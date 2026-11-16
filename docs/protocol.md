@@ -373,9 +373,9 @@ stripping it. A daemon also checks the
 gates on its own side: before it opens a sealed offer or starts any work, it
 computes `requiredReceiverCapabilities('task.offer', payload)` on the wire
 payload and declines non-retryably when a flag is missing from its own
-`conn.hello`. The decline carries `code: 'offer_capability_missing'`, and its
-`reason` is `offer_capability_missing: this daemon does not advertise
-<flags>`. A task whose `sealing.categories` includes `task-output`
+`conn.hello`. The decline carries `code: 'offer_capability_missing'`; its
+`reason` is only the detail, `this daemon does not advertise <flags>`, and
+Hosts classify by `code`. A task whose `sealing.categories` includes `task-output`
 is declined with the sealed code `sealed_key_unavailable` instead, because a
 decline for such a task must take a closed sealed-code form (§2.5). Its
 `reason` is that code alone; the missing flags appear only in the device log
@@ -2642,7 +2642,7 @@ Attempt's requested home access. This includes capacity, lease acquisition,
 reader resume/run-directory and home initialization conflicts reported as
 `AgentHomeBusyError`. An offer that breaks an offer selection rule
 (`offerSelectionViolation`) is declined non-retryable with `code` equal to the
-rule and `reason` `<rule>: <message>`.
+rule; `reason` is only the rule's message, and Hosts classify by `code`.
 
 **Offer selection rules.** The predicate returns only the first
 violation, in the order of this table, which is the single source of truth for
@@ -3643,7 +3643,7 @@ every later major keeps it, so a peer of any major can read it:
 ```
 
 A daemon whose lone `conn.hello` gets a `protocol_version_unsupported`
-outcome, or a 4xx answer other than 401, 403, 413 and 429, halts with
+outcome, or a 4xx answer other than 401, 403, 409, 413 and 429, halts with
 `ProtocolNegotiationError` (`code: 'protocol_negotiation_failed'`,
 `localVersion`, `httpStatus`, and `peerVersion` only when the peer stated its
 major). A refusal never implies which major the peer speaks. A coordinated

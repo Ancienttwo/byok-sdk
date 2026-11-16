@@ -25,7 +25,7 @@ import {
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
-const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, target: { lane: 'auto' as const } };
 
 const dirs: string[] = [];
 
@@ -343,7 +343,7 @@ describe('outbound rejection diagnostics #397', () => {
     const bytes = encodeEnvelope(offer);
     await journal.appendEnvelope({ identity: { tenantId: 'tenant', productId: 'product', deviceId: 'device' },
       envelopeId: offer.id, seq: 1, taskId: 'rejected-task', bytes, bytesHash: journalHash(bytes), receivedAt: new Date().toISOString(), opensTask: true });
-    const terminal = encodeEnvelope(createEnvelope('task.complete', { summary: 'SECRET_PAYLOAD_BYTES', sessionRef: 'session' }, { taskId: 'rejected-task' }));
+    const terminal = encodeEnvelope(createEnvelope('task.complete', { summary: 'SECRET_PAYLOAD_BYTES', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'rejected-task' }));
     await journal.recordTerminal({ taskId: 'rejected-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal), truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
     await journal.rejectTerminal('rejected-task', journalHash(terminal), 'not_permitted');
     await journal.close();

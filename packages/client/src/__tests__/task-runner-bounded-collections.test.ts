@@ -108,7 +108,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     const taskId = 'task-recent';
     const offer = createEnvelope(
       'task.offer',
-      { agentRef: freshTestAgentRef(),  instruction: 'finish me', ...FRESH_OFFER },
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'finish me', ...FRESH_OFFER },
       { taskId, seq: 1 },
     );
     await runner.handleEnvelope(offer);
@@ -129,7 +129,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     // task.claim/task.complete.
     const redelivered = createEnvelope(
       'task.offer',
-      { agentRef: freshTestAgentRef(),  instruction: 'finish me', ...FRESH_OFFER },
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'finish me', ...FRESH_OFFER },
       { taskId, seq: 2 },
     );
     const sentBeforeRedelivery = sent.length;
@@ -159,7 +159,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
         const instruction = failure.startsWith('C7b')
           ? { blobRef: { blobId: 'b1', contentHash: `sha256:${'0'.repeat(64)}`, size: 10, contentType: 'text/plain' } }
           : 'fail before active';
-        const payload = { agentRef: freshTestAgentRef(), instruction, ...FRESH_OFFER } as never;
+        const payload = { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction, ...FRESH_OFFER } as never;
         await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId, seq: 1 }));
         expect(sent.filter((e) => e.type === 'task.fail' && e.task_id === taskId)).toHaveLength(1);
         expect(sent.filter((e) => e.task_id === taskId).map((e) => e.type))
@@ -195,7 +195,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     const taskId = 'task-race-window-bounded';
     const offerEnvelope = createEnvelope(
       'task.offer',
-      { agentRef: freshTestAgentRef(),  instruction: 'race the cancel under a full map', ...FRESH_OFFER },
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'race the cancel under a full map', ...FRESH_OFFER },
       { taskId, seq: 1 },
     );
     const cancelEnvelope = createEnvelope(
@@ -243,7 +243,7 @@ describe('TaskRunner: bounded finished/pendingCancelled (M3-B)', () => {
     const taskId = 'task-A-in-flight';
     const offerEnvelope = createEnvelope(
       'task.offer',
-      { agentRef: freshTestAgentRef(),  instruction: 'block me in adapter.start', ...FRESH_OFFER },
+      { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'block me in adapter.start', ...FRESH_OFFER },
       { taskId, seq: 1 },
     );
     const offerPromise = runner.handleEnvelope(offerEnvelope);

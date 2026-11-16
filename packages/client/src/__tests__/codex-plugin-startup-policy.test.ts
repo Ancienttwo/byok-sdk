@@ -8,6 +8,8 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
+const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
+
 const fixture = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 const sessions: Session[] = [];
 const dirs: string[] = [];
@@ -50,7 +52,7 @@ async function setup(policy: 'excluded' | 'inherit' | undefined, scope: 'writer'
 }
 
 for (const mode of ['fresh', 'resume'] as const) {
-  const offer = { instruction: 'hello', ...(mode === 'resume' ? { sessionRef: 'fake-thread-1' } : {}) };
+  const offer = { target: CODEX_TARGET, instruction: 'hello', ...(mode === 'resume' ? { sessionRef: 'fake-thread-1' } : {}) };
   describe(`Codex plugin startup policy: ${mode}`, () => {
     it.each([
       ['excluded', 'writer', true],

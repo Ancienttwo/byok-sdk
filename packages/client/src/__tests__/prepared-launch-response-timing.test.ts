@@ -144,7 +144,7 @@ const __executionScratch = await testExecutionScratch();
     }) as unknown as SpawnFn,
   });
   const prepared = await adapter.prepare({
-    offer: { instruction: 'summarise the repository' },
+    offer: { instruction: 'summarise the repository', target: { lane: 'auto' } },
     descriptor: adapter.descriptor,
     requiredToolsetIds: [],
   });

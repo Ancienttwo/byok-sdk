@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "7b5650077fa1c3308f04ada5cee9f6b37307c9e8260ff9bf681e81e1b47c3434"
+    "snapshotSha256": "0658a2801057b0a6c193103b94cf57345540d8b3d3d4dd28921d097b6e8d3a53"
   },
   "configFields": {
     "status": "tracked",
@@ -710,6 +710,46 @@
       "items": [
         "behavior:dataplane-mailbox-row-tenant-validated"
       ]
+    },
+    {
+      "id": "wire-v7-client-negotiation-halt",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DAEMON_HALT_REASONS adds protocol_negotiation_failed, and DaemonLifecycle's halted phase carries httpStatus for it. The daemon halts instead of reconnecting when its lone conn.hello is refused as another wire major: a rejected outcome with protocol_version_unsupported (httpStatus 200) or a 4xx other than 401, 403, 409, 413 and 429. whenOpen() rejects with a DaemonHaltError whose cause is a ProtocolNegotiationError. Handle the new halt reason wherever halts are switched on.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/client#DAEMON_HALT_REASONS",
+        "export:@byok-sdk/client#DaemonLifecycle"
+      ]
+    },
+    {
+      "id": "wire-v7-client-execution-target",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client RuntimeTaskInput takes the offer's required target in place of runtime, harnessId and dispatchSelection, and RuntimeOperationManifest.modelTarget (the model-lane target) replaces dispatchSelection. taskRuntimeTarget returns { lane: 'runtime', runtimeId } or { lane: 'harness', harnessId }: use it as the offer target. Custom adapters read the model selection from manifest.modelTarget.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/client#RuntimeTaskInput",
+        "export:@byok-sdk/client#RuntimeOperationManifest",
+        "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+        "export:@byok-sdk/client/adapters#taskRuntimeTarget"
+      ]
+    },
+    {
+      "id": "wire-v7-client-decline-reason-detail",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client declines carry the decline code only in task.decline code; reason is the detail alone and no longer starts with '<code>: ' (for example offer_capability_missing and the offer selection rules). Hosts that parsed a code out of reason read code instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-client-decline-reason-detail"
+      ]
+    },
+    {
+      "id": "wire-v7-client-selection-before-native-sessions",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client checks the offer selection rules before native-sessions support, so an offer that breaks a rule declines with the rule's code (for example native_sessions_selection_invalid for nativeSessions without an explicit Pi target) even on a device without native sessions; native_sessions_unsupported answers only an offer the rules accept.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-client-selection-before-native-sessions"
+      ]
     }
   ],
   "changes": [
@@ -748,9 +788,19 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
+      "change": "changed",
+      "entry": "wire-v7-client-negotiation-halt"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonLifecycle",
+      "change": "changed",
+      "entry": "wire-v7-client-negotiation-halt"
     },
     {
       "item": "export:@byok-sdk/client#DaemonLog",
@@ -786,6 +836,16 @@
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeTaskInput",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
     },
     {
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
@@ -826,6 +886,16 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#taskRuntimeTarget",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",

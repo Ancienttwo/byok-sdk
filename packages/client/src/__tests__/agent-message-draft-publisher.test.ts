@@ -329,7 +329,7 @@ describe('TaskRunner draft reconciliation before publish', () => {
     });
     runners.push(runner);
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'reply', runtime: 'pi', agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
+      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
       messageEgress: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: frameMax * 3 },
     }, { taskId: 'finalize-task', seq: 1 }));
     expect(adapter.descriptor.progressMessageBoundary).toBe(progressMessageBoundary);

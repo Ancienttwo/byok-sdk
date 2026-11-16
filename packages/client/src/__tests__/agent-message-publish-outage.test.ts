@@ -114,7 +114,7 @@ describe('one pending agent.message.publish per message during a route outage (#
       agentMessageMcpPreflight: async () => {},
     });
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'reply', runtime: 'pi', agentRef: { agentId: 'outage-agent', profileRevision: '1' },
+      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'outage-agent', profileRevision: '1' },
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId: 'live-outage', seq: 1 }));

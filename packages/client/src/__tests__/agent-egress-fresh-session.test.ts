@@ -43,7 +43,6 @@ function reliableEnvelopes(): Envelope[] {
 describe('fresh Agent egress session authority', () => {
   it('starts fresh without a resume argument, fsyncs the runtime session handoff, and accepts only exact reliable append/ack', async () => {
     server = await TestServer.start();
-    server.setAckCapabilities(['agent-egress-reliable-ack']);
     const storeDir = await tmpDir('byok-fresh-egress-store-');
     const hostStorageRoot = await tmpDir('byok-fresh-egress-home-');
     const adapter = new StubRuntimeAdapter('pi');
@@ -74,7 +73,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'mint a native session only after start',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },
@@ -98,7 +97,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'mint a native session only after start',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },
@@ -183,7 +182,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         instruction: 'this must not become fresh',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef,
         session: { mode: 'resume', sessionRef: 'mismatched-resume-session' },
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -223,7 +222,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'fail only at handoff fsync',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },

@@ -16,6 +16,8 @@ import type { McpStdioServerConfig, MessageDraftDelta, Session } from '../types'
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { memoryClaude } from './fixtures/memory-claude';
 
+const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+
 const fixture = fileURLToPath(new URL('./fixtures/fake-claude-tool-authorization.mjs', import.meta.url));
 const roots: string[] = [];
 const sessions: Session[] = [];
@@ -33,7 +35,7 @@ async function start(
   mcpServers?: Record<string, McpStdioServerConfig>, mcpToolApprovals?: Record<string, readonly string[]>,
 ): Promise<Session> {
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: fixture, source: 'env' }) });
-  const session = await startPreparedOperation(adapter, { instruction: 'write' }, {
+  const session = await startPreparedOperation(adapter, { target: CLAUDE_TARGET, instruction: 'write' }, {
     workspaceDir: workspace, agentHome: workspace, env, ...(toolAuthorization === undefined ? {} : { toolAuthorization }),
     ...(mcpServers === undefined ? {} : { mcpServers }),
     ...(mcpToolApprovals === undefined ? {} : { mcpToolApprovals }),
@@ -207,7 +209,7 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
     const { gate, summaries, calls } = recordingGate(false, workspace);
     const session = await start(workspace, gate);
     await takeTurn(session);
-    await session.followUp({ instruction: 'write again' });
+    await session.followUp({ target: CLAUDE_TARGET, instruction: 'write again' });
     await takeTurn(session);
     expect(calls.map(call => call.toolCallId)).toEqual(['write-1', 'write-2']);
     expect(summaries).toEqual([]);

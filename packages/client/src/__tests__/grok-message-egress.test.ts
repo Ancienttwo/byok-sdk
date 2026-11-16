@@ -49,7 +49,7 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
   const sent: Envelope[] = [];
   const runner = await grokRunner(sent);
   await runner.handleEnvelope(createEnvelope('task.offer', {
-    session: { mode: 'fresh' }, instruction: 'tool', harnessId: 'grok', agentRef,
+    session: { mode: 'fresh' }, instruction: 'tool', target: { lane: 'harness', harnessId: 'grok' }, agentRef,
     egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
   }, { taskId, seq: 1 }));
@@ -82,7 +82,7 @@ it('fails the task when Grok stops on a permission request, and sends no task.co
   const sent: Envelope[] = [];
   const runner = await grokRunner(sent);
   await runner.handleEnvelope(createEnvelope('task.offer', {
-    session: { mode: 'fresh' }, instruction: 'recorded-permission-stop', harnessId: 'grok', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    session: { mode: 'fresh' }, instruction: 'recorded-permission-stop', target: { lane: 'harness', harnessId: 'grok' }, agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
   }, { taskId, seq: 1 }));
 
   await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true), { timeout: 8000 });

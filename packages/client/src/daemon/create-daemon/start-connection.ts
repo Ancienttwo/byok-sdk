@@ -231,7 +231,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         runPresenceDiscovery();
       }
     },
-    onHalted: (reason) => halted(reason),
+    onHalted: (halt) => halted(halt),
     onCrashed: () => crashed(),
     longPollRetryDelayMs: overrides.longPoll?.retryDelayMs,
     longPollIdleDelayMs: overrides.longPoll?.idleDelayMs,

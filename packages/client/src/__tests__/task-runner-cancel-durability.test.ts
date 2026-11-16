@@ -68,7 +68,7 @@ async function fixture(overrides: Partial<TaskRunnerDeps> = {}) {
     awaitTerminalCommit, ...overrides,
   });
   await runner.handleEnvelope(createEnvelope('task.offer', {
-    ...FRESH_OFFER, instruction: 'wait for cancellation', runtime: 'pi', agentRef: AGENT,
+    ...FRESH_OFFER, instruction: 'wait for cancellation', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
   }, { taskId: TASK, seq: 1 }));
   expect(sent.filter(event => event.type === 'task.started')).toHaveLength(1);
   expect(releases).toHaveLength(1);

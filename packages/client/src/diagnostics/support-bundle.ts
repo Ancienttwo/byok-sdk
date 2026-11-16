@@ -56,10 +56,10 @@ export interface SupportBundle {
         storagePresent: boolean;
         outbound?: Pick<import('../daemon/outbound-settlement.js').OutboundStatus, 'accepted' | 'duplicate' | 'rejected' | 'rejectedByReason' | 'rejectedTerminals' | 'droppedEphemeral'>;
       };
-  /** Issue #394: phase, connection and halt reason — closed enums only. */
+  /** Issue #394: phase, connection and halt reason — closed enums only, plus the HTTP status of a refused wire major. */
   lifecycle:
     | { status: 'unknown' }
-    | { status: 'known'; source: 'live' | 'audit'; phase: DaemonLifecycle['phase']; connection?: 'connecting' | 'open'; reason?: DaemonHaltReason };
+    | { status: 'known'; source: 'live' | 'audit'; phase: DaemonLifecycle['phase']; connection?: 'connecting' | 'open'; reason?: DaemonHaltReason; httpStatus?: number };
   /** A control endpoint refusal keeps its code and time; its path is a store-derived path and stays out. */
   health:
     | Exclude<DiagnosticsSnapshot['health'], { status: 'valid' }>
@@ -212,6 +212,7 @@ function projectLifecycle(lifecycle: DiagnosticsSnapshot['lifecycle']): SupportB
     phase: value.phase,
     ...(value.phase === 'running' ? { connection: value.connection } : {}),
     ...(value.phase === 'halted' ? { reason: value.reason } : {}),
+    ...(value.phase === 'halted' && value.reason === 'protocol_negotiation_failed' ? { httpStatus: value.httpStatus } : {}),
   };
 }
 

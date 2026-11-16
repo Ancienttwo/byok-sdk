@@ -757,7 +757,7 @@ it.each(['complete', 'cancel', 'start-failure', 'handoff-failure', 'busy', 'clos
   blobClient:{resolveInstruction:async()=>{throw new Error('unused');},uploadArtifact:async()=>{throw new Error('unused');}},
   approvalRegistry:new ApprovalRegistry(),storeDir:testScratchRoot(),productId:'product-1'});
  cleanups.push(()=>runner.shutdownActiveTasks('test cleanup'));
- await runner.handleEnvelope(createEnvelope('task.offer',{instruction:'resume old Pi transcript',runtime:'pi',agentRef:match.agentRef,...FRESH_OFFER,session:{mode:'resume',sessionRef}},{taskId:'retained-resume',seq:1}));
+ await runner.handleEnvelope(createEnvelope('task.offer',{instruction:'resume old Pi transcript',target: { lane: 'runtime', runtimeId: 'pi' },agentRef:match.agentRef,...FRESH_OFFER,session:{mode:'resume',sessionRef}},{taskId:'retained-resume',seq:1}));
  if(outcome==='busy'){
   expect(handoffs.requireMatch).not.toHaveBeenCalled();
   expect(sent.find(e=>e.type==='task.decline')?.payload).toMatchObject({retryable:true});

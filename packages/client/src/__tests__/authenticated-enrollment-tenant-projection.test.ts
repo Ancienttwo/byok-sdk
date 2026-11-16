@@ -324,7 +324,6 @@ describe('authenticated enrollment tenant projection', () => {
   it('binds final egress and journal composition to the loaded enrollment record, not host config', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('daemon-code', 'tenant-daemon');
-    server.setAckCapabilities(['agent-egress-reliable-ack']);
     const storeDir = await tmpDir('byok-enrollment-store-');
     const hostStorageRoot = await tmpDir('byok-enrollment-agent-home-');
     const agentRef = { agentId: 'enrollment-agent', profileRevision: 'r1' };
@@ -365,7 +364,7 @@ describe('authenticated enrollment tenant projection', () => {
     expect(appended).toMatchObject({ ok: true, record: { tenantId: 'tenant-daemon' } });
 
     const sequence = server.nextSeq();
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'journal identity' }, {
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'journal identity' }, {
       taskId: 'enrollment-journal-task',
       seq: sequence,
     }));

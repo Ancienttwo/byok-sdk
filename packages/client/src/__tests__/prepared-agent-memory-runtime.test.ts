@@ -159,7 +159,7 @@ const __executionScratch = await testExecutionScratch();
       }) as unknown as SpawnFn,
     });
     const prepared = await adapter.prepare({
-      offer: { instruction: 'recall the current memory' },
+      offer: { instruction: 'recall the current memory', target: { lane: 'auto' } },
       descriptor: adapter.descriptor,
       requiredToolsetIds: [],
     });

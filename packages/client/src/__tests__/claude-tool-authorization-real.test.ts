@@ -11,6 +11,8 @@ import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolA
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
+const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+
 const execFileAsync = promisify(execFile);
 async function localPushFixture(root: string, workspace: string, env: NodeJS.ProcessEnv) {
   const remote = path.join(root, 'origin.git');
@@ -156,7 +158,7 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
         verdicts.push(verdict);
         return verdict;
       } };
-      session = await startPreparedOperation(adapter, { instruction: 'Perform the requested file operation, then finish.' }, {
+      session = await startPreparedOperation(adapter, { target: CLAUDE_TARGET, instruction: 'Perform the requested file operation, then finish.' }, {
         workspaceDir: workspace, agentHome: workspace, env, ...(toolAuthorization === undefined ? {} : { toolAuthorization }),
         ...(mode !== 'rules-mcp' ? {} : { mcpServers: { salesko: { command: process.execPath,
           args: [fileURLToPath(new URL('./fixtures/fake-salesko-mcp.mjs', import.meta.url))] } } }),
@@ -217,7 +219,7 @@ describe.runIf(process.env.BYOK_REAL_CLAUDE_HOOK_TEST === '1')('real Claude auto
           rules: { alwaysAsk: [{ id: 'ask-resumed-write', match: { toolName: 'Write', pathGlob: target } }] },
           requestAuthorization: async summary => { summaries.push(summary); return { approved: false, reason: '主人尚未授权' }; },
         });
-        session = await startPreparedOperation(adapter, { instruction: 'BYOK_RULE_RESUME_WRITE: perform the file operation again, then finish.', sessionRef }, {
+        session = await startPreparedOperation(adapter, { target: CLAUDE_TARGET, instruction: 'BYOK_RULE_RESUME_WRITE: perform the file operation again, then finish.', sessionRef }, {
           workspaceDir: workspace, agentHome: workspace, env, toolAuthorization: { timeoutMs: resumedGate.timeoutMs, authorize: async call => {
             const verdict = await resumedGate.authorize(call);
             verdicts.push(verdict);

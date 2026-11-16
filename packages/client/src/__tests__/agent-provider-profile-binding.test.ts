@@ -30,7 +30,7 @@ function prepareInput(): RuntimeAdapterPrepareInput {
   return {
     offer: {
       instruction: 'inspect image',
-      dispatchSelection: {
+      target: {
         lane: 'byok-profile',
         runtimeId: 'pi',
         providerProfile: binding,
@@ -113,7 +113,7 @@ describe('Agent provider profile binding admission', () => {
       const taskId = 'task-stale-provider-profile';
       server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
         instruction: 'inspect image',
-        dispatchSelection: {
+        target: {
           lane: 'byok-profile',
           runtimeId: 'pi',
           providerProfile: binding,

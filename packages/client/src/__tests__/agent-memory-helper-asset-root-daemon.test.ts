@@ -93,7 +93,7 @@ it.skipIf(!helperClient.isAgentMemoryFilesystemHelperSupported() || !hasAgentMem
       expect(open).not.toHaveBeenCalled();
     }
     const seeded = intents ? 'intent from copied assets' : '';
-    server.pushLongPollEvent(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'Use local memory', runtime: 'pi', agentRef },
+    server.pushLongPollEvent(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'Use local memory', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef },
       { taskId: 'relocated-memory-task', seq: server.nextSeq() }));
     const started = await server.waitFor(event => event.task_id === 'relocated-memory-task' && (event.type === 'task.started' || event.type === 'task.decline'));
     expect(started.type, JSON.stringify(started.payload)).toBe('task.started');

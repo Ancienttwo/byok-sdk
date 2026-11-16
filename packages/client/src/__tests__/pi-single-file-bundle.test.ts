@@ -54,7 +54,7 @@ if (process.argv[2] !== 'capture') {
       capture={command,args,options,configPath,configBytes,config:JSON.parse(configBytes)};
       throw new Error('S2_CAPTURE_BEFORE_PROMPT');
     }});
-    const prepared=await adapter.prepare({offer:{instruction:'Never sent'},
+    const prepared=await adapter.prepare({offer:{target:{lane:'runtime',runtimeId:'pi'},instruction:'Never sent'},
       descriptor:adapter.descriptor,requiredToolsetIds:[],mcpServers:input.mcpServers,mcpToolsetTools:input.observation});
     if(prepared.kind!=='prepared') throw new Error(prepared.reason);
     const scratch=await sdk.createExecutionScratch({root:input.scratchRoot});

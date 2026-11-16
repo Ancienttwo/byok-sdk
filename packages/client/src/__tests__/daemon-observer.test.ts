@@ -95,7 +95,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     // a fresh offer's latest-value lane would coalesce the batch below. The
     // session it resumes comes from a first, fresh task.
     const agentRef = freshTestAgentRef();
-    server.send(createEnvelope('task.offer', { agentRef, instruction: 'start the session', ...FRESH_OFFER }, { taskId: 'task-seed', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef, instruction: 'start the session', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'task-seed', seq: server.nextSeq() }));
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-seed');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const seed = adapter.sessions[0]!;
@@ -105,7 +105,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef, instruction: 'do the thing', ...resumeSession(seed.sessionRef) },
+        { agentRef, instruction: 'do the thing', target: { lane: 'auto' }, ...resumeSession(seed.sessionRef) },
         { taskId: 'task-seq-1', seq: server.nextSeq() },
       ),
     );
@@ -162,7 +162,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'do something risky', harnessId: 'acme-harness', runtime: 'claude', ...FRESH_OFFER },
+        { agentRef: freshTestAgentRef(),  instruction: 'do something risky', ...FRESH_OFFER, target: { lane: 'harness', harnessId: 'acme-harness' } },
         { taskId: 'task-decline-1', seq: server.nextSeq() },
       ),
     );
@@ -187,7 +187,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER },
+        { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER, target: { lane: 'auto' } },
         { taskId: 'task-list-1', seq: server.nextSeq() },
       ),
     );
@@ -253,7 +253,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER },
+        { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } },
         { taskId: 'task-unsub-1', seq: server.nextSeq() },
       ),
     );
@@ -268,7 +268,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'y', ...FRESH_OFFER },
+        { agentRef: freshTestAgentRef(),  instruction: 'y', ...FRESH_OFFER, target: { lane: 'auto' } },
         { taskId: 'task-unsub-2', seq: server.nextSeq() },
       ),
     );
@@ -295,7 +295,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER },
+        { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } },
         { taskId: 'task-throw-1', seq: server.nextSeq() },
       ),
     );
@@ -335,7 +335,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER },
+          { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } },
           { taskId: 'task-async-throw-1', seq: server.nextSeq() },
         ),
       );
@@ -374,7 +374,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       const total = MAX_TRACKED_TASKS * 2;
       for (let i = 0; i < total; i++) {
         observer.handleInboundEnvelope(
-          createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER }, { taskId: `t-${i}`, seq: i + 1 }),
+          createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: `t-${i}`, seq: i + 1 }),
         );
       }
 
@@ -398,12 +398,12 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.handleInboundEnvelope(
           createEnvelope(
             'task.offer',
-            { agentRef: freshTestAgentRef(),  instruction: 'run it', runtime: 'claude', ...FRESH_OFFER },
+            { agentRef: freshTestAgentRef(),  instruction: 'run it', ...FRESH_OFFER, target: { lane: 'runtime', runtimeId: 'claude' } },
             { taskId: 'task-runtime-1', seq: 1 },
           ),
         );
         observer.handleOutboundEnvelope(
-          createEnvelope('task.claim', { deviceId: 'device-1', runtime: 'pi' }, { taskId: 'task-runtime-1' }),
+          createEnvelope('task.claim', { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task-runtime-1' }),
         );
 
         expect(events).toEqual([
@@ -418,13 +418,13 @@ describe('daemon local observability (DaemonObserver)', () => {
         });
       });
 
-      it('keeps legacy claims without a runtime free of a claimedRuntime field', () => {
+      it('keeps a harness claim free of a claimedRuntime field', () => {
         const observer = new DaemonObserver();
         const events: DaemonEvent[] = [];
         observer.subscribe((e) => events.push(e));
 
         observer.handleOutboundEnvelope(
-          createEnvelope('task.claim', { deviceId: 'device-1' }, { taskId: 'task-runtime-legacy' }),
+          createEnvelope('task.claim', { deviceId: 'device-1', executor: { kind: 'harness', harnessId: 'acme-harness' } }, { taskId: 'task-runtime-legacy' }),
         );
 
         expect(events[0]).toEqual({ kind: 'claimed', ts: expect.any(String), taskId: 'task-runtime-legacy' });
@@ -496,7 +496,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(),  instruction: 'needs a human', ...FRESH_OFFER },
+          { agentRef: freshTestAgentRef(),  instruction: 'needs a human', ...FRESH_OFFER, target: { lane: 'auto' } },
           { taskId: 'task-approve-local-1', seq: server.nextSeq() },
         ),
       );
@@ -522,7 +522,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(),  instruction: 'needs a human', ...FRESH_OFFER },
+          { agentRef: freshTestAgentRef(),  instruction: 'needs a human', ...FRESH_OFFER, target: { lane: 'auto' } },
           { taskId: 'task-approve-local-stale', seq: server.nextSeq() },
         ),
       );
@@ -549,7 +549,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(),  instruction: 'two approvals', ...FRESH_OFFER },
+          { agentRef: freshTestAgentRef(),  instruction: 'two approvals', ...FRESH_OFFER, target: { lane: 'auto' } },
           { taskId: 'task-approve-local-queued', seq: server.nextSeq() },
         ),
       );
@@ -585,7 +585,7 @@ describe('daemon local observability (DaemonObserver)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(),  instruction: 'needs a human', ...FRESH_OFFER },
+          { agentRef: freshTestAgentRef(),  instruction: 'needs a human', ...FRESH_OFFER, target: { lane: 'auto' } },
           { taskId: 'task-reject-local-1', seq: server.nextSeq() },
         ),
       );
@@ -640,11 +640,11 @@ it('projects a refused terminal after restart without an accepted lifecycle even
   const observer = new DaemonObserver();
   const events: DaemonEvent[] = [];
   observer.subscribe((event) => events.push(event));
-  const terminal = createEnvelope('task.complete', { summary: 'local terminal truth', sessionRef: 'session' }, { taskId: 'recovered' });
+  const terminal = createEnvelope('task.complete', { summary: 'local terminal truth', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'recovered' });
   observer.noteOutboundRejected(terminal, { envelopeId: terminal.id, type: terminal.type, taskId: 'recovered', reason: 'not_permitted', terminal: true });
   expect(observer.tasks()).toMatchObject([{ taskId: 'recovered', state: 'Complete', delivery: 'rejected', summary: 'local terminal truth' }]);
   expect(events.map((event) => event.kind)).toEqual(['outbound-rejected']);
-  const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'new', ...FRESH_OFFER }, { taskId: 'active', seq: 1 });
+  const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'new', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 'active', seq: 1 });
   observer.handleInboundEnvelope(offer);
   const progress = createEnvelope('task.progress', { seq: 1, events: [{ type: 'progress', text: 'partial' }] }, { taskId: 'active' });
   observer.noteOutboundRejected(progress, { envelopeId: progress.id, type: progress.type, taskId: 'active', reason: 'limit_exceeded', terminal: false });

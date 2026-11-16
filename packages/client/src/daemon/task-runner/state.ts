@@ -299,9 +299,6 @@ export interface OfferFactsV1 {
   readonly requiredToolsets: readonly string[];
   readonly strict: boolean;
   readonly sealed: boolean;
-  readonly requestedRuntime?: string;
-  readonly dispatchRuntime?: string;
-  readonly harnessId?: string;
   readonly agentRef?: string;
   readonly sessionRef?: string;
   readonly maxDurationMs?: number;

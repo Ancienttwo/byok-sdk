@@ -84,7 +84,7 @@ async function activeFixture(unsent: boolean, overrides: Partial<TaskRunnerDeps>
   const h = await cancellationFixture(overrides);
   // This fixture never spawns MCP/runtime processes.
   await h.runner.handleEnvelope(createEnvelope('task.offer', {
-    instruction: 'reply', runtime: 'pi', agentRef: AGENT,
+    instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
     session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
   }, { taskId: TASK, seq: 1 }));
@@ -317,7 +317,7 @@ it('S10-F1 preserves cancellation selected during the durable startup handoff', 
     const result = await record(...args); recorded.resolve(); await gate.promise; return result;
   });
   const offering = h.runner.handleEnvelope(createEnvelope('task.offer', {
-    instruction: 'no message contract', runtime: 'pi', agentRef: AGENT,
+    instruction: 'no message contract', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
     session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
   }, { taskId: TASK, seq: 1 }));
   try {

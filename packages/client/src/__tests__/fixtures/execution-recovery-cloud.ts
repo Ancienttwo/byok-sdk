@@ -64,7 +64,9 @@ async function createFixtureStores() {
   }
   try {
     const expected = realpathSync(config.dbPath);
+    // Construction may also open and close a short-lived connection; only a live one can own the store.
     const matches = [...handles].filter((handle) => {
+      if (!handle.isOpen) return false;
       if (handle.isTransaction !== false) throw new Error('fixture capture observed an open transaction');
       const main = prepare.call(handle, 'PRAGMA database_list').all().find((row) => row.name === 'main');
       return main?.file && realpathSync(String(main.file)) === expected;
@@ -451,7 +453,7 @@ lines.on('line', (line) => {
           taskId: params.taskId ?? globalThis.crypto.randomUUID(),
           deviceId: params.deviceId,
           payload: {
-            instruction: String(params.instruction), runtime: 'pi',
+            instruction: String(params.instruction), target: { lane: 'runtime', runtimeId: 'pi' },
             agentRef: params.agentRef ?? { agentId: `recovery-${globalThis.crypto.randomUUID()}`, profileRevision: '1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -464,7 +466,7 @@ lines.on('line', (line) => {
           deviceId: params.deviceId,
           agentMessageContext: { destinationBinding: 'fixture-conversation', freshnessCursor: 'fixture-turn' },
           payload: {
-            instruction: 'publish durable reply', runtime: 'pi',
+            instruction: 'publish durable reply', target: { lane: 'runtime', runtimeId: 'pi' },
             agentRef: { agentId: 'agent-message', profileRevision: 'profile-v1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -478,7 +480,7 @@ lines.on('line', (line) => {
           taskId: params.taskId,
           deviceId: params.deviceId,
           payload: {
-            instruction: 'submit one structured result', runtime: 'pi',
+            instruction: 'submit one structured result', target: { lane: 'runtime', runtimeId: 'pi' },
             agentRef: { agentId: 'agent-result', profileRevision: 'profile-v1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

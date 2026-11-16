@@ -105,7 +105,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
         }
       }
     } else if (haltReason !== 'store_owned') {
-      halted(haltReason);
+      halted({ reason: haltReason });
     }
     const thrown = haltReason === undefined || err instanceof DaemonHaltError ? err : new DaemonHaltError(haltReason, { cause: err });
     try {

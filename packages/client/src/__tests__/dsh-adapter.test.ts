@@ -13,6 +13,8 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
+const DSH_TARGET = { lane: 'harness', harnessId: 'dsh' } as const;
+
 const fixture = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url));
 const MODEL: DshModelSelection = { provider: 'custom', model: 'loop-model', baseUrl: 'http://127.0.0.1:9/v1', keyEnv: 'TEST_DSH_PROVIDER_KEY' };
 const sessions: Session[] = [];
@@ -46,7 +48,7 @@ async function setup(options: Partial<DshAdapterOptions> = {}, env: NodeJS.Proce
     runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_DSH_*', 'TEST_DSH_*'] }, ...options,
   });
   const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), FAKE_DSH_LOG: log, TEST_DSH_PROVIDER_KEY: 'test-key', DSH_STRAY: 'ambient', ...env } };
-  const open = async (offer: RuntimeTaskInput = { instruction: 'hello' }, extra: Record<string, unknown> = {}) => {
+  const open = async (offer: RuntimeTaskInput = { target: DSH_TARGET, instruction: 'hello' }, extra: Record<string, unknown> = {}) => {
     const session = await startPreparedOperation(adapter, offer, { ...resources, ...extra });
     sessions.push(session);
     return session;
@@ -146,7 +148,7 @@ describe('DshAdapter detect and prepare', () => {
   it('validates MCP servers before probing dsh', async () => {
     const resolveBin = vi.fn(() => ({ command: fixture, source: 'path' as const }));
     const { adapter } = await setup({ resolveBin });
-    const prepare = (name: string) => adapter.prepare({ offer: { instruction: 'x' }, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers: { [name]: { command: 'mcp' }, byokagentresult: { command: 'mcp' } } });
+    const prepare = (name: string) => adapter.prepare({ offer: { target: DSH_TARGET, instruction: 'x' }, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers: { [name]: { command: 'mcp' }, byokagentresult: { command: 'mcp' } } });
     expect(await prepare('x'.repeat(33))).toEqual({ kind: 'reject', reason: 'dsh cannot attach the task MCP servers: DSH MCP server names must match [A-Za-z0-9_-]{1,32}; OAR does not rename them', retryable: false });
     expect(resolveBin).not.toHaveBeenCalled();
     expect((await prepare('x'.repeat(32))).kind).toBe('prepared');
@@ -154,7 +156,7 @@ describe('DshAdapter detect and prepare', () => {
 
   it('rejects a missing binary', async () => {
     const missing = new DshAdapter({ home: await tempDir('bd-'), model: MODEL, resolveBin: () => ({ command: path.join(os.tmpdir(), 'no-such-dsh'), source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
-    await expect(missing.prepare({ offer: { instruction: 'x' }, descriptor: missing.descriptor, requiredToolsetIds: [] })).resolves.toEqual({ kind: 'reject', reason: 'dsh installation refused: not-found', retryable: false });
+    await expect(missing.prepare({ offer: { target: DSH_TARGET, instruction: 'x' }, descriptor: missing.descriptor, requiredToolsetIds: [] })).resolves.toEqual({ kind: 'reject', reason: 'dsh installation refused: not-found', retryable: false });
   });
 });
 
@@ -178,7 +180,7 @@ describe('DshAdapter sessions', () => {
 
   it('opens the session in the canonical workspace with the task MCP servers', async () => {
     const { open, facts, workspaceDir } = await setup();
-    const session = await open({ instruction: 'hello' }, {
+    const session = await open({ target: DSH_TARGET, instruction: 'hello' }, {
       mcpServers: { byokagentresult: { command: '/usr/bin/env', args: ['node', 'helper.mjs'] } },
     });
     await turn(session);
@@ -194,7 +196,7 @@ describe('DshAdapter sessions', () => {
     ['http', { type: 'http', url: 'http://127.0.0.1:9/mcp' }],
   ])('refuses an MCP entry with %s before dsh starts, without a retry', async (_label, server) => {
     const { adapter, facts } = await setup();
-    expect(await adapter.prepare({ offer: { instruction: 'x' }, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers: { host: server } as never })).toEqual({
+    expect(await adapter.prepare({ offer: { target: DSH_TARGET, instruction: 'x' }, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers: { host: server } as never })).toEqual({
       kind: 'reject', reason: 'dsh cannot attach the task MCP servers: DSH session MCP supports stdio command and args only; HTTP, env and headers have no verified persistence boundary', retryable: false,
     });
     expect((await facts()).some((fact) => fact.kind === 'start')).toBe(false);
@@ -215,7 +217,7 @@ describe('DshAdapter sessions', () => {
 
   it('sums interleaved subagent usage while keeping context and other events root-only', async () => {
     const { open } = await setup();
-    expect(await turn(await open({ instruction: 'subagent-usage' }))).toEqual([
+    expect(await turn(await open({ target: DSH_TARGET, instruction: 'subagent-usage' }))).toEqual([
       { type: 'progress', text: 'first message: subagent-usage' },
       { type: 'tool_use', tool: 'bash', toolCallId: 'call_1', input: { command: 'ls' } },
       { type: 'tool_result', tool: 'bash', toolCallId: 'call_1', output: { content: [{ type: 'text', text: 'a.txt\n' }] } },
@@ -227,7 +229,7 @@ describe('DshAdapter sessions', () => {
 
   it('keeps a tool input past 10k whole, as the native object', async () => {
     const { open } = await setup();
-    const events = await turn(await open({ instruction: 'long-input' }));
+    const events = await turn(await open({ target: DSH_TARGET, instruction: 'long-input' }));
     const input = events.find((event) => event.type === 'tool_use')!.input as { command: string };
     expect(input.command.length).toBe(12027);
     expect(input.command.endsWith('; git push origin main')).toBe(true);
@@ -235,22 +237,22 @@ describe('DshAdapter sessions', () => {
 
   it('fails closed on tool arguments that are not a JSON object', async () => {
     const { open } = await setup();
-    const error = await turn(await open({ instruction: 'bad-input' })).catch((caught: unknown) => caught);
+    const error = await turn(await open({ target: DSH_TARGET, instruction: 'bad-input' })).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ retry: 'non-retryable', message: expect.stringMatching(/not a JSON object/) });
   });
 
   it('stops dsh before it reports turn_end, drops what follows and refuses a follow-up', async () => {
     const { open, facts } = await setup();
-    const session = await open({ instruction: 'spontaneous' });
+    const session = await open({ target: DSH_TARGET, instruction: 'spontaneous' });
     const events = await turn(session);
     expect((await facts()).some((fact) => fact.method === 'dispose')).toBe(true);
     expect(events.filter((event) => event.type === 'progress')).toEqual([{ type: 'progress', text: 'started a subagent' }]);
-    await expect(session.followUp({ instruction: 'again' })).rejects.toBeInstanceOf(PolicyUnsupportedError);
+    await expect(session.followUp({ target: DSH_TARGET, instruction: 'again' })).rejects.toBeInstanceOf(PolicyUnsupportedError);
   });
 
   it('steers the running turn and reports a refused steer', async () => {
     const { open, facts } = await setup();
-    const session = await open({ instruction: 'hang' });
+    const session = await open({ target: DSH_TARGET, instruction: 'hang' });
     await expect.poll(async () => (await facts()).some((fact) => fact.method === 'prompt')).toBe(true);
     await expect.poll(() => session.steer('turn left').then(() => true, () => false)).toBe(true);
     expect((await facts()).find((fact) => fact.method === 'steer')!.request).toMatchObject({ text: 'turn left' });
@@ -262,7 +264,7 @@ describe('DshAdapter sessions', () => {
 
   it('fails a turn dsh rejects as a non-retryable semantic failure with its native class', async () => {
     const { open } = await setup();
-    const session = await open({ instruction: 'fail' });
+    const session = await open({ target: DSH_TARGET, instruction: 'fail' });
     const error = await turn(session).catch((caught: unknown) => caught);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
     expect(error).toMatchObject({ phase: 'run', retry: 'non-retryable', failure: { class: 'auth' } });
@@ -271,19 +273,19 @@ describe('DshAdapter sessions', () => {
 
   it('retries a native rate limit', async () => {
     const { open } = await setup();
-    const error = await turn(await open({ instruction: 'rate-limit' })).catch((caught: unknown) => caught);
+    const error = await turn(await open({ target: DSH_TARGET, instruction: 'rate-limit' })).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ phase: 'run', retry: 'retryable', failure: { class: 'rate_limited' } });
   });
 
   it('fails the session when dsh exits during a turn', async () => {
     const { open } = await setup();
-    const error = await turn(await open({ instruction: 'exit' })).catch((caught: unknown) => caught);
+    const error = await turn(await open({ target: DSH_TARGET, instruction: 'exit' })).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ failure: { class: 'runtime_exited' } });
   });
 
   it('interrupts with the native cancel and ends the turn', async () => {
     const { open, facts } = await setup();
-    const session = await open({ instruction: 'hang' });
+    const session = await open({ target: DSH_TARGET, instruction: 'hang' });
     const events = turn(session);
     await expect.poll(async () => (await facts()).some((fact) => fact.method === 'prompt')).toBe(true);
     await session.interrupt();
@@ -294,7 +296,7 @@ describe('DshAdapter sessions', () => {
   it('refuses the interrupt and sends no native cancel when the agent\'s descendants cannot be read first', async () => {
     vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
     const { open, facts } = await setup();
-    const session = await open({ instruction: 'hang' });
+    const session = await open({ target: DSH_TARGET, instruction: 'hang' });
     await expect.poll(async () => (await facts()).some((fact) => fact.method === 'prompt')).toBe(true);
     await expect(session.interrupt()).rejects.toMatchObject({ message: 'dsh interrupt refused: Process table ps: timeout after 5000 ms' });
     expect((await facts()).some((fact) => fact.method === 'cancel')).toBe(false);
@@ -318,7 +320,7 @@ describe('DshAdapter sessions', () => {
     const sessionRef = first.sessionRef;
     await first.close();
     const mcpServers = { byokagentresult: { command: '/usr/bin/env', args: ['node', 'helper.mjs'] } };
-    const resumed = await open({ instruction: 'again', sessionRef }, { mcpServers });
+    const resumed = await open({ target: DSH_TARGET, instruction: 'again', sessionRef }, { mcpServers });
     expect(resumed.sessionRef).toBe(sessionRef);
     expect((await turn(resumed))[0]).toEqual({ type: 'progress', text: 'first message: again' });
     const all = await facts();
@@ -328,12 +330,12 @@ describe('DshAdapter sessions', () => {
 
   it('fails a resume of an unknown session or another workspace as a non-retryable authority failure', async () => {
     const { open, workspaceDir } = await setup();
-    await expect(open({ instruction: 'x', sessionRef: 'unknown-session' })).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable' });
+    await expect(open({ target: DSH_TARGET, instruction: 'x', sessionRef: 'unknown-session' })).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const first = await open();
     await turn(first);
     const sessionRef = first.sessionRef;
     await first.close();
-    await expect(open({ instruction: 'x', sessionRef }, { workspaceDir: await tempDir('bdo-') })).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining(workspaceDir) });
+    await expect(open({ target: DSH_TARGET, instruction: 'x', sessionRef }, { workspaceDir: await tempDir('bdo-') })).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', message: expect.stringContaining(workspaceDir) });
   });
 
   it('refuses a dsh without steer as a non-retryable authority failure', async () => {

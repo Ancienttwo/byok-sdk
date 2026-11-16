@@ -80,7 +80,7 @@ async function setup(options: { adapter?: RuntimeAdapter; gateReply?: boolean } 
   const submit = async (required = true) => {
     await server.byok.executions.submit({ taskId, deviceId, payload: {
       instruction: 'Write a reply.', agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
-      ...(adapter.descriptor.id === 'custom-draft' ? { harnessId: 'custom-draft' } : { runtime: 'pi' as const }),
+      target: adapter.descriptor.id === 'custom-draft' ? { lane: 'harness', harnessId: 'custom-draft' } : { lane: 'runtime', runtimeId: 'pi' },
       ...(required ? { messageEgress: {
         mode: 'required' as const, contract: 'draft.v1', contentType: 'text/plain' as const, maxBytes: 1024,
       } } : {}),

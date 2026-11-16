@@ -56,7 +56,7 @@ describe('terminal durability and actual harness boundaries', () => {
     await daemon.start();
     const identity = { tenantId: record.tenantId, deviceId: record.deviceId, productId: cfg.productId };
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId: 'pending-decline', seq });
+    const offer = createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId: 'pending-decline', seq });
     server.send(offer);
     await vi.waitFor(() => expect(candidates.length).toBeGreaterThan(0));
     expect((await journal.readTask('pending-decline', identity))?.localState).toBe('received');
@@ -95,7 +95,7 @@ describe('terminal durability and actual harness boundaries', () => {
     await daemon.pair('pairing-code');
     await daemon.start();
     const taskId = 'queued-past-stop';
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     fail = true;
     adapter.sessions[0]!.emit({ type: 'progress', text: 'the real result' });
@@ -128,11 +128,11 @@ describe('terminal durability and actual harness boundaries', () => {
           deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [PROTOCOL_VERSION],
           capabilities: ['custom-harness', 'agent-home-contract'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],
         }));
-        // Never run, only recovered from the crash image: the resume lane carries an offer that may name no target.
+        // Never run, only recovered from the crash image: the offer names the harness or lets the device pick.
         const agentRef = freshTestAgentRef();
         const offer = await cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: {
           instruction: 'interrupted', agentRef, session: { mode: 'resume', sessionRef: 'interrupted-session' },
-          ...(explicit ? { harnessId: 'acme-harness' } : {}),
+          target: explicit ? { lane: 'harness', harnessId: 'acme-harness' } : { lane: 'auto' },
         } });
         const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir! });
         const bytes = encodeEnvelope(offer.envelope);
@@ -140,14 +140,17 @@ describe('terminal durability and actual harness boundaries', () => {
           taskId: offer.taskId, envelopeId: offer.envelope.id, seq: offer.seq, bytes, bytesHash: journalHash(bytes),
           opensTask: true, receivedAt: new Date().toISOString() });
         await journal.recordAdmission({ taskId: offer.taskId, admitted: true, claimedRuntime: 'acme-harness', decidedAt: new Date().toISOString() });
-        if (claimed) await post(cloud.url, device.accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, harnessId: 'acme-harness', agentRef }, { taskId: offer.taskId }));
+        if (claimed) await post(cloud.url, device.accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, executor: { kind: 'harness', harnessId: 'acme-harness' }, agentRef }, { taskId: offer.taskId }));
         await journal.close(); // Persisted crash image; no graceful task finalization.
         await daemon.start();
         await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
         const terminal = decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!);
-        expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', harnessId: 'acme-harness', retryable: false,
+        expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', executor: { kind: 'harness', harnessId: 'acme-harness' }, retryable: false,
           recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } });
-        expect((await cloud.readTaskAttempt(offer.taskId))?.claimedHarnessId).toBe(claimed ? 'acme-harness' : undefined);
+        // An unclaimed recovery settles the attempt without making the device its owner.
+        const attempt = await cloud.readTaskAttempt(offer.taskId);
+        expect(attempt?.claimedExecutor).toEqual(claimed ? { kind: 'harness', harnessId: 'acme-harness' } : undefined);
+        expect(attempt?.ownerDeviceId).toBe(claimed ? device.deviceId : undefined);
         expect(adapter.startCalls).toHaveLength(0);
       });
     }
@@ -165,7 +168,7 @@ describe('terminal durability and actual harness boundaries', () => {
     adapter.sessions[0]!.emit({ type: 'progress', text: 'x'.repeat(8192) });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
-    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, harnessId: 'acme-harness' });
+    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, executor: { kind: 'harness', harnessId: 'acme-harness' } });
     expect(adapter.startCalls).toHaveLength(1);
   });
 });

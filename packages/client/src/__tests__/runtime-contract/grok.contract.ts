@@ -11,6 +11,8 @@ import {
 import { searchThenCall, startLoopbackProvider, type ProviderRequest, type ProviderStep } from './loopback';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 
+const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
+
 const target = contractTarget('grok', QUALIFIED_GROK_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
@@ -171,7 +173,7 @@ const ownTurn = once(async () => {
   }, MODEL);
   try {
     const grokHome = await loopbackGrokHome(box.home, provider.baseUrl);
-    const session = await startPreparedOperation(adapter(), { instruction: 'Start the background command, then finish.' }, {
+    const session = await startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'Start the background command, then finish.' }, {
       workspaceDir: box.workspace, agentHome: box.workspace, env: { ...baseEnv(box.home), GROK_HOME: grokHome, ...recorder.env },
     });
     const events: TurnEvent[] = [];
@@ -182,7 +184,7 @@ const ownTurn = once(async () => {
         events.push(event);
         if (event.type === 'turn_end' && followUp !== undefined) break;
         // Grok's own turn is running its blocking command: the task turn already ended.
-        if (event.type === 'tool_use' && JSON.stringify(event.input).includes('own-turn-done')) followUp = session.followUp({ instruction: `${FOLLOW_UP}: reply.` });
+        if (event.type === 'tool_use' && JSON.stringify(event.input).includes('own-turn-done')) followUp = session.followUp({ target: GROK_TARGET, instruction: `${FOLLOW_UP}: reply.` });
       }
       await followUp;
     } finally {

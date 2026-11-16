@@ -168,7 +168,7 @@ const __executionScratch = await testExecutionScratch();
       return spawn(command, args, options);
     }) as unknown as SpawnFn,
   });
-  const offer = { instruction: 'report cwd' };
+  const offer = { target: { lane: 'runtime', runtimeId: 'pi' } as const, instruction: 'report cwd' };
   const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [] });
   if (prepared.kind === 'reject') throw new Error(prepared.reason);
   const manifest = sealRuntimeOperationManifest({

@@ -48,7 +48,7 @@ describe('protocol-version admission at real long-poll receive', () => {
       if (url.startsWith(`${real!.url}/byok/events`) && rewroteKnownOffer) eventsRequestsAfterStale += 1;
       const response = await nativeFetch(input, init);
       if (!url.startsWith(`${real!.url}/byok/events`) || !response.ok) return response;
-      const page = await response.json() as { events: Array<Record<string, unknown>>; cursor: number; capabilities?: string[] };
+      const page = await response.json() as { events: Array<Record<string, unknown>>; cursor: number };
       const events = page.events.map((event) => {
         if (!rewriteStale || event.type !== 'task.offer') return event;
         rewroteKnownOffer = true;
@@ -77,7 +77,7 @@ describe('protocol-version admission at real long-poll receive', () => {
     await connection.start();
     await waitForOpen(connection);
     await real.byok.dispatch({
-      deviceId: record.deviceId, instruction: 'known v1 offer must not run',
+      deviceId: record.deviceId, instruction: 'known v1 offer must not run', target: { lane: 'auto' },
       agentRef: { agentId: 'version-admission-agent', profileRevision: 'rev-1' }, sessionRef: 'version-admission-session',
     });
 
