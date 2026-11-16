@@ -79,7 +79,7 @@ import {
   secureSqliteFilePermissions,
   SqliteSchemaError,
 } from '../../sqlite-support.js';
-import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, SQLITE_USER_OBJECT } from '@byok-sdk/core/sqlite-node';
 
 const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
@@ -270,8 +270,7 @@ const SCHEMA_DDL = [
 
 /** A file's tables, indexes and triggers, keyed `type name`, each with its table and stored definition. */
 function schemaObjects(db: DatabaseSync): Map<string, string> {
-  // Only SQLite's own objects carry the literal `sqlite_` prefix; LIKE would read `_` as a wildcard.
-  const rows = db.prepare("SELECT type, name, tbl_name, sql FROM sqlite_master WHERE substr(name, 1, 7) <> 'sqlite_'").all();
+  const rows = db.prepare(`SELECT type, name, tbl_name, sql FROM sqlite_master WHERE ${SQLITE_USER_OBJECT}`).all();
   return new Map(rows.map((row) => [`${String(row.type)} ${String(row.name)}`, `${String(row.tbl_name)}\n${String(row.sql)}`]));
 }
 
