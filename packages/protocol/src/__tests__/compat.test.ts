@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as v6Release from 'byok-protocol-previous';
-import * as currentModule from '../index';
+import * as currentModule from '../http-api';
+import { TerminalResidentMemoryOverLimitSchema, pairDeviceDigest } from '../index';
 import {
   AGENT_MEMORY_START_REFUSALS,
   CAPABILITY_FLAGS,
@@ -700,7 +701,7 @@ describe('compat v7: corpus coverage and WIRE_ADDITIONS', () => {
     for (const type of ['task.complete', 'task.fail', 'task.cancelled'] as const) {
       expect(requiredReceiverCapabilities(type, { residentMemoryOverLimit }), type).toEqual([]);
     }
-    const schema = currentModule.TerminalResidentMemoryOverLimitSchema;
+    const schema = TerminalResidentMemoryOverLimitSchema;
     expect(schema.safeParse({ byteCount: 0 }).success).toBe(true);
     for (const bad of [{}, { byteCount: -1 }, { byteCount: 1.5 }, { byteCount: 12288, path: 'MEMORY.md' }]) {
       expect(schema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
@@ -777,7 +778,7 @@ describe('compat v7: HTTP corpus', () => {
 
   it('pins the generator\'s pairing digest to pairDeviceDigest', async () => {
     const request = v7HttpCorpus.find((entry) => entry.surface === 'PairRequest' && entry.value.expectedDeviceDigest !== null)!;
-    expect(request.value.expectedDeviceDigest).toBe(await currentModule.pairDeviceDigest({
+    expect(request.value.expectedDeviceDigest).toBe(await pairDeviceDigest({
       tenantId: 'tenant-golden',
       productId: 'acme-agent',
       deviceId: 'dev_00000000-0000-4000-8000-000000002045',
