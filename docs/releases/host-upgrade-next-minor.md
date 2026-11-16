@@ -107,6 +107,13 @@ since this build does not read it.
   export written by an earlier release is refused; complete a topology switch
   before upgrading.
 
+The hosted bot-collaboration example (Postgres) follows the same decision: its
+`STORE_VERSION` is now 3, and a scope written by version 2 is refused when it is
+opened with `HostedStoreVersionError`, under the scope lock and before any
+write; the schedulers skip it. Finish or abandon its in-flight collaboration
+work before upgrading, then provision a new hosted store (a new schema or
+database).
+
 `@byok-sdk/keys` `SqliteProviderProfileStore` decides an existing store's format
 the same way, before `journal_mode` or DDL. A store with `provider_profile` but
 without one of its custody tables is refused with `PROVIDER_STORE_SCHEMA_STALE`

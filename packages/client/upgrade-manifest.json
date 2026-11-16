@@ -151,6 +151,15 @@
       ]
     },
     {
+      "id": "reject-hosted-store-version-2",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example's Postgres store moves to STORE_VERSION 3 because the collaboration state no longer carries a version field; a scope written by version 2 is refused at open with HostedStoreVersionError, under the scope lock and before any write, and the schedulers skip it. Finish or abandon in-flight collaboration work before upgrading, then provision a new hosted store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledgers-record-their-format-2286",
+      "items": [
+        "behavior:reject-hosted-store-version-2"
+      ]
+    },
+    {
       "id": "pi-agent-skill-paths-config",
       "impact": "additive",
       "summary": "DaemonConfig.runtimes.pi.agentSkillPaths and PiRuntimeConfig.agentSkillPaths, default [], project to PiAdapterOptions.agentSkillPaths, so createDaemon and createRuntimeAdapters hand Pi the Host's skill files or directories without a hand-built PiAdapter. Config check refuses a relative, duplicated or NUL-carrying path, and a non-empty list with runtimes.pi.durableLane, as DaemonConfigInvalidError at runtimes.pi.agentSkillPaths. A skill path that is missing or unreadable when an Agent task starts now fails the start before Pi spawns as a non-retryable RuntimeExecutionFailure, for an embedded PiAdapter too; it used to surface as a retryable runtime_exited start failure. No Host action is required.",
