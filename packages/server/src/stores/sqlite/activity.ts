@@ -47,12 +47,6 @@ CREATE TABLE activity_log_entry (
 CREATE INDEX activity_log_retained ON activity_log_entry (tenant_id, task_id, revision) WHERE body IS NOT NULL;
 `;
 
-/** The columns an existing file must hold; a missing table is refused, never recreated. */
-export const ACTIVITY_LOG_PROJECTIONS = [
-  'tenant_id, task_id, generation, revision, floor, dropped, source_dropped, capacity, byte_capacity, retained_bytes, ttl_ms, terminal_at, expires_at, removed FROM activity_log_head',
-  'tenant_id, task_id, revision, source_envelope_id, source_hash, body, byte_size FROM activity_log_entry',
-] as const;
-
 interface Coordinator {
   run<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;
   transaction<T>(operation: (db: DatabaseSync) => T | Promise<T>): Promise<T>;

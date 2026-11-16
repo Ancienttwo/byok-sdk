@@ -10,10 +10,14 @@ import type { TaskRunner } from '../task-runner.js';
 import type { AcceptedOfferPayload } from './support.js';
 import type { OfferAdmissionTiming } from './offer-admission-timing.js';
 import { hostFor } from './host.js';
-import { createOfferFacts } from './state.js';
+import { createOfferFacts, offerSettled } from './state.js';
 
 /**
  * Suppress redelivered offers for owned tasks and recently finished tasks.
+ * The finished/strict-declined rule belongs to the reducer (`offerSettled`,
+ * applied by O1); this guard adds the runner's ownership registries, which
+ * the reducer cannot see, and runs before `beginOffer` archives the task's
+ * previous state.
  * The reducer's finished list retains the most recent MAX_TRACKED_TASK_IDS
  * ids, evicting the oldest first. This is a bounded redelivery horizon: a
  * connection stalled across more finished tasks can redeliver an evicted id,
@@ -23,8 +27,7 @@ import { createOfferFacts } from './state.js';
  */
 export function offerAlreadyHandled(this: TaskRunner, taskId: string): boolean {
   return this['tasks'].has(taskId) || this['startupOwnership'].has(taskId)
-    || this['inFlightOffers'].has(taskId) || hostFor(this).runnerSnapshot().finished.includes(taskId)
-    || hostFor(this).runnerSnapshot().strictDeclined.includes(taskId);
+    || this['inFlightOffers'].has(taskId) || offerSettled(hostFor(this).runnerSnapshot(), taskId);
 }
 
 export function offerHasOwner(this: TaskRunner, taskId: string): boolean {

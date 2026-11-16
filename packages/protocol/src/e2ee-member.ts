@@ -9,6 +9,7 @@
  * rules; a cross-package test in `@byok-sdk/cloud` keeps the two equal.
  */
 import { z } from 'zod';
+import { canonicalBase64UrlByteLength } from './base64url.js';
 
 import { CONTENT_HASH_RE } from './blob.js';
 
@@ -45,9 +46,8 @@ export const E2EE_SCOPE_KEY_PACKAGE_PUT_OPERATION = 'e2ee-scope-key-package.put'
  * one text form.
  */
 function base64UrlBytes(bytes: number) {
-  const length = Math.ceil((bytes * 4) / 3);
-  const last = ['[A-Za-z0-9_-]', '[AQgw]', '[AEIMQUYcgkosw048]'][bytes % 3];
-  return z.string().regex(new RegExp(`^[A-Za-z0-9_-]{${length - 1}}${last}$`, 'u'));
+  return z.string().refine((value) => canonicalBase64UrlByteLength(value) === bytes,
+    `must be canonical unpadded base64url of ${bytes} bytes`);
 }
 
 const MemberIdSchema = z.string().regex(/^[A-Za-z0-9_-]{43}$/u);
@@ -161,7 +161,6 @@ export const E2eeMemberKeyRegisterRequestSchema = z.strictObject({
   }),
   mac: E2eePairingMacSchema,
 });
-export type E2eeMemberKeyRegisterRequest = z.infer<typeof E2eeMemberKeyRegisterRequestSchema>;
 
 /** What the client relays to the device in pairing step 4. The client member has no device id. */
 export const E2eeClientPairingMacSchema = z.strictObject({

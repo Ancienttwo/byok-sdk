@@ -59,7 +59,7 @@ export interface AuthPlane {
   /**
    * Host control plane: mint a single-use code carrying the tenant/product a
    * device will land in. The caller bounds `productId` by
-   * {@link PAIRING_CODE_PRODUCT_ID_MAX_LENGTH} (`Cloud.createPairingCode`).
+   * {@link PAIRING_CODE_PRODUCT_ID_MAX_LENGTH} (`ByokCloud.createPairingCode`).
    */
   createPairingCode(tenant: TenantId, input: { readonly productId: string; readonly ttlMs?: number }): Promise<PairingCodeInfo>;
   /**

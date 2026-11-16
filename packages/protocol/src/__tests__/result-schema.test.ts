@@ -1,20 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as cfworker from '@cfworker/json-schema';
 import {
-  RESULT_ISSUES_MAX_BYTES,
   RESULT_ISSUES_MAX_COUNT,
-  RESULT_JSON_MAX_DEPTH,
   RESULT_OUTCOME_MAX_BYTES,
-  RESULT_SCHEMA_KEYWORDS,
   RESULT_SCHEMA_MAX_BYTES,
-  RESULT_SCHEMA_MAX_DEPTH,
-  ResultDocumentSchemaSchema,
   TerminalProjectionSelectionSchema,
   checkResultSchema,
   validateResultOutcome,
+} from '../index';
+import {
+  RESULT_ISSUES_MAX_BYTES,
+  RESULT_JSON_MAX_DEPTH,
+  RESULT_SCHEMA_KEYWORDS,
+  RESULT_SCHEMA_MAX_DEPTH,
   type ResultSchemaCheck,
   type ResultOutcomeCheck,
-} from '../index';
+} from '../result-schema';
+import { ResultDocumentSchemaSchema } from '../terminal-projection';
 
 vi.mock('@cfworker/json-schema', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@cfworker/json-schema')>();

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { createByokCloud, createHmacTokenSigner, createWebCrypto, fullCapabilityDeclaration, AgentExecutionInputSchema } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
@@ -12,6 +12,19 @@ import { tenantStoresFor } from '../../../cloud/src/tenant-stores';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { SqliteOwnershipError } from '../sqlite-support';
 import { TEST_AGENT_REF, TEST_SESSION_REF } from './test-support';
+
+// Faults run as TEMP triggers on the store's own connection: a trigger written
+// into the file is an object schema 10 does not know, and the open refuses it.
+const faults = vi.hoisted((): string[] => []);
+afterEach(() => { faults.length = 0; });
+vi.mock('../sqlite-support.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../sqlite-support.js')>();
+  return { ...actual, openSqliteDatabase: (...args: Parameters<typeof actual.openSqliteDatabase>) => {
+    const db = actual.openSqliteDatabase(...args);
+    for (const fault of faults) db.exec(fault);
+    return db;
+  } };
+});
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
 
@@ -85,14 +98,12 @@ describe('SQLite receipt recovery', () => {
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn' } });
       const persistedInput = JSON.stringify(execution);
       await runtime.stores.close();
-      const appendFault = new DatabaseSync(path);
-      appendFault.exec("CREATE TRIGGER fail_recurring_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected recurring append'); END;");
-      appendFault.close();
+      faults.push("CREATE TEMP TRIGGER fail_recurring_append BEFORE INSERT ON main.mailbox_message BEGIN SELECT RAISE(ABORT, 'injected recurring append'); END;");
       runtime = open();
       await expect(runtime.cloud.submitAgentExecution(tenant, JSON.parse(persistedInput))).rejects.toThrow('injected recurring append');
       expect(await runtime.cloud.readTaskOffer(tenant, taskId)).toMatchObject({ delivered: false });
       await runtime.stores.close();
-      const removeAppendFault = new DatabaseSync(path); removeAppendFault.exec('DROP TRIGGER fail_recurring_append'); removeAppendFault.close();
+      faults.length = 0;
       runtime = open();
       await expect(runtime.cloud.submitAgentExecution(tenant, { ...execution,
         agentMessageContext: { destinationBinding: 'different' } })).rejects.toThrow();
@@ -101,9 +112,7 @@ describe('SQLite receipt recovery', () => {
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toHaveLength(1);
 
       await runtime.stores.close();
-      const fault = new DatabaseSync(path);
-      fault.exec("CREATE TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
-      fault.close();
+      faults.push("CREATE TEMP TRIGGER fail_message_finalize BEFORE UPDATE OF terminal_body ON main.agent_message_admission BEGIN SELECT RAISE(ABORT, 'injected finalize fault'); END;");
       runtime = open();
       await expect(handleInboundEnvelope(runtime.bound, deviceId, message, undefined, { consume }).then((result) => result.outcome)).rejects.toThrow('injected finalize fault');
       expect(calls).toBe(1);
@@ -112,7 +121,7 @@ describe('SQLite receipt recovery', () => {
       expect(await read()).toBeUndefined();
       expect(await discover()).toEqual({ payload: message.payload, context: execution.agentMessageContext });
       await runtime.stores.close();
-      const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_message_finalize'); repair.close();
+      faults.length = 0;
       runtime = open();
       expect(await handleInboundEnvelope(runtime.bound, deviceId, message, undefined, { consume }).then((result) => result.outcome)).toBe('accepted');
       expect(calls).toBe(2);
@@ -220,7 +229,7 @@ describe('SQLite receipt recovery', () => {
     const db = new DatabaseSync(path); db.exec('DROP TABLE mailbox_message'); db.close();
     expect(() => open()).toThrow(expect.objectContaining({
       name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10', requiredVersion: '10',
-      message: expect.stringContaining('FROM mailbox_message'),
+      message: 'Missing BYOK SQLite table mailbox_message',
     }));
     const check = new DatabaseSync(path, { readOnly: true });
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'mailbox_message'").get()).toBeUndefined();
@@ -230,8 +239,7 @@ describe('SQLite receipt recovery', () => {
   it('preserves immutable offer before failed append and resumes only the original payload', async () => {
     const { open, path } = fixture(); let runtime = open();
     await runtime.stores.close();
-    const db = new DatabaseSync(path);
-    db.exec("CREATE TRIGGER fail_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;"); db.close();
+    faults.push("CREATE TEMP TRIGGER fail_append BEFORE INSERT ON main.mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;");
     runtime = open();
     const input = { taskId: 'pre-append', payload };
     try {
@@ -242,7 +250,7 @@ describe('SQLite receipt recovery', () => {
         code: 'task_offer_append_refused', taskId: input.taskId, cause: expect.objectContaining({ message: expect.stringContaining('injected append failure') }) });
       expect(await runtime.cloud.readTaskOffer(tenant, input.taskId)).toMatchObject({ delivered: false, payload });
       await runtime.stores.close();
-      const reset = new DatabaseSync(path); reset.exec('DROP TRIGGER fail_append'); reset.close();
+      faults.length = 0;
       runtime = open();
       await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, { ...input, payload: { ...payload, instruction: 'changed' } })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
       await runtime.cloud.enqueueAgentOffer(tenant, deviceId, input);
@@ -253,8 +261,7 @@ describe('SQLite receipt recovery', () => {
   it('resumes the same mailbox row after append but before delivered receipt commit', async () => {
     const { open, path } = fixture(); let runtime = open();
     await runtime.stores.close();
-    const db = new DatabaseSync(path);
-    db.exec("CREATE TRIGGER fail_delivered BEFORE INSERT ON request_receipt WHEN NEW.key LIKE 'task-offer-delivered:%' BEGIN SELECT RAISE(ABORT, 'injected delivered failure'); END;"); db.close();
+    faults.push("CREATE TEMP TRIGGER fail_delivered BEFORE INSERT ON main.request_receipt WHEN NEW.key LIKE 'task-offer-delivered:%' BEGIN SELECT RAISE(ABORT, 'injected delivered failure'); END;");
     runtime = open();
     const input = { taskId: 'post-append', payload };
     try {
@@ -265,7 +272,7 @@ describe('SQLite receipt recovery', () => {
       const before = (await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages;
       expect(before).toHaveLength(1);
       await runtime.stores.close();
-      const reset = new DatabaseSync(path); reset.exec('DROP TRIGGER fail_delivered'); reset.close();
+      faults.length = 0;
       runtime = open();
       await runtime.cloud.enqueueAgentOffer(tenant, deviceId, input);
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toEqual(before);
@@ -278,7 +285,7 @@ describe('SQLite receipt recovery', () => {
     const corrupt = new DatabaseSync(path);
     corrupt.exec('DROP TABLE request_receipt; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)');
     corrupt.close();
-    expect(() => open()).toThrow('Invalid BYOK SQLite request receipt schema');
+    expect(() => open()).toThrow('BYOK SQLite table request_receipt does not match schema 10');
     expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10' }));
   });
 

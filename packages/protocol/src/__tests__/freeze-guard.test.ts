@@ -6,14 +6,14 @@ import {
   MESSAGE_PAYLOAD_SCHEMAS,
   EnvelopeSchema,
   AgentEventSchema,
-  KNOWN_AGENT_EVENT_TYPES,
   createEnvelope,
   parseMessage,
   UnknownMessageTypeError,
   EnvelopeValidationError,
   type MessageType,
-  type CreateEnvelopeOptions,
 } from '../index';
+import { KNOWN_AGENT_EVENT_TYPES } from '../agent-event';
+import { type CreateEnvelopeOptions } from '../codec';
 
 /**
  * FREEZE GUARD — local invariants of the frozen wire, major 3 (docs/protocol.md

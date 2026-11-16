@@ -2312,6 +2312,7 @@
       "bareImports": [
         "@byok-sdk/cloud",
         "@byok-sdk/core",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
         "@hono/node-server",

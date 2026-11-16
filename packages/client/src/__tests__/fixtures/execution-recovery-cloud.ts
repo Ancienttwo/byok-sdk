@@ -97,10 +97,14 @@ async function ownerWrite<T>(operation: () => T): Promise<T> {
   }
 }
 
+// The store refuses a database holding objects outside its schema (#2286 part C),
+// so the Host-side tables live in an attached file on the same owner connection;
+// unqualified names below resolve to it because main has no such tables.
+await ownerWrite(() => db.prepare('ATTACH DATABASE ? AS fixture').run(`${config.dbPath}.fixture`));
 await ownerWrite(() => db.exec(`
-  CREATE TABLE IF NOT EXISTS fixture_message (task_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS fixture_wire (body TEXT NOT NULL);
-  CREATE TABLE IF NOT EXISTS fixture_device (
+  CREATE TABLE IF NOT EXISTS fixture.fixture_message (task_id TEXT PRIMARY KEY, payload TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS fixture.fixture_wire (body TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS fixture.fixture_device (
     tenant_id TEXT NOT NULL,
     product_id TEXT NOT NULL,
     device_id TEXT NOT NULL,
@@ -113,14 +117,14 @@ await ownerWrite(() => db.exec(`
     PRIMARY KEY (tenant_id, device_id),
     UNIQUE (device_id)
   );
-  CREATE TABLE IF NOT EXISTS fixture_receipt (
+  CREATE TABLE IF NOT EXISTS fixture.fixture_receipt (
     tenant_id TEXT NOT NULL,
     receipt_key TEXT NOT NULL,
     body TEXT NOT NULL,
     recorded_at TEXT NOT NULL,
     PRIMARY KEY (tenant_id, receipt_key)
   );
-  CREATE TABLE IF NOT EXISTS fixture_inbound_dedup (
+  CREATE TABLE IF NOT EXISTS fixture.fixture_inbound_dedup (
     scope TEXT NOT NULL,
     envelope_id TEXT NOT NULL,
     PRIMARY KEY (scope, envelope_id)

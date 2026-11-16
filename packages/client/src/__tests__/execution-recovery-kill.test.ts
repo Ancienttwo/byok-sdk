@@ -816,7 +816,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     await reconstructed.rpc('close');
     expect(await reconstructed.exited()).toEqual({ code: 0, signal: null });
     const [receipt] = (() => {
-      const db = new DatabaseSync(current!.cloudDb, { readOnly: true });
+      const db = new DatabaseSync(`${current!.cloudDb}.fixture`, { readOnly: true });
       try { return db.prepare('SELECT body FROM fixture_receipt WHERE receipt_key = ?').all(`task:${offer.taskId}:terminal`) as Record<string, unknown>[]; }
       finally { db.close(); }
     })();

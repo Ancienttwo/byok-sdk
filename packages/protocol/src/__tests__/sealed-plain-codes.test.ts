@@ -4,7 +4,8 @@
  * `SEALED_TASK_PLAIN_CODES`, by exact match.
  */
 import { describe, expect, it } from 'vitest';
-import { SEALED_DECLINE_CODES, SEALED_TASK_PLAIN_CODES, isSealedTaskPlainOutput } from '../index';
+import { SEALED_DECLINE_CODES, isSealedTaskPlainOutput } from '../index';
+import { SEALED_TASK_PLAIN_CODES } from '../sealed-payload';
 
 describe('isSealedTaskPlainOutput (#654 12d)', () => {
   it('names the closed codes of the plaintext fail, decline and cancellation', () => {

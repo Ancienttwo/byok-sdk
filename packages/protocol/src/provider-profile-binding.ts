@@ -12,13 +12,11 @@ export type ProviderProfileRef = z.infer<typeof ProviderProfileRefSchema>;
 export const ProviderProfileRevisionSchema = z
   .string()
   .regex(/^(?:0|[1-9][0-9]{0,19})$/u, 'provider profile revision must be canonical decimal');
-export type ProviderProfileRevision = z.infer<typeof ProviderProfileRevisionSchema>;
 
 /** Hash of the normalized, non-secret local profile projection. */
 export const ProviderProfileHashSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/u, 'provider profile hash must be lowercase sha256');
-export type ProviderProfileHash = z.infer<typeof ProviderProfileHashSchema>;
 
 export const PROVIDER_MODEL_CAPABILITIES = ['image-input'] as const;
 export const ProviderModelCapabilitySchema = z.enum(PROVIDER_MODEL_CAPABILITIES);

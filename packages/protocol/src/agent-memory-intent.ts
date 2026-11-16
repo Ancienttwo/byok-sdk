@@ -47,13 +47,11 @@ const SHA256_REVISION = /^sha256:[0-9a-f]{64}$/u;
 export const AgentMemoryIntentRevisionSchema = z
   .string()
   .regex(SHA256_REVISION, 'revision must be lowercase sha256:<64 hex>');
-export type AgentMemoryIntentRevision = z.infer<typeof AgentMemoryIntentRevisionSchema>;
 
 /** The identity-and-operation binding; see `@byok-sdk/core` `agentMemoryIntentOperationDigest`. */
 export const AgentMemoryIntentOperationDigestSchema = z
   .string()
   .regex(SHA256_REVISION, 'operationDigest must be lowercase sha256:<64 hex>');
-export type AgentMemoryIntentOperationDigest = z.infer<typeof AgentMemoryIntentOperationDigestSchema>;
 
 /**
  * Syntactic bound only: 1..1024 printable ASCII characters that need no JSON
@@ -65,7 +63,6 @@ export const AgentMemoryIntentPathSchema = z
   .min(1)
   .max(AGENT_MEMORY_INTENT_PATH_MAX_BYTES)
   .regex(/^[\x20\x21\x23-\x5b\x5d-\x7e]+$/u, 'path must be printable ASCII without quote or backslash');
-export type AgentMemoryIntentPath = z.infer<typeof AgentMemoryIntentPathSchema>;
 
 /** Opaque audit correlation. The device records it and never evaluates it. */
 export const AgentMemoryIntentApprovalRefSchema = z
@@ -74,7 +71,6 @@ export const AgentMemoryIntentApprovalRefSchema = z
     new RegExp(`^[A-Za-z0-9._:-]{1,${AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES}}$`, 'u'),
     `approvalRef must be 1..${AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES} characters of [A-Za-z0-9._:-]`,
   );
-export type AgentMemoryIntentApprovalRef = z.infer<typeof AgentMemoryIntentApprovalRefSchema>;
 
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/u;
 const utf8 = new TextEncoder();
@@ -87,7 +83,6 @@ export const AgentMemoryIntentContentSchema = z
     (value) => utf8.encode(value).byteLength <= AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES,
     `content must not exceed ${AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES} UTF-8 bytes`,
   );
-export type AgentMemoryIntentContent = z.infer<typeof AgentMemoryIntentContentSchema>;
 
 export const AGENT_MEMORY_INTENT_OPERATIONS = ['replace', 'delete'] as const;
 export const AgentMemoryIntentOperationSchema = z.enum(AGENT_MEMORY_INTENT_OPERATIONS);
@@ -285,7 +280,6 @@ export const AgentMemoryIntentFetchRequestSchema = z
     reservation: AgentMemoryIntentReservationSchema,
   })
   .strict();
-export type AgentMemoryIntentFetchRequest = z.infer<typeof AgentMemoryIntentFetchRequestSchema>;
 
 export const AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS = ['release', 'withheld', 'terminal', 'deferred'] as const;
 export type AgentMemoryIntentFetchDisposition = (typeof AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS)[number];

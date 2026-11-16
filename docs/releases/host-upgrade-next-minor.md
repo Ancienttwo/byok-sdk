@@ -886,6 +886,18 @@ machine's current device. See
   `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`, and `inspectSqliteStore`
   reports `new-path-repair`. Point `storage.path` at a new file, keep the old
   one for the history export, and pair the devices again.
+- **SQLite format check before any write** (#2286). The store decides a
+  file's format through `@byok-sdk/core/sqlite-node`'s read-only check before
+  it opens the file for writing, so a refused file keeps its bytes, its WAL
+  and its directory as they were. A current file must hold exactly schema
+  10's tables, indexes and triggers with this build's definitions: a missing
+  or changed one is refused with `SQLITE_SCHEMA_INVALID` instead of being
+  recreated, and an unknown one with `SQLITE_SCHEMA_UNSUPPORTED`. The `migration` option is no longer checked; the store has none.
+  A Host that keeps its own tables, indexes or triggers in the server's store
+  file is refused with `SQLITE_SCHEMA_UNSUPPORTED` after the upgrade. Move them
+  to a separate file; `ATTACH DATABASE` can mount it on the same connection.
+  Receipt maintenance deletes no request receipt, as before: every SDK receipt
+  is an identity fence.
 - **Dispatch.** `DispatchInput` takes one required `target` in place of
   `runtime`, `harnessId` and `dispatchSelection`. Pass `{ lane: 'auto' }` to
   keep the device's own runtime choice. An execution-core intent names a
@@ -951,6 +963,10 @@ use the replacement named here.
     `CapabilityDeclarationSchema` and `CapabilityDeclaration` from
     `@byok-sdk/core`.
   - `receiptRetentionClass`.
+- **Auth plane.** `createAuthPlane`, with `AuthPlane`, `AuthPlaneDeps`,
+  `MintedAccessToken` and `PairInput`, is removed. `createCloud` composes the
+  auth plane itself, and `ByokCloud.createPairingCode` is the only way to mint a
+  pairing code; it enforces `PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`.
 - **In-memory projection adapters.** `InMemoryAgentMemoryProjectionStore`
   and `InMemoryAgentMemoryProjectionAuthorizer` are no longer exported. A
   hosted composition supplies its own projection ports.

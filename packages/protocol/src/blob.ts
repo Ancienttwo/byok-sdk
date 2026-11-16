@@ -4,11 +4,8 @@ import { z } from 'zod';
  * Canonical `contentHash` format (finding F9): `sha256:` followed by exactly
  * 64 lowercase hex characters (a SHA-256 digest). Pinned here — the single
  * source of truth both `BlobRefSchema` and `CreateBlobRequestSchema`
- * (`http-api.ts`) validate against — rather than left as a bare `z.string()`
- * that silently accepted any prefix (or none) and left the server to
- * reconcile the mismatch with an ad hoc normalization step. No compat shim:
- * the wire is pre-freeze (`v` stays `1`), so this is a straight tightening,
- * not a migration.
+ * (`http-api.ts`) validate against. Hashes have exactly one transport form;
+ * receivers never normalize another prefix or casing.
  */
 export const CONTENT_HASH_RE = /^sha256:[0-9a-f]{64}$/;
 

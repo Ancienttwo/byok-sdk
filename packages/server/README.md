@@ -309,10 +309,9 @@ and [runbook](../../deploy/runbooks/cloud-cleanup.md) for the port contract.
 
 Receipt keys are tenant scoped and first-write-wins. All SDK receipt families
 and unknown prefixes are identity fences: immutable offer, delivered and
-canonical terminal facts remain for the lifetime of the database. The kernel's
-derived `request` class is currently empty, so its configured 24-hour policy
-does not expire SDK identity receipts. Monitor disk usage; exhaustion does not
-authorize deleting those fences.
+canonical terminal facts remain for the lifetime of the database: receipt
+maintenance deletes none. Monitor disk usage; exhaustion does not authorize
+deleting those fences.
 
 Offer and terminal receipts hold wire bytes, and a wire v4 server reads only
 v4 bytes. There is no migration: a SQLite file a v3 build wrote is not
@@ -449,13 +448,19 @@ starts on a new store: export the history you need from the old file, point
 `storage.path` at a new file and pair the devices again. `inspectSqliteStore`
 reports an older file as `new-path-repair`.
 
-The schema is decided before anything writes to the file. The store first
-reads the file's metadata through a read-only, immutable connection, which
-takes no lock, writes nothing and creates no journal, WAL or SHM file, and
-refuses an older, newer or foreign file there. Only then does it open the file
-for writing (exclusive locking and WAL). The same check inside the schema
-transaction stays the authority for a file that changes in between. A refused
-file is not read for business data, deleted or rewritten.
+The format is decided before anything writes to the file. The store first
+checks the file through `@byok-sdk/core/sqlite-node`'s read-only, immutable
+connection, which takes no lock, writes nothing and creates no journal, WAL or
+SHM file. It refuses an older, newer or foreign file there. A current file
+must hold exactly schema 10's tables, indexes and triggers, each with the
+definition this build creates: a missing or changed object is
+`SQLITE_SCHEMA_INVALID` and nothing is recreated; an object schema 10 does not
+know means a newer build wrote the file, and is `SQLITE_SCHEMA_UNSUPPORTED`.
+Only then does it open the file for writing (exclusive locking and WAL). The
+same check inside the schema transaction stays the authority for a file that
+changes in between. A new store checkpoints its metadata into the main file as
+soon as it is created. A refused file is not read for business data, deleted
+or rewritten.
 
 One residual is accepted ([#2286](https://github.com/Ancienttwo/byok-sdk/issues/2286)):
 the immutable read sees the main file only. An older-version store that
@@ -466,7 +471,7 @@ rewritten the main file. Such a store holds almost no data.
 
 Open failures use `SqliteSchemaError` with `foundVersion` and `requiredVersion`:
 
-- `SQLITE_SCHEMA_UNSUPPORTED`: an older or newer schema, or the removed migration option.
+- `SQLITE_SCHEMA_UNSUPPORTED`: an older or newer schema.
 - `SQLITE_SCHEMA_INVALID`: no BYOK metadata in a non-empty file, or a required authority is missing or malformed.
 - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox bytes are not the current wire major.
 

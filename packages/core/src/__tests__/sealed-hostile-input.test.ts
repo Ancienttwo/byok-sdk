@@ -15,7 +15,8 @@ import { ByokCoreError } from '../errors';
 import { createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem, type MemberKeyBundleV1 } from '../sealed-payload/member-bundle';
 import { memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, type MemberChainEntryV1 } from '../sealed-payload/member-chain';
 import { applyMemberChainEntries, emptyMemberChainState, verifyMemberChainFromAnchor } from '../sealed-payload/member-chain-walk';
-import { memberApprovalCode, memberFingerprint } from '../sealed-payload/member-fingerprint';
+import { memberApprovalCode } from '../sealed-payload/member-fingerprint';
+import { memberFingerprint } from './support/member-fingerprint';
 import {
   computeClientPairingMac,
   computeDevicePairingMac,

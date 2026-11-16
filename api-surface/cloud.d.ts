@@ -60,8 +60,6 @@
 //   ApprovalTimelineStore -> dist/approval-timeline.d.ts
 //   ApprovalTimelineTail -> dist/approval-timeline.d.ts
 //   ApproveTaskOptions -> dist/cloud.d.ts
-//   AuthPlane -> dist/auth/plane.d.ts
-//   AuthPlaneDeps -> dist/auth/plane.d.ts
 //   AuthenticatedDeviceProof -> dist/auth/device-proof.d.ts
 //   BLOB_READ_ERROR_CODES -> dist/stores/ports.d.ts
 //   BLOB_URL_TTL_MS -> dist/stores/in-memory/blobs.d.ts
@@ -196,14 +194,12 @@
 //   MaintenanceReport -> dist/maintenance.d.ts
 //   MaintenanceStep -> dist/maintenance.d.ts
 //   MaintenanceStepReport -> dist/maintenance.d.ts
-//   MintedAccessToken -> dist/auth/plane.d.ts
 //   NONCE_SIGNING_DOMAIN -> @byok-sdk/core#NONCE_SIGNING_DOMAIN
 //   NONCE_TTL_MS -> dist/stores/in-memory/nonces.d.ts
 //   NonceStore -> dist/stores/ports.d.ts
 //   PAIRING_CODE_PRODUCT_ID_MAX_LENGTH -> dist/auth/plane.d.ts
 //   PAIRING_CODE_TTL_MS -> dist/auth/plane.d.ts
 //   PROOF_RECEIPT_RETENTION_FLOOR_MS -> dist/maintenance.d.ts
-//   PairInput -> dist/auth/plane.d.ts
 //   PairingCodeClaims -> dist/stores/ports.d.ts
 //   PairingCodeInfo -> dist/stores/ports.d.ts
 //   PairingCodeIssueInput -> dist/stores/ports.d.ts
@@ -328,7 +324,6 @@
 //   authenticateHostedTaskAssertion -> dist/auth/device-assertion.d.ts
 //   capabilityDeclarationForPorts -> dist/capabilities.d.ts
 //   createActivityEntry -> dist/activity.d.ts
-//   createAuthPlane -> dist/auth/plane.d.ts
 //   createByokCloud -> dist/cloud.d.ts
 //   createHmacTokenSigner -> dist/auth/tokens.d.ts
 //   createInMemoryBlobBytes -> dist/stores/in-memory/blobs.d.ts
@@ -1311,45 +1306,10 @@ export interface AuthenticatedDeviceProof {
 }
 export declare function authenticateDeviceProof(input: unknown, request: DeviceProofRequestBinding, deps: DeviceProofAuthDeps): Promise<AuthenticatedDeviceProof | undefined>;
 // ==== @byok-sdk/cloud dist/auth/plane.d.ts ====
-import type { Clock, TenantId } from '@byok-sdk/core';
-import type { CloudCrypto } from '../crypto/port.js';
-import type { CloudStores, DeviceRecord, PairingCodeInfo, PairingEnrollmentResult } from '../stores/ports.js';
-import { type TokenSigner } from './tokens.js';
 export declare const PAIRING_CODE_TTL_MS: number;
 export declare const PAIRING_CODE_PRODUCT_ID_MAX_LENGTH = 64;
 export declare const DEVICE_IDENTITY_PROOF_KEY_ID = "identity";
 export declare const DEVICE_IDENTITY_PROOF_KEY_EPOCH = 0;
-export interface PairInput {
-    readonly pairingCode: string;
-    readonly deviceName: string;
-    readonly devicePublicKey: string;
-    readonly machineId?: string;
-    readonly expectedDeviceDigest: string | null;
-}
-export interface MintedAccessToken {
-    readonly accessToken: string;
-    readonly expiresIn: number;
-}
-export interface AuthPlane {
-    createPairingCode(tenant: TenantId, input: {
-        readonly productId: string;
-        readonly ttlMs?: number;
-    }): Promise<PairingCodeInfo>;
-    redeemAndRegister(input: PairInput): Promise<PairingEnrollmentResult>;
-    resolveDevice(deviceId: string): Promise<DeviceRecord | undefined>;
-    issueNonce(device: DeviceRecord): Promise<string>;
-    consumeNonceIfValid(device: DeviceRecord, nonce: string): Promise<boolean>;
-    verifySignature(device: DeviceRecord, nonce: string, signature: string): Promise<boolean>;
-    mintAccessToken(device: DeviceRecord): Promise<MintedAccessToken>;
-}
-export interface AuthPlaneDeps {
-    readonly stores: CloudStores;
-    readonly crypto: CloudCrypto;
-    readonly clock: Clock;
-    readonly tokenSigner: TokenSigner;
-    readonly accessTokenTtlSeconds?: number;
-}
-export declare function createAuthPlane(deps: AuthPlaneDeps): AuthPlane;
 // ==== @byok-sdk/cloud dist/auth/tokens.d.ts ====
 import type { Clock } from '@byok-sdk/core';
 export declare const ACCESS_TOKEN_TTL_SECONDS: number;
@@ -2099,8 +2059,7 @@ export { DEFAULT_DEVICE_PROOF_CLOCK_SKEW_MS, DEFAULT_DEVICE_PROOF_MAX_LIFETIME_M
 export type { AuthenticatedDeviceProof, DeviceProofAuthDeps, DeviceProofRequestBinding, } from './auth/device-proof.js';
 export { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from './auth/device-assertion.js';
 export type { HostedDeviceAssertionAuthDeps, HostedTaskAssertionAuthDeps } from './auth/device-assertion.js';
-export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_PRODUCT_ID_MAX_LENGTH, PAIRING_CODE_TTL_MS, createAuthPlane, } from './auth/plane.js';
-export type { AuthPlane, AuthPlaneDeps, MintedAccessToken, PairInput } from './auth/plane.js';
+export { DEVICE_IDENTITY_PROOF_KEY_EPOCH, DEVICE_IDENTITY_PROOF_KEY_ID, PAIRING_CODE_PRODUCT_ID_MAX_LENGTH, PAIRING_CODE_TTL_MS, } from './auth/plane.js';
 export { createWebCrypto } from './crypto/web-crypto.js';
 export type { CloudCrypto } from './crypto/port.js';
 export { INBOUND_REFUSAL_REASONS, handleInboundEnvelope, terminalReceiptKey } from './inbound.js';

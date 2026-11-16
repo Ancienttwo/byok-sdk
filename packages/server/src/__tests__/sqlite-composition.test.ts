@@ -1,8 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMutableClock } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import { createByokServer } from '..';
@@ -10,6 +9,19 @@ import { isSqliteAvailable } from '../sqlite-support';
 import { serverTenantId } from '../stores';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { submitFrozen, type FrozenInput } from '../execution-core';
+
+// Faults run as TEMP triggers on the store's own connection: a trigger written
+// into the file is an object schema 10 does not know, and the open refuses it.
+const faults = vi.hoisted((): string[] => []);
+afterEach(() => { faults.length = 0; });
+vi.mock('../sqlite-support.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../sqlite-support.js')>();
+  return { ...actual, openSqliteDatabase: (...args: Parameters<typeof actual.openSqliteDatabase>) => {
+    const db = actual.openSqliteDatabase(...args);
+    for (const fault of faults) db.exec(fault);
+    return db;
+  } };
+});
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
 
@@ -73,8 +85,7 @@ describeSqlite('createByokServer SQLite composition', () => {
     await seed.cloud.devices.register(tenant, { deviceId, productId, deviceName: 'fixture', devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
     await seed.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities });
     await seed.close();
-    const fault = new DatabaseSync(path);
-    fault.exec("CREATE TRIGGER fail_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;"); fault.close();
+    faults.push("CREATE TEMP TRIGGER fail_append BEFORE INSERT ON main.mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;");
     const input: FrozenInput = { taskId: 'conditional-retry', deviceId, payload: { instruction: 'dream', target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: { agentId: 'main', profileRevision: '1' }, session: { mode: 'fresh' }, agentMemory: 'none', terminalProjection: { mode: 'none' },
       egressPolicy: { policyRevision: 'test', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -87,7 +98,7 @@ describeSqlite('createByokServer SQLite composition', () => {
       const recorded = await server.tasks.offer(input.taskId!);
       expect(recorded).toMatchObject({ delivered: false });
       await server.close();
-      const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_append'); repair.close();
+      faults.length = 0;
       const reopened = openStores();
       await reopened.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: [...capabilities, capability] });
       await reopened.close();
