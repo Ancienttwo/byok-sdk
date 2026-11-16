@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "0658a2801057b0a6c193103b94cf57345540d8b3d3d4dd28921d097b6e8d3a53"
+    "snapshotSha256": "6296969aa0e6d780c40e13b02b6672ade648fc4e5f678aba82ab6313326356f0"
   },
   "configFields": {
     "status": "tracked",
@@ -1067,18 +1067,134 @@
   ],
   "changes": [
     {
+      "item": "config:$schema",
+      "change": "added",
+      "after": "optional schema-sha256=00404e686415370f",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentEgress",
+      "change": "changed",
+      "before": "optional schema-sha256=0fe1bb45b19bbe3f",
+      "after": "optional schema-sha256=7c33d7337649acb5",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentHome",
+      "change": "changed",
+      "before": "optional schema-sha256=66edf8f80ce054e9",
+      "after": "optional schema-sha256=8c5a867aec8e8f93",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:agentMemory",
+      "change": "changed",
+      "before": "optional schema-sha256=0355ed29f3569663",
+      "after": "optional schema-sha256=b194debb42611ec2",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:artifactLimits",
+      "change": "changed",
+      "before": "optional schema-sha256=92efb10e4b237352",
+      "after": "optional schema-sha256=b63ced141cf6b9d4",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:branding",
+      "change": "changed",
+      "before": "optional schema-sha256=f5eaf56d7a1d0cc8",
+      "after": "optional schema-sha256=30b1cfd028418632",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:deviceAssertion",
+      "change": "changed",
+      "before": "optional schema-sha256=67738e44d544c345",
+      "after": "optional schema-sha256=8e4b67cd4089ef2e",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:deviceCredentials",
+      "change": "changed",
+      "before": "optional schema-sha256=f92318979ea72557",
+      "after": "optional schema-sha256=d355d1a17b00b7b8",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:mcpToolsets",
+      "change": "changed",
+      "before": "optional schema-sha256=c398321f7555b326",
+      "after": "optional schema-sha256=fba615fff84b94e3",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:piByokLauncher",
+      "change": "changed",
+      "before": "optional schema-sha256=7c3012d0c95b15da",
+      "after": "optional schema-sha256=a5a36c0fd971f657",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:presence",
+      "change": "changed",
+      "before": "optional schema-sha256=ca5de1d109969e37",
+      "after": "optional schema-sha256=13088095a63c489a",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:progressBatch",
+      "change": "changed",
+      "before": "optional schema-sha256=3f9b54486eda932a",
+      "after": "optional schema-sha256=3e65c5db3b469541",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:runtimeEnvironment",
+      "change": "changed",
+      "before": "optional schema-sha256=25be0c05980d06a5",
+      "after": "optional schema-sha256=3a110b8636d2d43f",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
       "item": "config:runtimes",
       "change": "changed",
       "before": "optional schema-sha256=733c24d0d48a4795",
-      "after": "optional schema-sha256=d0c93f4b002b16c5",
+      "after": "optional schema-sha256=0274d0856fb11b28",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "config:sdkHelperHost",
+      "change": "changed",
+      "before": "optional schema-sha256=54a73cacf0ba88bb",
+      "after": "optional schema-sha256=fe299de91ee27fe1",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "config:serviceEnrollment",
+      "change": "changed",
+      "before": "optional schema-sha256=2c6116713313cb4b",
+      "after": "optional schema-sha256=19e8773d76c24dc3",
+      "entry": "daemon-config-unknown-fields-fail-closed"
     },
     {
       "item": "config:storage",
       "change": "changed",
       "before": "optional schema-sha256=e89f34f2223d0907",
-      "after": "optional schema-sha256=0e2b685e4a3635ba",
+      "after": "optional schema-sha256=0044d659c81fe859",
       "entry": "grok-session-store"
+    },
+    {
+      "item": "config:toolAuthorization",
+      "change": "changed",
+      "before": "optional schema-sha256=1e3298b66ffff519",
+      "after": "optional schema-sha256=58f8a89f7ff38710",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "entry:@byok-sdk/core/sqlite-node",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -1086,14 +1202,84 @@
       "entry": "k4-settlement-notice"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration#botLedgerOptions",
+      "change": "added",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#CollaborationState",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#discardImport",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds",
       "change": "added",
       "entry": "bot-delivery-supersession"
     },
     {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_ARTIFACT",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_WORKSPACE",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
       "item": "export:@byok-sdk/client#AgentEgressDropReceipt",
       "change": "removed",
       "entry": "remove-egress-drop-receipts"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeProjectionFunction",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentMemoryOutboxVersionUnsupportedError",
+      "change": "added",
+      "entry": "agent-memory-outbox-version-error"
     },
     {
       "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
@@ -1106,9 +1292,34 @@
       "entry": "wire-v7-client-negotiation-halt"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
+      "change": "removed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigIssue",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonConfigIssueCode",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEffectiveConfig",
+      "change": "changed",
+      "entry": "daemon-config-unknown-fields-fail-closed"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonEvent",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonEventKind",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
     },
     {
       "item": "export:@byok-sdk/client#DaemonLifecycle",
@@ -1126,6 +1337,11 @@
       "entry": "grok-agent-user-context"
     },
     {
+      "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
+      "change": "changed",
+      "entry": "runtime-status-inline"
+    },
+    {
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "grok-session-store"
@@ -1136,6 +1352,11 @@
       "entry": "grok-agent-user-context"
     },
     {
+      "item": "export:@byok-sdk/client#LocalMemoryFilter",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
       "item": "export:@byok-sdk/client#LocalTeamWorkspace",
       "change": "changed",
       "entry": "remove-unused-team-workspace-methods"
@@ -1144,6 +1365,21 @@
       "item": "export:@byok-sdk/client#LocalTeamWorkspaceService",
       "change": "changed",
       "entry": "remove-unused-team-workspace-methods"
+    },
+    {
+      "item": "export:@byok-sdk/client#MemorySelector",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeDetectionAdvisory",
+      "change": "removed",
+      "entry": "runtime-version-verdict-only"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
@@ -1164,6 +1400,91 @@
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#TOOL_FILE_ACCESS",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthManifestQueryInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthManifestRecord",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClient",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientError",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientErrorCode",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryClientOptions",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthMemoryMetric",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthSnapshotCandidateInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthSnapshotWriteInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthTerminalWriteInput",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthWriteBody",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#TruthWriteResult",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#VerifiedTruthRecord",
+      "change": "removed",
+      "entry": "remove-truth-memory-client"
+    },
+    {
+      "item": "export:@byok-sdk/client#createAgentHomeProjection",
+      "change": "removed",
+      "entry": "remove-unused-client-aliases"
+    },
+    {
+      "item": "export:@byok-sdk/client#listInstalledSkillPacks",
+      "change": "removed",
+      "entry": "remove-list-installed-skill-packs"
     },
     {
       "item": "export:@byok-sdk/client#openDaemonLog",
@@ -1196,6 +1517,16 @@
       "entry": "grok-agent-user-context"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
+      "change": "changed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeDetectionAdvisory",
+      "change": "removed",
+      "entry": "runtime-version-verdict-only"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
@@ -1209,6 +1540,11 @@
       "item": "export:@byok-sdk/client/adapters#taskRuntimeTarget",
       "change": "changed",
       "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client/mcp-server#MCP_SERVER_MAX_FRAME_BYTES",
+      "change": "changed",
+      "entry": "mcp-frame-ceiling-single-authority"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
@@ -1756,6 +2092,71 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#sqliteOpenPath",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+      "change": "changed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+      "change": "changed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#scopeSecretStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
       "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
       "change": "changed",
       "entry": "wire-v7-retired-flags-and-bounds"
@@ -2101,9 +2502,48 @@
       "entry": "k4-settlement-notice"
     },
     {
+      "item": "export:@byok-sdk/server/execution-core#HostLedger",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerOptions",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
       "item": "export:@byok-sdk/server/execution-core#HostOptions",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostStoreFormatError",
+      "change": "added",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerDump",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#LedgerState",
+      "change": "changed",
+      "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "store:bot-collaboration-ledger",
+      "change": "changed",
+      "before": "ledger=1 collaboration=3 ddl-sha256=c5721e95abe5c4d1",
+      "after": "k4=1 k8=3 ddl-sha256=10c5abc21474e995",
+      "entry": "host-ledger-format-table"
+    },
+    {
+      "item": "store:client-journal",
+      "change": "changed",
+      "before": "ddl-sha256=dc9f3290dd91055a",
+      "after": "ddl-sha256=e8335dbafcb630c4",
+      "entry": "client-journal-exact-format"
     },
     {
       "item": "store:cloud-dataplane-postgres",
