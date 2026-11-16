@@ -293,7 +293,12 @@ const ED25519_PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'he
  * PEM and the public key are deterministic projections of the seed.
  */
 function seedOf(devicePrivateKeyPem: string): string {
-  const der = createPrivateKey(devicePrivateKeyPem).export({ format: 'der', type: 'pkcs8' });
+  let der: Buffer;
+  try {
+    der = createPrivateKey(devicePrivateKeyPem).export({ format: 'der', type: 'pkcs8' });
+  } catch {
+    throw new DeviceCredentialStoreError('device private key is not an Ed25519 key');
+  }
   if (der.length !== 48 || !der.subarray(0, 16).equals(ED25519_PKCS8_PREFIX)) {
     throw new DeviceCredentialStoreError('device private key is not an Ed25519 key');
   }
@@ -307,10 +312,11 @@ function privateKeyPemOf(seed: unknown): string {
 }
 
 function storedRecord(record: DeviceRecord): object {
+  const deviceKey = seedOf(record.devicePrivateKeyPem);
   if (publicKeyOfPrivateKeyPem(record.devicePrivateKeyPem) !== record.devicePublicKey) {
     throw new DeviceCredentialStoreError('device public key does not match its private key');
   }
-  return { deviceId: record.deviceId, tenantId: record.tenantId, deviceKey: seedOf(record.devicePrivateKeyPem) };
+  return { deviceId: record.deviceId, tenantId: record.tenantId, deviceKey };
 }
 
 function storedAttempt(attempt: PairingAttempt): object {

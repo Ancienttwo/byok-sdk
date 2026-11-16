@@ -304,6 +304,7 @@ describe('replacement pairing credential authority', () => {
   it.each([
     ['an attempt over a field bound', (store: DeviceCredentialStore) => store.savePairingAttempt({ ...attempt, deviceName: 'h'.repeat(PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH + 1) })],
     ['a record whose public key is not its private key\'s', (store: DeviceCredentialStore) => store.replace({ ...credentials, devicePublicKey: deviceKey().devicePublicKey })],
+    ['a record whose private key is not an Ed25519 PEM', (store: DeviceCredentialStore) => store.replace({ ...credentials, devicePrivateKeyPem: 'not a key' })],
   ] as const)('refuses %s before writing and keeps the current enrollment', async (_case, write) => {
     const raw = encoded(storedRecord(credentials));
     const entry = provider(raw);
