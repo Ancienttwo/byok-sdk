@@ -23,6 +23,7 @@ async function register(
     devicePublicKey: `${deviceId}-public-key`,
     proofKeyId: `${deviceId}-proof-key`,
     proofKeyEpoch: 0,
+    expectedDeviceDigest: null,
   });
 }
 

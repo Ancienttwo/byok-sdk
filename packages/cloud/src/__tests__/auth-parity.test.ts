@@ -9,10 +9,10 @@
  * slice exists to make impossible.
  */
 import { createMutableClock, tenantId, type Clock } from '@byok-sdk/core';
-import type { ChallengeResponse, PairResponse, TokenResponse } from '@byok-sdk/protocol';
+import { pairDeviceDigest, type ChallengeResponse, type PairResponse, type TokenResponse } from '@byok-sdk/protocol';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AuthPlane } from '../auth/plane';
+import { PAIRING_CODE_PRODUCT_ID_MAX_LENGTH, type AuthPlane } from '../auth/plane';
 import { ACCESS_TOKEN_TTL_SECONDS, createHmacTokenSigner } from '../auth/tokens';
 import { tokenHandler } from '../handlers/auth';
 import { NONCE_TTL_MS } from '../stores/in-memory/nonces';
@@ -70,6 +70,7 @@ describe('pairing (§6.1)', () => {
       pairingCode: pairing.code,
       deviceName: 'twice',
       devicePublicKey: keys.publicKeyBase64Url,
+      expectedDeviceDigest: null,
     });
     const headers = { 'content-type': 'application/json' };
 
@@ -90,6 +91,7 @@ describe('pairing (§6.1)', () => {
       pairingCode: pairing.code,
       deviceName: 'retry-after-registration-failure',
       devicePublicKey: keys.publicKeyBase64Url,
+      expectedDeviceDigest: null,
     });
     const pair = () => harness.request('/byok/pair', { method: 'POST', headers, body });
 
@@ -119,6 +121,7 @@ describe('pairing (§6.1)', () => {
         pairingCode: used.code,
         deviceName: 'used',
         devicePublicKey: usedKeys.publicKeyBase64Url,
+        expectedDeviceDigest: null,
       }),
     });
     expect(usedResponse.status).toBe(200);
@@ -130,14 +133,14 @@ describe('pairing (§6.1)', () => {
         expiring.json('/byok/pair', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ pairingCode: code, deviceName: 'd', devicePublicKey: 'x' }),
+          body: JSON.stringify({ pairingCode: code, deviceName: 'd', devicePublicKey: 'x', expectedDeviceDigest: null }),
         }),
       ),
     );
 
     expect(answers.map((answer) => answer.status)).toEqual([401, 401, 401]);
     expect(new Set(answers.map((answer) => JSON.stringify(answer.body))).size).toBe(1);
-    expect(answers[0]?.body).toEqual({ error: 'invalid pairing code' });
+    expect(answers[0]?.body).toEqual({ error: 'invalid pairing code', code: 'pairing_code_invalid' });
   });
 
   it('400s a request missing a required field, without consuming the code', async () => {
@@ -157,9 +160,39 @@ describe('pairing (§6.1)', () => {
         pairingCode: pairing.code,
         deviceName: 'valid-after-bad-request',
         devicePublicKey: keys.publicKeyBase64Url,
+        expectedDeviceDigest: null,
       }),
     });
     expect(retry.status).toBe(200);
+  });
+
+  it('409s a stale registration fence with the current device digest, without consuming the code (#2045)', async () => {
+    const machineId = 'a'.repeat(64);
+    const current = await harness.pairDevice(TENANT_A, PRODUCT_ID, machineId);
+    const pairing = await harness.cloud.createPairingCode(TENANT_A, { productId: PRODUCT_ID });
+    const keys = createDeviceKeys();
+    const pair = (expectedDeviceDigest: string | null) => harness.json('/byok/pair', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'successor', devicePublicKey: keys.publicKeyBase64Url, machineId, expectedDeviceDigest }),
+    });
+    const currentDeviceDigest = await pairDeviceDigest({ tenantId: TENANT_A, productId: PRODUCT_ID, deviceId: current.deviceId });
+
+    expect(await pair(null)).toEqual({
+      status: 409,
+      body: { error: 'pairing superseded', code: 'pairing_superseded', currentDeviceDigest },
+    });
+    const retry = await pair(currentDeviceDigest);
+    expect(retry.status).toBe(200);
+    expect((await harness.cloud.listDevices(TENANT_A)).map((device) => device.deviceId))
+      .toEqual([(retry.body as PairResponse).deviceId]);
+  });
+
+  it('mints a pairing code only for a productId of at most PAIRING_CODE_PRODUCT_ID_MAX_LENGTH characters', async () => {
+    await expect(harness.cloud.createPairingCode(TENANT_A, { productId: 'p'.repeat(PAIRING_CODE_PRODUCT_ID_MAX_LENGTH) }))
+      .resolves.toMatchObject({ code: expect.any(String) });
+    await expect(harness.cloud.createPairingCode(TENANT_A, { productId: 'p'.repeat(PAIRING_CODE_PRODUCT_ID_MAX_LENGTH + 1) }))
+      .rejects.toMatchObject({ code: 'pairing_product_id_invalid' });
   });
 });
 
@@ -195,7 +228,7 @@ describe('token renewal (§6.2)', () => {
     const pairResponse = await configured.request('/byok/pair', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'relative-ttl', devicePublicKey: keys.publicKeyBase64Url }),
+      body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'relative-ttl', devicePublicKey: keys.publicKeyBase64Url, expectedDeviceDigest: null }),
     });
     expect(pairResponse.status).toBe(200);
     const paired = (await pairResponse.json()) as PairResponse;

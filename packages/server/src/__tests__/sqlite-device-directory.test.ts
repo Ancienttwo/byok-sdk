@@ -6,14 +6,16 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createMutableClock, type TenantId } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
+import { pairDeviceDigest } from '@byok-sdk/protocol';
 import { createSqliteEmbeddedStores } from '../stores/sqlite';
 
 const tenant = 'tenant-a' as TenantId;
 const other = 'tenant-b' as TenantId;
-const registration = (deviceId: string, productId = 'product', machineId?: string) => ({
+const registration = (deviceId: string, productId = 'product', machineId?: string, expectedDeviceDigest: string | null = null) => ({
   deviceId, productId, deviceName: 'fixture', devicePublicKey: 'test-key',
-  proofKeyId: 'proof-key', proofKeyEpoch: 1, ...(machineId === undefined ? {} : { machineId }),
+  proofKeyId: 'proof-key', proofKeyEpoch: 1, ...(machineId === undefined ? {} : { machineId }), expectedDeviceDigest,
 });
+const fence = (deviceId: string) => pairDeviceDigest({ tenantId: tenant, productId: 'product', deviceId });
 
 describe('SQLite durable device authority', () => {
   const roots: string[] = [];
@@ -33,7 +35,7 @@ describe('SQLite durable device authority', () => {
       await stores.cloud.devices.register(tenant, registration('old', 'product', 'machine'));
       await stores.cloud.devices.register(other, registration('other-tenant', 'product', 'machine'));
       await stores.cloud.devices.register(tenant, registration('other-product', 'other', 'machine'));
-      await stores.cloud.devices.register(tenant, registration('new', 'product', 'machine'));
+      await stores.cloud.devices.register(tenant, registration('new', 'product', 'machine', await fence('old')));
       await stores.cloud.devices.register(tenant, registration('unidentified-1'));
       await stores.cloud.devices.register(tenant, registration('unidentified-2'));
       await expect(stores.cloud.devices.register(other, registration('new'))).rejects.toThrow('another tenant');
@@ -63,7 +65,7 @@ describe('SQLite durable device authority', () => {
     try {
       await stores.cloud.devices.register(tenant, registration('old', 'product', 'machine'));
       await expect(stores.cloud.devices.register(tenant, {
-        ...registration('new', 'product', 'machine'), proofKeyEpoch: -1,
+        ...registration('new', 'product', 'machine', await fence('old')), proofKeyEpoch: -1,
       })).rejects.toThrow();
       await expect(stores.cloud.devices.resolveByDeviceId('old')).resolves.toMatchObject({ deviceId: 'old' });
       await expect(stores.cloud.devices.resolveByDeviceId('new')).resolves.toBeUndefined();

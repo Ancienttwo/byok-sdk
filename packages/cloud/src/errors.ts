@@ -23,6 +23,8 @@ export const CLOUD_ERROR_CODES = {
   maintenance_result_invalid: 'maintenance_result_invalid',
   /** A pairing code that is unknown, expired, or already redeemed (§6.1). */
   pairing_code_invalid: 'pairing_code_invalid',
+  /** `createPairingCode` was given a `productId` longer than `PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`. Nothing was minted. */
+  pairing_product_id_invalid: 'pairing_product_id_invalid',
   /** The composition handed a device row whose tenant is not a mintable `TenantId`. */
   device_tenant_invalid: 'device_tenant_invalid',
   /**

@@ -7,7 +7,7 @@ import { createEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/proto
 import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager, type OutboundSettlement } from '../daemon/connection-manager';
 import { LongPollClient, LongPollRouteError, type CorrelatedOutcome } from '../daemon/long-poll-transport';
-import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { seedAuthHoldingToken } from './fixtures/device-enrollment';
 import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 
 const dirs: string[] = [];
@@ -21,12 +21,7 @@ afterEach(async () => {
 async function auth(): Promise<AuthManager> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settlement-')); dirs.push(dir);
   const store = createTestDeviceStore(dir);
-  await seedDeviceEnrollment(store, {
-    deviceId: 'settlement-device', tenantId: 'settlement-tenant', accessToken: 'test-token',
-    expiresAt: new Date(Date.now() + 3600000).toISOString(), devicePrivateKeyPem: 'test', devicePublicKey: 'test',
-  });
-  const auth = new AuthManager({ serverUrl: 'http://example.invalid', store });
-  await auth.loadExisting(); return auth;
+  return seedAuthHoldingToken(store, 'http://example.invalid', { deviceId: 'settlement-device', tenantId: 'settlement-tenant' });
 }
 
 async function open(onOutboundSettled: (batch: readonly OutboundSettlement[]) => Promise<void>, queued: readonly Envelope[] = []): Promise<ConnectionManager> {

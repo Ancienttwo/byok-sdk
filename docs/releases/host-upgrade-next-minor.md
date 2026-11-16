@@ -716,6 +716,90 @@ A plaintext `task.steer` text is at most 65,536 UTF-8 bytes
 enqueues. A sealed steer is not checked on the device. `conn.hello` carries
 at most 64 capability flags.
 
+### Pairing registration fence (#2045)
+
+`POST /byok/pair` fences machine supersession with a compare-and-set on the
+machine's current device. See
+"Registration fence" in [§6.1](../protocol.md#61-pairing--post-byokpair-v2).
+
+- `PairRequest` requires `expectedDeviceDigest` (`null` or a
+  `pairDeviceDigest`). A v6 client gets `400`.
+- `401` carries `code: 'pairing_code_invalid'`. The new `409`
+  `pairing_superseded` carries only `currentDeviceDigest`, and its code stays
+  redeemable.
+- Custom cloud stores: `DeviceRegistration` and `PairingEnrollmentInput`
+  require `expectedDeviceDigest`. `DeviceDirectory.register` returns
+  `DeviceRegistrationResult` (`registered` or `conflict`), and
+  `PairingEnrollment.redeemAndRegister` returns `PairingEnrollmentResult`
+  (`registered`, `conflict` or `code_invalid` in place of `undefined`).
+  With `machineId`, the fence check, the supersession and the insert form
+  one atomic section per machine; a conflict writes nothing and consumes no
+  code. The cloud conformance suite has a case for each rule.
+- `createPairingCode` refuses a `productId` longer than 64 characters
+  (`PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`) with `ByokCloudError` code
+  `pairing_product_id_invalid`, and mints nothing. Hosts with longer product
+  ids shorten them before upgrading.
+- The in-memory, SQLite and Postgres reference stores implement the fence.
+  Postgres serializes registrations of one machine with
+  `pg_advisory_xact_lock`; no schema change.
+
+#### Client pairing
+
+- `Daemon.pair()` and `byok-agent pair` reject with three new errors:
+  `PairingSupersededError` (another pairing of this `productId` replaced this
+  one while its request was in flight; nothing was written), `PairingBusyError`
+  (`retryable: true`; two pairings of the same machine ran at once; retry with
+  the same code) and `PairingCodeRejectedError` (the code is unknown, expired
+  or used; pair with a new code).
+- `FirstPairingAttemptRefusedError` is renamed `PairingAttemptRefusedError`
+  and has no `code`: its only cause is another store's staged attempt.
+- `pairing_attempt_unattributed` and
+  `clearDeviceEnrollment({ clearUnattributedAttempt })` are removed: a v7
+  attempt always names its store. Hosts that handled them (AiphaBee:
+  aiphabee#1384) drop that path.
+- An injected `DeviceCredentialBackend` implements `readPairingAttempt` and
+  `savePairingAttempt` in place of `readFirstPairingAttempt` and
+  `saveFirstPairingAttempt`; the attempt type is `PairingAttempt`.
+- Every pairing stages an attempt, including a re-pair. A retry with the same
+  code resumes it; a new code stages a fresh key, except a re-pair of the
+  store's own enrollment, which keeps its key.
+- Pairing no longer holds the `productId` lock across its request or across
+  its E2EE member custody. Re-pairing a running daemon shuts it down outside
+  the lock; the member entries are written only while the new enrollment
+  still holds.
+- A pairing or renewal error carries only the HTTP status, never the server's
+  response text. A malformed `2xx` body is `AuthResponseInvalidError` with no
+  `cause`.
+- **Wire bounds.** `PairRequest.deviceName` and `PairResponse.deviceId` are
+  1 to 64 UTF-16 code units (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`,
+  `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`) and a tenant id 1 to 200, of
+  well-formed text without control characters. Code units, not code points:
+  an astral character such as an emoji counts as two. One check,
+  `isPairingText(value, maxUnits)`, owns both length and text at every
+  boundary. The core tenant id mint (`tenantId`, `isTenantId`) now refuses any
+  control character or unpaired surrogate, not only NUL; a Host that mints
+  tenant ids with such characters changes them before upgrading. A client
+  refuses a longer `deviceId` as `AuthResponseInvalidError` and writes
+  nothing. These bounds are the wire contract, under which the largest OS
+  credential entry measures 2,106 bytes; the client guarantees the 2,400-byte
+  fit by checking the encoded entry before every write, and a pairing
+  validates everything it writes before it writes `device.json`. A Host whose
+  hostnames exceed 64 code units sets `deviceName`: `config check` reports it, and
+  pairing throws `PairingInputInvalidError` (`field: 'deviceName'`). A
+  `machineId` resolver must return a lowercase hex SHA-256, or pairing throws
+  `PairingInputInvalidError` (`field: 'machineId'`).
+- **The access token is no longer persisted.** `DeviceRecord` (and
+  `DeviceCredentialBackend.read` and `replace`) carries no `accessToken` or
+  `expiresAt`. The daemon exchanges a token with the device key on its first
+  request after start and after a `401`, and keeps it in memory: a start costs
+  the `/byok/challenge` and `/byok/token` round trips once. Renewal writes
+  nothing. An injected `DeviceCredentialBackend` drops those two fields, and
+  its `replace` always discards a staged attempt.
+- **v6 OS entry.** The client reads the OS entry's format version and never
+  decodes a v6 entry. `start` deletes it and reports re-pair required, pairing
+  deletes it and pairs as a first pairing, and a clear deletes it. Re-pair
+  every device after the cloud upgrade, as the operator order above says.
+
 ### Cloud (`@byok-sdk/cloud`)
 
 - **Claim and terminal executor.** The cloud records the winning claim's

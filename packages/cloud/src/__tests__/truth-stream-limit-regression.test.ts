@@ -75,6 +75,7 @@ describe('truth PUT raw streaming byte ceiling (F03-1)', () => {
       productId: 'product-a', deviceId: 'device-a', deviceName: 'test',
       devicePublicKey: keys.publicKey.export({ format: 'jwk' }).x!,
       proofKeyId: 'identity', proofKeyEpoch: 0,
+      expectedDeviceDigest: null,
     });
   });
 

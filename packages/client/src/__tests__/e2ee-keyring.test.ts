@@ -58,10 +58,17 @@ async function member(keyringOptions: { readonly requestTimeoutMs?: number; read
   }, [new StubRuntimeAdapter('pi')]);
   const { deviceId } = await daemon.pair('pair-code');
   const record = (await testDeviceCredentials(productId).read())!;
+  // The access token lives only in the daemon's memory (#2045); the test server names the device's current one.
+  const cloud = server;
+  const accessToken = async () => {
+    const token = cloud.currentAccessToken(deviceId);
+    if (token === undefined) throw new Error('test server holds no access token for the device');
+    return token;
+  };
   const auth = {
     readCurrent: async () => record,
-    getValidAccessToken: async () => record.accessToken,
-    handleUnauthorized: async () => record.accessToken,
+    getValidAccessToken: accessToken,
+    handleUnauthorized: accessToken,
   } as unknown as AuthManager;
   const identity = enrollmentIdentityOf(record);
   const client = new E2eeMemberClient({

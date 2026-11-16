@@ -70,7 +70,7 @@ describe('SQLite receipt recovery', () => {
     const discover = () => runtime.cloud.readTaskAgentMessage(tenant, deviceId, taskId, agentRef);
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: [
         'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress',
         'terminal-projection-selection', 'agent-egress-fresh-session',
@@ -180,7 +180,7 @@ describe('SQLite receipt recovery', () => {
     const taskId = 'completed-task'; const input = { taskId, payload };
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
       const first = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, input);
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { executor: CLAUDE, deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome)).toBe('accepted');
@@ -236,7 +236,7 @@ describe('SQLite receipt recovery', () => {
     const input = { taskId: 'pre-append', payload };
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
       await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, input)).rejects.toMatchObject({
         code: 'task_offer_append_refused', taskId: input.taskId, cause: expect.objectContaining({ message: expect.stringContaining('injected append failure') }) });
@@ -259,7 +259,7 @@ describe('SQLite receipt recovery', () => {
     const input = { taskId: 'post-append', payload };
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
       await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, input)).rejects.toThrow('injected delivered failure');
       const before = (await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages;
@@ -286,7 +286,7 @@ describe('SQLite receipt recovery', () => {
     const { open } = fixture(); let runtime = open();
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
       await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { taskId: 'cancelled-task', payload });
       await runtime.cloud.cancelTask(tenant, 'cancelled-task', 'host-cancel');
@@ -303,7 +303,7 @@ describe('SQLite receipt recovery', () => {
     const taskId = 'offer-readback';
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
-        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
+        devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
       await runtime.stores.cloud.tasks.reserveAgentOffer(tenant, { taskId: 'unsubmitted', deviceId, agentRef: AGENT_REF });
       expect(await runtime.cloud.readTaskOffer(tenant, 'unsubmitted')).toBeUndefined();

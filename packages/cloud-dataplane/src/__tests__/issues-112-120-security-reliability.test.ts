@@ -20,6 +20,7 @@ function enrollment(code: string, deviceId: string) {
     devicePublicKey: 'durable-public-key',
     proofKeyId: 'identity',
     proofKeyEpoch: 0,
+    expectedDeviceDigest: null,
   };
 }
 
@@ -41,10 +42,11 @@ describe.skipIf(SKIP_DATAPLANE)(`Issues #112/#120 Postgres regressions — ${SKI
         pairing.redeemAndRegister(enrollment('ISSUE112', 'device-b')),
       ]);
       expect(attempts).toEqual([
-        expect.objectContaining({ deviceId: 'device-a' }),
-        expect.objectContaining({ deviceId: 'device-a' }),
+        { outcome: 'registered', device: expect.objectContaining({ deviceId: 'device-a' }) },
+        { outcome: 'registered', device: expect.objectContaining({ deviceId: 'device-a' }) },
       ]);
-      await expect(pairing.redeemAndRegister({ ...enrollment('ISSUE112', 'device-c'), deviceName: 'conflict' })).resolves.toBeUndefined();
+      await expect(pairing.redeemAndRegister({ ...enrollment('ISSUE112', 'device-c'), deviceName: 'conflict' }))
+        .resolves.toEqual({ outcome: 'code_invalid' });
       await expect(scope.pool.query<{ count: string }>('SELECT count(*)::text AS count FROM device WHERE tenant_id = $1', [TENANT]))
         .resolves.toMatchObject({ rows: [{ count: '1' }] });
     } finally {

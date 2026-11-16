@@ -223,6 +223,8 @@ export async function createDeviceSimulator(
           pairingCode,
           deviceName,
           devicePublicKey: identity.publicKeyBase64Url,
+          // No machineId, so the registration fence does not apply.
+          expectedDeviceDigest: null,
         },
       }),
     );
