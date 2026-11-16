@@ -384,11 +384,16 @@ test('archived vendored Hermes paths stay mapped as root CI scripts (#1854)', ()
     assert.ok(checks.tests.includes('scripts/release/pack-and-smoke.test.mjs'), file);
   }
   assert.throws(() => selectImpact(['packages/cloud-do/src/unreviewed.ts']), /reviewed CI mapping required/i);
+  // #2284: only the deletion of api-surface/README.md is mapped.
+  assert.deepEqual(selectImpact(['api-surface/README.md']), { dirs: [], files: ['api-surface/README.md'], families: [], reason: 'root-ci-scripts' });
+  assert.throws(() => selectImpact(['api-surface/other.md']), /reviewed CI mapping required/i);
   const cwd = mkdtempSync(join(tmpdir(), 'ci-unknown-owner-'));
   try {
     mkdirSync(join(cwd, 'api-surface'));
     const entries = join(cwd, 'api-surface/entries.json');
     writeFileSync(entries, '{}');
+    writeFileSync(join(cwd, 'api-surface/README.md'), '# restored\n');
+    assert.throws(() => selectImpact(['api-surface/README.md'], { cwd }), /reviewed CI mapping required/i);
     const git = (...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
     assert.equal(git('init').status, 0);
     assert.equal(git('add', '.').status, 0);
@@ -634,6 +639,9 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
           assert.ok(source.includes('check-api-surface.mjs'));
           assert.ok(readFileSync(new URL('scripts/api-surface/check-api-surface.mjs', root), 'utf8').includes('entry-closure.mjs'));
           assert.ok(readFileSync(new URL('scripts/api-surface/entry-closure.mjs', root), 'utf8').includes('module-scan.mjs'));
+        } else if (path === 'scripts/release/upgrade-manifest/dts-surface.mjs' && file === 'scripts/api-surface/check-api-surface.test.mjs') {
+          assert.ok(source.includes('check-api-surface.mjs'));
+          assert.ok(readFileSync(new URL('scripts/api-surface/check-api-surface.mjs', root), 'utf8').includes('dts-surface.mjs'));
         } else assert.ok(source.includes(path.split('/').pop()), `${file} does not run ${path}`);
       }
     }
