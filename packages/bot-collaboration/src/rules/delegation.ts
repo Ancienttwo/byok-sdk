@@ -529,10 +529,10 @@ export function abandonDelegation(state: DelegationState, facts: Pick<IntentFact
 }
 /** Next time a delegation timer can change state without other events. */
 export function delegationDue(state: Pick<DelegationState, 'delegations'>, timers: DelegationTimers = DEFAULT_TIMERS): number[] {
-  return Object.values(state.delegations).flatMap(d => [
+  return Object.values(state.delegations).filter(d => !d.verdict).flatMap(d => [
     ...(d.nextCheckAt !== undefined ? [d.nextCheckAt] : []),
-    ...(!d.verdict && d.status !== 'uncertain' && d.cancel ? [d.cancel.requestedAt + timers.cancelGraceMs] : []),
-    ...(!d.verdict && d.status === 'running' && !d.cancel && d.claimed && d.claimed.turnId === d.chainTurnIds.at(-1) ? [d.claimed.at + timers.uncertainAfterMs] : []),
+    ...(d.status !== 'uncertain' && d.cancel ? [d.cancel.requestedAt + timers.cancelGraceMs] : []),
+    ...(d.status === 'running' && !d.cancel && d.claimed && d.claimed.turnId === d.chainTurnIds.at(-1) ? [d.claimed.at + timers.uncertainAfterMs] : []),
   ]);
 }
 
@@ -548,6 +548,7 @@ export function reconcileReply(state: DelegationState, d: Delegation, readback: 
   retryReply(state, d, now, emit, uncertainAfterMs);
 }
 export function retryReply(state: DelegationState, d: Delegation, now: number, emit: Publish, uncertainAfterMs = REPLY_UNCERTAIN_AFTER_MS): void {
+  if (d.verdict) return;
   d.checks = (d.checks ?? 0) + 1;
   d.nextCheckAt = now + Math.min(REPLY_RETRY_MAX_MS, 1000 * 2 ** (d.checks - 1));
   if (d.status !== 'uncertain' && now - (d.pendingSince ?? now) >= uncertainAfterMs) uncertain(state, d, now, emit);

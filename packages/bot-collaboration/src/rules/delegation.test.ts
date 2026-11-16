@@ -1,7 +1,7 @@
 import { expect, it } from 'vitest';
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addTurn } from './turn';
-import { applyDelegate, arbitrateCancel, settleDelegations, type DelegationState, type IntentFact, type IntentFacts } from './delegation';
+import { applyDelegate, arbitrateCancel, checkReply, delegationDue, replyCheckDue, resolveDelegation, settleDelegations, type DelegationState, type IntentFact, type IntentFacts } from './delegation';
 import type { AutonomyGate } from './autonomy';
 /** These cases apply every autonomous action, as a Bot in `auto` does. */
 const auto: AutonomyGate = { autonomy: 'auto', record: () => { throw new Error('auto records nothing'); } };
@@ -58,4 +58,19 @@ it('arbitrates a cancel from intent facts: no intent closes now, an open intent 
   open.intents[open.d.id] = { taskId: 'b-task', conclusion: 'cancelled' };
   settleDelegations(open.state, open.facts, 6, open.emit);
   expect(open.d).toMatchObject({ verdict: 'cancelled', reason: 'user_cancelled' });
+});
+
+it('ignores a failed reply check after its delegation resolves and excludes resolved timer rows', () => {
+  const { state, d, emit, events } = setup();
+  Object.assign(d, { status: 'reply_pending', pendingSince: 0, nextCheckAt: 1 });
+  expect(replyCheckDue(d, 1)).toBe(true);
+  resolveDelegation(state, d, 'answered', 2, emit);
+  const resolved = structuredClone(d), published = events.length;
+  checkReply(state, d, { failed: true }, 100_000, emit, 10);
+  expect(d).toEqual(resolved);
+  expect(events).toHaveLength(published);
+  expect(replyCheckDue(d, 100_001)).toBe(false);
+  expect(delegationDue(state)).toEqual([]);
+  d.nextCheckAt = 1;
+  expect(delegationDue(state)).toEqual([]);
 });
