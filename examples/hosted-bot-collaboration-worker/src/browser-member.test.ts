@@ -52,7 +52,7 @@ async function fixture() {
     kemPublicJwk: device.kem.publicJwk, kemEpoch: 1, deviceId });
   const pairing = parsePairingInput(await browser.start('browser-product'));
   await base.stores.devices.register(tenant, { productId: 'browser-product', deviceId, deviceName: deviceId,
-    devicePublicKey: 'proof-public-key', proofKeyId: 'identity', proofKeyEpoch: 0 });
+    devicePublicKey: 'proof-public-key', proofKeyId: 'identity', proofKeyEpoch: 0, expectedDeviceDigest: null });
   await base.stores.devices.recordCapabilities(tenant, { deviceId, capabilities: ['sealed-payload-v1',
     'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection'] });
   await provisionEntitlement(base.core, tenant);

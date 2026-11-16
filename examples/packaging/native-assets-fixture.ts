@@ -6,13 +6,13 @@ import { createOwnedLineProcessSpawn } from '../../packages/client/src/runtime/o
 /** One Credential Manager round trip of the packaged Host, through its own native asset root. */
 async function credentialRoundTrip(nativeAssetRoot: string, storeDir: string): Promise<void> {
   const productId = `native-assets-sea-${process.pid}-${Date.now()}`;
-  const record = { deviceId: 'device-sea', tenantId: 'tenant-sea', devicePublicKey: 'public', accessToken: 'token', expiresAt: '2030-01-01T00:00:00.000Z', devicePrivateKeyPem: 'private' };
+  const record = { deviceId: 'device-sea', tenantId: 'tenant-sea', devicePublicKey: 'public', devicePrivateKeyPem: 'private' };
   const store = new DeviceCredentialStore({ productId, storeDir, nativeAssetRoot });
   try {
     const status = await readDeviceEnrollmentStatus({ productId, storeDir, nativeAssetRoot });
     await store.replace(record);
     const stored = await new DeviceCredentialStore({ productId, storeDir, nativeAssetRoot }).read();
-    process.stdout.write(`${JSON.stringify({ status: status.state, roundTrip: stored?.accessToken === record.accessToken, cleared: await store.clear() })}\n`);
+    process.stdout.write(`${JSON.stringify({ status: status.state, roundTrip: stored?.devicePrivateKeyPem === record.devicePrivateKeyPem, cleared: await store.clear() })}\n`);
   } catch (error) {
     process.stdout.write(`${JSON.stringify({ failed: error instanceof Error ? error.name : String(error) })}\n`);
   }
