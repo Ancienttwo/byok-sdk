@@ -43,8 +43,10 @@ export const TENANT_KEY_SEPARATOR = '\u0000';
 /**
  * A tenant id has no control character (C0, which includes the NUL
  * separator, or C1) and no unpaired surrogate: a device stores it, and this
- * keeps it within three UTF-8 bytes per code unit as JSON (#2045). Kept in
- * step with `@byok-sdk/protocol`'s `isPairingText`.
+ * keeps it within three UTF-8 bytes per code unit as JSON (#2045). The other
+ * copy of this rule is `@byok-sdk/protocol`'s `isPairingText` and
+ * `PairResponseTenantIdSchema`; core depends on no other package. The client's
+ * `device-credential-store.test.ts` asserts the two accept and refuse the same ids.
  */
 const CONTROL_OR_UNPAIRED_SURROGATE = /[\p{Cc}\p{Cs}]/u;
 

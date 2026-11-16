@@ -4,7 +4,9 @@ import {
   PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH,
   PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH,
   PAIR_RESPONSE_TENANT_ID_MAX_LENGTH,
+  PairResponseTenantIdSchema,
 } from '@byok-sdk/protocol';
+import { TENANT_ID_MAX_LENGTH, isTenantId } from '@byok-sdk/core';
 import { inspect } from 'node:util';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
@@ -242,6 +244,16 @@ describe('replacement pairing credential authority', () => {
     await entry.open().replace({ ...record, deviceId: astral(PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), tenantId: astral(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH) });
     await entry.open().savePairingAttempt({ ...largest, deviceName: astral(PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH) });
     expect(Buffer.byteLength(entry.value()!)).toBeLessThan(2_106);
+  });
+
+  it('the protocol tenant schema and the core tenant mint accept and refuse the same ids', () => {
+    // Two copies of one rule: protocol depends on no package and core only on zod.
+    expect(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH).toBe(TENANT_ID_MAX_LENGTH);
+    const bound = TENANT_ID_MAX_LENGTH;
+    const samples = ['', 'a'.repeat(bound), 'a'.repeat(bound + 1), '\u4e2d'.repeat(bound), '\u{1F600}'.repeat(bound / 2),
+      '\u{1F600}'.repeat(bound / 2 + 1), 'a\u0000b', 'a\u001fb', 'a\u007fb', 'a\u0085b', 'a\ud800b', 'a\udc00b',
+      ' tenant', 'tenant ', '\ttenant', 'ten ant', 'tenant'];
+    for (const sample of samples) expect(isTenantId(sample), JSON.stringify(sample)).toBe(PairResponseTenantIdSchema.safeParse(sample).success);
   });
 
   it('keeps first pairing as a standalone attempt and clears it completely', async () => {

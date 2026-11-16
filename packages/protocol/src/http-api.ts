@@ -60,8 +60,10 @@ export const PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH = 64;
  * code points), well-formed (no unpaired surrogate) and with no control
  * character (C0, DEL, C1). Each code unit then costs at most three UTF-8
  * bytes as JSON. Every boundary that checks one of these fields calls this;
- * `@byok-sdk/core`'s tenant id mint restates it, because core depends on no
- * other package.
+ * `@byok-sdk/core`'s tenant id mint (`tenantId`, `isTenantId` in
+ * `core/src/tenant.ts`) restates it, because core depends on no other package;
+ * the client's `device-credential-store.test.ts` asserts the two accept and
+ * refuse the same tenant ids.
  */
 export function isPairingText(value: string, maxUnits: number): boolean {
   return value.length > 0 && value.length <= maxUnits && !/[\p{Cc}\p{Cs}]/u.test(value);
