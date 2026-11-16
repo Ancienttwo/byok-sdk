@@ -154,6 +154,7 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
@@ -1094,7 +1095,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 591107,
+      "budgetBytes": 591126,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1875,7 +1876,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Read-only SQLite format admission for Node stores",
-      "budgetBytes": 1731,
+      "budgetBytes": 1750,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1886,8 +1887,7 @@
     "facts": {
       "target": "packages/core/dist/sqlite-node.js",
       "conditions": [
-        "node",
-        "import"
+        "default"
       ],
       "types": [
         "packages/core/dist/sqlite-node.d.ts"
@@ -1965,6 +1965,7 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "child_process",
         "crypto",
@@ -2368,7 +2369,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 416196,
+      "budgetBytes": 420558,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2387,6 +2388,7 @@
       "bareImports": [
         "@byok-sdk/core",
         "@byok-sdk/core/sealed-payload",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
@@ -2583,7 +2585,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2475239,
+      "budgetBytes": 2475258,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2924,7 +2926,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 187254,
+      "budgetBytes": 189736,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2938,6 +2940,7 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "child_process",
         "crypto",
