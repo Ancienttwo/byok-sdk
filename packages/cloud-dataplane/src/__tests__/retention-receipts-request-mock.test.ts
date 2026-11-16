@@ -12,6 +12,7 @@ import { createDataplaneScope, createObjectStorageScope, SKIP_DATAPLANE } from '
 import { migrate } from '../migrate';
 import { createPostgresCloudStores } from '../stores';
 import { createPostgresCoreStores } from '../stores/core/index';
+import { PostgresDeviceAssertionReplayAuthority } from '../stores/device-assertion-replay';
 const deploySql = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const factory: CloudCompositionFactory = {
   async create() {
@@ -24,6 +25,7 @@ const factory: CloudCompositionFactory = {
       const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
       return {
         presence: core.presence,
+        replay: new PostgresDeviceAssertionReplayAuthority(scope.pool),
         stores, now: () => clock.now().toISOString(), advanceTime: ms => clock.advance(ms),
         landBlobBytes: async ({ grant, bytes, reservation }) => { const response = await fetch(grant.uploadUrl, { method: 'PUT', headers: { 'content-type': reservation.contentType, 'content-length': String(bytes.byteLength) }, body: bytes as unknown as BodyInit }); if (!response.ok) throw new Error('PUT refused'); },
         commitBlob: async () => { throw new Error('Receipt/TTL retention does not commit blobs.'); },

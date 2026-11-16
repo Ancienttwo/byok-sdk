@@ -1,7 +1,7 @@
 import { vi } from 'vitest';
 const { requestPrefix } = vi.hoisted(() => ({ requestPrefix: 'test-request:' }));
 vi.mock('@byok-sdk/cloud', async original => ({ ...await original<typeof import('@byok-sdk/cloud')>(), REQUEST_RECEIPT_PREFIXES: Object.freeze([requestPrefix]) }));
-import { createMutableClock } from '@byok-sdk/core';
+import { InMemoryDeviceAssertionReplayAuthority, createMutableClock } from '@byok-sdk/core';
 import { ackAndCollectMailbox, conformanceMailbox, runCloudRetentionConformance, type CloudCompositionFactory } from '@byok-sdk/conformance';
 
 import { describe } from 'vitest';
@@ -14,6 +14,7 @@ const factory: CloudCompositionFactory = {
     const composition = createSqliteEmbeddedStores({ path: ':memory:' }, { clock, crypto: createWebCrypto() });
     return {
       presence: composition.core.presence,
+      replay: new InMemoryDeviceAssertionReplayAuthority(),
       stores: composition.cloud, now: () => clock.now().toISOString(), advanceTime: ms => clock.advance(ms),
       landBlobBytes: async ({ grant, bytes }) => { const result = await composition.blobContentProxy.writeContent(grant.blobId, bytes); if (!result.ok) throw new Error(result.reason); },
       commitBlob: async (tenant, reservation, observation) => { await composition.core.objects.commit(tenant, { hash: reservation.contentHash, ...observation }); },
