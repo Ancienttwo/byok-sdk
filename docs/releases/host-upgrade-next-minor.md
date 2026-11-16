@@ -415,8 +415,8 @@ supported:
 - The Host's K4 frozen work and outbox snapshots rotate: start them fresh on
   the v7 store.
 - The SQLite startup check refuses a pending row of another major
-  (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`). The hosted data plane's store
-  check: phase 1.
+  (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`). The hosted data plane checks the
+  database's wire epoch instead; see "Cloud data plane" below.
 
 ### What a v6 daemon sees
 
@@ -526,6 +526,27 @@ at most 64 capability flags.
   `rejected` and `protocol_version_unsupported`, and an unknown type with
   `rejected` and `type_unsupported`, each with HTTP 200. The handshake answer
   carries `ingress` and no `capabilities`.
+
+### Cloud data plane (`@byok-sdk/cloud-dataplane`)
+
+- **New database.** Run the migrations on a new Postgres database, then write
+  the storage entitlements and retention policy. `0040_wire_v7.sql` stops
+  before any change when any table already holds a row, Host configuration
+  included, with an error that names the table. Otherwise it records wire
+  epoch 7 in `byok_wire_epoch`.
+- **Startup check.** `createPostgresCloudStores` rejects a database whose
+  epoch is not 7, or that has none, with `PostgresStoreEpochUnsupportedError`
+  (`code: 'POSTGRES_STORE_EPOCH_UNSUPPORTED'`, `requiredEpoch`, `foundEpoch`
+  when present) and changes nothing. It replaces the pending-mailbox check:
+  `PostgresMailboxProtocolUnsupportedError` and
+  `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED` are removed. Match the new code
+  where you matched the old one.
+- **New store.** `PostgresTaskSteerRefusalStore` is the `steerRefusals` port
+  (table `task_steer_refusal`); `createPostgresCloudStores` includes it.
+  Archive, redaction, retention and device retirement keep its rows; tenant
+  erasure deletes them (`TENANT_ERASURE_TABLES`).
+- **Claims.** A claimed task stores exactly one executor, in
+  `claimed_runtime` or `claimed_harness_id` (a new CHECK).
 
 ### Phase 1 and 2 items
 
