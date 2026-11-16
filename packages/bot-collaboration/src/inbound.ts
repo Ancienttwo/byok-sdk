@@ -8,15 +8,14 @@ import { inboundDisposition, inboundDispositions, type InboundDisposition, type 
  * adapter adds one synthetic row per round root, because a round input stores its round id as the inbound root and its
  * seat Turns have their own roots.
  */
-/** A round root answers a room input when any seat Turn concluded; otherwise the round is still open. */
+/** A successful seat answers the input; seat cancellation is failure, never cancellation of the round root. */
 function roundTurn(state: CollaborationState, round: Round): InboundTurn {
   const turns = round.seats.map(id => state.turns[id]).filter((turn): turn is Turn => turn !== undefined);
   const conclusions = turns.map(turn => turn.conclusion).filter((value): value is string => value !== undefined);
-  if (conclusions.includes('cancelled')) return { id: round.id, root: round.root, status: 'failed', conclusion: 'cancelled' };
   if (turns.some(turn => turn.status === 'succeeded' || turn.conclusion === 'succeeded' || turn.conclusion === 'delivered')) {
     return { id: round.id, root: round.root, status: 'succeeded', conclusion: 'succeeded' };
   }
-  const failed = new Set(['failed', 'expired', 'declined', 'superseded', 'abandoned']);
+  const failed = new Set(['failed', 'expired', 'declined', 'superseded', 'abandoned', 'cancelled']);
   if (conclusions.some(conclusion => failed.has(conclusion)) || turns.some(turn => turn.status === 'failed')) {
     return { id: round.id, root: round.root, status: 'failed', conclusion: 'failed' };
   }

@@ -16,11 +16,22 @@
   },
   "entries": [
     {
+      "id": "bot-round-inbound-disposition",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration inboundDispositions() and inbound: projections now report answered when any round seat succeeded or delivered, even if a sibling was cancelled. Without success, cancelled seats mean failed, including when all seats were cancelled; only an authoritative root Turn can report cancelled. Update Host disposition consumers to distinguish root cancellation from seat failure; existing ledger rows use the new precedence on read.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#bot-collaboration-round-inbound-disposition-2255",
+      "items": [
+        "behavior:bot-round-inbound-disposition"
+      ]
+    },
+    {
       "id": "bot-inbound-conversation-kind",
       "impact": "breaking",
       "summary": "@byok-sdk/bot-collaboration inboundKey(message) now includes conversation.kind, separating direct and group chats with the same id. All inbound and receive command identities change, so in-flight events can be admitted again once across an upgrade. Drain inbound delivery before upgrading or account for that redelivery, and use the new keys in Host comparisons and storage.",
       "migration": "docs/releases/host-upgrade-next-minor.md#bot-collaboration-inbound-conversation-identity-2250",
-      "items": ["behavior:bot-inbound-conversation-kind"]
+      "items": [
+        "behavior:bot-inbound-conversation-kind"
+      ]
     },
     {
       "id": "model-confirmation-non-retryable",

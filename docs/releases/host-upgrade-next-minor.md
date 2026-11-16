@@ -18,6 +18,22 @@ matches. Drain inbound delivery before upgrading, or account for that one-time
 redelivery. Hosts that persist or compare inbound keys must use the new keys;
 there is no compatibility lookup of the old key.
 
+## Bot collaboration round inbound disposition (#2255)
+
+`@byok-sdk/bot-collaboration` `inboundDispositions()` and its `inbound:`
+projections now describe whether a room input got an answer. An existing root
+Turn remains authoritative, including explicit root cancellation. Without a
+root Turn, a succeeded or delivered seat wins over any failed or cancelled
+seat, so cancelling a sibling after an answer no longer changes `answered`
+to `cancelled`. If no seat succeeded, a failed or cancelled seat means
+`failed`; otherwise the input remains `coalesced`. Even cancelling all seats
+does not cancel the round root.
+
+Hosts that render or consume these dispositions must treat `cancelled` as
+root or batch cancellation and accept `failed` for seat-only cancellation.
+Re-reading existing ledger rows uses this precedence too. No store migration
+is needed.
+
 ## OAR 0.109.0 (#2235)
 
 The vendored OAR moves from 0.105.0 to 0.109.0 (`packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.
