@@ -88,6 +88,8 @@ export interface InMemoryByokCloudOptions {
   readonly publicRouteLimiter?: ByokCloudOptions['publicRouteLimiter'];
   readonly agentMemoryProjectionAuthorizer?: AgentMemoryProjectionAuthorizer;
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
+  /** Adds `stores.e2eeMember` and declares `e2ee.member` (see `createInMemoryCloudStores`). */
+  readonly e2eeMember?: boolean;
 }
 
 export interface InMemoryByokCloud {
@@ -116,6 +118,8 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
     core.mailbox,
     core.presence,
     objectBytes,
+    undefined,
+    { e2eeMember: options.e2eeMember === true },
   );
   const proofReceiptRetention = { authority: proofReceiptAuthority };
   const tokenSigner =
@@ -124,7 +128,7 @@ export function createInMemoryByokCloud(options: InMemoryByokCloudOptions = {}):
 
   const mailboxWake = options.mailboxWake ?? createInProcessMailboxWake();
   // The default declaration is derived from the ports this composition holds.
-  const capabilities = options.capabilities ?? capabilityDeclarationForPorts({ ...options, blobContentProxy });
+  const capabilities = options.capabilities ?? capabilityDeclarationForPorts({ ...options, blobContentProxy, cloud: stores });
   const cloud = createByokCloud({
     mailboxWake,
     core,

@@ -127,7 +127,7 @@ import {
 import type { SteerRejectedError } from './steer-control.js';
 import { createAuthPlane, type AuthPlane } from './auth/plane.js';
 import type { TokenSigner } from './auth/tokens.js';
-import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, declares, type CapabilityPorts, type CloudCapability } from './capabilities.js';
+import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, capabilityPort, declares, type CapabilityPortName, type CapabilityPorts, type CloudCapability } from './capabilities.js';
 import {
   DEFAULT_ACTIVITY_BOUNDS,
   DEFAULT_PRESENCE_DETAIL_MAX_BYTES,
@@ -220,7 +220,6 @@ import {
 } from './task-redaction.js';
 import { type CloudRootStores, type TenantStores } from './tenant-stores.js';
 import * as e2eeMember from './e2ee-member.js';
-import type { E2eeMemberStore } from './e2ee-member.js';
 import type { TruthCommitter, TruthObjectDownloads } from './truth/contract.js';
 
 /** Matches the reference server's ceiling (§7). */
@@ -317,8 +316,6 @@ export interface ByokCloudOptions {
   readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
   /** Durable authority for {@link ByokCloud.redactTasks}. Without it, `redactTasks` fails closed. */
   readonly taskRedactionStore?: TaskRedactionStore;
-  /** Durable authority for the E2EE member chain, key packages and pairing MACs. Without it, those calls fail closed. */
-  readonly e2eeMemberStore?: E2eeMemberStore;
   readonly maxBlobSizeBytes?: number;
   readonly longPollHoldMs?: number;
   readonly eventsPageLimit?: number;
@@ -1199,7 +1196,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     );
   }
 
-  if (options.e2eeMemberStore !== undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
+  if (options.cloud.e2eeMember !== undefined && declares(declaration, CLOUD_CAPABILITIES.e2eeMember)) {
     const e2eeDeps = {
       proof: { devices: options.cloud.devices, crypto: options.crypto, clock: options.clock },
       device: deviceRouteDeps,
@@ -1405,9 +1402,9 @@ function assertDeclarationMatchesPorts(declaration: CapabilityDeclaration, ports
     );
   }
   const undeclared: string[] = [];
-  for (const [capability, names] of Object.entries(CAPABILITY_PORTS) as [CloudCapability, readonly (keyof CapabilityPorts)[]][]) {
+  for (const [capability, names] of Object.entries(CAPABILITY_PORTS) as [CloudCapability, readonly CapabilityPortName[]][]) {
     if (declares(declaration, capability)) {
-      const missing = names.filter((name) => ports[name] === undefined);
+      const missing = names.filter((name) => capabilityPort(ports, name) === undefined);
       if (missing.length > 0) {
         throw new ByokCloudError(
           'capability_over_declared',
@@ -1415,7 +1412,7 @@ function assertDeclarationMatchesPorts(declaration: CapabilityDeclaration, ports
         );
       }
     } else {
-      for (const name of names) if (ports[name] !== undefined) undeclared.push(`${name} (${capability})`);
+      for (const name of names) if (capabilityPort(ports, name) !== undefined) undeclared.push(`${name} (${capability})`);
     }
   }
   if (undeclared.length > 0) {

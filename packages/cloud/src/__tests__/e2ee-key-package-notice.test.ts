@@ -29,14 +29,13 @@ function setup() {
   const cloud: ByokCloud = createByokCloud({
     proofReceiptRetention: base.proofReceiptRetention,
     core: base.core,
-    cloud: base.stores,
+    cloud: { ...base.stores, e2eeMember: store },
     mailboxWake: base.mailboxWake,
     blobContentProxy: base.blobContentProxy,
     crypto: base.crypto,
     tokenSigner: createHmacTokenSigner(new Uint8Array(32).fill(7), clock),
     clock,
     capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: true }),
-    e2eeMemberStore: store,
   });
 
   /** A paired device with a registered member key, advertising `capabilities`. */

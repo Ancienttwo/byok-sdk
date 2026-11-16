@@ -1,4 +1,4 @@
-import { promises as fs } from 'node:fs';
+import { constants, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
 import { GrokAdapter, type GrokAdapterOptions } from '../../adapters/grok/grok-adapter';
@@ -38,12 +38,12 @@ const submitThroughSearchTool = searchThenCall({
   call: 'use_tool', callArgs: name => ({ tool_name: name, tool_input: { summary: 'runtime contract' } }),
 }, 'submit_result');
 
-/** GROK_HOME whose only model is the loopback provider at `baseUrl`. */
-async function loopbackGrokHome(home: string, baseUrl: string): Promise<string> {
+/** GROK_HOME whose only model is the loopback provider at `baseUrl`; `autoUpdate` keeps Grok's default, as a user's install has it. */
+async function loopbackGrokHome(home: string, baseUrl: string, autoUpdate = false): Promise<string> {
   const grokHome = path.join(home, '.grok');
   await fs.mkdir(grokHome);
   await fs.writeFile(path.join(grokHome, 'config.toml'), [
-    '[cli]', 'auto_update = false',
+    ...(autoUpdate ? [] : ['[cli]', 'auto_update = false']),
     '[model_providers.contract]', `base_url = "${baseUrl}"`, 'api_backend = "chat_completions"',
     `[model."${MODEL}"]`, `model = "${MODEL}"`, 'model_provider = "contract"', `name = "${MODEL}"`,
     'context_window = 128000', 'max_completion_tokens = 1024', 'api_key = "runtime-contract-placeholder"', '',
@@ -138,7 +138,7 @@ defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVe
     expect(draftText((await excluded()).events, descriptor)).toContain('runtime contract reply');
   }),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await ownTurn(); }, [
+  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await ownTurn(); await managedInstall(); }, [
     { phase: 'turn', target: 'cli-chat-proxy.grok.com:443', reason: 'Grok syncs its workspace, bundle and experiments with xAI whatever the model provider (GROK_CLI_CHAT_PROXY_BASE_URL); follow-up to #1103' },
   ]),
 }, GROK_ABSENT_ISOLATION_SOURCES);
@@ -195,6 +195,36 @@ const ownTurn = once(async () => {
   }
 });
 
+/**
+ * A task on a managed Grok install (#2269): Grok started as `$GROK_HOME/bin/grok`
+ * with GROK_HOME at that install, and Grok's default `auto_update`, runs its
+ * updater, which writes an `agent` link into `bin/` unless the adapter's
+ * GROK_DISABLE_AUTOUPDATER=1 reaches it.
+ */
+const managedInstall = once(async () => {
+  const box = await createSandbox('grok-managed-install');
+  const recorder = await fileEgress();
+  const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: ['runtime contract reply'] }), MODEL);
+  try {
+    const bin = path.join(await loopbackGrokHome(box.home, provider.baseUrl, true), 'bin');
+    await fs.mkdir(bin);
+    await fs.copyFile(target.bin, path.join(bin, `grok-${target.expectedVersion}`), constants.COPYFILE_FICLONE);
+    await fs.symlink(`grok-${target.expectedVersion}`, path.join(bin, 'grok'));
+    const listing = async () => Promise.all((await fs.readdir(bin)).sort().map(async (name) => {
+      const stat = await fs.lstat(path.join(bin, name));
+      return { name, type: stat.isSymbolicLink() ? 'link' : stat.isFile() ? 'file' : 'other', target: stat.isSymbolicLink() ? await fs.readlink(path.join(bin, name)) : undefined };
+    }));
+    const before = await listing();
+    const managed = new GrokAdapter({ resolveBin: () => ({ command: path.join(bin, 'grok'), source: 'env' }), model: MODEL });
+    const events = await runTurn(managed, 'Reply, then finish.', {
+      workspaceDir: box.workspace, agentHome: box.workspace, env: { ...baseEnv(box.home), GROK_HOME: path.dirname(bin), ...recorder.env },
+    });
+    return { events, before, after: await listing() };
+  } finally {
+    await provider.close();
+  }
+});
+
 defineRuntimeCases(`grok runtime contract: grok cases (${target.mode} ${target.expectedVersion})`, {
   ownTurn: ['a turn Grok runs on its own ends no task turn, holds a follow-up until it closes, and its usage is counted once', check(async () => {
     const { events, requests } = await ownTurn();
@@ -210,5 +240,10 @@ defineRuntimeCases(`grok runtime contract: grok cases (${target.mode} ${target.e
     const usage = events.filter(event => event.type === 'usage');
     expect(usage).toHaveLength(2);
     expect(usage.reduce((sum, event) => sum + (event.outputTokens ?? 0), 0)).toBe(requests.length);
+  })],
+  managedInstall: ['a task on a managed Grok install leaves its bin/ unchanged', check(async () => {
+    const { events, before, after } = await managedInstall();
+    expect(events.at(-1)?.type).toBe('turn_end');
+    expect(after).toEqual(before);
   })],
 });

@@ -242,6 +242,26 @@ export interface E2eeMemberStore {
     tenant: TenantId,
     input: { readonly deviceId: string; readonly now: string },
   ): Promise<string | undefined>;
+  /**
+   * Deletes the device's member state: the scope key packages addressed to the
+   * member the device registered, then that registration with its device
+   * pairing MAC, then the client pairing MAC relayed to it. The member chain,
+   * scope epochs and their `keyId`s, shred records, the member's KEM floor and
+   * recorded proof requests stay, so the member id is free for another device
+   * and keeps its floor. A device with no state is a no-op.
+   *
+   * A device directory calls it for the revoked id on every revoke and for
+   * each superseded id, once the registration change is durable
+   * (`DeviceDirectory`, retirement rule 3). A store that shares the
+   * directory's database may run the same deletes in the directory's
+   * transaction instead.
+   *
+   * A Host that assembles `CloudStores` and its directory itself, without a
+   * standard factory's `e2eeMember` opt-in, must give the same instance to
+   * `CloudStores.e2eeMember` and to the directory. Nothing checks it at run
+   * time; a second instance would serve routes that retirement never cleans.
+   */
+  deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 
 function invalid(message: string): ByokCloudError {
