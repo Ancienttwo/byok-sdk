@@ -1728,8 +1728,8 @@ and Codex reads `$HOME/.agents/skills` outside `CODEX_HOME`
 ([Codex `agentUserContext`](#agentusercontext-codex)). A Host-provided skill
 would sit beside the user's rather than replace it.
 
-The one SDK-owned skill store is not a runtime option. `installSkillPacks`,
-`listInstalledSkillPacks` and `projectSkillPack`
+The one SDK-owned skill store is not a runtime option. `installSkillPacks`
+and `projectSkillPack`
 (`packages/client/src/daemon/skill-pack-installer.ts`, exported from
 `@byok-sdk/client`) install verified packs into a content-addressed store and
 copy one pack into a directory the Host names. The Host then points the

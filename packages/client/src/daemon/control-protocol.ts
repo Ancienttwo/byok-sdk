@@ -253,13 +253,6 @@ export interface ControlResponseErr {
   error: ControlErrorShape;
 }
 
-export type ControlResponse = ControlResponseOk | ControlResponseErr;
-
-export interface ControlEventFrame {
-  v: 1;
-  id: string;
-  event: unknown;
-}
 
 export function encodeFrame(frame: unknown): string {
   return `${JSON.stringify(frame)}\n`;
@@ -563,11 +556,6 @@ export function parseAgentMessagePublishParams(value: unknown): AgentMessagePubl
   if (value.contentType !== 'text/plain' && value.contentType !== 'text/markdown') return undefined;
   if (typeof value.body !== 'string' || value.body.length === 0) return undefined;
   return { contextToken: value.contextToken, contentType: value.contentType, body: value.body };
-}
-
-export interface AgentMessagePublishResult {
-  messageId: string;
-  state: 'staged' | 'pending';
 }
 
 /**

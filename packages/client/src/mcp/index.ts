@@ -39,6 +39,5 @@ export {
   qualifiedMcpToolName,
 } from './projection.js';
 export type {
-  McpLaunchProjection,
   McpToolProjection,
 } from './projection.js';

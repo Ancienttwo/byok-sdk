@@ -628,7 +628,7 @@ adapter-only build/import surface。
 | `store.ts` / `cursor-store.ts` / `agent-session-handoff-store.ts` | device identity/token、redelivery cursor、Agent session handoff |
 | `blob-client.ts` | signed URL 方式上传/下载 instruction/artifact |
 | `capabilities-client.ts` / `presence-publisher.ts` | 读取并校验 hosted capability declaration（ADR-010，fail-closed）；仅在声明含 `presence.hints` 时发 `online` 心跳，停机停发（见 §12.3 daemon presence producer） |
-| `device-proof-signer.ts` / `truth-memory-client.ts` | 显式 tenant/product/key proof、metadata-only manifest、本地 selector、selected fetch/rehash/filter 与 truth write |
+| `device-proof-signer.ts` | 显式 tenant/product/key proof |
 | `url.ts` | HTTP URL normalization；remote plaintext 默认拒绝 |
 | `util/*` | bounded async queue、atomic write、POSIX mode / Windows DACL hardening |
 
@@ -1932,7 +1932,7 @@ SaaS 侧策划的声明式内容（agentskills.io 兼容的 `SKILL.md` + 静态�
 
 **device 侧存储。** `<dataDir>/skill-packs/<name>/<content-hash>/` content-addressed 落盘，`lock.json` 最后写（记 `content_hash`/`source`/`installed_at`/`files`），所以未完成的安装不会覆盖上一个可用版本，内容未变的重装是 no-op。审计走该目录下独立的 `audit.jsonl`（install/rejected/projected 各一行，0600），刻意不复用 `daemon/audit-log.ts` 的 `DaemonEvent` 流——那是 task 生命周期的读模型，技能安装不属于任何 task。
 
-**K4 判例。** vendor CLI 技能目录布局是 host policy。SDK 只拥有自有 store 与 `listInstalledSkillPacks()`/`projectSkillPack()` 两个投影 API，从不写 `~/.claude/skills` 一类目录。投影是**拷贝**不是 symlink（symlink 会让 store 的后续变化在 runtime 脚下改内容，也把 store 布局外泄进宿主目录），且拷出前按 lock 重新 hash 校验——上周验证过的安装不构成对今天磁盘上那个文件的证据。
+**K4 判例。** vendor CLI 技能目录布局是 host policy。SDK 只拥有自有 store 与 `installSkillPacks()`/`projectSkillPack()` 两个 API，从不写 `~/.claude/skills` 一类目录。投影是**拷贝**不是 symlink（symlink 会让 store 的后续变化在 runtime 脚下改内容，也把 store 布局外泄进宿主目录），且拷出前按 lock 重新 hash 校验——上周验证过的安装不构成对今天磁盘上那个文件的证据。
 
 **port 契约的过渡形状。** `SkillPackStore` 已进 `CORE_PORT_INTERFACES`/`CORE_PORT_METHODS`，因而受 tenant-first + async 的源码扫描约束；但**尚未**进 `CORE_STORE_NAMES`/`CoreStores`：Postgres 实现属 Phase 2，Phase 1 就把它列入 composition 契约会要求所有既有 composition 同 slice 实现。这个差集由 `CORE_NON_COMPOSITION_PORT_NAMES` 显式记名，Phase 2 落地后该常量归空。
 

@@ -663,11 +663,6 @@ export function serialize(value: unknown): string {
   return JSON.stringify(canonical(value));
 }
 
-/** UTF-8 byte size of the canonical serialization. */
-export function stateBytes(value: unknown): number {
-  return new TextEncoder().encode(serialize(value)).length;
-}
-
 function taskOf(snapshot: ReducerSnapshot): TaskStateV1 {
   if (snapshot.task === undefined) throw new Error('transition row requires a task');
   return snapshot.task;

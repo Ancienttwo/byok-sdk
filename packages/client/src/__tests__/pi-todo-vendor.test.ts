@@ -20,7 +20,7 @@ describe('licensed private todo source boundary', () => {
       if (!row.delta) expect(row.vendoredSha256, row.path).toBe(row.upstreamSha256);
     }
     expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual([
-      'index.ts', 'state/i18n-bridge.ts', 'state/state-reducer.ts', 'todo-overlay.ts', 'tool/types.ts', 'view/format.ts',
+      'config.ts', 'index.ts', 'state/i18n-bridge.ts', 'state/state-reducer.ts', 'todo-overlay.ts', 'tool/types.ts', 'view/format.ts',
     ]);
     expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Copyright (c) 2026 juicesharp');
   });
@@ -34,6 +34,9 @@ describe('licensed private todo source boundary', () => {
           ? current.replace('message.split("\\n")[0]!', 'message.split("\\n")[0]')
           : current.replace('lines[last]!.replace', 'lines[last].replace');
       const upstream = original
+        .replace('import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskStatus } from "../tool/types.ts";\n\n',
+          'import type { Task, TaskAction, TaskDetails, TaskMutationParams, TaskStatus } from "../tool/types.ts";\n\n'
+          + '// Re-export so legacy import paths (todo.ts, tests) continue to resolve;\n// the canonical definition lives in the i18n bridge.\nexport { formatStatusLabel };\n\n')
         .replace('import type { TodoRenderPort as TUI } from "../../pi-tui/0.85.1/ports.js";\nimport { truncateToWidth } from "../../pi-tui/0.85.1/utils.js";',
           'import { type TUI, truncateToWidth } from "@earendil-works/pi-tui";')
         .replace('import { Text } from "../../../pi-tui/0.85.1/components/text.js";',

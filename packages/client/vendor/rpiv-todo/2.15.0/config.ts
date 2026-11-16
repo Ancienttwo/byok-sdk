@@ -1,5 +1,5 @@
 import type { GuidanceFields } from "@juicesharp/rpiv-config";
-import { loadJsonConfigWithLegacyFallback, validateGuidanceFields } from "@juicesharp/rpiv-config";
+import { configPath, loadJsonConfig, validateGuidanceFields } from "@juicesharp/rpiv-config";
 
 interface TodoConfig {
 	guidance?: GuidanceFields;
@@ -27,7 +27,7 @@ export const DEFAULT_COLLAPSE_KEY: CollapseKeySpec = "ctrl+shift+t";
 export const COLLAPSE_KEY_OFF: CollapseKeySpec = "off";
 
 export function loadConfig(): TodoConfig {
-	return loadJsonConfigWithLegacyFallback<TodoConfig>("rpiv-todo");
+	return loadJsonConfig<TodoConfig>(configPath("rpiv-todo"));
 }
 
 /** Content-row budget for the overlay, read fresh on every call (per-render —

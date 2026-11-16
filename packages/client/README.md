@@ -433,17 +433,17 @@ creates missing `MEMORY.md` and `notes/` without overwriting existing bytes,
 and binds the resulting Agent home as runtime cwd.
 
 ```ts
-import { createAgentHomeProjection, createDaemon } from '@byok-sdk/client';
+import { createDaemon } from '@byok-sdk/client';
 
 createDaemon({
   // ...normal device and transport configuration
   agentHome: {
     hostStorageRoot: '/Users/alice/.salesko',
-    projection: createAgentHomeProjection(async ({ agentRef, cwd }) => {
+    projection: { prepare: async ({ agentRef, cwd }) => {
       // Host code receives the canonical home. It supplies redacted profile
       // content but never joins `agents/<agentId>` and never writes secrets.
       await profileProjection.write({ agentRef, canonicalAgentHome: cwd });
-    }),
+    } },
   },
 });
 ```
@@ -897,8 +897,7 @@ read their `productId`/`storeDir` the same way and reject anything else with a `
 An operation outside `operations` is refused before the key is read; each
 signature re-reads the enrollment and refuses (`enrollment_changed`) if tenant,
 device or proof key no longer equal `identity`. Failures are
-`DeviceProofSignerError` closed codes. The signer also satisfies
-`TruthMemoryClient`'s `signer` option.
+`DeviceProofSignerError` closed codes.
 
 ```ts
 createDaemon({

@@ -99,17 +99,11 @@ export function formatDaemonRecordLine(record: DaemonRecord): string {
 }
 
 /**
- * Appends one record at 0600, then rotates the file if it has grown past
- * the size cap. Plain `fs.open('a')` + `appendFile` — an append has no
- * torn-read risk; rotation, the one whole-file replace, uses
- * `atomicWriteFile`.
+ * Appends one already-serialized line at 0600, then rotates the file if it
+ * has grown past the size cap. Plain `fs.open('a')` + `appendFile` — an
+ * append has no torn-read risk; rotation, the one whole-file replace, uses
+ * `atomicWriteFile`. The line is immutable while filesystem work is queued.
  */
-export async function appendAuditRecord(storeDir: string, record: DaemonRecord): Promise<void> {
-  const line = formatDaemonRecordLine(record);
-  await appendAuditLine(storeDir, line);
-}
-
-/** The already-serialized line is immutable while filesystem work is queued. */
 async function appendAuditLine(storeDir: string, line: string): Promise<void> {
   await fs.mkdir(storeDir, { recursive: true, mode: AUDIT_STORE_DIR_MODE });
 

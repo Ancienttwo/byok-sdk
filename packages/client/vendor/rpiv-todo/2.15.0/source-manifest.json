@@ -8,7 +8,8 @@
     {
       "path": "config.ts",
       "upstreamSha256": "3fe24b3d3b128cabcbafc80a41f72b20907fd0edbdd84c8c57c391e27ffd76db",
-      "vendoredSha256": "3fe24b3d3b128cabcbafc80a41f72b20907fd0edbdd84c8c57c391e27ffd76db"
+      "vendoredSha256": "6070ece661f36570a23b15ed20dd6dfd80bc4ca185364bfe8fddcc419036add9",
+      "delta": "Read only the XDG-resolved config path; no fallback to the pre-XDG ~/.config location."
     },
     {
       "path": "index.ts",
@@ -93,8 +94,8 @@
     {
       "path": "view/format.ts",
       "upstreamSha256": "a8c759b74128e9f3a2047d8a0e15496d04bef59a4180bc4fae6c336893a2aaa6",
-      "vendoredSha256": "70b2d3daf0767ca7d950e11f37798677d8e31d0014b8316431169acf9d596e40",
-      "delta": "Use the licensed local Text implementation, same upstream bytes; type-only non-null assertion on the first split segment."
+      "vendoredSha256": "c2e2b922701a584750f4f2925bd55716c934f49ecfeedfcb1e3fec29f8de3ade",
+      "delta": "Use the licensed local Text implementation, same upstream bytes; type-only non-null assertion on the first split segment; drop the unused formatStatusLabel re-export."
     },
     {
       "path": "LICENSE",
