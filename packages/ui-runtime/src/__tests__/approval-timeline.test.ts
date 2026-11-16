@@ -222,14 +222,14 @@ describe('approval timeline projection', () => {
     expectCode(() => replayApprovalTimeline({ ...tail([]), dropped: -1 }), 'approval_input_invalid');
     expectCode(() => replayApprovalTimeline({ ...tail([]), cursor: 0 }), 'approval_input_invalid');
     expectCode(() => replayApprovalTimeline({
-      ...tail([observation(1, { type: 'approval_requested', summary: 'x' })]), cursor: 2,
+      ...tail([observation(1, { type: 'approval_requested', approvalId: 'approval-1', summary: 'x' })]), cursor: 2,
     }), 'approval_input_invalid');
     expectCode(() => replayApprovalTimeline(tail([
-      observation(2, { type: 'approval_requested', summary: 'later' }),
-      observation(1, { type: 'approval_requested', summary: 'earlier' }),
+      observation(2, { type: 'approval_requested', approvalId: 'approval-1', summary: 'later' }),
+      observation(1, { type: 'approval_requested', approvalId: 'approval-1', summary: 'earlier' }),
     ])), 'approval_input_invalid');
     expectCode(() => replayApprovalTimeline({
-      ...tail([]), entries: [{ ...observation(1, { type: 'approval_requested', summary: 'x' }), revision: 1.5 }],
+      ...tail([]), entries: [{ ...observation(1, { type: 'approval_requested', approvalId: 'approval-1', summary: 'x' }), revision: 1.5 }],
     }), 'approval_input_invalid');
   });
 });
