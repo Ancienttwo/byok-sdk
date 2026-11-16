@@ -14,10 +14,11 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { run } from './check-upgrade-manifest.mjs';
+import { publicPackageDirectories } from '../public-packages.mjs';
 import { packageSurface, splitStatements } from './upgrade-manifest/dts-surface.mjs';
 import { HISTORY_DIR } from './upgrade-manifest/history.mjs';
 import { BASELINE_PATH, MANIFEST_PATH, breakingAllowed, bumpKind, checkManifest, markdownAnchors, renderManifest, serialize } from './upgrade-manifest/manifest.mjs';
-import { CONFIG_SCHEMA_PATH, INTERPROCESS_PROTOCOLS, PUBLIC_PACKAGES, STORES, VENDORED_EXAMPLES, buildSnapshot } from './upgrade-manifest/snapshot.mjs';
+import { CONFIG_SCHEMA_PATH, INTERPROCESS_PROTOCOLS, STORES, VENDORED_EXAMPLES, buildSnapshot } from './upgrade-manifest/snapshot.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const DOC = 'docs/migration.md';
@@ -41,7 +42,7 @@ function fixture(t) {
     filter: (source) => !/[\\/](?:node_modules|dist)(?:[\\/]|$)/.test(source),
   });
   copy('api-surface');
-  for (const pkg of PUBLIC_PACKAGES) copy(`packages/${pkg}/package.json`);
+  for (const pkg of publicPackageDirectories(repo)) copy(`packages/${pkg}/package.json`);
   for (const store of STORES) copy(store.source);
   copy('packages/bot-collaboration/src/model.ts');
   for (const protocol of INTERPROCESS_PROTOCOLS) copy(protocol.source);

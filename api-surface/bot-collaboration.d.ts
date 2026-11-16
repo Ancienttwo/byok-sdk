@@ -142,7 +142,6 @@
 //   UserInput -> dist/rules/coalesce.d.ts
 //   WouldDo -> dist/rules/autonomy.d.ts
 //   WouldDoAction -> dist/rules/autonomy.d.ts
-//   WouldDoMigration -> dist/commit.d.ts
 //   acceptDeliveryEcho -> dist/delivery.d.ts
 //   admitUserInput -> dist/coalesce.d.ts
 //   applyHomeTerminal -> dist/team.d.ts
@@ -156,14 +155,12 @@
 //   checkHomeReadback -> dist/team.d.ts
 //   classifyInbound -> dist/channel.d.ts
 //   cleanReplyTokens -> dist/delivery-routing.d.ts
-//   commitImport -> dist/switch.d.ts
 //   commitInLedger -> dist/commit.d.ts
 //   concludeRoutineTurn -> dist/routines.d.ts
 //   contextPack -> dist/schema.d.ts
 //   contextTurns -> dist/rules/context.d.ts
 //   createDefinition -> dist/routines.d.ts
 //   deliveryRoute -> dist/delivery-routing.d.ts
-//   discardImport -> dist/switch.d.ts
 //   dreamIntentIds -> dist/dream.d.ts
 //   dreamPolicy -> dist/dream.d.ts
 //   echoCandidates -> dist/delivery-routing.d.ts
@@ -175,13 +172,11 @@
 //   homeEnqueued -> dist/team.d.ts
 //   homeHead -> dist/team.d.ts
 //   homeRequests -> dist/team.d.ts
-//   importForSwitch -> dist/switch.d.ts
 //   inboundDisposition -> dist/rules/inbound.d.ts
 //   inboundDispositions -> dist/rules/inbound.d.ts
 //   inboundKey -> dist/channel.d.ts
 //   isOwner -> dist/channel.d.ts
 //   memberMentions -> dist/rules/rooms.d.ts
-//   migrateWouldDo -> dist/commit.d.ts
 //   minimumInstructionBytes -> dist/rules/delegation.d.ts
 //   outcomeFailure -> dist/adapter-steps.d.ts
 //   outcomeOffer -> dist/rules/schema.d.ts
@@ -212,7 +207,6 @@
 //   sealLedger -> dist/switch.d.ts
 //   sealSwitchExport -> dist/migration.d.ts
 //   sealedDefinition -> dist/routines.d.ts
-//   sealedRoutineInstruction -> dist/routines.d.ts
 //   sealedTemplate -> dist/routines.d.ts
 //   settleDelivery -> dist/delivery.d.ts
 //   startDelivery -> dist/delivery.d.ts
@@ -536,11 +530,6 @@ export { CommitConflict, revisionOf, type CommitRequest, type CommitResult, type
 export type { Command, CommandPorts } from './rules/commands.js';
 export declare function commitInLedger(ledger: HostLedger, request: CommitRequest<Command>, ports: (s: LedgerState) => CommandPorts): CommitResult;
 export declare function retainInLedger(ledger: HostLedger, input: RetentionInput, limits: RetentionLimits): RetentionResult;
-export interface WouldDoMigration {
-    backfilled: number;
-    archived: number;
-}
-export declare function migrateWouldDo(ledger: HostLedger): WouldDoMigration;
 // ==== @byok-sdk/bot-collaboration dist/compaction.d.ts ====
 import { type CompactVeto } from '@byok-sdk/server/execution-core';
 export declare const botCompactVeto: CompactVeto;
@@ -735,8 +724,8 @@ export type { CheckedOffer, ConfirmableSpec, MainAction, OutcomeOffer, TurnActio
 export type { Card, CollaborationState, Delegation, InputBatch, ReplyEntry, SealReason, Turn, UserInput } from './model.js';
 export { BOT_DREAM, BOT_ROUTINE, botRoutines } from './routines.js';
 export { DEFAULT_DREAM_MAX_DURATION_MS, DREAM_WAIT_MS, type DreamBot, type DreamingOptions, type DreamRecord, type DreamSkip, type DreamState, type OpenDream } from './dream.js';
-export { CommitConflict, commitInLedger, migrateWouldDo, retainInLedger, revisionOf } from './commit.js';
-export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent, WouldDoMigration } from './commit.js';
+export { CommitConflict, commitInLedger, retainInLedger, revisionOf } from './commit.js';
+export type { Command, CommandPorts, CommitRequest, CommitResult, Disposition, OutboxIntent } from './commit.js';
 export type { BotRoutine, BotRoutineInput } from './routines.js';
 export type { BotProfile, Room, Round, Seat, TeamState } from './team-model.js';
 export { DEFAULT_MEMBER_MENTIONS, ROOM_GRACE_MS, ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES, memberMentions, type MemberMentions, type RoomMessage } from './rooms.js';
@@ -746,7 +735,6 @@ export { inboundDisposition, inboundDispositions, type InboundDisposition, type 
 export { DEVICE_CONCURRENCY } from './rules/priority.js';
 export { DeviceModeError, type DeviceTopology, type SwitchWork } from './topology.js';
 export { SWITCH_EXPORT_VERSION, SWITCH_SECTIONS, SwitchExportError, sealSwitchExport, switchAttempts, verifySwitchExport, type ArchivedRecord, type ExecutionRecord, type IntentRecord, type MessageReceipt, type OccurrenceRecord, type OutboxRecord, type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal, type SwitchManifest, type SwitchSection, type TombstoneRecord } from './migration.js';
-export { commitImport, discardImport, importForSwitch } from './switch.js';
 export { DeviceSwitchingError, SwitchExportedError, SwitchImportedError, type SwitchReceipt } from './migration.js';
 export { botOutcomePorts, outcomeFailure, routeTerminal, runHostIntentHandler, syncHead, syncTail } from './adapter-steps.js';
 export { isOwner, verified } from './channel.js';
@@ -756,7 +744,7 @@ export { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, promoteSta
 export { checkDreamInstruction, dreamIntentIds, dreamPolicy, reconcileDreamRoutines, recordDream, syncDreams, type DreamSync } from './dream.js';
 export { exportMarkOf, type SwitchExportMark, type SwitchHeader } from './migration.js';
 export { stateOf } from './model.js';
-export { concludeRoutineTurn, createDefinition, endable, owned, resealDefinition, ROUTINE_LATE_AFTER_MS, ROUTINE_WAIT_MS, routineCalendar, routineOccurrence, routineTurn, sealedDefinition, sealedRoutineInstruction, sealedTemplate, SealedRoutineVersionError, updateDefinition, type SealedRoutineAction } from './routines.js';
+export { concludeRoutineTurn, createDefinition, endable, owned, resealDefinition, ROUTINE_LATE_AFTER_MS, ROUTINE_WAIT_MS, routineCalendar, routineOccurrence, routineTurn, sealedDefinition, sealedTemplate, SealedRoutineVersionError, updateDefinition, type SealedRoutineAction } from './routines.js';
 export { sealLedger } from './switch.js';
 export { applyHomeTerminal, applyManagement, applyModels, checkHomeReadback, failHomeFlush, homeEnqueued, homeHead, homeRequests, planHomeRetry, updateBot, writeSnapshotBot, type HomeReadback } from './team.js';
 // ==== @byok-sdk/bot-collaboration dist/host.d.ts ====
@@ -1392,7 +1380,6 @@ export declare function createDefinition(routines: readonly Routine[], owner: st
 export declare function owned(routines: readonly Routine[], owner: string, id: string): Routine;
 export declare function endable(routines: readonly Routine[], id: string): Routine;
 export declare function updateDefinition(routines: readonly Routine[], owner: string, action: UpdateRoutineAction): HostOccurrenceRoutineDefinition;
-export declare function sealedRoutineInstruction(prompt: string): string;
 export declare function sealedDefinition(routines: readonly Routine[], owner: string, action: SealedRoutineAction, execution: ExecutionTemplate): HostOccurrenceRoutineDefinition;
 export declare function resealDefinition(routines: readonly Routine[], owner: string, action: SealedRoutineAction, execution: ExecutionTemplate): HostOccurrenceRoutineDefinition;
 export declare function sealedTemplate(routines: Iterable<Routine>, ref: SealedRoutineRef): SealedRoutineTemplate | undefined;
@@ -2575,7 +2562,7 @@ import type { StoreCompatibility } from '@byok-sdk/client';
 export declare function inspectLedger(path: string, tenant: string): StoreCompatibility;
 // ==== @byok-sdk/bot-collaboration dist/switch.d.ts ====
 import { type HostLedger } from '@byok-sdk/server/execution-core';
-import { type SwitchExport, type SwitchHeader, type SwitchReceipt } from './migration.js';
+import { type SwitchExport, type SwitchHeader } from './migration.js';
 // support
 export interface SwitchImport {
     digest: string;
@@ -2583,9 +2570,6 @@ export interface SwitchImport {
     discarding?: true;
 }
 export declare function sealLedger(ledger: HostLedger, header: SwitchHeader): SwitchExport;
-export declare function importForSwitch(ledger: HostLedger, document: SwitchExport): SwitchReceipt;
-export declare function commitImport(ledger: HostLedger, digest: string): void;
-export declare function discardImport(ledger: HostLedger): void;
 // ==== @byok-sdk/bot-collaboration dist/team-model.d.ts ====
 import type { AgentHomeProjectionRequest } from '@byok-sdk/server';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';

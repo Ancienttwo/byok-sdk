@@ -115,9 +115,9 @@ export function retentionVectors(name: string, open: () => RetentionSubject | Pr
         expect(error).toBeInstanceOf(RetentionRefused);
         expect(error).toMatchObject({ code: 'seat_root', root: 'seat', roundRoot: 'round', message: 'Retention refused: The Turn is a room seat of root round' });
       });
-      // A would-do row from before #1756 refuses every call until the one-shot migration links it (fail closed).
+      // A would-do row from before #1756 is refused.
       await subject.change(state => { delete (state.wouldDo!['r1:w'] as { turnId?: string }).turnId; });
-      await refused(subject, () => retain(subject, ['r2']), error => expect((error as Error).message).toMatch(/^A would-do row has no turnId: run migrateWouldDo/));
+      await refused(subject, () => retain(subject, ['r2']), error => expect(error).toMatchObject({ code: 'would_do_unsupported_old' }));
     });
 
     it('refuses each root that is still in use, and changes nothing', async () => {

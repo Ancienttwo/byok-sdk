@@ -49,10 +49,9 @@ CREATE TABLE IF NOT EXISTS entity (
   ordinal  bigint NOT NULL CHECK (ordinal >= 0),
   body     json   NOT NULL,
   PRIMARY KEY (scope, kind, key),
-  UNIQUE (scope, kind, ordinal)
+  UNIQUE (scope, kind, ordinal),
+  CONSTRAINT entity_kind_check CHECK (kind IN (${names(MAPS.map(([kind]) => kind))}))
 );
-ALTER TABLE entity DROP CONSTRAINT IF EXISTS entity_kind_check;
-ALTER TABLE entity ADD CONSTRAINT entity_kind_check CHECK (kind IN (${names(MAPS.map(([kind]) => kind))}));
 CREATE TABLE IF NOT EXISTS entry (
   scope     text   NOT NULL REFERENCES scope (scope),
   kind      text   NOT NULL CHECK (kind IN (${names([...LISTS.map(([kind]) => kind), ROOM_MESSAGE])})),

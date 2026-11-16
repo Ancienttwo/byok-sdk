@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "061e0097ee09d792461eeb5df8f1c1a17181e35287921a602160b08b3574d1e8"
+    "snapshotSha256": "4b5fb739e2dc3b6f09251be7c06d486fac2bed4ba9721726b96c1c3999e8972d"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,74 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "retire-compatibility-apis",
+      "impact": "breaking",
+      "summary": "The keys and bot-collaboration Host APIs remove compatibility migrators, unused helpers, the TruthStore provider adapter and its PROVIDER_TRUTH_INVALID error code, and local Host switch import. Remove their calls and use a supported provider store; local Host export remains available.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "export:@byok-sdk/keys#scopeSecretStore",
+        "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+        "export:@byok-sdk/keys#migrateProviderProfileStore",
+        "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+        "export:@byok-sdk/keys#TruthStoreProviderProfileStore",
+        "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
+        "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
+        "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+        "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+        "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+        "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+        "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+        "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+        "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+        "export:@byok-sdk/bot-collaboration/host-kit#discardImport"
+      ]
+    },
+    {
+      "id": "reject-hosted-old-entity-constraint",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses an older entity kind constraint with hosted_schema_unsupported_old before DDL; preserve the old store and provision a separate current store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-old-entity-constraint"
+      ]
+    },
+    {
+      "id": "reject-older-provider-kind-store",
+      "impact": "breaking",
+      "summary": "@byok-sdk/keys SqliteProviderProfileStore and inspectProviderProfileStore refuse an earlier provider-kind schema with PROVIDER_STORE_SCHEMA_STALE instead of offering migration; preserve the old store and explicitly configure a separate current store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-older-provider-kind-store"
+      ]
+    },
+    {
+      "id": "reject-local-old-would-do",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration Host opening, direct ledger writes and inspectLedger refuse local would-do rows lacking turnId with would_do_unsupported_old. Preserve the old ledger and use a separate current ledger.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-local-old-would-do"
+      ]
+    },
+    {
+      "id": "reject-hosted-frame-would-do",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses would-do rows held in an old scope frame with would_do_unsupported_old rather than relocating them; preserve the old hosted store and provision separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-frame-would-do"
+      ]
+    },
+    {
+      "id": "reject-hosted-old-would-do-row",
+      "impact": "breaking",
+      "summary": "The hosted bot-collaboration example refuses would-do entity rows without turnId with would_do_unsupported_old rather than backfilling or archiving them; preserve the old hosted store and provision separately.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
+      "items": [
+        "behavior:reject-hosted-old-would-do-row"
+      ]
+    },
     {
       "id": "pi-agent-skill-paths-config",
       "impact": "additive",
@@ -624,6 +692,36 @@
       "entry": "k4-settlement-notice"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#WouldDoMigration",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#commitImport",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#discardImport",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#migrateWouldDo",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#sealedRoutineInstruction",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds",
       "change": "added",
       "entry": "bot-delivery-supersession"
@@ -1022,6 +1120,51 @@
       "item": "export:@byok-sdk/core#PresenceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+      "change": "changed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
+      "change": "changed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ProviderProfileStoreMigration",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#scopeSecretStore",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys/model-route#listPiCatalogModels",
+      "change": "removed",
+      "entry": "retire-compatibility-apis"
     },
     {
       "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",

@@ -365,6 +365,13 @@ test('OpenCode adapter, its contract and the shared spawn code select the OpenCo
   ]) assert.ok(selectImpact([path]).families.includes('opencode-real-windows'), path);
 });
 
+test('the deleted relative specifier codemod remains a reviewed CI input', () => {
+  const file = 'scripts/codemod/relative-js-specifiers.mjs';
+  const impact = selectImpact([file]);
+  assert.deepEqual(impact.files, [file]);
+  assert.deepEqual(impact.families, ['npm-release-pack']);
+});
+
 test('archived vendored Hermes paths stay mapped as root CI scripts (#1854)', () => {
   for (const path of ['.gitattributes', 'manifest.json', `${'a'.repeat(40)}/install.sh`, `${'a'.repeat(40)}/install.ps1`]) {
     const file = `scripts/ci/vendor/hermes/${path}`;
@@ -609,11 +616,12 @@ test('reviewed release scripts select the tests and the jobs that run them', () 
     'scripts/api-surface/entry-closure.mjs', 'scripts/api-surface/entry-closure.test.mjs', 'scripts/api-surface/module-scan.mjs',
     'scripts/architecture/dependency-baseline.json', 'scripts/architecture/dependency-graph.mjs', 'scripts/architecture/dependency-graph.test.mjs',
     'scripts/ci/with-secret-service.sh',
-    'scripts/codemod/relative-js-specifiers.mjs',
     'scripts/docs/device-setup.mjs', 'scripts/docs/device-setup.test.mjs',
+    'scripts/public-packages.mjs',
     'scripts/release/beta-release.test.mjs', 'scripts/release/check-package-graph.mjs', 'scripts/release/check-retired-identities.mjs',
     'scripts/release/check-upgrade-manifest.mjs', 'scripts/release/check-upgrade-manifest.test.mjs',
     'scripts/release/execution-submit-smoke.mjs',
+    'scripts/release/install-graph.mjs',
     'scripts/release/node-next-consumer-probe.mjs',
     'scripts/release/pack-and-smoke.mjs',
     'scripts/release/pack-and-smoke.test.mjs',

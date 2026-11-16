@@ -1,25 +1,22 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import path from 'node:path';
-import { agentKey, hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, taskId, type IntentInput, type LedgerDump } from '@byok-sdk/server/execution-core';
+import { agentKey, hash, MIN_TOMBSTONE_RETENTION_MS, taskId, type IntentInput, type LedgerDump } from '@byok-sdk/server/execution-core';
 import { openHost, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { stateOf } from './model';
 import { botCompactVeto } from './compaction';
 import { DeviceSwitchingError, sealSwitchExport, SwitchExportedError, SwitchExportError, verifySwitchExport, type SwitchExport, type SwitchHeader } from './migration';
-import { checkSwitchRecords, commitImport, discardImport, importForSwitch, sealLedger, switchContent, switchDump } from './switch';
+import { checkSwitchRecords, sealLedger, switchContent } from './switch';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
 import { DeviceModeError } from './topology';
 
-// #975 slice 3: L as the old owner exports a drained domain and commits away on the new owner's receipt, and L as the new
-// owner imports an H export into an empty tenant, reads it back, and commits toward L or discards it.
+// #975: L as the old owner exports a drained domain and commits away on the new owner's receipt.
 let fixture: TestHost | undefined;
-const bots: BotCollaboration[] = [], ledgers: HostLedger[] = [];
+const bots: BotCollaboration[] = [];
 let offset = 0;
 const now = () => Date.now() + offset;
 afterEach(async () => {
   for (const bot of bots.splice(0)) await bot.close();
-  for (const ledger of ledgers.splice(0)) { try { ledger.close(); } catch { /* A discarded ledger is closed. */ } }
   await fixture?.close(); fixture = undefined;
 });
 const schedule = { minute: 0, hour: (new Date().getUTCHours() + 12) % 24, tz: 'UTC' };
@@ -76,20 +73,10 @@ async function exportDomain(exportedAt = now()): Promise<SwitchExport> {
 }
 const headerOf = (document: SwitchExport): SwitchHeader =>
   ({ source: document.source, domain: document.domain, devices: document.devices, exportedAt: document.exportedAt });
-/** The same content as an H export: what a new L owner receives. */
-function asH(document: SwitchExport): SwitchExport {
-  const { manifest: _manifest, ...content } = structuredClone(document);
-  return sealSwitchExport({ ...content, source: 'H' });
-}
-function target(tenant = 'product:target'): HostLedger {
-  const ledger = new HostLedger(path.join(fixture!.root, `${tenant.replace(/\W/g, '-')}.sqlite`), tenant, { compactVeto: botCompactVeto });
-  ledgers.push(ledger);
-  return ledger;
-}
 const digestOf = () => sealLedger(fixture!.ledger, headerOf(exported!)).manifest.digest;
 let exported: SwitchExport | undefined;
 
-it('exports a drained L domain, imports it as an H export into a new tenant, commits both ways, and a new Host runs on it', async () => {
+it('exports a drained L domain and commits the old owner on its receipt', async () => {
   await setup();
   await work();
   exported = await exportDomain();
@@ -102,72 +89,11 @@ it('exports a drained L domain, imports it as an H export into a new tenant, com
   expect(stateOf(fixture!.ledger.snapshot().application).switchExport)
     .toEqual({ digest: exported.manifest.digest, exportedAt: exported.exportedAt, devices: exported.devices });
 
-  const document = asH(exported), ledger = target();
-  const receipt = importForSwitch(ledger, document);
-  expect(receipt).toEqual({ digest: document.manifest.digest, devices: [device()] });
-  // The import binds each intent to the new tenant and reads back the document's digest.
-  expect(Object.values(ledger.snapshot().intents).every(intent => intent.agent === agentKey(ledger.tenant, intent.execution))).toBe(true);
-  expect(sealLedger(ledger, headerOf(document)).manifest).toEqual(document.manifest);
-  expect(stateOf(ledger.snapshot().application)).toMatchObject({ topology: { [device()]: { mode: 'H', revision: 1 } },
-    switchImport: { digest: document.manifest.digest, devices: [device()] } });
-  // No Host runs on an import that is not committed toward L.
-  expect(() => new BotCollaboration(fixture!.server, ledger, options())).toThrow(expect.objectContaining({ name: 'SwitchImportedError', code: 'switch_imported', digest: document.manifest.digest }));
-
   // Step 5 on the old owner: the receipt of its own export.
-  await expect(bot.commitSwitch(device(), 1, document.manifest.digest)).rejects.toThrow("is not this Host's export");
+  await expect(bot.commitSwitch(device(), 1, 'other')).rejects.toThrow("is not this Host's export");
   expect(await bot.commitSwitch(device(), 1, exported.manifest.digest)).toEqual({ mode: 'H', revision: 2 });
   expect(stateOf(fixture!.ledger.snapshot().application).switchExport?.digest).toBe(exported.manifest.digest);
 
-  // Step 6 on the new owner.
-  expect(() => commitImport(ledger, exported!.manifest.digest)).toThrow(`is ${document.manifest.digest}, not`);
-  commitImport(ledger, receipt.digest);
-  expect(stateOf(ledger.snapshot().application)).toMatchObject({ topology: { [device()]: { mode: 'L', revision: 2 } } });
-  expect(stateOf(ledger.snapshot().application).switchImport).toBeUndefined();
-  expect(() => commitImport(ledger, receipt.digest)).toThrow('holds no switch import record');
-  const moved = new BotCollaboration(fixture!.server, ledger, options());
-  bots.push(moved);
-  expect(sealLedger(ledger, headerOf(document)).manifest.digests).toEqual(document.manifest.digests);
-  // The new owner's SDK has none of the source's wakes: `recover()` schedules each routine's next wake on it.
-  const [routine] = Object.values(ledger.snapshot().routines);
-  vi.spyOn(fixture!.server.wakes, 'pending').mockResolvedValue([]);
-  const schedule = vi.spyOn(fixture!.server.wakes, 'schedule');
-  await moved.recover();
-  expect(schedule).toHaveBeenCalledWith(expect.objectContaining({ dedupKey: routine!.next!.dedupKey, availableAt: routine!.next!.availableAt }));
-  vi.restoreAllMocks();
-  // The new owner runs new work on the device; the old owner refuses it.
-  bot = moved;
-  const next = await moved.input('k2', 'again');
-  await settled(next);
-  expect(moved.snapshot().turns[next]).toMatchObject({ status: 'succeeded' });
-  expect(moved.core.intent(next)!.agent).toBe(agentKey(ledger.tenant, moved.core.intent(next)!.execution));
-  // A tenant that ran work after its commit has no import to discard.
-  expect(() => discardImport(ledger)).toThrow('holds no switch import record');
-});
-
-it('writes each derived value from the format: sequence, settled cursors, Host intents, slots and the owner records', async () => {
-  await setup();
-  await work();
-  exported = await exportDomain();
-  const document = asH(exported);
-  const dump = switchDump(document, 'product:other', { topology: {}, switchImport: { digest: 'd', devices: [] } });
-  const s = dump.body;
-  expect(s.sequence).toBe(Math.max(...document.intents.map(row => row.ordinal)));
-  expect([s.scanSequence, s.scanWake, s.outbox]).toEqual([0, null, {}]);
-  expect(Object.values(s.intents).every(intent => intent.phase === 'settled' && intent.notBefore === 0)).toBe(true);
-  expect(Object.values(s.intents).every(intent => intent.agent === agentKey('product:other', intent.execution))).toBe(true);
-  expect(stateOf(s.application)).toMatchObject({ hostIntents: { 'host-1': { handler: 'research' } }, topology: {},
-    switchImport: { digest: 'd', devices: [] } });
-  const [occurrence] = Object.values(s.occurrences);
-  expect(s.slots).toEqual({ [hash(occurrence!.wakeKey)]: occurrence!.key });
-  expect(occurrence!.intentId).toBe(hash(`occurrence:${occurrence!.key}`));
-  // A routine's next wake is derived from its slot and current version, as K4 `nextWake` writes it.
-  const [routine] = Object.values(s.routines);
-  expect(routine!.next).toEqual(fixture!.ledger.snapshot().routines[hash(routine!.definition.id)]!.next);
-  // The content that one L ledger reads is the content that the other reads.
-  const source = fixture!.ledger.dumpForSwitch().body;
-  expect(s.executions).toEqual(source.executions);
-  expect(s.applied).toEqual(source.applied);
-  expect(s.occurrences).toEqual(source.occurrences);
 });
 
 it('carries every earlier generation of a retried intent and refuses an earlier one without its terminal and attempt', async () => {
@@ -179,9 +105,6 @@ it('carries every earlier generation of a retried intent and refuses an earlier 
   const content = switchContent(dump, fixture!.ledger.tenant, headerOf(exported));
   const [row] = content.intents.filter(intent => intent.generation === 1);
   expect(row!.earlierExecutions).toHaveLength(1);
-  const reloaded = switchDump(sealSwitchExport({ ...content, source: 'H' }), fixture!.ledger.tenant, {});
-  expect(reloaded.body.executions).toEqual(dump.body.executions);
-  expect(reloaded.body.intents).toEqual(Object.fromEntries(Object.entries(dump.body.intents).map(([id, intent]) => [id, { ...intent, notBefore: 0 }])));
   const changed = structuredClone(dump);
   (changed.body.executions[taskId(row!.key, 0)]!.input as { deviceId: string }).deviceId = 'device-2';
   expect(() => switchContent(changed, fixture!.ledger.tenant, headerOf(exported!))).toThrow('generation 0 input differs');
@@ -347,54 +270,10 @@ it('ends the export at an abort before the commit, and commits every device of t
   await expect(bot.commitSwitch('device-2', 3, second.manifest.digest)).rejects.toMatchObject({ code: 'stale_revision' });
 });
 
-it('discards an uncommitted import, and refuses to commit one that is being discarded', async () => {
-  await setup();
-  await settled(await bot.input('k1', 'hello'));
-  exported = await exportDomain();
-  const document = asH(exported);
-  // A discard that stopped after its first step leaves an import that no commit takes.
-  const stopped = target('product:stopped');
-  importForSwitch(stopped, document);
-  stopped.transaction(s => { stateOf(s.application).switchImport!.discarding = true; });
-  expect(() => commitImport(stopped, document.manifest.digest)).toThrow('being discarded');
-  // The discard deletes the tenant: a new ledger over it is empty and can import again.
-  const ledger = target('product:discarded');
-  importForSwitch(ledger, document);
-  discardImport(ledger);
-  expect(() => ledger.snapshot()).toThrow();
-  const again = target('product:discarded');
-  expect(Object.keys(again.snapshot().intents)).toEqual([]);
-  expect(importForSwitch(again, document).digest).toBe(document.manifest.digest);
-  // An L export is not an import for L, and a changed document is refused before any write.
-  expect(() => importForSwitch(target('product:l'), exported!)).toThrow('imports only an H export');
-  const changed = structuredClone(document);
-  changed.exportedAt += 1;
-  const fresh = target('product:changed');
-  expect(() => importForSwitch(fresh, changed)).toThrow(SwitchExportError);
-  expect(Object.keys(fresh.snapshot().intents)).toEqual([]);
-});
-
 it('refuses to open a ledger with a malformed export record', () => {
   const state = stateOf({});
   expect(() => checkSwitchRecords({ ...state, switchExport: { digest: 'd', exportedAt: 1, devices: [] } })).toThrow('Invalid switch export record');
   expect(() => checkSwitchRecords({ ...state, switchExport: { digest: 'd', exportedAt: 1, devices: [{ deviceId: 'x', frozenRevision: 0 }] } }))
     .toThrow('Invalid switch export record');
   expect(() => checkSwitchRecords({ ...state, switchExport: { digest: 'd', exportedAt: 1, devices: [{ deviceId: 'x', frozenRevision: 1 }] } })).not.toThrow();
-});
-
-it('refuses an import whose read-back differs from the document, and leaves the tenant empty', async () => {
-  await setup();
-  await settled(await bot.input('k1', 'hello'));
-  exported = await exportDomain();
-  const document = asH(exported), ledger = target();
-  // The rows K4 holds after the load read back as other content, as a gap in the L mapping would.
-  const load = ledger.loadForSwitch.bind(ledger);
-  vi.spyOn(ledger, 'loadForSwitch').mockImplementation((dump, verify) => load(dump, readBack => {
-    stateOf(readBack.body.application).audit.push('lost in the mapping');
-    verify(readBack);
-  }));
-  const empty = JSON.stringify(ledger.dumpForSwitch());
-  expect(() => importForSwitch(ledger, document)).toThrow(expect.objectContaining({ reason: 'manifest' }));
-  expect(JSON.stringify(ledger.dumpForSwitch())).toBe(empty);
-  expect(() => commitImport(ledger, document.manifest.digest)).toThrow('holds no switch import record');
 });

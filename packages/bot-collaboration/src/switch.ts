@@ -1,12 +1,11 @@
 import { agentKey, canonical, frozenInput, hash, isOccurrenceIntentKey, occurrenceIntentKey, parseRoutineWakeKey, routineWakeKey, taskId,
-  type HostLedger, type Intent, type Json, type LedgerDump, type LedgerState, type Occurrence, type Routine } from '@byok-sdk/server/execution-core';
+  type HostLedger, type Json, type LedgerDump } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState } from './model.js';
-import { exportMarkOf, sealSwitchExport, switchAttempts, SwitchExportedError, SwitchExportError, SwitchImportedError, verifySwitchExport, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
-  type RoutineRecord, type SwitchContent, type SwitchDevice, type SwitchExport, type SwitchExportRefusal, type SwitchHeader, type SwitchReceipt } from './migration.js';
+import { exportMarkOf, sealSwitchExport, switchAttempts, SwitchExportedError, SwitchExportError, SwitchImportedError, type ExecutionRecord, type IntentRecord, type OccurrenceRecord, type OutboxRecord,
+  type RoutineRecord, type SwitchContent, type SwitchExport, type SwitchExportRefusal, type SwitchHeader } from './migration.js';
 
-// The L side of the #975 state move. `switchContent` reads an L ledger into the neutral form, both for the old owner's export
-// and for the new owner's read-back, so one function states what an L ledger holds. `switchDump` writes the neutral form
-// into a K4 dump for one tenant. Each value either moves, is derived from values that move (the checks below), or is a
+// The L side of the #975 state move. `switchContent` reads and checks an L ledger for the old owner's export.
+// Each value either moves, is derived from values that move (the checks below), or is a
 // named scheduler value of a concluded row or of the SDK's wakes, which a target writes for itself.
 
 /** The import record of a new L owner: from the load until the commit toward L. */
@@ -15,10 +14,7 @@ export interface SwitchImport { digest: string; devices: string[]; discarding?: 
 export function refuseExported(state: CollaborationState): void {
   if (state.switchExport) throw new SwitchExportedError(state.switchExport.digest);
 }
-/**
- * Throws while the ledger holds a switch import, which is not committed toward L yet: no K8 work runs on it. The switch
- * steps `commitImport` and `discardImport` write it themselves.
- */
+/** Refuse work on a ledger that still holds an uncommitted switch import. */
 export function refuseImported(state: CollaborationState): void {
   if (state.switchImport) throw new SwitchImportedError(state.switchImport.digest);
 }
@@ -185,124 +181,7 @@ export function switchContent(dump: LedgerDump, tenant: string, header: SwitchHe
   };
 }
 
-/**
- * Writes the neutral form into a K4 dump bound to `tenant`. The K8 owner records the target needs are passed in `owner`.
- * A concluded row gets K4's values of a new row for its scheduler cursors (#975 D6): `phase: 'settled'`, `notBefore: 0`.
- */
-export function switchDump(content: SwitchContent, tenant: string, owner: Pick<CollaborationState, 'topology' | 'switchImport'>): LedgerDump {
-  // K4 keeps routines and occurrences in insertion order, and the format makes their ordinals their positions.
-  const byOrdinal = <T extends { ordinal: number }>(rows: readonly T[]) => [...rows].sort((a, b) => a.ordinal - b.ordinal);
-  const records = new Map(content.intents.map(row => [row.key, row]));
-  const s: LedgerState = { version: 1, sequence: Math.max(0, ...content.intents.map(row => row.ordinal)), scanSequence: 0, intents: {}, executions: {},
-    routines: {}, occurrences: {}, slots: {}, outbox: {}, applied: {}, application: {}, scanWake: null };
-  const hostIntents: Record<string, { handler: string }> = {};
-  for (const row of byOrdinal(content.intents)) {
-    const { taskId: _task, ...execution } = row.input as unknown as Intent['execution'] & { taskId: string };
-    const intent: Intent = defined({
-      key: row.key, source: row.source, execution, waitUntil: row.waitUntil, retry: row.retry, id: hash(row.key), agent: agentKey(tenant, execution),
-      sequence: row.ordinal, phase: 'settled', generation: row.generation, taskId: row.taskId, notBefore: 0,
-      attempts: switchAttempts(row), memoryBlocked: row.memoryBlocked, preparationError: row.preparationError,
-      retryUntil: row.retryUntil,
-      cancelReason: row.cancelReason, conclusion: row.conclusion,
-    }) as Intent;
-    s.intents[intent.id] = intent;
-    s.executions[row.taskId] = defined({ input: row.input, submission: row.submission, started: row.started, attempt: row.attempt,
-      terminal: row.terminal, messageReceipt: row.messageReceipt }) as unknown as LedgerState['executions'][string];
-    row.earlierExecutions.forEach((earlier, generation) => {
-      const task = taskId(row.key, generation);
-      s.executions[task] = defined({ input: frozenInput(execution, task), ...earlier }) as unknown as LedgerState['executions'][string];
-    });
-    if (row.conclusion === 'succeeded') s.applied[row.taskId] = true;
-    if (row.handler !== undefined) Object.defineProperty(hostIntents, row.key, { value: { handler: row.handler }, enumerable: true, writable: true, configurable: true });
-  }
-  for (const row of byOrdinal(content.routines)) {
-    s.routines[hash(row.id)] = defined({
-      definition: row.definition, pending: row.pending, lifecycle: row.lifecycle, status: row.status,
-      next: row.nextAt === null ? null : { dedupKey: routineWakeKey(row.id, row.definition.version, row.nextAt), availableAt: row.nextAt },
-      calendarErrors: row.calendarErrors, scheduleRetryAt: row.scheduleRetryAt, scheduleRetryCount: row.scheduleRetryCount, lastError: row.lastError,
-    }) as Routine;
-  }
-  for (const row of byOrdinal(content.occurrences)) {
-    const wakeKey = routineWakeKey(row.routineId, row.definitionVersion, row.trigger.plannedAt);
-    // The occurrence names its intent (K4 `promote`): the format checks that each occurrence intent names one.
-    const intent = s.intents[hash(occurrenceIntentKey(row.key))];
-    if (intent) intent.occurrence = row.key;
-    const superseded = row.executionSuperseded ? { executionSuperseded: true as const } : {};
-    s.occurrences[row.key] = defined({
-      key: row.key, routineId: row.routineId, definitionVersion: row.definitionVersion, trigger: row.trigger, wakeKey, recordedAt: row.recordedAt,
-      nextAt: row.nextAt, intentId: intent?.id, job: row.job ? { ...row.job, ...superseded } : undefined, hook: row.job ? undefined : superseded,
-      attempts: switchAttempts(records.get(occurrenceIntentKey(row.key))), conclusion: intent ? intent.conclusion : row.conclusion, slotReplayCount: row.slotReplayCount,
-    }) as Occurrence;
-    s.slots[hash(wakeKey)] = row.key;
-  }
-  for (const row of content.outbox) s.outbox[`host-job:${row.occurrenceKey}`] = { kind: 'host-job', occurrenceKey: row.occurrenceKey };
-  s.application.collaboration = { ...structuredClone(content.collaboration), ...(Object.keys(hostIntents).length ? { hostIntents } : {}),
-    ...defined(owner) } as unknown as Json;
-  return {
-    version: 1, body: s, memoryTombstones: [],
-    tombstones: content.tombstones.map(row => ({ kind: row.kind, identity: row.digest, expiresAt: row.expiresAt ?? null })),
-    rows: content.archived.map(row => ({ namespace: row.namespace, id: row.id, value: row.body, expiresAt: row.expiresAt ?? null })),
-  };
-}
-
-/** The header of a document, which a read-back copies as it is. */
-const headerOf = (document: SwitchContent): SwitchHeader =>
-  ({ source: document.source, domain: document.domain, devices: document.devices, exportedAt: document.exportedAt });
 /** Seals the content that a ledger holds now, under a given header. */
 export function sealLedger(ledger: HostLedger, header: SwitchHeader): SwitchExport {
   return sealSwitchExport(switchContent(ledger.dumpForSwitch(), ledger.tenant, header));
-}
-
-const importOf = (state: CollaborationState): SwitchImport => {
-  if (!state.switchImport) throw new Error('This ledger holds no switch import record');
-  return state.switchImport;
-};
-
-/**
- * Step 2 of a switch to L (#975): writes an H export into an empty L ledger tenant and verifies it in the same transaction.
- * The document must verify. Each of its devices is recorded as owned by H, with the import record, until `commitImport`.
- * Before the load commits, K4 reads the tenant's rows back, and they must give the document's digest under its header;
- * otherwise nothing is written. Returns the receipt the old owner commits away on. A `BotCollaboration` refuses a ledger
- * with an import, so no work runs on it before the commit.
- */
-export function importForSwitch(ledger: HostLedger, document: SwitchExport): SwitchReceipt {
-  const manifest = verifySwitchExport(document);
-  if (document.source !== 'H') throw new SwitchExportError('invalid', `An L owner imports only an H export, not one from ${document.source}`);
-  const devices = document.devices.map((device: SwitchDevice) => device.deviceId);
-  const topology = {};
-  for (const id of devices) Object.defineProperty(topology, id, { value: { mode: 'H', revision: 1 }, enumerable: true, writable: true, configurable: true });
-  ledger.loadForSwitch(switchDump(document, ledger.tenant, { topology, switchImport: { digest: manifest.digest, devices } }), readBack => {
-    const back = sealSwitchExport(switchContent(readBack, ledger.tenant, headerOf(document))).manifest.digest;
-    if (back !== manifest.digest) throw new SwitchExportError('manifest', `The imported ledger reads back as ${back}, not ${manifest.digest}`);
-  });
-  return { digest: manifest.digest, devices };
-}
-
-/**
- * Step 4 of a switch to L, after the old owner committed away on the receipt: L owns each device of the import. Only the
- * import of this digest that is not being discarded commits. Then a `BotCollaboration` can open the ledger.
- */
-export function commitImport(ledger: HostLedger, digest: string): void {
-  ledger.transaction(s => {
-    const state = stateOf(s.application), record = importOf(state);
-    if (record.discarding) throw new Error('The switch import is being discarded');
-    if (record.digest !== digest) throw new Error(`The switch import is ${record.digest}, not ${digest}`);
-    for (const id of record.devices) {
-      const row = state.topology && Object.hasOwn(state.topology, id) ? state.topology[id] : undefined;
-      if (row?.mode !== 'H' || row.revision !== 1 || row.switching) throw new Error(`Device ${id} is not an imported device`);
-      state.topology![id] = { mode: 'L', revision: 2 };
-    }
-    delete state.switchImport;
-  });
-}
-
-/**
- * Deletes an import that was not committed, when the switch does not go ahead: the old owner aborts, or the product
- * decides against it. It first records
- * that the import is being discarded, so `commitImport` refuses it from then on, then deletes the tenant (K4 `discard`).
- * A committed tenant has no import record, so it is refused; no `BotCollaboration` ran work on an uncommitted one.
- */
-export function discardImport(ledger: HostLedger): void {
-  ledger.transaction(s => { importOf(stateOf(s.application)).discarding = true; });
-  ledger.discard();
 }

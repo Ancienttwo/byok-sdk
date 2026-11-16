@@ -232,9 +232,9 @@ across its bounded reasoning-only retry, and sends a truthful
 `@byok-sdk/keys/<package version>` User-Agent. An endpoint or model name never
 selects this behavior. Authentication failures keep their closed outcome
 codes; a successful key check remains a UI hint. The added provider kind
-widens the profile store CHECK set: existing stores report
-`migration-required` and keep their data and credential-store key references
-through the Host's explicit `migrateProviderProfileStore` call. Pi execution
+widens the profile store CHECK set: stores with an earlier provider-kind set
+are refused with `PROVIDER_STORE_SCHEMA_STALE` and remain unchanged. A Host
+must explicitly provision a separate current store. Pi execution
 separately requires the declared Pi identity above; provider kind does not
 infer it.
 
@@ -252,7 +252,7 @@ browser: its closure has no Node builtins, and it imports no `SecretStore`,
 OS credential store, SQLite store or `ProviderRegistry`, reads no environment
 and makes no network request.
 
-- `listPiCatalogModels` lists the pinned catalog entries of a vendor and api,
+- The model view lists the pinned catalog entries of a vendor and api,
   each `representable` (with input, reasoning and thinking levels) or
   `unrepresentable` (with its blocking paths).
 - `PI_DEFAULT_THINKING_LEVEL` is generated from the pinned

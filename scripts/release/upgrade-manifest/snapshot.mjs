@@ -23,11 +23,9 @@
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { packageSurface, sha256, splitGolden, splitStatements } from './dts-surface.mjs';
+import { publicPackageDirectories } from '../../public-packages.mjs';
 
 export const SNAPSHOT_SCHEMA_VERSION = 1;
-
-/** The nine published packages, by `packages/<dir>`. */
-export const PUBLIC_PACKAGES = ['bot-collaboration', 'client', 'cloud', 'cloud-dataplane', 'core', 'protocol', 'server', 'ui-runtime', 'keys'];
 
 /**
  * Host-visible unions. Each one is read from a declaration in the gated
@@ -283,6 +281,7 @@ function goldenStatement(goldens, pkg, pattern) {
 
 /** Build the snapshot of the tree at `root`. */
 export function buildSnapshot(root) {
+  const PUBLIC_PACKAGES = publicPackageDirectories(root);
   const sources = new Map();
   const track = (file) => {
     sources.set(file, fileDigest(root, file));

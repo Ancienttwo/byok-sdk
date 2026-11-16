@@ -188,24 +188,35 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
     expect((await h.state()).revision).toBeUndefined();
   });
 
-  it('replaces an older entity_kind_check on migrate, so a would_do entity is stored and read back (#1229)', async () => {
+  it('refuses an older entity_kind_check without changing it', async () => {
     const legacy = await openStore(), table = `"${legacy.store.schema}".entity`;
     try {
       await legacy.pool.query(`ALTER TABLE ${table} DROP CONSTRAINT entity_kind_check`);
       await legacy.pool.query(`ALTER TABLE ${table} ADD CONSTRAINT entity_kind_check CHECK (kind IN ('turn'))`);
-      await legacy.store.migrate();
+      const query = () => legacy.pool.query<{ definition: string }>("SELECT pg_get_constraintdef(c.oid) AS definition FROM pg_constraint c JOIN pg_class t ON t.oid = c.conrelid JOIN pg_namespace n ON n.oid = t.relnamespace WHERE n.nspname = $1 AND t.relname = 'entity' AND c.conname = 'entity_kind_check'", [legacy.store.schema]);
+      const before = (await query()).rows;
+      await expect(legacy.store.migrate()).rejects.toMatchObject({ code: 'hosted_schema_unsupported_old' });
+      await expect(legacy.store.read('would-do')).rejects.toMatchObject({ code: 'hosted_schema_unsupported_old' });
+      expect((await query()).rows).toEqual(before);
+    } finally { await legacy.close(); }
+  });
+
+  it('refuses an old would-do frame without changing it', async () => {
+    const legacy = await openStore(), table = `"${legacy.store.schema}".entity`;
+    try {
       const wouldDo = { w1: { id: 'w1', botId: 'main', turnId: 't1', taskId: 'x', action: 'create_routine' as const, index: 0, at: 1, detail: null } };
       await legacy.store.seed('would-do', state => { seedCollaboration(state); state.wouldDo = wouldDo; });
       expect((await legacy.store.read('would-do')).wouldDo).toEqual(wouldDo);
-      // A frame that an L import on older code wrote holds the rows inline: migrate moves them into entity rows once.
+      // A frame from an old import is rejected without changing it.
       const key = JSON.stringify('would-do'), schema = `"${legacy.store.schema}"`;
       const { rows: [held] } = await legacy.pool.query<{ frame: string }>(`SELECT frame::text FROM ${schema}.scope WHERE scope = $1`, [key]);
       await legacy.pool.query(`UPDATE ${schema}.scope SET frame = $2::json WHERE scope = $1`, [key, JSON.stringify({ ...JSON.parse(held!.frame), wouldDo })]);
       await legacy.pool.query(`DELETE FROM ${table} WHERE scope = $1 AND kind = 'would_do'`, [key]);
-      await legacy.store.migrate();
-      const { rows: [moved] } = await legacy.pool.query<{ frame: string }>(`SELECT frame::text FROM ${schema}.scope WHERE scope = $1`, [key]);
-      expect(JSON.parse(moved!.frame).wouldDo).toEqual({});
-      expect((await legacy.store.read('would-do')).wouldDo).toEqual(wouldDo);
+      const select = await legacy.pool.query<{ sql: string }>("SELECT format('SELECT frame::text FROM %I.scope WHERE scope = $1', $1::text) AS sql", [legacy.store.schema]);
+      const before = (await legacy.pool.query(select.rows[0]!.sql, [key])).rows;
+      await expect(legacy.store.migrate()).rejects.toMatchObject({ code: 'would_do_unsupported_old' });
+      await expect(legacy.store.read('would-do')).rejects.toMatchObject({ code: 'would_do_unsupported_old' });
+      expect((await legacy.pool.query(select.rows[0]!.sql, [key])).rows).toEqual(before);
     } finally { await legacy.close(); }
   });
 
