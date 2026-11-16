@@ -518,9 +518,8 @@ export interface AuthenticateDeviceAssertionDeps {
 
 /**
  * What both lanes' results carry: the current-authority principal plus the
- * audit fields of the credential that was spent. Never a name a caller holds —
- * a value is always one lane or the other, and {@link AuthenticatedAssertion}
- * is the union to accept when a consumer genuinely serves both.
+ * audit fields of the credential that was spent. Every result names one
+ * lane; a consumer that serves both states that union explicitly.
  */
 interface AuthenticatedAssertionBase {
   readonly device: DevicePrincipal;
@@ -889,14 +888,10 @@ export async function verifyTaskAssertion(
  * Audit-safe result of a consumed TASK assertion; no credential or signature is
  * retained.
  *
- * Deliberately NOT an extension of {@link AuthenticatedDeviceAssertion}. It was
- * one, and that was the same mistake in the type system that §8.1 forbids on
- * the wire: an extension is assignable to the thing it extends, so every
- * consumer written for device authority would have accepted a task credential
- * silently, with no fallback ever written down. The two results share
- * {@link AuthenticatedAssertionBase} and differ in `lane`, so a consumer that
- * must accept exactly one of them compares one field, and a consumer that must
- * accept either says so with {@link AuthenticatedAssertion}.
+ * Separate from {@link AuthenticatedDeviceAssertion}: task authority must
+ * never be assignable to device authority (§8.1). The results share audit
+ * fields through {@link AuthenticatedAssertionBase} and differ in `lane`;
+ * a consumer that accepts both states that union explicitly.
  */
 export interface AuthenticatedTaskAssertion extends AuthenticatedAssertionBase {
   readonly lane: 'task';
@@ -904,15 +899,6 @@ export interface AuthenticatedTaskAssertion extends AuthenticatedAssertionBase {
   readonly agentRef: TaskAssertionAgentRef;
   readonly toolsetId: string;
 }
-
-/**
- * Either lane's result, discriminated by `lane`.
- *
- * For the consumer that genuinely serves both (an audit projection, a ledger
- * writer). A consumer that serves ONE lane must name that lane's type instead —
- * this union exists so "both" is stated on purpose, not reached by accident.
- */
-export type AuthenticatedAssertion = AuthenticatedDeviceAssertion | AuthenticatedTaskAssertion;
 
 /**
  * Authenticate one task assertion and atomically consume its JTI under the

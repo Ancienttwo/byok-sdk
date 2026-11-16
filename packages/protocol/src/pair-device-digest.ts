@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { sealedBase64UrlByteLength } from './sealed-payload.js';
+import { canonicalBase64UrlByteLength } from './base64url.js';
 
 /** Domain separator of {@link pairDeviceDigest}; a new digest definition takes a new namespace. */
 export const PAIR_DEVICE_DIGEST_NAMESPACE = 'byok-pair-device-v1';
@@ -7,7 +7,7 @@ export const PAIR_DEVICE_DIGEST_NAMESPACE = 'byok-pair-device-v1';
 /** Canonical unpadded base64url of the 32-byte SHA-256 output: exactly one spelling per digest. */
 export const PairDeviceDigestSchema = z
   .string()
-  .refine((value) => sealedBase64UrlByteLength(value) === 32, 'must be canonical unpadded base64url of 32 bytes');
+  .refine((value) => canonicalBase64UrlByteLength(value) === 32, 'must be canonical unpadded base64url of 32 bytes');
 
 export interface PairDeviceDigestInput {
   readonly tenantId: string;

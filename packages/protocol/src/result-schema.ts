@@ -70,7 +70,6 @@ export const RESULT_SCHEMA_KEYWORDS = Object.freeze([
   'maximum',
   'description',
 ] as const);
-export type ResultSchemaKeyword = (typeof RESULT_SCHEMA_KEYWORDS)[number];
 
 export const RESULT_SCHEMA_INSTANCE_TYPES = Object.freeze([
   'object',

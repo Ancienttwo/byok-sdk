@@ -16,7 +16,6 @@ import {
   SERVER_TO_DAEMON_TYPES,
   TaskCompletePayloadSchema,
   TaskFailPayloadSchema,
-  TerminalPreparedObservationSchema,
   UnknownMessageTypeError,
   byokInputPreparationCompletionPath,
   byokInputPreparationStatusPath,
@@ -25,6 +24,7 @@ import {
   parseMessage,
   type MessageType,
 } from '../index';
+import { TerminalPreparedObservationSchema } from '../messages';
 
 const SOURCE = { revision: 'source-r42', digest: `sha256:${'c'.repeat(64)}` } as const;
 

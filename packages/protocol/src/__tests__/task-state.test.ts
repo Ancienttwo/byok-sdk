@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { TASK_STATES, TASK_TRANSITIONS, canTransition, type TaskState } from '../index';
+import { TASK_STATES, TASK_TRANSITIONS, type TaskState } from '../index';
 
 const TERMINAL_STATES: readonly TaskState[] = ['Complete', 'Failed', 'Cancelled'];
 
@@ -21,18 +21,18 @@ describe('TASK_TRANSITIONS', () => {
   });
 
   it('Offered cannot skip straight to Running', () => {
-    expect(canTransition('Offered', 'Running')).toBe(false);
+    expect(TASK_TRANSITIONS.Offered.includes('Running')).toBe(false);
   });
 
   it('AwaitApproval <-> Running loop is legal in both directions', () => {
-    expect(canTransition('Running', 'AwaitApproval')).toBe(true);
-    expect(canTransition('AwaitApproval', 'Running')).toBe(true);
+    expect(TASK_TRANSITIONS.Running.includes('AwaitApproval')).toBe(true);
+    expect(TASK_TRANSITIONS.AwaitApproval.includes('Running')).toBe(true);
   });
 
   it('rejects illegal transitions out of terminal states', () => {
-    expect(canTransition('Complete', 'Running')).toBe(false);
-    expect(canTransition('Failed', 'Complete')).toBe(false);
-    expect(canTransition('Cancelled', 'Offered')).toBe(false);
+    expect(TASK_TRANSITIONS.Complete.includes('Running')).toBe(false);
+    expect(TASK_TRANSITIONS.Failed.includes('Complete')).toBe(false);
+    expect(TASK_TRANSITIONS.Cancelled.includes('Offered')).toBe(false);
   });
 
   it('every non-terminal state can reach a terminal state (no dead ends)', () => {
@@ -54,11 +54,4 @@ describe('TASK_TRANSITIONS', () => {
     }
   });
 
-  it('canTransition agrees with TASK_TRANSITIONS for every state pair', () => {
-    for (const from of TASK_STATES) {
-      for (const to of TASK_STATES) {
-        expect(canTransition(from, to)).toBe(TASK_TRANSITIONS[from].includes(to));
-      }
-    }
-  });
 });

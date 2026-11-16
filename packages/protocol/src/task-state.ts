@@ -35,8 +35,3 @@ export const TASK_TRANSITIONS: Readonly<Record<TaskState, readonly TaskState[]>>
   Failed: [],
   Cancelled: [],
 };
-
-/** Whether `from -> to` is a legal transition per {@link TASK_TRANSITIONS}. */
-export function canTransition(from: TaskState, to: TaskState): boolean {
-  return TASK_TRANSITIONS[from].includes(to);
-}

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { buildDreamInstruction, type DreamInstructionInput } from '../index';
+import { buildDreamInstruction } from '../index';
+import { type DreamInstructionInput } from '../dream';
 
 interface Vector { name: string; input: DreamInstructionInput; instruction: string }
 const vectors = JSON.parse(readFileSync(new URL('./golden/dream-instruction.vectors.json', import.meta.url), 'utf8')) as Vector[];

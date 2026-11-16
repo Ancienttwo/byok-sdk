@@ -20,6 +20,7 @@
  * length function; a cross-package test keeps the two equal.
  */
 import { z } from 'zod';
+import { canonicalBase64UrlByteLength } from './base64url.js';
 
 import { AGENT_MESSAGE_MAX_BYTES } from './agent-egress.js';
 import { BlobRefSchema, CONTENT_HASH_RE } from './blob.js';
@@ -167,28 +168,8 @@ function isLegalPaddedLength(value: number): boolean {
     && sealedPayloadPaddedLength(value) === value;
 }
 
-const BASE64URL_VALUE = /^[A-Za-z0-9_-]*$/u;
-const BASE64URL_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
-
-/**
- * The byte length of canonical unpadded base64url, or `undefined`. Canonical
- * means no padding, no impossible length, and zero unused bits in the last
- * character, so one byte string has exactly one encoding.
- */
-export function sealedBase64UrlByteLength(value: string): number | undefined {
-  if (!BASE64URL_VALUE.test(value)) return undefined;
-  const tail = value.length % 4;
-  if (tail === 1) return undefined;
-  if (tail !== 0) {
-    const last = BASE64URL_ALPHABET.indexOf(value[value.length - 1]!);
-    const unusedBits = tail === 2 ? 0b1111 : 0b11;
-    if ((last & unusedBits) !== 0) return undefined;
-  }
-  return Math.floor(value.length / 4) * 3 + (tail === 0 ? 0 : tail - 1);
-}
-
 function base64UrlOf(bytes: number) {
-  return z.string().refine((value) => sealedBase64UrlByteLength(value) === bytes, `must be canonical unpadded base64url of ${bytes} bytes`);
+  return z.string().refine((value) => canonicalBase64UrlByteLength(value) === bytes, `must be canonical unpadded base64url of ${bytes} bytes`);
 }
 
 const PositiveIntegerSchema = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -238,7 +219,7 @@ function sealedPayloadSchema<Category extends z.ZodType<SealedPayloadCategory>>(
       if (inline) {
         if (sealed.ciphertextRef !== undefined || sealed.ciphertext === undefined) {
           ctx.addIssue({ code: 'custom', path: ['ciphertext'], message: `a padded length up to ${SEALED_INLINE_MAX_PADDED_LENGTH} carries inline ciphertext only` });
-        } else if (sealedBase64UrlByteLength(sealed.ciphertext) !== ciphertextLength) {
+        } else if (canonicalBase64UrlByteLength(sealed.ciphertext) !== ciphertextLength) {
           ctx.addIssue({ code: 'custom', path: ['ciphertext'], message: 'ciphertext must be canonical base64url of paddedLength + 16 bytes' });
         }
         return;

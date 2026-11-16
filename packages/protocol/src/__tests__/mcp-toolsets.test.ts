@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   CONFIGURED_TOOLSETS_MAX_ITEMS,
   ConfiguredToolsetsSchema,
-  ConnHelloPayloadSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   ToolsetIdSchema,
   createEnvelope,
 } from '../index';
+import { ConnHelloPayloadSchema } from '../messages';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' };
 const RESUME_SESSION = { mode: 'resume', sessionRef: 'session-1' } as const;

@@ -21,11 +21,9 @@ const opaqueReference = (field: string) => z
 
 /** Opaque, embedder-issued authorization grant. It is never interpreted as a consent boolean. */
 export const AgentMemoryProjectionGrantRefSchema = opaqueReference('grantRef');
-export type AgentMemoryProjectionGrantRef = z.infer<typeof AgentMemoryProjectionGrantRefSchema>;
 
 /** Exact local runtime session identity. No cwd or local source path is portable. */
 export const AgentMemoryProjectionSessionRefSchema = opaqueReference('sessionRef');
-export type AgentMemoryProjectionSessionRef = z.infer<typeof AgentMemoryProjectionSessionRefSchema>;
 
 /** Positive epoch that changes only when the local single-writer authority changes. */
 export const AgentMemoryProjectionWriterEpochSchema = z
@@ -33,7 +31,6 @@ export const AgentMemoryProjectionWriterEpochSchema = z
   .int()
   .positive()
   .max(AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE);
-export type AgentMemoryProjectionWriterEpoch = z.infer<typeof AgentMemoryProjectionWriterEpochSchema>;
 
 /** Positive sequence within one writer epoch. A new epoch starts at one. */
 export const AgentMemoryProjectionSourceSeqSchema = z
@@ -41,7 +38,6 @@ export const AgentMemoryProjectionSourceSeqSchema = z
   .int()
   .positive()
   .max(AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE);
-export type AgentMemoryProjectionSourceSeq = z.infer<typeof AgentMemoryProjectionSourceSeqSchema>;
 
 /** Byte length implied by the unpadded base64url transport string. */
 export function agentMemoryProjectionBase64UrlByteLength(value: string): number | undefined {
@@ -77,7 +73,6 @@ export const AgentMemoryProjectionSnapshotSchema = z
       });
     }
   });
-export type AgentMemoryProjectionSnapshot = z.infer<typeof AgentMemoryProjectionSnapshotSchema>;
 
 /** The plaintext identity and ordering fields of every mutation branch. */
 const MUTATION_IDENTITY = {
@@ -148,7 +143,6 @@ export const AgentMemoryProjectionPlainReceiptSchema = z
     metering: AgentMemoryProjectionMeteringReceiptSchema,
   })
   .strict();
-export type AgentMemoryProjectionPlainReceipt = z.infer<typeof AgentMemoryProjectionPlainReceiptSchema>;
 
 /** Stable meter receipt for one accepted sealed snapshot: the Host meters the padded length it stores. */
 export const AgentMemoryProjectionSealedMeteringReceiptSchema = z
@@ -158,7 +152,6 @@ export const AgentMemoryProjectionSealedMeteringReceiptSchema = z
     recordedAt: z.iso.datetime({ offset: true }),
   })
   .strict();
-export type AgentMemoryProjectionSealedMeteringReceipt = z.infer<typeof AgentMemoryProjectionSealedMeteringReceiptSchema>;
 
 /** Immutable commit readback of a sealed snapshot: identity and the sealed member's `contentMac` and padded length. */
 export const AgentMemoryProjectionSealedReceiptSchema = z
@@ -169,7 +162,6 @@ export const AgentMemoryProjectionSealedReceiptSchema = z
     metering: AgentMemoryProjectionSealedMeteringReceiptSchema,
   })
   .strict();
-export type AgentMemoryProjectionSealedReceipt = z.infer<typeof AgentMemoryProjectionSealedReceiptSchema>;
 
 export const AgentMemoryProjectionReceiptSchema = z.union([
   AgentMemoryProjectionPlainReceiptSchema as typeof AgentMemoryProjectionPlainReceiptSchema,

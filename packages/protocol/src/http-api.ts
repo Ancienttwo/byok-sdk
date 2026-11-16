@@ -195,7 +195,6 @@ export const TokenRequestSchema = z.object({
   /** Ed25519 signature over `nonce`, base64url-encoded. */
   signature: z.string(),
 });
-export type TokenRequest = z.infer<typeof TokenRequestSchema>;
 
 export const TokenResponseSchema = z.object({
   accessToken: z.string(),
@@ -259,7 +258,6 @@ export const PresencePublishRequestSchema = z.object({
   /** The `conn.hello` list: built-in runtime and custom harness ids (#1103 D8); absent means unknown. */
   runtimeUnavailable: RuntimeUnavailableListSchema.optional(),
 });
-export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema>;
 
 /**
  * Revocation is server-side only (dashboard/API call on the SaaS's own
@@ -280,7 +278,6 @@ export const CreateBlobRequestSchema = z.object({
   contentType: z.string(),
   contentHash: z.string().regex(CONTENT_HASH_RE, 'contentHash must be "sha256:<64 lowercase hex>"'),
 });
-export type CreateBlobRequest = z.infer<typeof CreateBlobRequestSchema>;
 
 /** POST /byok/blobs response: presigned PUT target for the declared blob. */
 export const CreateBlobResponseSchema = z.object({
@@ -307,7 +304,6 @@ export const EventsPollQuerySchema = z.object({
   /** Last reliably processed seq; the only acknowledgement. Omitted on the first poll. */
   cursor: z.number().int().nonnegative().optional(),
 });
-export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;
 
 /**
  * Deployment-owned activity limits. A v3 responder advertises them on every
@@ -342,7 +338,6 @@ export const MessageSendOutcomeSchema = z.object({
   /** Decodes to an {@link OutboundRefusalReason}; an unrecognized string becomes `unknown`. */
   reason: z.string().max(64).transform((value): OutboundRefusalReason => (isOutboundRefusalCode(value) ? value : 'unknown')).optional(),
 });
-export type MessageSendOutcome = z.infer<typeof MessageSendOutcomeSchema>;
 
 export const EventsPollResponseSchema = z.object({
   /**
@@ -394,7 +389,6 @@ export const MESSAGES_SEND_MAX_BODY_BYTES = 2 * 1024 * 1024;
 export const MessagesSendRequestSchema = z.object({
   messages: z.array(z.looseObject({ v: z.number().int().positive(), id: z.uuid() })).max(MAX_MESSAGES_PER_BATCH),
 });
-export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 
 /**
  * `accepted` counts every envelope the inbound gate (`@byok-sdk/cloud`'s
@@ -443,7 +437,6 @@ export const AgentHomeProjectionStatusSchema = z.enum([
   'stale',
   'conflict',
 ]);
-export type AgentHomeProjectionStatus = z.infer<typeof AgentHomeProjectionStatusSchema>;
 
 export const AgentHomeProjectionReadbackSchema = z
   .object({
@@ -497,7 +490,6 @@ export type InputPreparationCompletionRequest = z.infer<typeof InputPreparationC
 
 /** `pending` until the device records a terminal fact; the other two are terminal. */
 export const InputPreparationStatusSchema = z.enum(['pending', 'prepared', 'rejected']);
-export type InputPreparationStatus = z.infer<typeof InputPreparationStatusSchema>;
 
 /**
  * Tenant/device/request-bound durable readback. `receipt` and `reason` are
@@ -545,7 +537,6 @@ export const InputPreparationStatusQuerySchema = z
     profileRevision: z.string().min(1),
   })
   .strict();
-export type InputPreparationStatusQuery = z.infer<typeof InputPreparationStatusQuerySchema>;
 
 // ---------------------------------------------------------------------------
 // POST /byok/agent-memory-projections — optional hosted, redacted, one-way

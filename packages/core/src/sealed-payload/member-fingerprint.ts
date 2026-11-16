@@ -40,11 +40,6 @@ export interface MemberFingerprintInput {
   readonly signingPublicJwk: P256PublicJwk;
 }
 
-/** The 25-digit fingerprint of one member, as 5 groups of 5 digits joined by single spaces. */
-export async function memberFingerprint(input: MemberFingerprintInput): Promise<string> {
-  return (await fingerprintGroups(input)).groups.join(' ');
-}
-
 /**
  * The 50-digit two-way approval code of two members of one tenant: their
  * fingerprints ordered by member id, as 10 groups of 5 digits joined by
@@ -61,8 +56,8 @@ export async function memberApprovalCode(
   return members.flatMap((member) => member.groups).join(' ');
 }
 
-/** The member id and the 5 fingerprint groups of one member. */
-async function fingerprintGroups(input: MemberFingerprintInput): Promise<{ memberId: string; groups: string[] }> {
+/** @internal The member id and fingerprint groups, shared with cryptographic vectors. */
+export async function fingerprintGroups(input: MemberFingerprintInput): Promise<{ memberId: string; groups: string[] }> {
   const parsed = safeParseTotal(FingerprintInputSchema, input);
   if (!parsed.success) throw invalidInput('Member fingerprint needs a tenant id and a P-256 signing key');
   const { tenantId, signingPublicJwk } = parsed.data;

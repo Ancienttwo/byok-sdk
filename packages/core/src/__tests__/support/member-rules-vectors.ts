@@ -13,7 +13,8 @@ import {
   verifyMemberChainFromAnchor,
   type MemberChainWalkFailure,
 } from '../../sealed-payload/member-chain-walk';
-import { memberApprovalCode, memberFingerprint } from '../../sealed-payload/member-fingerprint';
+import { memberApprovalCode } from '../../sealed-payload/member-fingerprint';
+import { memberFingerprint } from './member-fingerprint';
 import {
   computeClientPairingMac,
   computeDevicePairingMac,

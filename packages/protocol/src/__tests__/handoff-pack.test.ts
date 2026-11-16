@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { HANDOFF_EXCERPT_LINE_MAX_BYTES, buildHandoffPack, type HandoffPack, type HandoffPackBudgets, type HandoffTurn } from '../index';
+import { buildHandoffPack, type HandoffPack, type HandoffPackBudgets, type HandoffTurn } from '../index';
+import { HANDOFF_EXCERPT_LINE_MAX_BYTES } from '../handoff-pack';
 
 interface Vector { name: string; turns: HandoffTurn[]; budgets: HandoffPackBudgets; pack: HandoffPack }
 const vectors = JSON.parse(readFileSync(new URL('./golden/handoff-pack.vectors.json', import.meta.url), 'utf8')) as Vector[];

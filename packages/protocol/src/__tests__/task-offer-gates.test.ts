@@ -12,7 +12,6 @@ import { z } from 'zod';
 import * as v6Release from 'byok-protocol-previous';
 
 import {
-  AgentMemorySelectionSchema,
   ExecutionTargetSchema,
   readDeclineCode,
   HostOfferPlainPayloadSchema,
@@ -24,8 +23,9 @@ import {
   TaskOfferSealedPayloadSchema,
   WIRE_ADDITIONS,
   requiredReceiverCapabilities,
-  type WireAddition,
 } from '../index';
+import { AgentMemorySelectionSchema } from '../messages';
+import { type WireAddition } from '../wire-additions';
 
 type Json = { [key: string]: unknown };
 type OfferRow = WireAddition & { readonly field: string };
