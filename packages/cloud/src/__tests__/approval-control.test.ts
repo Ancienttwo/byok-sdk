@@ -253,16 +253,17 @@ describe('the gates that refuse before any mailbox row exists', () => {
     expect(isCloudError(caught, 'task_not_found')).toBe(true);
   });
 
-  it('refuses an unclaimed task even when a timeline entry exists', async () => {
+  it('refuses an unclaimed task, whose approval report is refused too', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: offerPayload('never claimed'),
     });
-    // Reported without a claim: nothing owns this attempt, so no runtime is
-    // paused on it and there is no device an approval could belong to.
-    await awaitApproval(harness, device, offer.taskId, 'approval-a');
+    // Nothing owns this attempt, so no runtime is paused on it (#2289).
+    expect(await handleInboundEnvelope(deviceStores(harness, device), device.deviceId,
+      createEnvelope('task.await_approval', { summary: 'delete production', approvalId: 'approval-a' }, { taskId: offer.taskId })))
+      .toMatchObject({ outcome: 'rejected', reason: 'task_not_claimed' });
 
     const caught = await harness.cloud
       .approveTask(TENANT_A, offer.taskId)
