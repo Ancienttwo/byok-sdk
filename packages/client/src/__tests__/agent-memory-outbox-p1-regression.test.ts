@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_MEMORY_MAX_LOCAL_LOG_BYTES,
   AGENT_MEMORY_OUTBOX_FILENAME,
+  AgentMemoryOutboxVersionUnsupportedError,
   AgentMemoryProjectionReplayPendingError,
   AgentMemoryRedactedOutbox,
   snapshotAndProjectAgentMemory,
@@ -224,17 +225,16 @@ describe('Agent-memory projection outbox P1 regression', () => {
       expect(await project(filesystem, { ...grant, sealing: { scopeId: 'scope-agent', epoch: 2 } })).toEqual(refused);
     });
 
-    it('binds a 0.32.0 state plain, and lets only a higher writer epoch change the binding', async () => {
+    it('refuses a 0.32.0 version 2 state with a typed error and leaves the file untouched', async () => {
       const filesystem = memoryHome();
-      filesystem.files.set(`.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`, JSON.stringify({
-        version: 2, currentWriterEpoch: 1, highWater: [{ writerEpoch: 1, sourceSeq: 1 }], pending: [],
-      }));
-      expect(await project(filesystem, sealedGrant)).toEqual(refused);
-      const superseding = await project(filesystem, { ...sealedGrant, writerEpoch: 2 });
-      expect(superseding.error).toBeUndefined();
-      expect(superseding.published.map(({ writerEpoch, sourceSeq, sealed }) => ({ writerEpoch, sourceSeq, scope: sealed?.scope.id })))
-        .toEqual([{ writerEpoch: 2, sourceSeq: 1, scope: 'scope-agent' }]);
-      expect(await project(filesystem, { ...grant, writerEpoch: 2 })).toEqual(refused);
+      const body = JSON.stringify({ version: 2, currentWriterEpoch: 1, highWater: [{ writerEpoch: 1, sourceSeq: 1 }], pending: [] });
+      filesystem.files.set(`.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`, body);
+      for (const candidate of [grant, { ...sealedGrant, writerEpoch: 2 }]) {
+        const result = await project(filesystem, candidate);
+        expect(result).toEqual({ published: [], error: expect.any(AgentMemoryOutboxVersionUnsupportedError) });
+        expect((result.error as AgentMemoryOutboxVersionUnsupportedError).stateVersion).toBe(2);
+      }
+      expect(filesystem.files.get(`.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`)).toBe(body);
     });
   });
 });

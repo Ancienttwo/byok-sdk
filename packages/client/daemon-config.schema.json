@@ -2489,55 +2489,5 @@
     "productName",
     "productId",
     "serverUrl"
-  ],
-  "x-byok-removedFields": [
-    {
-      "path": "permissionDefaults",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "agentEgress.sanitizer",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "mcpLaunchCwd",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "toolImplementationAuthority",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "hostedJournal",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "strictAgentOnly",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "gitWorkspace",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "workspaceRoot",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "resultDocument",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "maxConcurrentMutableSessionsPerAgentHome",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "durablePi",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "agentMemoryFilesystem",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    }
   ]
 }

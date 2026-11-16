@@ -932,10 +932,8 @@ function buildDaemon(
   const {
     agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin,
     agentMemoryDescribeBin, agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, piByokLauncher,
-    memoryHelper, configWarnings, toolAuthorizationResolver,
+    memoryHelper, toolAuthorizationResolver,
   } = resolveDaemonConfig({ overrides, config });
-  // Q4': an unknown field never stops the daemon; it is logged once and reported in status().config.
-  for (const warning of configWarnings) console.warn(`[byok/client] ${warning.message}`);
   const adapters = buildAdapters(piByokLauncher);
   const agySessionStore = adapters.map(agySessionStoreOf).find(store => store !== undefined);
   // The durable worker's lease and journal barriers live in the Agent home.
@@ -950,7 +948,7 @@ function buildDaemon(
   } = composeDaemonStores({ config, overrides, agentMemoryMcpEnabled, resolveAgentMemoryFilesystemHelperBin, toolsetRegistry, agentMemoryDescribeBin, adapters });
   // Config-derived, so resolved once; `byok-agent config check` builds the same report.
   const effectiveConfig = describeEffectiveDaemonConfig({
-    config, warnings: configWarnings, memoryHelper, agentMemoryMcpAdmission, storeDir,
+    config, memoryHelper, agentMemoryMcpAdmission, storeDir,
     scratchRoot: storageConfig.scratchRoot, adapters, runtimeSource,
   });
 
@@ -1095,7 +1093,7 @@ function buildDaemon(
   const daemonScope: DaemonScope = {
     config, adapters, overrides, assertionProbe, agentMemoryMcpEnabled, piByokLauncher,
     resolveAgentMemoryFilesystemHelperBin, agentMemoryMcpBin, agentMemoryDescribeBin,
-    agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, memoryHelper, configWarnings, toolAuthorizationResolver, effectiveConfig,
+    agentMemoryMcpAdmission, localAgentRelease, toolsetRegistry, memoryHelper, toolAuthorizationResolver, effectiveConfig,
     agentHomeReaderLimit, egressPolicy,
     egressBatcherOptions, presenceCadence, deviceAssertionAudiences, deviceAssertionTtlMs, storeDir,
     storageConfig, retentionClock, scratchRoot, storagePressure, inputPreparationLimits,

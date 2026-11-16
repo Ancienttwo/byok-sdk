@@ -326,7 +326,7 @@ export function duplicateAdapterIdIssues(adapters: readonly RuntimeAdapter[]): D
   for (const [index, adapter] of adapters.entries()) {
     const id = adapter.descriptor.id;
     if (ids.has(id)) return [{
-      severity: 'error', code: 'invalid_value', path: `adapters[${index}].descriptor.id`,
+      code: 'invalid_value', path: `adapters[${index}].descriptor.id`,
       message: `duplicate adapter descriptor.id: ${id}`,
     }];
     ids.add(id);

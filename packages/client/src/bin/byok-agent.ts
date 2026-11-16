@@ -99,7 +99,7 @@ function usage(exitCode = 1): never {
       '  byok-agent pair <code> --server <url> [--e2ee] [--replace-other-store] [--config <path>]   (--e2ee: <code> is the <pairing code>.<verification secret> the web client shows; --replace-other-store: replace an enrollment another storeDir of this productId paired)',
       '  byok-agent start [--config <path>] [--service]            (or BYOK_CONFIG env var; launchd/systemd pass --service)',
       '  byok-agent status [--config <path>]',
-      '  byok-agent config check [--strict] [--json] [--config <path>]   (validate a config file and print its effective values; --strict fails on warnings)',
+      '  byok-agent config check [--json] [--config <path>]   (validate a config file and print its effective values)',
       '  byok-agent doctor [--json] [--fix --yes] [--config <path>]',
       '  byok-agent doctor --repair restore-enrollment-metadata --expected-device-id <id> --expected-tenant-id <id> --yes [--json] [--config <path>]',
       '  byok-agent doctor --repair reset-cursor --yes [--json] [--config <path>]   (after a cursor_unreadable halt: replay from 0)',
@@ -221,11 +221,11 @@ async function main(): Promise<void> {
   }
 
   if (command === 'config') {
-    const [action, ...extra] = positionalArgs(rest, ['--config']).filter((arg) => arg !== '--strict' && arg !== '--json');
+    const [action, ...extra] = positionalArgs(rest, ['--config']).filter((arg) => arg !== '--json');
     if (action !== 'check' || extra.length > 0) usage();
     const configPath = configPathFrom(rest);
     if (!configPath) throw new ConfigError('config check requires --config <path> or a BYOK_CONFIG env var');
-    process.exitCode = runConfigCheckCommand(configPath, { strict: hasFlag(rest, '--strict'), json: hasFlag(rest, '--json') });
+    process.exitCode = runConfigCheckCommand(configPath, { json: hasFlag(rest, '--json') });
     return;
   }
 

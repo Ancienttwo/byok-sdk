@@ -3499,8 +3499,9 @@ secret change, or Agent-home deletion is part of this contract.
 Wire v4 removed Git workspace mode and the daemon's task workspace root (#925,
 ADR-034). Every offer is an Agent offer and runs in its SDK-owned Agent home, so
 no task runs in a `workspaceRoot/<taskId>` directory or a Git checkpoint
-workspace. `DaemonConfig.gitWorkspace`, `DaemonOverrides.gitWorkspace` and
-`DaemonConfig.workspaceRoot` raise `DaemonConfigFieldRemovedError`. The
+workspace. `DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot` are
+unknown fields and fail validation; `DaemonOverrides.gitWorkspace` throws a
+`TypeError`. The
 `byok-agent workspaces` command, the local `git-workspace` daemon event and
 audit record, the doctor `workspace` check and the `workspace` retention class
 are gone; an older audit log's `git-workspace` lines and `retention-failure`
@@ -3617,9 +3618,9 @@ Agent-only admission is the wire itself since v4: the one offer type,
 sealed), and the runtime-only offers are gone from the protocol. The local runner is the final authority: a daemon
 without `DaemonConfig.agentHome` advertises no `agent-home-contract` and
 declines every offer before admission, workspace, claim or start. The
-`strict-agent-only` flag is removed, and `DaemonConfig.strictAgentOnly` raises
-`DaemonConfigFieldRemovedError`, as do the removed `DaemonConfig.gitWorkspace`
-and `DaemonConfig.workspaceRoot`.
+`strict-agent-only` flag is removed, and `DaemonConfig.strictAgentOnly`, like
+the removed `DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot`, is an
+unknown field that fails validation.
 
 
 ### Owned Pi RPC team member and GUI interaction
@@ -5049,14 +5050,10 @@ missing `qualifiedVersion`/`unqualified`. `config check` reports the issue;
 adapter construction fails rather than silently dropping the policy.
 `DaemonEffectiveConfig.runtimes[].versionPolicy` reports the effective policy
 only — the installed version and verdict belong to `status`/`doctor`, because
-`config check` starts no runtime. Unknown fields remain warnings (Q4'). The
+`config check` starts no runtime. An unknown field is an error, in
+`config check` and at construction alike. The
 generated field table and error catalog are in
 [device setup](device-setup.md#configuration).
 
 The default policy changes no behavior, so migration needs no action; only a
 Host that deliberately configures a block changes admission.
-
-### Removed DaemonConfig fields
-
-See the [generated removed-field migration table](device-setup.md#removed-fields).
-This anchor remains the target of typed removed-field errors.

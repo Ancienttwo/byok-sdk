@@ -481,6 +481,7 @@ Owner 2026-10-31 批准修订方向：**缺省行为逐字不变；版本在缺�
 - 非法策略：新增 `DaemonConfigIssueCode` `invalid_version_policy`，覆盖空 exact/prefix、prefix 不以 `.` 结尾、重复 spec、缺 `qualifiedVersion`/`unqualified`、descriptor 层出现 block（`block_requires_host`）；并加 `setup-error-catalog.json` 条目与 `device-setup.md` 锚点。`config check` 报错、运行时构造失败（这是配置错误，不是 task decline）。
 - 迁移节：默认策略不改变行为 → **无需动作**；只有 Host 主动加 block 才有行为变化。升级清单新增一条 additive 条目（见 §5）。
 - 未知字段仍按 Q4' warn；不要为了策略引入新的“拒绝未知字段”路径。
+  - 2026-11-16 修订：兼容清扫（C1）按 owner「旧数据拒绝」裁定撤销 Q4'：`DaemonConfig` 的未知字段在 CLI 与内嵌构造中都是 `unknown_field` 错误，warning 与 `config check --strict` 一并删除。本条不再成立。
 
 ### 4.4 AiphaBee `runtime-executables.ts` 的收回契约
 
@@ -525,7 +526,7 @@ AiphaBee 现在自己做的五件事，分别由 SDK 承接：
 | R3 | 重启降级 | 第二次 detect 返回更低 token | `direction: 'downgrade'`，措辞更强；即使版本 allow 也提示 |
 | R4 | 变更到 block | 第二次 detect 落在 block | 提示 + 准入 decline（不互相替代） |
 | I1 | 非法配置 | `byok-agent config check --strict` + 内嵌构造 | `invalid_version_policy`（空 spec、prefix 无结尾 `.`、重复 spec、descriptor block），retryable false，有 nextStep/anchor |
-| I2 | 未知字段 | 现有 Q4' 用例 | 仍只 warn；不因新字段误拒 |
+| I2 | 未知字段 | 现有 Q4' 用例 | 仍只 warn；不因新字段误拒（2026-11-16 起改为 `unknown_field` 错误，见 §4.3 修订） |
 | M1 | 缺 CLI | 现有 detect 失败 fixture（`ENOENT`） | cause `not_installed`，retryable true，不 start |
 | M2 | 不可执行/超时/探测失败 | 现有 `runtime-detection-observation.test.ts` | 各 cause 对应正确，失败结果无路径/stderr |
 | M3 | 未登录 | `authPresent: false` fixture | **不 decline**（仅 status/doctor 提示）；运行期 auth 失败仍 `failure.class: 'auth'` |

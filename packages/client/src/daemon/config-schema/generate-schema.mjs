@@ -31,13 +31,12 @@
 //   an error. (No `DaemonConfig` field has such a union today.)
 // - `localAgentRelease` is `x-byok-surface: "distribution-owned"`: the
 //   distribution (the `byok-agent` bin) supplies it, a config file must not.
-// - Objects are open in the schema (no `additionalProperties: false`): an
-//   unknown field is a warning at runtime and an error only under
-//   `byok-agent config check --strict` (Q4').
+// - Objects carry no `additionalProperties: false`; the runtime validator
+//   (`validate.ts`) rejects every unknown field.
 
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { API, SymbolFlags, TypeFlags } from 'typescript/unstable/sync';
 
 /** Bump when the shape of the generated schema (not of DaemonConfig) changes. */
@@ -53,8 +52,6 @@ export const SCHEMA_TS_PATH = path.join(here, 'schema.generated.ts');
 export const RUNTIME_IDS_TS_PATH = path.join(clientRoot, 'src/daemon-config-runtime-ids.generated.ts');
 
 async function generate() {
-  // Node strips the types of this import-free module (engines >= 24).
-  const { REMOVED_DAEMON_CONFIG_FIELDS } = await import(pathToFileURL(path.join(here, 'removed-fields.ts')).href);
   const api = new API({ cwd: clientRoot });
   try {
     const snapshot = api.updateSnapshot({ openProject: tsconfig });
@@ -75,7 +72,6 @@ async function generate() {
       description: 'Configuration of one @byok-sdk/client daemon (byok-agent config file or createDaemon argument). Generated from the DaemonConfig TypeScript interface; do not edit.',
       'x-byok-schemaVersion': DAEMON_CONFIG_SCHEMA_VERSION,
       ...root,
-      'x-byok-removedFields': REMOVED_DAEMON_CONFIG_FIELDS.map(({ path: field, migration }) => ({ path: field, migration })),
     };
   } finally {
     api.close();

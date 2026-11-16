@@ -14,7 +14,6 @@ import { serviceLogDir } from '../host-layout.js';
 import { scratchRootSocketBudget } from '../retention/scratch.js';
 import type { DaemonConfig, DaemonStatus } from '../create-daemon.js';
 import { DAEMON_CONFIG_SCHEMA_VERSION } from './schema.generated.js';
-import type { DaemonConfigIssue } from './validate.js';
 import { runtimeEnvironmentFor } from '../../adapters/runtime-adapters.js';
 import type { RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 
@@ -79,8 +78,6 @@ export interface DaemonEffectiveRuntime {
 export interface DaemonEffectiveConfig {
   /** Version of the generated `daemon-config.schema.json` this daemon validates against. */
   readonly schemaVersion: number;
-  /** Unknown-field warnings; a daemon starts with them (Q4'). */
-  readonly warnings: readonly DaemonConfigIssue[];
   readonly directories: {
     readonly storeDir: { readonly path: string; readonly source: 'config' | 'default' };
     /** `agentHome.hostStorageRoot`, resolved. Absent without an Agent home. */
@@ -137,7 +134,6 @@ export type DaemonEffectiveToolAuthorization = (
 
 export interface EffectiveDaemonConfigInput {
   readonly config: DaemonConfig;
-  readonly warnings: readonly DaemonConfigIssue[];
   readonly memoryHelper: DaemonMemoryHelperResolution;
   readonly agentMemoryMcpAdmission: DaemonStatus['agentMemoryMcp'];
   /** Resolved `storeDir`. */
@@ -242,7 +238,6 @@ export function describeEffectiveDaemonConfig(input: EffectiveDaemonConfigInput)
 
   return {
     schemaVersion: DAEMON_CONFIG_SCHEMA_VERSION,
-    warnings: input.warnings,
     directories: {
       storeDir: { path: storeDir, source: config.storeDir === undefined ? 'default' : 'config' },
       ...(hostStorageRoot === undefined ? {} : { hostStorageRoot, agentHomes: path.join(hostStorageRoot, AGENT_HOME_DIRECTORY) }),

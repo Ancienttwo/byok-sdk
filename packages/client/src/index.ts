@@ -140,7 +140,6 @@ export {
   type DaemonMemoryHelperResolution,
 } from './daemon/config-schema/index.js';
 export {
-  DaemonConfigFieldRemovedError,
   DaemonJournalProtocolUnsupportedError,
   DeviceStoreBindingMismatchError,
   EmbeddedPairingError,
@@ -203,6 +202,7 @@ export type {
 } from './daemon/agent-memory-intent.js';
 export {
   AgentMemorySnapshotLimitError,
+  AgentMemoryOutboxVersionUnsupportedError,
   AgentMemoryRevisionConflictError,
   isAgentMemorySecureFilesystemAvailable,
   AGENT_MEMORY_AUDIT_FILENAME,

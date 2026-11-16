@@ -72,7 +72,7 @@ the end of the turn. A turn that ends with nothing staged fails with
 `result_not_submitted` (`retryable: false`); failure, cancellation and restart
 never deliver a staged outcome. Result-document offers need an Agent home;
 `DaemonConfig.resultDocument` no longer exists and is
-refused with `DaemonConfigFieldRemovedError`.
+refused as an unknown field.
 Provider
 credentials are not read by the dispatch plane; `@byok-sdk/keys` is a separate
 install and keeps a zero dependency edge to this package.
@@ -484,12 +484,11 @@ Startup materializes and write-probes the canonical root before publishing
 Successful startup with this configuration advertises `agent-home-contract`.
 Since wire v4 every offer is an Agent offer, and the daemon runs Agent offers
 only: a daemon without `agentHome` advertises no `agent-home-contract` and
-declines every offer. `DaemonConfig.strictAgentOnly` is removed and raises
-`DaemonConfigFieldRemovedError`. Wire v4 also removed Git workspace mode
-(#925): `DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot` raise
-`DaemonConfigFieldRemovedError`, and the `byok-agent workspaces` command is
-gone. Agent offers fail closed when identity, profile
-revision, or session/runtime/cwd evidence does not match. Within one daemon process,
+declines every offer. `DaemonConfig.strictAgentOnly` is removed and refused
+as an unknown field. Wire v4 also removed Git workspace mode (#925):
+`DaemonConfig.gitWorkspace` and `DaemonConfig.workspaceRoot` are refused as
+unknown fields, and the `byok-agent workspaces` command is gone. Agent offers
+fail closed when identity, profile revision, or session/runtime/cwd evidence does not match. Within one daemon process,
 execution leases are scoped to `(agentId, sessionRef)`: different sessions of
 one Agent may run concurrently in the same canonical home, while the same
 session remains serialized. Fresh

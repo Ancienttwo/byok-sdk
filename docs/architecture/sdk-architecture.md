@@ -719,7 +719,7 @@ request_id 匹配 ACK，不依赖事件消费者。成功 ACK 保留会话，1 �
 
 ## 6. Local Git checkpoint workspace（wire v4 已删除）
 
-wire v4（#925）执行了 ADR-034 的 gitWorkspace 一项：每个 offer 都在 SDK 拥有的 Agent home 里运行，Git workspace 模式与 `workspaceRoot/<taskId>` 目录一并删除。`DaemonConfig.gitWorkspace`、`DaemonOverrides.gitWorkspace` 与 `DaemonConfig.workspaceRoot` 抛 `DaemonConfigFieldRemovedError`；`byok-agent workspaces`、`git-workspace` daemon event 与 audit record、doctor 的 `workspace` 检查都已删除。旧 daemon 留下的 `<storeDir>/git-workspaces.json` 与 task 目录保持原样，由 operator 手动处理。
+wire v4（#925）执行了 ADR-034 的 gitWorkspace 一项：每个 offer 都在 SDK 拥有的 Agent home 里运行，Git workspace 模式与 `workspaceRoot/<taskId>` 目录一并删除。`DaemonConfig.gitWorkspace` 与 `DaemonConfig.workspaceRoot` 作为未知字段被拒（`unknown_field`），`DaemonOverrides.gitWorkspace` 抛 `TypeError`；`byok-agent workspaces`、`git-workspace` daemon event 与 audit record、doctor 的 `workspace` 检查都已删除。旧 daemon 留下的 `<storeDir>/git-workspaces.json` 与 task 目录保持原样，由 operator 手动处理。
 
 ## 7. `@byok-sdk/keys`：独立 provider credential plane
 

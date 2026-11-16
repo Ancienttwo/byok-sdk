@@ -25,5 +25,4 @@ export interface DaemonConfigJsonSchema {
    */
   readonly 'x-byok-embeddedAlternative'?: 'function';
   readonly 'x-byok-schemaVersion'?: number;
-  readonly 'x-byok-removedFields'?: readonly { readonly path: string; readonly migration: string }[];
 }

@@ -241,7 +241,7 @@ guarantees.
 
 ## Local Git checkpoint workspaces (removed)
 
-Wire v4 removed the local Git checkpoint mode and the daemon's task workspace root (#925). Every task runs in its Agent home. `gitWorkspace` and `workspaceRoot` in the daemon config raise `DaemonConfigFieldRemovedError`, and `byok-agent workspaces` is gone. The daemon does not read, clean up or delete what an older daemon left: task repositories, files and the private ledger `<storeDir>/git-workspaces.json` stay in place for manual salvage.
+Wire v4 removed the local Git checkpoint mode and the daemon's task workspace root (#925). Every task runs in its Agent home. `gitWorkspace` and `workspaceRoot` in the daemon config are refused as unknown fields (`unknown_field`), and `byok-agent workspaces` is gone. The daemon does not read, clean up or delete what an older daemon left: task repositories, files and the private ledger `<storeDir>/git-workspaces.json` stay in place for manual salvage.
 
 | Asset | Where it lives | Who touches it |
 |---|---|---|

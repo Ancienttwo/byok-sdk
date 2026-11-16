@@ -118,7 +118,6 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
 
     const daemon = createDaemon(config);
     const effective = daemon.status().config;
-    expect(effective.warnings).toEqual([]);
     expect(effective.runtimes).toEqual([
       { id: 'pi', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded' }, versionPolicy: { qualifiedVersion: '1.5.2', unqualified: 'allow' }, runtimeEnvironment: { base: 'login-shell' } },
       { id: 'claude', source: 'sdk-built', toolAuthorizationAuto: true, isolation: { agentUserContext: 'excluded', agentSessionPersistence: 'disabled' }, versionPolicy: { qualifiedVersion: '2.1.312', unqualified: 'allow' }, runtimeEnvironment: { base: 'login-shell' } },
@@ -145,9 +144,9 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     expect(check).toEqual({ ok: true, issues: [], effective: daemon.status().config });
 
     const lines: string[] = [];
-    expect(runConfigCheckCommand(file, { strict: true, json: false }, { log: (line) => lines.push(line) })).toBe(0);
+    expect(runConfigCheckCommand(file, { json: false }, { log: (line) => lines.push(line) })).toBe(0);
     const out = lines.join('\n');
-    expect(out).toContain('result: ok (0 errors, 0 warnings; --strict fails on warnings)');
+    expect(out).toContain('result: ok (0 errors)');
     expect(out).toContain('pi [sdk-built] auto supported agentUserContext=excluded');
     expect(out).toContain('claude [sdk-built] auto supported agentUserContext=excluded agentSessionPersistence=disabled');
     expect(out).toContain('tool authorization: static (local tool approval: host-only)');
@@ -162,12 +161,11 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     });
     const daemon = createDaemon(loadConfig(file));
     const effective = daemon.status().config;
-    expect(effective.warnings).toEqual([]);
     expect(effective.toolAuthorization).toEqual({ mode: 'static', byRuntime: { codex: 'all' }, localToolApproval: 'host-only' });
     expect(constructed.codex).toEqual([expect.objectContaining({ agentUserMcpServers: 'excluded', agentUserContext: 'excluded' })]);
 
     const lines: string[] = [];
-    expect(runConfigCheckCommand(file, { strict: true, json: false }, { log: (line) => lines.push(line) })).toBe(0);
+    expect(runConfigCheckCommand(file, { json: false }, { log: (line) => lines.push(line) })).toBe(0);
     expect(lines.join('\n')).toContain('codex [sdk-built] auto unsupported agentUserMcpServers=excluded agentUserContext=excluded sandbox=danger-full-access');
   });
 
@@ -180,7 +178,6 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     });
     const daemon = createDaemon(loadConfig(file));
     const effective = daemon.status().config;
-    expect(effective.warnings).toEqual([]);
     expect(effective.runtimes).toEqual([{
       id: 'grok', source: 'sdk-built', toolAuthorizationAuto: false, runtimeEnvironment: { base: 'login-shell' },
       isolation: { compatInstructions: 'disabled', agentUserMcpServers: 'excluded', agentUserContext: 'excluded' }, versionPolicy,
@@ -192,7 +189,7 @@ describe('Salesko-shaped CLI config sets isolation and static auto from the file
     expect([...constructed.pi, ...constructed.claude, ...constructed.codex]).toEqual([]);
 
     const lines: string[] = [];
-    expect(runConfigCheckCommand(file, { strict: true, json: false }, { log: (line) => lines.push(line) })).toBe(0);
+    expect(runConfigCheckCommand(file, { json: false }, { log: (line) => lines.push(line) })).toBe(0);
     expect(lines.join('\n')).toContain('grok [sdk-built] auto unsupported compatInstructions=disabled agentUserMcpServers=excluded');
   });
 

@@ -1,6 +1,5 @@
 import { DAEMON_CONFIG_SCHEMA } from './schema.generated.js';
 import type { DaemonConfigJsonSchema } from './schema-types.js';
-import { REMOVED_DAEMON_CONFIG_FIELDS, type RemovedDaemonConfigField } from './removed-fields.js';
 
 /**
  * Where a `DaemonConfig` comes from (#1094).
@@ -21,7 +20,6 @@ export type DaemonConfigIssueCode =
   | 'invalid_version_policy'
   | 'invalid_file_scope'
   | 'unknown_field'
-  | 'removed_field'
   | 'embedded_only'
   | 'distribution_owned';
 
@@ -30,49 +28,36 @@ export type DaemonConfigIssueCode =
  * and the expected type, never the supplied value.
  */
 export interface DaemonConfigIssue {
-  /** `warning` never stops a daemon (Q4'); `byok-agent config check --strict` fails on it. */
-  readonly severity: 'error' | 'warning';
   readonly code: DaemonConfigIssueCode;
   /** Dotted path from the config root; `''` for the root itself. */
   readonly path: string;
   readonly message: string;
-  /** Repo-relative `.md#anchor` of the migration note, for `removed_field`. */
-  readonly migration?: string;
 }
 
 export interface DaemonConfigValidation {
-  /** No `error` issue. Warnings do not affect it. */
+  /** No issue. */
   readonly ok: boolean;
   readonly issues: readonly DaemonConfigIssue[];
-}
-
-const REMOVED = new Map<string, RemovedDaemonConfigField>(REMOVED_DAEMON_CONFIG_FIELDS.map((field) => [field.path, field]));
-
-/** The removed-field entry for `path`, if `path` names a removed `DaemonConfig` field. */
-export function removedDaemonConfigField(path: string): RemovedDaemonConfigField | undefined {
-  return REMOVED.get(path);
 }
 
 /**
  * The one `DaemonConfig` validator, shared by `byok-agent` (config files) and
  * daemon construction (#1094). It checks what the generated schema
  * (`daemon-config.schema.json`) expresses: required fields, JSON types and
- * literal values, unknown fields and removed fields. Value ranges and
- * cross-field rules stay with daemon construction, which reports them as
- * construction errors.
+ * literal values and unknown fields. Value ranges and cross-field rules stay
+ * with daemon construction, which reports them as construction errors.
  *
- * An unknown field is a `warning`: a config written by a newer Host or SDK
- * must still start an older daemon after a rollback (Q4'). A removed field is
- * an `error` with its migration note, because the Host relied on it.
+ * Every issue is an error: an unknown field, including one an older release
+ * accepted, fails the config instead of being silently ignored.
  */
 export function validateDaemonConfig(input: unknown, options: { readonly source: DaemonConfigSource }): DaemonConfigValidation {
   const issues: DaemonConfigIssue[] = [];
   if (!isPlainObject(input)) {
-    issues.push({ severity: 'error', code: 'not_an_object', path: '', message: `DaemonConfig must be a JSON object, got ${kindOf(input)}` });
+    issues.push({ code: 'not_an_object', path: '', message: `DaemonConfig must be a JSON object, got ${kindOf(input)}` });
   } else {
     validateObject(input, DAEMON_CONFIG_SCHEMA, '', options.source, issues, true);
   }
-  return { ok: !issues.some((issue) => issue.severity === 'error'), issues };
+  return { ok: issues.length === 0, issues };
 }
 
 function validateValue(value: unknown, schema: DaemonConfigJsonSchema, path: string, source: DaemonConfigSource, issues: DaemonConfigIssue[]): void {
@@ -82,28 +67,29 @@ function validateValue(value: unknown, schema: DaemonConfigJsonSchema, path: str
     // the distribution's release identity); a config file cannot carry them.
     if (source === 'embedded') return;
     issues.push(surface === 'embedded-only'
-      ? { severity: 'error', code: 'embedded_only', path, message: `DaemonConfig.${path} is not expressible in a config file; only an embedded Host can pass it to createDaemon` }
-      : { severity: 'error', code: 'distribution_owned', path, message: `config field "${path}" is distribution-owned and must not be supplied` });
+      ? { code: 'embedded_only', path, message: `DaemonConfig.${path} is not expressible in a config file; only an embedded Host can pass it to createDaemon` }
+      : { code: 'distribution_owned', path, message: `config field "${path}" is distribution-owned and must not be supplied` });
     return;
   }
   const functionAlternative = schema['x-byok-embeddedAlternative'] === 'function';
   if (functionAlternative && typeof value === 'function') {
     // Embedded construction resolves the function; a config file sets the object form.
     if (source === 'cli') {
-      issues.push({ severity: 'error', code: 'embedded_only', path, message: `DaemonConfig.${path} as a function is not expressible in a config file; set its object form, or pass the function from an embedded Host` });
+      issues.push({ code: 'embedded_only', path, message: `DaemonConfig.${path} as a function is not expressible in a config file; set its object form, or pass the function from an embedded Host` });
     }
     return;
   }
   if (schema.anyOf !== undefined) {
+    // A branch the value fails only by unknown fields is the one it meant:
+    // report those, with their suggestions, instead of the bare union type.
+    let unknownOnly: DaemonConfigIssue[] | undefined;
     for (const branch of schema.anyOf) {
       const branchIssues: DaemonConfigIssue[] = [];
       validateValue(value, branch, path, source, branchIssues);
-      if (!branchIssues.some((issue) => issue.severity === 'error')) {
-        issues.push(...branchIssues);
-        return;
-      }
+      if (branchIssues.length === 0) return;
+      if (unknownOnly === undefined && branchIssues.every((issue) => issue.code === 'unknown_field')) unknownOnly = branchIssues;
     }
-    issues.push(typeIssue(path, describe(schema), value));
+    issues.push(...(unknownOnly ?? [typeIssue(path, describe(schema), value)]));
     return;
   }
   if (schema.const !== undefined) {
@@ -129,7 +115,7 @@ function validateValue(value: unknown, schema: DaemonConfigJsonSchema, path: str
         return;
       }
       if (schema.prefixItems !== undefined && value.length !== schema.prefixItems.length) {
-        issues.push({ severity: 'error', code: 'invalid_value', path, message: `DaemonConfig.${path} must have exactly ${schema.prefixItems.length} items` });
+        issues.push({ code: 'invalid_value', path, message: `DaemonConfig.${path} must have exactly ${schema.prefixItems.length} items` });
         return;
       }
       value.forEach((item, index) => {
@@ -160,19 +146,14 @@ function validateObject(
   const properties = schema.properties ?? {};
   for (const key of Object.keys(value)) {
     const child = path === '' ? key : `${path}.${key}`;
-    const removed = REMOVED.get(child);
-    if (removed !== undefined) {
-      issues.push({ severity: 'error', code: 'removed_field', path: child, message: removed.message, migration: removed.migration });
-      continue;
-    }
     // A config file may name its schema for editors.
     if (root && key === '$schema') continue;
     const propertySchema = Object.hasOwn(properties, key) ? properties[key] : schema.additionalProperties;
     if (propertySchema === undefined) {
       const suggestion = closest(key, Object.keys(properties));
       issues.push({
-        severity: 'warning', code: 'unknown_field', path: child,
-        message: `DaemonConfig.${child} is not a known field and is ignored${suggestion === undefined ? '' : `; did you mean "${suggestion}"?`}`,
+        code: 'unknown_field', path: child,
+        message: `DaemonConfig.${child} is not a known field${suggestion === undefined ? '' : `; did you mean "${suggestion}"?`}`,
       });
       continue;
     }
@@ -183,17 +164,17 @@ function validateObject(
     // At the root an empty string is as missing as an absent field, as it was for the CLI.
     if (value[key] === undefined || value[key] === null || (root && value[key] === '')) {
       const child = path === '' ? key : `${path}.${key}`;
-      issues.push({ severity: 'error', code: 'missing_required', path: child, message: root ? `config is missing required field "${key}"` : `DaemonConfig.${child} is required` });
+      issues.push({ code: 'missing_required', path: child, message: root ? `config is missing required field "${key}"` : `DaemonConfig.${child} is required` });
     }
   }
 }
 
 function typeIssue(path: string, expected: string, value: unknown): DaemonConfigIssue {
-  return { severity: 'error', code: 'invalid_type', path, message: `DaemonConfig.${path} must be ${expected}, got ${kindOf(value)}` };
+  return { code: 'invalid_type', path, message: `DaemonConfig.${path} must be ${expected}, got ${kindOf(value)}` };
 }
 
 function valueIssue(path: string, expected: string, value: unknown): DaemonConfigIssue {
-  return { severity: 'error', code: 'invalid_value', path, message: `DaemonConfig.${path} must be ${expected}, got ${typeof value === 'string' ? 'another string' : kindOf(value)}` };
+  return { code: 'invalid_value', path, message: `DaemonConfig.${path} must be ${expected}, got ${typeof value === 'string' ? 'another string' : kindOf(value)}` };
 }
 
 function describe(schema: DaemonConfigJsonSchema): string {
