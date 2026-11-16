@@ -541,6 +541,33 @@ at most 64 capability flags.
   `rejected` and `type_unsupported`, each with HTTP 200. The handshake answer
   carries `ingress` and no `capabilities`.
 
+### Embedded server (`@byok-sdk/server`)
+
+- **SQLite store.** The schema is version 10 and no older file is upgraded in
+  place. Opening a file from a v6 build (schema 6 to 9) fails with
+  `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`, and `inspectSqliteStore`
+  reports `new-path-repair`. Point `storage.path` at a new file, keep the old
+  one for the history export, and pair the devices again.
+- **Dispatch.** `DispatchInput` takes one required `target` in place of
+  `runtime`, `harnessId` and `dispatchSelection`. Pass `{ lane: 'auto' }` to
+  keep the device's own runtime choice. An execution-core intent names a
+  concrete target; `auto` is refused there.
+- **Claimed executor.** `TaskSnapshot.claimedExecutor` and the `task.state`
+  server event's `claimedExecutor` replace `claimedRuntime` and
+  `claimedHarnessId`; `SteerRejectedError.executor` replaces `runtime`.
+- **Steer.** `TaskHandle.steer` resolves `{ messageId }`. Text over 65,536
+  UTF-8 bytes is refused with `ByokCloudError` `coordination_input_invalid`
+  before anything is enqueued.
+- **Steer refusals.** A task's event feed yields
+  `{ kind: 'steer_refused', messageId, reason, at }` for each refusal
+  recorded before its terminal; add the arm to exhaustive switches over
+  `ServerTaskEvent`. `tasks.readSteerRefusal(taskId, messageId)` and
+  `tasks.listSteerRefusals(taskId, { afterRevision, limit })` read every
+  refusal, including one recorded after the feed ended. A refusal is kept for
+  the life of the store, archived task included.
+- **Event cursors.** `tasks.events` cursors start with `te2.`; a `te1.`
+  cursor is refused with `cursor_unknown`. Start a new read.
+
 ### Phase 1 and 2 items
 
 - Host APIs for steer refusals and their cursors (te2): phase 1.

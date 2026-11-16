@@ -69,6 +69,7 @@ const cloudFactory: CloudCompositionFactory = {
         nonces: stores.nonces,
         dedup: stores.dedup,
         tasks: stores.tasks,
+        steerRefusals: stores.steerRefusals,
         cancellations: stores.cancellations,
         receipts: stores.receipts,
         egress: stores.egress,

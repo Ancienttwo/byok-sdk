@@ -12,6 +12,7 @@ import {
   waitForTaskEvent,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -70,11 +71,11 @@ describe('long-poll transport (§8)', () => {
     const elapsedMs = Date.now() - triggeredAt;
 
     expect(pollRes.status).toBe(200);
-    const body = (await pollRes.json()) as { events: Envelope[]; cursor: number; capabilities?: string[] };
+    const body = (await pollRes.json()) as { events: Envelope[]; cursor: number };
     expect(body.events.map((e) => e.type)).toEqual(['task.offer']);
     expect(body.events[0]?.task_id).toBe(handle.taskId);
-    // Wire v6 has no server-flag gate.
-    expect(body.capabilities).toEqual([]);
+    // Wire v7 (B2): the server advertises no capabilities.
+    expect(body).not.toHaveProperty('capabilities');
     expect(elapsedMs).toBeLessThan(SHORT_HOLD_MS);
   });
 
@@ -151,7 +152,7 @@ describe('POST /byok/messages (§8, finding F6)', () => {
     // only a conn.hello records.
     await announceHello(daemon, { productId: PRODUCT_ID });
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'x', deviceId: daemon.deviceId });
-    const res = await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+    const res = await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ accepted: 1 });

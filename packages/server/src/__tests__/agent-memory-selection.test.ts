@@ -44,6 +44,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       capabilities: ['agent-home-contract'],
     });
     await expect(started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       taskId: 'memory-refused',
       instruction: 'plan only',
@@ -61,6 +62,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       capabilities: ['agent-home-contract', 'agent-memory-selection'],
     });
     await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       instruction: 'read memory',
       agentRef: AGENT_REF,
@@ -79,6 +81,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       capabilities: ALL_CAPABILITIES,
     });
     await expect(started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       taskId: 'reader-read-write',
       instruction: 'read memory',
@@ -100,7 +103,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       taskId: 'fresh-reader-read-write',
       deviceId: daemon.deviceId,
       payload: {
-        instruction: 'read memory', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        instruction: 'read memory', target: { lane: 'runtime', runtimeId: 'codex' }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write',
       },
     })).rejects.toThrow(/agentMemory read-write requires a writer/);
@@ -115,6 +118,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       capabilities: ALL_CAPABILITIES,
     });
     await expect(started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       taskId: 'read-if-admitted-refused',
       instruction: 'chat turn',
@@ -126,7 +130,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       taskId: 'fresh-read-if-admitted-refused',
       deviceId: daemon.deviceId,
       payload: {
-        instruction: 'chat turn', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        instruction: 'chat turn', target: { lane: 'runtime', runtimeId: 'codex' }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory: 'read-if-admitted',
       },
     })).rejects.toMatchObject({ code: 'agent_capability_missing' });
@@ -141,6 +145,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       capabilities: [...ALL_CAPABILITIES, 'agent-memory-read-if-admitted'],
     });
     await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       instruction: 'chat turn',
       agentRef: AGENT_REF,
@@ -159,6 +164,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       capabilities: [...ALL_CAPABILITIES, 'agent-memory-read-if-admitted'],
     });
     await expect(started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       taskId: 'read-write-if-admitted-refused',
       instruction: 'chat turn',
@@ -173,7 +179,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       taskId: 'fresh-read-write-if-admitted-refused',
       deviceId: daemon.deviceId,
       payload: {
-        instruction: 'chat turn', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        instruction: 'chat turn', target: { lane: 'runtime', runtimeId: 'codex' }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory: 'read-write-if-admitted',
       },
     })).rejects.toMatchObject({
@@ -191,6 +197,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       capabilities: [...ALL_CAPABILITIES, 'agent-memory-read-write-if-admitted'],
     });
     await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       instruction: 'chat turn',
       agentRef: AGENT_REF,
@@ -209,6 +216,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       capabilities: [...ALL_CAPABILITIES, 'agent-memory-read-write-if-admitted'],
     });
     await expect(started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       taskId: 'reader-read-write-if-admitted',
       instruction: 'read memory',
@@ -221,7 +229,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       taskId: 'fresh-reader-read-write-if-admitted',
       deviceId: daemon.deviceId,
       payload: {
-        instruction: 'read memory', runtime: 'codex', terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        instruction: 'read memory', target: { lane: 'runtime', runtimeId: 'codex' }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted',
       },
     })).rejects.toThrow(/agentMemory read-write-if-admitted requires a writer/);

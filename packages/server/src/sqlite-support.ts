@@ -280,6 +280,37 @@ export function openSqliteDatabase(
 }
 
 /**
+ * Run `read` on an existing, non-empty database file opened read-only and
+ * immutable, before anything opens it for writing. SQLite then takes no lock,
+ * writes nothing to the file and creates no journal, WAL or SHM file. It reads
+ * the main file only: content still in a WAL is not seen. `undefined` for
+ * `:memory:`, a missing path or an empty file, which hold nothing to read.
+ */
+export function readSqliteFileUnchanged<T>(path: string, read: (db: DatabaseSync) => T): T | undefined {
+  if (path === ':memory:') return undefined;
+  const { statSync } = process.getBuiltinModule('node:fs');
+  const { pathToFileURL } = process.getBuiltinModule('node:url');
+  let size: number;
+  try {
+    size = statSync(path).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw error;
+  }
+  if (size === 0) return undefined;
+  const url = pathToFileURL(path);
+  url.searchParams.set('mode', 'ro');
+  url.searchParams.set('immutable', '1');
+  const { DatabaseSync } = loadSqliteModule();
+  const db = new DatabaseSync(url, { readOnly: true });
+  try {
+    return read(db);
+  } finally {
+    db.close();
+  }
+}
+
+/**
  * Restrict `dbPath` and its WAL/SHM sibling files (`<path>-wal`,
  * `<path>-shm` — created by SQLite itself once WAL mode is active and a
  * write has happened) to owner-only read/write ({@link SECURE_FILE_MODE}).

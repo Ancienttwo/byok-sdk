@@ -1,11 +1,13 @@
 import { ByokCloudError, isCloudError, type ActivityTail, type TaskEventsWake, type TenantId } from '@byok-sdk/cloud';
 import { TASK_STATES, type TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay.js';
-import { TaskEventsUnavailableError, type ServerTaskEvent, type TaskEventEntry } from './types.js';
+import { TaskEventsUnavailableError, type ServerTaskEvent, type SteerRefusal, type TaskEventEntry } from './types.js';
 
 const TERMINAL_STATES: ReadonlySet<TaskState> = new Set<TaskState>(['Complete', 'Failed', 'Cancelled']);
 const TRUNCATED: ServerTaskEvent = { kind: 'error', reason: 'events_truncated' };
-const CURSOR_PREFIX = 'te1.';
+const CURSOR_PREFIX = 'te2.';
+/** Steer refusals read per page within one window. */
+const STEER_REFUSAL_PAGE = 100;
 
 /** One task's current facts, from the same reads `tasks.get` answers with. */
 export interface TaskEventFacts {
@@ -27,6 +29,8 @@ export interface TaskEventSources {
   readFacts(taskId: string): Promise<TaskEventFacts | undefined>;
   /** `ByokCloud.readActivity`, after `after` when given. */
   readActivity(taskId: string, after?: ActivityLogPosition): Promise<ActivityTail | undefined>;
+  /** The task's steer refusals with `revision > afterRevision`, ascending, at most `limit`. */
+  readSteerRefusals(taskId: string, afterRevision: number, limit: number): Promise<readonly SteerRefusal[]>;
 }
 
 export interface TaskEventDeps {
@@ -35,7 +39,7 @@ export interface TaskEventDeps {
   readonly sources: TaskEventSources;
   /**
    * The stores' own commit hints (#1113 A4). Every writer of a task's state,
-   * activity log or approval timeline signals it, retirement and maintenance
+   * activity log, approval timeline or steer refusals signals it, retirement and maintenance
    * included; a reader no hint reaches re-reads within its fallback.
    */
   readonly wake: TaskEventsWake;
@@ -54,21 +58,23 @@ export interface TaskEventReadOptions {
  * What a reader has consumed of each source. `log` names the last activity
  * revision read in full and `offset` how many events of the next revision were
  * already yielded, so a reader stopped inside a batch resumes inside it.
- * `approval` is the revision of the last approval request yielded and `state`
- * the last state yielded. Each entry's cursor advances only the source that
+ * `approval` is the revision of the last approval request yielded, `steer`
+ * the revision of the last steer refusal yielded and `state` the last state
+ * yielded. Each entry's cursor advances only the source that
  * entry came from.
  */
 interface Position {
   readonly log?: ActivityLogPosition;
   readonly offset: number;
   readonly approval: number;
+  readonly steer: number;
   readonly state?: TaskState;
 }
 
-const START: Position = { offset: 0, approval: 0 };
+const START: Position = { offset: 0, approval: 0, steer: 0 };
 
 function encodeCursor(taskId: string, position: Position): string {
-  const body = [taskId, position.log?.generation ?? null, position.log?.revision ?? 0, position.offset, position.approval, position.state ?? null];
+  const body = [taskId, position.log?.generation ?? null, position.log?.revision ?? 0, position.offset, position.approval, position.steer, position.state ?? null];
   return CURSOR_PREFIX + Buffer.from(JSON.stringify(body)).toString('base64url');
 }
 
@@ -82,15 +88,15 @@ function decodeCursor(taskId: string, cursor: string): Position {
   } catch {
     throw unknown();
   }
-  if (!Array.isArray(body) || body.length !== 6) throw unknown();
-  const [task, generation, revision, offset, approval, state] = body as unknown[];
+  if (!Array.isArray(body) || body.length !== 7) throw unknown();
+  const [task, generation, revision, offset, approval, steer, state] = body as unknown[];
   const count = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0;
-  if (task !== taskId || !count(revision) || !count(offset) || !count(approval)) throw unknown();
+  if (task !== taskId || !count(revision) || !count(offset) || !count(approval) || !count(steer)) throw unknown();
   if (generation === null ? revision !== 0 || offset !== 0 : typeof generation !== 'string' || generation.length === 0) throw unknown();
   if (state !== null && !TASK_STATES.includes(state as TaskState)) throw unknown();
   return {
     ...(generation === null ? {} : { log: { generation: generation as string, revision } }),
-    offset, approval, ...(state === null ? {} : { state: state as TaskState }),
+    offset, approval, steer, ...(state === null ? {} : { state: state as TaskState }),
   };
 }
 
@@ -127,16 +133,19 @@ export function readTaskEvents<T = TaskEventEntry>(
 }
 
 /**
- * The read-time projection of three authorities (#1113): canonical task state
- * and the approval timeline, read the way `tasks.get` reads them, and the
- * durable activity log. Each read window yields, in this order: the pending
- * approval request when it is new, the state when it changed, then the log
- * entries in revision order. A terminal state comes after the log was read
- * once more past it, and ends the feed. The window order is not a causal order
- * across the three sources, which never shared one.
+ * The read-time projection of four authorities (#1113, #2009): canonical task
+ * state and the approval timeline, read the way `tasks.get` reads them, the
+ * steer refusals and the durable activity log. Each read window yields, in
+ * this order: the pending approval request when it is new, the steer refusals
+ * past the last one yielded, the state when it changed, then the log entries
+ * in revision order. A terminal state comes after the refusals and the log
+ * were read once more past it, and ends the feed. The window order is not a
+ * causal order across the sources, which never shared one.
  *
- * Facts are read before the log, so the log read that follows a terminal
- * state holds every entry admitted before that terminal.
+ * Facts are read before the refusals and the log, so the reads that follow a
+ * terminal state hold everything recorded before that terminal. A refusal
+ * recorded after the terminal window reads only from `tasks.readSteerRefusal`
+ * and `tasks.listSteerRefusals`.
  */
 async function* followTaskEvents(
   deps: TaskEventDeps,
@@ -166,6 +175,17 @@ async function* followTaskEvents(
           position = { ...position, approval: facts.approval.revision };
           if (facts.approval.request !== undefined) yield entry(facts.approval.request);
         }
+      }
+      for (;;) {
+        const refusals = await sources.readSteerRefusals(taskId, position.steer, STEER_REFUSAL_PAGE);
+        if (signal.aborted) return;
+        for (const refusal of refusals) {
+          position = { ...position, steer: refusal.revision };
+          yield entry({ kind: 'steer_refused', messageId: refusal.messageId, reason: refusal.reason, at: refusal.at });
+        }
+        if (refusals.length < STEER_REFUSAL_PAGE) break;
+      }
+      if (!terminal) {
         if (facts.state !== position.state) {
           position = { ...position, state: facts.state };
           yield entry({ kind: 'state', state: facts.state, at: facts.at });

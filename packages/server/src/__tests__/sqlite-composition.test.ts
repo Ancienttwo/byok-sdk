@@ -75,7 +75,7 @@ describeSqlite('createByokServer SQLite composition', () => {
     await seed.close();
     const fault = new DatabaseSync(path);
     fault.exec("CREATE TRIGGER fail_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;"); fault.close();
-    const input: FrozenInput = { taskId: 'conditional-retry', deviceId, payload: { instruction: 'dream', runtime: 'pi',
+    const input: FrozenInput = { taskId: 'conditional-retry', deviceId, payload: { instruction: 'dream', target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: { agentId: 'main', profileRevision: '1' }, session: { mode: 'fresh' }, agentMemory: 'none', terminalProjection: { mode: 'none' },
       egressPolicy: { policyRevision: 'test', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },

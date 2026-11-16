@@ -33,6 +33,7 @@ describe('reference-server memory-reader dispatch (#317)', () => {
       capabilities: ['agent-home-contract'],
     });
     await expect(started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       taskId: 'reader-refused',
       instruction: 'read memory',
@@ -50,6 +51,7 @@ describe('reference-server memory-reader dispatch (#317)', () => {
       capabilities: ['agent-home-contract', 'agent-home-readers'],
     });
     await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       instruction: 'read memory',
       agentRef: AGENT_REF,
