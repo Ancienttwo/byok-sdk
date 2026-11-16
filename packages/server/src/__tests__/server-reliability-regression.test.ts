@@ -47,7 +47,7 @@ async function cloudWithFirstMailboxAppendFailure() {
     mailboxLimitBytes: 100_000_000n,
     retentionPolicyId: 'test',
   });
-  const composition = createInMemoryCloudStores(clock, crypto, base.objects, base.mailbox, objectBytes);
+  const composition = createInMemoryCloudStores(clock, crypto, base.objects, base.mailbox, base.presence, objectBytes);
   await composition.stores.devices.register(TENANT, {
     productId: PRODUCT_ID, deviceId: 'device-a', deviceName: 'mailbox-retry-fixture',
     devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1,

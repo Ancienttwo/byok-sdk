@@ -55,7 +55,7 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
   ],
   board: ['create', 'get', 'list', 'claim', 'unclaim', 'updateStatus', 'remove'],
   truth: ['writeTerminal', 'writeSnapshot', 'getRecord', 'listManifest'],
-  presence: ['publish', 'read', 'list', 'collectExpired'],
+  presence: ['publish', 'read', 'list', 'collectExpired', 'deleteDevice'],
   objects: [
     'putManifest',
     'commit',

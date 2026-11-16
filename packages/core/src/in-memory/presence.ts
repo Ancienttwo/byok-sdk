@@ -110,6 +110,10 @@ export class InMemoryPresenceStore implements PresenceStore {
     return live;
   }
 
+  async deleteDevice(tenant: TenantId, deviceId: string): Promise<void> {
+    this.#hints.delete(tenantKey(tenant, deviceId));
+  }
+
   async collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult> {
     assertCollectExpiredInput(input);
     let removed = 0, more = false;

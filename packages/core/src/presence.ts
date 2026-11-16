@@ -163,4 +163,6 @@ export interface PresenceStore {
   publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
   read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
   list(tenant: TenantId): Promise<readonly PresenceHint[]>;
+  /** Deletes this tenant's hint for `deviceId`; a no-op when there is none. Called by device retirement. */
+  deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }

@@ -83,7 +83,7 @@ async function lockEach(client: PoolClient, kind: 'e2ee-scope' | 'e2ee-member-ke
  * Postgres E2EE member store (`deploy/sql/0027_e2ee_member.sql`,
  * `0028_e2ee_scope_shred.sql`, `0029_e2ee_member_kem_floor.sql`). Device
  * revocation and machine supersession delete a device's rows in the device
- * transaction (`DEVICE_STATE_DELETES` in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
+ * transaction (`E2EE_MEMBER_STATE_DELETES` in `devices.ts`). A shred receipt goes to `device_request_receipts`, the
  * request receipt store, in the append transaction.
  */
 export class PostgresE2eeMemberStore implements E2eeMemberStore {

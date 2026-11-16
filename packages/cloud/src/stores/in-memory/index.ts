@@ -9,7 +9,7 @@ export { InMemoryE2eeMemberStore } from './e2ee-member.js';
  * without a database — which is what makes those same assertions meaningful
  * when a durable composition (S3b's journal, S4A's schema) runs them later.
  */
-import type { Clock, MailboxStore, ObjectStore, TenantId } from '@byok-sdk/core';
+import type { Clock, MailboxStore, ObjectStore, PresenceStore, TenantId } from '@byok-sdk/core';
 import type { CloudCrypto } from '../../crypto/port.js';
 import type { ProofReceiptRetentionAuthority } from '../../maintenance.js';
 import type { TaskArchiveStore } from '../../task-archive.js';
@@ -86,6 +86,8 @@ export function createInMemoryCloudStores(
   crypto: CloudCrypto,
   objects: ObjectStore,
   mailbox: MailboxStore,
+  /** The core presence store; device retirement deletes the retired device's hint from it. */
+  presence: PresenceStore,
   objectBytes: InMemoryBlobBytes,
   /**
    * Absent, the archive rewrites the in-memory core `mailbox` and `objects`,
@@ -103,7 +105,9 @@ export function createInMemoryCloudStores(
     closeApprovalTimeline(approvals, tenant, taskId, at);
   }, taskEventsWake.changed);
   const tasks = new InMemoryTaskAttemptStore(clock, taskState);
-  const devices = new InMemoryDeviceDirectory(taskState, mailbox);
+  const nonces = new InMemoryNonceStore(clock, crypto);
+  const dedup = new InMemoryInboundDedupStore();
+  const devices = new InMemoryDeviceDirectory(taskState, mailbox, { presence, nonces, dedup });
   const pairing = new InMemoryPairingCodeStore(clock, devices);
   const agentMessageDraft = new InMemoryAgentMessageDraftStore(clock);
   const receipts = new InMemoryRequestReceiptStore(clock);
@@ -118,8 +122,8 @@ export function createInMemoryCloudStores(
       // ports so neither side exposes the other's methods.
       pairingCodes: { issue: pairing.issue.bind(pairing), collectExpired: pairing.collectExpired.bind(pairing) },
       pairing: { redeemAndRegister: pairing.redeemAndRegister.bind(pairing) },
-      nonces: new InMemoryNonceStore(clock, crypto),
-      dedup: new InMemoryInboundDedupStore(),
+      nonces,
+      dedup,
       tasks,
       cancellations: new InMemoryTaskCancellationStore(taskState, mailbox, devices),
       receipts,

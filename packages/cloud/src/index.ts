@@ -366,6 +366,7 @@ export type {
   DeviceRecord,
   DeviceRegistration,
   InboundDedupStore,
+  DeviceScopedStores,
   InboundRateLimiter,
   NonceStore,
   PairingCodeClaims,

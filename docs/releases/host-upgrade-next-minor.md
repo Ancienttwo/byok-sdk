@@ -179,3 +179,76 @@ keeps the default `[]`; no Host action is required.
 `@byok-sdk/cloud` removes `createInMemoryBlobs(objects, bytes)`. It only
 returned `bytes.bind(objects)`. Call `bind(objects)` on the `InMemoryBlobBytes`
 from `createInMemoryBlobBytes()` instead; it returns the same `InMemoryBlobs`.
+
+## Device retirement clears device-scoped state (#2237)
+
+`DeviceDirectory.revoke()` and machine supersession in `register()` (also
+reached through `pairing.redeemAndRegister()`) now delete the retired device's
+presence hint, challenge nonces and inbound dedup ledgers in every SDK
+composition: in-memory, the embedded SQLite server and Postgres. Before, only
+Postgres deleted them; in memory and on SQLite a revoked device's presence hint
+stayed until its TTL, and its nonces and dedup ledgers stayed until expiry or
+restart. Device-assertion replay entries are still kept until they expire
+(#2264).
+
+### Store ports gain deleteDevice
+
+`@byok-sdk/core` `PresenceStore` and `@byok-sdk/cloud` `NonceStore` and
+`InboundDedupStore` each gain a required
+`deleteDevice(tenant, deviceId): Promise<void>`. It deletes every hint, nonce
+or dedup entry of that `(tenant, deviceId)`; for dedup that is the
+device-physical ledger and every Agent-bound ledger. A deleted record reads as
+one never written. Hosts with their own implementation of any of these ports
+add the method. `InMemoryPresenceStore`, `InMemoryNonceStore` and
+`InMemoryInboundDedupStore` implement it.
+
+### In-memory composition wiring
+
+`createInMemoryCloudStores()` takes a required `presence: PresenceStore` after
+`mailbox`; pass the core stores' `presence`:
+
+```ts
+createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, core.presence, objectBytes);
+```
+
+`new InMemoryDeviceDirectory(tasks, mailbox, state)` takes a required third
+argument of the new type `DeviceScopedStores`
+(`{ presence, nonces, dedup }`, each needing only `deleteDevice`). Pass the
+stores the rest of the composition reads.
+
+### Retirement contract for a custom DeviceDirectory
+
+A Host with its own `DeviceDirectory` calls `deleteDevice` on its presence,
+nonce and dedup stores on both retirement paths:
+
+- Only once the registration change is durable: inside the same transaction
+  when the stores share its storage, otherwise after commit and before the next
+  registration change starts. A retirement that fails or rolls back deletes
+  nothing.
+- `revoke(tenant, deviceId)` deletes that state even when no row was removed,
+  so calling `revoke` again recovers a cleanup that failed, and also clears
+  state a write racing the first revoke recreated.
+- Never delete device-assertion replay entries.
+
+`ByokCloud.listPresence()` on the in-memory composition no longer shows a
+retired device until its TTL.
+
+Deleting the dedup ledger has one cost. If the **same** `deviceId` is
+registered again after a revoke or supersession and resends an envelope the
+cloud processed before the retirement, that envelope is processed a second
+time. Task-bound envelopes for the retired device's attempts are still refused,
+because retirement cancelled those attempts; what can run twice is
+`conn.hello` and Agent facts with no task. The shipped `POST /byok/pair` route
+never reuses an id: it mints a new `deviceId` for every pairing. Only Host code
+that calls `DeviceDirectory.register()` or `pairing.redeemAndRegister()` with a
+`deviceId` it chose can reach this. Such a Host keeps its own envelope-level
+idempotency across re-registration if it needs it.
+
+### Postgres stores
+
+`@byok-sdk/cloud-dataplane` `PostgresPresenceStore`, `PostgresNonceStore` and
+`PostgresInboundDedupStore` implement `deleteDevice`. Postgres `revoke()` now
+deletes the presence, nonce and dedup rows of the id even when no device row
+was left, so a repeated revoke clears rows a racing write recreated. Its E2EE
+member state is still deleted only with a row the call removed (#2267). No
+schema change.

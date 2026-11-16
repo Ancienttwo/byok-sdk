@@ -89,6 +89,9 @@ function assertMinimumInterval(minimumIntervalMs: number): void {
   }
 }
 
+/** Device retirement's presence delete; `devices.ts` runs it in its own transaction. */
+export const DELETE_DEVICE_PRESENCE = 'DELETE FROM device_presence WHERE tenant_id = $1 AND device_id = ANY($2::text[])';
+
 export class PostgresPresenceStore implements PresenceStore {
   readonly #pool: Pool;
   readonly #clock: Clock;
@@ -111,6 +114,10 @@ export class PostgresPresenceStore implements PresenceStore {
       [tenant, input.now, input.limit],
     );
     return { removed: Number(result.rows[0]!.removed), expired: 0, releasedBytes: 0n, more: result.rows[0]!.more };
+  }
+
+  async deleteDevice(tenant: TenantId, deviceId: string): Promise<void> {
+    await this.#pool.query(DELETE_DEVICE_PRESENCE, [tenant, [deviceId]]);
   }
 
   async publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint> {

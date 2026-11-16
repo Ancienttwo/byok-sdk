@@ -1280,6 +1280,7 @@ export declare class InMemoryPresenceStore implements PresenceStore {
     publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
     read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
     list(tenant: TenantId): Promise<readonly PresenceHint[]>;
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/core dist/in-memory/quota.d.ts ====
@@ -1904,6 +1905,8 @@ export interface PresenceStore {
     publish(tenant: TenantId, input: PresenceHintInput): Promise<PresenceHint>;
     read(tenant: TenantId, deviceId: string): Promise<PresenceHint | undefined>;
     list(tenant: TenantId): Promise<readonly PresenceHint[]>;
+    /** Deletes this tenant's hint for `deviceId`; a no-op when there is none. Called by device retirement. */
+    deleteDevice(tenant: TenantId, deviceId: string): Promise<void>;
 }
 // ==== @byok-sdk/core dist/principals.d.ts ====
 /**

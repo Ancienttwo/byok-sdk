@@ -124,7 +124,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
   const inMemoryCore = objectBytes === undefined ? undefined : createInMemoryCoreStores({ clock, objectBytes }).stores;
   const core = sqlite?.core ?? inMemoryCore!;
   const inMemoryCloud =
-    sqlite === undefined ? createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, objectBytes!) : undefined;
+    sqlite === undefined ? createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, core.presence, objectBytes!) : undefined;
   const stores = sqlite?.cloud ?? inMemoryCloud!.stores;
   const blobContentProxy = sqlite?.blobContentProxy ?? inMemoryCloud!.blobContentProxy;
 
@@ -204,6 +204,7 @@ function countingDedup(inner: InboundDedupStore, presence: LeasedPresence): Coun
       if (!seen) await presence.renew(tenant, deviceId);
       return seen;
     },
+    deleteDevice: (tenant, deviceId) => inner.deleteDevice(tenant, deviceId),
     drops: () => drops,
   };
 }
@@ -267,6 +268,7 @@ function serialPresence(inner: PresenceStore, ttlMs: number): LeasedPresence {
     list: tenant => inner.list(tenant),
     collectExpired: (tenant, input) => inner.collectExpired(tenant, input),
     publish: (tenant, input) => write(tenant, input.deviceId, () => inner.publish(tenant, input)),
+    deleteDevice: (tenant, deviceId) => write(tenant, deviceId, () => inner.deleteDevice(tenant, deviceId)),
     renew: (tenant, deviceId) => write(tenant, deviceId, async () => {
       const current = await inner.read(tenant, deviceId);
       await inner.publish(tenant, {
