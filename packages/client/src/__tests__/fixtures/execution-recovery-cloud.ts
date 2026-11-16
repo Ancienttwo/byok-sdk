@@ -310,9 +310,11 @@ class SqliteFixtureDedup implements InboundDedupStore {
 
   async deleteDevice(owner: TenantId, deviceId: string): Promise<void> {
     const scope = `${owner}\0${deviceId}`;
+    // A byte prefix: SQLite's text substr() stops at the NUL separators.
+    const agentPrefix = Buffer.from(`${scope}\0`);
     await ownerWrite(() => {
-      db.prepare('DELETE FROM fixture_inbound_dedup WHERE scope = ? OR substr(scope, 1, ?) = ?')
-        .run(scope, scope.length + 1, `${scope}\0`);
+      db.prepare('DELETE FROM fixture_inbound_dedup WHERE scope = ? OR substr(CAST(scope AS BLOB), 1, ?) = ?')
+        .run(scope, agentPrefix.length, agentPrefix);
     });
   }
 

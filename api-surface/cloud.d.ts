@@ -4073,15 +4073,14 @@ export interface InMemoryEphemeralTaskRows {
 }
 /** Builds the Host task archive for a core that is not the in-memory one. */
 export type InMemoryTaskArchiveFactory = (rows: InMemoryEphemeralTaskRows) => TaskArchiveStore;
-export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, 
-/** The core presence store; device retirement deletes the retired device's hint from it. */
-presence: PresenceStore, objectBytes: InMemoryBlobBytes, 
 /**
- * Absent, the archive rewrites the in-memory core `mailbox` and `objects`,
- * and construction throws when they are another core's. A host with another
- * core supplies the archive that owns its rows.
+ * @param presence The core presence store; device retirement deletes the
+ *   retired device's hint from it.
+ * @param taskArchive Absent, the archive rewrites the in-memory core `mailbox`
+ *   and `objects`, and construction throws when they are another core's. A
+ *   host with another core supplies the archive that owns its rows.
  */
-taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
+export declare function createInMemoryCloudStores(clock: Clock, crypto: CloudCrypto, objects: ObjectStore, mailbox: MailboxStore, presence: PresenceStore, objectBytes: InMemoryBlobBytes, taskArchive?: InMemoryTaskArchiveFactory): InMemoryCloudComposition;
 // ==== @byok-sdk/cloud dist/stores/in-memory/mailbox-wake.d.ts ====
 import type { MailboxWake } from '../../mailbox-wake.js';
 import type { TaskEventsWake } from '../../task-events-wake.js';
