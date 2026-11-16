@@ -19,7 +19,6 @@
 import type { Clock, TenantId } from '@byok-sdk/core';
 import { PairResponseSchema } from '@byok-sdk/protocol';
 import type { CloudCrypto } from '../crypto/port.js';
-import { ByokCloudError } from '../errors.js';
 import type { CloudStores, DeviceRecord, PairingCodeInfo, PairingEnrollmentResult } from '../stores/ports.js';
 import { ACCESS_TOKEN_TTL_SECONDS, type TokenSigner } from './tokens.js';
 import { verifyNonceSignature } from './verify.js';
@@ -59,8 +58,8 @@ export interface MintedAccessToken {
 export interface AuthPlane {
   /**
    * Host control plane: mint a single-use code carrying the tenant/product a
-   * device will land in. Rejects with `pairing_product_id_invalid` when
-   * `productId` is longer than {@link PAIRING_CODE_PRODUCT_ID_MAX_LENGTH}.
+   * device will land in. The caller bounds `productId` by
+   * {@link PAIRING_CODE_PRODUCT_ID_MAX_LENGTH} (`Cloud.createPairingCode`).
    */
   createPairingCode(tenant: TenantId, input: { readonly productId: string; readonly ttlMs?: number }): Promise<PairingCodeInfo>;
   /**
@@ -99,12 +98,6 @@ export function createAuthPlane(deps: AuthPlaneDeps): AuthPlane {
 
   return {
     async createPairingCode(tenant, input) {
-      if (input.productId.length > PAIRING_CODE_PRODUCT_ID_MAX_LENGTH) {
-        throw new ByokCloudError(
-          'pairing_product_id_invalid',
-          `productId must be at most ${PAIRING_CODE_PRODUCT_ID_MAX_LENGTH} characters`,
-        );
-      }
       const expiresAt = new Date(clock.now().getTime() + (input.ttlMs ?? PAIRING_CODE_TTL_MS)).toISOString();
       return stores.pairingCodes.issue(tenant, {
         code: crypto.randomPairingCode(PAIRING_CODE_LENGTH),

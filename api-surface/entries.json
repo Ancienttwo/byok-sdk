@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2810999,
+      "budgetBytes": 2810996,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -131,7 +131,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client",
-      "budgetBytes": 611685,
+      "budgetBytes": 611682,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -230,7 +230,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 pure rules; Worker-safe, no node:sqlite",
-      "budgetBytes": 248602,
+      "budgetBytes": 248591,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -289,7 +289,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3260334,
+      "budgetBytes": 3260303,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -465,7 +465,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2482066,
+      "budgetBytes": 2482055,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1095,7 +1095,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 595316,
+      "budgetBytes": 595305,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1434,7 +1434,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 547278,
+      "budgetBytes": 547273,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1492,7 +1492,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 782897,
+      "budgetBytes": 782892,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1622,7 +1622,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 751847,
+      "budgetBytes": 751842,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2147,7 +2147,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 154436,
+      "budgetBytes": 154425,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2293,7 +2293,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 706316,
+      "budgetBytes": 706311,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2369,7 +2369,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 424904,
+      "budgetBytes": 424893,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2498,7 +2498,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 571012,
+      "budgetBytes": 571007,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2585,7 +2585,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2492570,
+      "budgetBytes": 2492559,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

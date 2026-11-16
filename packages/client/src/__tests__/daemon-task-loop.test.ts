@@ -4,7 +4,7 @@ import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { createEnvelope, steerRefusalEnvelopeId } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { RuntimeExecutionFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON } from '../runtime-failure';
@@ -500,9 +500,18 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       session.interrupt = async () => { release(new Error('session closed')); await interrupt(); };
     }
     const steer = createEnvelope('task.steer', { text: 'focus on tests' }, { taskId, seq: server.nextSeq() });
+    const cancel = createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId, seq: server.nextSeq() });
+    // Resolves once the daemon's own cursor write past the cancel has landed.
+    let cursorSaved!: () => void;
+    const cancelCursorSaved = new Promise<void>((resolve) => { cursorSaved = resolve; });
+    const save = CursorStore.prototype.save;
+    const saveSpy = vi.spyOn(CursorStore.prototype, 'save').mockImplementation(async function (this: CursorStore, url, device, cursor) {
+      await save.call(this, url, device, cursor);
+      if (cursor >= cancel.seq!) cursorSaved();
+    });
+    onTestFinished(() => saveSpy.mockRestore());
     server.send(steer);
     await vi.waitFor(() => expect(session.steerAttempts).toBe(1));
-    const cancel = createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId, seq: server.nextSeq() });
     server.send(cancel);
     await server.waitFor((e) => e.type === 'task.cancelled' && e.task_id === taskId);
     expect(session.interruptCalled).toBe(true);
@@ -516,7 +525,8 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       expect(refused.payload).toEqual({ steerMessageId: steer.id, reason: 'task_not_active' });
     } else await vi.waitFor(() => expect(session.steerCalls).toEqual(['focus on tests']));
     // Both envelopes are handled on first delivery: the cursor passes them, with no failed gap.
-    await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, 'device-1')).toBe(cancel.seq));
+    await cancelCursorSaved;
+    expect(await new CursorStore(storeDir).load(server.url, 'device-1')).toBe(cancel.seq);
     expect(diagnostics.mock.calls.flat().filter((line) => String(line).includes('envelope handler failed for task.steer'))).toEqual([]);
     expect(server.received.filter((e) => e.task_id === taskId && e.type === 'task.cancelled')).toHaveLength(1);
     expect(server.received.filter((e) => e.task_id === taskId && e.type === 'task.steer_refused')).toHaveLength(outcome === 'resolves' ? 0 : 1);
