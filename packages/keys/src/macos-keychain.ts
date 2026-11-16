@@ -80,7 +80,6 @@ export class MacOsKeychainSecretStore<TName extends string = string>
     this.#assertMacOs();
     const stored = await this.#readStored(service);
     if (stored === undefined) return false;
-    this.#assertPrefix(stored);
     const result = await this.#invoke('DELETE', [
       'delete-generic-password',
       '-a',
@@ -123,7 +122,9 @@ export class MacOsKeychainSecretStore<TName extends string = string>
         'macOS Keychain could not read the requested secret',
       );
     }
-    return result.stdout.replace(/\r?\n$/u, '');
+    const stored = result.stdout.replace(/\r?\n$/u, '');
+    if (!stored.startsWith(this.#storagePrefix)) throw new ByokKeysError('KEYCHAIN_LEGACY', 'Unsupported legacy Keychain entry');
+    return stored;
   }
 
   async has(name: TName): Promise<boolean> {
@@ -213,21 +214,8 @@ export class MacOsKeychainSecretStore<TName extends string = string>
     }
   }
 
-  /**
-   * Fail-closed inverse of the storage encoding. The error message never
-   * echoes the undecodable value — it may still be somebody's live credential.
-   */
-  #assertPrefix(storedSecret: string): void {
-    if (!storedSecret.startsWith(this.#storagePrefix)) {
-      throw new ByokKeysError(
-        'KEYCHAIN_LEGACY_UNSUPPORTED',
-        'macOS Keychain returned a legacy value without this store\'s storage prefix',
-      );
-    }
-  }
-
+  /** Decode only values whose storage prefix was checked by #readStored. */
   #decode(storedSecret: string): string {
-    this.#assertPrefix(storedSecret);
     const decoded = decodeStrictBase64Utf8(
       storedSecret.slice(this.#storagePrefix.length),
     );

@@ -18,13 +18,13 @@ const DEVICE_KEY_REPLACED = '. Unfinished provisioning requests sealed to the ol
 const SECRET_STORE_GUIDANCE: Record<SecretStoreSubject, Partial<Record<ByokKeysErrorCode, string>>> = {
   provider: {
     KEYCHAIN_SECRET_CORRUPTED: 'The OS keychain entry for this provider cannot be decoded; supply a new key to replace it',
-    KEYCHAIN_LEGACY_UNSUPPORTED: 'The OS keychain holds an unsupported legacy entry; reconfigure the provider to replace it',
+    KEYCHAIN_LEGACY: 'Reconfigure the provider to replace the legacy Keychain entry',
     KEYCHAIN_SECRET_DECODE_FAILED: "The OS keychain holds an entry with this provider key's name that the SDK did not write; delete or rename it, or use another profile",
     CREDENTIAL_MANAGER_READ_FAILED: 'Windows Credential Manager could not read this secret; if the entry is damaged, delete it in Credential Manager and supply the key again',
   },
   device_sealing_key: {
     KEYCHAIN_SECRET_CORRUPTED: `The OS keychain entry for the device sealing key cannot be decoded; delete it so the device generates a new key, then register that key again${DEVICE_KEY_REPLACED}`,
-    KEYCHAIN_LEGACY_UNSUPPORTED: 'The OS keychain holds an unsupported legacy device sealing key',
+    KEYCHAIN_LEGACY: 'Unsupported legacy device sealing key',
     KEYCHAIN_SECRET_DECODE_FAILED: `The OS keychain holds an entry with the device sealing key's name that the SDK did not write; delete or rename it so the device generates a new key, then register that key again${DEVICE_KEY_REPLACED}`,
     CREDENTIAL_MANAGER_READ_FAILED: `Windows Credential Manager could not read the device sealing key; if the entry is damaged, delete it in Credential Manager so the device generates a new key, then register that key again${DEVICE_KEY_REPLACED}`,
   },
@@ -76,7 +76,7 @@ const STORE_FAMILY_CODES = {
   CREDENTIAL_MANAGER_UNAVAILABLE: 1,
   CREDENTIAL_MANAGER_WRITE_FAILED: 1,
   KEYCHAIN_ARGUMENT_INVALID: 1,
-  KEYCHAIN_LEGACY_UNSUPPORTED: 1,
+  KEYCHAIN_LEGACY: 1,
   KEYCHAIN_DELETE_FAILED: 1,
   KEYCHAIN_READ_FAILED: 1,
   KEYCHAIN_SECRET_CORRUPTED: 1,

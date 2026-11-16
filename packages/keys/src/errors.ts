@@ -47,7 +47,7 @@ export class ByokKeysError extends Error {
  * the lock release) failed.
  * `KEYCHAIN_SECRET_CORRUPTED` narrows the decode failure to an entry that
  * carries this store's storage prefix (one the SDK wrote) but whose payload
- * does not decode. `KEYCHAIN_LEGACY_UNSUPPORTED` refuses an unprefixed macOS
+ * does not decode. `KEYCHAIN_LEGACY` refuses an unprefixed macOS
  * entry, and `KEYCHAIN_SECRET_DECODE_FAILED` remains the Linux decode refusal.
  * Everything else matches the source string for string.
  *
@@ -69,7 +69,7 @@ export const BYOK_KEYS_ERROR_CODES = {
   CREDENTIAL_MANAGER_WRITE_FAILED: 'CREDENTIAL_MANAGER_WRITE_FAILED',
   DEVICE_SEALING_KEY_INVALID: 'DEVICE_SEALING_KEY_INVALID',
   KEYCHAIN_ARGUMENT_INVALID: 'KEYCHAIN_ARGUMENT_INVALID',
-  KEYCHAIN_LEGACY_UNSUPPORTED: 'KEYCHAIN_LEGACY_UNSUPPORTED',
+  KEYCHAIN_LEGACY: 'KEYCHAIN_LEGACY',
   KEYCHAIN_DELETE_FAILED: 'KEYCHAIN_DELETE_FAILED',
   KEYCHAIN_READ_FAILED: 'KEYCHAIN_READ_FAILED',
   KEYCHAIN_SECRET_CORRUPTED: 'KEYCHAIN_SECRET_CORRUPTED',

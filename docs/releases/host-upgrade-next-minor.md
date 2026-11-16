@@ -19,7 +19,7 @@ Hosted stores with an old `entity_kind_check` are refused with
 boundary is handled separately by #2286.
 
 macOS Keychain values without the configured prefix are refused with
-`KEYCHAIN_LEGACY_UNSUPPORTED`. An explicit provider reconfiguration with a
+`KEYCHAIN_LEGACY`. An explicit provider reconfiguration with a
 new key overwrites a same-name legacy record; back up what you need first.
 
 `scopeSecretStore`, `listPiCatalogModels`, `sealedRoutineInstruction`, the

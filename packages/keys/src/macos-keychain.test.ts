@@ -194,7 +194,7 @@ describe('MacOsKeychainSecretStore.get', () => {
   it('refuses an unprefixed stored value', async () => {
     runner.queue({ exitCode: 0, stdout: `${CANARY}\n` });
     await expect(store().get('model-openai-api-key')).rejects.toThrowError(
-      expect.objectContaining({ code: 'KEYCHAIN_LEGACY_UNSUPPORTED' }),
+      expect.objectContaining({ code: 'KEYCHAIN_LEGACY' }),
     );
   });
 
@@ -360,7 +360,7 @@ describe('MacOsKeychainSecretStore.delete', () => {
   it('refuses to delete an unprefixed legacy entry without exposing its value', async () => {
     runner.queue({ exitCode: 0, stdout: `${CANARY}\n` });
     const error = await store().delete('model-openai-api-key').catch((caught: unknown) => caught as Error);
-    expect(error).toMatchObject({ code: 'KEYCHAIN_LEGACY_UNSUPPORTED' });
+    expect(error).toMatchObject({ code: 'KEYCHAIN_LEGACY' });
     expect(String(error)).not.toContain(CANARY);
     expect(runner.invocations).toHaveLength(1);
     expect(runner.invocations[0]?.args[0]).toBe('find-generic-password');

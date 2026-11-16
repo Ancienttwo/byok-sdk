@@ -42,7 +42,7 @@
     {
       "id": "reject-unprefixed-keychain-records",
       "impact": "breaking",
-      "summary": "@byok-sdk/keys MacOsKeychainSecretStore refuses an unprefixed record with KEYCHAIN_LEGACY_UNSUPPORTED and does not delete it. Explicit provider reconfiguration overwrites a same-name legacy record; back up what you need first.",
+      "summary": "@byok-sdk/keys MacOsKeychainSecretStore refuses an unprefixed record with KEYCHAIN_LEGACY and does not delete it. Explicit provider reconfiguration overwrites a same-name legacy record; back up what you need first.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retired-compatibility-paths",
       "items": [
         "behavior:reject-unprefixed-keychain-records"
