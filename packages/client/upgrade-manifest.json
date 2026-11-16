@@ -1075,6 +1075,19 @@
       ]
     },
     {
+      "id": "cloud-auth-plane-export-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud removes createAuthPlane and its AuthPlane, AuthPlaneDeps, MintedAccessToken and PairInput types. createCloud composes the auth plane; ByokCloud.createPairingCode is the only way to mint a pairing code and enforces PAIRING_CODE_PRODUCT_ID_MAX_LENGTH.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#createAuthPlane",
+        "export:@byok-sdk/cloud#AuthPlane",
+        "export:@byok-sdk/cloud#AuthPlaneDeps",
+        "export:@byok-sdk/cloud#MintedAccessToken",
+        "export:@byok-sdk/cloud#PairInput"
+      ]
+    },
+    {
       "id": "cloud-host-facade-methods-removed",
       "impact": "breaking",
       "summary": "@byok-sdk/cloud ByokCloud removes completeAgentHomeProjection and completeInputPreparation (the device completion routes still complete both), listBoardItems and acceptBoardItem (use the tenant board store), enqueueSealedAgentOffer and enqueueSealedAgentEgressOffer with SealedAgentDispatchInput and SealedAgentEgressDispatchInput (submitSealedAgentExecution is the hosted sealed lane), and enqueueProviderProvisioningNotice with ProviderProvisioningNoticeInput. ByokCloud also gains readSteerRefusal and listSteerRefusals (wire-v7-cloud-steer-refusal-reads).",

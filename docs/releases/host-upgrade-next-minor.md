@@ -951,6 +951,10 @@ use the replacement named here.
     `CapabilityDeclarationSchema` and `CapabilityDeclaration` from
     `@byok-sdk/core`.
   - `receiptRetentionClass`.
+- **Auth plane.** `createAuthPlane`, with `AuthPlane`, `AuthPlaneDeps`,
+  `MintedAccessToken` and `PairInput`, is removed. `createCloud` composes the
+  auth plane itself, and `ByokCloud.createPairingCode` is the only way to mint a
+  pairing code; it enforces `PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`.
 - **In-memory projection adapters.** `InMemoryAgentMemoryProjectionStore`
   and `InMemoryAgentMemoryProjectionAuthorizer` are no longer exported. A
   hosted composition supplies its own projection ports.
