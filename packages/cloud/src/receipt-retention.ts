@@ -17,6 +17,3 @@ if (RECEIPT_RETENTION.some((entry, index) => RECEIPT_RETENTION.findIndex(other =
     || identities.some(identity => identity.prefix.startsWith(prefix) || prefix.startsWith(identity.prefix)))) {
   throw new ByokCloudError('maintenance_invalid_input', 'Receipt retention families must be distinct and request prefixes cannot overlap identity fences.');
 }
-export function receiptRetentionClass(key: string): ReceiptRetentionClass {
-  return RECEIPT_RETENTION.find(entry => key.startsWith(entry.prefix))?.class ?? 'identity';
-}

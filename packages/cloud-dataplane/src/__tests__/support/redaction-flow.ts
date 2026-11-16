@@ -32,7 +32,7 @@ import {
   type Envelope,
 } from '@byok-sdk/protocol';
 import { createDeviceSimulator } from '../../../../testkit/src/index';
-import { createPostgresCloudStores, createPostgresTaskRedactionStore, PostgresProofReceiptRetentionAuthority } from '../../stores';
+import { createPostgresCloudStores, PostgresTaskRedactionStore, PostgresProofReceiptRetentionAuthority } from '../../stores';
 import { createPostgresCoreStores } from '../../stores/core';
 import type { ObjectStorageScope } from './dataplane';
 import { canaryNeedles, type Needle } from './plaintext-scan';
@@ -50,7 +50,7 @@ const DEVICE_CAPABILITIES = [
   'agent-message-egress',
   'terminal-projection-selection',
 ];
-const EGRESS_POLICY: AgentEgressPolicy = {
+export const EGRESS_POLICY: AgentEgressPolicy = {
   policyRevision: 'redaction-policy-1',
   activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262_144 },
   reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4_096, maxPendingBytesPerTenant: 8_192 },
@@ -116,7 +116,7 @@ export async function composeRedactionHost(
       },
       consumeSealed: async () => ({ outcome: 'accepted' }),
     },
-    taskRedactionStore: wrapStore(createPostgresTaskRedactionStore({ pool, clock, objectStorage: objectStorage.config })),
+    taskRedactionStore: wrapStore(new PostgresTaskRedactionStore({ pool, clock, objectStorage: objectStorage.config })),
     proofReceiptRetention: { authority: new PostgresProofReceiptRetentionAuthority(pool) },
   });
   return { cloud, core, clock, consumed };

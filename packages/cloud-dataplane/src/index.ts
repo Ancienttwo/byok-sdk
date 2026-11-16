@@ -53,10 +53,7 @@ export { migrationsDir } from './migrations-dir.js';
 // Host-owned retention/dead-letter/R2 GC and reconciliation. This is separate
 // from CoreStores because it coordinates one concrete SQL authority with one
 // concrete byte store; it is not a domain port every composition must fake.
-export {
-  PostgresCloudCleanup,
-  createPostgresCloudMaintenance,
-} from './cleanup.js';
+export { PostgresCloudCleanup } from './cleanup.js';
 
 export type {
   ObjectStorageReconcileResult,
@@ -66,7 +63,6 @@ export type {
   DeadLetterReplayInput,
   ObjectUsageRebuildResult,
   PostgresCloudCleanupOptions,
-  PostgresCloudMaintenanceOptions,
 } from './cleanup.js';
 
 // Package-owned destructive maintenance. This is intentionally Node-only: an
@@ -77,10 +73,8 @@ export {
   TENANT_ERASURE_TABLES,
   PostgresTenantErasure,
   TenantErasureError,
-  createPostgresTenantErasure,
 } from './tenant-erasure.js';
 export type {
-  PostgresTenantErasureCompositionOptions,
   PostgresTenantErasureOptions,
   TenantErasureConflict,
   TenantErasureErrorCode,
@@ -88,12 +82,3 @@ export type {
   TenantErasureResult,
   TenantErasureStatus,
 } from './tenant-erasure.js';
-export { retireAgentlessTasks } from './retire-agentless-tasks.js';
-export type { RetireAgentlessTasksOptions, RetireAgentlessTasksResult } from './retire-agentless-tasks.js';
-
-// Resident Node session listener; deliberately excluded from ./runtime.
-export { createPostgresMailboxWake, MailboxWakeProbeMissedError } from './mailbox-wake.js';
-export type { PostgresMailboxWake, PostgresMailboxWakeOptions } from './mailbox-wake.js';
-export { createPostgresTaskEventsWake, TaskEventsWakeProbeMissedError } from './task-events-wake.js';
-export type { PostgresTaskEventsWake, PostgresTaskEventsWakeOptions } from './task-events-wake.js';
-export type { PostgresWakeOptions } from './postgres-wake.js';

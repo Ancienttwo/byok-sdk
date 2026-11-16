@@ -99,14 +99,12 @@ export interface TaskArchiveStepCounts {
 
 /**
  * The archive input for one task: every receipt key holding its content and its
- * sealed object reference. `agentRef` is absent only for a task stored without an
- * Agent identity, which `retireAgentlessTasks` (cloud-dataplane, #1780) archives
- * once; builds up to v0.30.2 keyed its offer without one.
+ * sealed object reference.
  */
 export async function taskArchiveInput(
   crypto: Pick<CloudCrypto, 'sha256'>,
   tenant: TenantId,
-  unit: { readonly taskId: string; readonly deviceId: string; readonly agentRef?: AgentRef },
+  unit: { readonly taskId: string; readonly deviceId: string; readonly agentRef: AgentRef },
   archivedAt: string,
 ): Promise<TaskArchiveStoreInput> {
   const messageId = await taskOfferMessageId(tenant, unit.taskId, unit.deviceId, unit.agentRef, bytes => crypto.sha256(bytes));

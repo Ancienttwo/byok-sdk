@@ -61,12 +61,9 @@ export {
   PostgresStoreEpochUnsupportedError,
 } from './store-epoch.js';
 export { PostgresTaskSteerRefusalStore } from './steer-refusals.js';
-export {
-  PostgresAgentMemoryProjectionStore,
-  createPostgresAgentMemoryProjectionStore,
-} from './agent-memory-projection.js';
+export { PostgresAgentMemoryProjectionStore } from './agent-memory-projection.js';
 export type { PostgresAgentMemoryProjectionStoreOptions } from './agent-memory-projection.js';
-export { PostgresTaskRedactionStore, createPostgresTaskRedactionStore } from './task-redaction.js';
+export { PostgresTaskRedactionStore } from './task-redaction.js';
 export { PostgresE2eeMemberStore } from './e2ee-member.js';
 import { PostgresE2eeMemberStore } from './e2ee-member.js';
 export type { PostgresTaskRedactionStoreOptions } from './task-redaction.js';

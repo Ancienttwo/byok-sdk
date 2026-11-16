@@ -5,12 +5,11 @@ import {
 } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import {
-  InMemoryAgentMemoryProjectionAuthorizer,
-  InMemoryAgentMemoryProjectionStore,
   createWebCrypto,
   fullCapabilityDeclaration,
 } from '..';
 import { DEFAULT_MAX_AGENT_MEMORY_PROJECTION_REQUEST_BYTES } from '../handlers/agent-memory-projections';
+import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from './support/agent-memory-projection';
 import { TENANT_A, createHarness } from './support/harness';
 
 describe('Agent-memory projection request-body boundary', () => {
