@@ -51,7 +51,7 @@ adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 | Tool authorization `auto` | `toolAuthorizationAuto` | no | yes | no | no | no | no | yes | yes |
 | Prepared lane | `preparedLane` | no | no | no | no | no | no | yes | no |
 | Durable worker lane | `durableLane` | no | no | no | no | no | no | no | yes |
-| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | yes | yes | no | no | yes | no |
+| Keeps user-level instructions out | `isolation.userInstructions` | yes | yes | yes | yes | yes | no | yes | no |
 | Keeps the user output style out | `isolation.userOutputStyle` | yes (no source) | yes | no | yes | no | no | yes (no source) | no |
 | Keeps user-level memory out | `isolation.userMemory` | no | yes | yes | yes (no source) | no | no | yes (no source) | no |
 | Keeps user skills out | `isolation.userSkills` | yes | no | no | yes | no | no | yes | no |
@@ -665,13 +665,64 @@ stay:
 - The Claude and Cursor `skills`, `hooks` and `mcps` cells, with their
   configured values.
 
-Keeping these out means moving `GROK_HOME`, which also moves `auth.json` and
-the sessions; the adapter does not do it, so Grok declares none of the five
-user-context bits, with or without `compatInstructions: 'disabled'`. Only
-`userMcpServers` is `yes`, through the option below. With the four variables, `grok inspect --json` 1.0.52 lists the
-four Claude and Cursor files as `disabled`; without them, as `enabled`. The
-probe ran in a synthetic home with the network denied. `inspect` reports
-discovery, not prompt text. No live Grok session shows what the model sees.
+`agentUserContext: 'excluded'` keeps these out of Agent tasks by moving
+`GROK_HOME`; see below. Without it, Grok declares none of the five
+user-context bits, with or without `compatInstructions: 'disabled'`. With the
+four variables, `grok inspect --json` 1.0.52 lists the four Claude and Cursor
+files as `disabled`; without them, as `enabled`. The probe ran in a synthetic
+home with the network denied. `inspect` reports discovery, not prompt text.
+
+#### `agentUserContext` (Grok)
+
+`GrokAdapterOptions.agentUserContext: 'excluded'` (`runtimes.grok.agentUserContext`)
+applies to Agent tasks (runs whose manifest has an `agentRef`); other runs and
+the default `'inherit'` are unchanged. Under `excluded`, the Grok agent process
+and its `grok inspect` probe run with `GROK_HOME` set to
+`<execution scratch>/grok-home`. That directory holds symbolic links only, never
+copies or hard links:
+
+- to the user's `auth.json`, `config.toml`, `trusted_folders.toml` and `hooks/`,
+  where present (the user `GROK_HOME` is `$GROK_HOME`, else `~/.grok`);
+- `sessions/` to the Agent's own store, `<Agent home>/.byok/grok/sessions`,
+  created so that every component inside the Agent home is a real directory.
+  A later task of the same Agent resumes its session from there. A Bot switched
+  from `inherit` cannot resume sessions it made in the user's store.
+
+The user's `AGENTS.md`, `rules/`, `skills/`, memory, plugins, sessions and
+other state stay out; Grok writes its own state (`settings_cache.json`,
+`models_cache.json`, `agent_id` and others) into the SDK home, which the
+scratch release removes without following links. Hosted terminal commands keep
+the task environment. The option also sets the four Claude and Cursor `agents`
+and `rules` variables of `compatInstructions: 'disabled'` on the agent process.
+Grok then declares `isolation.userInstructions`; `userMemory`, `userSkills` and
+`userHookContext` stay `false`.
+
+`[paths] extra_rule_dirs` in the linked `config.toml` still loads. Before the
+agent starts, the adapter reads `projectInstructions` from `grok inspect --json`
+with the agent's environment and refuses a `global` entry unless it is a Claude
+or Cursor file whose `agents` or `rules` cell inspect reports disabled: Grok
+1.0.77 lists those files even with the cell off. On darwin the paths compare
+case-folded. Probed on Grok 1.0.77 in a synthetic home with the network denied:
+an `extra_rule_dirs` file, `$GROK_HOME/AGENTS.md` and `$GROK_HOME/rules/*` are
+`global` entries; `[paths]` in the `GROK_CONFIG` or `GROK_CONFIG_PATH` overlay
+is ignored; a project `.grok/config.toml` in an untrusted folder adds none. The
+runtime contract checks that `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
+`~/.claude/CLAUDE.md` reach the model under `inherit` and not under
+`excluded`.
+
+The option controls which user context Grok loads; it is not a filesystem
+boundary. The start fails as a non-retryable `authority` failure, class
+`unknown`, with reasons that name no paths:
+
+- `grok Agent user context exclusion refused: Grok still loads <n> user instruction file(s) outside the task, such as [paths] extra_rule_dirs`
+- `grok Agent user context exclusion refused: grok inspect failed`
+- `grok Agent user context exclusion refused: the task has no sealed Agent home for its session store`
+- `grok Agent user context exclusion refused: the Agent home session store is not a real directory inside the Agent home`
+- `grok Agent user context exclusion refused: the user GROK_HOME has no auth.json and XAI_API_KEY is not set`
+- `grok Agent user context exclusion refused: the user GROK_HOME does not exist`
+
+Whether a login refresh through the linked `auth.json` reaches the user's file
+is being verified (#2239).
 
 #### `agentUserMcpServers` (Grok)
 
@@ -876,7 +927,7 @@ for Claude it is `agentSessionPersistence: 'disabled'`, below.
 | --- | --- |
 | Claude | `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<encoded cwd>/<session>.jsonl`, outside the Agent home |
 | Codex | `$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread id>.jsonl`, normally under `~/.codex`. Under `agentUserContext: 'excluded'`, an Agent task's rollouts are in `<Agent home>/.byok/codex/sessions/` instead |
-| Grok | `$GROK_HOME/sessions/<encoded cwd>/<session id>/`, and the `sessions/session_search.sqlite` index. The adapter does not set `GROK_HOME`, so normally under `~/.grok` |
+| Grok | `$GROK_HOME/sessions/<encoded cwd>/<session id>/`, and the `sessions/session_search.sqlite` index, normally under `~/.grok`. Under `agentUserContext: 'excluded'`, an Agent task's sessions are in `<Agent home>/.byok/grok/sessions/` instead |
 | Pi, ordinary, Pi login | The settings `sessionDir`, else `<agent dir>/sessions/--<encoded cwd>--/<time>_<id>.jsonl`. The agent directory is `$PI_CODING_AGENT_DIR`, else `~/.pi/agent` |
 | Pi, ordinary, Keys profile | `DaemonConfig.piByokLauncher.sessionDir/<time>_<id>.jsonl`, one folder for every execution, which the Host chooses |
 | Pi, prepared | None: the session is in memory |

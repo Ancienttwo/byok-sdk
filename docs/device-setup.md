@@ -1263,6 +1263,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.grok` | advanced | object |
 | `runtimes.grok.compatInstructions` | advanced | "disabled" / "inherit" |
 | `runtimes.grok.agentUserMcpServers` | advanced | "excluded" / "inherit" |
+| `runtimes.grok.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.grok.versionPolicy` | advanced | object |
 | `runtimes.grok.versionPolicy.qualifiedVersion` | required when parent is set | string |
 | `runtimes.grok.versionPolicy.unqualified` | required when parent is set | "allow" / "block" / "warn" |
@@ -1426,6 +1427,7 @@ Manifest transition: **0.43.0 → 0.43.0**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| grok-agent-user-context | additive | GrokAdapterOptions.agentUserContext and runtimes.grok.agentUserContext, default inherit, which changes nothing. Under excluded, a Grok Agent task runs with GROK_HOME set to an SDK-owned directory that links the user's auth.json, config.toml, trusted_folders.toml and hooks/, keeps AGENTS.md, rules/, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in <Agent home>/.byok/grok/sessions, and sets the four Claude and Cursor agents and rules variables. The start fails as a non-retryable authority failure while grok inspect still lists a user instruction file (such as an [paths] extra_rule_dirs file), when inspect fails, without a sealed Agent home, or when the user GROK_HOME has no auth.json and XAI_API_KEY is not set. The Grok descriptor then declares isolation.userInstructions. A Bot switched from inherit cannot resume sessions it made in the user's store. [Migration](../docs/adapter-capabilities.md#agentusercontext-grok) |
 <!-- generated:migrations:end -->
 
 ## Removed fields

@@ -188,7 +188,7 @@ const OPTION_SOURCES = {
   } satisfies Record<keyof CodexAdapterOptions, OptionSource>,
   grok: {
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', model: 'embedded-only',
-    compatInstructions: 'runtimes.grok.compatInstructions', agentUserMcpServers: 'runtimes.grok.agentUserMcpServers',
+    compatInstructions: 'runtimes.grok.compatInstructions', agentUserMcpServers: 'runtimes.grok.agentUserMcpServers', agentUserContext: 'runtimes.grok.agentUserContext',
     versionPolicy: 'runtimes.grok.versionPolicy', resolveBin: 'embedded-only',
     spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof GrokAdapterOptions, OptionSource>,

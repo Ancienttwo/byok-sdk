@@ -3,13 +3,14 @@ import { PathMutationGateBusyError } from '../util/path-mutation-gate';
 import type { RuntimeTaskInput } from '../types';
 import { fileURLToPath } from 'node:url';
 import { spawn, type SpawnOptions } from 'node:child_process';
-import { existsSync, promises as fs, readFileSync } from 'node:fs';
+import { existsSync, promises as fs, readdirSync, readFileSync, readlinkSync } from 'node:fs';
 import { Server } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { GrokAdapter } from '../adapters/grok/grok-adapter';
+import { grokUserInstructionsRefusal } from '../adapters/grok/agent-user-context';
 import { PolicyUnsupportedError, SteerUnsupportedError, type McpToolsetToolObservation, type RuntimeAdapter, type Session } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
@@ -556,12 +557,86 @@ describe('GrokAdapter agentUserMcpServers (#935)', () => {
   });
 
   it('changes nothing under inherit or for a task that is not an Agent task', async () => {
-    for (const [options, agent] of [[{}, true], [{ agentUserMcpServers: 'inherit' as const }, true], [{ agentUserMcpServers: 'excluded' as const }, false]] as const) {
+    for (const [options, agent] of [[{}, true], [{ agentUserMcpServers: 'inherit' as const, agentUserContext: 'inherit' as const }, true], [{ agentUserMcpServers: 'excluded' as const, agentUserContext: 'excluded' as const }, false]] as const) {
       const resources = agent ? await agentCtx() : await ctx();
       await turn(await open(adapter(options), { instruction: 'hello' }, resources));
       expect(kinds(resources.log)).toEqual(['start']);
       expect(Object.keys(facts(resources.log).find(fact => fact.kind === 'start')!.env).filter(name => name.startsWith('GROK_'))).toEqual([]);
     }
+  });
+});
+
+describe('GrokAdapter agentUserContext (#2239)', () => {
+  const PREFIX = 'grok Agent user context exclusion refused';
+  /** An Agent writer task whose user GROK_HOME holds a login, a config, instructions and rules. */
+  async function agentCtx(env: NodeJS.ProcessEnv = {}, login = true) {
+    const user = await tempDir('byok-grok-user-');
+    await fs.mkdir(path.join(user, 'rules'));
+    await Promise.all([
+      ...(login ? [fs.writeFile(path.join(user, 'auth.json'), '{}')] : []),
+      fs.writeFile(path.join(user, 'config.toml'), ''), fs.writeFile(path.join(user, 'AGENTS.md'), 'user'), fs.writeFile(path.join(user, 'rules', 'r.md'), 'rule'),
+    ]);
+    const resources = await ctx({ GROK_HOME: user, ...env });
+    const home = await fs.realpath(resources.workspaceDir);
+    return { ...resources, workspaceDir: home, agentHome: home, user };
+  }
+
+  it('validates the option and declares userInstructions only under excluded', () => {
+    expect(() => adapter({ agentUserContext: 'strict' as never })).toThrow(new TypeError('GrokAdapterOptions.agentUserContext must be inherit or excluded'));
+    expect(adapter().descriptor.capabilities.isolation?.userInstructions).toBe(false);
+    expect(adapter({ agentUserContext: 'excluded' }).descriptor.capabilities.isolation?.userInstructions).toBe(true);
+  });
+
+  it('runs inspect and the agent in an SDK-owned GROK_HOME that links the login and configuration, and keeps sessions in the Agent home', async () => {
+    const resources = await agentCtx();
+    let seen: string[] = [];
+    const spawnFn: typeof spawn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+      // The scratch home is released at close, so its entries are read while the agent starts.
+      if (args[0] === 'agent') seen = readdirSync(String(options.env!.GROK_HOME)).sort().map(name => `${name}->${readlinkSync(path.join(String(options.env!.GROK_HOME), name))}`);
+      return spawn(command, args, options);
+    }) as typeof spawn;
+    await turn(await open(adapter({ agentUserContext: 'excluded', spawnFn }), { instruction: 'hello' }, resources));
+    const user = await fs.realpath(resources.user);
+    expect(seen).toEqual([
+      `auth.json->${path.join(user, 'auth.json')}`, `config.toml->${path.join(user, 'config.toml')}`,
+      `sessions->${path.join(resources.agentHome, '.byok', 'grok', 'sessions')}`,
+    ]);
+    const [inspect, started] = [facts(resources.log).find(fact => fact.kind === 'inspect')!, facts(resources.log).find(fact => fact.kind === 'start')!];
+    expect(inspect.env.GROK_HOME).toBe(started.env.GROK_HOME);
+    expect(started.env.GROK_HOME).not.toBe(resources.user);
+    expect(started.env).toMatchObject({ GROK_CLAUDE_AGENTS_ENABLED: '0', GROK_CLAUDE_RULES_ENABLED: '0', GROK_CURSOR_AGENTS_ENABLED: '0', GROK_CURSOR_RULES_ENABLED: '0' });
+  });
+
+  const extra = JSON.stringify({ mcpServers: [], plugins: [], externalCompat: { cells: [] },
+    projectInstructions: [{ path: '/rules/extra.md', scope: 'global', fileType: 'rules' }, { path: '/w/AGENTS.md', scope: 'project', fileType: 'agents_md' }] });
+  it.each([
+    ['inspect lists a user instruction file', { FAKE_ACP_INSPECT: extra }, true, 'Grok still loads 1 user instruction file outside the task, such as [paths] extra_rule_dirs'],
+    ['inspect fails', { FAKE_ACP_INSPECT: 'fail' }, true, 'grok inspect failed'],
+    ['the user GROK_HOME has no login and no API key', {}, false, 'the user GROK_HOME has no auth.json and XAI_API_KEY is not set'],
+  ] as const)('fails before the agent starts when %s', async (_, env, login, reason) => {
+    const resources = await agentCtx(env, login);
+    const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
+    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', message: `${PREFIX}: ${reason}` });
+    expect(existsSync(resources.log) && facts(resources.log).some(fact => fact.kind === 'start')).toBe(false);
+  });
+
+  it('allows the Claude and Cursor files only while inspect reports their cell disabled, folding letter case on darwin', async () => {
+    const output = (enabled: boolean) => JSON.stringify({
+      projectInstructions: [{ path: '/Users/u/.claude/Claude.md', scope: 'global' }, { path: '/Users/u/.claude/rules/c.md', scope: 'global' }],
+      externalCompat: { cells: ['agents', 'rules'].map(surface => ({ vendor: 'claude', surface, enabled, source: 'env' })) },
+    });
+    expect(await grokUserInstructionsRefusal(output(false), '/Users/u', 'darwin')).toBeUndefined();
+    expect(await grokUserInstructionsRefusal(output(true), '/Users/u', 'darwin')).toBe(`${PREFIX}: Grok still loads 2 user instruction files outside the task, such as [paths] extra_rule_dirs`);
+    expect(await grokUserInstructionsRefusal(output(false), '/users/u', 'linux')).toBe(`${PREFIX}: Grok still loads 2 user instruction files outside the task, such as [paths] extra_rule_dirs`);
+    expect(await grokUserInstructionsRefusal('{"projectInstructions":[]}', '/Users/u', 'darwin')).toBe(`${PREFIX}: grok inspect failed`);
+  });
+
+  it('refuses a session store that is not a real directory inside the Agent home', async () => {
+    const resources = await agentCtx();
+    await fs.mkdir(path.join(resources.agentHome, '.byok'), { recursive: true });
+    await fs.symlink(resources.user, path.join(resources.agentHome, '.byok', 'grok'), 'dir');
+    const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { instruction: 'hello' }, resources).catch(e => e);
+    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', message: `${PREFIX}: the Agent home session store is not a real directory inside the Agent home` });
   });
 });
 

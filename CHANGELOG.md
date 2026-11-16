@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Added (client; #2239)** — `GrokAdapterOptions.agentUserContext` / `runtimes.grok.agentUserContext`, default `inherit`. Under `excluded`, a Grok Agent task runs with an SDK-owned `GROK_HOME` that links the user's login, configuration, folder trust and hooks, keeps `AGENTS.md`, `rules/`, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in `<Agent home>/.byok/grok/`, and turns off the Claude and Cursor instruction and rules cells. The start refuses while `grok inspect` still lists a user instruction file such as an `[paths] extra_rule_dirs` file. Grok then declares `isolation.userInstructions`. See [`agentUserContext` (Grok)](docs/adapter-capabilities.md#agentusercontext-grok).
 - **Changed (client; #2235)** — The vendored OAR moves from 0.105.0 to 0.109.0 (upstream release commit `4eb5919f`, `packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). A start whose runtime does not confirm the requested model now fails as non-retryable on Codex, Grok, agy and OpenCode, as it already did on dsh; before, those four retried it as `unknown`. agy's ACP command also carries `--gemini-dir <owned home>/.gemini`, the directory it already used. A queued Claude input is recorded as held by the adapter and then dispatched as its own prompt request; the Host still sees it start after Claude's own turn ends.
 
 ## 0.43.0 — 2026-11-14 (published)

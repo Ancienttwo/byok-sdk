@@ -13,7 +13,7 @@ export const GROK_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   messageDraft: true,
   preparedLane: false,
   isolation: Object.freeze({
-    userInstructions: false, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
+    userInstructions: true, userOutputStyle: false, userMemory: false, userSkills: false, userHookContext: false,
     userMcpServers: true, sessionPersistence: false,
   }),
 });

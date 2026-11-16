@@ -32,7 +32,9 @@ import { AsyncQueue } from '../../util/async-queue.js';
 import { haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce } from '../session-kit.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
-import { GROK_USER_MCP_SERVERS_OFF, grokUserMcpServersRefusal } from './agent-user-mcp-servers.js';
+import { GROK_INSPECT_FAILED, GROK_USER_MCP_SERVERS_OFF, grokInspectRefusal } from './agent-user-mcp-servers.js';
+import { GROK_USER_CONTEXT_INSPECT_FAILED, createGrokAgentHome, grokUserInstructionsRefusal } from './agent-user-context.js';
+import { runGrokInspect } from './inspect.js';
 import { GrokProjection, type GrokTurnOutcome } from './projection.js';
 import { resolveGrokBin } from './resolve-bin.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
@@ -65,9 +67,27 @@ export interface GrokAdapterOptions {
    * children that Grok starts itself, such as stdio MCP servers and hooks, may
    * inherit them. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
    * `[paths] extra_rule_dirs` still load; Grok has no per-process switch for
-   * them. Default `inherit`: the user's Grok settings apply.
+   * them, and `agentUserContext: 'excluded'` keeps them out of Agent tasks.
+   * Default `inherit`: the user's Grok settings apply.
    */
   compatInstructions?: 'inherit' | 'disabled';
+  /**
+   * For an Agent task (`task.offer`), `excluded` runs Grok with `GROK_HOME`
+   * set to `<execution scratch>/grok-home`, which holds symbolic links only:
+   * to the user's `auth.json`, `config.toml`, `trusted_folders.toml` and
+   * `hooks/`, and `sessions/` to the Agent's own store in
+   * `<Agent home>/.byok/grok/`. The user's `AGENTS.md`, `rules/`, skills,
+   * memory, plugins and sessions stay out. It also sets the four Claude and
+   * Cursor `agents` and `rules` variables of `compatInstructions: 'disabled'`
+   * on the Grok agent process, then runs `grok inspect --json` with that
+   * environment. The start fails before the agent starts if inspect still
+   * lists a user instruction file (such as an `[paths] extra_rule_dirs`
+   * file) or fails, if the task has no sealed Agent home, or if the user
+   * `GROK_HOME` has no `auth.json` and `XAI_API_KEY` is not set. It controls
+   * which user context Grok loads; it is not a filesystem boundary. Other
+   * tasks are unchanged. Default `inherit`.
+   */
+  agentUserContext?: 'inherit' | 'excluded';
   /**
    * For an Agent task (`task.offer`), `excluded` sets
    * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
@@ -114,6 +134,7 @@ export class GrokAdapter implements RuntimeAdapter {
       isolation: {
         ...GROK_RUNTIME_CAPABILITIES.isolation!,
         ...(this.options.agentUserMcpServers === 'excluded' ? {} : { userMcpServers: false }),
+        ...(this.options.agentUserContext === 'excluded' ? {} : { userInstructions: false }),
       },
     },
     ...(this.effectiveVersionPolicy === undefined ? {} : { versionPolicy: this.effectiveVersionPolicy }),
@@ -133,6 +154,8 @@ export class GrokAdapter implements RuntimeAdapter {
       throw new TypeError('GrokAdapterOptions.compatInstructions must be inherit or disabled');
     if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
       throw new TypeError('GrokAdapterOptions.agentUserMcpServers must be inherit or excluded');
+    if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
+      throw new TypeError('GrokAdapterOptions.agentUserContext must be inherit or excluded');
     this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(GROK_VERSION_POLICY, options.versionPolicy);
     this.options = { ...options };
   }
@@ -190,15 +213,26 @@ export class GrokAdapter implements RuntimeAdapter {
     if (!cwd) throw authority('grok manifest has no sealed cwd');
     const persona = await agentPersona('grok', input.manifest);
     const env = { ...input.env, ...input.scratch.env } as Record<string, string>;
-    const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
+    const agentTask = input.manifest.agentRef !== undefined;
+    const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && agentTask;
+    const excludeUserContext = this.options.agentUserContext === 'excluded' && agentTask;
     // Set on the agent; its own children may inherit them. Hosted terminal commands keep the task env.
     const agentEnv = {
-      ...(this.options.compatInstructions === 'disabled' ? COMPAT_INSTRUCTIONS_OFF : {}),
+      ...(this.options.compatInstructions === 'disabled' || excludeUserContext ? COMPAT_INSTRUCTIONS_OFF : {}),
       ...(excludeUserMcp ? GROK_USER_MCP_SERVERS_OFF : {}),
+      ...(excludeUserContext ? { GROK_HOME: await createGrokAgentHome(env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {}),
     };
-    if (excludeUserMcp) {
-      const refusal = await grokUserMcpServersRefusal(this.options.spawnFn ?? spawn, command, cwd, { ...env, ...agentEnv });
-      if (refusal !== undefined) throw authority(refusal);
+    if (excludeUserMcp || excludeUserContext) {
+      // One inspect judges both options, with the environment the agent gets.
+      const inspected = await runGrokInspect(this.options.spawnFn ?? spawn, command, cwd, { ...env, ...agentEnv });
+      if (excludeUserContext) {
+        const refusal = inspected === undefined ? GROK_USER_CONTEXT_INSPECT_FAILED : await grokUserInstructionsRefusal(inspected, env.HOME ?? '');
+        if (refusal !== undefined) throw authority(refusal);
+      }
+      if (excludeUserMcp) {
+        const refusal = inspected === undefined ? GROK_INSPECT_FAILED : grokInspectRefusal(inspected);
+        if (refusal !== undefined) throw authority(refusal);
+      }
     }
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));

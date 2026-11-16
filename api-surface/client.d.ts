@@ -385,9 +385,27 @@ export interface GrokAdapterOptions {
      * children that Grok starts itself, such as stdio MCP servers and hooks, may
      * inherit them. `$GROK_HOME/AGENTS.md`, `$GROK_HOME/rules/` and
      * `[paths] extra_rule_dirs` still load; Grok has no per-process switch for
-     * them. Default `inherit`: the user's Grok settings apply.
+     * them, and `agentUserContext: 'excluded'` keeps them out of Agent tasks.
+     * Default `inherit`: the user's Grok settings apply.
      */
     compatInstructions?: 'inherit' | 'disabled';
+    /**
+     * For an Agent task (`task.offer`), `excluded` runs Grok with `GROK_HOME`
+     * set to `<execution scratch>/grok-home`, which holds symbolic links only:
+     * to the user's `auth.json`, `config.toml`, `trusted_folders.toml` and
+     * `hooks/`, and `sessions/` to the Agent's own store in
+     * `<Agent home>/.byok/grok/`. The user's `AGENTS.md`, `rules/`, skills,
+     * memory, plugins and sessions stay out. It also sets the four Claude and
+     * Cursor `agents` and `rules` variables of `compatInstructions: 'disabled'`
+     * on the Grok agent process, then runs `grok inspect --json` with that
+     * environment. The start fails before the agent starts if inspect still
+     * lists a user instruction file (such as an `[paths] extra_rule_dirs`
+     * file) or fails, if the task has no sealed Agent home, or if the user
+     * `GROK_HOME` has no `auth.json` and `XAI_API_KEY` is not set. It controls
+     * which user context Grok loads; it is not a filesystem boundary. Other
+     * tasks are unchanged. Default `inherit`.
+     */
+    agentUserContext?: 'inherit' | 'excluded';
     /**
      * For an Agent task (`task.offer`), `excluded` sets
      * `GROK_CLAUDE_MCPS_ENABLED`, `GROK_CURSOR_MCPS_ENABLED` and
@@ -1004,6 +1022,8 @@ export interface RuntimeAdaptersRuntimes {
         compatInstructions?: GrokAdapterOptions['compatInstructions'];
         /** `GrokAdapterOptions.agentUserMcpServers`: `excluded` switches off the user MCP sources Grok can disable and refuses an Agent task while another is enabled. Default `inherit`. */
         agentUserMcpServers?: GrokAdapterOptions['agentUserMcpServers'];
+        /** `GrokAdapterOptions.agentUserContext`: `excluded` runs an Agent task in an SDK-owned `GROK_HOME` that keeps the user's `AGENTS.md`, rules, skills, memory, plugins and sessions out, links the login, configuration, folder trust and hooks, keeps the Agent's sessions in its home, and refuses a start while Grok still lists a user instruction file. Default `inherit`. */
+        agentUserContext?: GrokAdapterOptions['agentUserContext'];
         /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
         versionPolicy?: RuntimeVersionPolicy;
         /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */

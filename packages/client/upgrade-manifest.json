@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "b81b00f84a29eee6caaac12846759589d9ec426d8980dac925b20ee3aaee0ab1"
+    "snapshotSha256": "4c5ea60004e07852718a63f05f9662d116270ebf2130353b94bc26d984727e6b"
   },
   "configFields": {
     "status": "tracked",
@@ -145,9 +145,28 @@
         "export:@byok-sdk/server/execution-core#HostExecutionCore",
         "export:@byok-sdk/server/execution-core#HostOptions"
       ]
+    },
+    {
+      "id": "grok-agent-user-context",
+      "impact": "additive",
+      "summary": "GrokAdapterOptions.agentUserContext and runtimes.grok.agentUserContext, default inherit, which changes nothing. Under excluded, a Grok Agent task runs with GROK_HOME set to an SDK-owned directory that links the user's auth.json, config.toml, trusted_folders.toml and hooks/, keeps AGENTS.md, rules/, skills, memory, plugins and the user's sessions out, keeps the Agent's sessions in <Agent home>/.byok/grok/sessions, and sets the four Claude and Cursor agents and rules variables. The start fails as a non-retryable authority failure while grok inspect still lists a user instruction file (such as an [paths] extra_rule_dirs file), when inspect fails, without a sealed Agent home, or when the user GROK_HOME has no auth.json and XAI_API_KEY is not set. The Grok descriptor then declares isolation.userInstructions. A Bot switched from inherit cannot resume sessions it made in the user's store.",
+      "migration": "docs/adapter-capabilities.md#agentusercontext-grok",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#GrokAdapterOptions",
+        "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=733c24d0d48a4795",
+      "after": "optional schema-sha256=c31225db3310daa3",
+      "entry": "grok-agent-user-context"
+    },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
@@ -167,6 +186,11 @@
       "item": "export:@byok-sdk/client#DaemonLog",
       "change": "removed",
       "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
     },
     {
       "item": "export:@byok-sdk/client#LocalTeamWorkspace",
@@ -192,6 +216,16 @@
       "item": "export:@byok-sdk/client#serviceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapterOptions",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "grok-agent-user-context"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
