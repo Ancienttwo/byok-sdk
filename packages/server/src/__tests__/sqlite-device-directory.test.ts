@@ -91,6 +91,25 @@ describe('SQLite durable device authority', () => {
     expect(readdirSync(join(path, '..'))).toEqual(['server.sqlite']);
   });
 
+  it('refuses a released store with pending WAL frames before any write: the file, its WAL and its directory stay as they were', () => {
+    const source = database();
+    copyFileSync(new URL('../../../../scripts/release/fixtures/stores/0.43.0/server-sqlite.db', import.meta.url), source);
+    const writer = new DatabaseSync(source);
+    const path = database();
+    try {
+      writer.exec('PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0;');
+      writer.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('pending', 'wal')").run();
+      // Copied while the writer holds them, so the WAL still has its frames.
+      copyFileSync(source, path);
+      copyFileSync(`${source}-wal`, `${path}-wal`);
+    } finally { writer.close(); }
+    const digest = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
+    const before = [digest(path), digest(`${path}-wal`)];
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '9' }));
+    expect([digest(path), digest(`${path}-wal`)]).toEqual(before);
+    expect(readdirSync(join(path, '..')).sort()).toEqual(['server.sqlite', 'server.sqlite-wal']);
+  });
+
   it('rejects unknown versions and malformed old databases without marking them migrated', async () => {
     const path = database(); await open(path).close();
     const legacy = new DatabaseSync(path);

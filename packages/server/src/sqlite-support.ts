@@ -1,4 +1,5 @@
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
+import { sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 
 export type SqliteOpenStep = 'after-open' | 'after-wal';
 
@@ -257,7 +258,7 @@ export function openSqliteDatabase(
   }
   let db: DatabaseSync;
   try {
-    db = new DatabaseSync(path, { timeout: DEFAULT_BUSY_TIMEOUT_MS, ...options });
+    db = new DatabaseSync(sqliteOpenPath(path), { timeout: DEFAULT_BUSY_TIMEOUT_MS, ...options });
   } catch (error) {
     throw sqliteOpenError(path, error);
   }
@@ -276,37 +277,6 @@ export function openSqliteDatabase(
       'SQLite open initialization failed and its native handle could not be closed',
       faults?.close,
     );
-  }
-}
-
-/**
- * Run `read` on an existing, non-empty database file opened read-only and
- * immutable, before anything opens it for writing. SQLite then takes no lock,
- * writes nothing to the file and creates no journal, WAL or SHM file. It reads
- * the main file only: content still in a WAL is not seen. `undefined` for
- * `:memory:`, a missing path or an empty file, which hold nothing to read.
- */
-export function readSqliteFileUnchanged<T>(path: string, read: (db: DatabaseSync) => T): T | undefined {
-  if (path === ':memory:') return undefined;
-  const { statSync } = process.getBuiltinModule('node:fs');
-  const { pathToFileURL } = process.getBuiltinModule('node:url');
-  let size: number;
-  try {
-    size = statSync(path).size;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
-    throw error;
-  }
-  if (size === 0) return undefined;
-  const url = pathToFileURL(path);
-  url.searchParams.set('mode', 'ro');
-  url.searchParams.set('immutable', '1');
-  const { DatabaseSync } = loadSqliteModule();
-  const db = new DatabaseSync(url, { readOnly: true });
-  try {
-    return read(db);
-  } finally {
-    db.close();
   }
 }
 

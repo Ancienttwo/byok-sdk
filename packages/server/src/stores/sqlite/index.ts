@@ -75,11 +75,10 @@ import type { DatabaseSync } from 'node:sqlite';
 import {
   closeSqliteDatabaseAfterInitializationFailure,
   openSqliteDatabase,
-  readSqliteFileUnchanged,
   secureSqliteFilePermissions,
   SqliteSchemaError,
-  type SqliteSchemaErrorCode,
 } from '../../sqlite-support.js';
+import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
 
 const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
@@ -261,26 +260,78 @@ CREATE INDEX task_attempt_archive_idx ON task_attempt (tenant_id, archive_after,
 CREATE INDEX task_attempt_unsettled_idx ON task_attempt (tenant_id, task_id) WHERE archived_at IS NOT NULL AND archive_settled_at IS NULL;
 `;
 
+const CURRENT_PROJECTIONS = [
+  'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at, closed_at, closed_cause FROM mailbox_cursor',
+  'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at FROM mailbox_message',
+  'tenant_id, task_id, device_id, agent_ref_json, owner_device_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities_json, status, terminal_cause, cancellation_requested_at, cancellation_reason, cancellation_message_id, updated_at FROM task_attempt',
+  `${TASK_PHASE_COLUMNS.join(', ')} FROM task_attempt`,
+  `${TASK_ARCHIVE_COLUMNS.join(', ')} FROM task_attempt`,
+  'tenant_id, task_id, message_id, payload_body, terminal_body FROM agent_message_admission',
+  'tenant_id, hash, byte_size, content_type, state, created_at, updated_at, delete_pending_at FROM object_manifest',
+  'tenant_id, hash, ref_kind, ref_id, created_at FROM object_reference',
+  'blob_id, tenant_id, reservation_id, content_hash, byte_size, content_type, uploaded, data FROM blob',
+  ...ACTIVITY_LOG_PROJECTIONS,
+  STEER_REFUSAL_PROJECTION,
+  'tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake',
+  PROOF_REQUEST_RECEIPT_PROJECTION,
+  'tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory',
+];
+const META_TABLE = "SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'";
+const APPROVAL_TIMELINE_COLUMNS = ['tenant_id', 'task_id', 'entries_json', 'next_revision', 'dropped', 'capacity', 'terminal_at', 'expires_at'];
+const REQUEST_RECEIPT_COLUMNS = ['tenant_id', 'key', 'body', 'recorded_at'];
+
 /**
- * The refusal a file's own schema metadata calls for, or `undefined` when this
- * build adopts the file: it is current, or holds no table yet. Reads only.
- * Wire v7 starts on a new store, so no older file is upgraded in place.
+ * The store's format check, reading only: `'empty'` for a file that holds no
+ * table yet, `'current'` for a file of this build's schema with every durable
+ * authority in place, and a `SqliteSchemaError` thrown for anything else.
+ * Wire v7 starts on a new store, so no older file is upgraded in place, and a
+ * missing table, column, trigger or index is refused, never recreated. It runs
+ * at open only: on the immutable handle before anything writes to the file,
+ * and again inside the schema transaction as the authority for a file that
+ * changed in between or whose metadata is still in its WAL.
  */
-function schemaRefusal(db: DatabaseSync): SqliteSchemaError | undefined {
-  const hasMetadata = db
-    .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
-    .get();
-  if (hasMetadata === undefined) {
-    const existing = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get();
-    return existing === undefined
-      ? undefined
-      : new SqliteSchemaError('SQLITE_SCHEMA_INVALID', 'Existing SQLite database has no BYOK schema metadata', undefined, SQLITE_SCHEMA_VERSION);
+function assertCurrent(db: DatabaseSync): 'empty' | 'current' {
+  if (db.prepare(META_TABLE).get() === undefined) {
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").get() === undefined) return 'empty';
+    throw new SqliteSchemaError('SQLITE_SCHEMA_INVALID', 'Existing SQLite database has no BYOK schema metadata', undefined, SQLITE_SCHEMA_VERSION);
   }
   const version = (db.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get() as { value: string } | undefined)?.value;
-  if (version === SQLITE_SCHEMA_VERSION) return undefined;
-  return new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version)}; ` +
-    `this build requires ${SQLITE_SCHEMA_VERSION}. ` +
-    'An older file is not adopted: start on a new database. A newer file needs a newer build.', version, SQLITE_SCHEMA_VERSION);
+  if (version !== SQLITE_SCHEMA_VERSION) {
+    throw new SqliteSchemaError('SQLITE_SCHEMA_UNSUPPORTED', `Unsupported BYOK SQLite schema version ${JSON.stringify(version)}; ` +
+      `this build requires ${SQLITE_SCHEMA_VERSION}. ` +
+      'An older file is not adopted: start on a new database. A newer file needs a newer build.', version, SQLITE_SCHEMA_VERSION);
+  }
+  const invalid = (message: string, options?: ErrorOptions) =>
+    new SqliteSchemaError('SQLITE_SCHEMA_INVALID', message, SQLITE_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION, options);
+  for (const projection of CURRENT_PROJECTIONS) {
+    try {
+      db.prepare(`SELECT ${projection} LIMIT 0`);
+    } catch (error) {
+      throw invalid(`Missing BYOK SQLite durable authority: SELECT ${projection}`, { cause: error });
+    }
+  }
+  const approvalColumns = db.prepare('PRAGMA table_info(approval_timeline_tail)').all();
+  if (approvalColumns.length !== APPROVAL_TIMELINE_COLUMNS.length || approvalColumns.some((column, index) =>
+    column.name !== APPROVAL_TIMELINE_COLUMNS[index] || column.notnull !== (index < 6 ? 1 : 0) ||
+    column.type !== (index >= 3 && index <= 5 ? 'INTEGER' : 'TEXT') ||
+    column.pk !== (index < 2 ? index + 1 : 0))) {
+    throw invalid('Invalid BYOK SQLite approval timeline schema');
+  }
+  const receiptColumns = db.prepare('PRAGMA table_info(request_receipt)').all();
+  if (receiptColumns.length !== REQUEST_RECEIPT_COLUMNS.length || receiptColumns.some((column, index) =>
+    column.name !== REQUEST_RECEIPT_COLUMNS[index] || column.type !== 'TEXT' || column.notnull !== 1 ||
+    column.pk !== (index < 2 ? index + 1 : 0))) {
+    throw invalid('Invalid BYOK SQLite request receipt schema');
+  }
+  if (db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(OUTPUT_CLOSURE_TRIGGER_NAME) === undefined) {
+    throw invalid('Missing BYOK SQLite task output closure');
+  }
+  for (const index of TASK_ATTEMPT_INDEX_NAMES) {
+    if (db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'index' AND name = ?").get(index) === undefined) {
+      throw invalid(`Missing BYOK SQLite index ${index}`);
+    }
+  }
+  return 'current';
 }
 
 /** One serialized owner for the synchronous SQLite handle and every transaction on it. */
@@ -294,47 +345,17 @@ class SqliteCoordinator {
   #closePromise: Promise<void> | undefined;
 
   constructor(path: string, wake?: WakeConsumer) {
-    // Refuse a file this build does not adopt before the open below writes to
-    // it: switching a rollback-journal file to WAL rewrites its header, and no
-    // rollback undoes that. The check inside the schema transaction stays the
-    // authority for a file that changes between the two reads.
-    const refused = readSqliteFileUnchanged(path, schemaRefusal);
-    if (refused !== undefined) throw refused;
+    // Decide the format before the open below writes to the file: switching a
+    // rollback-journal file to WAL rewrites its header, and no rollback undoes
+    // that.
+    readSqliteFileUnchanged(path, assertCurrent);
     this.db = openSqliteDatabase(path);
-    let foundVersion: string | undefined;
-    const schemaError = (code: SqliteSchemaErrorCode, message: string, options?: ErrorOptions) =>
-      new SqliteSchemaError(code, message, foundVersion, SQLITE_SCHEMA_VERSION, options);
-    // Do not silently recreate missing durable authorities in an existing file.
-    const assertProjection = (projection: string) => {
-      try {
-        this.db.prepare(`SELECT ${projection} LIMIT 0`);
-      } catch (error) {
-        throw schemaError('SQLITE_SCHEMA_INVALID', `Missing BYOK SQLite durable authority: SELECT ${projection}`, { cause: error });
-      }
-    };
     try {
+      let created = false;
       // openSqliteDatabase holds EXCLUSIVE ownership before this schema transaction.
       this.db.exec('BEGIN IMMEDIATE');
       try {
-        const refusal = schemaRefusal(this.db);
-        if (refusal !== undefined) throw refusal;
-        const hasMetadata = this.db
-          .prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'table' AND name = 'byok_sqlite_meta'")
-          .get();
-        if (hasMetadata !== undefined) {
-          foundVersion = SQLITE_SCHEMA_VERSION;
-          for (const projection of [
-            'tenant_id, device_id, next_seq, delivered_seq, acked_seq, updated_at, closed_at, closed_cause FROM mailbox_cursor',
-            'tenant_id, device_id, seq, message_id, body, body_hash, byte_size, state, appended_at FROM mailbox_message',
-            'tenant_id, task_id, device_id, agent_ref_json, owner_device_id, claimed_runtime, claimed_runtime_capabilities_json, status, terminal_cause, cancellation_requested_at, cancellation_reason, cancellation_message_id, updated_at FROM task_attempt',
-            'tenant_id, task_id, message_id, payload_body, terminal_body FROM agent_message_admission',
-            'tenant_id, hash, byte_size, content_type, state, created_at, updated_at, delete_pending_at FROM object_manifest',
-            'tenant_id, hash, ref_kind, ref_id, created_at FROM object_reference',
-            'blob_id, tenant_id, reservation_id, content_hash, byte_size, content_type, uploaded, data FROM blob',
-          ]) {
-            assertProjection(projection);
-          }
-        } else {
+        if (assertCurrent(this.db) === 'empty') {
           this.db.exec(SCHEMA);
           this.db.exec(RECEIPT_SCHEMA);
           this.db.exec(DEVICE_SCHEMA);
@@ -347,42 +368,10 @@ class SqliteCoordinator {
           // The closure reads the phase columns, so it follows them.
           this.db.exec(OUTPUT_CLOSURE_TRIGGER);
           this.db.prepare("INSERT INTO byok_sqlite_meta (key, value) VALUES ('schema_version', ?)").run(SQLITE_SCHEMA_VERSION);
+          created = true;
         }
-        assertProjection('claimed_harness_id FROM task_attempt');
-        assertProjection('tenant_id, task_id, entries_json, next_revision, dropped, capacity, terminal_at, expires_at FROM approval_timeline_tail');
-        for (const projection of ACTIVITY_LOG_PROJECTIONS) assertProjection(projection);
-        const approvalColumns = this.db.prepare('PRAGMA table_info(approval_timeline_tail)').all();
-        const approvalNames = ['tenant_id', 'task_id', 'entries_json', 'next_revision', 'dropped', 'capacity', 'terminal_at', 'expires_at'];
-        if (approvalColumns.length !== approvalNames.length || approvalColumns.some((column, index) =>
-          column.name !== approvalNames[index] || column.notnull !== (index < 6 ? 1 : 0) ||
-          column.type !== (index >= 3 && index <= 5 ? 'INTEGER' : 'TEXT') ||
-          column.pk !== (index < 2 ? index + 1 : 0))) {
-          throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite approval timeline schema');
-        }
-        assertProjection(`${TASK_PHASE_COLUMNS.join(', ')} FROM task_attempt`);
-        assertProjection(`${TASK_ARCHIVE_COLUMNS.join(', ')} FROM task_attempt`);
-        assertProjection(STEER_REFUSAL_PROJECTION);
-        if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(OUTPUT_CLOSURE_TRIGGER_NAME) === undefined) {
-          throw schemaError('SQLITE_SCHEMA_INVALID', 'Missing BYOK SQLite task output closure');
-        }
-        for (const index of TASK_ATTEMPT_INDEX_NAMES) {
-          if (this.db.prepare("SELECT 1 AS present FROM sqlite_master WHERE type = 'index' AND name = ?").get(index) === undefined) {
-            throw schemaError('SQLITE_SCHEMA_INVALID', `Missing BYOK SQLite index ${index}`);
-          }
-        }
-        assertProjection('tenant_id, wake_id, dedup_key, available_at, payload, state, due_at, retry_at, deliveries, last_error, done_at FROM wake');
         if (wake === undefined && this.db.prepare("SELECT 1 FROM wake WHERE state = 'queued' LIMIT 1").get() !== undefined) {
           throw new WakeHookMissingError();
-        }
-        assertProjection(PROOF_REQUEST_RECEIPT_PROJECTION);
-        assertProjection('tenant_id, device_id, product_id, machine_id, device_name, device_public_key, proof_key_id, proof_key_epoch, capabilities_json, harnesses_json FROM device_directory');
-        const receiptColumns = this.db.prepare('PRAGMA table_info(request_receipt)').all() as unknown as
-          { name: string; type: string; notnull: number; pk: number }[];
-        const expectedColumns = ['tenant_id', 'key', 'body', 'recorded_at'];
-        if (receiptColumns.length !== expectedColumns.length || receiptColumns.some((column, index) =>
-          column.name !== expectedColumns[index] || column.type !== 'TEXT' || column.notnull !== 1 ||
-          column.pk !== (index < 2 ? index + 1 : 0))) {
-          throw schemaError('SQLITE_SCHEMA_INVALID', 'Invalid BYOK SQLite request receipt schema');
         }
         // The wire-major fence: a pending envelope of another major is refused
         // here, before routes repeatedly fail to decode the same row.
@@ -391,8 +380,9 @@ class SqliteCoordinator {
           try { envelope = JSON.parse(row.body as string); } catch { envelope = undefined; }
           if (typeof envelope !== 'object' || envelope === null ||
               !('v' in envelope) || envelope.v !== PROTOCOL_VERSION) {
-            throw schemaError('SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED',
-              `Pending mailbox rows do not use protocol v${PROTOCOL_VERSION}; preserve the database and drain with the previous SDK before upgrading, or use a new state directory and enrollment`);
+            throw new SqliteSchemaError('SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED',
+              `Pending mailbox rows do not use protocol v${PROTOCOL_VERSION}; preserve the database and drain with the previous SDK before upgrading, or use a new state directory and enrollment`,
+              SQLITE_SCHEMA_VERSION, SQLITE_SCHEMA_VERSION);
           }
         }
         this.db.exec('COMMIT');
@@ -400,6 +390,9 @@ class SqliteCoordinator {
         this.db.exec('ROLLBACK');
         throw error;
       }
+      // A new store moves its metadata into the main file at once, so the
+      // read-only check of a later open sees it rather than an empty file.
+      if (created) this.db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
       this.db.function(TASK_CHANGED_FUNCTION, (tenant, taskId) => {
         this.#changedTasks.set(JSON.stringify([tenant, taskId]), [tenant as TenantId, taskId as string]);
         return null;
