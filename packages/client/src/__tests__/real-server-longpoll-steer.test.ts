@@ -78,11 +78,9 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     // The claim really did carry the adapter's self-report across the long-poll
     // round trip — and it is the adapter's own value, not a server-side guess:
-    // `runtime` is undefined here (a custom adapter id has no `RuntimeId` to
-    // name it), so there was nothing for the server to infer a default from.
+    // the claimed executor is the custom harness, never a built-in runtime.
     const snapshot = await real.byok.tasks.get(handle.taskId);
-    expect(snapshot?.claimedRuntime).toBeUndefined();
-    expect(snapshot?.claimedHarnessId).toBe('acme-harness');
+    expect(snapshot?.claimedExecutor).toEqual({ kind: 'harness', harnessId: 'acme-harness' });
     expect(snapshot?.claimedRuntimeCapabilities).toEqual({
       steer: true,
       resume: true,
