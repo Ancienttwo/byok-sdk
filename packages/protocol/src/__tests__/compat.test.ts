@@ -124,7 +124,7 @@ function corpusOf(lines: readonly string[]): CorpusLine[] {
 
 type HttpSurface = 'ChallengeRequest' | 'ChallengeResponse' | 'TokenRequest' | 'TokenResponse'
   | 'PairRequest' | 'PairResponse' | 'EventsPollQuery' | 'EventsPollResponse' | 'MessagesSendRequest' | 'MessagesSendResponse'
-  | 'PresencePublishRequest';
+  | 'PresencePublishRequest' | 'PairSupersededResponse' | 'PairingCodeInvalidResponse';
 
 interface HttpCorpusLine {
   readonly index: number;
@@ -754,10 +754,10 @@ function assertCurrentHttp(line: HttpCorpusLine): void {
 }
 
 describe('compat v7: HTTP corpus', () => {
-  it('covers all eleven scoped HTTP route schemas with owned bodies and independent expected values', () => {
+  it('covers all thirteen scoped HTTP route schemas with owned bodies and independent expected values', () => {
     const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
       'PairRequest', 'PairResponse', 'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse',
-      'PresencePublishRequest'];
+      'PresencePublishRequest', 'PairSupersededResponse', 'PairingCodeInvalidResponse'];
     expect([...new Set(v7HttpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
     expect(v7HttpText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
     for (const line of v7HttpCorpus) {
@@ -774,6 +774,15 @@ describe('compat v7: HTTP corpus', () => {
     'v7 HTTP line %i (%s) deep-equals its independent expected value and accounts for its batch',
     (_index, _surface, line) => assertCurrentHttp(line),
   );
+
+  it('pins the generator\'s pairing digest to pairDeviceDigest', async () => {
+    const request = v7HttpCorpus.find((entry) => entry.surface === 'PairRequest' && entry.value.expectedDeviceDigest !== null)!;
+    expect(request.value.expectedDeviceDigest).toBe(await currentModule.pairDeviceDigest({
+      tenantId: 'tenant-golden',
+      productId: 'acme-agent',
+      deviceId: 'dev_00000000-0000-4000-8000-000000002045',
+    }));
+  });
 
   it('detects a changed literal body independently of the expected value', () => {
     const line = v7HttpCorpus.find((entry) => entry.surface === 'ChallengeResponse')!;

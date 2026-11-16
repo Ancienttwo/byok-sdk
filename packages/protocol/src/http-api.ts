@@ -24,6 +24,7 @@ import {
   AgentMemoryProjectionMutationSchema,
   AgentMemoryProjectionReceiptSchema,
 } from './agent-memory-projection.js';
+import { PairDeviceDigestSchema } from './pair-device-digest.js';
 
 /**
  * HTTP-side request/response shapes for the reference server's auth and blob
@@ -58,8 +59,51 @@ export const PairRequestSchema = z.object({
    * exact digest. A client that cannot resolve one omits the field entirely.
    */
   machineId: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  /**
+   * Registration fence (#2045): the `pairDeviceDigest` of the device this
+   * client last knew as current for its slot, or `null` when it knew none.
+   * With `machineId`, the server registers only when this equals the digest
+   * of the current device of (tenant, product, machineId) — `null` for none —
+   * and otherwise answers `409` {@link PairSupersededResponseSchema} without
+   * consuming the code. Without `machineId` nothing is superseded, so the
+   * server ignores it. Required, never omitted: a request without it is a
+   * pre-v7 client and gets `400`.
+   */
+  expectedDeviceDigest: PairDeviceDigestSchema.nullable(),
 });
 export type PairRequest = z.infer<typeof PairRequestSchema>;
+
+/**
+ * The typed rejections of `POST /byok/pair` (§6.1). Each body carries a fixed
+ * `error` text and its `code`, and nothing else the server knows, except the
+ * one field the `409` carries.
+ */
+export const PAIRING_CODE_INVALID_CODE = 'pairing_code_invalid';
+export const PAIRING_SUPERSEDED_CODE = 'pairing_superseded';
+
+/**
+ * `401`: the code is unknown, expired or already used. The three answer with
+ * this one body, so a code holder learns nothing more than that it failed.
+ */
+export const PairingCodeInvalidResponseSchema = z.object({
+  error: z.string(),
+  code: z.literal(PAIRING_CODE_INVALID_CODE),
+});
+export type PairingCodeInvalidResponse = z.infer<typeof PairingCodeInvalidResponseSchema>;
+
+/**
+ * `409`: `expectedDeviceDigest` is not the digest of the machine's current
+ * device. Nothing changed and the code is not consumed. `currentDeviceDigest`
+ * is that device's digest, or `null` when the machine has none; only the
+ * pairing invocation that still owns its local attempt may resend once with
+ * it (§6.1).
+ */
+export const PairSupersededResponseSchema = z.object({
+  error: z.string(),
+  code: z.literal(PAIRING_SUPERSEDED_CODE),
+  currentDeviceDigest: PairDeviceDigestSchema.nullable(),
+});
+export type PairSupersededResponse = z.infer<typeof PairSupersededResponseSchema>;
 
 /**
  * The authenticated tenant projection is opaque to the wire protocol. It is

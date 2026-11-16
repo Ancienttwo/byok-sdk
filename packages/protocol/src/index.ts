@@ -416,6 +416,12 @@ export {
   offerSelectionViolation,
 } from './messages.js';
 export { steerRefusalEnvelopeId, uuidFromSha256 } from './steer-refusal.js';
+export {
+  PAIR_DEVICE_DIGEST_NAMESPACE,
+  PairDeviceDigestSchema,
+  pairDeviceDigest,
+  type PairDeviceDigestInput,
+} from './pair-device-digest.js';
 export type {
   ResultDocumentCheck,
   MessageType,
@@ -578,10 +584,16 @@ export {
   InputPreparationStatusSchema,
   InputPreparationReadbackSchema,
   InputPreparationStatusQuerySchema,
+  PAIRING_CODE_INVALID_CODE,
+  PAIRING_SUPERSEDED_CODE,
+  PairingCodeInvalidResponseSchema,
+  PairSupersededResponseSchema,
 } from './http-api.js';
 export type {
   PairRequest,
   PairResponse,
+  PairingCodeInvalidResponse,
+  PairSupersededResponse,
   ChallengeRequest,
   ChallengeResponse,
   TokenRequest,
