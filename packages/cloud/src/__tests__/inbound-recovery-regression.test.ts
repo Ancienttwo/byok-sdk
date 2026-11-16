@@ -25,12 +25,14 @@ function storesFor(harness: ReturnType<typeof createHarness>, deviceId: string):
   });
 }
 
+const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+
 function claim(taskId: string, deviceId: string): Envelope {
-  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId });
+  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
 }
 
 function complete(taskId: string): Envelope {
-  return createEnvelope('task.complete', { summary: 'completed', sessionRef: 'session-recovery', agentRef: TEST_AGENT_REF }, { taskId });
+  return createEnvelope('task.complete', { summary: 'completed', sessionRef: 'session-recovery', agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
 }
 
 async function offeredTask() {
@@ -198,6 +200,7 @@ describe('inbound lifecycle recovery', () => {
         instruction: 'send one message',
         agentRef,
         session: { mode: 'resume', sessionRef: 'recovery-session' },
+        target: { lane: 'auto' },
         egressPolicy: {
           policyRevision: 'recovery-policy',
           activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -260,10 +263,14 @@ describe('inbound lifecycle recovery', () => {
         harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: device.deviceId, agentRef }),
       ),
     );
+    for (const { taskId, agentRef } of [first, second]) {
+      const claimed = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor: EXECUTOR }, { taskId });
+      await expect(handleInboundEnvelope(stores, device.deviceId, claimed).then((result) => result.outcome)).resolves.toBe('accepted');
+    }
 
     const crossAgentTerminal = createEnvelope(
       'task.fail',
-      { reason: 'wrong Agent must not write this task', agentRef: second.agentRef },
+      { reason: 'wrong Agent must not write this task', agentRef: second.agentRef, executor: EXECUTOR },
       { taskId: first.taskId, id: '10000000-0000-4000-8000-000000001139' },
     );
     await expect(handleInboundEnvelope(stores, device.deviceId, crossAgentTerminal).then((result) => result.outcome)).resolves.toBe('rejected');
@@ -271,7 +278,7 @@ describe('inbound lifecycle recovery', () => {
     const terminals = [first, second].map(({ taskId, agentRef }, index) =>
       createEnvelope(
         'task.complete',
-        { summary: `completed by ${agentRef.agentId}`, sessionRef: `session-${agentRef.agentId}`, agentRef },
+        { summary: `completed by ${agentRef.agentId}`, sessionRef: `session-${agentRef.agentId}`, agentRef, executor: EXECUTOR },
         { taskId, id: `10000000-0000-4000-8000-00000000114${index}` },
       ),
     );
@@ -362,7 +369,7 @@ describe('inbound lifecycle recovery', () => {
     await handleInboundEnvelope(stores, device.deviceId, claim(taskId, device.deviceId)).then((result) => result.outcome);
     const winning = complete(taskId);
     await stores.receipts.record({ key: terminalReceiptKey(taskId), body: encodeEnvelope(winning) });
-    const losing = createEnvelope('task.fail', { reason: 'must not win', agentRef: TEST_AGENT_REF }, { taskId });
+    const losing = createEnvelope('task.fail', { reason: 'must not win', agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
 
     await expect(handleInboundEnvelope(stores, device.deviceId, losing).then((result) => result.outcome)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.status).toBe('complete');
@@ -388,7 +395,7 @@ describe('inbound lifecycle recovery', () => {
       },
     };
     const unknownTerminals = [
-      createEnvelope('task.complete', { summary: 'unknown', sessionRef: 'unknown-session' }, { taskId: 'task-unknown-complete' }),
+      createEnvelope('task.complete', { summary: 'unknown', sessionRef: 'unknown-session', executor: EXECUTOR }, { taskId: 'task-unknown-complete' }),
       createEnvelope('task.fail', { reason: 'unknown' }, { taskId: 'task-unknown-fail' }),
       createEnvelope('task.cancelled', {}, { taskId: 'task-unknown-cancelled' }),
       createEnvelope('task.decline', { reason: 'unknown' }, { taskId: 'task-unknown-decline' }),
