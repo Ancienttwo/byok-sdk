@@ -16,7 +16,7 @@ import { createEnvelope, type Envelope, type MessageType } from '@byok-sdk/proto
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -48,7 +48,7 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], missing
   // check is not the subject: advertise every flag so the offer reaches the sealed decline.
   return new TaskRunner({...testAgentHomeDeps(), ...freshOfferEgressDeps(),
     advertisedCapabilities: () => advertiseEveryDeviceFlag().filter((flag) => flag !== missingFlag),
-    getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     deviceId: 'sealed-refusal-device', send: (event) => { sent.push(event); },
     blobClient: {

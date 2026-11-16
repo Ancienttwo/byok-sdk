@@ -16,7 +16,7 @@ import { OfferAdmissionTiming } from '../daemon/task-runner/offer-admission-timi
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeCapabilities } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const AGENT_REF = { agentId: 'admission-agent', profileRevision: '1' } as const;
@@ -40,7 +40,7 @@ async function temporary(prefix: string): Promise<string> {
 async function harness(adapter: StubRuntimeAdapter, overrides: Partial<TaskRunnerDeps> = {}) {
   const sent: Envelope[] = [];
   const runner = new TaskRunner({
-    getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot: await temporary('byok-admission-home-') }),

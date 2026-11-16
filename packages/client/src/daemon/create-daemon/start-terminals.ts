@@ -231,9 +231,9 @@ export function composeStartTerminals(daemonScope: DaemonScope, run: Pick<StartR
   // #2294: one waiter per task for its posted `task.claim`, settled from the
   // outbound settlement. A waiter that its signal ended is removed, so a late
   // settlement finds nothing.
-  type ClaimSettlement = Awaited<ReturnType<NonNullable<TaskRunnerDeps['awaitClaimSettlement']>>>;
+  type ClaimSettlement = Awaited<ReturnType<TaskRunnerDeps['awaitClaimSettlement']>>;
   const claimWaiters = new Map<string, { readonly claimId: string; readonly settle: (settlement: ClaimSettlement) => void }>();
-  const awaitClaimSettlement: NonNullable<TaskRunnerDeps['awaitClaimSettlement']> = (taskId, claimId, signal) =>
+  const awaitClaimSettlement: TaskRunnerDeps['awaitClaimSettlement'] = (taskId, claimId, signal) =>
     new Promise((resolve) => {
       if (signal.aborted) { resolve(undefined); return; }
       const settle = (settlement: ClaimSettlement): void => {

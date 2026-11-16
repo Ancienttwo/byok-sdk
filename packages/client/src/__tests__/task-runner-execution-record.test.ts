@@ -10,7 +10,7 @@ import type { ExecutionRecord } from '../daemon/execution-record';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, type StubSession } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -48,7 +48,7 @@ async function makeRunner(options: RunnerOptions = {}) {
   if (options.omitEvidence === true) adapter.decorateSession = stub => { Object.defineProperty(stub, 'evidence', { value: undefined }); };
   const sent: Envelope[] = [];
   const records: ExecutionRecord[] = [];
-  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'execution-record-device',
@@ -210,7 +210,7 @@ describe('TaskRunner execution record', () => {
     adapter.startError = new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: 'spawn failed' });
     const sent: Envelope[] = [];
     const onExecutionRecord = vi.fn();
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter], deviceId: 'execution-record-device',
       send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },

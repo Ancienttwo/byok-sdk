@@ -313,7 +313,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   // host reduces C2, runs this send synchronously, and reduces the claim.sent
   // completion inside the same turn; a cancel can only be queued behind it
   // and then sees a claimed task (X3b), never a pre-claim X2a row.
-  const claim: { settlement?: ReturnType<NonNullable<TaskRunnerDeps['awaitClaimSettlement']>> } = {};
+  const claim: { settlement?: ReturnType<TaskRunnerDeps['awaitClaimSettlement']> } = {};
   host.setSendClaim(taskId, () => {
     this['claimedExecutorIds'].set(taskId, manifest.descriptor.id);
     const timings = admission.snapshot();
@@ -347,7 +347,7 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
       { taskId },
     );
     // Registered before the send, so no settlement can arrive unobserved.
-    claim.settlement = this['deps'].awaitClaimSettlement?.(taskId, envelope.id, blobAbort.signal);
+    claim.settlement = this['deps'].awaitClaimSettlement(taskId, envelope.id, blobAbort.signal);
     this['deps'].send(envelope);
   });
   try {
@@ -360,7 +360,8 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   } finally {
     host.setSendClaim(taskId, undefined);
   }
-  if (claim.settlement !== undefined && !await claimAccepted.call(this, taskId, claim.settlement, blobAbort.signal, {
+  if (claim.settlement === undefined) throw new Error(`claim for ${taskId} was sent without its settlement wait`);
+  if (!await claimAccepted.call(this, taskId, claim.settlement, blobAbort.signal, {
     binding: agentBinding,
     runtimeId: pick.descriptor.id,
   })) return;
@@ -448,7 +449,7 @@ function failBeforeStart(
 async function claimAccepted(
   this: TaskRunner,
   taskId: string,
-  settlement: NonNullable<ReturnType<NonNullable<TaskRunnerDeps['awaitClaimSettlement']>>>,
+  settlement: ReturnType<TaskRunnerDeps['awaitClaimSettlement']>,
   signal: AbortSignal,
   context: ClaimedAgentFailureContext,
 ): Promise<boolean> {
@@ -460,9 +461,10 @@ async function claimAccepted(
     return false;
   }
   // `duplicate` is a replay of an accepted claim: the cloud reaches its
-  // envelope dedupe (cloud inbound.ts `completeInboundEnvelope`) only after
-  // the ownership CAS in `applyLifecycle` passed with this device as owner
-  // and the same executor, and a refused claim never records that dedupe.
+  // envelope dedupe (`completeInboundEnvelope`, packages/cloud/src/inbound.ts:838-841)
+  // only after the ownership CAS in `applyLifecycle` (inbound.ts:876-877)
+  // passed with this device as owner and the same executor, and a refused
+  // claim never records that dedupe.
   if (settled !== undefined && !signal.aborted) return true;
   const pendingCancel = pendingCancelBeforeActive.call(this, taskId);
   if (pendingCancel === undefined) {

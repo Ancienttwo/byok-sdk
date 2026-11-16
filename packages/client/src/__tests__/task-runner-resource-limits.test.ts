@@ -17,7 +17,7 @@ import {
 } from '../daemon/task-runner/state';
 import { estimateEventBytes } from '../daemon/task-runner/support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 /**
  * M5 batch-3 (workstream 2): `TaskRunner`'s two local resource-limit
@@ -69,7 +69,7 @@ async function makeRunner(
     shutdownInterruptTimeoutMs: overrides.shutdownInterruptTimeoutMs,
     maxTaskOutputBytes: overrides.maxTaskOutputBytes,
     batcherOptions: overrides.batcherOptions,
-    getIngressBudget: overrides.getIngressBudget ?? testIngressBudget,
+    getIngressBudget: overrides.getIngressBudget ?? testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
   };
   return new TaskRunner(deps);
 }

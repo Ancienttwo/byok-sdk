@@ -16,7 +16,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SealedTasks, type SealedScopeKeyring } from '../daemon/sealed-task';
 import { TaskRunner } from '../daemon/task-runner';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -86,7 +86,7 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
   const sent: Envelope[] = [];
   const adapter = new StubRuntimeAdapter('pi');
   const runner = new TaskRunner({
-    getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
     agentEgressPolicy: first.payload.egressPolicy as never, agentSessionHandoffs: new AgentSessionHandoffStore(),

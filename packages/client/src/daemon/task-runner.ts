@@ -211,10 +211,8 @@ export interface TaskRunnerDeps {
    * The cloud's outcome for the posted `task.claim` with this envelope id
    * (#2294). Registered before the claim is sent; resolves `undefined` once
    * `signal` aborts first. The runtime starts only after an accepted claim.
-   * A runner whose `send` reaches no cloud (unit fixtures) omits it and
-   * starts after the claim is queued.
    */
-  awaitClaimSettlement?: (taskId: string, claimId: string, signal: AbortSignal) => Promise<
+  awaitClaimSettlement: (taskId: string, claimId: string, signal: AbortSignal) => Promise<
     | { readonly outcome: 'accepted' | 'duplicate' }
     | { readonly outcome: 'rejected'; readonly reason: string }
     | undefined

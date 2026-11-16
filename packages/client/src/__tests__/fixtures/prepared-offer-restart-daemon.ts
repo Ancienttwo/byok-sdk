@@ -30,7 +30,7 @@ import {
 import type { McpToolsetConfig, RuntimeCapabilities } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
-import { testIngressBudget } from './activity-ingress';
+import { acceptClaimSettlement, testIngressBudget } from './activity-ingress';
 import { advertiseEveryDeviceFlag } from '../support/advertised-capabilities';
 
 /**
@@ -182,7 +182,7 @@ const sent: Envelope[] = [];
 await fs.mkdir(config.runnerStoreDir, { recursive: true });
 await fs.mkdir(config.agentHomeDir, { recursive: true });
 
-const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: new ScratchRoot(config.scratchRoot),
+const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: new ScratchRoot(config.scratchRoot),
   adapters: [adapter],
   deviceId: DEVICE_ID,
   send: (envelope) => sent.push(envelope),

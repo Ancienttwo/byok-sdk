@@ -27,7 +27,7 @@ import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } fro
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
 
 const roots: string[] = [];
@@ -83,7 +83,7 @@ describe('Agent memory guidance', () => {
         throw new Error('not used in this test');
       },
     };
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -197,7 +197,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
   const storeDir = await makeRoot();
   const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),

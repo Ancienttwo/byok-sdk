@@ -11,7 +11,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS } from '../daemon/task-runner/state';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -55,7 +55,7 @@ async function fixture(overrides: Partial<TaskRunnerDeps> = {}) {
   const committed = deferred();
   const awaitTerminalCommit = vi.fn(async () => { committing.resolve(); await committed.promise; });
   const runner = new TaskRunner({
-    getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome, agentSessionHandoffs: handoffs, deviceId: 'cancel-device',
     send: envelope => {

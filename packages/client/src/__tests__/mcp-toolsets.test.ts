@@ -22,7 +22,7 @@ import { McpToolsetRegistry, McpToolsetRevisionConflictError } from '../daemon/t
 import { freezeRuntimeAdapterDescriptor, type McpToolsetConfig, type RuntimeCapabilities, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
@@ -103,7 +103,7 @@ async function makeRunner(
   getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>,
   mcpToolsetToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = stubToolsProbe,
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe,
     adapters: Array.isArray(adapter) ? adapter : [adapter],
     ...testAgentHomeDeps(),
@@ -807,7 +807,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
     extra: Partial<TaskRunnerDeps> = {},
   ): Promise<TaskRunner> {
     const storeDir = await tmpDir('byok-host-toolset-store-');
-    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       mcpToolsetToolsProbe: stubToolsProbe,
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: await tmpDir('byok-host-toolset-home-') }),

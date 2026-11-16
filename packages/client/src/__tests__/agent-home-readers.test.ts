@@ -28,7 +28,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -903,7 +903,7 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     });
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [durable],
       agentHome,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -940,7 +940,7 @@ describe('reader admission after a published reader terminal (#476)', () => {
     const pi = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [pi],
       agentHome,
       agentSessionHandoffs: new AgentSessionHandoffStore(),

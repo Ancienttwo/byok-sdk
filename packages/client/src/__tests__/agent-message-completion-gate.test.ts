@@ -17,7 +17,7 @@ import { RuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../run
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { freezeRuntimeAdapterDescriptor, type Session } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
 
@@ -40,7 +40,7 @@ async function cancellationFixture() {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
@@ -447,7 +447,7 @@ describe('required Agent message completion gate', () => {
     const payload = outbox.publishPayload(record!);
     if (payload.sealed !== undefined) throw new Error("plaintext message expected");
     const sent: Envelope[] = [];
-    const createRunner = () => new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag,...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const createRunner = () => new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag,...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [], storeDir: root, productId: 'recovery-test', deviceId: 'device-one', tenantId: 'tenant-one',
       send: (envelope) => sent.push(envelope),
       blobClient: { resolveInstruction: async () => '', uploadArtifact: async () => { throw new Error('unused'); } },
@@ -483,7 +483,7 @@ describe('required Agent message completion gate', () => {
       const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
       });
-      const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+      const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
         adapters: [adapter],
         agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-refusal',
@@ -571,7 +571,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -604,7 +604,7 @@ describe('required Agent message completion gate', () => {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
     const helperPreflight = vi.fn<NonNullable<TaskRunnerDeps['agentMessageMcpPreflight']>>(async () => {});
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -702,7 +702,7 @@ describe('required Agent message completion gate', () => {
     expect(sent.some((envelope) => envelope.type === 'task.complete' && envelope.task_id === refusedTaskId)).toBe(false);
 
     const restartSent: Envelope[] = [];
-    const restarted = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const restarted = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -724,7 +724,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -767,7 +767,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -802,7 +802,7 @@ describe('required Agent message completion gate', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -853,7 +853,7 @@ describe('required Agent message completion gate', () => {
         value: freezeRuntimeAdapterDescriptor({ ...adapter.descriptor, progressMessageBoundary: 'event' }),
       });
     }
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

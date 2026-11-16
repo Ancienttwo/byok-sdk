@@ -21,7 +21,7 @@ import { ControlError } from '../daemon/control-protocol';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps, resumeSession } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeCapabilities, RuntimeOperationStartInput } from '../types';
@@ -50,7 +50,7 @@ const NO_AUTO: RuntimeCapabilities = { steer: true, resume: true, approvalIntera
 function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs'>> = {}) {
   const approvalRegistry = new ApprovalRegistry();
   const runner = new TaskRunner({
-    advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter], ...testAgentHomeDeps(), deviceId: 'device-1', send: (envelope) => { sent.push(envelope); },
     blobClient: unusedBlobClient, approvalRegistry, storeDir: 'unused-store-dir', productId: 'unused-product-id', ...extra,
   });

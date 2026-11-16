@@ -15,7 +15,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { waitForOpen } from './fixtures/lifecycle-barrier';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -77,7 +77,7 @@ async function openConnection() {
 function runnerDeps(manager: ConnectionManager, sentPublishes: Envelope[], storeDir: string): TaskRunnerDeps {
   return {
     advertisedCapabilities: advertiseEveryDeviceFlag,
-    getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [], storeDir, deviceId: 'device-outage',
     productId: 'publish-outage-test', tenantId: 'tenant-outage',
     send: (envelope) => {
