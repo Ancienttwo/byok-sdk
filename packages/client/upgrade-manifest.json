@@ -116,6 +116,15 @@
       "items": [
         "behavior:remove-pi-rpc-close-wait"
       ]
+    },
+    {
+      "id": "bot-blocked-projection-id",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration publishes a blocked Turn as blocked:<turnId>:<code>:<fingerprint> instead of blocked:<turnId>, with value { owner, turnId, code, reason }. code is unavailable_model, schema_over_budget or current_request_too_large; reason keeps the full details; the fingerprint is the first 12 hex digits of the SHA-256 of the canonical JSON of { code, reason }. A Turn whose reason changes while it stays blocked gets one more id per reason, and a reason that comes back republishes the same id and value. A Host that routes by the 'blocked:' prefix needs no change; a Host that builds or parses blocked:<turnId> reads turnId and code from the value instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#blocked-turn-projection-ids-2245",
+      "items": [
+        "behavior:bot-blocked-projection-id"
+      ]
     }
   ],
   "changes": [

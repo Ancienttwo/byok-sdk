@@ -313,7 +313,8 @@ it('blocks an over-limit current Unicode Request with a measured reason and no S
   expect(fixture.adapter.starts).toHaveLength(1);
   expect(host().snapshot().team.rooms[room.id]!.messages.at(-1)!.text).toBe(request);
   expect(Object.values(fixture.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({
-    kind: 'projection', id: `blocked:${seat.id}`, value: { owner: turn.botId, turnId: seat.id, reason },
+    kind: 'projection', id: expect.stringMatching(new RegExp(`^blocked:${seat.id}:current_request_too_large:[0-9a-f]{12}$`)),
+    value: { owner: turn.botId, turnId: seat.id, code: 'current_request_too_large', reason },
   }));
 });
 

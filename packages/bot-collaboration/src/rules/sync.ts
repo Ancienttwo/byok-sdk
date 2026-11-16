@@ -1,5 +1,6 @@
 import { BOT_TURN_OUTCOME_CONTRACT, BotTurnOutcomeSchemaError, type AgentMemorySelection, type AgentRef, type ResultSchema,
   type TaskOfferSealedPayload, type TaskSealing } from '@byok-sdk/protocol';
+import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { json, type SealedRoutineRef, type Turn } from './turn.js';
 import { BOT_REPLY_MAX_BYTES, type IntentFacts, type Publish } from './delegation.js';
 import { CurrentRequestTooLargeError } from './history.js';
@@ -124,9 +125,18 @@ export type SyncStep<E> =
   | { kind: 'cancel' }
   | { kind: 'ended' };
 
-/** Blocks a Turn that cannot freeze. A blocked seat is released and terminal, so it is published (#1393). */
-function blockTurn(state: Pick<SyncState<FreezeExecution>, 'team'>, turn: Turn, reason: string, publish: Publish): void {
-  if (turn.blockedReason !== reason) publish(`blocked:${turn.id}`, { owner: turn.botId, turnId: turn.id, reason });
+/** Why a Turn is blocked: the class of its reason. */
+type BlockedCode = 'unavailable_model' | 'schema_over_budget' | 'current_request_too_large';
+/**
+ * Blocks a Turn that cannot freeze. A blocked seat is released and terminal, so it is published (#1393).
+ * The reason carries details that change while the Turn stays blocked, such as a schema size or a model name, so each
+ * reason has its own projection id from a fingerprint of the code and the reason (#2245). A projection id never changes
+ * value, and a reason that comes back republishes the same row.
+ */
+function blockTurn(state: Pick<SyncState<FreezeExecution>, 'team'>, turn: Turn, code: BlockedCode, reason: string, publish: Publish): void {
+  if (turn.blockedReason !== reason) {
+    publish(`blocked:${turn.id}:${code}:${hash({ code, reason }).slice(0, 12)}`, { owner: turn.botId, turnId: turn.id, code, reason });
+  }
   const seat = state.team.seats[turn.id];
   if (seat) {
     const settled = seatSettled(seat);
@@ -207,7 +217,7 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   // #1357: the Host has no template of the Bot's model, for example after a device key was removed. Every Turn of the Bot,
   // a sealed routine Turn too, waits here and freezes once the Host provides the template.
   if (!options.models.includes(bot.model)) {
-    blockTurn(state, turn, `Unavailable model: ${bot.model}`, publish);
+    blockTurn(state, turn, 'unavailable_model', `Unavailable model: ${bot.model}`, publish);
     return undefined;
   }
   if (turn.sealedRoutine) return freezeSealed(state, turn, turn.sealedRoutine, bot, options, publish);
@@ -222,8 +232,8 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     frozen = botTurnInstruction(state, turn, options.limits, options.routines, history?.rows, room?.rows, promptActions(schema, options.offer));
   } catch (error) {
     if (error instanceof BotTurnOutcomeSchemaError && error.code === 'schema-over-budget') {
-      blockTurn(state, turn, `Outcome schema over budget: ${error.message}`, publish);
-    } else if (error instanceof CurrentRequestTooLargeError) blockTurn(state, turn, error.message, publish);
+      blockTurn(state, turn, 'schema_over_budget', `Outcome schema over budget: ${error.message}`, publish);
+    } else if (error instanceof CurrentRequestTooLargeError) blockTurn(state, turn, 'current_request_too_large', error.message, publish);
     else throw error;
     return undefined;
   }
@@ -276,7 +286,7 @@ function freezeSealed<E extends FreezeExecution, R extends ContextRoutine>(state
   try { schema = outcomeSchema(turn.botId, state, turn, options.models, options.routines, options.offer); }
   catch (error) {
     if (!(error instanceof BotTurnOutcomeSchemaError) || error.code !== 'schema-over-budget') throw error;
-    blockTurn(state, turn, `Outcome schema over budget: ${error.message}`, publish);
+    blockTurn(state, turn, 'schema_over_budget', `Outcome schema over budget: ${error.message}`, publish);
     return undefined;
   }
   state.schemas[turn.id] = schema;
