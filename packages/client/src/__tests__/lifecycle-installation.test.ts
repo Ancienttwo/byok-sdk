@@ -19,6 +19,7 @@ import { installationHoldsStart, readServiceInstallationRecord } from '../util/s
 import { collisionKey, SERVICE_PAYLOAD_MANIFEST, sha256File, writeServicePayloadManifest, type ServicePayloadManifest } from '../service-payload-manifest';
 import { createManagedLifecycle, type HeldServiceLifecycle, type ManagedServiceLifecycle, type PlatformUnit } from '../lifecycle/managed-lifecycle';
 import { createLaunchdLifecycle } from '../lifecycle/launchd';
+import { createWindowsUserLifecycle } from '../lifecycle/windows-user';
 import type { Runner } from '../util/exec-runner';
 import { PlatformCommandTimeoutError } from '../util/command-timeouts';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs } from './support/service-fs';
@@ -1074,6 +1075,40 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     await installation.uninstall();
     expect(await fs.readdir(installRoot)).toEqual([]);
   });
+  it.each(['uninstall', 'failed install'] as const)('a Windows user service whose stop program lives under current: a retry after a failed unit removal (%s) finishes without running it again (#2279)', async (first) => {
+    const unitFs = memoryServiceFs();
+    let running = false;
+    let unitRemovalFailures = 1;
+    unitFs.rm.mockImplementation(async (file: string) => {
+      if (file.endsWith('svc.cmd') && unitRemovalFailures-- > 0) throw Object.assign(new Error('unit busy'), { code: 'EPERM' });
+      unitFs.files.delete(file);
+    });
+    // The stop program exits 0 only while current exists, as one under current does.
+    const stops: boolean[] = [];
+    const def = { name: 'svc', storeDir, logDir: path.join(storeDir, 'service-logs'), owner: 'app', program: { command: process.execPath, args: [] }, windows: { scope: 'user' as const, stop: { command: 'stop', args: [] } } };
+    installation = installationOver(createWindowsUserLifecycle(def, {
+      fs: unitFs, appData: () => '/appdata', now: () => 0, sleep: async () => undefined,
+      run: async () => ({ code: 0, stdout: running ? '4242' : '', stderr: '' }),
+      launchUnit: async () => { running = true; },
+      runStopProgram: async () => {
+        const present = existsSync(path.join(installRoot, 'current'));
+        stops.push(present);
+        if (present) running = false;
+        return present ? 0 : 1;
+      },
+    }));
+    if (first === 'failed install') unhealthy.add('1.0.0');
+    const failing = installation.install(await payload('1.0.0'));
+    if (first === 'failed install') await expect(failing).rejects.toMatchObject({ code: 'install_health_check_failed' });
+    else {
+      await failing;
+      await expect(installation.uninstall()).rejects.toMatchObject({ code: 'EPERM' });
+    }
+    expect([stops, await pointer('current'), [...unitFs.files.keys()].some((file) => file.endsWith('svc.cmd'))]).toEqual([[true], undefined, true]);
+    await installation.uninstall();
+    expect([stops, [...unitFs.files.keys()].some((file) => file.endsWith('svc.cmd')), existsSync(path.join(installRoot, 'versions'))]).toEqual([[true], false, false]);
+  });
+
   describe('install store preparation (#1983)', () => {
     const migrating = (verdict = 'accepted') => installationOver(fakeLifecycle(), {
       precheck: (versionDir) => {

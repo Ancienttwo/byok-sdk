@@ -379,6 +379,12 @@ with `service_stop_failed`.
 - A unit whose removal fails after the stop stays without `current`, so a
   boot or login starts no payload, as in 0.43.0 (#2011, #2279). A timed-out
   `daemon-reload` after the unit files are removed is thrown the same way.
+- A Windows `user` scope lifecycle's `stop()`, and the stop inside
+  `uninstall()`, now run the Host's `stop` program only while a launcher
+  runs. With none running they write the stop marker and return. A retried
+  `uninstall()` therefore finishes after `current` is gone, instead of
+  failing with `service_stop_failed` because a stop program under `current`
+  no longer exists (#2279).
 - A first install that fails to activate, start or pass its health check
   cleans up in the same order: stop and unregister, remove `current`, then
   the unit and launcher. A leftover unit can no longer start the payload that
@@ -387,5 +393,6 @@ with `service_stop_failed`.
   first among the remaining artifacts; when the stop fails, it lists
   `service registration, current pointer` before it.
 
-Retry `uninstall()` after any failure. No Host change is needed for a stop
-program that runs from under `current`.
+Retry `uninstall()` after any failure; a retry finishes once the cause is
+fixed. No Host change is needed for a stop program that runs from under
+`current`.

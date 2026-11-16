@@ -12018,7 +12018,9 @@ export declare function nodeAgentProgram(opts: NodeAgentProgramOptions): Service
  *   `<storeDir>\service\<name>.launcher.cmd`, which reruns the program
  *   after a non-zero exit. `stop` is the Host's own program that makes the
  *   running service exit (for the byok-agent daemon, a control `shutdown`);
- *   it must exit 0 once the service is stopping or already gone.
+ *   it must exit 0 once the service is stopping or already gone. It runs only
+ *   while a launcher runs, so it is never run once the service has stopped,
+ *   for example on an uninstall retried after `current` was removed.
  */
 export type ServiceWindowsOptions = {
     scope?: 'machine';
@@ -12507,9 +12509,11 @@ export declare function generateWindowsStartupUnit(launcherPath: string): string
  *
  * - `start()` removes the stop marker and runs the unit, unless a launcher
  *   is already running.
- * - `stop()` writes the stop marker, runs the Host's `stop` program (a
- *   non-zero exit is `service_stop_failed` and the marker stays), then
- *   waits for the launcher to exit (`service_unload_timeout`).
+ * - `stop()` writes the stop marker; while a launcher runs, it runs the
+ *   Host's `stop` program (a non-zero exit is `service_stop_failed` and the
+ *   marker stays), then waits for the launcher to exit
+ *   (`service_unload_timeout`). With no launcher running it runs nothing
+ *   more, so `stop()` and `uninstall()` work without the program (#2279).
  * - `status()` reports the launcher process, found by its command line.
  */
 export declare function createWindowsUserLifecycle(def: ServiceDefinition, deps?: WindowsUserDeps, gateRoot?: string): ManagedServiceLifecycle;
