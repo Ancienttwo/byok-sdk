@@ -7,13 +7,14 @@ import type { Delegation } from '../model.js';
 export function crossBot(fixture: () => TestTeam) {
   const host = () => fixture().host;
   const taskOf = (id: string) => host().core.intent(id)!.taskId;
+  // Each poll drains the Host, which rewrites the whole ledger on the event loop the daemon shares: a slower poll leaves it room to run.
   async function running(id: string) {
-    await vi.waitFor(async () => { await host().drain(); expect(fixture().adapter.sessions.has(host().core.intent(id)?.taskId ?? '')).toBe(true); }, { timeout: 5000 });
+    await vi.waitFor(async () => { await host().drain(); expect(fixture().adapter.sessions.has(host().core.intent(id)?.taskId ?? '')).toBe(true); }, { timeout: 5000, interval: 250 });
     return fixture().adapter.sessions.get(taskOf(id))!;
   }
   async function finish(id: string, document: unknown = {}) {
     (await running(id)).finish(document);
-    await vi.waitFor(async () => { await host().drain(); expect(host().snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
+    await vi.waitFor(async () => { await host().drain(); expect(host().snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000, interval: 250 });
   }
   async function createBots(count: number) {
     const id = await host().input('create-bots', 'Create the team');
@@ -23,7 +24,7 @@ export function crossBot(fixture: () => TestTeam) {
     await vi.waitFor(async () => {
       await host().drain();
       for (const bot of bots) expect(host().snapshot().team.bots[bot]!.readyRevision).toBe(host().snapshot().team.bots[bot]!.revision);
-    }, { timeout: 5000 });
+    }, { timeout: 5000, interval: 250 });
     // Test fixture: these Bots run the autonomous actions that the cross-Bot cases exercise (#1229).
     autoBots(fixture().ledger, bots);
     return bots;

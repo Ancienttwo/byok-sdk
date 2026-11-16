@@ -15,8 +15,8 @@ it('seals the open batch of a Bot before its bot_request, bot_reply and room_slo
     create_room: [{ localId: 'new_room_1', name: 'Room', members: ['new_bot_1'] }] });
   const other = Object.keys(host().snapshot().team.bots).find(id => id !== 'main')!, room = Object.values(host().snapshot().team.rooms)[0]!;
   await vi.waitFor(async () => { await host().drain(); expect(host().snapshot().team.bots[other]!.readyRevision).toBe('1'); }, { timeout: 5000 });
-  // The Host restarts with input coalescing on.
-  fixture.botOptions.coalesce = {};
+  // The Host restarts with input coalescing on. The window outlasts the test, so only a boundary seals a batch here.
+  fixture.botOptions.coalesce = { windowMs: 60_000 };
   await fixture.reopen();
 
   const otherBusy = await host().input('other-busy', 'Long work', other);
