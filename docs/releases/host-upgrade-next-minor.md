@@ -87,8 +87,11 @@ task could lose its start or its turn to such a run.
   rest of that run's output.
 - An extension run that settles before the task's prompt is accepted, or that
   runs between turns, no longer ends the task's turn early. Frames written
-  outside the task's turn, including that run's progress, usage and
-  `extension_error`, are no longer reported as the task's events.
+  outside the task's turn, such as that run's progress, usage and tool
+  events, are no longer reported as the task's events. When the task's input
+  joins a run in the middle of a tool call, that call's result is not reported
+  either. Every `extension_error` is still reported, because Pi does not say
+  which prompt or run it belongs to.
 - A first prompt that Pi handles without a run, such as an extension command,
   now ends the turn at once instead of waiting for the next settlement.
 

@@ -1357,6 +1357,8 @@ class PiSession implements Session {
   /** Index in `rpc.events` of each accepted prompt's first frame, oldest first. */
   private readonly turnStarts: number[] = [];
   private framesRead = 0;
+  /** Tool calls that started inside the current turn. */
+  private readonly turnToolCalls = new Set<string>();
 
   constructor(
     public readonly sessionRef: string,
@@ -1387,6 +1389,7 @@ class PiSession implements Session {
   /** The task's run settled at `index`: prompts accepted before it were queued into that run. */
   private closeTurn(index: number): void {
     this.turnOpen = false;
+    this.turnToolCalls.clear();
     while (this.turnStarts[0] !== undefined && this.turnStarts[0] <= index) this.turnStarts.shift();
   }
 
@@ -1418,7 +1421,10 @@ class PiSession implements Session {
               const index = session.framesRead;
               if (!done) {
                 session.framesRead += 1;
-                if (!session.owns(index)) continue; // another run's frame
+                // Pi names neither the prompt nor the run of an extension_error; one
+                // from this task's own preflight (its input or before_agent_start
+                // hooks) is written before the prompt response, so none is dropped.
+                if (!session.owns(index) && value.type !== 'extension_error') continue; // another run's frame
               }
               if (done) {
                 throw new RuntimeExecutionFailure({
@@ -1458,6 +1464,10 @@ class PiSession implements Session {
                 return { value: mapPiContextUsage(stats?.success === false ? undefined : stats?.data, hostContextWindow), done: false };
               }
               const mapped = mapPiMessageToAgentEvent(value, session.identities);
+              if (mapped?.type === 'tool_use' && mapped.toolCallId !== undefined) session.turnToolCalls.add(mapped.toolCallId);
+              // A queued prompt joins a run mid-way: a call that started before the
+              // turn opened belongs to that run's earlier part, and so does its result.
+              if (mapped?.type === 'tool_result' && mapped.toolCallId !== undefined && !session.turnToolCalls.has(mapped.toolCallId)) continue;
               if (value.type === 'message_end' && mapped?.type === 'usage') providerError = piAssistantError(value);
               if (value.type === 'auto_retry_end' && value.success === false) {
                 terminalFailure = new RuntimeExecutionFailure({

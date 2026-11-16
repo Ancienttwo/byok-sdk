@@ -16,6 +16,7 @@ const PROVIDER = 'bootstrap-loopback';
 const BOOT = 'BYOK-BOOT-2299';
 const TASK = 'BYOK-TASK-2299';
 const LATER = 'BYOK-LATER-2299';
+type SessionEvent = Session['events'] extends AsyncIterable<infer Event> ? Event : never;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 /** An isolated Pi agent directory with one user extension, under the default `inherit` context. */
@@ -32,27 +33,37 @@ async function piHome(extension: string, provider: LoopbackProvider) {
   return { box, env: { ...baseEnv(box.home), PI_CODING_AGENT_DIR: agentDir } };
 }
 
-/** Replies name the task input they answer; an extension request can be held so its run stays active. */
-function provider(holdExtensionMs = 0) {
+/**
+ * Replies name the task input they answer; an extension request can be held so
+ * its run stays active, or first call the extension tool `tool`.
+ */
+function provider(holdExtensionMs = 0, tool?: string) {
   return startLoopbackProvider('openai-chat', async request => {
     const task = [`${TASK}-2`, TASK].find(marker => request.text.includes(marker));
     if (task === undefined && holdExtensionMs > 0) await delay(holdExtensionMs);
+    const call = task === undefined && request.toolResults === 0 ? request.tools.find(entry => entry.name === tool) : undefined;
+    if (call !== undefined) return { kind: 'tool', tool: call, args: {} };
     return { kind: 'text', chunks: [task === undefined ? 'extension reply' : `${task} reply`] };
   });
 }
 
-/** The text of one turn, failing on a turn that never ends. */
-async function turnText(session: Session): Promise<string> {
-  const text: string[] = [];
+/** One turn's events, failing on a turn that never ends. */
+async function turnEvents(session: Session): Promise<SessionEvent[]> {
+  const events: SessionEvent[] = [];
   const iterator = session.events[Symbol.asyncIterator]();
   const timeout = delay(20_000).then(() => 'timeout' as const);
   for (;;) {
     const next = await Promise.race([iterator.next(), timeout]);
-    if (next === 'timeout') throw new Error(`turn did not end: ${text.join('')}`);
-    if (next.done) throw new Error(`session ended inside a turn: ${text.join('')}`);
-    if (next.value.type === 'progress') text.push(next.value.text);
-    if (next.value.type === 'turn_end') return text.join('');
+    if (next === 'timeout') throw new Error(`turn did not end: ${JSON.stringify(events)}`);
+    if (next.done) throw new Error(`session ended inside a turn: ${JSON.stringify(events)}`);
+    events.push(next.value);
+    if (next.value.type === 'turn_end') return events;
   }
+}
+
+/** The text of one turn. */
+async function turnText(session: Session): Promise<string> {
+  return (await turnEvents(session)).flatMap(event => event.type === 'progress' ? [event.text] : []).join('');
 }
 
 async function startTask(extension: string, loopback: LoopbackProvider, instruction = `${TASK} reply briefly.`) {
@@ -90,6 +101,40 @@ describe('pi-rpc lane with a user extension that runs Pi itself (#2299)', () => 
 }\n`, await provider());
     expect(text).toContain(`${TASK} reply`);
     expect(text).not.toContain('extension reply');
+  }, 60_000);
+
+  it('an error from the task prompt\'s own extension hook reaches the task', async () => {
+    const loopback = await provider();
+    try {
+      const { session } = await startTask(`export default function(pi) {
+  pi.on('before_agent_start', () => { throw new Error('BYOK-HOOK-2299'); });
+}\n`, loopback);
+      try {
+        const events = await turnEvents(session);
+        expect(events.some(event => event.type === 'error' && event.message.includes('BYOK-HOOK-2299'))).toBe(true);
+      } finally { await session.close(); }
+    } finally { await loopback.close(); }
+  }, 60_000);
+
+  it('a prompt queued into an extension run mid tool call reports no result without its call', async () => {
+    const loopback = await provider(0, 'slow_2299');
+    try {
+      const { session } = await startTask(`import { Type } from 'typebox';
+export default function(pi) {
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  let running = false;
+  pi.registerTool({ name: 'slow_2299', label: 'slow', description: 'Waits.', parameters: Type.Object({}),
+    async execute() { running = true; await delay(1500); return { content: [{ type: 'text', text: 'slow done' }], details: {} }; } });
+  // Pi reads the task prompt only after session_start returns: hold it until the call runs.
+  pi.on('session_start', async () => { pi.sendUserMessage(${JSON.stringify(BOOT)}); while (!running) await delay(10); });
+}\n`, loopback);
+      try {
+        const events = await turnEvents(session);
+        const calls = new Set(events.flatMap(event => event.type === 'tool_use' ? [event.toolCallId] : []));
+        expect(events.filter(event => event.type === 'tool_result' && !calls.has(event.toolCallId))).toEqual([]);
+        expect(events.flatMap(event => event.type === 'progress' ? [event.text] : []).join('')).toContain(`${TASK} reply`);
+      } finally { await session.close(); }
+    } finally { await loopback.close(); }
   }, 60_000);
 
   it('a first prompt Pi handles without a run ends the turn at once', async () => {
