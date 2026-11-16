@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation.js';
 import { z } from 'zod';
-import { AGENT_MEMORY_START_REFUSALS, RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type AgentMemoryStartRefusal, type RuntimeUnavailableCause } from './constants.js';
+import { AGENT_MEMORY_START_REFUSALS, RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type AgentMemoryStartRefusal } from './constants.js';
 import { BlobRefSchema } from './blob.js';
 import {
   SEALED_DECLINE_CODES,
@@ -77,11 +77,6 @@ const RuntimeUnavailableCauseSchema = z.union([
   z.enum(RUNTIME_UNAVAILABLE_CAUSES),
   unrecognizedToken(RUNTIME_UNAVAILABLE_CAUSES),
 ]);
-
-/** A runtime-unavailable cause as this version understands it; unknown reads as `unknown` with the raw token kept. */
-export type RuntimeUnavailableCauseReading =
-  | { readonly cause: RuntimeUnavailableCause }
-  | { readonly cause: 'unknown'; readonly reportedCause: string };
 
 /** Wire-safe protocol version number: bounded before JSON reaches a store or comparison. */
 export const ProtocolVersionNumberSchema = z
@@ -1175,10 +1170,9 @@ export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
 /**
  * The typed reason a runtime was unavailable before claim (#1103 D6).
  * Append-only: an unknown well-formed cause is accepted and kept verbatim
- * (#1121). The
- * login-shell capture code travels only with `environment_unavailable`
- * (#1095); it is an open well-formed token so the protocol never owns the
- * client's closed environment-code list.
+ * (#1121). The login-shell capture code travels only with
+ * `environment_unavailable` (#1095); it is an open well-formed token so the
+ * protocol never owns the client's closed environment-code list.
  */
 const RuntimeUnavailableSchema = z.object({
   cause: RuntimeUnavailableCauseSchema,

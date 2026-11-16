@@ -53,6 +53,9 @@ export type {
 export {
   PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION,
   PROVIDER_PROVISIONING_OPERATIONS,
+  PROVIDER_PROVISIONING_REJECTION_CODES,
+  PROVIDER_PROVISIONING_KEY_CHECK_RESULTS,
+  PROVIDER_PROVISIONING_HOST_TERMINAL_CODES,
   ProviderProvisioningAvailablePayloadSchema,
   ProviderProvisioningReadbackSchema,
 } from './provider-provisioning.js';
