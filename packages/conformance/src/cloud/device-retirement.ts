@@ -12,8 +12,27 @@
  * the quota a dead device held is exactly what a Host feels: before this, a
  * full mailbox stayed full and every new offer was refused.
  */
-import { contentHash, isCoreError, tenantId, type MailboxMessage } from '@byok-sdk/core';
-import type { TaskArchiveStoreInput, TaskAttempt, TaskRedactionCodec } from '@byok-sdk/cloud';
+import { generateKeyPairSync, sign } from 'node:crypto';
+import {
+  DEVICE_ASSERTION_SCHEMA_ID,
+  TASK_ASSERTION_SCHEMA_ID,
+  contentHash,
+  createMutableClock,
+  deviceAssertionSigningInput,
+  isCoreError,
+  taskAssertionSigningInput,
+  tenantId,
+  type DeviceAssertionClaims,
+  type MailboxMessage,
+} from '@byok-sdk/core';
+import {
+  authenticateHostedDeviceAssertion,
+  authenticateHostedTaskAssertion,
+  createWebCrypto,
+  type TaskArchiveStoreInput,
+  type TaskAttempt,
+  type TaskRedactionCodec,
+} from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
 import { registration } from './fixtures';
 import {
@@ -226,6 +245,72 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         expect(final.pending.map((message) => message.seq)).toEqual([next.seq]);
       });
     });
+
+    /**
+     * #2264: the replay ledger is a deny-list, so retirement leaves its
+     * entries to expiry. Re-registering the same id with the same key restores
+     * every input the assertion check reads, and only the surviving entry
+     * still refuses an assertion that was spent before the retirement.
+     */
+    for (const { lane, retire } of [
+      { lane: 'device', retire: 'revoke' },
+      { lane: 'task', retire: 'revoke' },
+      { lane: 'device', retire: 'supersession' },
+    ] as const) {
+      it(`a ${lane} assertion spent before ${retire} stays spent after the same id and key register again`, async () => {
+        await withCloudComposition(factory, async (handle) => {
+          const { stores, replay } = handle;
+          const keys = generateKeyPairSync('ed25519');
+          const publicKey = keys.publicKey.export({ format: 'jwk' }).x!;
+          const register = (deviceId: string) => stores.devices.register(TENANT, registration(deviceId, {
+            devicePublicKey: publicKey,
+            ...(retire === 'supersession' ? { machineId: MACHINE } : {}),
+          }));
+          const claims: DeviceAssertionClaims = {
+            version: 1,
+            issuer: 'https://api.example.com',
+            productId: 'product-1',
+            deviceId: 'replayed',
+            audience: 'connector-binding',
+            jti: 'AAAAAAAAAAAAAAAAAAAAAA',
+            issuedAt: '2026-08-12T04:45:00.000Z',
+            expiresAt: '2026-08-12T04:47:00.000Z',
+          };
+          const deps = {
+            devices: stores.devices,
+            crypto: createWebCrypto(),
+            replay,
+            clock: createMutableClock(new Date('2026-08-12T04:45:30.000Z')),
+            expected: { issuer: claims.issuer, productId: claims.productId, audience: claims.audience },
+          };
+          const present = lane === 'device'
+            ? () => authenticateHostedDeviceAssertion({
+              schema: DEVICE_ASSERTION_SCHEMA_ID,
+              algorithm: 'ed25519',
+              protected: claims,
+              signature: sign(null, deviceAssertionSigningInput(claims), keys.privateKey).toString('base64url'),
+            }, deps)
+            : () => {
+              const task = { ...claims, taskId: 'task-1', agentRef: AGENT_REF, toolsetId: 'toolset-1' };
+              return authenticateHostedTaskAssertion({
+                schema: TASK_ASSERTION_SCHEMA_ID,
+                algorithm: 'ed25519',
+                protected: task,
+                signature: sign(null, taskAssertionSigningInput(task), keys.privateKey).toString('base64url'),
+              }, deps);
+            };
+
+          await register('replayed');
+          await expect(present()).resolves.toBeDefined();
+          if (retire === 'revoke') await stores.devices.revoke(TENANT, 'replayed');
+          else await register('successor');
+          await expect(stores.devices.get(TENANT, 'replayed')).resolves.toBeUndefined();
+          await register('replayed');
+
+          await expect(present()).resolves.toBeUndefined();
+        });
+      });
+    }
     it('a retirement whose mailbox expiry fails changes nothing, and a retry completes it', async () => {
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox, failMailboxExpiry } = handle;

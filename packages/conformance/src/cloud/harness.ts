@@ -20,6 +20,7 @@ import type { BlobDeclaration, BlobObservation, CloudStores } from '@byok-sdk/cl
 import {
   contentHash,
   type CoreStores,
+  type DeviceAssertionReplayAuthority,
   type MailboxMessage,
   type MailboxStore,
   type PresenceStore,
@@ -92,6 +93,12 @@ export interface CloudCompositionHandle {
   readonly stores: CloudConformanceStores;
   /** This composition's core presence authority, sharing its storage and clock. */
   readonly presence: PresenceStore;
+  /**
+   * The assertion replay ledger this composition's Host exchange consumes
+   * against. Device retirement must leave its entries to expiry (#2264), and
+   * only a case that drives the directory and the ledger together can show it.
+   */
+  readonly replay: DeviceAssertionReplayAuthority;
   /**
    * The composition's current instant as an ISO string. Exposed so assertions
    * about absolute deadlines (a pairing code's `expiresAt`) can be written

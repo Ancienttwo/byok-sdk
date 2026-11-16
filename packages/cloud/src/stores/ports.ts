@@ -141,10 +141,16 @@ export interface DeviceDirectory {
   get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
   /**
    * Deletes the registration and the device-scoped state it owned (presence,
-   * challenge nonces, assertion-replay entries, inbound dedup), and retires
-   * the device under `device_revoked` in the same transaction (see above). A
-   * no-op for a device this tenant cannot address. Afterwards every read
-   * answers exactly as it does for a device that was never registered.
+   * challenge nonces, inbound dedup), and retires the device under
+   * `device_revoked` in the same transaction (see above). A no-op for a device
+   * this tenant cannot address. Afterwards every read answers exactly as it
+   * does for a device that was never registered.
+   *
+   * Assertion-replay entries are not deleted: they stay until the assertion
+   * expires and `collectExpired` removes them. Revocation and machine
+   * supersession must leave them in place, because an assertion spent before
+   * the retirement would otherwise authenticate again once the same id
+   * registers with the same key.
    *
    * How far the device-state deletion physically reaches is driver-scoped.
    * The durable (Postgres) driver deletes the registration and every

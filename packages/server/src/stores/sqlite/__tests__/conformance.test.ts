@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createMutableClock } from '@byok-sdk/core';
+import { InMemoryDeviceAssertionReplayAuthority, createMutableClock } from '@byok-sdk/core';
 import { createWebCrypto } from '@byok-sdk/cloud';
 import {
   ackAndCollectMailbox,
@@ -57,6 +57,8 @@ const cloudFactory: CloudCompositionFactory = {
     const stores = composition.cloud;
     return {
       presence: composition.core.presence,
+      // The embedded server composes no durable replay ledger; a Host pairs it with the reference one.
+      replay: new InMemoryDeviceAssertionReplayAuthority(),
       stores: {
         activity: stores.activity,
         approvals: stores.approvals,

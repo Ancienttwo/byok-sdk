@@ -6,7 +6,7 @@
  * — if either ever needs more than that, the port contract is what needs
  * fixing.
  */
-import { createInMemoryCoreStores, createMutableClock } from '@byok-sdk/core';
+import { InMemoryDeviceAssertionReplayAuthority, createInMemoryCoreStores, createMutableClock } from '@byok-sdk/core';
 import { createInMemoryCloudStores, createInMemoryBlobBytes, createWebCrypto } from '@byok-sdk/cloud';
 import { ackAndCollectMailbox, conformanceMailbox, mailboxAppendHold, mailboxExpiryFaults, runCloudConformance, type CloudCompositionFactory } from '../cloud/harness';
 
@@ -25,6 +25,7 @@ const inMemoryFactory: CloudCompositionFactory = {
     );
     return {
       presence: core.presence,
+      replay: new InMemoryDeviceAssertionReplayAuthority(),
       // Exactly the certified ports, in `CLOUD_CONFORMANCE_PORTS` order: the
       // suite asserts the key set, so a composition cannot quietly hand over
       // extra surface the other compositions do not owe.

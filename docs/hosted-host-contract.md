@@ -123,8 +123,11 @@ A device terminal that arrives after the marker is kept as device evidence. The 
 The Postgres directory does this in one transaction (`PostgresDeviceDirectory.revoke` in `packages/cloud-dataplane/src/stores/devices.ts`):
 
 - It deletes the device row.
-- It deletes the `device_presence`, `auth_nonce`, `inbound_dedup` and `device_assertion_replay` rows of the device
+- It deletes the `device_presence`, `auth_nonce` and `inbound_dedup` rows of the device
   (`DEVICE_STATE_DELETES` in `packages/cloud-dataplane/src/stores/devices.ts`).
+- It keeps the `device_assertion_replay` rows of the device. Revoke and machine supersession leave them until the
+  assertion expires, and maintenance deletes them after that (#2264). Deleting them earlier would let an assertion
+  spent before the revoke authenticate again once the same id registers with the same key.
 - It deletes the E2EE member state of the device: the key packages addressed to its member, its pairing MACs and its
   member key registration (#654 E2c, `DEVICE_STATE_DELETES` in `packages/cloud-dataplane/src/stores/devices.ts`).
   Machine supersession runs the same deletes. The SQLite composition keeps no E2EE member state; the in-memory directory

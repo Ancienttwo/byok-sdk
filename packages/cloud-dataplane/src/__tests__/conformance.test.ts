@@ -43,6 +43,7 @@ import {
   SKIP_REASON,
 } from './support/dataplane';
 import { PostgresProofReceiptRetentionAuthority } from '../stores/proof-receipts';
+import { PostgresDeviceAssertionReplayAuthority } from '../stores/device-assertion-replay';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const OFFER_TENANT = tenantId('tenant-offer-sequence');
@@ -69,6 +70,7 @@ const postgresFactory: CloudCompositionFactory = {
 
     return {
       presence: core.presence,
+      replay: new PostgresDeviceAssertionReplayAuthority(scope.pool),
       stores,
       now: () => clock.now().toISOString(),
       advanceTime: (ms: number) => {
