@@ -46,28 +46,31 @@ import { PairDeviceDigestSchema } from './pair-device-digest.js';
 // ---------------------------------------------------------------------------
 
 /**
- * Every field a device stores from a pairing has a bound, so the enrollment
- * fits one OS credential entry (#2045). 64 is the longest Linux hostname
- * (`HOST_NAME_MAX`) and holds the reference `dev_<uuid>` device id.
+ * Every field a device stores from a pairing has a bound (#2045). 64 is the
+ * longest Linux hostname (`HOST_NAME_MAX`) and holds the reference
+ * `dev_<uuid>` device id. Bounds count UTF-16 code units, checked only by
+ * {@link isPairingText}.
  */
 export const PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH = 64;
 export const PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH = 64;
 
 /**
- * Free text a pairing stores (`deviceName`, `deviceId`, `tenantId`) is
- * well-formed and has no control character: no C0/C1 control and no unpaired
- * surrogate. Each code unit then costs at most three UTF-8 bytes as JSON, so a
- * length bound is also a byte bound. Keep in step with `@byok-sdk/core`'s
- * tenant id mint point.
+ * The pairing text rule for every field a pairing stores (`deviceName`,
+ * `deviceId`, `tenantId`): 1 to `maxUnits` UTF-16 code units (`length`, not
+ * code points), well-formed (no unpaired surrogate) and with no control
+ * character (C0, DEL, C1). Each code unit then costs at most three UTF-8
+ * bytes as JSON. Every boundary that checks one of these fields calls this;
+ * `@byok-sdk/core`'s tenant id mint restates it, because core depends on no
+ * other package.
  */
-export function isPairingText(value: string): boolean {
-  return !/[\p{Cc}\p{Cs}]/u.test(value);
+export function isPairingText(value: string, maxUnits: number): boolean {
+  return value.length > 0 && value.length <= maxUnits && !/[\p{Cc}\p{Cs}]/u.test(value);
 }
 
 export const PairRequestSchema = z.object({
   pairingCode: z.string(),
-  deviceName: z.string().min(1).max(PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH).refine(isPairingText, {
-    message: 'deviceName must be well-formed text without control characters',
+  deviceName: z.string().refine((value) => isPairingText(value, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH), {
+    message: `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
   }),
   /** Ed25519 public key, base64url-encoded. Private key stays device-local (OS keychain or 0600 file). */
   devicePublicKey: z.string(),
@@ -139,18 +142,16 @@ export type PairSupersededResponse = z.infer<typeof PairSupersededResponseSchema
 export const PAIR_RESPONSE_TENANT_ID_MAX_LENGTH = 200;
 export const PairResponseTenantIdSchema = z
   .string()
-  .min(1)
-  .max(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH)
+  .refine((value) => isPairingText(value, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH), {
+    message: `tenantId must be 1 to ${PAIR_RESPONSE_TENANT_ID_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
+  })
   .refine((value) => value.trim() === value, {
     message: 'tenantId must not have leading or trailing whitespace',
-  })
-  .refine(isPairingText, {
-    message: 'tenantId must be well-formed text without control characters',
   });
 
 export const PairResponseSchema = z.object({
-  deviceId: z.string().min(1).max(PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH).refine(isPairingText, {
-    message: 'deviceId must be well-formed text without control characters',
+  deviceId: z.string().refine((value) => isPairingText(value, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), {
+    message: `deviceId must be 1 to ${PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
   }),
   /** JWT, ~1h lifetime. */
   accessToken: z.string(),

@@ -236,6 +236,12 @@ describe('replacement pairing credential authority', () => {
     expect(Buffer.byteLength(entry.value()!)).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
     await expect(entry.open().read()).resolves.toEqual(record);
     await expect(entry.open().readPairingAttempt()).resolves.toEqual(largest);
+    // Bounds count UTF-16 code units: an astral character is two of them and
+    // four UTF-8 bytes, narrower per unit than the three-byte case above.
+    const astral = (length: number) => '\u{1F600}'.repeat(length / 2);
+    await entry.open().replace({ ...record, deviceId: astral(PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), tenantId: astral(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH) });
+    await entry.open().savePairingAttempt({ ...largest, deviceName: astral(PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH) });
+    expect(Buffer.byteLength(entry.value()!)).toBeLessThan(2_106);
   });
 
   it('keeps first pairing as a standalone attempt and clears it completely', async () => {

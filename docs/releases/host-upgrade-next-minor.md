@@ -415,15 +415,21 @@ machine's current device. See
 - A pairing or renewal error carries only the HTTP status, never the server's
   response text. A malformed `2xx` body is `AuthResponseInvalidError` with no
   `cause`.
-- **Wire bounds.** `PairRequest.deviceName` is 1 to 64 characters and
-  `PairResponse.deviceId` 1 to 64 (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`,
-  `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`). Both, and every tenant id, must be
-  well-formed text without control characters (`isPairingText`). The core
-  tenant id mint (`tenantId`, `isTenantId`) now refuses any control character
-  or unpaired surrogate, not only NUL; a Host that mints tenant ids with such
-  characters changes them before upgrading. A client refuses a longer `deviceId`
-  as `AuthResponseInvalidError` and writes nothing. A Host whose hostnames
-  exceed 64 characters sets `deviceName`: `config check` reports it, and
+- **Wire bounds.** `PairRequest.deviceName` and `PairResponse.deviceId` are
+  1 to 64 UTF-16 code units (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`,
+  `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`) and a tenant id 1 to 200, of
+  well-formed text without control characters. Code units, not code points:
+  an astral character such as an emoji counts as two. One check,
+  `isPairingText(value, maxUnits)`, owns both length and text at every
+  boundary. The core tenant id mint (`tenantId`, `isTenantId`) now refuses any
+  control character or unpaired surrogate, not only NUL; a Host that mints
+  tenant ids with such characters changes them before upgrading. A client
+  refuses a longer `deviceId` as `AuthResponseInvalidError` and writes
+  nothing. These bounds are the wire contract, under which the largest OS
+  credential entry measures 2,106 bytes; the client guarantees the 2,400-byte
+  fit by checking the encoded entry before every write, and a pairing
+  validates everything it writes before it writes `device.json`. A Host whose
+  hostnames exceed 64 code units sets `deviceName`: `config check` reports it, and
   pairing throws `PairingInputInvalidError` (`field: 'deviceName'`). A
   `machineId` resolver must return a lowercase hex SHA-256, or pairing throws
   `PairingInputInvalidError` (`field: 'machineId'`).

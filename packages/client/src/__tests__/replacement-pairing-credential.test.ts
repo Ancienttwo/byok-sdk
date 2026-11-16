@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { pairDeviceDigest } from '@byok-sdk/protocol';
-import { AuthManager } from '../daemon/auth-manager';
+import { AuthManager, AuthResponseInvalidError } from '../daemon/auth-manager';
 import { PairingBusyError, PairingCodeRejectedError, PairingInputInvalidError, PairingSupersededError } from '../daemon/daemon-errors';
 import { DeviceCredentialStore, type DeviceCommandRunner } from '../daemon/device-credential-store';
 import { publicKeyOfPrivateKeyPem } from '../daemon/device-keys';
@@ -228,6 +228,28 @@ describe.each(['OS entry', 'injected backend'] as const)('registration fence (#2
     const exchanges = server.httpRequests.length;
     await expect(restarted.auth.getValidAccessToken()).resolves.toEqual(expect.any(String));
     expect(server.httpRequests.slice(exchanges).map((request) => request.pathname)).toEqual(['/byok/challenge', '/byok/token']);
+  });
+
+  // 33 code points pass a code-point bound of 64; they are 66 UTF-16 code units.
+  it.each(['pair', 'promote', 'replace-other-store', 'token re-acquire'] as const)('writes nothing when a %s fails validation', async (operation) => {
+    const { auth } = make('store');
+    const other = make('other');
+    if (operation !== 'pair') await auth.pair('code-1');
+    const files = () => Promise.all(['store', 'other'].map(name => fs.readFile(path.join(root, name, 'device.json'), 'utf8').catch(() => undefined)));
+    const entry = async () => backend === 'OS entry' ? value : JSON.stringify([await injected.read(), await injected.readPairingAttempt()]);
+    const before = await files();
+    // A pairing stages its attempt before sending; nothing may be written after the answer.
+    let sent = await entry();
+    scriptPair([async () => {
+      sent = await entry();
+      return json(200, { deviceId: '\u{1F600}'.repeat(33), tenantId: 'tenant-test', accessToken: 'paired', expiresIn: 3600 });
+    }]);
+    const failure = await (operation === 'token re-acquire' ? auth.handleUnauthorized()
+      : (operation === 'replace-other-store' ? other : { auth }).auth.pair('code-2', { replaceOtherStore: operation === 'replace-other-store' }))
+      .catch((error: unknown) => error);
+    expect(await files()).toEqual(before);
+    expect(await entry()).toBe(sent);
+    if (operation !== 'token re-acquire') expect(failure).toBeInstanceOf(AuthResponseInvalidError);
   });
 
   it.each([

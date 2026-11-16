@@ -23,7 +23,7 @@ import {
   type DeviceMetadata,
   type DeviceRecord,
 } from './store.js';
-import { DeviceCredentialLegacyEntryError, type DeviceCredentialBackend, type PairingAttempt } from './device-credential-store.js';
+import { DeviceCredentialLegacyEntryError, encodeEnrollmentEntry, type DeviceCredentialBackend, type PairingAttempt } from './device-credential-store.js';
 import { acquireEnrollmentGate, registerMemberWrites } from './enrollment-gate.js';
 import {
   DeviceStoreBindingMismatchError,
@@ -68,15 +68,13 @@ export class AuthRequestAbortedError extends Error {
  * is not valid JSON or does not satisfy its protocol schema
  * (`ChallengeResponseSchema` / `TokenResponseSchema`, #386) — for example a
  * truncated body or a missing field such as `expiresIn` (#1114). The renewal or pairing fails and the prior credential
- * is kept unchanged; nothing is inferred from the malformed body. The JSON
- * `SyntaxError` or the schema failure rides in `cause`. Not a revocation.
+ * is kept unchanged; nothing is inferred from the malformed body. It has no
+ * `cause`, so no part of the body reaches the Host through it. Not a
+ * revocation.
  */
 export class AuthResponseInvalidError extends Error {
-  constructor(
-    readonly route: 'challenge' | 'token' | 'pair',
-    options?: { cause: unknown },
-  ) {
-    super(`${route === 'pair' ? 'pairing' : `token renewal (${route})`} failed: the server response does not match the protocol schema`, options);
+  constructor(readonly route: 'challenge' | 'token' | 'pair') {
+    super(`${route === 'pair' ? 'pairing' : `token renewal (${route})`} failed: the server response does not match the protocol schema`);
     this.name = 'AuthResponseInvalidError';
   }
 }
@@ -350,7 +348,7 @@ export class AuthManager {
         const observedDeviceName = this.opts.deviceName ?? os.hostname();
         const observedMachineId = await this.opts.machineId?.();
         // The wire bounds both, and the staged attempt stores both.
-        if (observedDeviceName.length === 0 || observedDeviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH || !isPairingText(observedDeviceName)) {
+        if (!isPairingText(observedDeviceName, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH)) {
           throw new PairingInputInvalidError('deviceName');
         }
         if (observedMachineId !== undefined && !/^[0-9a-f]{64}$/u.test(observedMachineId)) throw new PairingInputInvalidError('machineId');
@@ -373,6 +371,9 @@ export class AuthManager {
           devicePublicKey,
         };
         const record: DeviceRecord = { ...metadata, devicePrivateKeyPem: attempt.devicePrivateKeyPem };
+        // Everything written below is validated first: a record the entry
+        // refuses must not leave a device.json naming it.
+        encodeEnrollmentEntry(record);
         await this.underEnrollmentGate(signal, async () => {
           await this.assertOwnsAttempt(signal, attempt);
           // device.json is this store's pair-time binding and a non-secret
@@ -441,7 +442,7 @@ export class AuthManager {
       // one atomic DeviceRecord; no token claim or host configuration is an
       // alternate tenant authority.
       const paired = PairResponseSchema.safeParse(await readAuthResponseJson(res, 'pair'));
-      if (!paired.success) throw new AuthResponseInvalidError('pair', { cause: paired.error });
+      if (!paired.success) throw new AuthResponseInvalidError('pair');
       return {
         kind: 'paired',
         body: {
@@ -541,7 +542,7 @@ export class AuthManager {
         throw new Error(`token renewal (challenge) failed: HTTP ${challengeRes.status}`);
       }
       const parsed = ChallengeResponseSchema.safeParse(await readAuthResponseJson(challengeRes, 'challenge'));
-      if (!parsed.success) throw new AuthResponseInvalidError('challenge', { cause: parsed.error });
+      if (!parsed.success) throw new AuthResponseInvalidError('challenge');
       return parsed.data;
     });
     if (challenge === undefined) return undefined;
@@ -561,7 +562,7 @@ export class AuthManager {
         throw new Error(`token renewal (token) failed: HTTP ${tokenRes.status}`);
       }
       const token = TokenResponseSchema.safeParse(await readAuthResponseJson(tokenRes, 'token'));
-      if (!token.success) throw new AuthResponseInvalidError('token', { cause: token.error });
+      if (!token.success) throw new AuthResponseInvalidError('token');
       return {
         accessToken: token.data.accessToken,
         expiresAt: deviceLocalExpiry(receivedAt, token.data.expiresIn),

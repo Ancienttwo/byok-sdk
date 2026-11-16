@@ -59,8 +59,8 @@ export function checkDaemonConfig(input: unknown, options: DaemonConfigCheckOpti
   if (policyIssues.length > 0) return { ok: false, issues: [...issues, ...policyIssues] };
   // Pairing refuses it with PairingInputInvalidError; report it before any pairing.
   const { deviceName } = input as { deviceName?: unknown };
-  if (typeof deviceName === 'string' && (deviceName.length === 0 || deviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH || !isPairingText(deviceName))) {
-    return { ok: false, issues: [...issues, { severity: 'error', code: 'invalid_value', path: 'deviceName', message: `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} characters of text without control characters` }] };
+  if (typeof deviceName === 'string' && !isPairingText(deviceName, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH)) {
+    return { ok: false, issues: [...issues, { severity: 'error', code: 'invalid_value', path: 'deviceName', message: `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} UTF-16 code units of text without control characters` }] };
   }
   const config = (options.localAgentRelease === undefined ? input : { ...(input as object), localAgentRelease: options.localAgentRelease }) as DaemonConfig;
   try {

@@ -436,7 +436,11 @@
         "export:@byok-sdk/cloud#PairingEnrollment",
         "export:@byok-sdk/cloud#PairingEnrollmentInput",
         "export:@byok-sdk/cloud#PairingEnrollmentResult",
-        "export:@byok-sdk/cloud#PairInput"
+        "export:@byok-sdk/cloud#PairInput",
+        "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore"
       ]
     },
     {

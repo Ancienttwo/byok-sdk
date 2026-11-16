@@ -1054,15 +1054,21 @@ keeps the current enrollment usable; retrying after restart uses the staged key.
 Renewal of the current enrollment writes nothing, so the attempt stays. A
 successful replacement promotes the new enrollment, and the other store then
 reads as not bound. After promotion, the entry is an ordinary enrollment again.
-Every stored field is bounded in length and is text without control
-characters, so an enrollment beside an attempt always fits the 2,400-byte OS
-entry: the worst case is 2,106 bytes. An injected
+Two layers keep the entry within its 2,400-byte bound. Every stored field
+has a wire bound in UTF-16 code units and is text without control characters
+(`isPairingText`); under those bounds the measured worst case of an
+enrollment beside an attempt is 2,106 bytes. What guarantees the fit is the
+store's check of the encoded entry's byte length before every write: an entry
+over the bound is refused with `DeviceCredentialStoreError`, and pairing runs
+that check, with every other validation, before it writes `device.json`, so a
+refused pairing writes nothing. An injected
 `DeviceCredentialBackend` (`read`, `readPairingAttempt`, `savePairingAttempt`,
 `replace`, `clear`) must keep the same staging semantics; `replace` promotes a
 pairing and discards its attempt.
 
 **Device name refused.** `deviceName`, or the hostname when it is unset, must
-be 1 to 64 characters of well-formed text without control characters. Any
+be 1 to 64 UTF-16 code units of well-formed text without control characters
+(`isPairingText`; an astral character such as an emoji counts as two). Any
 other value fails `config check`, and pairing throws `PairingInputInvalidError`
 (`field: 'deviceName'`) before it stages or sends anything; set `deviceName`. A `machineId` resolver that does not return a
 lowercase hex SHA-256 fails the same way with `field: 'machineId'`.

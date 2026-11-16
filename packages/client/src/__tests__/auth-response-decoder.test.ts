@@ -63,11 +63,8 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
     try {
       const error = await auth.handleUnauthorized().catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(AuthResponseInvalidError);
-      expect(error).toMatchObject({
-        name: 'AuthResponseInvalidError',
-        route: 'challenge',
-        cause: { name: 'ZodError', issues: [expect.objectContaining({ path: ['nonce'] })] },
-      });
+      expect(error).toMatchObject({ name: 'AuthResponseInvalidError', route: 'challenge' });
+      expect(error).not.toHaveProperty('cause');
       expect(server.httpRequests.filter((request) => request.pathname === '/byok/token')).toHaveLength(tokenRequestsBefore);
       expect(auth.isRevoked()).toBe(false);
       expect(await store.credentials.read()).toEqual(before);
@@ -77,23 +74,20 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
   });
 
   it.each([
-    ['a missing accessToken', { expiresIn: 3600 }, ['accessToken']],
+    ['a missing accessToken', { expiresIn: 3600 }],
     // #1114: expiresIn is the device's only lifetime authority, so the client requires it.
-    ['a missing expiresIn', { accessToken: 'fresh-token' }, ['expiresIn']],
-    ['a non-integer expiresIn', { accessToken: 'fresh-token', expiresIn: 1.5 }, ['expiresIn']],
-    ['a zero expiresIn', { accessToken: 'fresh-token', expiresIn: 0 }, ['expiresIn']],
-    ['a negative expiresIn', { accessToken: 'fresh-token', expiresIn: -60 }, ['expiresIn']],
-    ['a string expiresIn', { accessToken: 'fresh-token', expiresIn: '3600' }, ['expiresIn']],
-  ])('refuses a token response with %s and keeps the prior credential', async (_case, body, issuePath) => {
+    ['a missing expiresIn', { accessToken: 'fresh-token' }],
+    ['a non-integer expiresIn', { accessToken: 'fresh-token', expiresIn: 1.5 }],
+    ['a zero expiresIn', { accessToken: 'fresh-token', expiresIn: 0 }],
+    ['a negative expiresIn', { accessToken: 'fresh-token', expiresIn: -60 }],
+    ['a string expiresIn', { accessToken: 'fresh-token', expiresIn: '3600' }],
+  ])('refuses a token response with %s and keeps the prior credential', async (_case, body) => {
     const { auth, store, before } = await pairedWithResponse('/byok/token', body);
     try {
       const error = await auth.handleUnauthorized().catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(AuthResponseInvalidError);
-      expect(error).toMatchObject({
-        name: 'AuthResponseInvalidError',
-        route: 'token',
-        cause: { name: 'ZodError', issues: [expect.objectContaining({ path: issuePath })] },
-      });
+      expect(error).toMatchObject({ name: 'AuthResponseInvalidError', route: 'token' });
+      expect(error).not.toHaveProperty('cause');
       expect(auth.isRevoked()).toBe(false);
       expect(await store.credentials.read()).toEqual(before);
     } finally {
@@ -190,11 +184,8 @@ describe('AuthManager decodes renewal responses with protocol schemas (#386)', (
     try {
       const error = await auth.pair('pairing-code').catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(AuthResponseInvalidError);
-      expect(error).toMatchObject({
-        name: 'AuthResponseInvalidError',
-        route: 'pair',
-        cause: { name: 'ZodError', issues: [expect.objectContaining({ path: ['expiresIn'] })] },
-      });
+      expect(error).toMatchObject({ name: 'AuthResponseInvalidError', route: 'pair' });
+      expect(error).not.toHaveProperty('cause');
       expect(auth.deviceId).toBeUndefined();
       expect(await store.credentials.read()).toBeUndefined();
       expect(await store.load()).toBeUndefined();

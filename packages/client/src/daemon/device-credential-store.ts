@@ -52,7 +52,7 @@ export interface PairingAttempt {
   readonly codeDigest: string;
   /** `DeviceStore.identity` of the store that staged the attempt. */
   readonly storeIdentity: string;
-  /** At most `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` characters. */
+  /** `isPairingText` within `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`. */
   readonly deviceName: string;
   /** Lowercase hex SHA-256, as `PairRequest.machineId`. */
   readonly machineId?: string;
@@ -213,9 +213,7 @@ function assertRecord(value: unknown): asserts value is DeviceRecord {
   }
   const credential = value as DeviceRecord;
   if (
-    credential.deviceId.length === 0 ||
-    credential.deviceId.length > PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH ||
-    !isPairingText(credential.deviceId) ||
+    !isPairingText(credential.deviceId, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH) ||
     credential.devicePublicKey.length === 0 ||
     credential.devicePrivateKeyPem.length === 0
   ) {
@@ -247,9 +245,7 @@ function assertPairingAttempt(value: unknown): asserts value is PairingAttempt {
     typeof attempt.devicePrivateKeyPem !== 'string' ||
     (attempt.machineId !== undefined && (typeof attempt.machineId !== 'string' || !/^[0-9a-f]{64}$/u.test(attempt.machineId))) ||
     (attempt.expectedDeviceDigest !== null && (typeof attempt.expectedDeviceDigest !== 'string' || !BASE64URL_43.test(attempt.expectedDeviceDigest))) ||
-    attempt.deviceName.length === 0 ||
-    attempt.deviceName.length > PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH ||
-    !isPairingText(attempt.deviceName) ||
+    !isPairingText(attempt.deviceName, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH) ||
     attempt.devicePrivateKeyPem.length === 0
   ) {
     throw new DeviceCredentialStoreError('OS credential entry has an invalid pairing attempt shape');
@@ -352,12 +348,23 @@ function encode(authority: DeviceCredentialAuthority): string {
   }
   const encoded = Buffer.from(JSON.stringify(stored), 'utf8').toString('base64');
   const value = `${ENCODED_PREFIX}${encoded}`;
-  // Windows generic-credential blobs are limited; do not silently truncate a
-  // bearer/key authority into a different credential.
+  // The field bounds are a wire contract; this check on the encoded value is
+  // what guarantees the entry fits. Windows generic-credential blobs are
+  // limited, and a key authority is never truncated into a different one.
   if (Buffer.byteLength(value, 'utf8') > OS_CREDENTIAL_ENTRY_MAX_BYTES) {
     throw new DeviceCredentialStoreError('device credential exceeds the OS credential entry bound');
   }
   return value;
+}
+
+/**
+ * The entry `replace(record)` writes: every field validated, encoded and
+ * within {@link OS_CREDENTIAL_ENTRY_MAX_BYTES}, or a
+ * {@link DeviceCredentialStoreError}. A pairing calls it before it writes
+ * anything, whichever backend holds the enrollment.
+ */
+export function encodeEnrollmentEntry(record: DeviceRecord): string {
+  return encode(record);
 }
 
 function decode(value: string): DeviceCredentialAuthority {
@@ -624,7 +631,7 @@ export class DeviceCredentialStore implements DeviceCredentialBackend {
   }
 
   async replace(record: DeviceRecord, signal?: AbortSignal): Promise<void> {
-    const encoded = encode(record);
+    const encoded = encodeEnrollmentEntry(record);
     // An entry this store cannot decode is refused, never overwritten.
     await this.#readAuthority(signal);
     await this.#entry.replace(encoded, signal);

@@ -45,8 +45,18 @@ describe('authenticated enrollment HTTP DTOs', () => {
     ['C1 control', 'tenant-\u0085a'],
     ['unpaired surrogate', 'tenant-\ud800a'],
     ['oversize', 't'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH + 1)],
+    ['oversize in UTF-16 code units', '\u{1F600}'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH / 2 + 1)],
   ])('rejects malformed or oversize tenantId: %s', (_label, tenantId) => {
     expect(() => PairResponseSchema.parse({ ...pairResponse, tenantId })).toThrow();
+  });
+
+  it('bounds deviceName and deviceId in UTF-16 code units, not code points', () => {
+    // 33 astral characters are 33 code points and 66 code units.
+    for (const [length, ok] of [[32, true], [33, false]] as const) {
+      const text = '\u{1F600}'.repeat(length);
+      expect(PairRequestSchema.safeParse({ ...pairRequest, deviceName: text }).success).toBe(ok);
+      expect(PairResponseSchema.safeParse({ ...pairResponse, deviceId: text }).success).toBe(ok);
+    }
   });
 
   it('accepts the exact maximum bounded opaque tenant shape', () => {
