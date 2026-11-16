@@ -15,7 +15,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import { contentHash } from '@byok-sdk/core';
-import { createInMemoryByokCloud, handleInboundEnvelope, tenantStoresFor, TASK_ATTEMPT_STATUSES } from '@byok-sdk/cloud';
+import { createInMemoryByokCloud, handleInboundEnvelope, tenantStoresFor, terminalReceiptKey, TASK_ATTEMPT_STATUSES } from '@byok-sdk/cloud';
 import { AGENT_MESSAGE_EGRESS_CAPABILITY, createEnvelope } from '@byok-sdk/protocol';
 import { PI_EXECUTOR, registration, TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
@@ -534,6 +534,8 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
           createEnvelope('task.progress', { seq: 1, events: [] }, { taskId }),
           createEnvelope('task.artifact', { name: 'a.txt', contentType: 'text/plain', inline: 'aGk=' }, { taskId }),
           createEnvelope('task.await_approval', { summary: 'ok?', approvalId: 'approval-1' }, { taskId }),
+          createEnvelope('task.approval_resolved', { approvalId: 'approval-1', decision: 'approve', resolvedBy: 'local', at: '2026-11-16T00:00:00.000Z' }, { taskId }),
+          createEnvelope('task.steer_refused', { steerMessageId: '10000000-0000-4000-8000-000000000003', reason: 'task_not_active' }, { taskId }),
           createEnvelope('task.complete', { agentRef: AGENT_REF, executor: PI_EXECUTOR, summary: 'done', sessionRef: 'session' }, { taskId }),
           createEnvelope('task.fail', { agentRef: AGENT_REF, reason: 'boom' }, { taskId }),
         ];
@@ -562,6 +564,9 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         expect(attempt).toMatchObject({ status: 'offered' });
         expect(attempt?.ownerDeviceId).toBeUndefined();
         expect(await stores.agentMessageDraft.read(TENANT_A, taskId)).toBeUndefined();
+        expect(await stores.activity.read(TENANT_A, taskId)).toBeUndefined();
+        expect(await stores.approvals.read(TENANT_A, taskId)).toBeUndefined();
+        expect(await stores.receipts.get(TENANT_A, terminalReceiptKey(taskId))).toBeUndefined();
       });
     });
 
