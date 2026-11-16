@@ -3,6 +3,7 @@
  * (#1120). The archive tombstones the offer; a replayed winning claim and a
  * replayed `daemon_interrupted` recovery report still get the answer they got
  * before, from the claim snapshot and the terminal receipt the task keeps.
+ * A steer refusal is a lifetime fact the archive leaves as it is.
  */
 import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -10,10 +11,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { describe, expect, it } from 'vitest';
+import { contentHash, createMutableClock, tenantId } from '@byok-sdk/core';
+import { createWebCrypto, type TaskRedactionCodec } from '@byok-sdk/cloud';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { createByokServer, createHmacTokenSigner } from '../index';
 import { isSqliteAvailable } from '../sqlite-support';
-import { connectFakeDaemonLongPoll, startServer, stopServer } from './test-support';
+import { createSqliteEmbeddedStores } from '../stores/sqlite';
+import { connectFakeDaemonLongPoll, startServer, stopServer, TEST_CLAIMED_EXECUTOR } from './test-support';
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
 const PRODUCT_ID = 'acme-task-archive';
@@ -44,15 +48,15 @@ describeSqlite('SQLite terminal-task archive replays (#1120)', () => {
       const submit = async (taskId: string) => {
         await instance.executions.submit({
           taskId, deviceId: daemon.deviceId,
-          payload: { instruction: 'archive me', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+          payload: { instruction: 'archive me', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
         });
         return (await daemon.next()).find((event) => event.type === 'task.offer' && event.task_id === taskId)!;
       };
 
       await submit('claimed');
-      const claim = createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'claimed' });
+      const claim = createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'claimed' });
       expect(await send(claim)).toMatchObject({ accepted: 1 });
-      expect(await send(createEnvelope('task.fail', { reason: 'boom', retryable: false, agentRef: AGENT }, { taskId: 'claimed' })))
+      expect(await send(createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, reason: 'boom', retryable: false, agentRef: AGENT }, { taskId: 'claimed' })))
         .toMatchObject({ accepted: 1 });
       const offer = await submit('interrupted');
       const recovery = createEnvelope('task.fail', { reason: 'daemon_interrupted', retryable: false, agentRef: AGENT,
@@ -74,6 +78,41 @@ describeSqlite('SQLite terminal-task archive replays (#1120)', () => {
     } finally {
       await stopServer(http.server);
       await instance.close();
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves a recorded steer refusal unchanged when it archives the task', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'byok-sqlite-archive-refusal-'));
+    const tenant = tenantId(PRODUCT_ID);
+    const clock = createMutableClock(new Date('2026-11-16T00:00:00.000Z'));
+    const codec: TaskRedactionCodec = {
+      async tombstone(body) {
+        const tombstone = `{"byokRedacted":1,"bytes":${String(body.length)}}`;
+        return { body: tombstone, bodyHash: contentHash(`sha256:${'0'.repeat(64)}`), byteSize: BigInt(tombstone.length) };
+      },
+      absent: '{"byokRedacted":1,"absent":true}',
+      isTombstone: (body) => body.startsWith('{"byokRedacted":1,'),
+      blobHashes: () => [],
+    };
+    const stores = createSqliteEmbeddedStores({ path: join(root, 'sdk.sqlite') }, { clock, crypto: createWebCrypto() });
+    try {
+      const { tasks, steerRefusals, taskArchive } = stores.cloud;
+      await tasks.reserveAgentOffer(tenant, { taskId: 'steered', deviceId: 'device', agentRef: AGENT });
+      await tasks.claim(tenant, { taskId: 'steered', deviceId: 'device', executor: TEST_CLAIMED_EXECUTOR });
+      const steerMessageId = globalThis.crypto.randomUUID();
+      const { refusal } = await steerRefusals.record(tenant, { taskId: 'steered', steerMessageId, reason: 'steer_unsupported', deviceId: 'device' });
+      await tasks.recordStatus(tenant, { taskId: 'steered', status: 'complete', agentRef: AGENT });
+      clock.advance(1_000);
+      await expect(taskArchive.archive(tenant, {
+        taskId: 'steered', receiptKeys: [], terminalReceiptKey: 'task:steered:terminal', releaseObjectReferences: [],
+        archivedAt: clock.now().toISOString(), codec,
+      })).resolves.toMatchObject({ outcome: 'archived' });
+      await taskArchive.settle(tenant, 'steered', clock.now().toISOString());
+      expect((await tasks.get(tenant, 'steered'))?.archivedAt).toBe(clock.now().toISOString());
+      expect(await steerRefusals.get(tenant, 'steered', steerMessageId)).toEqual(refusal);
+    } finally {
+      await stores.close();
       rmSync(root, { recursive: true, force: true });
     }
   });

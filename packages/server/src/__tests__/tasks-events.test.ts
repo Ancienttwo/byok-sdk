@@ -17,6 +17,7 @@ import {
   type ByokServer,
   type CreateByokServerOptions,
   type ServerTaskEvent,
+  type SteerRefusal,
   type TaskEventEntry,
 } from '../index';
 import {
@@ -27,6 +28,7 @@ import {
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
   type FakeLongPollDaemon,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme-task-events';
@@ -105,7 +107,7 @@ describe('ByokServer.tasks.events', () => {
     await instance.executions.submit({
       taskId,
       deviceId: daemon.deviceId,
-      payload: { instruction: 'stream me', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      payload: { instruction: 'stream me', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
     });
   }
 
@@ -115,7 +117,7 @@ describe('ByokServer.tasks.events', () => {
   }
 
   async function claimStarted(daemon: FakeLongPollDaemon, taskId: string): Promise<void> {
-    await send(daemon, createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId }));
+    await send(daemon, createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef: AGENT }, { taskId }));
     await send(daemon, createEnvelope('task.started', {}, { taskId }));
   }
 
@@ -169,7 +171,7 @@ describe('ByokServer.tasks.events', () => {
     await submit(instance, daemon, 'streamed');
     const reader = instance.tasks.events('streamed')[Symbol.asyncIterator]();
     const entries = await take(reader, 1);
-    await send(daemon, createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'streamed' }));
+    await send(daemon, createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'streamed' }));
     entries.push(...await take(reader, 1));
     await send(daemon, createEnvelope('task.started', {}, { taskId: 'streamed' }));
     entries.push(...await take(reader, 1));
@@ -184,7 +186,7 @@ describe('ByokServer.tasks.events', () => {
     await instance.tasks.approve('streamed', { approvalId: approval.approvalId });
     entries.push(...await take(reader, 1));
     await send(daemon, createEnvelope('task.progress', progress(2, 'finishing'), { taskId: 'streamed' }));
-    await send(daemon, createEnvelope('task.complete', { agentRef: AGENT, summary: 'done', sessionRef: 'sess-streamed' }, { taskId: 'streamed' }));
+    await send(daemon, createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: AGENT, summary: 'done', sessionRef: 'sess-streamed' }, { taskId: 'streamed' }));
     entries.push(...await take(reader, 2));
     expect(await reader.next()).toEqual({ value: undefined, done: true });
 
@@ -245,11 +247,11 @@ describe('ByokServer.tasks.events', () => {
     await submit(instance, daemon, 'mine');
     await submit(instance, daemon, 'other');
     const [mine] = await take(instance.tasks.events('mine')[Symbol.asyncIterator](), 1);
-    const forged = (body: unknown) => `te1.${Buffer.from(JSON.stringify(body)).toString('base64url')}`;
+    const forged = (body: unknown) => `te2.${Buffer.from(JSON.stringify(body)).toString('base64url')}`;
     for (const after of [
-      mine!.cursor, 'garbage', '', 'te1.', 'te1.!!!', `${globalThis.crypto.randomUUID()}.3`,
-      forged(['other', null, 0, 0, 0]), forged(['other', null, 1, 0, 0, null]), forged(['other', 'g', -1, 0, 0, null]),
-      forged(['other', null, 0, 0, 0, 'Nope']), forged({ task: 'other' }),
+      mine!.cursor, 'garbage', '', 'te2.', 'te2.!!!', `${globalThis.crypto.randomUUID()}.3`,
+      forged(['other', null, 0, 0, 0, null]), forged(['other', null, 1, 0, 0, 0, null]), forged(['other', 'g', -1, 0, 0, 0, null]),
+      forged(['other', null, 0, 0, 0, -1, null]), forged(['other', null, 0, 0, 0, 0, 'Nope']), forged({ task: 'other' }),
     ]) {
       const refused = await first(instance.tasks.events('other', { after })).catch((error: unknown) => error);
       expect(refused).toBeInstanceOf(TaskEventsUnavailableError);
@@ -262,7 +264,7 @@ describe('ByokServer.tasks.events', () => {
     await submit(instance, daemon, 'finished');
     await claimStarted(daemon, 'finished');
     await send(daemon, createEnvelope('task.progress', progress(1, 'work'), { taskId: 'finished' }));
-    await send(daemon, createEnvelope('task.complete', { agentRef: AGENT, summary: 'done', sessionRef: 'sess-r' }, { taskId: 'finished' }));
+    await send(daemon, createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: AGENT, summary: 'done', sessionRef: 'sess-r' }, { taskId: 'finished' }));
     const read = await collect(instance.tasks.events('finished'));
     expect(read.map((entry) => entry.event)).toMatchObject([{ kind: 'agent', event: { text: 'work' } }, { kind: 'state', state: 'Complete' }]);
     expect(await collect(instance.tasks.events('finished'))).toEqual(read);
@@ -344,7 +346,7 @@ describe('ByokServer.tasks.events', () => {
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'resume me' });
     await claimAndStart(instance, daemon, handle);
     await send(daemon, createEnvelope('task.progress', progress(1, 'shared'), { taskId: handle.taskId }));
-    await send(daemon, createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess-h' }, { taskId: handle.taskId }));
+    await send(daemon, createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess-h' }, { taskId: handle.taskId }));
     const viaHandle = [];
     for await (const event of handle.events()) viaHandle.push(event);
     const fromTasks = (await collect(instance.tasks.events(handle.taskId))).map((entry) => entry.event);
@@ -396,9 +398,9 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
   async function submitRunning(instance: ByokServer, post: (envelope: Envelope) => Promise<void>, deviceId: string, taskId: string) {
     await instance.executions.submit({
       taskId, deviceId,
-      payload: { instruction: 'outlive me', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      payload: { instruction: 'outlive me', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
     });
-    await post(createEnvelope('task.claim', { deviceId, agentRef: AGENT }, { taskId }));
+    await post(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId, agentRef: AGENT }, { taskId }));
     await post(createEnvelope('task.started', {}, { taskId }));
   }
 
@@ -419,7 +421,7 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
       expect((await take(reader, 1))[0]!.event).toEqual({ kind: 'agent', event: { type: 'progress', text: 'two' } });
       await post(createEnvelope('task.progress', progress(2, 'after restart'), { taskId: 'survivor' }));
       expect((await take(reader, 1))[0]!.event).toEqual({ kind: 'agent', event: { type: 'progress', text: 'after restart' } });
-      await post(createEnvelope('task.complete', { agentRef: AGENT, summary: 'finished after restart', sessionRef: 'sess-s' }, { taskId: 'survivor' }));
+      await post(createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: AGENT, summary: 'finished after restart', sessionRef: 'sess-s' }, { taskId: 'survivor' }));
       expect((await take(reader, 1))[0]!.event).toMatchObject({ kind: 'state', state: 'Complete' });
       expect(await reader.next()).toEqual({ value: undefined, done: true });
 
@@ -457,7 +459,7 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
       expect((await reader.next()).value?.event).toMatchObject({ kind: 'state', state: 'Running' });
       await expect(instance().executions.submit({
         taskId: 'resubmitted', deviceId,
-        payload: { instruction: 'outlive me', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+        payload: { instruction: 'outlive me', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
       })).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       await post(createEnvelope('task.progress', progress(1, 'after the refused resubmit'), { taskId: 'resubmitted' }));
       expect((await reader.next()).value?.event).toEqual({ kind: 'agent', event: { type: 'progress', text: 'after the refused resubmit' } });
@@ -466,10 +468,10 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
   });
 });
 
-/** In-memory stand-ins for the three sources, for cases the gate cannot produce on demand. */
+/** In-memory stand-ins for the four sources, for cases the gate cannot produce on demand. */
 function fakeSources(initial: TaskEventFacts | undefined) {
   const TENANT = tenantId(PRODUCT_ID);
-  const state = { facts: initial, entries: [] as ActivityTailEntry[], floor: 0, generation: 'gen-1', reads: 0 };
+  const state = { facts: initial, entries: [] as ActivityTailEntry[], refusals: [] as SteerRefusal[], floor: 0, generation: 'gen-1', reads: 0 };
   const tail = (after: number): ActivityTail => ({
     tenantId: TENANT, taskId: 'task', after,
     entries: state.entries.filter((entry) => entry.revision > after),
@@ -490,6 +492,8 @@ function fakeSources(initial: TaskEventFacts | undefined) {
       }
       return tail(after.revision);
     },
+    readSteerRefusals: async (_taskId, afterRevision, limit) =>
+      state.refusals.filter((refusal) => refusal.revision > afterRevision).slice(0, limit),
   };
   let revision = 0;
   const append = (events: readonly AgentEventOrUnknown[]) => {
@@ -626,6 +630,28 @@ describe('readTaskEvents over its sources', () => {
     expect((await terminal).value?.event).toMatchObject({ kind: 'state', state: 'Failed' });
     expect(await reader.next()).toEqual({ value: undefined, done: true });
     relay.stop();
+  });
+
+  it('yields steer refusals before the terminal in revision order, and resumes between two after the first', async () => {
+    const fake = fakeSources(RUNNING);
+    const refusal = (revision: number): SteerRefusal => ({
+      messageId: `steer-${revision}`, reason: { reason: 'steer_unsupported' }, at: `2026-11-01T00:00:0${revision}.000Z`, revision,
+    });
+    const refused = ({ messageId, reason, at }: SteerRefusal): ServerTaskEvent => ({ kind: 'steer_refused', messageId, reason, at });
+    fake.state.refusals.push(refusal(1), refusal(2));
+    const complete: ServerTaskEvent = { kind: 'state', state: 'Complete', at: '2026-11-01T00:00:03.000Z' };
+    fake.state.facts = { state: 'Complete', at: '2026-11-01T00:00:03.000Z' };
+    const read = await collect({ [Symbol.asyncIterator]: () => readFake(fake.sources).reader });
+    expect(read.map((entry) => entry.event)).toEqual([refused(refusal(1)), refused(refusal(2)), complete]);
+    const resumed = readFake(fake.sources, { after: read[0]!.cursor });
+    expect((await collect({ [Symbol.asyncIterator]: () => resumed.reader })).map((entry) => entry.event)).toEqual([refused(refusal(2)), complete]);
+  });
+
+  it('refuses a cursor of the previous te1 format as cursor_unknown', async () => {
+    const fake = fakeSources(RUNNING);
+    const te1 = `te1.${Buffer.from(JSON.stringify(['task', null, 0, 0, 0, null])).toString('base64url')}`;
+    const { reader } = readFake(fake.sources, { after: te1 });
+    await expect(reader.next()).rejects.toMatchObject(unknownCursor('task'));
   });
 
   it('ends without reading the log when the read is stopped during its first store read', async () => {

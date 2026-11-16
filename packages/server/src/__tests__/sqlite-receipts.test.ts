@@ -18,7 +18,9 @@ const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
 const tenant = tenantId('receipts');
 const other = tenantId('other');
 const deviceId = 'device-receipts';
-const payload = { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, instruction: 'original', runtime: 'claude' } as const;
+const payload = { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, instruction: 'original', target: { lane: 'runtime', runtimeId: 'claude' } } as const;
+/** What a device claims for {@link payload}'s runtime target. */
+const CLAUDE = { kind: 'runtime', runtimeId: 'claude' } as const;
 
 describe('SQLite receipt recovery', () => {
   const roots: string[] = [];
@@ -74,7 +76,7 @@ describe('SQLite receipt recovery', () => {
         'terminal-projection-selection', 'agent-egress-fresh-session',
       ] });
       const execution = AgentExecutionInputSchema.parse({ taskId, deviceId, payload: {
-        instruction: 'reply', runtime: 'codex', agentRef, session: { mode: 'fresh' },
+        instruction: 'reply', target: { lane: 'runtime', runtimeId: 'codex' }, agentRef, session: { mode: 'fresh' },
         egressPolicy: { policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
@@ -181,8 +183,8 @@ describe('SQLite receipt recovery', () => {
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1 });
       await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
       const first = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, input);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome)).toBe('accepted');
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { executor: CLAUDE, deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { executor: CLAUDE, agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       const receipt = await runtime.cloud.readTerminalReceipt(tenant, taskId);
       const result = await runtime.cloud.readTaskResult(tenant, taskId);
       const deviceTerminal = await runtime.cloud.readDeviceTerminal(tenant, taskId);
@@ -197,7 +199,7 @@ describe('SQLite receipt recovery', () => {
         await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, retry)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       }
       expect((await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages).toEqual([]);
-      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'conflict', sessionRef: 'session-other' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
+      expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { executor: CLAUDE, agentRef: TEST_AGENT_REF, summary: 'conflict', sessionRef: 'session-other' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       expect(await runtime.cloud.readTerminalReceipt(tenant, taskId)).toEqual(receipt);
       expect(await runtime.cloud.readTaskResult(tenant, taskId)).toEqual(result);
     } finally { await runtime.stores.close(); }
@@ -207,7 +209,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE request_receipt'); db.close();
     expect(() => open()).toThrow();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '9' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10' }));
     const check = new DatabaseSync(path, { readOnly: true });
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'request_receipt'").get()).toBeUndefined();
     check.close();
@@ -217,7 +219,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE mailbox_message'); db.close();
     expect(() => open()).toThrow(expect.objectContaining({
-      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '9', requiredVersion: '9',
+      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10', requiredVersion: '10',
       message: expect.stringContaining('FROM mailbox_message'),
     }));
     const check = new DatabaseSync(path, { readOnly: true });
@@ -277,7 +279,7 @@ describe('SQLite receipt recovery', () => {
     corrupt.exec('DROP TABLE request_receipt; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)');
     corrupt.close();
     expect(() => open()).toThrow('Invalid BYOK SQLite request receipt schema');
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '9' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10' }));
   });
 
   it('keeps cancellation result authority after reopen', async () => {

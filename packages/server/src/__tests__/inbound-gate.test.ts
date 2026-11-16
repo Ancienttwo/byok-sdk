@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, PROTOCOL_VERSION, type Envelope, type MessagesSendResponse, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, type Envelope, type MessagesSendResponse, type ClaimedExecutor, type RuntimeCapabilities } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '../index';
 import type { ServerTaskEvent, TaskHandle } from '../types';
 import {
@@ -15,6 +15,7 @@ import {
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
   TEST_SESSION_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -23,20 +24,19 @@ const SHORT_HOLD_MS = 150;
 
 /**
  * Claim + start a dispatched task over the long-poll send path (Offered ->
- * Claimed -> Running) and wait for the Running event. `runtime` (S0) is the
- * actual adapter this claim reports and `capabilities` (S0/D-4) is that
- * adapter's own self-report, which is the ONLY thing the steer gate reads;
- * both omitted matches a legacy `task.claim`, which is what every call site
- * here but the steer test wants.
+ * Claimed -> Running) and wait for the Running event. `executor` is what
+ * this claim reports running and `capabilities` (S0/D-4) is that adapter's
+ * own self-report, which is the ONLY thing the steer gate reads; only the
+ * steer test passes capabilities.
  */
 async function claimAndStart(
   daemon: FakeLongPollDaemon,
   handle: TaskHandle,
-  runtime?: RuntimeId,
+  executor: ClaimedExecutor = TEST_CLAIMED_EXECUTOR,
   capabilities?: RuntimeCapabilities,
 ): Promise<void> {
   await daemon.send(
-    createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, runtime, capabilities }, { taskId: handle.taskId }),
+    createEnvelope('task.claim', { executor, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, capabilities }, { taskId: handle.taskId }),
   );
   await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
@@ -90,7 +90,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       // One fixed batch, reused verbatim (same `id`s) across both POSTs —
       // this is what makes the second POST a genuine wire-level retry, not a
       // fresh set of envelopes that merely happen to target the same task.
-      const claim = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
+      const claim = createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
       const startedEnv = createEnvelope('task.started', {}, { taskId: handle.taskId });
       const progress = createEnvelope(
         'task.progress',
@@ -227,7 +227,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
         ),
         createEnvelope(
           'task.complete',
-          { agentRef: TEST_AGENT_REF, summary: 'stolen', sessionRef: 'sess_evil' },
+          { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'stolen', sessionRef: 'sess_evil' },
           { taskId: handle.taskId },
         ),
         createEnvelope('task.await_approval', { summary: 'injected', approvalId: 'appr-injected' }, { taskId: handle.taskId }),
@@ -257,7 +257,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
 
       const taskOffer = createEnvelope(
         'task.offer',
-        { instruction: 'do the thing', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, runtime: 'pi' },
+        { instruction: 'do the thing', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, target: { lane: 'runtime', runtimeId: 'pi' } },
         { taskId: 'task_forged', seq: 100 },
       );
 
@@ -305,10 +305,10 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, { productId: PRODUCT_ID });
 
       const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'x' });
-      const claim = createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
+      const claim = createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
       const forgedOffer = createEnvelope(
         'task.offer',
-        { instruction: 'forged', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, runtime: 'pi' },
+        { instruction: 'forged', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, target: { lane: 'runtime', runtimeId: 'pi' } },
         { taskId: 'task_forged_2', seq: 999 },
       );
 
@@ -338,7 +338,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
 
       // Queue a steer before accepting cancellation.
       const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
-      await claimAndStart(daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
+      await claimAndStart(daemon, handle1, { kind: 'runtime', runtimeId: 'pi' }, PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
       await handle1.result();
@@ -377,7 +377,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       });
 
       const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
-      await claimAndStart(daemon, handle1, 'pi', PI_RUNTIME_INFO.capabilities);
+      await claimAndStart(daemon, handle1, { kind: 'runtime', runtimeId: 'pi' }, PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
       await handle1.result();

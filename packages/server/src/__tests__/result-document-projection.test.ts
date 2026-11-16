@@ -9,6 +9,7 @@ import {
   type FakeLongPollDaemon,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -17,7 +18,7 @@ const SHORT_HOLD_MS = 150;
 
 /** Offered -> Claimed -> Running over the long-poll send path, asserting each hop landed. */
 async function claimAndStart(byok: ByokServer, daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
-  const claim = await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+  const claim = await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
   expect(await claim.json()).toMatchObject({ accepted: 1 });
   expect((await byok.tasks.get(handle.taskId))?.state).toBe('Claimed');
   const started = await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
@@ -67,7 +68,7 @@ describe('additive-minor: task.complete.document projection', () => {
     await claimAndStart(instance, daemon, handle);
 
     const document = { kind: 'invoice', lines: [{ sku: 'a', qty: 2 }], total: 42.5, note: null, nested: { deep: [1, 2] } };
-    await daemon.send(createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1', document }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1', document }, { taskId: handle.taskId }));
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'done', sessionRef: 'sess_1', document });
@@ -81,6 +82,7 @@ describe('additive-minor: task.complete.document projection', () => {
     await claimAndStart(instance, daemon, handle);
 
     await daemon.send(createEnvelope('task.complete', {
+      executor: TEST_CLAIMED_EXECUTOR,
       agentRef: TEST_AGENT_REF,
       summary: 'I will consolidate memory.CONSOLIDATED',
       finalMessage: 'CONSOLIDATED',
@@ -103,7 +105,7 @@ describe('additive-minor: task.complete.document projection', () => {
     await claimAndStart(instance, daemon, handle);
 
     await daemon.send(
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1', document: [1, 'two', null] }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1', document: [1, 'two', null] }, { taskId: handle.taskId }),
     );
 
     const result = await handle.result();
@@ -115,7 +117,7 @@ describe('additive-minor: task.complete.document projection', () => {
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'no structured result' });
     await claimAndStart(instance, daemon, handle);
 
-    await daemon.send(createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess_1' }, { taskId: handle.taskId }));
 
     const result = await handle.result();
     expect(result.document).toBeUndefined();
@@ -131,7 +133,7 @@ describe('additive-minor: task.complete.document projection', () => {
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'will fail' });
     await claimAndStart(instance, daemon, handle);
 
-    await daemon.send(createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'boom', retryable: false }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.fail', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, reason: 'boom', retryable: false }, { taskId: handle.taskId }));
 
     const result = await handle.result();
     expect(result).toEqual({ state: 'Failed', reason: 'boom', retryable: false });
@@ -189,7 +191,7 @@ describe('additive-minor: task.complete.document projection', () => {
 
     // A well-formed completion afterwards still lands normally, proving the
     // transport survived — and it is THIS one's values that win.
-    await daemon.send(createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'real done', sessionRef: 'sess_valid' }, { taskId: handle.taskId }));
+    await daemon.send(createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'real done', sessionRef: 'sess_valid' }, { taskId: handle.taskId }));
     const result = await handle.result();
     expect(result).toEqual({ state: 'Complete', summary: 'real done', sessionRef: 'sess_valid' });
     expect(result.document).toBeUndefined();

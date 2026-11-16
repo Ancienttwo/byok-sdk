@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createEnvelope } from '@byok-sdk/protocol';
-import { claimAndStart, connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
+import { claimAndStart, connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, TEST_AGENT_DISPATCH, TEST_AGENT_REF, TEST_CLAIMED_EXECUTOR } from './test-support';
 import type { MaintenanceReport } from '@byok-sdk/cloud';
 import { MaintenanceScheduler } from '../maintenance-scheduler';
 import { createByokServer } from '../index';
@@ -77,7 +77,7 @@ describe('maintenance scheduler', () => {
       const handle = await server.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'retain identity' });
       await nextEnvelope(daemon);
       await claimAndStart(server, daemon, handle);
-      const complete = await daemon.send(createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'retained-session' }, { taskId: handle.taskId }));
+      const complete = await daemon.send(createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'retained-session' }, { taskId: handle.taskId }));
       expect(complete.status).toBe(200);
       await daemon.next(); // The next cursor acknowledges the delivered offer.
       const before = await server.tasks.get(handle.taskId);

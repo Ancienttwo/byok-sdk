@@ -26,7 +26,7 @@ const EGRESS_POLICY = {
 };
 // Each submission is its own Agent, so task B never meets task A's home writer.
 const submitExecution = async (byok, deviceId) => (await byok.executions.submit({ taskId: randomUUID(), deviceId,
-  payload: { instruction: 'attribution fixture', runtime: 'pi', agentRef: { agentId: `probe-agent-${randomUUID()}`, profileRevision: 'rev-1' },
+  payload: { instruction: 'attribution fixture', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: `probe-agent-${randomUUID()}`, profileRevision: 'rev-1' },
     session: { mode: 'fresh' }, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } } })).taskId;
 // Every daemon journals (#924), so a restart never runs task A again.
 const scenarios = [

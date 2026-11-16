@@ -12,6 +12,7 @@ import {
   waitForTaskEvent,
   TEST_AGENT_DISPATCH,
   TEST_AGENT_REF,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -151,7 +152,7 @@ describe('POST /byok/messages (§8, finding F6)', () => {
     // only a conn.hello records.
     await announceHello(daemon, { productId: PRODUCT_ID });
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, instruction: 'x', deviceId: daemon.deviceId });
-    const res = await daemon.send(createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+    const res = await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }));
 
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ accepted: 1 });
