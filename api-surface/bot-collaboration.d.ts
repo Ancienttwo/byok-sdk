@@ -498,6 +498,10 @@ export declare function cleanReplyTokens(ledger: IntentConclusions, state: Colla
 export declare function resendUnknown(state: CollaborationState, id: string, now: number): Delivery;
 export declare function echoCandidates(state: CollaborationState, message: InboundMessage): Delivery[];
 export {};
+// ==== @byok-sdk/bot-collaboration dist/delivery-superseded.d.ts ====
+import type { Delivery } from './channel.js';
+/** Manual replacements keep their predecessors as history, with acceptance still unknown. */
+export declare function supersededDeliveryIds(deliveries: Readonly<Record<string, Delivery>>): Set<string>;
 // ==== @byok-sdk/bot-collaboration dist/delivery-vectors.test-support.d.ts ====
 import type { Json } from '@byok-sdk/server/execution-core';
 import { type ChannelPort, type Delivery } from './channel.js';
@@ -581,8 +585,7 @@ export declare function deliveryVectors(name: string, open: (port: ChannelPort) 
 import type { ChannelPort, Delivery } from './channel.js';
 type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
 type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
-/** Manual replacements keep their predecessors as history, with acceptance still unknown. */
-export declare function supersededDeliveryIds(deliveries: Readonly<Record<string, Delivery>>): Set<string>;
+export { supersededDeliveryIds } from './delivery-superseded.js';
 /** Manual resend supplies a nonce. The original delivery keeps its audit identity. */
 export declare function deliveryId(taskId: string, messageId: string, route: Delivery['route'], nonce?: string): string;
 /** The caller persists this claim before it calls the channel. */
@@ -599,7 +602,6 @@ export declare function recoverDelivery(row: Delivery): void;
 export declare function readbackDelivery(row: Delivery, attempt: number, result: ReadbackResult, now: number): void;
 /** The caller has already checked the verified self principal and exact identity. */
 export declare function acceptDeliveryEcho(row: Delivery, platformMessageId: string): boolean;
-export {};
 // ==== @byok-sdk/bot-collaboration dist/dream.d.ts ====
 import { type ExecutionTemplate, type HostOccurrenceRun, type LedgerState } from '@byok-sdk/server/execution-core';
 import { type CollaborationState } from './model.js';

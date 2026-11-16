@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2808625,
+      "budgetBytes": 2809418,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -129,7 +129,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client",
-      "budgetBytes": 608934,
+      "budgetBytes": 609564,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -286,7 +286,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3258327,
+      "budgetBytes": 3259647,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

@@ -1,7 +1,8 @@
 import { hash, type Conclusion } from '@byok-sdk/server/execution-core';
 import type { CollaborationState, Turn } from './model.js';
 import { inboundKey, type Conversation, type Delivery, type InboundMessage, type PushRoute, type ReplyRoute } from './channel.js';
-import { deliveryId, supersededDeliveryIds } from './delivery.js';
+import { deliveryId } from './delivery.js';
+import { supersededDeliveryIds } from './delivery-superseded.js';
 
 /** The intent conclusions a delivery rule reads. A K4 `LedgerState` fits; H passes its intent rows. */
 export interface IntentConclusions { readonly intents: Readonly<Record<string, { readonly conclusion?: Conclusion }>> }

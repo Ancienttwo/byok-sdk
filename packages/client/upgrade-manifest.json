@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "da5abd9945a9d7ccac2abf757aaa703e514a9515a5b90e1766372f99ac60c136"
+    "snapshotSha256": "b45cb046e52dde2f307e80b8adf4cdca530e588efce845b8335cb8f2b5e3d46c"
   },
   "configFields": {
     "status": "tracked",
@@ -217,6 +217,11 @@
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds",
+      "change": "added",
+      "entry": "bot-delivery-supersession"
     },
     {
       "item": "export:@byok-sdk/client#AgentEgressDropReceipt",

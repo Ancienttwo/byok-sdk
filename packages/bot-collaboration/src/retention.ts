@@ -3,7 +3,7 @@ import { hash, MIN_TOMBSTONE_RETENTION_MS, time, type Json } from '@byok-sdk/ser
 import { DEFAULT_CONTEXT_TURN_LIMIT, handoffFrameBytes, handoffTurn } from './rules/context.js';
 import type { CollaborationState, Turn } from './model.js';
 import { refuseUnmigratedWouldDo } from './rules/autonomy.js';
-import { supersededDeliveryIds } from './delivery.js';
+import { supersededDeliveryIds } from './delivery-superseded.js';
 
 /**
  * Explicit retention (#798). The Host acknowledges settled roots. One call moves every row of each root out of the

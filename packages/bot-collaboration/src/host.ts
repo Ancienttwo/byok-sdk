@@ -42,7 +42,8 @@ import { checkSwitchRecords, refuseExported, sealLedger, switchContent } from '.
 import { sealSwitchExport, SwitchExportError, type SwitchExport, type SwitchHeader } from './migration.js';
 import { admitUserInput, coalescePolicy, type CoalescePolicy } from './coalesce.js';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel.js';
-import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, supersededDeliveryIds, unknownDelivery } from './delivery.js';
+import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery.js';
+import { supersededDeliveryIds } from './delivery-superseded.js';
 import { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, promoteStaged, queueDelivery, refuseRoute, rememberFilteredInbound, rememberInbound,
   resendUnknown, revokePush } from './delivery-routing.js';
 import { inboundDispositionsOf } from './inbound.js';
