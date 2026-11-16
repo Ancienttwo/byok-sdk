@@ -817,7 +817,7 @@ one strict discriminated union on `lane`, so no two selectors can disagree:
 
 | `lane` | Members | Meaning |
 | --- | --- | --- |
-| `auto` | none | The device picks a built-in runtime by its own preference |
+| `auto` | none | The device picks by its own preference: a built-in runtime or a custom harness it advertised |
 | `runtime` | `runtimeId` | A built-in runtime (`pi`, `claude`, `codex`) with the device's own model |
 | `subscription` | `runtimeId: 'claude' \| 'codex'`, `modelId` | A vendor CLI with its subscription credentials and this model |
 | `byok` | `runtimeId: 'pi'`, `providerId`, `modelId` | A BYOK provider and model, run only through Pi |
