@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "3e4a718185699541a03fb20b9e686dc9b98e1be78571f780ac01d2b24c90cabb"
+    "snapshotSha256": "b1889f4d3346234cb75e8b723ced5c649a3b15584050b29f7c0d689c9dec2700"
   },
   "configFields": {
     "status": "tracked",
@@ -86,10 +86,11 @@
     {
       "id": "core-sqlite-node-entry",
       "impact": "additive",
-      "summary": "@byok-sdk/core/sqlite-node is a new entry, whose functions need Node, exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. The core root does not export it. No Host action is required.",
+      "summary": "@byok-sdk/core/sqlite-node is a new entry, whose functions need Node, exporting readSqliteFileUnchanged(path, readMetadata). It opens an existing, non-empty SQLite file read-only and immutable, runs readMetadata on its main file and closes it, so a store can decide its format before any writable open, pragma or DDL; it returns undefined for :memory:, a missing path or a zero-length file, and throws SqliteReadOnlyOpenError when the file exists but cannot be stat'ed or opened read-only. sqliteOpenPath(path) and sqliteFileUri(path) name a store file for SQLite under one rule, with the Windows extended-length prefix past MAX_PATH; the client journal's writable open uses sqliteOpenPath, and the read-only check opens sqliteFileUri. SQLITE_USER_OBJECT is the SQL condition on a sqlite_schema name that excludes only the literal sqlite_ prefix; name NOT LIKE 'sqlite_%' also hides user objects named sqliteX..., because _ matches any character in LIKE. The core root does not export it. No Host action is required.",
       "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
       "items": [
         "entry:@byok-sdk/core/sqlite-node",
+        "export:@byok-sdk/core/sqlite-node#SQLITE_USER_OBJECT",
         "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
         "export:@byok-sdk/core/sqlite-node#readSqliteFileUnchanged",
         "export:@byok-sdk/core/sqlite-node#sqliteFileUri",
@@ -1225,6 +1226,11 @@
       "item": "export:@byok-sdk/core#PresenceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#SQLITE_USER_OBJECT",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
     },
     {
       "item": "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",

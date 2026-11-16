@@ -2,7 +2,7 @@
 // Select a separate Host database explicitly; never point it at an Agent home
 // or the daemon's SDK store. Acceptance uses SQLite and stub runtimes only.
 import { DatabaseSync } from 'node:sqlite';
-import { readSqliteFileUnchanged, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, SQLITE_USER_OBJECT, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 
 export interface HostSnapshot<T> { readonly revision: number; readonly value: T; }
 
@@ -31,7 +31,7 @@ export interface HostStoreFormat {
 }
 
 function hostFormat(db: DatabaseSync, format: HostStoreFormat): 'new' | 'current' {
-  const names = new Set(db.prepare("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").all().map(row => String(row.name)));
+  const names = new Set(db.prepare(`SELECT name FROM sqlite_schema WHERE type='table' AND ${SQLITE_USER_OBJECT}`).all().map(row => String(row.name)));
   if (names.size === 0) return 'new';
   if (!names.has('host_format')) throw new HostFormatError('Host database has tables but no host_format; it predates this store format');
   const row = db.prepare('SELECT version FROM host_format WHERE owner=?').get(format.owner);

@@ -353,13 +353,17 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
 });
 
 describe('goal/btw Host database format', () => {
-  it('refuses a store from before host_format without writing to it', async () => {
+  it.each([
+    ['a store from before host_format', `CREATE TABLE bot_state (host_id TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(host_id, key));
+        CREATE TABLE bot_execution_ids (host_id TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(host_id, task_id));`],
+    // `_` is a LIKE wildcard: NOT LIKE 'sqlite_%' would count this file as new (#2318).
+    ['a file whose only table is named like an SQLite one', 'CREATE TABLE sqliteX_notes (v TEXT)'],
+  ])('refuses %s without writing to it', async (_label, ddl) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'goal-btw-format-'));
     try {
       const file = path.join(dir, 'host.sqlite');
       const old = new DatabaseSync(file);
-      old.exec(`CREATE TABLE bot_state (host_id TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(host_id, key));
-        CREATE TABLE bot_execution_ids (host_id TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(host_id, task_id));`);
+      old.exec(ddl);
       old.close();
       const sha = () => createHash('sha256').update(readFileSync(file)).digest('hex');
       const before = sha();

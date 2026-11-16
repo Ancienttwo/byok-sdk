@@ -244,7 +244,7 @@ No new manifest entry: this carries forward the
 
 ### SQLite stores decide their format before any write (#2286)
 
-Sources: [#2295], [#2309]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`.
+Sources: [#2295], [#2309], [#2318]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`.
 
 SQLite stores check the unchanged main file before writable open, pragmas or
 DDL. Refusal preserves bytes and creates no sidecars, except for
@@ -257,6 +257,9 @@ zero-length files return `undefined`. Call it before writable open. The core
 root does not export it; lazy Node imports let Worker bundles resolve it.
 `sqliteOpenPath` / `sqliteFileUri` use Windows extended-length paths for both
 opens, including paths past `MAX_PATH`; `:memory:` remains unchanged.
+`SQLITE_USER_OBJECT` is the SQL condition that tells a store's objects from
+SQLite's own; use it instead of `name NOT LIKE 'sqlite_%'`, which also hides
+objects named `sqliteX…` because `_` matches any character in `LIKE`.
 
 - Local task journals must have exactly the current tables and columns. Old
   `local_artifact_ref`, `local_cleanup_candidate` or `local_storage_usage`
@@ -1010,4 +1013,5 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2309]: https://github.com/Ancienttwo/byok-sdk/pull/2309
 [#2311]: https://github.com/Ancienttwo/byok-sdk/pull/2311
 [#2313]: https://github.com/Ancienttwo/byok-sdk/pull/2313
+[#2318]: https://github.com/Ancienttwo/byok-sdk/issues/2318
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384
