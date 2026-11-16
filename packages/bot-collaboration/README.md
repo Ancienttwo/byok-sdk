@@ -1925,12 +1925,17 @@ the rows the Host already writes. There is no second disposition table:
 | `coalesced(turnId)` | In the Turn `turnId`, including a merged input whose batch is still open. |
 | `answered(turnId)` | The Turn succeeded. |
 | `failed(turnId)` | The Turn failed, expired or was superseded. |
-| `cancelled(turnId)` | The owner cancelled the Turn or its batch. |
+| `cancelled(turnId)` | The root Turn or its batch was cancelled, not merely a round seat. |
 
 A 1:1 input names the batch Turn that answers it. A room input names its round
-id; the round's seat Turns decide the destination. A recorded message whose
-Turn was retained away reads `failed`, never nothing, so the Host UI cannot
-show a message with no destination.
+id. An existing root Turn decides first, including its explicit cancellation.
+Otherwise, the round reports whether the message got an answer: any seat that
+succeeded or delivered makes it `answered`, even if another seat later fails
+or is cancelled. With no successful seat, any failed or cancelled seat makes
+it `failed`; otherwise it stays `coalesced`. Cancelling every seat still means
+`failed`, not cancellation of the round root. A recorded message whose Turn
+was retained away reads `failed`, never nothing, so the Host UI cannot show a
+message with no destination.
 
 ```ts
 const rows = bot.inboundDispositions(); // oldest first, from the ledger
@@ -1969,9 +1974,12 @@ the order of the guide's §3. The first match wins.
 | Other human, 1:1 | `not_owner`. Audit only. |
 | Human, group | `room_input`. `roomInput` with the principal. Mention entities select seats. |
 
-The input key is `inboundKey(message)`, the hash of channel, conversation id,
-and platform message id. A redelivered event returns the same id. The Host
-never scans text for mentions.
+The input key is `inboundKey(message)`, the hash of channel, conversation kind,
+conversation id and platform message id. A direct chat and a group with the
+same id have separate keys. A redelivered event returns the same id. The Host
+never scans text for mentions. Upgrading from the previous key format loses
+deduplication once for events already in flight; drain inbound delivery before
+upgrading or allow for those events to be admitted again.
 
 `BotOptions.owner` is the owner principal id. The default is `owner`. Only the
 human principal with this id passes the owner check. These owner APIs take an

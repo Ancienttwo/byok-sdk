@@ -51,10 +51,11 @@ it('gives owner authority only to the human principal with the owner id', () => 
 
 it('derives the input key from channel, conversation and platform message id only', () => {
   const key = inboundKey(message());
-  expect(key).toBe(hash(['fake', 'main', 'm1']));
+  expect(key).toBe(hash(['fake', 'direct', 'main', 'm1']));
   expect(inboundKey(message({ text: 'Edited', sender: member, mentions: ['b1'] }))).toBe(key);
   expect(inboundKey(message({ channel: 'other' }))).not.toBe(key);
   expect(inboundKey(message({ conversation: { kind: 'direct', id: 'b1' } }))).not.toBe(key);
+  expect(inboundKey(message({ conversation: { kind: 'group', id: 'main' } }))).not.toBe(key);
   expect(inboundKey(message({ platformMessageId: 'm2' }))).not.toBe(key);
 });
 

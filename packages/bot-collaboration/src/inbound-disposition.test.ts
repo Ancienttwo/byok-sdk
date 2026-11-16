@@ -1,6 +1,25 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { openTeam, type TestTeam } from './__tests__/team.test-support';
 import { inboundKey, type InboundMessage, type Principal } from './channel';
+import { inboundDispositionsOf } from './inbound';
+import { stateOf } from './model';
+
+it.each([
+  ['succeeded', false, 'answered'],
+  ['cancelled', false, 'failed'],
+  ['succeeded', true, 'cancelled'],
+] as const)('projects a %s seat with a cancelled sibling and root cancellation %s as %s', (conclusion, cancelledRoot, expected) => {
+  const state = stateOf({});
+  state.channel = { inbounds: { message: { id: 'message', root: 'round', conversation: { kind: 'group', id: 'room' },
+    channel: 'fake', sequence: 1 } }, deliveries: {}, pushRoutes: {} };
+  state.team.rounds.round = { id: 'round', root: 'round', roomId: 'room', input: '', seats: ['a', 'b'], limit: 2, counts: {}, closed: true };
+  state.turns.a = { id: 'a', root: 'a', botId: 'a', source: 'room_slot', request: '', hop: 0,
+    status: conclusion === 'succeeded' ? 'succeeded' : 'failed', conclusion };
+  expect(inboundDispositionsOf(state)[0]).toMatchObject({ disposition: expected === 'cancelled' ? 'answered' : expected });
+  state.turns.b = { id: 'b', root: 'b', botId: 'b', source: 'room_slot', request: '', hop: 0, status: 'failed', conclusion: 'cancelled' };
+  if (cancelledRoot) state.turns.round = { ...state.turns.b, id: 'round', root: 'round' };
+  expect(inboundDispositionsOf(state)).toEqual([{ id: 'message', disposition: expected, turnId: 'round' }]);
+});
 
 let fixture: TestTeam;
 afterEach(async () => { await fixture?.close(); });

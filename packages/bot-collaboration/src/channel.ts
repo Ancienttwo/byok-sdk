@@ -83,5 +83,5 @@ export function classifyInbound(message: InboundMessage, owner: string, self?: R
 }
 /** A redelivered platform event maps to the same input. A platform message id can be unique only within one chat. */
 export function inboundKey(message: InboundMessage): string {
-  return hash([message.channel, message.conversation.id, message.platformMessageId]);
+  return hash([message.channel, message.conversation.kind, message.conversation.id, message.platformMessageId]);
 }
