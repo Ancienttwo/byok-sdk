@@ -33,7 +33,7 @@ function turnRoot(state: CollaborationState, turn: Turn): string {
 }
 function rootOpen(ledger: IntentConclusions, state: CollaborationState, root: string, conversation: Conversation): boolean {
   return Object.values(state.turns).some(turn => turnRoot(state, turn) === root && sameConversation(turnConversation(state, turn), conversation)
-    && !turn.conclusion && !ledger.intents[hash(turn.id)]?.conclusion && !['blocked', 'failed', 'delivered'].includes(turn.status))
+    && !turn.conclusion && !ledger.intents[hash(turn.id)]?.conclusion && !['failed', 'delivered'].includes(turn.status))
     || Object.values(state.inputBatches ?? {}).some(batch => batch.id === root && batch.state === 'open')
     || Object.values(state.team.seats).some(seat => state.team.rounds[seat.roundId]?.root === root && !seat.released);
 }

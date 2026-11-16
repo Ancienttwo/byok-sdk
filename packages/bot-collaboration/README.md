@@ -2101,8 +2101,9 @@ from message text. A different bot, human, channel or conversation cannot
 confirm a delivery. Echoes can arrive while `send` is pending; they do not
 wait behind the send operation.
 
-Reply tokens are removed at expiry. They are also removed after the root
-has no open Turn or seat and no pending/sending delivery on that route.
+Reply tokens are removed at expiry. A non-seat blocked Turn remains open
+because it can resume. Tokens are also removed after the root has no open
+Turn or seat and no staged/pending/sending/unknown delivery on that route.
 Metadata and delivery audit remain. All delivery state is Host state; it
 does not change K4, K7, the SDK message disposition or wire messages.
 

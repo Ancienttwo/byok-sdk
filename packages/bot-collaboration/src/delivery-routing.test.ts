@@ -45,6 +45,19 @@ it('never refreshes the original credential or expiry on platform redelivery', (
   });
 });
 
+it('keeps a blocked root reply route until it resumes and replies', () => {
+  ledger().transaction(s => {
+    const state = stateOf(s.application), turn = state.turns.root!;
+    rememberInbound(state, incoming(), turn.root);
+    turn.status = 'blocked'; turn.blockedReason = 'Unavailable model: test';
+    cleanReplyTokens(s, state, 100);
+    expect(state.channel!.inbounds[inboundKey(incoming())]!.reply?.token).toBe('secret-in1');
+    turn.status = 'processing'; delete turn.blockedReason;
+    const reply = queueDelivery(s, state, turn, 'task', 'message', 'answer', 150)!;
+    expect(deliveryRoute(state, reply, 150)).toMatchObject({ token: 'secret-in1' });
+  });
+});
+
 it('keeps a committed pending reply slot through settlement, then deletes its token after acceptance', () => {
   const db = ledger();
   db.transaction(s => {
