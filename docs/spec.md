@@ -1277,8 +1277,11 @@ metadata are rejected. There is no compatibility translation.
 
 `refused` requires exactly `kind` and `reason`. Its reasons are
 `app_server_unavailable` (Codex has no `app-server`), `acp_unavailable`
-(an ACP runtime such as Grok has no stdio ACP mode) and `platform_unsupported`
-(the host `process.platform` is not in the descriptor's `platforms`). The one
+(an ACP runtime such as Grok has no stdio ACP mode), `platform_unsupported`
+(the host `process.platform` is not in the descriptor's `platforms`) and
+`agent_user_context_unavailable` (the adapter has `agentUserContext:
+'excluded'`, but this account cannot create the symbolic links its SDK-owned
+home needs). The one
 exception is `runtime_environment_unavailable`, which carries exactly one more
 field, `code`: the login-shell capture failure code (see Runtime environment
 below). No other arm accepts `reason`; arbitrary error text

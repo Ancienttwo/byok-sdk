@@ -9,6 +9,13 @@ import type { RuntimeUnavailableCause } from '@byok-sdk/protocol/constants';
 import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 import type { RuntimeDetectResult } from './types.js';
 
+/**
+ * How a Windows account fixes `agentUserContext: 'excluded'` when it may not
+ * create symbolic links. The detection decline and the start-time refusal
+ * show this same text (#2241).
+ */
+export const AGENT_USER_CONTEXT_WINDOWS_REMEDY = "Windows refused to create a symbolic link (EPERM); turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit' on this device";
+
 /** One typed pre-claim admission cause, plus the optional environment capture code. */
 export interface RuntimeUnavailableAdmission {
   readonly cause: RuntimeUnavailableCause;
@@ -43,6 +50,8 @@ const RETRYABLE_BY_CAUSE = Object.freeze({
   runtime_not_allowed: false,
   // Another device may have an available runtime.
   none_available: true,
+  // Another device may allow the symbolic links the SDK-owned home needs.
+  agent_user_context_unavailable: true,
 } satisfies Record<RuntimeUnavailableCause, boolean>);
 
 /** The retryable default for `cause`; the one table every decline path uses. */
@@ -73,6 +82,8 @@ export function runtimeUnavailableForDetection(
       return { cause: 'acp_unavailable' };
     case 'platform_unsupported':
       return { cause: 'platform_unsupported' };
+    case 'agent_user_context_unavailable':
+      return { cause: 'agent_user_context_unavailable' };
     case 'runtime_environment_unavailable':
       return { cause: 'environment_unavailable', code: result.code };
   }

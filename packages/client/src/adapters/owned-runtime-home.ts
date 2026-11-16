@@ -1,7 +1,9 @@
 import { promises as fs } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home.js';
 import { RuntimeExecutionFailure } from '../runtime-failure.js';
+import { AGENT_USER_CONTEXT_WINDOWS_REMEDY } from '../runtime-unavailable.js';
 
 /** One runtime's SDK-owned home for an Agent task: which user entries it links and where the Agent's own store lives. */
 export interface OwnedRuntimeHomeSpec {
@@ -52,7 +54,7 @@ export async function createOwnedRuntimeHome(spec: OwnedRuntimeHomeSpec, dir: st
       await fs.symlink(target, path.join(home, name), type);
     } catch (error) {
       if (platform === 'win32' && (error as NodeJS.ErrnoException).code === 'EPERM') {
-        throw refuse('Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator');
+        throw refuse(AGENT_USER_CONTEXT_WINDOWS_REMEDY);
       }
       throw error;
     }
@@ -73,4 +75,42 @@ export async function createOwnedRuntimeHome(spec: OwnedRuntimeHomeSpec, dir: st
     await link(target, name, 'dir');
   }
   return home;
+}
+
+let windowsFileLinks: Promise<boolean> | undefined;
+
+/**
+ * Whether this process may create the links of an owned runtime home, asked
+ * at detection so a Host learns it before the offer (#2241). Only win32 can
+ * refuse: without Developer Mode, a non-administrator gets `EPERM`. A
+ * directory junction would need no privilege, but `auth.json`, `config.toml`
+ * and `hooks.json` are files, and a hard link or a copy splits the login a
+ * refresh rotates. The win32 answer is cached for the process; an unexpected
+ * error is not, and rejects. The start-time `EPERM` refusal stays for a
+ * privilege change after the probe.
+ */
+export function ownedRuntimeHomeLinksAvailable(platform: NodeJS.Platform = process.platform): Promise<boolean> {
+  if (platform !== 'win32') return Promise.resolve(true);
+  windowsFileLinks ??= probeFileLink().catch((error: unknown) => {
+    windowsFileLinks = undefined;
+    throw error;
+  });
+  return windowsFileLinks;
+}
+
+async function probeFileLink(): Promise<boolean> {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-link-probe-'));
+  try {
+    const target = path.join(dir, 'target');
+    await fs.writeFile(target, '');
+    try {
+      await fs.symlink(target, path.join(dir, 'link'), 'file');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EPERM') return false;
+      throw error;
+    }
+    return true;
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 }

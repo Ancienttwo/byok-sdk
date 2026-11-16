@@ -2221,7 +2221,7 @@ export declare const RUNTIME_IDS: readonly ["pi", "claude", "codex"];
  * kebab-case detection kinds, because the mapping is explicit and never a
  * string transformation.
  */
-export declare const RUNTIME_UNAVAILABLE_CAUSES: readonly ["not_installed", "not_executable", "probe_timeout", "probe_failed", "app_server_unavailable", "acp_unavailable", "platform_unsupported", "environment_unavailable", "version_blocked", "runtime_not_configured", "runtime_not_allowed", "none_available"];
+export declare const RUNTIME_UNAVAILABLE_CAUSES: readonly ["not_installed", "not_executable", "probe_timeout", "probe_failed", "app_server_unavailable", "acp_unavailable", "platform_unsupported", "environment_unavailable", "version_blocked", "runtime_not_configured", "runtime_not_allowed", "none_available", "agent_user_context_unavailable"];
 /** One append-only `runtime_unavailable` cause. */
 export type RuntimeUnavailableCause = (typeof RUNTIME_UNAVAILABLE_CAUSES)[number];
 /** Maximum length of a served model name. */
@@ -2994,6 +2994,7 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
         }>, z.ZodString]>;
         cause: z.ZodUnion<readonly [z.ZodEnum<{
             acp_unavailable: "acp_unavailable";
+            agent_user_context_unavailable: "agent_user_context_unavailable";
             app_server_unavailable: "app_server_unavailable";
             environment_unavailable: "environment_unavailable";
             none_available: "none_available";
@@ -4827,6 +4828,7 @@ export declare const RuntimeUnavailableEntrySchema: z.ZodObject<{
     }>, z.ZodString]>;
     cause: z.ZodUnion<readonly [z.ZodEnum<{
         acp_unavailable: "acp_unavailable";
+        agent_user_context_unavailable: "agent_user_context_unavailable";
         app_server_unavailable: "app_server_unavailable";
         environment_unavailable: "environment_unavailable";
         none_available: "none_available";
@@ -4851,6 +4853,7 @@ export declare const RuntimeUnavailableListSchema: z.ZodArray<z.ZodObject<{
     }>, z.ZodString]>;
     cause: z.ZodUnion<readonly [z.ZodEnum<{
         acp_unavailable: "acp_unavailable";
+        agent_user_context_unavailable: "agent_user_context_unavailable";
         app_server_unavailable: "app_server_unavailable";
         environment_unavailable: "environment_unavailable";
         none_available: "none_available";
@@ -4979,6 +4982,7 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
         }>, z.ZodString]>;
         cause: z.ZodUnion<readonly [z.ZodEnum<{
             acp_unavailable: "acp_unavailable";
+            agent_user_context_unavailable: "agent_user_context_unavailable";
             app_server_unavailable: "app_server_unavailable";
             environment_unavailable: "environment_unavailable";
             none_available: "none_available";
@@ -6978,6 +6982,7 @@ export declare const TaskDeclineSealedPayloadSchema: z.ZodObject<{
     runtimeUnavailable: z.ZodOptional<z.ZodObject<{
         cause: z.ZodUnion<readonly [z.ZodEnum<{
             acp_unavailable: "acp_unavailable";
+            agent_user_context_unavailable: "agent_user_context_unavailable";
             app_server_unavailable: "app_server_unavailable";
             environment_unavailable: "environment_unavailable";
             none_available: "none_available";
@@ -7265,6 +7270,7 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
     runtimeUnavailable: z.ZodOptional<z.ZodObject<{
         cause: z.ZodUnion<readonly [z.ZodEnum<{
             acp_unavailable: "acp_unavailable";
+            agent_user_context_unavailable: "agent_user_context_unavailable";
             app_server_unavailable: "app_server_unavailable";
             environment_unavailable: "environment_unavailable";
             none_available: "none_available";
@@ -7297,6 +7303,7 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
     runtimeUnavailable: z.ZodOptional<z.ZodObject<{
         cause: z.ZodUnion<readonly [z.ZodEnum<{
             acp_unavailable: "acp_unavailable";
+            agent_user_context_unavailable: "agent_user_context_unavailable";
             app_server_unavailable: "app_server_unavailable";
             environment_unavailable: "environment_unavailable";
             none_available: "none_available";

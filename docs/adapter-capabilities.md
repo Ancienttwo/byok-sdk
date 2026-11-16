@@ -478,10 +478,12 @@ it:
 
 - `auth.json`: the login. A ChatGPT login refresh writes through the link.
   Codex 0.160.0 opens the file through the link and writes it in place;
-  0.167.0 resolves the link, writes a temporary file beside the target and
-  renames it onto the target, so the link stays and the user's file gets the
-  new refresh token. Codex 0.167.0 refuses to save to a hard-linked file, so
-  the SDK uses symbolic links only.
+  0.167.0 and later resolve the link, write a temporary file beside the target
+  and rename it onto the target, so the link stays and the user's file gets the
+  new refresh token. From 0.169.0 the commit lock is also taken beside the
+  resolved target, so the user's own Codex and the Agent task share it.
+  Codex refuses to save to a hard-linked file (0.167.0, and on Windows too in
+  0.169.0), so the SDK uses symbolic links only.
 - `config.toml`: the user's model, provider, sandbox and other configuration,
   including its `developer_instructions`, still apply.
 - `rules/` and `hooks.json`: the user's command rules and hooks are guardrails
@@ -544,8 +546,29 @@ The start fails as a non-retryable `authority` failure when:
   link, a file-mode login would save `auth.json` in the SDK home and lose it
   at cleanup. Reason: `codex Agent user context exclusion refused: the user CODEX_HOME has no auth.json; log in to Codex with file credentials first`.
 - On Windows, the account may not create symbolic links (`EPERM`: Developer
-  Mode is off and the daemon is not an administrator). Reason: `codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode or run the daemon as an administrator`.
+  Mode is off and the daemon is not an administrator) although detection
+  allowed it, because the privilege changed after the probe described below.
+  Reason: `codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit' on this device`.
   Otherwise Windows behaves as the other platforms.
+
+On Windows, `excluded` needs an account that can create symbolic links
+(Developer Mode on, or the daemon running as an administrator). `auth.json`,
+`config.toml` and `hooks.json` are files, and Windows has no unprivileged
+alternative that keeps one login: a junction only links a directory, Codex
+refuses a hard link, and a copy splits the refresh token. With
+`agentUserContext: 'excluded'` on win32, `detect()` therefore creates one file
+link in the OS temp directory, removes it, and keeps the answer for the
+process. Without the privilege, detection refuses with
+`agent_user_context_unavailable`, and every Codex task on this device is
+declined before claim, including tasks without an `agentRef`: the decline
+carries `runtimeUnavailable.cause: 'agent_user_context_unavailable'`,
+`retryable: true` and the reason `agent_user_context_unavailable: runtime "codex" cannot keep user context out on this device. Windows refused to create a symbolic link (EPERM); turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit' on this device`.
+To fix it, turn on Developer Mode, or set `agentUserContext` back to
+`'inherit'` for this device. The keyring credential store is no alternative:
+its entry is keyed by the `CODEX_HOME` path (above). Probed on Windows 11
+(build 26100) with Codex 0.169.0, a standard account with Developer Mode on:
+file links, directory links and the rename onto a resolved target work, and a
+recursive removal of the SDK home does not follow its links (#2241).
 
 The credential store check runs on the started app server, through
 `config/read`, before the thread opens.
