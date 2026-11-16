@@ -71,7 +71,10 @@ async function pairingSequence(productId: string, storeDir: string): Promise<voi
   const { custody, records } = memberRecords(productId, storeDir);
   const store = new DeviceCredentialStore({ productId, storeDir });
   await records.clear();
-  await store.saveFirstPairingAttempt({ kind: 'first-pairing-attempt-v1', deviceName: 'native', devicePublicKey: record.devicePublicKey, devicePrivateKeyPem: record.devicePrivateKeyPem });
+  await store.savePairingAttempt({
+    kind: 'pairing-attempt-v2', attemptId: 'A'.repeat(22), codeDigest: 'c'.repeat(43), storeIdentity: 'a'.repeat(64),
+    deviceName: 'native', devicePrivateKeyPem: record.devicePrivateKeyPem, expectedDeviceDigest: null,
+  });
   await store.replace(record);
   await custody.replace('member-keys', 'keys');
   await custody.replace('pairing-verification', 'pending');

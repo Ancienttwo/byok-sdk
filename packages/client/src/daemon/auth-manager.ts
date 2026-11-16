@@ -30,7 +30,7 @@ import {
   PairingCodeRejectedError,
   PairingSupersededError,
 } from './daemon-errors.js';
-import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, signNonce } from './device-keys.js';
+import { generateDeviceKeyPair, exportPrivateKeyPem, importPrivateKeyPem, publicKeyOfPrivateKeyPem, signNonce } from './device-keys.js';
 import { toHttpBase } from './url.js';
 import { MAX_TIMER_DELAY_MS } from '../util/timer-delay.js';
 
@@ -88,11 +88,6 @@ type PairOutcome =
   | { readonly kind: 'conflict'; readonly currentDeviceDigest: string | null };
 
 const PAIRING_CODE_DIGEST_NAMESPACE = 'byok-pairing-code-v1';
-
-function generatedKey(): { readonly publicKey: string; readonly privateKeyPem: string } {
-  const pair = generateDeviceKeyPair();
-  return { publicKey: pair.publicKeyBase64Url, privateKeyPem: exportPrivateKeyPem(pair.privateKey) };
-}
 
 /** The local name of a pairing code in a staged attempt: a retry with the same code resumes it. The code itself is never stored. */
 function pairingCodeDigest(pairingCode: string): string {
@@ -333,20 +328,21 @@ export class AuthManager {
         const observedMachineId = await this.opts.machineId?.();
         const attempt = await this.underEnrollmentGate(signal, () =>
           this.stagePairingAttempt(signal, pairingCode, replaceOtherStore, observedDeviceName, observedMachineId));
-        let outcome = await this.sendPairRequest(signal, pairingCode, attempt, attempt.expectedDeviceDigest);
+        const devicePublicKey = publicKeyOfPrivateKeyPem(attempt.devicePrivateKeyPem);
+        let outcome = await this.sendPairRequest(signal, pairingCode, attempt, devicePublicKey, attempt.expectedDeviceDigest);
         if (outcome.kind === 'conflict') {
           // Adopted only inside this invocation, never persisted: a later
           // invocation starts again from the staged digest.
           const adopted = outcome.currentDeviceDigest;
           await this.underEnrollmentGate(signal, () => this.assertOwnsAttempt(signal, attempt));
-          outcome = await this.sendPairRequest(signal, pairingCode, attempt, adopted);
+          outcome = await this.sendPairRequest(signal, pairingCode, attempt, devicePublicKey, adopted);
           if (outcome.kind === 'conflict') throw new PairingBusyError();
         }
         const { body } = outcome;
         const metadata: DeviceMetadata = {
           deviceId: body.deviceId,
           tenantId: body.tenantId,
-          devicePublicKey: attempt.devicePublicKey,
+          devicePublicKey,
         };
         const record: DeviceRecord = {
           ...metadata,
@@ -386,13 +382,14 @@ export class AuthManager {
     signal: AbortSignal,
     pairingCode: string,
     attempt: PairingAttempt,
+    devicePublicKey: string,
     expectedDeviceDigest: string | null,
   ): Promise<PairOutcome> {
     const url = new URL(BYOK_PAIR_PATH, toHttpBase(this.opts.serverUrl));
     const request: PairRequest = {
       pairingCode,
       deviceName: attempt.deviceName,
-      devicePublicKey: attempt.devicePublicKey,
+      devicePublicKey,
       // An unresolvable machine identity omits the field, the documented "no
       // supersession" case, never a placeholder shared by every device.
       ...(attempt.machineId === undefined ? {} : { machineId: attempt.machineId }),
@@ -612,7 +609,6 @@ export class AuthManager {
     if (staged !== undefined && staged.codeDigest === codeDigest) return staged;
     // The fence names the slot's current enrollment, whichever store paired it.
     const current = await this.credentials.read(signal);
-    const key = existing === undefined ? generatedKey() : { publicKey: existing.devicePublicKey, privateKeyPem: existing.devicePrivateKeyPem };
     const attempt: PairingAttempt = {
       kind: 'pairing-attempt-v2',
       attemptId: randomBytes(16).toString('base64url'),
@@ -620,8 +616,7 @@ export class AuthManager {
       storeIdentity: this.opts.store.identity,
       deviceName: observedDeviceName,
       ...(observedMachineId === undefined ? {} : { machineId: observedMachineId }),
-      devicePublicKey: key.publicKey,
-      devicePrivateKeyPem: key.privateKeyPem,
+      devicePrivateKeyPem: existing?.devicePrivateKeyPem ?? exportPrivateKeyPem(generateDeviceKeyPair().privateKey),
       expectedDeviceDigest: current === undefined
         ? null
         : await pairDeviceDigest({ tenantId: current.tenantId, productId: this.opts.store.productId, deviceId: current.deviceId }),
@@ -644,7 +639,7 @@ export class AuthManager {
       current.storeIdentity !== attempt.storeIdentity ||
       current.attemptId !== attempt.attemptId ||
       current.codeDigest !== attempt.codeDigest ||
-      current.devicePublicKey !== attempt.devicePublicKey
+      current.devicePrivateKeyPem !== attempt.devicePrivateKeyPem
     ) {
       throw new PairingSupersededError();
     }

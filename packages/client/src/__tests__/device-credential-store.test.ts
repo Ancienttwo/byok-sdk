@@ -1,4 +1,6 @@
 import { spawn as nodeSpawn } from 'node:child_process';
+import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { PAIR_RESPONSE_TENANT_ID_MAX_LENGTH } from '@byok-sdk/protocol';
 import { inspect } from 'node:util';
 import { PassThrough } from 'node:stream';
 import { EventEmitter } from 'node:events';
@@ -14,13 +16,14 @@ import * as path from 'node:path';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DeviceCredentialCommandAbortedError,
+  DeviceCredentialLegacyEntryError,
   DeviceCredentialStore,
   DeviceCredentialStoreError,
   DeviceCredentialStoreUnavailableError,
   OS_CREDENTIAL_ENTRY_MAX_BYTES,
   OsCredentialEntry,
   type DeviceCommandRunner,
-  type FirstPairingAttempt,
+  type PairingAttempt,
   runDeviceCommand,
 } from '../daemon/device-credential-store';
 import type { Win32CredentialBindings, Win32CredentialCallback, Win32CredentialWrite } from '../daemon/win32-credential-api';
@@ -170,11 +173,12 @@ describe('DeviceCredentialStore', () => {
 });
 
 describe('replacement pairing credential authority', () => {
-  const attempt: FirstPairingAttempt = {
-    kind: 'first-pairing-attempt-v1', deviceName: 'replacement', devicePublicKey: 'replacement-public-key',
-    devicePrivateKeyPem: 'replacement-private-key', machineId: 'replacement-machine', storeIdentity: 'a'.repeat(64),
+  const attempt: PairingAttempt = {
+    kind: 'pairing-attempt-v2', attemptId: 'A'.repeat(22), codeDigest: 'c'.repeat(43), storeIdentity: 'a'.repeat(64),
+    deviceName: 'replacement', machineId: 'replacement-machine', devicePrivateKeyPem: 'replacement-private-key',
+    expectedDeviceDigest: null,
   };
-  const encoded = (value: unknown): string => `byok-device-credential-v1:${Buffer.from(JSON.stringify(value), 'utf8').toString('base64')}`;
+  const encoded = (value: unknown): string => `byok-device-credential-v2:${Buffer.from(JSON.stringify(value), 'utf8').toString('base64')}`;
 
   function provider(initial?: string) {
     let value = initial;
@@ -189,39 +193,75 @@ describe('replacement pairing credential authority', () => {
     return { open, value: () => value, writes: () => writes };
   }
 
+  it('recognizes a wire v6 entry by its format version alone, never deletes it on a read, and clears it unread', async () => {
+    // Not even base64: nothing behind the v1 prefix is decoded.
+    const legacy = 'byok-device-credential-v1:not-decoded';
+    const entry = provider(legacy);
+    await expect(entry.open().read()).rejects.toBeInstanceOf(DeviceCredentialLegacyEntryError);
+    await expect(entry.open().readPairingAttempt()).rejects.toBeInstanceOf(DeviceCredentialLegacyEntryError);
+    expect(entry.value()).toBe(legacy);
+    await expect(entry.open().clear()).resolves.toBe(true);
+    expect(entry.value()).toBeUndefined();
+  });
+
+  it('fits the largest enrollment beside a pairing attempt in one entry', async () => {
+    // The bounds this rests on: tenantId at its protocol maximum, a 64-character
+    // hostname (HOST_NAME_MAX), a 64-character productId inside the cloud's
+    // access token, a machine digest and a fence digest.
+    const keys = generateKeyPairSync('ed25519');
+    const privateKeyPem = keys.privateKey.export({ format: 'pem', type: 'pkcs8' }) as string;
+    const segment = (value: object): string => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const deviceId = `dev_${randomUUID()}`;
+    const tenantId = 't'.repeat(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH);
+    const record = {
+      deviceId, tenantId,
+      devicePublicKey: keys.publicKey.export({ format: 'jwk' }).x!,
+      accessToken: `${segment({ alg: 'HS256', typ: 'JWT' })}.${segment({ deviceId, tenantId, productId: 'p'.repeat(64), iat: 1_900_000_000, exp: 1_900_003_600 })}.${'s'.repeat(43)}`,
+      expiresAt: '2030-01-01T00:00:00.000Z',
+      devicePrivateKeyPem: privateKeyPem,
+    };
+    const largest: PairingAttempt = {
+      ...attempt, deviceName: 'h'.repeat(64), machineId: 'm'.repeat(64), devicePrivateKeyPem: privateKeyPem, expectedDeviceDigest: 'e'.repeat(43),
+    };
+    const entry = provider(encoded(record));
+    await entry.open().savePairingAttempt(largest);
+    expect(Buffer.byteLength(entry.value()!)).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
+    await expect(entry.open().readPairingAttempt()).resolves.toEqual(largest);
+  });
+
   it('keeps first pairing as a standalone attempt and clears it completely', async () => {
     const entry = provider();
-    await entry.open().saveFirstPairingAttempt(attempt);
+    await entry.open().savePairingAttempt(attempt);
     expect(entry.value()).toBe(encoded(attempt));
     await expect(entry.open().read()).resolves.toBeUndefined();
-    await expect(entry.open().readFirstPairingAttempt()).resolves.toEqual(attempt);
+    await expect(entry.open().readPairingAttempt()).resolves.toEqual(attempt);
     await expect(entry.open().clear()).resolves.toBe(true);
-    await expect(entry.open().readFirstPairingAttempt()).resolves.toBeUndefined();
+    await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
   });
 
   it('stages both authorities in one entry and keeps the pending key through current enrollment renewal', async () => {
     const entry = provider(encoded(credentials));
-    await entry.open().saveFirstPairingAttempt(attempt);
+    await entry.open().savePairingAttempt(attempt);
     expect(entry.writes()).toBe(1);
-    expect(entry.value()).toBe(encoded({ kind: 'replacement-pairing-attempt-v1', record: credentials, attempt }));
+    expect(entry.value()).toBe(encoded({ kind: 'enrollment-with-attempt-v2', record: credentials, attempt }));
     await expect(entry.open().read()).resolves.toEqual(credentials);
-    await expect(entry.open().readFirstPairingAttempt()).resolves.toEqual(attempt);
+    await expect(entry.open().readPairingAttempt()).resolves.toEqual(attempt);
     const renewed = { ...credentials, accessToken: 'renewed-token', expiresAt: '2031-01-01T00:00:00.000Z' };
     await entry.open().replace(renewed);
     await expect(entry.open().read()).resolves.toEqual(renewed);
-    await expect(entry.open().readFirstPairingAttempt()).resolves.toEqual(attempt);
+    await expect(entry.open().readPairingAttempt()).resolves.toEqual(attempt);
     await expect(entry.open().clear()).resolves.toBe(true);
     await expect(entry.open().read()).resolves.toBeUndefined();
-    await expect(entry.open().readFirstPairingAttempt()).resolves.toBeUndefined();
+    await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
   });
 
   it.each(['deviceId', 'tenantId', 'devicePublicKey'] as const)('promotes an authenticated enrollment with a different %s', async (field) => {
-    const entry = provider(encoded({ kind: 'replacement-pairing-attempt-v1', record: credentials, attempt }));
+    const entry = provider(encoded({ kind: 'enrollment-with-attempt-v2', record: credentials, attempt }));
     const replacement = { ...credentials, [field]: `replacement-${field}` };
     await entry.open().replace(replacement);
     expect(entry.value()).toBe(encoded(replacement));
     await expect(entry.open().read()).resolves.toEqual(replacement);
-    await expect(entry.open().readFirstPairingAttempt()).resolves.toBeUndefined();
+    await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
   });
 
   it.each([
@@ -229,15 +269,15 @@ describe('replacement pairing credential authority', () => {
     { record: credentials, attempt: undefined },
     { record: { ...credentials, accessToken: '' }, attempt },
     { record: credentials, attempt: { ...attempt, machineId: 1 } },
-    { record: { ...credentials, kind: 'first-pairing-attempt-v1' }, attempt },
+    { record: { ...credentials, kind: 'pairing-attempt-v2' }, attempt },
   ])('rejects a malformed wrapper without exposing or overwriting either member (%#)', async (members) => {
     // Flat fields cannot turn an invalid wrapper into a usable record.
-    const raw = encoded({ ...credentials, kind: 'replacement-pairing-attempt-v1', ...members });
+    const raw = encoded({ ...credentials, kind: 'enrollment-with-attempt-v2', ...members });
     const entry = provider(raw);
     await expect(entry.open().read()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
-    await expect(entry.open().readFirstPairingAttempt()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
+    await expect(entry.open().readPairingAttempt()).rejects.toBeInstanceOf(DeviceCredentialStoreError);
     await expect(entry.open().replace(credentials)).rejects.toBeInstanceOf(DeviceCredentialStoreError);
-    await expect(entry.open().saveFirstPairingAttempt(attempt)).rejects.toBeInstanceOf(DeviceCredentialStoreError);
+    await expect(entry.open().savePairingAttempt(attempt)).rejects.toBeInstanceOf(DeviceCredentialStoreError);
     expect(entry.writes()).toBe(0);
     expect(entry.value()).toBe(raw);
   });
@@ -247,15 +287,15 @@ describe('replacement pairing credential authority', () => {
     const largeAttempt = { ...attempt, devicePrivateKeyPem: 'b'.repeat(700) };
     expect(Buffer.byteLength(encoded(largeRecord))).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
     expect(Buffer.byteLength(encoded(largeAttempt))).toBeLessThanOrEqual(OS_CREDENTIAL_ENTRY_MAX_BYTES);
-    expect(Buffer.byteLength(encoded({ kind: 'replacement-pairing-attempt-v1', record: largeRecord, attempt: largeAttempt })))
+    expect(Buffer.byteLength(encoded({ kind: 'enrollment-with-attempt-v2', record: largeRecord, attempt: largeAttempt })))
       .toBeGreaterThan(OS_CREDENTIAL_ENTRY_MAX_BYTES);
     const raw = encoded(largeRecord);
     const entry = provider(raw);
-    await expect(entry.open().saveFirstPairingAttempt(largeAttempt)).rejects.toThrow('exceeds the OS credential entry bound');
+    await expect(entry.open().savePairingAttempt(largeAttempt)).rejects.toThrow('exceeds the OS credential entry bound');
     expect(entry.writes()).toBe(0);
     expect(entry.value()).toBe(raw);
     await expect(entry.open().read()).resolves.toEqual(largeRecord);
-    await expect(entry.open().readFirstPairingAttempt()).resolves.toBeUndefined();
+    await expect(entry.open().readPairingAttempt()).resolves.toBeUndefined();
   });
 });
 

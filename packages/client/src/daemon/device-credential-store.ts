@@ -55,7 +55,7 @@ export interface PairingAttempt {
   readonly storeIdentity: string;
   readonly deviceName: string;
   readonly machineId?: string;
-  readonly devicePublicKey: string;
+  /** The public key is derived from it; storing it too would cost entry bytes (the 2,400-byte bound). */
   readonly devicePrivateKeyPem: string;
   /** The `PairRequest` fence: `pairDeviceDigest` of the slot's enrollment when staged, or `null`. */
   readonly expectedDeviceDigest: string | null;
@@ -246,12 +246,10 @@ function assertPairingAttempt(value: unknown): asserts value is PairingAttempt {
     typeof attempt.codeDigest !== 'string' || !BASE64URL_43.test(attempt.codeDigest) ||
     typeof attempt.storeIdentity !== 'string' || !/^[0-9a-f]{64}$/u.test(attempt.storeIdentity) ||
     typeof attempt.deviceName !== 'string' ||
-    typeof attempt.devicePublicKey !== 'string' ||
     typeof attempt.devicePrivateKeyPem !== 'string' ||
     (attempt.machineId !== undefined && typeof attempt.machineId !== 'string') ||
     (attempt.expectedDeviceDigest !== null && (typeof attempt.expectedDeviceDigest !== 'string' || !BASE64URL_43.test(attempt.expectedDeviceDigest))) ||
     attempt.deviceName.length === 0 ||
-    attempt.devicePublicKey.length === 0 ||
     attempt.devicePrivateKeyPem.length === 0
   ) {
     throw new DeviceCredentialStoreError('OS credential entry has an invalid pairing attempt shape');
@@ -288,7 +286,6 @@ function freezeAttempt(attempt: PairingAttempt): PairingAttempt {
     storeIdentity: attempt.storeIdentity,
     deviceName: attempt.deviceName,
     ...(attempt.machineId === undefined ? {} : { machineId: attempt.machineId }),
-    devicePublicKey: attempt.devicePublicKey,
     devicePrivateKeyPem: attempt.devicePrivateKeyPem,
     expectedDeviceDigest: attempt.expectedDeviceDigest,
   });
