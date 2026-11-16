@@ -2952,8 +2952,10 @@ byte-for-byte an id that was never registered: it is absent from the device
 listing and from the tenant readiness projection, it resolves to nothing on
 the pre-tenant `/byok/challenge` and `/byok/token` paths, and the
 device-scoped state it owned — its presence hint, its outstanding challenge
-nonces, its inbound-dedup entries, its assertion-replay entries — is deleted
-in the same transaction. What the device DID is not revocation's business and
+nonces, its inbound-dedup entries — is deleted in the same transaction. Its
+assertion-replay entries are kept: revocation and machine supersession leave
+them until the assertion expires, and maintenance deletes them after that
+(#2264). What the device DID is not revocation's business and
 survives untouched: the task, egress, and proof-receipt records keyed by its
 device id are history, not credentials. Nothing observable on the wire
 changes, because `401` was already the answer for both a revoked device and

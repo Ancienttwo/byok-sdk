@@ -50,6 +50,11 @@ must not delete replay entries on revoke or supersession either. No schema
 change or migration is needed; replay retention stays bounded by the assertion
 TTL.
 
+Expired replay rows are not removed on their own. Pass the replay authority as
+`createByokCloud({ deviceAssertionReplay })` and run `runMaintenance()` on a
+schedule; without the authority the `deviceAssertionReplay` step reports
+`not-configured` and expired rows accumulate.
+
 ## OAR 0.109.0 (#2235)
 
 The vendored OAR moves from 0.105.0 to 0.109.0 (`packages/client/vendor/oar/4eb5919/`, fork branch `byok/0.109.0`). No public type, export or configuration field changes. The upgrade manifest declares the three behavior-only breaking changes below as `model-confirmation-non-retryable`, `agy-model-confirmation-deadline` and `claude-queued-write-failure`.

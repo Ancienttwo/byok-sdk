@@ -134,6 +134,7 @@ task receipt、task 行、`agent_message_admission` 行和 `agent_egress_event` 
 其他删除路径都很窄：
 
 - `revokeDevice` 删除设备行和 presence、nonce、inbound dedup、assertion replay 状态。它有意不删 task、`agent_egress_event`、outbox 和 `device_stream`（`packages/cloud-dataplane/src/stores/devices.ts:71-99`）。
+  Amended by #2264：revoke 和 machine supersession 不再删除 assertion replay 记录，记录保留到 assertion 过期，之后由 maintenance 删除。
 - `discardDeadLetter` 由运维调用，一次删除一条 `expired` outbox 行。它只从包根导出，`runtime.ts` 不导出它。
 - `eraseAgentMemoryProjection` 擦除一个 Agent 的记忆投影（`packages/cloud/src/cloud.ts:1782`）。
 - 重新签发配对码时，旧的配对完成 receipt 被删除（`packages/cloud-dataplane/src/stores/pairing-codes.ts:145-152`）。
