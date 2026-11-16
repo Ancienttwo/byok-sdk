@@ -272,7 +272,6 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     ['was cancelled', 'task.cancelled', () => server.send(createEnvelope('task.cancel', { reason: 'stop' }, { taskId: 'ended', seq: server.nextSeq() })), {}],
     ['timed out', 'task.fail', () => {}, { limits: { maxDurationMs: 200 } }],
   ] as const)('restores MEMORY.md and notes/ of a task that %s', async (_label, type, end, options) => {
-    server.setAckCapabilities(['resident-memory-over-limit']);
     const { pi, home } = await start();
     offer('ended', options);
     await terminal('task.started', 'ended');

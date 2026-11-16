@@ -102,7 +102,6 @@ describe('task.offer self-check: a daemon declines an offer whose gates name a f
   it.each(CASES.map((gap) => [gap.name, gap] as const))('%s', async (_name, gap) => {
     const openOffer = vi.spyOn(SealedTasks.prototype, 'openOffer');
     server = await TestServer.start();
-    if (gap.sealedCode !== undefined) server.setAckCapabilities(['sealed-payload-v1']);
     const storeDir = await tmpDir('byok-offer-self-check-store-');
     const hostStorageRoot = await tmpDir('byok-offer-self-check-home-');
     const adapter = new StubRuntimeAdapter('pi');

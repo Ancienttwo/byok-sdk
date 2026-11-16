@@ -435,7 +435,6 @@ async function withPublicDaemon(
   extra: { localToolApproval?: 'allow' } = {},
 ): Promise<void> {
   const server = await TestServer.start();
-  server.setAckCapabilities(['custom-harness']);
   const storeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-tool-auth-public-'));
   const adapter = new GateCapturingAdapter({ ...AUTO_CAPABLE, approvalInteractive: true });
   const daemon = createDaemonWithAdapters({

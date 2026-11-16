@@ -43,7 +43,6 @@ function reliableEnvelopes(): Envelope[] {
 describe('fresh Agent egress session authority', () => {
   it('starts fresh without a resume argument, fsyncs the runtime session handoff, and accepts only exact reliable append/ack', async () => {
     server = await TestServer.start();
-    server.setAckCapabilities(['agent-egress-reliable-ack']);
     const storeDir = await tmpDir('byok-fresh-egress-store-');
     const hostStorageRoot = await tmpDir('byok-fresh-egress-home-');
     const adapter = new StubRuntimeAdapter('pi');

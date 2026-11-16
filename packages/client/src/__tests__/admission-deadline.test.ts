@@ -24,7 +24,6 @@ for (const phase of ['detect', 'prepare'] as const) {
   for (const action of ['deadline', 'cancel', 'shutdown'] as const) {
     it(`${phase}: ${action} withdraws admission, releases home, ignores late results`, async () => {
       const server = await TestServer.start(); cleanup.push(() => server.close());
-      server.setAckCapabilities(['custom-harness', 'mailbox-read-ahead']);
       const root = await mkdtemp(path.join(os.tmpdir(), 'byok-admission-'));
       cleanup.push(() => rm(root, { recursive: true, force: true }));
       const adapter = new StubRuntimeAdapter('acme-harness');

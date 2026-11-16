@@ -324,7 +324,6 @@ describe('authenticated enrollment tenant projection', () => {
   it('binds final egress and journal composition to the loaded enrollment record, not host config', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('daemon-code', 'tenant-daemon');
-    server.setAckCapabilities(['agent-egress-reliable-ack']);
     const storeDir = await tmpDir('byok-enrollment-store-');
     const hostStorageRoot = await tmpDir('byok-enrollment-agent-home-');
     const agentRef = { agentId: 'enrollment-agent', profileRevision: 'r1' };
