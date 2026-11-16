@@ -314,6 +314,12 @@ export async function handleSteer(this: TaskRunner, taskId: string, steerMessage
   try {
     await active.session.steer(text);
   } catch (err) {
+    // A cancel runs ahead of this steer (#2304). Its teardown closed the
+    // session under the steer, so the steer never reached the runtime.
+    if (this['tasks'].get(taskId) !== active || taskFinalizing(this, taskId)) {
+      await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
+      return;
+    }
     if (err instanceof SteerUnsupportedError) {
       console.error(
         `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${err.runtimeId}" has no steering channel (${err.message}) — acked without retry; this envelope should have been gated server-side`,

@@ -4573,7 +4573,14 @@ the offer `target` and one kind of the claim `executor`.
   after a claim (§3.1). A missing, different, or unexpected executor is rejected. Builtin usage
   metrics keep their existing schema; the SDK does not invent custom usage.
 
-Independent inbound handlers retain per-task control order. Acknowledgement only
+Independent inbound handlers retain per-task control order, with one
+exception: `task.cancel` does not wait for an earlier control of its task to
+finish, and later controls of that task wait for the cancel (#2304). An
+earlier control can be waiting on the runtime, as a `task.steer` waits for the
+runtime to take its input, and a runtime that never answers would otherwise
+leave the cancel queued behind it. The cancel closes the session; a steer the
+runtime has not taken by then is reported as `task.steer_refused` with
+`task_not_active`, and one it answers later sends nothing. Acknowledgement only
 advances after all received sequences in the prefix have succeeded and the cursor
 is durable. Successfully handled tails survive gaps and cursor-write retries in
 memory; delivery alone is never acknowledgement.

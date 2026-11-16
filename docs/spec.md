@@ -3796,8 +3796,9 @@ Unknown or invalid executable messages cannot silently advance the mailbox curso
 
 Independent offers may progress concurrently. Admission reserves the canonical
 Agent home synchronously before asynchronous preparation and converts that
-reservation into the existing execution lease. Controls remain ordered per task;
-startup does not block another Agent or that task's cancel. `startupTimeoutMs`
+reservation into the existing execution lease. Controls remain ordered per task,
+except that a cancel does not wait behind an earlier control of its task
+(#2304); startup does not block another Agent or that task's cancel. `startupTimeoutMs`
 (default 30 seconds) starts before admission and bounds pure adapter detect/prepare
 waits as well as runtime start. AbortSignal is supplied to these pure adapter
 operations; late returns cannot claim/start or retain the home reservation. A deadline is not a disposal

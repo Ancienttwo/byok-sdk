@@ -429,6 +429,36 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     expect(adapter.sessions[0]?.steerCalls ?? []).toEqual([]);
   });
 
+  // #2304: a cancel does not queue behind a steer the runtime has not answered.
+  it.each(['rejects', 'resolves'] as const)('a cancel runs ahead of an unanswered steer, which then %s without a second terminal', async (outcome) => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true });
+    await setupDaemon(adapter);
+    const taskId = `task-steer-held-${outcome}`;
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+      { taskId, seq: server.nextSeq() }));
+    await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
+    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    const session = adapter.sessions[0]!;
+    const release = session.blockSteer();
+    const steer = createEnvelope('task.steer', { text: 'focus on tests' }, { taskId, seq: server.nextSeq() });
+    server.send(steer);
+    await vi.waitFor(() => expect(session.steerAttempts).toBe(1));
+    server.send(createEnvelope('task.cancel', { reason: 'user stopped it' }, { taskId, seq: server.nextSeq() }));
+    await server.waitFor((e) => e.type === 'task.cancelled' && e.task_id === taskId);
+    expect(session.interruptCalled).toBe(true);
+    expect(session.closeCalled).toBe(true);
+    const settled = server.received.length;
+    // A runtime rejects a pending steer once its session closed; one that answers late delivered nothing the task can use.
+    release(outcome === 'rejects' ? new Error('session closed') : undefined);
+    if (outcome === 'rejects') {
+      const refused = await server.waitFor((e) => e.type === 'task.steer_refused' && e.task_id === taskId);
+      expect(refused.payload).toEqual({ steerMessageId: steer.id, reason: 'task_not_active' });
+    } else await vi.waitFor(() => expect(session.steerCalls).toEqual(['focus on tests']));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(server.received.slice(settled).filter((e) => e.task_id === taskId).map((e) => e.type))
+      .toEqual(outcome === 'rejects' ? ['task.steer_refused'] : []);
+  });
+
   describe('task.claim reports the actually-selected runtime (M5, requested vs. claimed)', () => {
     it('an explicit-runtime offer: task.claim carries that same runtime as the actual pick', async () => {
       const adapter = new StubRuntimeAdapter('pi');
