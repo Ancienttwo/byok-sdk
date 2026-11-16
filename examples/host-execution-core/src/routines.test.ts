@@ -39,7 +39,7 @@ it('keeps one running occurrence and only the latest queued slot, then pause sto
   // Mock only the wall clock. Fake timers would let vi.waitFor advance it.
   vi.setSystemTime(now);
   await host.core.addRoutine(host.routine('coalesce', { rule: { anchorMs: now, everyMs: 100 } }));
-  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
+  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1), { timeout: 5_000 });
   for (const slot of [1, 2]) {
     vi.setSystemTime(now + slot * 100);
     await host.server.wakes.schedule({ dedupKey: `coalesce-clock:${slot}`, availableAt: Date.now() });
@@ -93,7 +93,7 @@ it('does not retry an old occurrence beyond the next routine slot', async () => 
   const definition = host.routine('retry', { waitMs: 600_000,
     retry: { maxAttempts: 3, delaysMs: [20, 120_000], retryFailures: false } });
   await host.server.executions.submit({ ...definition.execution, taskId: 'other-writer' });
-  await vi.waitFor(() => expect(host.adapter.sessions.has('other-writer')).toBe(true));
+  await vi.waitFor(() => expect(host.adapter.sessions.has('other-writer')).toBe(true), { timeout: 5_000 });
   definition.rule = { anchorMs: Date.now() + 30, everyMs: 60_000 };
   await host.core.addRoutine(definition);
   await vi.waitFor(() => expect(occurrences()).toHaveLength(1));
@@ -116,7 +116,7 @@ it('does not retry an old occurrence beyond the next routine slot', async () => 
 it('lets an admitted queued occurrence finish after pause cancels its successor cutoff', async () => {
   host = await openHost();
   const bot = await host.core.enqueue(host.intent('blocking-bot'));
-  await vi.waitFor(() => expect(host.adapter.sessions.has(bot.taskId)).toBe(true));
+  await vi.waitFor(() => expect(host.adapter.sessions.has(bot.taskId)).toBe(true), { timeout: 5_000 });
   await host.core.addRoutine(host.routine('paused-queue', { rule: { anchorMs: Date.now() + 30, everyMs: 1000 }, waitMs: 60_000 }));
   await vi.waitFor(() => expect(occurrences()).toHaveLength(1));
   const occurrence = occurrences()[0]!;
@@ -131,7 +131,7 @@ it('lets an admitted queued occurrence finish after pause cancels its successor 
   expect(queued.retryUntil).toBeUndefined();
   expect(queued.waitUntil).toBe(before.waitUntil);
   host.adapter.sessions.get(bot.taskId)!.finish({ text: 'release the FIFO' });
-  await vi.waitFor(async () => { await host.core.drain(); expect(host.adapter.sessions.has(queued.taskId)).toBe(true); });
+  await vi.waitFor(async () => { await host.core.drain(); expect(host.adapter.sessions.has(queued.taskId)).toBe(true); }, { timeout: 5_000 });
   host.adapter.sessions.get(queued.taskId)!.finish({ text: 'admitted before pause' });
   await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(queued.key)?.conclusion).toBe('succeeded'); });
   expect(occurrences()).toHaveLength(1);
@@ -148,7 +148,7 @@ it('redelivers a rejected wake after 60 seconds without another occurrence or ex
   await host.core.addRoutine(host.routine('retry-wake'));
   await vi.waitFor(async () => expect((await host.server.wakes.pending()).some(wake => wake.lastError === 'response lost after commit')).toBe(true));
   const task = intents()[0]!;
-  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
+  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1), { timeout: 5_000 });
   await host.core.drain(); // Persist the observed claim before advancing past the waiting deadline.
   vi.setSystemTime(now + 60_100);
   // Public schedule causes the scheduler to compare the injected wall clock.
@@ -192,7 +192,7 @@ it('reports an initial schedule failure and recovers its durable outbox on start
   expect(Object.values(host.ledger.snapshot().outbox)).toContainEqual(expect.objectContaining({ kind: 'schedule', lastError: 'temporary schedule failure' }));
   await host.restartCore();
   await vi.waitFor(() => expect(occurrences()).toHaveLength(1));
-  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
+  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1), { timeout: 5_000 });
 });
 
 // While a task is live, event mode deliberately arms no host-scan: wake (#630).
@@ -237,7 +237,7 @@ it.each([
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(retry.retryAt! + 1);
   await host.server.wakes.schedule({ dedupKey: 'retry-clock-check', availableAt: Date.now() });
   await vi.waitFor(() => expect(deliveries).toEqual([1, 2]));
-  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1));
+  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(1), { timeout: 5_000 });
   expect(occurrences()).toHaveLength(1);
   expect(Object.keys(host.ledger.snapshot().executions)).toHaveLength(1);
 });

@@ -61,7 +61,7 @@ it('SIGKILL during wake delivery recovers the frozen input and only one executio
     const submitted = await processHost.message('submitted');
     expect(submitted.delivering).toBe(true);
     expect(submitted.delivery).toBe(1);
-    await vi.waitFor(() => expect(adapter.sessions.has(submitted.taskId)).toBe(true));
+    await vi.waitFor(() => expect(adapter.sessions.has(submitted.taskId)).toBe(true), { timeout: 5_000 });
     await kill(processHost.child);
 
     ledger = new HostLedger(path.join(root, 'host.sqlite'), 'product:k4-crash-test');

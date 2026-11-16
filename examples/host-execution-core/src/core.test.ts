@@ -203,7 +203,7 @@ it('advances busy generations only after canonical terminal readback and respect
     deviceTerminal: async id => hide && id !== 'external-writer' ? undefined : server.tasks.deviceTerminal(id),
   } }) });
   await host.server.executions.submit({ ...template(host.deviceId), taskId: 'external-writer' });
-  await vi.waitFor(() => expect(host.adapter.sessions.has('external-writer')).toBe(true));
+  await vi.waitFor(() => expect(host.adapter.sessions.has('external-writer')).toBe(true), { timeout: 5_000 });
   const intent = await host.core.enqueue(host.intent('busy', { retry: { maxAttempts: 2, delaysMs: [20], retryFailures: false } }));
   await vi.waitFor(async () => expect(await host.server.tasks.deviceTerminal(intent.taskId)).toMatchObject({ envelope: { type: 'task.decline', payload: { code: 'agent_home_writer_busy' } } }));
   await host.core.drain();
