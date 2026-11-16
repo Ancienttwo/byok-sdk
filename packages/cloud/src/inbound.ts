@@ -145,6 +145,7 @@ export const INBOUND_REFUSAL_REASONS = [
   // task ownership
   'task_not_found_for_device',
   'task_owned_by_other_device',
+  'task_not_claimed',
   'agent_identity_mismatch',
   'terminal_executor_mismatch',
   // task.claim
@@ -481,6 +482,12 @@ function inboundAgentRef(envelope: Envelope): AgentRef | undefined {
   }
 }
 
+/** The reports an offered device may send before its claim (#2289). */
+function isUnclaimedTaskReport(envelope: Envelope): boolean {
+  return envelope.type === 'task.claim' || envelope.type === 'task.decline' || envelope.type === 'task.cancelled'
+    || (envelope.type === 'task.fail' && envelope.payload.recovery !== undefined);
+}
+
 function agentRefEchoRequired(envelope: Envelope): boolean {
   return envelope.type === 'task.claim' || TERMINAL_TYPES.includes(envelope.type);
 }
@@ -721,6 +728,11 @@ async function applyInboundGate(
     TERMINAL_TASK_STATUSES.includes(attempt.status) && attempt.cancellation === undefined
     && await stores.receipts.get(terminalReceiptKey(taskId)) === undefined
   ) return refuse('task_settled_by_cloud');
+  // #2289: execution starts at the claim. Before one, the offered device may
+  // only claim, decline, acknowledge a cancel, or report an interruption; any
+  // other report would skip the claim's checks and leave an ownerless task
+  // Running, awaiting approval or terminal.
+  if (attempt.ownerDeviceId === undefined && !isUnclaimedTaskReport(envelope)) return refuse('task_not_claimed');
   if (envelope.type === 'task.claim' && envelope.payload.deviceId !== deviceId) return refuse('claim_device_mismatch');
   if (envelope.type === 'task.claim') {
     const executor = envelope.payload.executor;

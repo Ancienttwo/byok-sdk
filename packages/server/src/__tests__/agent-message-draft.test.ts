@@ -155,7 +155,8 @@ describe('tasks.messageDraft through real HTTP inbound', () => {
     expect((await iterator.next()).done).toBe(true);
   });
   it('emits only discarded for an unsupported runtime with no published message', async () => {
-    await send(createEnvelope('task.fail', { agentRef, reason: 'failed' }, { taskId }));
+    // An unsupported runtime is declined before a claim (#2289).
+    await send(createEnvelope('task.decline', { agentRef, reason: 'unsupported runtime' }, { taskId }));
     const iterator = stream();
     expect((await iterator.next()).value).toEqual({ kind: 'discarded' });
     expect((await iterator.next()).done).toBe(true);

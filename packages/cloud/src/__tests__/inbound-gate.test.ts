@@ -210,6 +210,7 @@ describe('the inbound gate', () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
       payload: offerPayload(),
     });
+    expect(await handleInboundEnvelope(stores, deviceId, claim(taskId, deviceId)).then((result) => result.outcome)).toBe('accepted');
     const requested = createEnvelope(
       'task.await_approval',
       { summary: 'Allow write', approvalId: 'approval-1' },
@@ -272,6 +273,8 @@ describe('the inbound gate', () => {
     });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-first-device', deviceId, agentRef: AGENT_REF });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId, agentRef: AGENT_REF });
+    await harness.stores.tasks.claim(TENANT_A, { taskId: 'task-first-device', deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
+    await harness.stores.tasks.claim(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
     const envelopeId = '10000000-0000-4000-8000-000000000123';
     const first = createEnvelope('task.progress', { seq: 1, events: [] }, {
       id: envelopeId,
@@ -294,6 +297,7 @@ describe('the inbound gate', () => {
     });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-shared', deviceId, agentRef: AGENT_REF });
     await harness.stores.tasks.reserveAgentOffer(TENANT_B, { taskId: 'task-shared', deviceId, agentRef: AGENT_REF });
+    for (const tenant of [TENANT_A, TENANT_B]) await harness.stores.tasks.claim(tenant, { taskId: 'task-shared', deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
     const envelope = progress('task-shared');
 
     expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('accepted');

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "a624d3fc0d71c63edb3260b05dc6fc1d5eafd414d49a169b0568aa6265b640c0"
+    "snapshotSha256": "5e336f392e5b623867554849b3030ed3c7c7c98650ef12155fcac3409d7d0998"
   },
   "configFields": {
     "status": "tracked",
@@ -496,7 +496,7 @@
     {
       "id": "wire-v7-cloud-executor",
       "impact": "breaking",
-      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime and TerminalResult.executor replaces harnessId. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch and steer_refusal_unknown_steer. Rename the reason strings an observer matches.",
+      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime and TerminalResult.executor replaces harnessId. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch, steer_refusal_unknown_steer and task_not_claimed. Rename the reason strings an observer matches.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
@@ -525,6 +525,15 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "behavior:wire-v7-cloud-terminal-executor"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-unclaimed-task-reports",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages accept only task.claim, task.decline, task.cancelled and a task.fail with recovery for a task that has no claim, and only from the offered device. Every other task report before a claim (task.started, task.progress, task.artifact, task.await_approval, task.approval_resolved, task.steer_refused, task.complete, task.fail without recovery) is rejected with task_not_claimed (wire not_permitted) and changes nothing. A device that claims before it reports sees no change.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-unclaimed-task-reports"
       ]
     },
     {
