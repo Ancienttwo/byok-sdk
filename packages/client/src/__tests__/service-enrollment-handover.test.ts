@@ -4,7 +4,7 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 import { existsSync, promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, TestRunner, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import { controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { DAEMON_OWNER_FILENAME } from '../util/daemon-owner';
@@ -14,6 +14,7 @@ import { runUnpairCommand } from '../bin/commands/unpair';
 import type { RuntimeDetectResult } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
+import { nextEvent, until } from './fixtures/until';
 
 /**
  * A service daemon waiting for enrollment holds the store lease, pairs, and
@@ -94,14 +95,13 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     expect(daemon.status().lifecycle).toEqual({ phase: 'awaiting-enrollment' });
     return daemon;
   }
+  /** The control `shutdown` RPC's own completion: its teardown has released the lease and removed the endpoint. */
+  const shutdownComplete = (current: Daemon) => nextEvent(current, (event) => event.kind === 'shutdown-complete', 'shutdown-complete');
   /** Runs queued lifecycle work to the end, then proves nothing took the lease again. */
   async function expectStoppedForGood(current: Daemon): Promise<void> {
     // Observe the requested shutdown without a second stop, which could hide a queued restart.
     await new Promise((resolve) => setImmediate(resolve));
-    await vi.waitFor(async () => {
-      expect(leaseHeld()).toBe(false);
-      expect(await gone()).toBe(true);
-    }, { timeout: 5_000 });
+    await until(async () => !leaseHeld() && await gone(), () => `leaseHeld=${leaseHeld()}`);
     expect(leaseHeld()).toBe(false);
     expect(await gone()).toBe(true);
     expect(current.status().lifecycle.phase).not.toBe('running');
@@ -110,7 +110,8 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
    * Polls the real liveness predicate until `until` settles; resolves to how
    * often it read "gone" while the enrolling daemon's own owner record
    * (`nonce`) was in place before and after the read. A later contender's own
-   * lease (a fresh unpair) is not this daemon's.
+   * lease (a fresh unpair) is not this daemon's. It has no deadline of its
+   * own: `until` and the test timeout bound it.
    */
   function watchGoneWhileHeld(nonce: string, until: Promise<unknown>): Promise<number> {
     let done = false;
@@ -121,7 +122,7 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
       failed = true;
       failure = error;
     });
-    const deadline = Date.now() + 5_000;
+    const signal = TestRunner.getCurrentTest()!.context.signal;
     let lastErrorCode: string | undefined;
     const pending = Symbol('owner read pending');
     const observeNonce = async () => {
@@ -138,7 +139,7 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
       let violations = 0;
       let observationPending = false;
       while (!done || observationPending) {
-        if (failed || Date.now() >= deadline) {
+        if (failed || signal.aborted) {
           throw new Error(`handover observation did not complete; last owner read error code: ${lastErrorCode ?? 'none'}`, { cause: failure });
         }
         const before = await observeNonce();
@@ -158,18 +159,17 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
   }
 
   it('promotes the same endpoint, token and authenticated connection; gone never reads true while the lease is held', async () => {
-    await enrolling();
+    const current = await enrolling();
     const client = await connect();
     const token = await fs.readFile(controlTokenPath(storeDir), 'utf8');
     await expect(client.request('approvals.list', {})).rejects.toMatchObject({ code: 'unknown_method' });
 
-    const running = vi.waitFor(async () => {
-      const status = await client.request<ControlStatusResult>('status');
-      expect(status.lifecycle).toEqual({ phase: 'running', connection: 'open' });
-    }, { timeout: 5_000, interval: 5 });
+    const running = nextEvent(current, (event) => event.kind === 'lifecycle'
+      && event.lifecycle.phase === 'running' && event.lifecycle.connection === 'open', 'lifecycle running/open');
     const violations = watchGoneWhileHeld((await ownerNonce())!, running);
     await client.request('enrollment.pair', { pairingCode: 'pairing-code' });
     expect(await violations).toBe(0);
+    expect((await client.request<ControlStatusResult>('status')).lifecycle).toEqual({ phase: 'running', connection: 'open' });
     expect(await client.request('approvals.list', {})).toEqual({ approvals: [] });
     expect(await fs.readFile(controlTokenPath(storeDir), 'utf8')).toBe(token);
     const newer = await connect();
@@ -209,7 +209,7 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     const release = server.blockNextPair();
     const client = await connect();
     const pairing = client.request<{ deviceId: string }>('enrollment.pair', { pairingCode: 'pairing-code' });
-    await vi.waitFor(() => expect(server.pairRequests).toHaveLength(1));
+    await until(() => server.pairRequests.length === 1, () => `pairRequests=${server.pairRequests.length}`);
     const control = await connect();
     expect(await control.request('shutdown', { reason: 'unpair' })).toEqual({ acknowledged: true });
     control.close();
@@ -233,9 +233,11 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     const client = await connect();
     await client.request('enrollment.pair', { pairingCode: 'pairing-code' });
     expect(deferred).toHaveLength(1);
+    const complete = shutdownComplete(current);
     expect(await client.request('shutdown', { reason: 'unpair' })).toEqual({ acknowledged: true });
     client.close();
-    await vi.waitFor(async () => expect(await gone()).toBe(true), { timeout: 5_000 });
+    await complete;
+    expect(await gone()).toBe(true);
     expect(leaseHeld()).toBe(false);
     const resume = vi.spyOn(AuthManager.prototype, 'resume');
     deferred[0]!();
@@ -251,12 +253,14 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     await client.request('enrollment.pair', { pairingCode: 'pairing-code' });
     await adapter.reached;
     expect(await client.request('approvals.list', {})).toEqual({ approvals: [] });
+    const complete = shutdownComplete(current);
     expect(await client.request('shutdown', { reason: 'unpair' })).toEqual({ acknowledged: true });
     client.close();
     expect(leaseHeld()).toBe(true);
     expect(await gone()).toBe(false);
     adapter.open();
-    await vi.waitFor(async () => expect(await gone()).toBe(true), { timeout: 5_000 });
+    await complete;
+    expect(await gone()).toBe(true);
     expect(leaseHeld()).toBe(false);
     await expectStoppedForGood(current);
   }, 15_000);
@@ -295,7 +299,10 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const client = await connect();
-    const settled = vi.waitFor(async () => expect(await gone()).toBe(true), { timeout: 5_000, interval: 5 });
+    // The failed start's teardown reports `stopped` before it releases the
+    // lease and removes the endpoint, so gone is awaited after that signal.
+    const stopped = nextEvent(current, (event) => event.kind === 'lifecycle' && event.lifecycle.phase === 'stopped', 'lifecycle stopped');
+    const settled = stopped.then(() => until(gone, () => `leaseHeld=${leaseHeld()}`));
     const violations = watchGoneWhileHeld((await ownerNonce())!, settled);
     await client.request('enrollment.pair', { pairingCode: 'pairing-code' });
     client.close();

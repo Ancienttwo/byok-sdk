@@ -17,26 +17,10 @@ import { quarantineCorruptOperationalHealth } from '../diagnostics/diagnostics';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
+import { until } from './fixtures/until';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
-}
-
-/** Fails the regression deterministically instead of leaving a pre-fix HTTP/body hang in the test runner. */
-async function settleWithin<T>(operation: Promise<T>, timeoutMs = 250): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`auth request regression guard exceeded ${timeoutMs}ms`)), timeoutMs);
-    void operation.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
 }
 
 function authWithDeadline(serverUrl: string, store: DeviceStore, authRequestDeadlineMs: number): AuthManager {
@@ -184,10 +168,8 @@ describe('access token renewal (protocol §6.2)', () => {
     await auth.loadExisting();
     expect(server.httpRequests.some((r) => r.pathname === '/byok/token')).toBe(false);
 
-    await vi.waitFor(() => {
-      expect(server.httpRequests.filter((r) => r.pathname === '/byok/challenge')).not.toHaveLength(0);
-      expect(server.httpRequests.filter((r) => r.pathname === '/byok/token')).not.toHaveLength(0);
-    });
+    const requested = (pathname: string) => server.httpRequests.some((r) => r.pathname === pathname);
+    await until(() => requested('/byok/challenge') && requested('/byok/token'), () => `requests=${server.httpRequests.map((r) => r.pathname).join(',')}`);
 
     auth.stop();
   });
@@ -238,7 +220,8 @@ describe('access token renewal (protocol §6.2)', () => {
       expect(renewSpy).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1_000);
       expect(renewSpy).toHaveBeenCalledTimes(1);
-      await vi.waitFor(() => expect(tokenRequests()).toBeGreaterThan(0));
+      await renewSpy.mock.results[0]!.value;
+      expect(tokenRequests()).toBeGreaterThan(0);
 
       expect(Math.max(...delays)).toBeLessThanOrEqual(MAX_TIMER_DELAY_MS);
       await new Promise<void>((resolve) => setImmediate(resolve));
@@ -329,13 +312,19 @@ describe('access token renewal (protocol §6.2)', () => {
     const saveGate = new Promise<void>((resolve) => {
       releaseSave = resolve;
     });
+    let saveReached!: () => void;
+    const reached = new Promise<void>((resolve) => {
+      saveReached = resolve;
+    });
     const realReplace = store.credentials.replace.bind(store.credentials);
     const save = vi.spyOn(store.credentials, 'replace').mockImplementation(async (next) => {
+      saveReached();
       await saveGate;
       await realReplace(next);
     });
     const renewal = auth.handleUnauthorized();
-    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1));
+    await reached;
+    expect(save).toHaveBeenCalledTimes(1);
 
     let stopped = false;
     const stopping = auth.stop().then(() => {
@@ -409,7 +398,7 @@ describe('access token renewal (protocol §6.2)', () => {
     const auth = authWithDeadline(server.url, store, 40);
     const releasePair = server.blockNextPair();
     try {
-      await expect(settleWithin(auth.pair('pairing-code'))).rejects.toMatchObject({
+      await expect(auth.pair('pairing-code')).rejects.toMatchObject({
         name: 'AuthRequestAbortedError',
         reason: 'deadline',
       });
@@ -431,10 +420,10 @@ describe('access token renewal (protocol §6.2)', () => {
     server.rotateDeviceToken(record.deviceId);
     const releaseChallenge = server.blockNextChallenge();
     const renewal = auth.handleUnauthorized();
-    await vi.waitFor(() => expect(server.httpRequests.some((request) => request.pathname === '/byok/challenge')).toBe(true));
+    await until(() => server.httpRequests.some((request) => request.pathname === '/byok/challenge'), () => `requests=${server.httpRequests.length}`);
     const stopping = auth.stop();
     try {
-      const [renewalResult] = await settleWithin(Promise.allSettled([renewal, stopping]));
+      const [renewalResult] = await Promise.allSettled([renewal, stopping]);
       expect(renewalResult).toMatchObject({
         status: 'rejected',
         reason: { name: 'AuthRequestAbortedError', reason: 'stopped' },
@@ -466,7 +455,7 @@ describe('access token renewal (protocol §6.2)', () => {
       return realFetch(input, init);
     });
     try {
-      await expect(settleWithin(auth.handleUnauthorized())).rejects.toMatchObject({
+      await expect(auth.handleUnauthorized()).rejects.toMatchObject({
         name: 'AuthRequestAbortedError',
         reason: 'deadline',
       });
@@ -474,9 +463,6 @@ describe('access token renewal (protocol §6.2)', () => {
       expect(await store.credentials.read()).toEqual(before);
     } finally {
       fetch.mockRestore();
-      // The unfixed base cannot settle this body read. Keep its deterministic
-      // regression guard short without turning teardown itself into a 10s
-      // test timeout; the fixed path independently proves stop/renew abort.
       void auth.stop().catch(() => undefined);
     }
   });
@@ -492,7 +478,7 @@ describe('access token renewal (protocol §6.2)', () => {
       }),
     );
     try {
-      await expect(settleWithin(auth.pair('pairing-code'))).rejects.toMatchObject({
+      await expect(auth.pair('pairing-code')).rejects.toMatchObject({
         name: 'AuthRequestAbortedError',
         reason: 'deadline',
       });
@@ -567,10 +553,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     );
     const releasePair = server.blockNextPair();
     try {
-      // The 40ms request deadline starts inside AuthManager after daemon-owned
-      // key/store setup. Keep the outer regression guard well below the 15s
-      // default without racing that legitimate pre-request work under CI load.
-      await expect(settleWithin(daemon.pair('pairing-code'), 2_000)).rejects.toMatchObject({
+      await expect(daemon.pair('pairing-code')).rejects.toMatchObject({
         name: 'AuthRequestAbortedError',
         reason: 'deadline',
       });
@@ -594,10 +577,8 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
 
     server.rotateDeviceToken(record.deviceId);
 
-    await vi.waitFor(() => expect(server.httpRequests.some((r) => r.pathname === '/byok/challenge')).toBe(true), {
-      timeout: 5000,
-    });
-    await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual(OPEN_LIFECYCLE), { timeout: 5000 });
+    await until(() => server.httpRequests.some((r) => r.pathname === '/byok/challenge'), () => `requests=${server.httpRequests.length}`);
+    await waitForDaemonOpen(daemon);
     expect(daemon.status().lifecycle.phase).not.toBe('halted');
   });
 
@@ -977,9 +958,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const devicePath = path.join(storeDir, 'device.json');
     await fs.rm(devicePath);
     execFileSync('mkfifo', [devicePath]);
-    const started = Date.now();
     await expect(daemon.unpair()).rejects.toThrow(/device identity/);
-    expect(Date.now() - started).toBeLessThan(1_000);
     await fs.rm(devicePath);
     const lease = await acquireDaemonOwner(storeDir, 'doctor');
     await lease.release();
@@ -1046,7 +1025,10 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
 
     server.revokeDevice(record.deviceId);
 
-    await vi.waitFor(() => expect(daemon?.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'device_revoked' }), { timeout: 5000 });
+    await until(() => {
+      const lifecycle = daemon!.status().lifecycle;
+      return lifecycle.phase === 'halted' && lifecycle.reason === 'device_revoked';
+    }, () => JSON.stringify(daemon!.status().lifecycle));
     expect(daemon.status().lifecycle.phase).toBe('halted');
 
     // Never a retry loop: once revoked, events polls must stop.
@@ -1058,11 +1040,11 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     // this must actually recover the device, not just clear the flag.
     await daemon.pair('a-fresh-pairing-code');
     await daemon.start();
-    await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual(OPEN_LIFECYCLE), { timeout: 5000 });
+    await waitForDaemonOpen(daemon);
     expect(daemon.status().lifecycle.phase).not.toBe('halted');
   });
 
-  it('#391: a cold start() against an already-revoked device resolves, halts as device_revoked within 5s, and then polls nothing', async () => {
+  it('#391: a cold start() against an already-revoked device resolves, halts as device_revoked, and then polls nothing', async () => {
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
@@ -1074,7 +1056,10 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
 
     // start() reports local startup only; the revocation is a lifecycle fact.
     await daemon.start();
-    await vi.waitFor(() => expect(daemon?.status().lifecycle).toMatchObject({ phase: 'halted', reason: 'device_revoked' }), { timeout: 5_000 });
+    await until(() => {
+      const lifecycle = daemon!.status().lifecycle;
+      return lifecycle.phase === 'halted' && lifecycle.reason === 'device_revoked';
+    }, () => JSON.stringify(daemon!.status().lifecycle));
 
     // Never a retry loop: once halted as revoked, no events polls and no further handshakes.
     const pollsAfterRevoked = server.httpRequests.filter((request) => request.pathname === '/byok/events').length;

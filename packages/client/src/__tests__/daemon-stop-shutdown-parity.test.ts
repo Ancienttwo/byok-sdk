@@ -25,6 +25,7 @@ import { stableAgentHomeOwnerId } from '../agent-home';
 import { defaultScratchRoot, privateDirectory } from '../daemon/retention/scratch';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { TestServer } from './fixtures/test-server';
+import { nextEvent, until } from './fixtures/until';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -39,33 +40,6 @@ async function fileGone(filePath: string): Promise<boolean> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/**
- * Runner-portable stand-in for `vi.waitFor`: retries `check` until it stops
- * throwing, then returns; rethrows the LAST failure once the deadline passes,
- * so a timeout still reports the real assertion error rather than a generic
- * "timed out". Same contract this file used before, minus the runner
- * dependency — `bun test`'s `vi` shim has no `waitFor`, and this file is a
- * `tests_pass` target the harness completion gate runs under bun.
- *
- * The default budget is deliberately well inside bun's own 5s per-test
- * default: every condition here (an adapter session appearing, the control
- * socket files disappearing) settles in milliseconds once the awaited event
- * that precedes it has already landed.
- */
-async function waitFor(check: () => unknown | Promise<unknown>, opts: { timeoutMs?: number; intervalMs?: number } = {}): Promise<void> {
-  const deadline = Date.now() + (opts.timeoutMs ?? 2_000);
-  const intervalMs = opts.intervalMs ?? 20;
-  for (;;) {
-    try {
-      await check();
-      return;
-    } catch (err) {
-      if (Date.now() >= deadline) throw err;
-      await sleep(intervalMs);
-    }
-  }
 }
 
 /**
@@ -145,7 +119,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await until(() => adapter.sessions.length === 1, () => `sessions=${adapter.sessions.length}`);
 
     await daemon.stop();
 
@@ -160,10 +134,8 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
 
     // Same control-socket teardown daemon.stop() has always performed —
     // still true now that it does more work first.
-    await waitFor(async () => {
-      expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
-      expect(await fileGone(controlSocketPath(built.storeDir))).toBe(true);
-    });
+    expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
+    expect(await fileGone(controlSocketPath(built.storeDir))).toBe(true);
 
     // No new task was ever claimed once shutdown began.
     expect(adapter.sessions).toHaveLength(1);
@@ -177,9 +149,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     await daemon.stop();
 
     expect(server.received.some((e) => e.type === 'task.fail')).toBe(false);
-    await waitFor(async () => {
-      expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
-    });
+    expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
   });
 
   it('retains daemon ownership when runtime disposal rejects, then a clean retry releases it without a second terminal', async () => {
@@ -224,19 +194,19 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-idem', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await until(() => adapter.sessions.length === 1, () => `sessions=${adapter.sessions.length}`);
 
     const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
     if (!conn.ok) throw new Error('expected reachable');
+    const complete = nextEvent(daemon, (event) => event.kind === 'shutdown-complete', 'shutdown-complete');
     await expect(conn.client.request('shutdown', { reason: 'operator' })).resolves.toEqual({ acknowledged: true });
     conn.client.close();
 
     const fail = await server.waitFor((e) => e.type === 'task.fail' && e.task_id === 't-idem');
     expect((fail.payload as { retryable: boolean }).retryable).toBe(true);
 
-    await waitFor(async () => {
-      expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
-    });
+    await complete;
+    expect(await fileGone(controlTokenPath(built.storeDir))).toBe(true);
 
     // The control-socket shutdown already tore this daemon down fully;
     // calling the public stop() again (exactly what bin/commands/start.ts's
@@ -258,7 +228,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER }, { taskId: 't-double', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await until(() => adapter.sessions.length === 1, () => `sessions=${adapter.sessions.length}`);
 
     await daemon.stop();
     await expect(daemon.stop()).resolves.toBeUndefined();
@@ -317,7 +287,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'late writer', ...FRESH_OFFER }, { taskId: 't-late', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    await until(() => adapter.sessions.length === 1, () => `sessions=${adapter.sessions.length}`);
     const releaseClose = adapter.sessions[0]!.blockClose();
 
     const first = daemon.stop();
@@ -341,10 +311,10 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
     expect(await isControlDaemonGone(storeDir, 'acme-stop-concurrent')).toBe(false);
 
     releaseClose();
-    await waitFor(() => expect(adapter.sessions[0]!.closeCalled).toBe(true));
+    await until(() => adapter.sessions[0]!.closeCalled, () => 'closeCalled=false');
     // Session.close is only the process receipt. The retained late writer also
     // owns asynchronous SDK scratch removal and journal finalization.
-    await waitFor(() => expect(daemon!.status().activeTaskCount).toBe(0));
+    await until(() => daemon!.status().activeTaskCount === 0, () => `activeTaskCount=${daemon!.status().activeTaskCount}`);
     await expect(daemon.stop()).resolves.toBeUndefined();
     const doctorLease = await acquireDaemonOwner(storeDir, 'doctor');
     await doctorLease.release();
@@ -372,7 +342,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
    * unreachable no matter how long that step takes, because the signal is
    * published only after the lease is gone.
    */
-  it('never publishes "control daemon gone" while the store-mutation lease is still held', async () => {
+  it('never publishes "control daemon gone" while the store-mutation lease is still held', async ({ signal }) => {
     const WINDOW_AMPLIFIER_MS = 250;
     const adapter = new StubRuntimeAdapter('pi');
     const built = await pairedAndStarted('acme-stop-lease-order', adapter);
@@ -401,7 +371,6 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
       await expect(conn.client.request('shutdown', { reason: 'operator' })).resolves.toEqual({ acknowledged: true });
       conn.client.close();
 
-      const deadline = Date.now() + 8_000;
       for (;;) {
         // Order matters: read the exit gate FIRST, then the lock. The lease is
         // only ever released during this sequence, never re-taken, so a lock
@@ -421,7 +390,7 @@ describe('daemon.stop() shutdown parity with the control-socket shutdown path (M
           }
           break;
         }
-        if (Date.now() >= deadline) throw new Error('the daemon never reached the control-exit gate');
+        if (signal.aborted) throw new Error('the daemon never reached the control-exit gate');
       }
     } finally {
       markCleanStopSpy.mockRestore();
@@ -601,7 +570,7 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     await daemon.pair('pairing-code');
     await daemon.start();
     offer('alias-first');
-    await waitFor(() => expect(first.sessions).toHaveLength(1));
+    await until(() => first.sessions.length === 1, () => `sessions=${first.sessions.length}`);
     first.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-first');
     await daemon.stop();
@@ -622,7 +591,7 @@ describe('daemon restart through a Windows name alias of the store (#1030)', () 
     await daemon.start();
     expect(await fileGone(residue)).toBe(true);
     offer('alias-second');
-    await waitFor(() => expect(second.sessions).toHaveLength(1));
+    await until(() => second.sessions.length === 1, () => `sessions=${second.sessions.length}`);
     second.sessions[0]!.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'alias-second');
 
