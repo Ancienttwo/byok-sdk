@@ -401,6 +401,7 @@ export {
   TaskApprovalResolvedPayloadSchema,
   RESULT_DOCUMENT_MAX_BYTES,
   checkResultDocument,
+  targetsPi,
   TerminalInferenceUsageSchema,
   TerminalPreparedObservationSchema,
   TerminalAgentHomeProjectionSchema,

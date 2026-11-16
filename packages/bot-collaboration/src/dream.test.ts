@@ -24,8 +24,7 @@ function offlineDream(nativeSessions?: boolean, harnessOnly = false): AgentExecu
   ledger.transaction(s => {
     const state = stateOf(s.application); seedCollaboration(state); state.turns.t1!.status = 'succeeded';
     if (harnessOnly) {
-      const { runtime: _runtime, ...payload } = state.team.bots.main!.execution.payload;
-      state.team.bots.main!.execution.payload = { ...payload, harnessId: 'test-harness' };
+      state.team.bots.main!.execution.payload = { ...state.team.bots.main!.execution.payload, target: { lane: 'harness', harnessId: 'test-harness' } };
     }
     reconcileDreamRoutines(s, policy, models, WINDOW_START);
     const routine = Object.values(s.routines)[0]!, key = 'dream-key';
@@ -42,7 +41,7 @@ it('freezes the default native session request with the dream window', () => {
 });
 it('promotes a valid harness-only Bot template without a native session request', () => {
   const { payload } = offlineDream(undefined, true);
-  expect(payload.harnessId).toBe('test-harness');
+  expect(payload.target).toEqual({ lane: 'harness', harnessId: 'test-harness' });
   expect(payload.nativeSessions).toBeUndefined();
   expect(HostOfferPlainPayloadSchema.safeParse(payload).success).toBe(true);
 });
@@ -131,7 +130,7 @@ it('offers a fresh writer with agentMemory none, keeps the Host out of its inten
   expect(execution).toEqual({ deviceId: fixture!.deviceId });
   expect(payload).toMatchObject({ agentMemory: 'none', session: { mode: 'fresh' }, agentRef: { agentId: 'main' }, terminalProjection: { mode: 'none' },
     limits: { maxDurationMs: DEFAULT_DREAM_MAX_DURATION_MS }, nativeSessions: { fromMs, toMs: clock, ifAdvertised: true } });
-  for (const field of ['agentMemoryCommit', 'homeAccess', 'messageEgress', 'requiredToolsets', 'preparation', 'harnessId']) expect(payload).not.toHaveProperty(field);
+  for (const field of ['agentMemoryCommit', 'homeAccess', 'messageEgress', 'requiredToolsets', 'preparation']) expect(payload).not.toHaveProperty(field);
   expect(bot!.ledger.snapshot().intents[intent.id]!.execution.payload.nativeSessions).toEqual(payload.nativeSessions);
   expect(payload.instruction).toContain('The release moved to Friday');
   await expect(bot!.cancelHostIntent(key)).rejects.toMatchObject({ code: 'unknown_intent' });
@@ -184,12 +183,15 @@ it('omits native sessions from the cloud offer when the device does not advertis
 
 it('takes the first listed template on the Bot device, falls back to the Bot template, and skips without one', async () => {
   fixture = await openHost({ externalCore: true, ledgerOptions: { compactVeto: botCompactVeto }, consume: (wake, signal) => bot!.consume(wake, signal) });
-  const own = template(fixture.deviceId), cheap = { ...own, payload: { ...own.payload, limits: { maxTokens: 7 } } };
+  const own = template(fixture.deviceId), cheap = { ...own, payload: { ...own.payload, target: { lane: 'runtime', runtimeId: 'claude' } as const } };
   await open({ models: { default: own, far: template('other-device'), cheap }, dreaming: { timeZone: ZONE, models: ['gone', 'far', 'cheap'] } });
   await completedTurn('one');
   const first = await due();
-  expect(bot!.core.intent(first)!.execution.payload).toMatchObject({ limits: { maxTokens: 7, maxDurationMs: DEFAULT_DREAM_MAX_DURATION_MS } });
-  // The stub device declines `maxTokens`, and a dream that did not succeed keeps its window.
+  const offered = bot!.core.intent(first)!.execution.payload;
+  expect(offered).toMatchObject({ target: { lane: 'runtime', runtimeId: 'claude' }, limits: { maxDurationMs: DEFAULT_DREAM_MAX_DURATION_MS } });
+  // Only a Pi target carries the native session request.
+  expect(offered).not.toHaveProperty('nativeSessions');
+  // The stub device has no Claude runtime and declines, and a dream that did not succeed keeps its window.
   await vi.waitFor(async () => { await bot!.drain(); expect(record()?.last).toMatchObject({ template: 'cheap', fallback: false, outcome: 'declined' }); }, { timeout: 5000 });
   await bot!.setModels({ default: own });
   const second = await due();

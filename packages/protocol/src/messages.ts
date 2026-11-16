@@ -541,7 +541,7 @@ export type OfferSelectionRule = (typeof OFFER_SELECTION_RULES)[number];
 export type OfferSelectionViolation = { readonly rule: OfferSelectionRule; readonly path: readonly string[]; readonly message: string };
 
 /** Whether an offer target names Pi explicitly: the built-in Pi runtime or a Pi model lane. */
-function targetsPi(target: { readonly lane: string; readonly runtimeId?: string } | undefined): boolean {
+export function targetsPi(target: { readonly lane: string; readonly runtimeId?: string } | undefined): boolean {
   return target !== undefined && target.lane !== 'auto' && target.lane !== 'harness' && target.runtimeId === 'pi';
 }
 

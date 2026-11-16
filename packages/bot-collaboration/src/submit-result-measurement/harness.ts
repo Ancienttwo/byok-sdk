@@ -14,7 +14,7 @@ import {
   createDaemonWithAdapters, type AgentEgressPolicy, type Daemon, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
   type MessageDraftDelta, type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput, type Session,
 } from '@byok-sdk/client';
-import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, type AgentEvent, type DispatchSelection, type OfferAdmissionTimings } from '@byok-sdk/protocol';
+import { BYOK_EVENTS_PATH, BYOK_MESSAGES_PATH, type AgentEvent, type ExecutionTarget, type OfferAdmissionTimings } from '@byok-sdk/protocol';
 import { createByokServer, type ByokServer } from '@byok-sdk/server';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { CORPUS, CORPUS_REVISION, corpusCase, corpusContract, preflightCorpus } from './corpus.js';
@@ -168,10 +168,9 @@ export interface RunCellOptions {
   readonly runId: string;
   readonly cellId: string;
   readonly mode: 'execute' | 'synthetic';
-  /** `grok` is not a wire runtime id: its offers name the `grok` harness instead. */
   readonly runtime: MeasuredRuntime;
-  /** Sent on every offer when the runtime accepts it (Claude, Codex, Pi with a BYOK launcher). */
-  readonly dispatchSelection?: DispatchSelection;
+  /** The `target` of every offer of this cell. */
+  readonly target: ExecutionTarget;
   readonly adapters: () => RuntimeAdapter[];
   readonly outDir: string;
   /** Scratch root for the Host, the daemon store and the Agent homes. */
@@ -212,10 +211,10 @@ export function plannedManifest(options: Omit<RunCellOptions, 'adapters' | 'outD
   const counted = plan.filter(trial => trial.counted).length;
   const calibration = plan.length - counted;
   return {
-    schema: 'byok.submit-result-measurement.manifest.v1', runId: options.runId, cellId: options.cellId,
+    schema: 'byok.submit-result-measurement.manifest.v2', runId: options.runId, cellId: options.cellId,
     mode: options.mode, synthetic: options.mode !== 'execute', authorization: options.authorization,
     // Generated facts come last: operator facts can never replace them.
-    cell: { ...options.cell, runtime: options.runtime, dispatchSelection: options.dispatchSelection ?? null, ...cellFacts(), sdkBuild: sdkBuild() },
+    cell: { ...options.cell, runtime: options.runtime, target: options.target, ...cellFacts(), sdkBuild: sdkBuild() },
     corpus: corpusManifest(),
     plan: { rounds: options.rounds, order: caseIds, plannedTrials: counted, calibrationTrials: calibration, runtimeTasks: calibration + Math.min(counted, options.maxTrials) },
     deadlineMs: options.deadlineMs, budget: { maxTrials: options.maxTrials, maxSpend: options.maxSpend ?? null },
@@ -229,7 +228,7 @@ export function plannedManifest(options: Omit<RunCellOptions, 'adapters' | 'outD
  * `model` comes from `--model`; the last two come from the live Host.
  */
 export const RESERVED_CELL_KEYS: readonly string[] = Object.freeze([
-  'model', 'runtime', 'dispatchSelection', 'platform', 'osRelease', 'arch', 'node', 'bun', 'transport', 'concurrency',
+  'model', 'runtime', 'target', 'platform', 'osRelease', 'arch', 'node', 'bun', 'transport', 'concurrency',
   'agentMemory', 'requiredToolsets', 'messageEgress', 'replyDelivery', 'eventSource', 'daemonLimits', 'egressPolicy',
   'sdkBuild', 'observedRuntimes', 'activityMaxBytes',
 ]);
@@ -360,8 +359,7 @@ async function runTrial(host: Host, options: RunCellOptions, planned: PlannedTri
     await host.server.executions.submit({
       taskId, deviceId: host.deviceId,
       payload: {
-        session: { mode: 'fresh' }, instruction: entry.instruction, ...(options.runtime === 'grok' ? { harnessId: 'grok' } : { runtime: options.runtime }), agentRef: { agentId, profileRevision: '1' }, agentMemory: 'none',
-        ...(options.dispatchSelection ? { dispatchSelection: options.dispatchSelection } : {}),
+        session: { mode: 'fresh' }, instruction: entry.instruction, target: options.target, agentRef: { agentId, profileRevision: '1' }, agentMemory: 'none',
         terminalProjection: { mode: 'result-document', contract: corpusContract(planned.caseId), schema: entry.schema as never },
         egressPolicy: EGRESS_POLICY,
       },
