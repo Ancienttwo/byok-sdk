@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "a624d3fc0d71c63edb3260b05dc6fc1d5eafd414d49a169b0568aa6265b640c0"
+    "snapshotSha256": "7ac3258f4095f2714c7b0cd7d803af773482ba72eba885e0575659745005780e"
   },
   "configFields": {
     "status": "tracked",
@@ -814,9 +814,59 @@
       "entry": "wire-v7-execution-target"
     },
     {
+      "item": "export:@byok-sdk/cloud#ApprovalObservationSchema",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ApprovalTimelineEventSchema",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedClient",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedClientOptions",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedItem",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedMode",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedPage",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedRead",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedRetryableError",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedStoppedError",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#ByokCloud",
       "change": "changed",
-      "entry": "wire-v7-cloud-steer-refusal-reads"
+      "entry": "cloud-host-facade-methods-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",
@@ -824,9 +874,29 @@
       "entry": "e2ee-member-store-in-cloud-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+      "change": "changed",
+      "entry": "cloud-error-agent-ref-missing-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_PORT_INTERFACES",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
       "change": "changed",
       "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilitiesResponse",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilitiesResponseSchema",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#CapabilityPorts",
@@ -852,6 +922,16 @@
       "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
@@ -894,6 +974,26 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/cloud#PendingApproval",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ProviderProvisioningNoticeInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
       "change": "changed",
       "entry": "wire-v7-execution-target"
@@ -907,6 +1007,16 @@
       "item": "export:@byok-sdk/cloud#SteerRejectedError",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TRUTH_INLINE_CONTENT_TYPE",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TRUTH_RECORD_CAPABILITY",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#TaskAttempt",
@@ -954,6 +1064,21 @@
       "entry": "in-memory-directory-device-state"
     },
     {
+      "item": "export:@byok-sdk/cloud#receiptRetentionClass",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#taskArchiveInput",
+      "change": "changed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
       "change": "removed",
       "entry": "wire-v7-dataplane-store-epoch"
@@ -962,6 +1087,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_STORE_EPOCH_UNSUPPORTED",
       "change": "added",
       "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
@@ -989,6 +1119,16 @@
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
@@ -997,6 +1137,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresStoreEpochUnsupportedError",
@@ -1009,14 +1154,94 @@
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskSteerRefusalStore",
       "change": "added",
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
       "change": "changed",
       "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicy",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicyInput",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresCloudMaintenance",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresMailboxWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskRedactionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTenantErasure",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
@@ -1064,6 +1289,11 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresStoreEpochUnsupportedError",
       "change": "added",
       "entry": "wire-v7-dataplane-store-epoch"
@@ -1077,6 +1307,26 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskSteerRefusalStore",
       "change": "added",
       "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicy",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicyInput",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createPostgresAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createPostgresTaskRedactionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/core#InMemoryMailboxStore",
