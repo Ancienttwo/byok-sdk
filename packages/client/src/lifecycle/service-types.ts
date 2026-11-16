@@ -80,7 +80,7 @@ export function nodeAgentProgram(opts: NodeAgentProgramOptions): ServiceProgram 
  *   after a non-zero exit. `stop` is the Host's own program that makes the
  *   running service exit (for the byok-agent daemon, a control `shutdown`);
  *   it must exit 0 once the service is stopping or already gone. It runs only
- *   while a launcher runs, so it is never run once the service has stopped,
+ *   while a launcher runs, so it is never run once the launcher has exited,
  *   for example on an uninstall retried after `current` was removed.
  */
 export type ServiceWindowsOptions =
