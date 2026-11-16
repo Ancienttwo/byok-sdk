@@ -919,7 +919,7 @@ export declare class PostgresDeviceAssertionReplayAuthority implements DeviceAss
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/devices.d.ts ====
-import type { HarnessInfo } from '@byok-sdk/protocol';
+import { type HarnessInfo } from '@byok-sdk/protocol';
 /**
  * Postgres {@link DeviceDirectory}.
  *
@@ -945,7 +945,7 @@ import type { HarnessInfo } from '@byok-sdk/protocol';
  * `BEGIN_OUTBOX_WRITE`, as every mailbox writer does.
  */
 import { type Clock, type PresenceStore, type TenantId, type TenantReadiness } from '@byok-sdk/core';
-import type { DeviceDirectory, DeviceRecord, DeviceRegistration } from '@byok-sdk/cloud';
+import type { DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceRegistrationResult } from '@byok-sdk/cloud';
 import type { PoolClient } from 'pg';
 import type { ByokPool } from '../pool.js';
 /**
@@ -953,14 +953,16 @@ import type { ByokPool } from '../pool.js';
  * registration and pairing enrollment. Its caller owns the transaction so the
  * guarded pairing-code update, machine supersession cleanup, and insert can
  * commit or roll back together, and opens it with `BEGIN_OUTBOX_WRITE`.
+ *
+ * `conflict` has written nothing; the caller rolls the transaction back.
  */
-export declare function registerDeviceOnClient(client: PoolClient, tenant: TenantId, input: DeviceRegistration, now: string): Promise<DeviceRecord>;
+export declare function registerDeviceOnClient(client: PoolClient, tenant: TenantId, input: DeviceRegistration, now: string): Promise<DeviceRegistrationResult>;
 /** Read one active device while a caller-owned transaction still holds its authority lock. */
 export declare function getDeviceOnClient(client: PoolClient, tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
 export declare class PostgresDeviceDirectory implements DeviceDirectory {
     #private;
     constructor(pool: ByokPool, clock: Clock);
-    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRecord>;
+    register(tenant: TenantId, input: DeviceRegistration): Promise<DeviceRegistrationResult>;
     get(tenant: TenantId, deviceId: string): Promise<DeviceRecord | undefined>;
     /**
      * Revocation removes the registration and the device-scoped state that only
@@ -1192,35 +1194,31 @@ import { type CollectExpiredInput, type CollectExpiredResult } from '@byok-sdk/c
  * Postgres {@link PairingCodeStore}: single-use codes bound to the tenant and
  * product they were minted for.
  *
- * Enrollment is one transaction. `UPDATE ... WHERE redeemed_at IS NULL AND
- * expires_at >= $now RETURNING ...` claims the code only inside the same client
- * transaction that applies machine supersession/state cleanup and inserts the
- * device. A read-then-write would let two callers observe an unused code; an
- * autocommitted redemption would strand a code when registration fails.
+ * Enrollment is one transaction. The code row is locked (`SELECT ... FOR
+ * UPDATE`) and marked redeemed only inside the same client transaction that
+ * applies the registration fence, machine supersession/state cleanup and the
+ * device insert. A read-then-write without the lock would let two callers
+ * observe an unused code; an autocommitted redemption would strand a code when
+ * registration fails.
  *
- * Unknown, expired, and already-used all answer `undefined`. The reference
- * server distinguishes them in its 401 text; a hosted multi-tenant surface
- * deliberately does not — the code is a bearer credential addressable across
- * every tenant, and "already used" versus "never existed" is precisely the
- * difference an attacker enumerating codes would pay for.
+ * Decision order (#2045): a replay of a consumed code answers before the
+ * fence is read; the fence runs before the code is marked redeemed, so a
+ * `conflict` rolls back and leaves the code redeemable.
+ *
+ * Unknown, expired, and already-used all answer `code_invalid`: the code is a
+ * bearer credential addressable across every tenant, and "already used"
+ * versus "never existed" is precisely the difference an attacker enumerating
+ * codes would pay for.
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { DeviceRecord, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore } from '@byok-sdk/cloud';
+import type { PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollmentInput, PairingEnrollmentResult } from '@byok-sdk/cloud';
 import type { ByokPool } from '../pool.js';
 export declare class PostgresPairingCodeStore implements PairingCodeStore {
     #private;
     constructor(pool: ByokPool, clock: Clock);
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     issue(tenant: TenantId, input: PairingCodeIssueInput): Promise<PairingCodeInfo>;
-    redeemAndRegister(input: {
-        readonly pairingCode: string;
-        readonly deviceId: string;
-        readonly deviceName: string;
-        readonly devicePublicKey: string;
-        readonly proofKeyId: string;
-        readonly proofKeyEpoch: number;
-        readonly machineId?: string;
-    }): Promise<DeviceRecord | undefined>;
+    redeemAndRegister(input: PairingEnrollmentInput): Promise<PairingEnrollmentResult>;
 }
 // ==== @byok-sdk/cloud-dataplane dist/stores/proof-receipts.d.ts ====
 import type { ProofReceiptCollectExpiredInput, ProofReceiptRetentionAuthority, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore } from '@byok-sdk/cloud';

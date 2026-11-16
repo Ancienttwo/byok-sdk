@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "115160d47b74622f9ec443b6118ca3091675fd5679dddf8cd0d6ea6e62f57af8"
+    "snapshotSha256": "27ac4b26895cf5630fde0b104337612df5a3a35f44e40fd27110d171cb08ff2c"
   },
   "configFields": {
     "status": "tracked",
@@ -857,6 +857,11 @@
       "entry": "in-memory-directory-device-state"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": null
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresInboundDedupStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
@@ -867,9 +872,19 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
+      "change": "changed",
+      "entry": null
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": null
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore",
@@ -880,6 +895,11 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore",
+      "change": "changed",
+      "entry": null
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
