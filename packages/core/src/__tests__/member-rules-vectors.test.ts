@@ -28,7 +28,8 @@ import { describe, expect, it } from 'vitest';
 import type { JsonObject } from '../attestation';
 import { createMemberKeyBundle, memberKemSigningInput } from '../sealed-payload/member-bundle';
 import { deriveMemberId, memberChainEntryHash, signMemberChainEntry } from '../sealed-payload/member-chain';
-import { memberApprovalCode, memberFingerprint } from '../sealed-payload/member-fingerprint';
+import { memberApprovalCode } from '../sealed-payload/member-fingerprint';
+import { memberFingerprint } from './support/member-fingerprint';
 import { computeClientPairingMac, computeDevicePairingMac } from '../sealed-payload/pairing-verification';
 import {
   buildScopeSignerVectors,

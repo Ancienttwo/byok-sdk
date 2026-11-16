@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  createEnvelope, decodeEnvelope, PROTOCOL_VERSION, RUNTIME_UNAVAILABLE_CAUSES, readDeclineCode, readRuntimeUnavailableCause,
+  createEnvelope,
+  decodeEnvelope,
+  PROTOCOL_VERSION,
+  RUNTIME_UNAVAILABLE_CAUSES,
+  readDeclineCode,
 } from '../index';
 import { TASK_FAIL_REASON_MAX_BYTES } from '../constants';
 
@@ -64,7 +68,6 @@ describe('typed runtime-unavailable cause (#1103 B2a)', () => {
     expect(decodeEnvelope(wire(payload)).payload).toEqual(payload);
     // Wire v7 types the code a v6 device already sent.
     expect(readDeclineCode('runtime_unavailable')).toEqual({ code: 'runtime_unavailable' });
-    expect(readRuntimeUnavailableCause('not_installed')).toEqual({ cause: 'not_installed' });
   });
 
   it('keeps the login-shell capture code only with environment_unavailable', () => {
@@ -87,7 +90,6 @@ describe('typed runtime-unavailable cause (#1103 B2a)', () => {
       runtimeUnavailable: { cause: 'invented_cause' },
     };
     expect(decodeEnvelope(wire(payload)).payload).toEqual(payload);
-    expect(readRuntimeUnavailableCause('invented_cause')).toEqual({ cause: 'unknown', reportedCause: 'invented_cause' });
     expect(RUNTIME_UNAVAILABLE_CAUSES).toContain('version_blocked');
   });
 

@@ -72,7 +72,6 @@ export const ProviderProvisioningOperationGenerationSchema = z
       value <= PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM,
     `operationGeneration must not exceed ${PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM}`,
   );
-export type ProviderProvisioningOperationGeneration = z.infer<typeof ProviderProvisioningOperationGenerationSchema>;
 
 /**
  * SHA-256 of the canonical non-secret operation the device evaluated. Two
@@ -84,7 +83,6 @@ export type ProviderProvisioningOperationGeneration = z.infer<typeof ProviderPro
 export const ProviderProvisioningOperationDigestSchema = z
   .string()
   .regex(/^sha256:[0-9a-f]{64}$/u, 'operationDigest must be lowercase sha256');
-export type ProviderProvisioningOperationDigest = z.infer<typeof ProviderProvisioningOperationDigestSchema>;
 
 /**
  * Closed rejection set. Codes name a failed check, never a value: no plaintext,
@@ -147,7 +145,6 @@ export const ProviderProvisioningProviderStatusSchema = z
       ctx.addIssue({ code: 'custom', path: ['capabilities'], message: 'duplicate provider capability' });
     }
   });
-export type ProviderProvisioningProviderStatus = z.infer<typeof ProviderProvisioningProviderStatusSchema>;
 
 /**
  * Closed outcome set of the device's one post-apply check of the stored key
@@ -178,14 +175,12 @@ export const PROVIDER_PROVISIONING_KEY_CHECK_RESULTS = [
   'not_run',
 ] as const;
 export const ProviderProvisioningKeyCheckResultSchema = z.enum(PROVIDER_PROVISIONING_KEY_CHECK_RESULTS);
-export type ProviderProvisioningKeyCheckResult = z.infer<typeof ProviderProvisioningKeyCheckResultSchema>;
 
 export const ProviderProvisioningKeyCheckSchema = z
   .object({
     result: ProviderProvisioningKeyCheckResultSchema,
   })
   .strict();
-export type ProviderProvisioningKeyCheck = z.infer<typeof ProviderProvisioningKeyCheckSchema>;
 
 const completionIdentity = {
   requestId: z.uuid(),
@@ -279,7 +274,6 @@ export type ProviderProvisioningCompletion = z.infer<typeof ProviderProvisioning
  */
 export const PROVIDER_PROVISIONING_DISPOSITIONS = ['recorded', 'idempotent', 'conflict', 'host_terminal'] as const;
 export const ProviderProvisioningDispositionSchema = z.enum(PROVIDER_PROVISIONING_DISPOSITIONS);
-export type ProviderProvisioningDisposition = z.infer<typeof ProviderProvisioningDispositionSchema>;
 
 /**
  * The Host's durable terminal readback for one provisioning request.

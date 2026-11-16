@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_HOME_PROJECTION_CAPABILITY,
-  AGENT_HOME_PROJECTION_MAX_BYTES,
   AgentHomeProjectionAgentRefSchema,
   AgentHomeProjectionCompletionRequestSchema,
   AgentHomeProjectionOutcomeSchema,
@@ -10,7 +9,6 @@ import {
   AgentHomeProjectionReadbackSchema,
   AgentHomeProjectionValueSchema,
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
-  BYOK_AGENT_HOME_PROJECTIONS_PATH,
   byokAgentHomeProjectionCompletionPath,
   CAPABILITY_FLAGS,
   EnvelopeSchema,
@@ -18,6 +16,8 @@ import {
   decodeEnvelope,
   type AgentHomeProjectionPayload,
 } from '../index';
+import { AGENT_HOME_PROJECTION_MAX_BYTES } from '../agent-home-projection';
+import { BYOK_AGENT_HOME_PROJECTIONS_PATH } from '../http-api';
 
 const REQUEST_ID = '10000000-0000-4000-8000-000000000001';
 const AGENT_REF = {

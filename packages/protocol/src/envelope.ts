@@ -41,8 +41,8 @@ function envelopeShape<
   Seq extends z.ZodTypeAny,
 >(type: T, taskId: TaskId, seq: Seq): EnvelopeShape<T, TaskId, Seq> {
   return z.object({
-    // A known payload shape does not authorize interpreting another wire major
-    // as v1. Keep the public number type and all supported v1 bytes unchanged.
+    // Transport v is the current wire major, independent of the domain-local
+    // versions inside sealed payloads, member bundles and assertion envelopes.
     v: z.number().int().refine((version): boolean => version === PROTOCOL_VERSION, {
       message: 'unsupported protocol version',
     }),

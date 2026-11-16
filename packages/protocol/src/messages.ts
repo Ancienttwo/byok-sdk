@@ -71,8 +71,7 @@ export type RuntimeId = z.infer<typeof RuntimeIdSchema>;
 /**
  * The append-only pre-claim runtime-unavailable cause (#1103 D6). An unknown
  * well-formed token is accepted and kept verbatim, so a newer device can add
- * one without a protocol bump; {@link readRuntimeUnavailableCause} is the
- * typed reading.
+ * one without a protocol bump. Consumers retain unknown diagnostic tokens.
  */
 const RuntimeUnavailableCauseSchema = z.union([
   z.enum(RUNTIME_UNAVAILABLE_CAUSES),
@@ -84,12 +83,6 @@ export type RuntimeUnavailableCauseReading =
   | { readonly cause: RuntimeUnavailableCause }
   | { readonly cause: 'unknown'; readonly reportedCause: string };
 
-export function readRuntimeUnavailableCause(cause: string): RuntimeUnavailableCauseReading {
-  return (RUNTIME_UNAVAILABLE_CAUSES as readonly string[]).includes(cause)
-    ? { cause: cause as RuntimeUnavailableCause }
-    : { cause: 'unknown', reportedCause: cause };
-}
-
 /** Wire-safe protocol version number: bounded before JSON reaches a store or comparison. */
 export const ProtocolVersionNumberSchema = z
   .number()
@@ -99,12 +92,12 @@ export const ProtocolVersionNumberSchema = z
 
 /**
  * Per-runtime feature flags reported in `conn.hello.runtimes[].capabilities`
- * (pre-freeze addition). Distinct from the connection-level `CAPABILITY_FLAGS`
+ * for one detected runtime. Distinct from the connection-level `CAPABILITY_FLAGS`
  * (`version.ts`) / `conn.hello.capabilities` array: those are protocol-level
  * flags negotiated for the whole connection, while this is what one specific
  * detected runtime (pi/claude/codex) supports. The whole field is optional
- * end-to-end — older daemons omit `capabilities` entirely — and every field
- * inside it is itself optional, since detection can be partial.
+ * end-to-end, and each field inside it is optional because detection can
+ * be partial.
  *
  * Unrecognized keys inside `capabilities` itself, by contrast, are silently
  * stripped (zod's default object behavior — same as every other payload
@@ -141,7 +134,7 @@ export type RuntimeCapabilities = z.infer<typeof RuntimeCapabilitiesSchema>;
  * The effective version policy's verdict, projected for discovery (#1103 D8).
  * Only `state` and the policy's qualified token travel: `matched` and the
  * allow/warn/block spec lists stay local. Absence means **unknown**, never
- * `allow`: an older daemon or an adapter without a policy omits the field.
+ * `allow`: an adapter without a policy omits the field.
  */
 export const RuntimeVersionPolicyProjectionSchema = z.object({
   state: z.enum(['allow', 'warn', 'block']),
@@ -150,15 +143,14 @@ export const RuntimeVersionPolicyProjectionSchema = z.object({
 export type RuntimeVersionPolicyProjection = z.infer<typeof RuntimeVersionPolicyProjectionSchema>;
 
 /**
- * Runtime detection info reported in `conn.hello`. Supersedes the M0
- * `agents: unknown` field (M1 gap #4): typed, so the server no longer has to
- * best-effort-normalize an untyped blob.
+ * Typed runtime detection info reported in `conn.hello`. Each optional field
+ * records only what detection observed.
  */
 export const RuntimeInfoSchema = z.object({
   id: RuntimeIdSchema,
   version: z.string().optional(),
   authPresent: z.boolean().optional(),
-  /** Optional: older daemons omit this entirely (pre-freeze addition). */
+  /** Omitted when runtime capability detection produced no observation. */
   capabilities: RuntimeCapabilitiesSchema.optional(),
   /** #1103 D8: discovery projection; absent means unknown. */
   versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
@@ -168,7 +160,6 @@ export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
 /** Custom identities are disjoint from the frozen built-in runtime enum. */
 export const HarnessIdSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/)
   .refine(value => !(RUNTIME_IDS as readonly string[]).includes(value), 'built-in runtime must use runtime');
-export type HarnessId = z.infer<typeof HarnessIdSchema>;
 export const HarnessInfoSchema = z.object({
   id: HarnessIdSchema,
   version: z.string().min(1).max(128).optional(),
@@ -249,7 +240,6 @@ export type AgentRef = z.infer<typeof AgentRefSchema>;
 export const AgentHomeProjectionAgentRefSchema = AgentRefSchema.extend({
   profileRevision: AgentHomeProjectionProfileRevisionSchema,
 }).strict();
-export type AgentHomeProjectionAgentRef = z.infer<typeof AgentHomeProjectionAgentRefSchema>;
 
 function rejectDuplicateToolsets(
   ids: readonly string[],
@@ -693,7 +683,6 @@ export const AgentMessageDraftPayloadSchema = z.object({
   ),
   overflow: z.literal(true).optional(),
 }).strict();
-export type AgentMessageDraftPayload = z.infer<typeof AgentMessageDraftPayloadSchema>;
 
 /** The fields of an Agent message that every branch carries in plaintext. */
 const AGENT_MESSAGE_IDENTITY = {
@@ -752,7 +741,6 @@ const AGENT_MESSAGE_DISPOSITION = {
 export const AgentMessageDispositionPlainPayloadSchema = z
   .object({ ...AGENT_MESSAGE_DISPOSITION, contentHash: AgentEgressContentHashSchema, contentMac: z.never().optional() })
   .strict();
-export type AgentMessageDispositionPlainPayload = z.infer<typeof AgentMessageDispositionPlainPayloadSchema>;
 
 /**
  * Server -> daemon: the disposition of a sealed message (#1045 C2). It names
@@ -766,7 +754,6 @@ export const AgentMessageDispositionSealedPayloadSchema = z
     contentHash: z.never().optional(),
   })
   .strict();
-export type AgentMessageDispositionSealedPayload = z.infer<typeof AgentMessageDispositionSealedPayloadSchema>;
 
 /** Narrow with `payload.contentMac !== undefined`. */
 export const AgentMessageDispositionPayloadSchema = z.union([
@@ -1012,7 +999,6 @@ export type AgentInputPreparationPayload = z.infer<typeof AgentInputPreparationP
 export const TaskApprovePayloadSchema = z.object({
   approvalId: z.string().min(1),
 });
-export type TaskApprovePayload = z.infer<typeof TaskApprovePayloadSchema>;
 
 /**
  * server -> daemon: reject a pending `task.await_approval` request.
@@ -1030,7 +1016,6 @@ export const TaskRejectPayloadSchema = z.object({
   reason: z.string().optional(),
   approvalId: z.string().min(1),
 });
-export type TaskRejectPayload = z.infer<typeof TaskRejectPayloadSchema>;
 
 /**
  * server -> daemon: cancel a task in any non-terminal state.
@@ -1044,7 +1029,6 @@ export type TaskRejectPayload = z.infer<typeof TaskRejectPayloadSchema>;
 export const TaskCancelPayloadSchema = z.object({
   reason: z.string().optional(),
 });
-export type TaskCancelPayload = z.infer<typeof TaskCancelPayloadSchema>;
 
 /**
  * The most UTF-8 bytes a plaintext `task.steer` text carries (wire v7). A
@@ -1135,7 +1119,6 @@ export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
  * sends this once it has actually started the runtime session for the task.
  */
 export const TaskStartedPayloadSchema = z.object({});
-export type TaskStartedPayload = z.infer<typeof TaskStartedPayloadSchema>;
 
 /**
  * daemon -> server: decline an offer *before* claiming it (M1 gap #5) — e.g.
@@ -1191,7 +1174,7 @@ export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
 /**
  * The typed reason a runtime was unavailable before claim (#1103 D6).
  * Append-only: an unknown well-formed cause is accepted and kept verbatim
- * (#1121), and {@link readRuntimeUnavailableCause} is the typed reading. The
+ * (#1121). The
  * login-shell capture code travels only with `environment_unavailable`
  * (#1095); it is an open well-formed token so the protocol never owns the
  * client's closed environment-code list.
@@ -1238,7 +1221,7 @@ const TaskDeclinePlainPayloadSchema = DeclineFields.refine(
  * daemon -> server: batch of normalized agent events.
  *
  * `events` elements are known-or-unknown (`AgentEventOrUnknownSchema` —
- * `agent-event.ts`), not bare `AgentEventSchema`: pre-freeze, an unrecognized
+ * `agent-event.ts`), not bare `AgentEventSchema`: an unrecognized
  * event `type` must not fail the whole batch, since a peer running a newer
  * minor version may have emitted an additive event variant this schema
  * doesn't know about yet. See `agent-event.ts` for the full rationale and
@@ -1392,8 +1375,8 @@ const TerminalInferenceReportedAtSchema = z
 
 /**
  * A bounded, non-billing observation associated with one terminal runtime
- * outcome. It is optional on every terminal payload so a pre-U2 daemon remains
- * a legal v1 peer. `promptTokens` and `completionTokens` are values a runtime
+ * outcome. It is optional on every terminal payload because the runtime may
+ * produce no usage observation. `promptTokens` and `completionTokens` are values a runtime
  * reported for its final observed turn; they are not a storage-accounting or
  * invoice authority.
  */
@@ -1644,7 +1627,7 @@ const TaskFailPlainPayloadSchema = z.object({
    */
   reason: z.string().transform(boundFailureReason),
   retryable: z.boolean().optional(),
-  /** Gated on the server's `runtime-failure-class` flag. Plaintext on the sealed branch too. */
+  /** Typed runtime failure evidence, plaintext on the sealed branch too. */
   failure: TaskFailureSchema.optional(),
   usage: TerminalInferenceUsageSchema.optional(),
   /** Present on a prepared Execution that observed provider usage before failing. */
@@ -1781,13 +1764,11 @@ export const TaskCompleteSealedPayloadSchema = TaskCompletePlainPayloadSchema.om
 })
   .extend({ sealed: SealedTaskOutputSchema })
   .strict();
-export type TaskCompleteSealedPayload = z.infer<typeof TaskCompleteSealedPayloadSchema>;
 
 /** daemon -> server: `task.fail` of a sealed task. `reason` is sealed; `preparedObservation` is not carried in v1. */
 export const TaskFailSealedPayloadSchema = TaskFailPlainPayloadSchema.omit({ reason: true, preparedObservation: true })
   .extend({ sealed: SealedTaskOutputSchema })
   .strict();
-export type TaskFailSealedPayload = z.infer<typeof TaskFailSealedPayloadSchema>;
 
 /**
  * daemon -> server: `task.decline` of a sealed task with a sealed `reason`.
@@ -1803,19 +1784,16 @@ export const TaskDeclineSealedPayloadSchema = DeclineFields.omit({ reason: true 
     sealed: SealedTaskOutputSchema,
   })
   .strict();
-export type TaskDeclineSealedPayload = z.infer<typeof TaskDeclineSealedPayloadSchema>;
 
 /** daemon -> server: `task.cancelled` of a sealed task. `reason` is sealed. */
 export const TaskCancelledSealedPayloadSchema = TaskCancelledPlainPayloadSchema.omit({ reason: true })
   .extend({ sealed: SealedTaskOutputSchema })
   .strict();
-export type TaskCancelledSealedPayload = z.infer<typeof TaskCancelledSealedPayloadSchema>;
 
 /** daemon -> server: `task.progress` of a sealed task. `events` is sealed; `seq` names the batch. */
 export const TaskProgressSealedPayloadSchema = TaskProgressPlainPayloadSchema.omit({ events: true })
   .extend({ sealed: SealedTaskOutputSchema })
   .strict();
-export type TaskProgressSealedPayload = z.infer<typeof TaskProgressSealedPayloadSchema>;
 
 /**
  * daemon -> server: an inline artifact of a sealed task. `inline` is sealed; a
@@ -1825,13 +1803,11 @@ export type TaskProgressSealedPayload = z.infer<typeof TaskProgressSealedPayload
 export const TaskArtifactSealedPayloadSchema = TaskArtifactPlainPayloadSchema.omit({ inline: true, blobRef: true })
   .extend({ artifactId: z.uuid(), sealed: SealedTaskOutputSchema })
   .strict();
-export type TaskArtifactSealedPayload = z.infer<typeof TaskArtifactSealedPayloadSchema>;
 
 /** daemon -> server: `task.await_approval` of a sealed task. `summary` is sealed; `approvalId` is required. */
 export const TaskAwaitApprovalSealedPayloadSchema = TaskAwaitApprovalPlainPayloadSchema.omit({ summary: true })
   .extend({ approvalId: z.string().min(1), sealed: SealedTaskOutputSchema })
   .strict();
-export type TaskAwaitApprovalSealedPayload = z.infer<typeof TaskAwaitApprovalSealedPayloadSchema>;
 
 // Each sealable payload: the plaintext branch first, then the sealed branch.
 // Narrow with `payload.sealed !== undefined`; the plaintext branch's `sealed` is `never`.
@@ -1841,7 +1817,6 @@ export const TaskSteerPayloadSchema = z.union([
   TaskSteerPlainPayloadSchema as typeof TaskSteerPlainPayloadSchema,
   TaskSteerSealedPayloadSchema as typeof TaskSteerSealedPayloadSchema,
 ]);
-export type TaskSteerPayload = z.infer<typeof TaskSteerPayloadSchema>;
 
 export const TaskDeclinePayloadSchema = z.union([
   TaskDeclinePlainPayloadSchema as typeof TaskDeclinePlainPayloadSchema,
@@ -1853,7 +1828,6 @@ export const TaskProgressPayloadSchema = z.union([
   TaskProgressPlainPayloadSchema as typeof TaskProgressPlainPayloadSchema,
   TaskProgressSealedPayloadSchema as typeof TaskProgressSealedPayloadSchema,
 ]);
-export type TaskProgressPayload = z.infer<typeof TaskProgressPayloadSchema>;
 
 export const TaskArtifactPayloadSchema = z.union([
   TaskArtifactPlainPayloadSchema as typeof TaskArtifactPlainPayloadSchema,
@@ -1865,13 +1839,11 @@ export const TaskAwaitApprovalPayloadSchema = z.union([
   TaskAwaitApprovalPlainPayloadSchema as typeof TaskAwaitApprovalPlainPayloadSchema,
   TaskAwaitApprovalSealedPayloadSchema as typeof TaskAwaitApprovalSealedPayloadSchema,
 ]);
-export type TaskAwaitApprovalPayload = z.infer<typeof TaskAwaitApprovalPayloadSchema>;
 
 export const TaskCompletePayloadSchema = z.union([
   TaskCompletePlainPayloadSchema as typeof TaskCompletePlainPayloadSchema,
   TaskCompleteSealedPayloadSchema as typeof TaskCompleteSealedPayloadSchema,
 ]);
-export type TaskCompletePayload = z.infer<typeof TaskCompletePayloadSchema>;
 
 export const TaskFailPayloadSchema = z.union([
   TaskFailPlainPayloadSchema as typeof TaskFailPlainPayloadSchema,
@@ -1883,7 +1855,6 @@ export const TaskCancelledPayloadSchema = z.union([
   TaskCancelledPlainPayloadSchema as typeof TaskCancelledPlainPayloadSchema,
   TaskCancelledSealedPayloadSchema as typeof TaskCancelledSealedPayloadSchema,
 ]);
-export type TaskCancelledPayload = z.infer<typeof TaskCancelledPayloadSchema>;
 
 // ---------------------------------------------------------------------------
 // registry — single source of truth mapping message type -> payload schema

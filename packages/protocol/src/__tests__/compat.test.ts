@@ -8,7 +8,6 @@ import * as v6Release from 'byok-protocol-previous';
 import * as currentModule from '../index';
 import {
   AGENT_MEMORY_START_REFUSALS,
-  AgentMemorySelectionSchema,
   CAPABILITY_FLAGS,
   EnvelopeSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
@@ -27,8 +26,9 @@ import {
   requiredReceiverCapabilities,
   steerRefusalEnvelopeId,
   type MessageType,
-  type WireAddition,
 } from '../index';
+import { AgentMemorySelectionSchema } from '../messages';
+import { type WireAddition } from '../wire-additions';
 
 /**
  * Executable wire-major-7 compatibility evidence (docs/protocol.md "Freeze

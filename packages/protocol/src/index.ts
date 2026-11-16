@@ -4,7 +4,7 @@ export { MAILBOX_READ_AHEAD_MAX_SEQS } from './version.js';
 export { PROTOCOL_VERSION, CAPABILITY_FLAGS, AGENT_HOME_READERS_CAPABILITY } from './version.js';
 export type { CapabilityFlag } from './version.js';
 export { WIRE_ADDITIONS, requiredReceiverCapabilities } from './wire-additions.js';
-export type { WireAddition } from './wire-additions.js';
+
 
 export { BlobRefSchema, CONTENT_HASH_RE } from './blob.js';
 export type { BlobRef } from './blob.js';
@@ -13,11 +13,9 @@ export {
   SEALED_INLINE_MAX_PADDED_LENGTH,
   SEALED_PAYLOAD_CATEGORIES,
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
-  SEALED_PAYLOAD_MAX_PADDED_LENGTH,
   SEALED_PAYLOAD_SUITE,
   SEALED_PAYLOAD_VERSION,
   SEALED_SPLIT_TABLE,
-  SEALED_TASK_PLAIN_CODES,
   SealedPayloadSchema,
   SealedTaskInputSchema,
   SealedTaskOutputSchema,
@@ -26,7 +24,6 @@ export {
   isSealedPayload,
   isSealedTaskPlainOutput,
   sealedAgentMessageMaxContentLength,
-  sealedBase64UrlByteLength,
   sealedMovedFields,
   sealedPayloadPaddedLength,
 } from './sealed-payload.js';
@@ -44,15 +41,11 @@ export type {
 export {
   PROVIDER_MODEL_CAPABILITIES,
   ProviderProfileRefSchema,
-  ProviderProfileRevisionSchema,
-  ProviderProfileHashSchema,
   ProviderModelCapabilitySchema,
   ProviderProfileBindingSchema,
 } from './provider-profile-binding.js';
 export type {
   ProviderProfileRef,
-  ProviderProfileRevision,
-  ProviderProfileHash,
   ProviderModelCapability,
   ProviderProfileBinding,
 } from './provider-profile-binding.js';
@@ -60,72 +53,29 @@ export type {
 export {
   PROVIDER_SECRET_SEALING_KEY_REGISTER_OPERATION,
   PROVIDER_PROVISIONING_OPERATIONS,
-  PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM,
-  PROVIDER_PROVISIONING_REJECTION_CODES,
-  PROVIDER_PROVISIONING_HOST_TERMINAL_CODES,
-  PROVIDER_PROVISIONING_DISPOSITIONS,
-  PROVIDER_PROVISIONING_KEY_CHECK_RESULTS,
   ProviderProvisioningAvailablePayloadSchema,
-  ProviderProvisioningKeyCheckResultSchema,
-  ProviderProvisioningKeyCheckSchema,
-  ProviderProvisioningOperationSchema,
-  ProviderProvisioningOperationGenerationSchema,
-  ProviderProvisioningOperationDigestSchema,
-  ProviderProvisioningRejectionCodeSchema,
-  ProviderProvisioningProviderStatusSchema,
-  ProviderProvisioningCompletionSchema,
-  ProviderProvisioningDispositionSchema,
   ProviderProvisioningReadbackSchema,
 } from './provider-provisioning.js';
 export type {
   ProviderProvisioningAvailablePayload,
   ProviderProvisioningOperation,
-  ProviderProvisioningOperationGeneration,
-  ProviderProvisioningOperationDigest,
-  ProviderProvisioningRejectionCode,
-  ProviderProvisioningProviderStatus,
   ProviderProvisioningCompletion,
-  ProviderProvisioningDisposition,
   ProviderProvisioningReadback,
-  ProviderProvisioningKeyCheckResult,
-  ProviderProvisioningKeyCheck,
 } from './provider-provisioning.js';
 
 export {
-  AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES,
-  AGENT_MEMORY_INTENT_PATH_MAX_BYTES,
-  AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES,
-  AGENT_MEMORY_INTENT_OPERATIONS,
-  AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES,
   AGENT_MEMORY_INTENT_REJECTION_CODES,
-  AGENT_MEMORY_INTENT_READBACK_DISPOSITIONS,
-  AGENT_MEMORY_INTENT_RESERVATIONS,
-  AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS,
-  AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION,
   AgentMemoryIntentRevisionSchema,
   AgentMemoryIntentOperationDigestSchema,
   AgentMemoryIntentPathSchema,
   AgentMemoryIntentApprovalRefSchema,
-  AgentMemoryIntentContentSchema,
-  AgentMemoryIntentOperationSchema,
   AgentMemoryIntentV1Schema,
-  AgentMemoryIntentHostTerminalCodeSchema,
-  AgentMemoryIntentRejectionCodeSchema,
-  AgentMemoryIntentFileObservationSchema,
   AgentMemoryIntentCompletionSchema,
-  AgentMemoryIntentReadbackDispositionSchema,
   AgentMemoryIntentReadbackSchema,
-  AgentMemoryIntentReservationSchema,
   AgentMemoryIntentFetchRequestSchema,
-  AgentMemoryIntentFetchResponseSchema,
   agentMemoryIntentFetchResponseSchemaFor,
 } from './agent-memory-intent.js';
 export type {
-  AgentMemoryIntentRevision,
-  AgentMemoryIntentOperationDigest,
-  AgentMemoryIntentPath,
-  AgentMemoryIntentApprovalRef,
-  AgentMemoryIntentContent,
   AgentMemoryIntentOperation,
   AgentMemoryIntentV1,
   AgentMemoryIntentHostTerminalCode,
@@ -135,43 +85,33 @@ export type {
   AgentMemoryIntentReadbackDisposition,
   AgentMemoryIntentReadback,
   AgentMemoryIntentReservation,
-  AgentMemoryIntentFetchRequest,
-  AgentMemoryIntentFetchDisposition,
   AgentMemoryIntentFetchResponse,
 } from './agent-memory-intent.js';
 
 export {
   AgentEventSchema,
-  AgentEventSpillSchema,
-  AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH,
-  UnknownAgentEventSchema,
   AgentEventOrUnknownSchema,
-  KNOWN_AGENT_EVENT_TYPES,
   isKnownAgentEvent,
   partitionAgentEvents,
 } from './agent-event.js';
-export type { AgentEvent, AgentEventSpill, UnknownAgentEvent, AgentEventOrUnknown } from './agent-event.js';
+export type {
+  AgentEvent,
+  AgentEventSpill,
+  AgentEventOrUnknown,
+} from './agent-event.js';
 
 export {
   AgentEgressPolicySchema,
-  AgentEgressActivityPolicySchema,
-  AgentReliableQuotaPolicySchema,
   ContentReadPolicySchema,
-  AgentEgressLaneSchema,
-  AgentEgressDropReasonSchema,
   AgentContentReadSurfaceSchema,
-  AgentContentActorKindSchema,
   AgentContentActorSchema,
   AgentContentDecodeAsSchema,
   AgentContentMimeTypeSchema,
-  AgentContentReadDecisionSchema,
   AgentContentReadDenialReasonSchema,
   AgentEgressContentHashSchema,
   AgentEgressPolicyRevisionSchema,
   AgentMessageContractSchema,
   AgentMessageContentTypeSchema,
-  AgentMessageDestinationBindingSchema,
-  AgentMessageFreshnessCursorSchema,
   AgentMessageServerContextSchema,
   AgentMessageEgressRequirementSchema,
   AGENT_MESSAGE_MAX_BYTES,
@@ -179,24 +119,17 @@ export {
 } from './agent-egress.js';
 export type {
   AgentEgressPolicy,
-  AgentEgressActivityPolicy,
-  AgentReliableQuotaPolicy,
   ContentReadPolicy,
-  AgentEgressLane,
   AgentEgressDropReason,
   AgentMessageContentType,
   AgentMessageEgressRequirement,
   AgentMessageServerContext,
   AgentContentReadSurface,
   AgentContentActorKind,
-  AgentContentActor,
-  AgentContentDecodeAs,
   AgentContentReadDecision,
-  AgentContentReadDenialReason,
 } from './agent-egress.js';
 
 export {
-  AGENT_HOME_PROJECTION_MAX_BYTES,
   AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM,
   AgentHomeProjectionProfileRevisionSchema,
   AgentHomeProjectionHostRevisionSchema,
@@ -205,9 +138,6 @@ export {
   AgentHomeProjectionValueSchema,
 } from './agent-home-projection.js';
 export type {
-  AgentHomeProjectionProfileRevision,
-  AgentHomeProjectionHostRevision,
-  AgentHomeProjectionHash,
   AgentHomeProjectionOutcome,
   AgentHomeProjectionValue,
 } from './agent-home-projection.js';
@@ -217,45 +147,23 @@ export {
   InputPreparationPolicyRevisionSchema,
   InputPreparationProfileIdSchema,
   InputPreparationSourceSchema,
-  InputPreparationModelCostSchema,
   InputPreparationModelSchema,
   InputPreparationOptionsSchema,
   InputPreparationSelectionSchema,
-  InputPreparationPromptSnapshotSchema,
-  InputPreparationUserMessageSchema,
-  InputPreparationHostCanonicalAssistantMessageSchema,
-  InputPreparationMessageSchema,
   InputPreparationContextDocumentSchema,
-  InputPreparationStateSchema,
-  InputPreparationReadinessReasonSchema,
-  InputPreparationRuntimeIdentitySchema,
-  InputPreparationCounterTargetSchema,
   InputPreparationAccountingPolicyRefSchema,
-  InputPreparationCounterProviderEvidenceSchema,
-  InputPreparationCounterEvidenceSchema,
-  InputPreparationResidualValueClassSchema,
-  InputPreparationResidualKeySchema,
-  InputPreparationProjectionSchema,
   InputPreparationArtifactSummarySchema,
   InputPreparationBindingSchema,
   InputPreparationReceiptSummarySchema,
-  InputPreparationReferenceSchema,
   InputPreparationOfferBindingSchema,
   InputPreparationRejectionReasonSchema,
   PREPARED_OFFER_DECLINE_CODES,
 } from './input-preparation.js';
 export type {
-  InputPreparationSource,
-  InputPreparationModel,
-  InputPreparationOptions,
   InputPreparationSelection,
   InputPreparationMessage,
   InputPreparationContextDocument,
-  InputPreparationState,
   InputPreparationReadinessReason,
-  InputPreparationAccountingPolicyRef,
-  InputPreparationResidualValueClass,
-  InputPreparationRuntimeIdentity,
   InputPreparationReceiptSummary,
   InputPreparationOfferBinding,
   InputPreparationRejectionReason,
@@ -265,67 +173,43 @@ export type {
 export {
   AGENT_MEMORY_PROJECTION_MAX_REDACTED_BYTES,
   AGENT_MEMORY_PROJECTION_MAX_ORDERING_VALUE,
-  AgentMemoryProjectionGrantRefSchema,
-  AgentMemoryProjectionSessionRefSchema,
-  AgentMemoryProjectionWriterEpochSchema,
-  AgentMemoryProjectionSourceSeqSchema,
-  AgentMemoryProjectionSnapshotSchema,
-  AgentMemoryProjectionMeteringReceiptSchema,
   AgentMemoryProjectionMutationSchema,
   AgentMemoryProjectionPlainMutationSchema,
   AgentMemoryProjectionReceiptSchema,
-  AgentMemoryProjectionPlainReceiptSchema,
   AgentMemoryProjectionEraseResultSchema,
   agentMemoryProjectionBase64UrlByteLength,
 } from './agent-memory-projection.js';
 export type {
-  AgentMemoryProjectionGrantRef,
-  AgentMemoryProjectionSessionRef,
-  AgentMemoryProjectionWriterEpoch,
-  AgentMemoryProjectionSourceSeq,
-  AgentMemoryProjectionSnapshot,
   AgentMemoryProjectionMeteringReceipt,
   AgentMemoryProjectionMutation,
   AgentMemoryProjectionPlainMutation,
   AgentMemoryProjectionSealedMutation,
   AgentMemoryProjectionReceipt,
-  AgentMemoryProjectionPlainReceipt,
-  AgentMemoryProjectionSealedReceipt,
-  AgentMemoryProjectionSealedMeteringReceipt,
   AgentMemoryProjectionEraseResult,
 } from './agent-memory-projection.js';
 
 
 export {
-  TerminalProjectionContractSchema,
   TerminalProjectionSelectionSchema,
-  ResultDocumentSchemaSchema,
 } from './terminal-projection.js';
 export type { TerminalProjectionSelection } from './terminal-projection.js';
 
 export {
   RESULT_SCHEMA_MAX_BYTES,
   RESULT_OUTCOME_MAX_BYTES,
-  RESULT_SCHEMA_MAX_DEPTH,
-  RESULT_JSON_MAX_DEPTH,
   RESULT_ISSUES_MAX_COUNT,
-  RESULT_ISSUES_MAX_BYTES,
-  RESULT_SCHEMA_KEYWORDS,
-  RESULT_SCHEMA_INSTANCE_TYPES,
   checkResultSchema,
   validateResultOutcome,
 } from './result-schema.js';
 export type {
   ResultSchema,
-  ResultSchemaKeyword,
-  ResultSchemaInstanceType,
   ResultIssue,
-  ResultDocumentFailureReason,
-  ResultSchemaCheck,
-  ResultOutcomeCheck,
 } from './result-schema.js';
 
-export { TASK_STATES, TASK_TRANSITIONS, canTransition } from './task-state.js';
+export {
+  TASK_STATES,
+  TASK_TRANSITIONS,
+} from './task-state.js';
 export type { TaskState } from './task-state.js';
 
 export {
@@ -335,13 +219,10 @@ export {
   DAEMON_TO_SERVER_TYPES,
   RuntimeIdSchema,
   ProtocolVersionNumberSchema,
-  RuntimeInfoSchema,
   HarnessIdSchema,
-  HarnessInfoSchema,
   HarnessInventorySchema,
   RuntimeCapabilitiesSchema,
   RuntimeVersionPolicyProjectionSchema,
-  RuntimeUnavailableEntrySchema,
   AgentRefSchema,
   AgentHomeProjectionAgentRefSchema,
   AGENT_REF_MAX_BYTES,
@@ -351,10 +232,7 @@ export {
   ConfiguredToolsetsSchema,
   RequiredToolsetsSchema,
   CONFIGURED_TOOLSETS_MAX_ITEMS,
-  ConnHelloPayloadSchema,
   CONN_HELLO_CAPABILITIES_MAX_ITEMS,
-  AgentHomeAccessSchema,
-  AgentMemorySelectionSchema,
   AgentMemoryCommitSchema,
   SessionSelectionSchema,
   TaskOfferPayloadSchema,
@@ -363,46 +241,33 @@ export {
   AgentEgressReliablePayloadSchema,
   AgentEgressAckPayloadSchema,
   AgentMessagePublishPayloadSchema,
-  AgentMessagePublishPlainPayloadSchema,
   AgentMessageDraftPayloadSchema,
   AgentMessageDispositionPayloadSchema,
-  AgentMessageDispositionPlainPayloadSchema,
   AgentContentReadPayloadSchema,
   AgentContentReceiptPayloadSchema,
   AgentHomeProjectionPayloadSchema,
   AgentMemoryIntentAvailablePayloadSchema,
   AgentInputPreparationPayloadSchema,
   TaskApprovePayloadSchema,
-  TaskRejectPayloadSchema,
-  TaskCancelPayloadSchema,
-  TaskSteerPayloadSchema,
   TaskSteerSealedPayloadSchema,
   TASK_STEER_TEXT_MAX_BYTES,
   TaskSteerRefusedPayloadSchema,
   STEER_REFUSAL_REASONS,
   readSteerRefusalReason,
   TaskClaimPayloadSchema,
-  OfferAdmissionTimingsSchema,
   OFFER_ADMISSION_MAX_DURATION_MS,
-  TaskStartedPayloadSchema,
-  TaskDeclinePayloadSchema,
   TaskProgressPayloadSchema,
   TaskArtifactPayloadSchema,
   TaskAwaitApprovalPayloadSchema,
   TaskCompletePayloadSchema,
   TaskFailPayloadSchema,
-  RuntimeFailureClassSchema,
   TaskFailureSchema,
   readTaskFailure,
   readDeclineCode,
   DECLINE_CODES,
-  readRuntimeUnavailableCause,
-  TaskCancelledPayloadSchema,
   TaskApprovalResolvedPayloadSchema,
   RESULT_DOCUMENT_MAX_BYTES,
   checkResultDocument,
-  TerminalInferenceUsageSchema,
-  TerminalPreparedObservationSchema,
   TerminalAgentHomeProjectionSchema,
   TerminalAgentHomeMemoryChangeSchema,
   TerminalResidentMemoryOverLimitSchema,
@@ -411,8 +276,6 @@ export {
   AGENT_HOME_MEMORY_PATH_MAX_LENGTH,
   TERMINAL_INFERENCE_USAGE_MAX_TOKENS,
   TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS,
-  TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH,
-  TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH,
   offerSelectionViolation,
 } from './messages.js';
 export { steerRefusalEnvelopeId, uuidFromSha256 } from './steer-refusal.js';
@@ -423,7 +286,6 @@ export {
   type PairDeviceDigestInput,
 } from './pair-device-digest.js';
 export type {
-  ResultDocumentCheck,
   MessageType,
   RuntimeId,
   RuntimeInfo,
@@ -431,7 +293,6 @@ export type {
   RuntimeVersionPolicyProjection,
   RuntimeUnavailableEntry,
   AgentRef,
-  AgentHomeProjectionAgentRef,
   ExecutionTarget,
   ClaimedExecutor,
   ToolsetId,
@@ -441,51 +302,31 @@ export type {
   TaskOfferPlainPayload,
   TaskOfferSealedPayload,
   TaskSteerSealedPayload,
-  TaskCompleteSealedPayload,
-  TaskFailSealedPayload,
-  TaskDeclineSealedPayload,
-  TaskCancelledSealedPayload,
-  TaskProgressSealedPayload,
-  TaskArtifactSealedPayload,
-  TaskAwaitApprovalSealedPayload,
   AgentEgressReliablePayload,
   AgentEgressAckPayload,
   AgentMessagePublishPayload,
   AgentMessagePublishPlainPayload,
   AgentMessagePublishSealedPayload,
-  AgentMessageDraftPayload,
   AgentMessageDispositionPayload,
-  AgentMessageDispositionPlainPayload,
-  AgentMessageDispositionSealedPayload,
   AgentContentReadPayload,
   AgentContentReceiptPayload,
   AgentHomeProjectionPayload,
   AgentMemoryIntentAvailablePayload,
   AgentInputPreparationPayload,
-  TaskApprovePayload,
-  TaskRejectPayload,
-  TaskCancelPayload,
-  TaskSteerPayload,
   TaskSteerRefusedPayload,
   SteerRefusalReason,
   SteerRefusalReasonReading,
   TaskClaimPayload,
   OfferAdmissionTimings,
-  TaskStartedPayload,
   TaskDeclinePayload,
   TaskDeclineCode,
   TaskDeclineCodeReading,
-  RuntimeUnavailableCauseReading,
-  TaskProgressPayload,
   TaskArtifactPayload,
-  TaskAwaitApprovalPayload,
-  TaskCompletePayload,
   TaskFailPayload,
   RuntimeFailureClass,
   RuntimeQuotaScope,
   TaskFailure,
   TaskFailureReading,
-  TaskCancelledPayload,
   TaskApprovalResolvedPayload,
   TerminalInferenceUsage,
   TerminalPreparedObservation,
@@ -495,8 +336,6 @@ export type {
   AgentHomeAccess,
   AgentMemorySelection,
   AgentMemoryCommit,
-  OfferSelectionRule,
-  OfferSelectionViolation,
 } from './messages.js';
 
 export { EnvelopeSchema, isServerToDaemonType } from './envelope.js';
@@ -511,7 +350,7 @@ export {
 } from './errors.js';
 
 export { encodeEnvelope, decodeEnvelope, createEnvelope, parseMessage } from './codec.js';
-export type { CreateEnvelopeOptions } from './codec.js';
+
 
 export {
   PairRequestSchema,
@@ -526,20 +365,13 @@ export {
   DeviceNotRegisteredResponseSchema,
   PresencePublishRequestSchema,
   CreateBlobRequestSchema,
-  CreateBlobResponseSchema,
-  BlobDownloadUrlResponseSchema,
-  EventsPollQuerySchema,
-  ActivityIngressSchema,
-  MessageSendOutcomeSchema,
   OUTBOUND_REFUSAL_REASONS,
   EventsPollResponseSchema,
   MessagesSendRequestSchema,
   MessagesSendResponseSchema,
   AgentHomeProjectionCompletionRequestSchema,
-  AgentHomeProjectionStatusSchema,
   AgentHomeProjectionReadbackSchema,
   AgentMemoryProjectionCommitRequestSchema,
-  AgentMemoryProjectionCommitResponseSchema,
   MAX_MESSAGES_PER_BATCH,
   MESSAGES_SEND_MAX_BODY_BYTES,
   BYOK_PAIR_PATH,
@@ -548,7 +380,6 @@ export {
   BYOK_CAPABILITIES_PATH,
   BYOK_EVENTS_PATH,
   BYOK_MESSAGES_PATH,
-  BYOK_AGENT_HOME_PROJECTIONS_PATH,
   BYOK_AGENT_HOME_PROJECTION_COMPLETION_ROUTE,
   byokAgentHomeProjectionCompletionPath,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
@@ -575,13 +406,11 @@ export {
   byokBlobFinalizePath,
   byokBlobUrlPath,
   byokBlobContentPath,
-  BYOK_INPUT_PREPARATIONS_PATH,
   BYOK_INPUT_PREPARATION_COMPLETION_ROUTE,
   BYOK_INPUT_PREPARATION_STATUS_ROUTE,
   byokInputPreparationCompletionPath,
   byokInputPreparationStatusPath,
   InputPreparationCompletionRequestSchema,
-  InputPreparationStatusSchema,
   InputPreparationReadbackSchema,
   InputPreparationStatusQuerySchema,
   PAIRING_CODE_INVALID_CODE,
@@ -599,32 +428,25 @@ export type {
   PairSupersededResponse,
   ChallengeRequest,
   ChallengeResponse,
-  TokenRequest,
   TokenResponse,
   DeviceNotRegisteredResponse,
-  PresencePublishRequest,
-  CreateBlobRequest,
   CreateBlobResponse,
   BlobDownloadUrlResponse,
-  EventsPollQuery,
   ActivityIngress,
-  MessageSendOutcome,
   OutboundRefusalReason,
   EventsPollResponse,
-  MessagesSendRequest,
   MessagesSendResponse,
   AgentHomeProjectionCompletionRequest,
-  AgentHomeProjectionStatus,
   AgentHomeProjectionReadback,
   AgentMemoryProjectionCommitRequest,
   AgentMemoryProjectionCommitResponse,
   InputPreparationCompletionRequest,
-  InputPreparationStatus,
   InputPreparationReadback,
-  InputPreparationStatusQuery,
 } from './http-api.js';
 
-export type { HarnessId, HarnessInfo } from './messages.js';
+export type {
+  HarnessInfo,
+} from './messages.js';
 
 export { PreparedAgentMemoryModeSchema, type PreparedAgentMemoryMode } from './input-preparation.js';
 
@@ -644,7 +466,6 @@ export {
   E2eeMemberKeyBundleSchema,
   E2eeMemberKeyRegisterRequestSchema,
   E2eeKeyPackageAvailablePayloadSchema,
-  E2eePairingMacSchema,
   E2eeScopeKeyPackageSchema,
 } from './e2ee-member.js';
 export type {
@@ -652,12 +473,47 @@ export type {
   E2eeKeyPackageAvailablePayload,
   E2eeMemberChainEntry,
   E2eeMemberKeyBundle,
-  E2eeMemberKeyRegisterRequest,
   E2eeScopeKeyPackage,
 } from './e2ee-member.js';
 
-export * from './bot-turn-outcome.js';
-export * from './routine-schedule.js';
+export {
+  BOT_TURN_OUTCOME_LIMITS,
+  BotTurnOutcomeSchemaError,
+  botTurnOutcomeFragments,
+  composeBotTurnOutcomeSchema,
+} from './bot-turn-outcome.js';
+export type {
+  NonEmptyIds,
+  BotTurnOutcomeFragments,
+  AskUserAction,
+  ConfirmableAction,
+  RoutineScheduleFields,
+  CreateRoutineAction,
+  UpdateRoutineAction,
+  CreateBotAction,
+  UpdateBotAction,
+  RoomFields,
+  BotTurnOutcome,
+} from './bot-turn-outcome.js';
+export {
+  ROUTINE_DAYS_OF_WEEK,
+  ROUTINE_HORIZON_MS,
+  checkRoutineSchedule,
+  nextRoutineOccurrence,
+} from './routine-schedule.js';
+export type {
+  RoutineDayOfWeek,
+  RoutineSchedule,
+} from './routine-schedule.js';
 export { resultOutcomeMaxBytes } from './result-schema.js';
-export * from './dream.js';
-export * from './handoff-pack.js';
+export {
+  buildDreamInstruction,
+} from './dream.js';
+export {
+  buildHandoffPack,
+} from './handoff-pack.js';
+export type {
+  HandoffTurn,
+  HandoffPackBudgets,
+  HandoffPack,
+} from './handoff-pack.js';

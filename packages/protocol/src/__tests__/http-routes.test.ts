@@ -90,7 +90,7 @@ describe('byok route paths: router templates match their prior mount literals', 
 });
 
 describe('byok route paths: client builders reproduce their prior template-string literals', () => {
-  it('byokRecordPath URL-encodes both segments, like truth-memory-client.ts', () => {
+  it('byokRecordPath URL-encodes both record identity segments', () => {
     const kind = 'task.terminal';
     const key = 'a b/c';
     expect(byokRecordPath(kind, key)).toBe(

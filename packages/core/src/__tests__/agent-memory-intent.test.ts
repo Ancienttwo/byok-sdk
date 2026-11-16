@@ -1,12 +1,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import {
-  AGENT_MEMORY_INTENT_DIGEST_VERSION,
-  agentMemoryIntentOperationDigest,
-  canonicalizeJson,
-  isCoreError,
-  type AgentMemoryIntentDigestInput,
-} from '../index';
+import { agentMemoryIntentOperationDigest, canonicalizeJson, isCoreError } from '../index';
+import { AGENT_MEMORY_INTENT_DIGEST_VERSION, type AgentMemoryIntentDigestInput } from '../agent-memory-intent';
 
 const EMPTY_REVISION = 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 const HELLO_REVISION = 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824';

@@ -906,15 +906,6 @@ export interface AuthenticatedTaskAssertion extends AuthenticatedAssertionBase {
 }
 
 /**
- * Either lane's result, discriminated by `lane`.
- *
- * For the consumer that genuinely serves both (an audit projection, a ledger
- * writer). A consumer that serves ONE lane must name that lane's type instead —
- * this union exists so "both" is stated on purpose, not reached by accident.
- */
-export type AuthenticatedAssertion = AuthenticatedDeviceAssertion | AuthenticatedTaskAssertion;
-
-/**
  * Authenticate one task assertion and atomically consume its JTI under the
  * `byok-task-assertion-v1` replay segment.
  *
