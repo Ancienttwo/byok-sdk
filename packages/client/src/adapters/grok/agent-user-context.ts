@@ -1,4 +1,6 @@
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import { ensureDirectoryNoSymlink } from '../../agent-home.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import { createOwnedRuntimeHome } from '../owned-runtime-home.js';
 import { objectRecord as record } from '../shared-rules.js';
@@ -17,6 +19,12 @@ export const GROK_USER_CONTEXT_INSPECT_FAILED = `${PREFIX}: grok inspect failed`
  */
 const LINKED = Object.freeze(['auth.json', 'config.toml', 'trusted_folders.toml', 'hooks']);
 
+/** A login Grok wrote over the SDK home's link, moved into the Agent's Grok store and left for the Host. */
+const PRESERVED_LOGIN = /^preserved-auth-[a-f0-9]+\.json$/u;
+const grokStore = (agentHome: string) => path.join(agentHome, '.byok', 'grok');
+/** The cleanup report when a task's Grok replaced the linked `auth.json`. */
+export const GROK_LOGIN_PRESERVED = 'grok replaced the linked auth.json; the refreshed login was moved into the Agent home Grok store and was not restored to the user GROK_HOME';
+
 /** Grok's own resolution: a set `GROK_HOME`, else `.grok` in the home directory. */
 function userGrokHome(env: Readonly<Record<string, string | undefined>>): string {
   if (env.GROK_HOME !== undefined && env.GROK_HOME !== '') return env.GROK_HOME;
@@ -34,6 +42,11 @@ function userGrokHome(env: Readonly<Record<string, string | undefined>>): string
 export async function createGrokAgentHome(env: Readonly<Record<string, string | undefined>>, dir: string, agentHome: string | undefined, platform: NodeJS.Platform = process.platform): Promise<string> {
   // Until #2241 settles how a Windows account without symlink privilege links the login, refuse before any link is tried.
   if (platform === 'win32') throw refuse('the SDK-owned GROK_HOME is not supported on Windows');
+  // A login an earlier task preserved may be the only live one; a new task would run on the stale user login.
+  if (agentHome !== undefined && agentHome !== '' && (await fs.readdir(grokStore(agentHome)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return [];
+    throw error;
+  })).some(name => PRESERVED_LOGIN.test(name))) throw refuse('an earlier task left a refreshed Grok login in the Agent home that the Host has not resolved');
   return await createOwnedRuntimeHome({
     refusalPrefix: PREFIX,
     name: 'grok-home',
@@ -43,6 +56,44 @@ export async function createGrokAgentHome(env: Readonly<Record<string, string | 
     required: env.XAI_API_KEY ? [] : [{ entry: 'auth.json', reason: 'the user GROK_HOME has no auth.json and XAI_API_KEY is not set' }],
     agentStore: { agentHome, root: path.join('.byok', 'grok'), entries: ['sessions'], label: 'session store' },
   }, dir, platform);
+}
+
+/** The SDK home's login link as built: `target` is what `auth.json` pointed to, or `undefined` without one. */
+export interface GrokLoginLink { readonly home: string; readonly target: string | undefined; readonly agentHome: string; readonly token: string }
+
+/** Records the login link of a home `createGrokAgentHome` built, by `readlink` only. */
+export async function grokLoginLink(home: string, agentHome: string, token: string): Promise<GrokLoginLink> {
+  const target = await fs.readlink(path.join(home, 'auth.json')).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  return { home, target, agentHome, token };
+}
+
+/**
+ * Runs after Grok exits and before the scratch release removes the SDK home,
+ * with `lstat` and `readlink` only. When `auth.json` is no longer the link the
+ * home was built with, Grok wrote a login over it (a refresh by rename): the
+ * entry is moved, never read, copied or deleted, to
+ * `<agentHome>/.byok/grok/preserved-auth-<scratch token>.json`, and `true` asks
+ * the caller to report it. It is not written over the user's login: whether
+ * the user's own Grok refreshed meanwhile is the Host's call.
+ */
+export async function preserveReplacedGrokLogin(link: GrokLoginLink): Promise<boolean> {
+  const file = path.join(link.home, 'auth.json');
+  const stat = await fs.lstat(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (stat === undefined || (stat.isSymbolicLink() && link.target !== undefined && await fs.readlink(file) === link.target)) return false;
+  const store = await ensureDirectoryNoSymlink(link.agentHome, grokStore(link.agentHome));
+  const preserved = path.join(store, `preserved-auth-${link.token}.json`);
+  if (await fs.lstat(preserved).then(() => true, (error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  })) throw new Error('grok preserved login already exists for this execution');
+  await fs.rename(file, preserved);
+  return true;
 }
 
 /**

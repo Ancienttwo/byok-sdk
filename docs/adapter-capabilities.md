@@ -731,7 +731,21 @@ boundary. The start fails as a non-retryable `authority` failure, class
 - `grok Agent user context exclusion refused: the SDK-owned GROK_HOME is not supported on Windows`, before any link is tried, until #2241 settles how a Windows account without symbolic-link privilege links the login
 
 Whether a login refresh through the linked `auth.json` reaches the user's file
-is being verified (#2239).
+is being verified (#2239). Two guards cover a Grok that writes a refreshed login
+over the link (a write by rename), both by `lstat` and `readlink` only:
+
+- At cleanup, after Grok exits and before the scratch release, an `auth.json`
+  that is no longer the link the home was built with is moved, never deleted
+  or copied, to `<Agent home>/.byok/grok/preserved-auth-<execution token>.json`.
+  The session close then fails once with a `cleanup` `RuntimeDisposalFailure`:
+  `grok replaced the linked auth.json; the refreshed login was moved into the Agent home Grok store and was not restored to the user GROK_HOME`.
+- At start, while such a file is in the Agent's Grok store, the Agent's Grok
+  tasks under `excluded` refuse:
+  `grok Agent user context exclusion refused: an earlier task left a refreshed Grok login in the Agent home that the Host has not resolved`.
+
+The SDK stops and reports; it does not restore the login to the user's
+`GROK_HOME`, because the user's own Grok may have refreshed it meanwhile. The
+Host decides which login to keep and removes the preserved file.
 
 #### `agentUserMcpServers` (Grok)
 

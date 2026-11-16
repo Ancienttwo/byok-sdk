@@ -22,7 +22,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types.js';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
@@ -33,7 +33,7 @@ import { haltGate, SettleWaiters, raceDeadline, oarCancelSettled, RetryableOnce 
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { GROK_INSPECT_FAILED, GROK_USER_MCP_SERVERS_OFF, grokInspectRefusal } from './agent-user-mcp-servers.js';
-import { GROK_USER_CONTEXT_INSPECT_FAILED, createGrokAgentHome, grokUserInstructionsRefusal } from './agent-user-context.js';
+import { GROK_LOGIN_PRESERVED, GROK_USER_CONTEXT_INSPECT_FAILED, createGrokAgentHome, grokLoginLink, grokUserInstructionsRefusal, preserveReplacedGrokLogin, type GrokLoginLink } from './agent-user-context.js';
 import { runGrokInspect } from './inspect.js';
 import { GrokProjection, type GrokTurnOutcome } from './projection.js';
 import { resolveGrokBin } from './resolve-bin.js';
@@ -216,11 +216,15 @@ export class GrokAdapter implements RuntimeAdapter {
     const agentTask = input.manifest.agentRef !== undefined;
     const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && agentTask;
     const excludeUserContext = this.options.agentUserContext === 'excluded' && agentTask;
+    const agentHome = input.manifest.lease?.canonicalHome;
+    const grokHome = excludeUserContext ? await createGrokAgentHome(env, input.scratch.sdkDir, agentHome) : undefined;
+    // createGrokAgentHome refuses without a sealed Agent home, so one is set whenever grokHome is.
+    const login = grokHome === undefined ? undefined : await grokLoginLink(grokHome, agentHome!, input.scratch.token);
     // Set on the agent; its own children may inherit them. Hosted terminal commands keep the task env.
     const agentEnv = {
       ...(this.options.compatInstructions === 'disabled' || excludeUserContext ? COMPAT_INSTRUCTIONS_OFF : {}),
       ...(excludeUserMcp ? GROK_USER_MCP_SERVERS_OFF : {}),
-      ...(excludeUserContext ? { GROK_HOME: await createGrokAgentHome(env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {}),
+      ...(grokHome === undefined ? {} : { GROK_HOME: grokHome }),
     };
     if (excludeUserMcp || excludeUserContext) {
       // One inspect judges both options, with the environment the agent gets.
@@ -245,6 +249,7 @@ export class GrokAdapter implements RuntimeAdapter {
       this.options.model,
       this.interruptTimeoutMs,
       input.manifest.sessionRef,
+      login,
     );
     try {
       const raw = await acp.grokSession(
@@ -324,6 +329,8 @@ class GrokSession implements Session {
     private readonly model: string | undefined,
     private readonly interruptMs: number,
     private readonly expectedSessionRef?: string,
+    /** The SDK home's login link under `agentUserContext: 'excluded'`, checked before the scratch release. */
+    private readonly login?: GrokLoginLink,
   ) {}
 
   own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
@@ -477,6 +484,7 @@ class GrokSession implements Session {
   async close(): Promise<void> {
     this.stopping = true;
     await this.closeOnce.run(async () => {
+      let loginPreserved = false;
       try {
         try {
           await this.raw?.dispose();
@@ -485,6 +493,8 @@ class GrokSession implements Session {
           if (!this.failure || isRuntimeDisposalFailure(error)) throw error;
         } finally {
           await this.child?.dispose();
+          // Grok has exited: a login it wrote over the link is moved out before the release removes the home.
+          if (this.login !== undefined && await preserveReplacedGrokLogin(this.login)) loginPreserved = true;
           await this.scratch.release();
         }
       } finally {
@@ -495,6 +505,8 @@ class GrokSession implements Session {
       this.raw = undefined;
       this.projection = undefined;
       this.child = undefined;
+      // Reported once, after the release completed; a later close finds nothing to move.
+      if (loginPreserved) throw new RuntimeDisposalFailure({ stage: 'cleanup', reason: GROK_LOGIN_PRESERVED });
     });
   }
   private flushPendingUsage(): void {
