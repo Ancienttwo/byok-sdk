@@ -43,3 +43,14 @@ This affects only a Host that embeds `ClaudeAdapter` directly; the daemon does n
 read API. Production failure handling still awaits `recordTaskTerminal()` to
 persist evidence before sending `task.fail`; use that write receipt when recording
 a failure. There is no public terminal-evidence read replacement.
+
+### Team workspaces
+
+`LocalTeamWorkspace.getWorkspace()`, `updateWorkspace()` and
+`validateMemberLease()` (also exposed by `LocalTeamWorkspaceService`) are removed,
+along with the unused
+`UpdateTeamWorkspaceInput` declaration. Use `listWorkspaces()` to inspect workspace
+definitions. Validate a member lease by performing the intended `postMessage()`,
+`readMessages()` or `ackMessages()` operation; each resolves the lease itself.
+There is no public in-place membership/limit update API. Create a separately named
+workspace with the desired definition and issue its member leases instead.

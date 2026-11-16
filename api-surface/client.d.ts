@@ -9038,12 +9038,6 @@ export interface CreateTeamWorkspaceInput {
     readonly members: readonly string[];
     readonly limits: TeamWorkspaceLimits;
 }
-export interface UpdateTeamWorkspaceInput {
-    readonly workspaceId: string;
-    readonly expectedRevision: TeamWorkspaceRevision;
-    readonly members: readonly string[];
-    readonly limits?: TeamWorkspaceLimits;
-}
 export interface CreateTeamMemberLeaseInput {
     readonly workspaceId: string;
     readonly memberId: string;
@@ -9135,23 +9129,13 @@ export declare class LocalTeamWorkspace {
     /** Create the secure state directory; it is safe to call on every start. */
     initialize(): Promise<void>;
     createWorkspace(input: CreateTeamWorkspaceInput): Promise<TeamWorkspaceDefinition>;
-    getWorkspace(workspaceId: string): Promise<TeamWorkspaceDefinition | undefined>;
     listWorkspaces(): Promise<readonly TeamWorkspaceDefinition[]>;
     /** Local operator read for the tmux pane; it does not create or advance a member receipt. */
     inspectMessages(workspaceId: string, afterSeq?: number): Promise<readonly TeamMessage[]>;
-    /** CAS-guarded membership/limit update.  A revision change invalidates all leases. */
-    updateWorkspace(input: UpdateTeamWorkspaceInput): Promise<TeamWorkspaceDefinition>;
     createMemberLease(input: CreateTeamMemberLeaseInput): Promise<TeamMemberLease>;
     revokeMemberLease(input: {
         readonly lease: TeamMemberLease;
     }): Promise<void>;
-    /** Validate the opaque lease and return its daemon-owned identity. */
-    validateMemberLease(lease: TeamMemberLease): Promise<Readonly<{
-        workspaceId: string;
-        memberId: string;
-        registryRevision: TeamWorkspaceRevision;
-        expiresAt: string;
-    }>>;
     postMessage(input: TeamPostMessageInput): Promise<TeamMessageAcceptedReceipt>;
     /** Metadata-only operator notification view. Never advances delivery or acknowledgement. */
     notificationSnapshot(input: TeamReadMessagesInput): Promise<{

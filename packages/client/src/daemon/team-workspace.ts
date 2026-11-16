@@ -94,13 +94,6 @@ export interface CreateTeamWorkspaceInput {
   readonly limits: TeamWorkspaceLimits;
 }
 
-export interface UpdateTeamWorkspaceInput {
-  readonly workspaceId: string;
-  readonly expectedRevision: TeamWorkspaceRevision;
-  readonly members: readonly string[];
-  readonly limits?: TeamWorkspaceLimits;
-}
-
 export interface CreateTeamMemberLeaseInput {
   readonly workspaceId: string;
   readonly memberId: string;
@@ -568,14 +561,6 @@ export class LocalTeamWorkspace {
     });
   }
 
-  async getWorkspace(workspaceId: string): Promise<TeamWorkspaceDefinition | undefined> {
-    assertSafeId(workspaceId, 'workspaceId');
-    return this.enqueue(async () => {
-      const state = (await this.load()).workspaces[workspaceId];
-      return state === undefined ? undefined : publicDefinition(state.definition);
-    });
-  }
-
   async listWorkspaces(): Promise<readonly TeamWorkspaceDefinition[]> {
     return this.enqueue(async () => {
       const envelope = await this.load();
@@ -593,52 +578,6 @@ export class LocalTeamWorkspace {
       const state = (await this.load()).workspaces[workspaceId];
       if (state === undefined) throw new TeamWorkspaceNotFoundError(workspaceId);
       return Object.freeze(state.messages.filter((message) => message.seq > afterSeq).map(publicMessage));
-    });
-  }
-
-  /** CAS-guarded membership/limit update.  A revision change invalidates all leases. */
-  async updateWorkspace(input: UpdateTeamWorkspaceInput): Promise<TeamWorkspaceDefinition> {
-    assertSafeId(input?.workspaceId, 'workspaceId');
-    assertRevision(input?.expectedRevision, 'expectedRevision');
-    const members = normalizeMembers(input?.members);
-    return this.enqueue(async () => {
-      const envelope = await this.load();
-      const current = envelope.workspaces[input.workspaceId];
-      if (current === undefined) throw new TeamWorkspaceNotFoundError(input.workspaceId);
-      if (current.definition.revision !== input.expectedRevision) throw new TeamWorkspaceConflictError(`team workspace "${input.workspaceId}" revision conflict`);
-      const limits = input.limits === undefined ? current.definition.limits : normalizeLimits(input.limits);
-      if (members.length > limits.maxMembers) throw new TeamWorkspaceQuotaError('members', 'workspace members exceed maxMembers');
-      if (current.messages.length > limits.maxMessages) throw new TeamWorkspaceQuotaError('messages', 'new workspace message quota is below retained messages');
-      const retainedBytes = current.messages.reduce((sum, message) => sum + message.byteCount, 0);
-      if (retainedBytes > limits.maxBytes) throw new TeamWorkspaceQuotaError('bytes', 'new workspace byte quota is below retained messages');
-      const revision = definitionRevision(input.workspaceId, members, limits);
-      const now = new Date(this.now()).toISOString();
-      const definition: TeamWorkspaceDefinition = {
-        version: TEAM_WORKSPACE_VERSION,
-        workspaceId: input.workspaceId,
-        revision,
-        members,
-        limits,
-        createdAt: current.definition.createdAt,
-        updatedAt: now,
-      };
-      const next = copyState(current);
-      next.definition = definition;
-      next.receipts = {};
-      // A registry revision invalidates leases, but it must not make a
-      // surviving member's durable acknowledgement move backwards.  Carry
-      // the bounded cursor/high-water forward while rebinding it to the new
-      // revision; newly added members start at zero.
-      for (const memberId of members) {
-        const previous = current.receipts[memberId];
-        next.receipts[memberId] = previous === undefined
-          ? emptyReceipt(input.workspaceId, memberId, revision, now)
-          : { ...previous, registryRevision: revision, updatedAt: now };
-      }
-      next.leases = {};
-      envelope.workspaces[input.workspaceId] = next;
-      await this.save(envelope);
-      return publicDefinition(definition);
     });
   }
 
@@ -693,16 +632,6 @@ export class LocalTeamWorkspace {
       delete next.leases[input.lease.memberId];
       envelope.workspaces[input.lease.workspaceId] = next;
       await this.save(envelope);
-    });
-  }
-
-  /** Validate the opaque lease and return its daemon-owned identity. */
-  async validateMemberLease(lease: TeamMemberLease): Promise<Readonly<{ workspaceId: string; memberId: string; registryRevision: TeamWorkspaceRevision; expiresAt: string }>> {
-    assertLeaseShape(lease);
-    return this.enqueue(async () => {
-      const resolved = await this.resolveLease(await this.load(), lease);
-      const stored = resolved.leases[lease.memberId]!;
-      return Object.freeze({ workspaceId: stored.workspaceId, memberId: stored.memberId, registryRevision: stored.registryRevision, expiresAt: stored.expiresAt });
     });
   }
 

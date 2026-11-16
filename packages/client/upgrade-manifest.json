@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "e021540cb85263aacf0f261ae5c864fa142a753eca8b74d3e441fa750c425212"
+    "snapshotSha256": "32f21795d6bdc22dc778f29989e35459e54911bdd3b91c9c9ef00900b00f4b1c"
   },
   "configFields": {
     "status": "tracked",
@@ -50,6 +50,16 @@
       "items": [
         "export:@byok-sdk/client#AgentSessionHandoffStore"
       ]
+    },
+    {
+      "id": "remove-unused-team-workspace-methods",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client removes LocalTeamWorkspace/LocalTeamWorkspaceService.getWorkspace(), updateWorkspace() and validateMemberLease(). Use listWorkspaces() for definitions and message operations for lease validation; create a separately named workspace for a different definition.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#team-workspaces",
+      "items": [
+        "export:@byok-sdk/client#LocalTeamWorkspace",
+        "export:@byok-sdk/client#LocalTeamWorkspaceService"
+      ]
     }
   ],
   "changes": [
@@ -57,6 +67,16 @@
       "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
       "change": "changed",
       "entry": "remove-task-terminal-read"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalTeamWorkspace",
+      "change": "changed",
+      "entry": "remove-unused-team-workspace-methods"
+    },
+    {
+      "item": "export:@byok-sdk/client#LocalTeamWorkspaceService",
+      "change": "changed",
+      "entry": "remove-unused-team-workspace-methods"
     }
   ]
 }
