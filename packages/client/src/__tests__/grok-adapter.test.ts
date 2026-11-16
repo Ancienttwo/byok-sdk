@@ -598,7 +598,7 @@ describe('AgyAdapter', () => {
     const s = await open(agy(home, { model: 'gemini-3.8-flash' }), { instruction: 'hello' }, resources);
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, { type: 'turn_end' }]);
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
-    expect(start.argv).toEqual(['acp', '--dangerously-skip-permissions', '--process-per-session', '--disable-telemetry']);
+    expect(start.argv).toEqual(['acp', '--dangerously-skip-permissions', '--process-per-session', '--gemini-dir', path.join(home, '.gemini'), '--disable-telemetry']);
     expect(start.env).toMatchObject({
       HOME: home, USERPROFILE: home, GEMINI_HOME: path.join(home, '.gemini'), AGY_CLI_DISABLE_AUTO_UPDATE: '1',
     });
