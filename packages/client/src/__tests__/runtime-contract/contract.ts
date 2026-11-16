@@ -242,6 +242,17 @@ export interface DeclaredHost { readonly phase: EgressAttempt['phase']; readonly
  * The egress case: it runs last in the file, after every runtime process of
  * the file. Every proxied attempt must match a declared host of its phase;
  * the loopback provider is reached directly and never proxied.
+ *
+ * The recorder sees only connections made through its proxy; one that ignores
+ * the proxy environment never reaches it. Qualifying a runtime version
+ * therefore includes one blocked run on darwin: point the runtime binary
+ * variable (e.g. `BYOK_CONTRACT_GROK_BIN`) at a wrapper that runs only the
+ * runtime binary under `sandbox-exec` with a profile that denies every
+ * non-loopback `network-outbound` and the DNS socket
+ * `/private/var/run/mDNSResponder`, run the whole file, and require it to pass
+ * with zero `deny(1) network-outbound` reports from `log stream` (#2257).
+ * Never sandbox the test process itself: a sandboxed process cannot exec
+ * `/bin/ps`, so process-tree disposal cannot stop the runtime.
  */
 export function egressCheck(prerequisites: () => Promise<unknown>, declaredHosts: readonly DeclaredHost[] = []): ContractCheck {
   return check(async () => {

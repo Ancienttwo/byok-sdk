@@ -138,7 +138,7 @@ defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVe
     expect(draftText((await excluded()).events, descriptor)).toContain('runtime contract reply');
   }),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); }, [
+  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await ownTurn(); }, [
     { phase: 'turn', target: 'cli-chat-proxy.grok.com:443', reason: 'Grok syncs its workspace, bundle and experiments with xAI whatever the model provider (GROK_CLI_CHAT_PROXY_BASE_URL); follow-up to #1103' },
   ]),
 }, GROK_ABSENT_ISOLATION_SOURCES);
@@ -157,8 +157,9 @@ const auxiliary = (text: string) => text.includes('<agent_reply>') || text.inclu
  * reminder and runs a turn the SDK never prompted. That turn runs a blocking
  * command, and the follow-up the SDK sends while it runs must wait for it.
  */
-async function ownTurn() {
+const ownTurn = once(async () => {
   const box = await createSandbox('grok-own-turn');
+  const recorder = await fileEgress();
   const terminal = (command: string, blockUntilMs: number): ProviderStep =>
     ({ kind: 'tool', tool: { name: 'run_terminal_command' }, args: { command, block_until_ms: blockUntilMs, description: 'runtime contract' } });
   const provider = await startLoopbackProvider('openai-chat', request => {
@@ -171,7 +172,7 @@ async function ownTurn() {
   try {
     const grokHome = await loopbackGrokHome(box.home, provider.baseUrl);
     const session = await startPreparedOperation(adapter(), { instruction: 'Start the background command, then finish.' }, {
-      workspaceDir: box.workspace, agentHome: box.workspace, env: { ...baseEnv(box.home), GROK_HOME: grokHome },
+      workspaceDir: box.workspace, agentHome: box.workspace, env: { ...baseEnv(box.home), GROK_HOME: grokHome, ...recorder.env },
     });
     const events: TurnEvent[] = [];
     let followUp: Promise<void> | undefined;
@@ -192,7 +193,7 @@ async function ownTurn() {
   } finally {
     await provider.close();
   }
-}
+});
 
 defineRuntimeCases(`grok runtime contract: grok cases (${target.mode} ${target.expectedVersion})`, {
   ownTurn: ['a turn Grok runs on its own ends no task turn, holds a follow-up until it closes, and its usage is counted once', check(async () => {
