@@ -1094,7 +1094,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 590511,
+      "budgetBytes": 591107,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1875,7 +1875,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Read-only SQLite format admission for Node stores",
-      "budgetBytes": 1529,
+      "budgetBytes": 1731,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
