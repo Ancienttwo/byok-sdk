@@ -144,7 +144,7 @@ describe('supported platforms', () => {
 
   it('the strict decoders accept the platform refusal', () => {
     expect(validateRuntimeDetectResult({ kind: 'refused', reason: 'platform_unsupported' })).toEqual({ kind: 'refused', reason: 'platform_unsupported' });
-    expect(parseRuntimeObservations([{ id: 'grok', present: false, outcome: 'refused', reason: 'platform_unsupported', steer: false, resume: true }]))
+    expect(parseRuntimeObservations([{ id: 'grok', present: false, outcome: 'refused', reason: 'platform_unsupported', steer: false, resume: true }], 'audit'))
       .toEqual([{ id: 'grok', present: false, outcome: 'refused', reason: 'platform_unsupported', steer: false, resume: true }]);
   });
 });
@@ -204,7 +204,7 @@ describe('daemon detection authority', () => {
     const server = await TestServer.start(); servers.push(server);
     const refused = unsupportedHere();
     const available = fakeRuntimeAdapter('codex', {
-      detect: { kind: 'available', version: 'codex-cli 9.9.9', authPresent: true, advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '0.160.0' } },
+      detect: { kind: 'available', version: 'codex-cli 9.9.9', authPresent: true, versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' } },
     });
     const daemon = createDaemonWithAdapters({
       storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Metadata', productId: 'metadata',

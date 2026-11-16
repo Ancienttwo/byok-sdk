@@ -25,7 +25,7 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { CursorStore } from '../daemon/cursor-store';
 import { TaskRunner, type AdmissionGuardDecision, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
-import { DaemonConfigFieldRemovedError } from '../daemon/daemon-errors';
+import { DaemonConfigInvalidError } from '../daemon-config-invalid-error';
 import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME } from '../daemon/journal/sqlite-journal';
 import { openJournalDatabase } from '../util/sqlite-support';
 import type { JournalIdentity, JournalReceipt, LocalTaskJournal, LocalTerminalRecord, ReceivedEnvelopeRecord, RecoverableTask } from '../daemon/journal/journal';
@@ -312,7 +312,7 @@ describe('hosted journal integration (L-002)', () => {
 
       expect(() =>
         createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...base, hostedJournal: { mode: 'sqlite' } } as DaemonConfig, []),
-      ).toThrow(DaemonConfigFieldRemovedError);
+      ).toThrow(DaemonConfigInvalidError);
       // Nothing was constructed on the rejected path.
       expect(journalConstructions.storeDirs).toEqual([]);
     });

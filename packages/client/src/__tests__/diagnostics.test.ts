@@ -11,7 +11,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig } from '../index';
 import type { ConnectControlResult, ControlClient } from '../daemon/control-client';
-import { appendAuditRecord } from '../daemon/audit-log';
+import { appendAuditRecord } from './fixtures/audit-records';
 
 const auditRead = vi.hoisted(() => ({ fail: false }));
 vi.mock('../daemon/audit-log', async (importOriginal) => {

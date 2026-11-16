@@ -1175,7 +1175,7 @@ dependency.
   spending limit (Grok's free-usage code, or a provider error type such as
   `insufficient_quota`), otherwise `rate_limited`. A -32603 that carries the
   provider's `http_status` is classed by that status (402 is `billing`).
-- Detection: `grok --version` (advisory when it is not the qualified 1.0.77),
+- Detection: `grok --version` (a `warn` verdict when it is not the qualified 1.0.77),
   `grok agent stdio --help` (else
   `refused: acp_unavailable`), and a login signal: `$GROK_HOME/auth.json`
   (default `~/.grok/auth.json`) exists, or `XAI_API_KEY` is set. The file is
@@ -1301,7 +1301,7 @@ and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
   tree observed while the root ran (`dsh.sigkill`,
   [#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)); a tool started
   within one second of that kill is not seen.
-- Detection: `dsh --version` (advisory when it is not the qualified
+- Detection: `dsh --version` (a `warn` verdict when it is not the qualified
   `0.2.2-rc.1`), then `dsh --profile acp --help`, which also writes the acp
   profile into a new root (else `refused: acp_unavailable`). `authPresent`
   means the `keyEnv` variable is set; the key is not checked.
@@ -1728,8 +1728,8 @@ and Codex reads `$HOME/.agents/skills` outside `CODEX_HOME`
 ([Codex `agentUserContext`](#agentusercontext-codex)). A Host-provided skill
 would sit beside the user's rather than replace it.
 
-The one SDK-owned skill store is not a runtime option. `installSkillPacks`,
-`listInstalledSkillPacks` and `projectSkillPack`
+The one SDK-owned skill store is not a runtime option. `installSkillPacks`
+and `projectSkillPack`
 (`packages/client/src/daemon/skill-pack-installer.ts`, exported from
 `@byok-sdk/client`) install verified packs into a content-addressed store and
 copy one pack into a directory the Host names. The Host then points the

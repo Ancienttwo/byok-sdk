@@ -1,26 +1,6 @@
 import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import type { DeviceMetadata } from './device-credential-store.js';
 
-/**
- * A `DaemonConfig` field that no longer exists was supplied. Construction
- * refuses it rather than ignoring it, so a host upgrading across a removal
- * learns at startup which seam is gone instead of silently losing behavior.
- */
-export class DaemonConfigFieldRemovedError extends Error {
-  readonly code = 'daemon_config_field_removed' as const;
-
-  constructor(
-    /** The removed path, e.g. `resultDocument` or `agentEgress.sanitizer`. */
-    readonly field: string,
-    message: string,
-    /** Repo-relative `.md#anchor` of the migration note (#1094). */
-    readonly migration: string,
-  ) {
-    super(message);
-    this.name = 'DaemonConfigFieldRemovedError';
-  }
-}
-
 export type DaemonJournalProtocolRecord = 'recovery-offer' | 'pending-terminal';
 
 /**

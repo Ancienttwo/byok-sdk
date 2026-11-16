@@ -18,7 +18,7 @@ import { generateWinswXml } from '../lifecycle/winsw';
 import { AGENT_PAYLOAD_ENTRY, agentServiceDefinition, agentServiceInstallation } from '../lifecycle/agent-service';
 import { ServiceInstallationError, type ServiceInstallation, type ServiceUpgradeReceipt } from '../lifecycle/service-installation';
 import { runUpgradeInstallationCommand, runUpgradeStatusCommand } from '../bin/commands/upgrade';
-import { appendAuditRecord } from '../daemon/audit-log';
+import { appendAuditRecord } from './fixtures/audit-records';
 import { formatHaltRemedy } from '../diagnostics/format';
 
 function baseConfig(overrides: Partial<DaemonConfig> = {}): DaemonConfig {

@@ -804,7 +804,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP server",
-      "budgetBytes": 13135,
+      "budgetBytes": 13144,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -836,7 +836,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 28394,
+      "budgetBytes": 28447,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1383,7 +1383,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private pure todo runtime",
-      "budgetBytes": 372058,
+      "budgetBytes": 372588,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

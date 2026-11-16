@@ -241,7 +241,7 @@ guarantees.
 
 ## Local Git checkpoint workspaces (removed)
 
-Wire v4 removed the local Git checkpoint mode and the daemon's task workspace root (#925). Every task runs in its Agent home. `gitWorkspace` and `workspaceRoot` in the daemon config raise `DaemonConfigFieldRemovedError`, and `byok-agent workspaces` is gone. The daemon does not read, clean up or delete what an older daemon left: task repositories, files and the private ledger `<storeDir>/git-workspaces.json` stay in place for manual salvage.
+Wire v4 removed the local Git checkpoint mode and the daemon's task workspace root (#925). Every task runs in its Agent home. `gitWorkspace` and `workspaceRoot` in the daemon config are refused as unknown fields (`unknown_field`), and `byok-agent workspaces` is gone. The daemon does not read, clean up or delete what an older daemon left: task repositories, files and the private ledger `<storeDir>/git-workspaces.json` stay in place for manual salvage.
 
 | Asset | Where it lives | Who touches it |
 |---|---|---|
@@ -975,7 +975,7 @@ The Host can only tell whether two submits of the same identity sealed the same 
 
 Sealing does not protect against:
 
-- **A truth `task.terminal` record that the product writes.** The truth route does not read the offer's `sealing` (`packages/cloud/src/handlers/truth.ts:191-227`). A product that writes a sealed task's terminal through `TruthMemoryClient` stores that body as written, in plaintext if it was plaintext, in `attested_record.body_inline`. The SDK daemon never writes one. Writing only sealed content there is the product's obligation.
+- **A truth `task.terminal` record that the product writes.** The truth route does not read the offer's `sealing` (`packages/cloud/src/handlers/truth.ts:191-227`). A product that writes a sealed task's terminal through the truth route stores that body as written, in plaintext if it was plaintext, in `attested_record.body_inline`. The SDK daemon never writes one. Writing only sealed content there is the product's obligation.
 - **The plaintext fields above.** An artifact name, a memory file path (unless the task seals `memory-projection`), the model or a failure class that a runtime chooses is visible to the Host.
 - **The categories v2 leaves plaintext.** Drafts, `agent.egress.reliable` payloads and truth `memory` records are stored as sent, and so is the message of a task that does not seal `agent-message`.
 - **An active Host.** The Host serves the web client its code. It can also send the device any task, for example one that reads local files and returns them in plaintext.

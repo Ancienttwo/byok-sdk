@@ -24,7 +24,7 @@ import path from 'node:path';
 import type { DaemonConfig } from '../daemon/create-daemon.js';
 import type { RuntimeAdapter } from '../types.js';
 import { readLastLifecycleRecord, readLastEnvironmentRecord, parseEnvironmentRecord } from '../daemon/audit-log.js';
-import { attachRuntimeExecutables, attachRuntimeVersionChanges, attachRuntimeVersionVerdicts, parseRuntimeObservations, type RuntimeObservation } from '../runtime-detection.js';
+import { parseControlStatusRuntimes, type RuntimeObservation } from '../runtime-detection.js';
 import { connectControlClient } from '../daemon/control-client.js';
 import { formatLifecycle, formatLifecycleRemedy } from '../diagnostics/format.js';
 import { parseDaemonLifecycle } from '../daemon/daemon-lifecycle.js';
@@ -820,12 +820,9 @@ export async function collectDoctorDiagnostics(
   } else {
     try {
       const live = await controlConnection.client.request<ControlStatusResult>('status');
-      const observed = parseRuntimeObservations(live.runtimes);
+      const observed = parseControlStatusRuntimes(live);
       if (observed !== undefined) {
-        observations = attachRuntimeExecutables(
-          attachRuntimeVersionChanges(attachRuntimeVersionVerdicts(observed, live.runtimeVersionVerdicts), live.runtimeVersionChanges),
-          live.runtimeExecutables,
-        );
+        observations = observed;
         runtimeSource = 'daemon';
       }
       if (live.environment !== undefined && live.environmentResolvedAt !== undefined) {

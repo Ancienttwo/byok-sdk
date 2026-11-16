@@ -12,9 +12,9 @@ export {
   McpStdioClient,
   McpTransportError,
   MCP_DEFAULT_REQUEST_TIMEOUT_MS,
-  MCP_MAX_FRAME_BYTES,
   MCP_OBSERVATION_MAX_STDOUT_BYTES,
 } from './client.js';
+export { MCP_MAX_FRAME_BYTES } from './frame-limit.js';
 export type { McpStdioClientOptions, McpStdioServerSpec } from './client.js';
 
 export {
@@ -39,6 +39,5 @@ export {
   qualifiedMcpToolName,
 } from './projection.js';
 export type {
-  McpLaunchProjection,
   McpToolProjection,
 } from './projection.js';

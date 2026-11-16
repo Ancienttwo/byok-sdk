@@ -5,6 +5,10 @@
   "x-byok-schemaVersion": 1,
   "type": "object",
   "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "The JSON schema this config file names for editors."
+    },
     "nativeSessions": {
       "type": "boolean",
       "description": "Opt in to sanitized Pi session input sent to the device BYOK model. Default false. macOS/Linux only."
@@ -67,13 +71,15 @@
                       "mcpTool": {
                         "type": "string"
                       }
-                    }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
                   "id",
                   "match"
-                ]
+                ],
+                "additionalProperties": false
               }
             },
             "allowWithoutAsking": {
@@ -107,16 +113,19 @@
                       "mcpTool": {
                         "type": "string"
                       }
-                    }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "required": [
                   "id",
                   "match"
-                ]
+                ],
+                "additionalProperties": false
               }
             }
           },
+          "additionalProperties": false,
           "description": "User-defined rules that move single calls across the ask boundary."
         },
         "fileScope": {
@@ -154,7 +163,8 @@
                   "id",
                   "path",
                   "access"
-                ]
+                ],
+                "additionalProperties": false
               },
               "description": "Only for `workspaces`; at least one unique-id, existing absolute root."
             }
@@ -162,12 +172,14 @@
           "required": [
             "mode"
           ],
+          "additionalProperties": false,
           "description": "Optional explicit file scope (#1061, D15). Absent means `inherit` and\npreserves the existing behavior exactly. Only legal when the offer's\neffective mode is `auto`; an `all` runtime with a scope is rejected\nbefore claim. An unsupported lane/adapter/platform is declined as\n`file_scope_unsupported` before claim; on an admitted platform every\nroot is revalidated after claim, before runtime start, and again before\nthe Pi session exists, and an unresolvable root fails the claimed task as\n`file_scope_unavailable`. A configured scope is never silently dropped.\nSDK-owned scoped read/write/edit/find/grep/ls tools enforce the admitted\nroots and shadow the native Pi tools of the same name. Every other tool\n(shell, MCP servers, SDK and user extension tools) is outside the boundary\nand asks on every call, regardless of the built-in risk level; only an\nexplicit allowWithoutAsking rule can opt one out. It is not an OS sandbox."
         }
       },
       "required": [
         "default"
       ],
+      "additionalProperties": false,
       "description": "Per-task tool authorization, decided by this Host for every runtime:\n`all` (default) never blocks and emits a `tool-reminder` event for each\nhigh-risk call; `auto` asks the user through the task's approval path\nbefore a high-risk call runs and is declined before claim on a runtime\nwithout `toolAuthorizationAuto`. `byRuntime` overrides the mode for one\nruntime id. `rules` move single calls across the ask boundary and apply\nto every runtime. A config file and an embedded Host supply the same\nobject; it is validated, copied and frozen before claim, once per offer\n(including resume). Invalid policies decline the offer. Rules never\nchange the wire or native launch.\n\nThe optional `fileScope` (#1061) is an explicit file boundary for the\nSDK-owned file tools: absent means inherit (unchanged behavior);\n`home` authorizes the canonical Agent home; `workspaces` adds explicit\nread/write roots (ids `home` and `run` are reserved). A writer task gets\nthe home read+write; a memory-reader task gets it read-only plus its own\nrun directory (`<home>/.byok/runs/<name>`, its cwd) read+write. It\napplies only to `auto` tasks, requires `agentHome`, and is never selected\nby the wire or the model. It is enforced on the Pi rpc and prepared\nlanes on darwin, linux and win32 and on the durable lane on darwin/linux;\nevery other platform and every non-Pi runtime declines before claim with\n`file_scope_unsupported`. On win32 a root is an absolute drive path\n(`X:\\…`); a `\\\\`-prefixed (UNC, `\\\\?\\`, `\\\\.\\`) or drive- or\nroot-relative path, a stream (`:`), a reserved device name, or a segment\nending in a dot or space is refused. After admission every configured\nroot is revalidated once before the runtime starts; a missing, symlinked,\nreplaced or otherwise unresolvable root fails the claimed task with a\ntyped `file_scope_unavailable` reason instead of starting unscoped. The\nSDK `read`/`write`/`edit`/`find`/`grep`/`ls` tools replace Pi's native\nfile tools and enforce the scope (the prepared lane has no native file\ntools). Bash, MCP and extension tools are outside the scope and ask on\nevery call unless an `allowWithoutAsking` rule matches. This is not an\nOS sandbox."
     },
     "localToolApproval": {
@@ -182,6 +194,7 @@
           "description": "Explicit macOS keychain file; omitted uses the operating system's default keychain."
         }
       },
+      "additionalProperties": false,
       "description": "Select an explicit macOS keychain for device enrollment custody."
     },
     "storage": {
@@ -215,7 +228,8 @@
           "required": [
             "maxStoreBytes",
             "minFreeBytes"
-          ]
+          ],
+          "additionalProperties": false
         },
         "skillPackDataDirs": {
           "type": "array",
@@ -290,9 +304,11 @@
                 "terminal-evidence": {
                   "type": "number"
                 }
-              }
+              },
+              "additionalProperties": false
             }
-          }
+          },
+          "additionalProperties": false
         },
         "journal": {
           "type": "object",
@@ -306,9 +322,11 @@
               "description": "Per-record byte bound. Defaults to the journal's own bound (256 KiB); oversized records are refused, never truncated.\nAn inbound envelope record may still reach a floor derived from the inline sealed maximum (415083 bytes),\nso a sealed envelope is journaled and declined, not stalled (#654). An inbound envelope above the bound is\nnot stored and does not stall the cursor: an offer is declined (`inbound_envelope_too_large`), any other\nenvelope is dropped (#826)."
             }
           },
+          "additionalProperties": false,
           "description": "Every daemon journals tasks durably in `<storeDir>/daemon.db` before it acks them."
         }
-      }
+      },
+      "additionalProperties": false
     },
     "localAgentRelease": {
       "x-byok-surface": "distribution-owned",
@@ -350,6 +368,7 @@
       "required": [
         "hostStorageRoot"
       ],
+      "additionalProperties": false,
       "description": "Strict Agent execution boundary. The host selects one absolute branded\nstorage root; the SDK alone composes `agents/<agentId>`, initializes the\ndurable home, and binds it as runtime cwd. `projection` may write opaque,\nredacted host content into the canonical home supplied by the SDK."
     },
     "agentMemoryMcp": {
@@ -391,6 +410,7 @@
                 "scopeId",
                 "epoch"
               ],
+              "additionalProperties": false,
               "description": "The Agent scope this writer epoch seals its snapshots under (#1045 C4).\nIt is fixed for the epoch: the Host issues a higher epoch to change it.\nWith it, a snapshot is only ever sent sealed."
             }
           },
@@ -398,7 +418,8 @@
             "grantRef",
             "writerEpoch",
             "policyRevision"
-          ]
+          ],
+          "additionalProperties": false
         },
         "redactor": {
           "x-byok-surface": "embedded-only",
@@ -409,6 +430,7 @@
           "not": {}
         }
       },
+      "additionalProperties": false,
       "description": "Optional, one-way hosted projection. Without all guards it has zero network activity."
     },
     "agentMemoryExport": {
@@ -438,6 +460,7 @@
       "required": [
         "mode"
       ],
+      "additionalProperties": false,
       "description": "Explicit composition for SDK-reserved MCP helpers when this daemon is\nembedded in a single-file/SEA product executable. The product entrypoint\nmust also call `runSdkReservedHelperCommand()` before its own CLI parser."
     },
     "maxConcurrentReaderAttemptsPerAgentHome": {
@@ -478,7 +501,8 @@
                 "delivery",
                 "maxCoalesceMs",
                 "maxEventBytes"
-              ]
+              ],
+              "additionalProperties": false
             },
             "reliable": {
               "type": "object",
@@ -497,7 +521,8 @@
                 "maxPendingEventsPerAgent",
                 "maxPendingBytesPerAgent",
                 "maxPendingBytesPerTenant"
-              ]
+              ],
+              "additionalProperties": false
             },
             "transfers": {
               "type": "object",
@@ -523,7 +548,8 @@
                       "required": [
                         "maxBytes",
                         "allowedMimeTypes"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -548,7 +574,8 @@
                       "required": [
                         "maxBytes",
                         "allowedMimeTypes"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -573,7 +600,8 @@
                       "required": [
                         "maxBytes",
                         "allowedMimeTypes"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 }
@@ -582,7 +610,8 @@
                 "workspace",
                 "transcript",
                 "artifact"
-              ]
+              ],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -591,6 +620,7 @@
             "reliable",
             "transfers"
           ],
+          "additionalProperties": false,
           "description": "Exact policy the daemon is willing to consume from an Agent offer.\nAbsent: the client default policy, as a config file's `\"agentEgress\": {}`."
         },
         "contentRead": {
@@ -610,7 +640,8 @@
                       },
                       "required": [
                         "kind"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -625,7 +656,8 @@
                       "required": [
                         "kind",
                         "root"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -649,7 +681,8 @@
                 "root",
                 "maxTextBytes",
                 "textMimeTypes"
-              ]
+              ],
+              "additionalProperties": false
             },
             "transcript": {
               "type": "object",
@@ -665,7 +698,8 @@
                       },
                       "required": [
                         "kind"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -680,7 +714,8 @@
                       "required": [
                         "kind",
                         "root"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -704,7 +739,8 @@
                 "root",
                 "maxTextBytes",
                 "textMimeTypes"
-              ]
+              ],
+              "additionalProperties": false
             },
             "artifact": {
               "type": "object",
@@ -720,7 +756,8 @@
                       },
                       "required": [
                         "kind"
-                      ]
+                      ],
+                      "additionalProperties": false
                     },
                     {
                       "type": "object",
@@ -735,7 +772,8 @@
                       "required": [
                         "kind",
                         "root"
-                      ]
+                      ],
+                      "additionalProperties": false
                     }
                   ]
                 },
@@ -759,7 +797,8 @@
                 "root",
                 "maxTextBytes",
                 "textMimeTypes"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeAllowlistedRoots": {
               "type": "array",
@@ -768,9 +807,11 @@
               }
             }
           },
+          "additionalProperties": false,
           "description": "Device-local additions required to make one server-selected transfer\npolicy executable. These values only supplement `policy.transfers`: a\nlocally configured surface never enables a server-disabled transfer, and\ncannot widen its maxBytes or MIME authority."
         }
       },
+      "additionalProperties": false,
       "description": "Explicit Agent-local/cloud egress selection. Omission still enforces the\nSDK metadata/status projection, but does not advertise or admit the new\npolicy/reliable protocol surface."
     },
     "runtimeAllowlist": {
@@ -836,7 +877,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -851,7 +893,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -874,7 +917,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -889,7 +933,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -912,7 +957,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -927,7 +973,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -938,6 +985,7 @@
                 "qualifiedVersion",
                 "unqualified"
               ],
+              "additionalProperties": false,
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             },
             "runtimeEnvironment": {
@@ -954,7 +1002,8 @@
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -977,7 +1026,8 @@
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ],
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
@@ -986,7 +1036,8 @@
               "type": "string",
               "description": "`PiAdapterOptions.packageDir`: the absolute Pi asset root of a product\nthat bundles Pi. It is the only source: the SDK sets it as\n`PI_PACKAGE_DIR` for Pi and the pi-host helper process alone, and\nremoves any `PI_PACKAGE_DIR` the login shell or Host environment holds."
             }
-          }
+          },
+          "additionalProperties": false
         },
         "claude": {
           "type": "object",
@@ -1037,7 +1088,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1052,7 +1104,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1075,7 +1128,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1090,7 +1144,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1113,7 +1168,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1128,7 +1184,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1139,6 +1196,7 @@
                 "qualifiedVersion",
                 "unqualified"
               ],
+              "additionalProperties": false,
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             },
             "runtimeEnvironment": {
@@ -1155,7 +1213,8 @@
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1178,12 +1237,14 @@
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ],
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
-          }
+          },
+          "additionalProperties": false
         },
         "codex": {
           "type": "object",
@@ -1234,7 +1295,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1249,7 +1311,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1272,7 +1335,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1287,7 +1351,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1310,7 +1375,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1325,7 +1391,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1336,6 +1403,7 @@
                 "qualifiedVersion",
                 "unqualified"
               ],
+              "additionalProperties": false,
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             },
             "runtimeEnvironment": {
@@ -1352,7 +1420,8 @@
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1375,12 +1444,14 @@
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ],
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
-          }
+          },
+          "additionalProperties": false
         },
         "grok": {
           "type": "object",
@@ -1438,7 +1509,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1453,7 +1525,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1476,7 +1549,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1491,7 +1565,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1514,7 +1589,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1529,7 +1605,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1540,6 +1617,7 @@
                 "qualifiedVersion",
                 "unqualified"
               ],
+              "additionalProperties": false,
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             },
             "runtimeEnvironment": {
@@ -1556,7 +1634,8 @@
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1579,12 +1658,14 @@
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ],
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           },
+          "additionalProperties": false,
           "description": "Applies only when `runtimeAllowlist` lists `grok`."
         },
         "dsh": {
@@ -1618,6 +1699,7 @@
                 "model",
                 "keyEnv"
               ],
+              "additionalProperties": false,
               "description": "`DshAdapterOptions.model`: provider, model, `baseUrl` and the name of the variable that holds the key."
             },
             "sandbox": {
@@ -1660,7 +1742,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1675,7 +1758,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1698,7 +1782,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1713,7 +1798,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1736,7 +1822,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1751,7 +1838,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1762,6 +1850,7 @@
                 "qualifiedVersion",
                 "unqualified"
               ],
+              "additionalProperties": false,
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             },
             "runtimeEnvironment": {
@@ -1778,7 +1867,8 @@
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1801,7 +1891,8 @@
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ],
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
@@ -1811,6 +1902,7 @@
             "home",
             "model"
           ],
+          "additionalProperties": false,
           "description": "Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only."
         },
         "opencode": {
@@ -1858,7 +1950,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1873,7 +1966,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1896,7 +1990,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1911,7 +2006,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1934,7 +2030,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -1949,7 +2046,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -1959,7 +2057,8 @@
               "required": [
                 "qualifiedVersion",
                 "unqualified"
-              ]
+              ],
+              "additionalProperties": false
             },
             "runtimeEnvironment": {
               "anyOf": [
@@ -1975,7 +2074,8 @@
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -1998,7 +2098,8 @@
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ],
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
@@ -2007,6 +2108,7 @@
           "required": [
             "models"
           ],
+          "additionalProperties": false,
           "description": "Required when runtimeAllowlist lists opencode. Native user configuration is inherited."
         },
         "agy": {
@@ -2052,7 +2154,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -2067,7 +2170,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -2090,7 +2194,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -2105,7 +2210,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -2128,7 +2234,8 @@
                         "required": [
                           "kind",
                           "version"
-                        ]
+                        ],
+                        "additionalProperties": false
                       },
                       {
                         "type": "object",
@@ -2143,7 +2250,8 @@
                         "required": [
                           "kind",
                           "prefix"
-                        ]
+                        ],
+                        "additionalProperties": false
                       }
                     ]
                   },
@@ -2154,6 +2262,7 @@
                 "qualifiedVersion",
                 "unqualified"
               ],
+              "additionalProperties": false,
               "description": "A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103)."
             },
             "runtimeEnvironment": {
@@ -2170,7 +2279,8 @@
                         "type": "string"
                       }
                     }
-                  }
+                  },
+                  "additionalProperties": false
                 },
                 {
                   "type": "object",
@@ -2193,7 +2303,8 @@
                   },
                   "required": [
                     "base"
-                  ]
+                  ],
+                  "additionalProperties": false
                 }
               ],
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
@@ -2202,9 +2313,11 @@
           "required": [
             "home"
           ],
+          "additionalProperties": false,
           "description": "Required when `runtimeAllowlist` lists `agy`, and applies only then."
         }
       },
+      "additionalProperties": false,
       "description": "Isolation options of the runtime adapters `createDaemon` builds (#1094),\npassed to each adapter's constructor; an unset option keeps the\nadapter's default, under which a runtime keeps the user's own context,\nsessions and MCP servers. Which runtimes are built stays\n`runtimeAllowlist`, and the Codex sandbox stays `codexSandbox`.\n`createDaemonWithAdapters` rejects this key, even when undefined:\nconfigure each injected adapter directly."
     },
     "runtimeEnvironment": {
@@ -2221,7 +2334,8 @@
                 "type": "string"
               }
             }
-          }
+          },
+          "additionalProperties": false
         },
         {
           "type": "object",
@@ -2244,7 +2358,8 @@
           },
           "required": [
             "base"
-          ]
+          ],
+          "additionalProperties": false
         }
       ],
       "description": "The default environment a runtime `createDaemon` builds gives its\nchildren (#1095): by default the user's login-shell snapshot, so a\nvariable the Host sets in `process.env` reaches a runtime only when `pass`\nnames it. One exception: after applying the snapshot, the default base\nsets `HOME` to the daemon's own live `HOME` (#2084); `PATH`, `XDG_*` and\nother values the rc derived from its `HOME` stay as the snapshot has them.\nA policy that passes `HOME` or uses `allowlist` is unchanged.\n`runtimes.<id>.runtimeEnvironment` overrides it for that runtime\n(#1759): it replaces this policy and is not merged with this `pass`.\n`createDaemonWithAdapters` refuses this field: each injected adapter\ntakes its own `runtimeEnvironment` option."
@@ -2280,6 +2395,7 @@
         "profileDbPath",
         "sessionDir"
       ],
+      "additionalProperties": false,
       "description": "Separate-process Pi BYOK credential boundary. Required only for a\n`dispatchSelection` in the BYOK lane; subscription runtimes and legacy\nPi tasks do not invoke it."
     },
     "runtimePreference": {
@@ -2306,6 +2422,7 @@
       "required": [
         "enabled"
       ],
+      "additionalProperties": false,
       "description": "Opt-in host composition for a daemon launched under a different OS\nprincipal than the interactive CLI (notably a WinSW service). When true,\nan unpaired daemon holds the normal writer lease and exposes only the\nexisting HMAC-authenticated local control surface so `enrollment.pair`\ncan persist the credential under the daemon's own OS token. Absent by\ndefault: ordinary foreground `start()` keeps rejecting an unpaired device."
     },
     "branding": {
@@ -2324,6 +2441,7 @@
           "description": "Brand accent color (any CSS-color-like string — hex, name, etc.); not parsed or validated here."
         }
       },
+      "additionalProperties": false,
       "description": "Optional white-label branding — see `DaemonBranding`. Carried through verbatim to `status().branding`."
     },
     "codexSandbox": {
@@ -2371,13 +2489,15 @@
               },
               "required": [
                 "command"
-              ]
+              ],
+              "additionalProperties": false
             }
           }
         },
         "required": [
           "mcpServers"
-        ]
+        ],
+        "additionalProperties": false
       },
       "description": "Device-local registry behind wire-level `requiredToolsets` ids. Only\nlogical ids cross the SaaS wire; MCP executable definitions stay here.\nThe first slice supports stdio servers (`command` + `args`) only and\ndeliberately has no task-provided env/header/secret surface."
     },
@@ -2403,6 +2523,7 @@
         "maxFileBytes",
         "maxTaskBytes"
       ],
+      "additionalProperties": false,
       "description": "Legacy artifact bytes only: default 16 MiB/file and 64 MiB/task, independent of event output limits."
     },
     "startupTimeoutMs": {
@@ -2425,6 +2546,7 @@
           "description": "Otherwise flush at most this often (ms) while events are pending. Default 250 (~4/sec)."
         }
       },
+      "additionalProperties": false,
       "description": "Timing and event-count batching policy. The server owns the byte ceiling."
     },
     "shutdownGraceMs": {
@@ -2447,6 +2569,7 @@
           "description": "The deployment's minimum interval between accepted publications. Default 5s."
         }
       },
+      "additionalProperties": false,
       "description": "Cadence for the `online` presence heartbeat (§12.3), when — and only when\n— the deployment's capability declaration contains `presence.hints` (see\n`capabilities-client.ts`; a deployment that declares nothing, or one this\ndaemon could not read a declaration from, publishes nothing at all).\n\nEvery field is optional and defaults to `presence-publisher.ts`'s own\nconstants, which are chosen against the hosted defaults. `ttlMs` and\n`minimumIntervalMs` describe THE DEPLOYMENT's hint TTL and publication\nthrottle as this operator understands them: the daemon never learns either\nfrom the wire, and uses them only to validate `intervalMs` sits strictly\nbetween them — a cadence outside that band is rejected synchronously here,\nthe same way `maxTaskOutputBytes` is above, rather than degrading into a\nrate-limited or flickering hint nobody sees an error for."
     },
     "deviceAssertion": {
@@ -2467,6 +2590,7 @@
       "required": [
         "audiences"
       ],
+      "additionalProperties": false,
       "description": "Plan `device-assertion-broker`: opt-in local assertion broker — lets a\nsibling process on this same machine (typically the host's own CLI,\ninstalled alongside this daemon) ask the daemon, over the already\nauthenticated control socket, to mint a short-lived audience-scoped\nassertion signed with the paired device key. See\nDeviceAssertionConfig.\n\nOFF by default, and off is expressed two ways that mean the same thing: an\nabsent section, or a present one with an empty `audiences` list. Both make\n`assertion.issue` answer `assertion_disabled` without looking at anything\nelse. A new local authentication surface does not get to be on because\nsomeone left a config key behind."
     },
     "inputPreparation": {
@@ -2490,54 +2614,5 @@
     "productId",
     "serverUrl"
   ],
-  "x-byok-removedFields": [
-    {
-      "path": "permissionDefaults",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "agentEgress.sanitizer",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "mcpLaunchCwd",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "toolImplementationAuthority",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "hostedJournal",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "strictAgentOnly",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "gitWorkspace",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "workspaceRoot",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "resultDocument",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "maxConcurrentMutableSessionsPerAgentHome",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "durablePi",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    },
-    {
-      "path": "agentMemoryFilesystem",
-      "migration": "docs/spec.md#removed-daemonconfig-fields"
-    }
-  ]
+  "additionalProperties": false
 }

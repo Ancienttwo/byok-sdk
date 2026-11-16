@@ -5,9 +5,6 @@
 // signature reaches it, so changing it still changes the public surface.
 // entry @byok-sdk/client
 //   AGENT_CONTENT_READ_CAPABILITIES -> dist/daemon/agent-content-read.d.ts
-//   AGENT_CONTENT_READ_CAPABILITY_ARTIFACT -> dist/daemon/agent-content-read.d.ts
-//   AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT -> dist/daemon/agent-content-read.d.ts
-//   AGENT_CONTENT_READ_CAPABILITY_WORKSPACE -> dist/daemon/agent-content-read.d.ts
 //   AGENT_HOME_PROJECTION_STATE_FILE -> dist/agent-home.d.ts
 //   AGENT_MEMORY_AUDIT_FILENAME -> dist/daemon/agent-memory.d.ts
 //   AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS -> dist/daemon/agent-memory-intent.d.ts
@@ -50,7 +47,6 @@
 //   AgentHomeProjection -> dist/agent-home.d.ts
 //   AgentHomeProjectionApplyFunction -> dist/agent-home.d.ts
 //   AgentHomeProjectionApplyInput -> dist/agent-home.d.ts
-//   AgentHomeProjectionFunction -> dist/agent-home.d.ts
 //   AgentHomeProjectionInput -> dist/agent-home.d.ts
 //   AgentHomeReaderRunMissingError -> dist/agent-home.d.ts
 //   AgentHomeResolution -> dist/agent-home.d.ts
@@ -59,6 +55,7 @@
 //   AgentMemoryHostedProjection -> dist/daemon/agent-memory.d.ts
 //   AgentMemoryIntentNoticeError -> dist/daemon/agent-memory-intent.d.ts
 //   AgentMemoryIntentNoticeFailureReason -> dist/daemon/agent-memory-intent.d.ts
+//   AgentMemoryOutboxVersionUnsupportedError -> dist/daemon/agent-memory.d.ts
 //   AgentMemoryProjectionGrant -> dist/daemon/agent-memory.d.ts
 //   AgentMemoryRedactor -> dist/daemon/agent-memory.d.ts
 //   AgentMemoryRevisionConflictError -> dist/daemon/agent-memory.d.ts
@@ -115,7 +112,6 @@
 //   DaemonConfig -> dist/daemon/create-daemon.d.ts
 //   DaemonConfigCheck -> dist/daemon/config-schema/check.d.ts
 //   DaemonConfigCheckOptions -> dist/daemon/config-schema/check.d.ts
-//   DaemonConfigFieldRemovedError -> dist/daemon/daemon-errors.d.ts
 //   DaemonConfigInvalidError -> dist/daemon-config-invalid-error.d.ts
 //   DaemonConfigIssue -> dist/daemon/config-schema/validate.d.ts
 //   DaemonConfigIssueCode -> dist/daemon/config-schema/validate.d.ts
@@ -126,7 +122,6 @@
 //   DaemonEffectiveRuntime -> dist/daemon/config-schema/effective.d.ts
 //   DaemonEffectiveToolAuthorization -> dist/daemon/config-schema/effective.d.ts
 //   DaemonEvent -> dist/daemon/observer.d.ts
-//   DaemonEventKind -> dist/daemon/observer.d.ts
 //   DaemonEventListener -> dist/daemon/observer.d.ts
 //   DaemonHaltError -> dist/daemon/daemon-lifecycle.d.ts
 //   DaemonHaltReason -> dist/daemon/daemon-lifecycle.d.ts
@@ -269,7 +264,6 @@
 //   JournalUnavailableError -> dist/daemon/journal/journal.d.ts
 //   JournalUnknownTaskError -> dist/daemon/journal/journal.d.ts
 //   LocalAgentReleaseIdentity -> dist/release-identity.d.ts
-//   LocalMemoryFilter -> dist/daemon/truth-memory-client.d.ts
 //   LocalStateRelocationBusyError -> dist/local-state-relocation.d.ts
 //   LocalStateRelocationError -> dist/local-state-relocation.d.ts
 //   LocalStateRelocationInput -> dist/local-state-relocation.d.ts
@@ -293,7 +287,6 @@
 //   McpToolsetReloadReceipt -> dist/types.d.ts
 //   McpToolsetRevisionConflictError -> dist/daemon/toolset-registry.d.ts
 //   McpToolsetStatus -> dist/types.d.ts
-//   MemorySelector -> dist/daemon/truth-memory-client.d.ts
 //   MessageDraftDelta -> dist/types.d.ts
 //   NativeApprovalDecision -> dist/native-interactions.d.ts
 //   NativeInteractionCapabilities -> dist/native-interactions.d.ts
@@ -361,7 +354,6 @@
 //   RuntimeAdapterRejectedOperation -> dist/types.d.ts
 //   RuntimeCapabilities -> dist/types.d.ts
 //   RuntimeDetectResult -> dist/types.d.ts
-//   RuntimeDetectionAdvisory -> dist/types.d.ts
 //   RuntimeDetectionRefusalReason -> dist/types.d.ts
 //   RuntimeDisposalFailure -> dist/runtime-failure.d.ts
 //   RuntimeDisposalFailureInput -> dist/runtime-failure.d.ts
@@ -454,8 +446,6 @@
 //   SystemToolUnavailableError -> @byok-sdk/core/system-tool#SystemToolUnavailableError
 //   TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES -> dist/daemon/control-protocol.d.ts
 //   TASK_ASSERTION_ISSUE_ERROR_CODES -> dist/daemon/control-protocol.d.ts
-//   TOOL_AUTHORIZATION_MODES -> dist/tool-authorization.d.ts
-//   TOOL_FILE_ACCESS -> dist/tool-authorization.d.ts
 //   TaskAssertionIssueErrorCode -> dist/daemon/control-protocol.d.ts
 //   TaskAssertionIssueParams -> dist/daemon/control-protocol.d.ts
 //   TaskAssertionIssueResult -> dist/daemon/control-protocol.d.ts
@@ -493,25 +483,12 @@
 //   ToolRisk -> dist/tool-authorization.d.ts
 //   ToolRiskReason -> dist/tool-authorization.d.ts
 //   ToolRule -> dist/tool-authorization.d.ts
-//   TruthManifestQueryInput -> dist/daemon/truth-memory-client.d.ts
-//   TruthManifestRecord -> dist/daemon/truth-memory-client.d.ts
-//   TruthMemoryClient -> dist/daemon/truth-memory-client.d.ts
-//   TruthMemoryClientError -> dist/daemon/truth-memory-client.d.ts
-//   TruthMemoryClientErrorCode -> dist/daemon/truth-memory-client.d.ts
-//   TruthMemoryClientOptions -> dist/daemon/truth-memory-client.d.ts
-//   TruthMemoryMetric -> dist/daemon/truth-memory-client.d.ts
-//   TruthSnapshotCandidateInput -> dist/daemon/truth-memory-client.d.ts
-//   TruthSnapshotWriteInput -> dist/daemon/truth-memory-client.d.ts
-//   TruthTerminalWriteInput -> dist/daemon/truth-memory-client.d.ts
-//   TruthWriteBody -> dist/daemon/truth-memory-client.d.ts
-//   TruthWriteResult -> dist/daemon/truth-memory-client.d.ts
 //   Unsubscribe -> dist/daemon/observer.d.ts
 //   UnsupportedServicePlatformError -> dist/lifecycle/create-service-lifecycle.d.ts
 //   UpgradeFromBreakingEntry -> dist/lifecycle/upgrade-from.d.ts
 //   UpgradeFromRefusalCode -> dist/lifecycle/upgrade-from.d.ts
 //   UpgradeFromReport -> dist/lifecycle/upgrade-from.d.ts
 //   UpgradeTrainPackage -> dist/lifecycle/upgrade-from.d.ts
-//   VerifiedTruthRecord -> dist/daemon/truth-memory-client.d.ts
 //   WithheldOfferRecord -> dist/daemon/journal/journal.d.ts
 //   WithheldOfferTask -> dist/daemon/journal/journal.d.ts
 //   agentServiceDefinition -> dist/lifecycle/agent-service.d.ts
@@ -529,7 +506,6 @@
 //   copyAgentMemoryHelperAssets -> dist/util/agent-memory-helper-release.d.ts
 //   copyPiRuntimeAssets -> dist/adapters/pi/runtime-assets.d.ts
 //   copySdkNativeAssets -> dist/sdk-native-assets.d.ts
-//   createAgentHomeProjection -> dist/agent-home.d.ts
 //   createAgentHomeProjectionConsumer -> dist/agent-home.d.ts
 //   createAutoToolAuthorizationGate -> dist/tool-authorization.d.ts
 //   createDaemon -> dist/daemon/create-daemon.d.ts
@@ -560,7 +536,6 @@
 //   isRuntimeExecutionFailure -> dist/runtime-failure.d.ts
 //   isRuntimeStartupDisposalFailure -> dist/runtime-failure.d.ts
 //   journalHash -> dist/daemon/journal/journal.d.ts
-//   listInstalledSkillPacks -> dist/daemon/skill-pack-installer.d.ts
 //   localStateRelocation -> dist/local-state-relocation.d.ts
 //   nodeAgentProgram -> dist/lifecycle/service-types.d.ts
 //   openTeamTmuxView -> dist/util/team-tmux-view.d.ts
@@ -651,7 +626,6 @@
 //   RuntimeAdaptersRuntimes -> dist/adapters/runtime-adapters.d.ts
 //   RuntimeCapabilities -> dist/types.d.ts
 //   RuntimeDetectResult -> dist/types.d.ts
-//   RuntimeDetectionAdvisory -> dist/types.d.ts
 //   RuntimeDetectionRefusalReason -> dist/types.d.ts
 //   RuntimeDisposalFailure -> dist/runtime-failure.d.ts
 //   RuntimeDisposalFailureInput -> dist/runtime-failure.d.ts
@@ -726,7 +700,7 @@
 //   HostLayoutPlatform -> dist/daemon/host-layout.d.ts
 //   resolveHostLayout -> dist/daemon/host-layout.d.ts
 // entry @byok-sdk/client/mcp-server
-//   MCP_SERVER_MAX_FRAME_BYTES -> dist/mcp-server/index.d.ts
+//   MCP_SERVER_MAX_FRAME_BYTES -> dist/mcp/frame-limit.d.ts
 //   MCP_SERVER_MAX_IN_FLIGHT -> dist/mcp-server/index.d.ts
 //   MCP_SERVER_MAX_LINE_BYTES -> dist/mcp-server/index.d.ts
 //   MCP_SERVER_MAX_SEEN_IDS -> dist/mcp-server/index.d.ts
@@ -949,7 +923,7 @@ export declare class GrokAdapter implements RuntimeAdapter {
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, } from '../types.js';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionRefusalReason, } from '../types.js';
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
 export type { RuntimeObservation } from '../runtime-detection.js';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure.js';
@@ -1256,7 +1230,6 @@ export interface AgentHomeProjection {
     prepare?(input: AgentHomeProjectionInput): void | Promise<void>;
     apply?(input: AgentHomeProjectionApplyInput): void | Promise<void>;
 }
-export type AgentHomeProjectionFunction = (input: AgentHomeProjectionInput) => void | Promise<void>;
 export type AgentHomeProjectionApplyFunction = (input: AgentHomeProjectionApplyInput) => void | Promise<void>;
 export interface AgentHomeLease {
     readonly leaseId: string;
@@ -1377,7 +1350,6 @@ export declare class AgentHomeManager {
     supportsTaskFreeProjection(): boolean;
     project(input: AgentHomeProjectionPayload): Promise<AgentHomeProjectionOutcome>;
 }
-export declare function createAgentHomeProjection(prepare: AgentHomeProjectionFunction): AgentHomeProjection;
 export declare function createAgentHomeProjectionConsumer(apply: AgentHomeProjectionApplyFunction): AgentHomeProjection;
 // ==== @byok-sdk/client dist/agent-memory/index.d.ts ====
 export { AgentMemoryService } from '../daemon/agent-memory.js';
@@ -1490,9 +1462,6 @@ export declare const AGENT_CONTENT_READ_CAPABILITIES: Readonly<{
     readonly transcript: "agent-content-transcript-read";
     readonly artifact: "agent-content-artifact-read";
 }>;
-export declare const AGENT_CONTENT_READ_CAPABILITY_WORKSPACE: "agent-content-workspace-read";
-export declare const AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT: "agent-content-transcript-read";
-export declare const AGENT_CONTENT_READ_CAPABILITY_ARTIFACT: "agent-content-artifact-read";
 // support
 export declare const AGENT_CONTENT_READ_DECISIONS: readonly ['allow', 'deny'];
 export type AgentContentReadDecision = (typeof AGENT_CONTENT_READ_DECISIONS)[number];
@@ -1717,6 +1686,10 @@ export declare const AGENT_MEMORY_OUTBOX_FILENAME = "agent-memory-redacted-outbo
 export declare class AgentMemorySnapshotLimitError extends AgentMemoryValidationError {
     readonly limit: 'files' | 'bytes' | 'entries' | 'manifest';
     constructor(limit: 'files' | 'bytes' | 'entries' | 'manifest', message: string);
+}
+export declare class AgentMemoryOutboxVersionUnsupportedError extends AgentMemoryError {
+    readonly stateVersion: unknown;
+    constructor(stateVersion: unknown);
 }
 export declare class AgentMemoryRevisionConflictError extends AgentMemoryError {
     readonly expectedRevision: string;
@@ -2036,7 +2009,6 @@ export declare function checkDaemonConfig(input: unknown, options: DaemonConfigC
 import { type ToolAuthorizationMode, type ToolFileScope } from '../../tool-authorization.js';
 import type { RuntimeVersionPolicy } from '../../types.js';
 import type { DaemonStatus } from '../create-daemon.js';
-import type { DaemonConfigIssue } from './validate.js';
 import type { RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 export type DaemonMemoryHelperResolution = {
     readonly state: 'not-needed' | 'native' | 'unsupported-platform';
@@ -2063,7 +2035,6 @@ export interface DaemonEffectiveRuntime {
 }
 export interface DaemonEffectiveConfig {
     readonly schemaVersion: number;
-    readonly warnings: readonly DaemonConfigIssue[];
     readonly directories: {
         readonly storeDir: {
             readonly path: string;
@@ -2108,13 +2079,11 @@ export type { DaemonEffectiveConfig, DaemonEffectiveMcpServer, DaemonEffectiveRu
 export declare const DAEMON_CONFIG_SCHEMA_VERSION = 1;
 // ==== @byok-sdk/client dist/daemon/config-schema/validate.d.ts ====
 export type DaemonConfigSource = 'cli' | 'embedded';
-export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'invalid_version_policy' | 'invalid_file_scope' | 'unknown_field' | 'removed_field' | 'embedded_only' | 'distribution_owned';
+export type DaemonConfigIssueCode = 'not_an_object' | 'missing_required' | 'invalid_type' | 'invalid_value' | 'invalid_version_policy' | 'invalid_file_scope' | 'unknown_field' | 'embedded_only' | 'distribution_owned';
 export interface DaemonConfigIssue {
-    readonly severity: 'error' | 'warning';
     readonly code: DaemonConfigIssueCode;
     readonly path: string;
     readonly message: string;
-    readonly migration?: string;
 }
 export interface DaemonConfigValidation {
     readonly ok: boolean;
@@ -2133,10 +2102,10 @@ import type { StoragePressureState } from './retention/pressure.js';
 import type { RetentionSnapshot } from './retention/sweeper.js';
 import type { OperationalHealthSnapshot } from './operational-health.js';
 import type { DaemonLifecycle } from './daemon-lifecycle.js';
-import type { RuntimeObservation, RuntimeVersionChange } from '../runtime-detection.js';
+import type { RuntimeObservation } from '../runtime-detection.js';
 import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type { LocalAgentReleaseIdentity } from '../release-identity.js';
-import type { McpToolsetRegistryStatus, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
+import type { McpToolsetRegistryStatus } from '../types.js';
 import type { AgentHomeExecutionStatus } from '../agent-home.js';
 import type { InputPreparationCancelParamsV1, InputPreparationLookupParamsV1, InputPreparationReceiptV1, InputPreparationRequestV1 } from '../input-preparation.js';
 // support
@@ -2167,19 +2136,6 @@ export interface ControlStatusResult {
     lifecycle: DaemonLifecycle;
     activeTasks: ControlActiveTask[];
     runtimes?: RuntimeObservation[];
-    runtimeVersionVerdicts?: Array<{
-        readonly id: string;
-        readonly versionVerdict: RuntimeVersionVerdict;
-    }>;
-    runtimeVersionChanges?: Array<{
-        readonly id: string;
-        readonly versionChange: RuntimeVersionChange;
-    }>;
-    runtimeExecutables?: Array<{
-        readonly id: string;
-        readonly executablePath?: string;
-        readonly executableSource: RuntimeExecutableSource;
-    }>;
     environment?: ServiceEnvironmentStatus;
     environmentResolvedAt?: string;
     queueWatermarks: TaskQueueWatermark[];
@@ -2449,14 +2405,6 @@ export declare function createDaemonWithAdapters(config: DaemonConfig, adapters:
 export declare function createDaemon(config: DaemonConfig, overrides?: DaemonOverrides): Daemon;
 // ==== @byok-sdk/client dist/daemon/daemon-errors.d.ts ====
 import type { DeviceMetadata } from './device-credential-store.js';
-export declare class DaemonConfigFieldRemovedError extends Error {
-    readonly field: string;
-    readonly migration: string;
-    readonly code: 'daemon_config_field_removed';
-    constructor(
-    field: string, message: string,
-    migration: string);
-}
 export type DaemonJournalProtocolRecord = 'recovery-offer' | 'pending-terminal';
 export declare class DaemonJournalProtocolUnsupportedError extends Error {
     readonly taskId: string;
@@ -3095,7 +3043,6 @@ import type { DaemonLifecycle } from './daemon-lifecycle.js';
 import type { ExecutionRecord } from './execution-record.js';
 import type { RuntimeObservation } from '../runtime-detection.js';
 import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
-export type DaemonEventKind = DaemonEvent['kind'];
 import type { OutboundRejection } from './outbound-settlement.js';
 export type DaemonEvent = ({
     kind: 'outbound-rejected';
@@ -3616,7 +3563,6 @@ export interface SkillPackInstallResult {
 }
 export declare function skillPacksRoot(dataDir: string): string;
 export declare function installSkillPacks(options: InstallSkillPacksOptions): Promise<SkillPackInstallResult>;
-export declare function listInstalledSkillPacks(dataDir: string): Promise<readonly InstalledSkillPack[]>;
 export interface ProjectedSkillPack {
     readonly name: string;
     readonly contentHash: string;
@@ -3866,96 +3812,6 @@ export declare class McpToolsetDefinitionRevisionConflictError extends Error {
     readonly expectedRevision: string;
     readonly actualRevision: string;
     constructor(toolsetId: string, expectedRevision: string, actualRevision: string);
-}
-// ==== @byok-sdk/client dist/daemon/truth-memory-client.d.ts ====
-import { type ContentHash, type TruthRecordKind, type TruthRecordSelector } from '@byok-sdk/core';
-import type { DeviceProofSigner } from './device-proof-signer.js';
-export interface TruthManifestRecord {
-    readonly kind: TruthRecordKind;
-    readonly recordKey: string;
-    readonly rev: number;
-    readonly contentHash: ContentHash;
-    readonly byteSize: number;
-    readonly label?: string;
-    readonly updatedAt: string;
-}
-export interface TruthManifestQueryInput {
-    readonly kind?: TruthRecordKind;
-    readonly keyPrefix?: string;
-    readonly limit?: number;
-}
-export interface MemorySelector {
-    select(manifest: readonly TruthManifestRecord[]): readonly TruthRecordSelector[] | Promise<readonly TruthRecordSelector[]>;
-}
-export interface VerifiedTruthRecord extends TruthManifestRecord {
-    readonly bytes: Uint8Array;
-}
-export interface LocalMemoryFilter<Context> {
-    filter(records: readonly VerifiedTruthRecord[]): Context | Promise<Context>;
-}
-export interface TruthMemoryMetric {
-    readonly kind: 'truth.snapshot.large';
-    readonly selector: TruthRecordSelector;
-    readonly byteSize: number;
-    readonly thresholdBytes: number;
-}
-export interface TruthMemoryClientOptions {
-    readonly serverUrl: string;
-    readonly signer: DeviceProofSigner;
-    readonly allowedObjectDownloadOrigins: readonly string[];
-    readonly fetch?: typeof globalThis.fetch;
-    readonly requestId?: () => string;
-    readonly onMetric?: (metric: TruthMemoryMetric) => void;
-}
-export type TruthWriteBody = {
-    readonly kind: 'inline';
-    readonly content: string;
-} | {
-    readonly kind: 'object';
-    readonly contentHash: string;
-    readonly byteSize: number;
-};
-export interface TruthSnapshotWriteInput {
-    readonly kind: 'profile' | 'memory';
-    readonly recordKey: string;
-    readonly expectedRev: number;
-    readonly body: TruthWriteBody;
-    readonly requestId: string;
-    readonly label?: string;
-}
-export interface TruthSnapshotCandidateInput {
-    readonly kind: 'profile' | 'memory';
-    readonly recordKey: string;
-    readonly expectedRev: number;
-    readonly body: TruthWriteBody;
-    readonly label?: string;
-}
-export interface TruthTerminalWriteInput {
-    readonly taskId: string;
-    readonly body: TruthWriteBody;
-    readonly requestId: string;
-    readonly label?: string;
-    readonly snapshots?: readonly TruthSnapshotCandidateInput[];
-}
-export interface TruthWriteResult {
-    readonly primary: TruthManifestRecord;
-    readonly snapshots: readonly TruthManifestRecord[];
-    readonly replayed: boolean;
-}
-export type TruthMemoryClientErrorCode = 'truth_http_failed' | 'truth_response_invalid' | 'truth_selection_invalid' | 'truth_manifest_changed' | 'truth_content_size_mismatch' | 'truth_content_hash_mismatch' | 'truth_object_url_rejected' | 'truth_write_invalid' | 'truth_write_confirmation_mismatch';
-export declare class TruthMemoryClientError extends Error {
-    readonly code: TruthMemoryClientErrorCode;
-    readonly status?: number | undefined;
-    constructor(code: TruthMemoryClientErrorCode, message: string, status?: number | undefined);
-}
-export declare class TruthMemoryClient {
-    #private;
-    private readonly options;
-    constructor(options: TruthMemoryClientOptions);
-    listManifest(query?: TruthManifestQueryInput): Promise<readonly TruthManifestRecord[]>;
-    loadSelected<Context>(selector: MemorySelector, filter: LocalMemoryFilter<Context>, query?: TruthManifestQueryInput): Promise<Context>;
-    writeSnapshot(input: TruthSnapshotWriteInput): Promise<TruthWriteResult>;
-    writeTerminal(input: TruthTerminalWriteInput): Promise<TruthWriteResult>;
 }
 // ==== @byok-sdk/client dist/diagnostics/device-doctor.d.ts ====
 import type { DaemonConfig } from '../daemon/create-daemon.js';
@@ -4252,12 +4108,12 @@ export interface FileScopeGrant {
 export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { StoreCompatibility } from '@byok-sdk/core';
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionAdvisory, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
-export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjection, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
+export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store.js';
 export type { AgentSessionHandoff, AgentSessionHandoffMatch, AgentTaskTerminalEvidence, AgentTaskTerminalMatch, AgentTerminalCause, } from './daemon/agent-session-handoff-store.js';
-export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionFunction, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home.js';
+export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home.js';
 export type { AgentHomeAccessMode } from './agent-home-readers.js';
 export { localStateRelocation, LocalStateRelocationError, LocalStateRelocationBusyError, LocalStateRelocationIntegrityError, } from './local-state-relocation.js';
 export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './local-state-relocation.js';
@@ -4271,7 +4127,7 @@ export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartu
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
-export { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, FirstPairingAttemptRefusedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
+export { DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, FirstPairingAttemptRefusedError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
 export type { ApprovalKind, LocalToolApprovalPolicy } from './daemon/approvals.js';
 export { RESULT_NOT_SUBMITTED_REASON_PREFIX, RESULT_UNREADABLE_REASON_PREFIX } from './daemon/task-runner/result-reason-prefixes.js';
@@ -4282,10 +4138,10 @@ export { ProviderProvisioningNoticeError, PROVIDER_PROVISIONING_NOTICE_FAILURE_R
 export type { ProviderProvisioningHandler, ProviderProvisioningNotice, ProviderProvisioningNoticeFailureReason, } from './daemon/provider-provisioning.js';
 export { AgentMemoryIntentNoticeError, AGENT_MEMORY_INTENT_NOTICE_FAILURE_REASONS, } from './daemon/agent-memory-intent.js';
 export type { AgentMemoryIntentNoticeFailureReason, } from './daemon/agent-memory-intent.js';
-export { AgentMemorySnapshotLimitError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory.js';
+export { AgentMemorySnapshotLimitError, AgentMemoryOutboxVersionUnsupportedError, AgentMemoryRevisionConflictError, isAgentMemorySecureFilesystemAvailable, AGENT_MEMORY_AUDIT_FILENAME, AGENT_MEMORY_OUTBOX_FILENAME, } from './daemon/agent-memory.js';
 export type { AgentMemoryRedactor, AgentMemoryProjectionGrant, AgentMemoryHostedProjection, } from './daemon/agent-memory.js';
 export type { AgentEgressLaneStatus, AgentEgressStatus, } from './daemon/agent-egress-policy.js';
-export { AGENT_CONTENT_READ_CAPABILITIES, AGENT_CONTENT_READ_CAPABILITY_WORKSPACE, AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT, AGENT_CONTENT_READ_CAPABILITY_ARTIFACT, } from './daemon/agent-content-read.js';
+export { AGENT_CONTENT_READ_CAPABILITIES, } from './daemon/agent-content-read.js';
 export type { AgentContentReadSurface, AgentContentReadDecision, AgentContentReadReason, AgentContentReadRoot, AgentContentReadPolicy, AgentContentReadPolicySelection, AgentContentReadRequest, AgentContentReadResult, AgentContentReadAllowed, AgentContentReadDenied, AgentContentSessionIdentity, AgentContentAuditReceipt, } from './daemon/agent-content-read.js';
 export { McpToolsetRevisionConflictError, McpToolsetDefinitionRevisionConflictError, } from './daemon/toolset-registry.js';
 export type { ProgressBatcherOptions } from './daemon/progress-batcher.js';
@@ -4318,10 +4174,8 @@ export type { DeviceCredentialBackend, DeviceCredentialConfig } from './daemon/d
 export type { DeviceEnrollment, DeviceEnrollmentIdentity, DeviceEnrollmentIdentityStatus, DeviceEnrollmentStatus, DeviceEnrollmentStatusOptions, } from './daemon/store.js';
 export { createStoredDeviceProofSigner, DeviceProofSignerError } from './daemon/device-proof-signer.js';
 export type { CreateStoredDeviceProofSignerOptions, DeviceProofRequest, DeviceProofSigner, DeviceProofSignerErrorCode, HostDeviceProofSigner, } from './daemon/device-proof-signer.js';
-export { SKILL_PACKS_CAPABILITY, SKILL_PACKS_DIRNAME, SKILL_PACK_AUDIT_FILENAME, SKILL_PACK_INSTALL_ERROR_CODES, SKILL_PACK_LOCK_FILENAME, SKILL_PACK_LOCK_SCHEMA, SKILL_PACK_RESPONSE_MAX_BYTES, SkillPackInstallError, installSkillPacks, listInstalledSkillPacks, projectSkillPack, skillPacksRoot, } from './daemon/skill-pack-installer.js';
+export { SKILL_PACKS_CAPABILITY, SKILL_PACKS_DIRNAME, SKILL_PACK_AUDIT_FILENAME, SKILL_PACK_INSTALL_ERROR_CODES, SKILL_PACK_LOCK_FILENAME, SKILL_PACK_LOCK_SCHEMA, SKILL_PACK_RESPONSE_MAX_BYTES, SkillPackInstallError, installSkillPacks, projectSkillPack, skillPacksRoot, } from './daemon/skill-pack-installer.js';
 export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, SkillPackInstallErrorCode, SkillPackInstallResult, SkillPackLock, } from './daemon/skill-pack-installer.js';
-export { TruthMemoryClient, TruthMemoryClientError } from './daemon/truth-memory-client.js';
-export type { LocalMemoryFilter, MemorySelector, TruthManifestQueryInput, TruthManifestRecord, TruthMemoryClientErrorCode, TruthMemoryClientOptions, TruthMemoryMetric, TruthSnapshotCandidateInput, TruthSnapshotWriteInput, TruthTerminalWriteInput, TruthWriteBody, TruthWriteResult, VerifiedTruthRecord, } from './daemon/truth-memory-client.js';
 export type { ConnectionState } from './daemon/connection-manager.js';
 export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
@@ -4330,7 +4184,7 @@ export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client.js';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client.js';
 export { DaemonObserver } from './daemon/observer.js';
-export type { DaemonEvent, DaemonEventKind, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer.js';
+export type { DaemonEvent, DaemonEventListener, DaemonTaskInfo, Unsubscribe } from './daemon/observer.js';
 export { createDaemonRecordProjector, DAEMON_RECORD_KINDS, isDaemonRecordKind } from './daemon/daemon-record.js';
 export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnRecord } from './daemon/daemon-record.js';
 export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record.js';
@@ -4392,7 +4246,7 @@ export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets.js';
 export { resolveSdkHosting, SdkHostingAssetsMissingError, type SdkHosting, type SdkHostingOptions } from './sdk-hosting.js';
 export type { AgentMemoryExportOptions } from './daemon/agent-memory-export.js';
-export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, TOOL_AUTHORIZATION_MODES, TOOL_FILE_ACCESS, } from './tool-authorization.js';
+export { classifyToolCall, createAutoToolAuthorizationGate, FileScopePolicyError, parseToolAuthorizationMode, parseToolAuthorizationPolicy, SENSITIVE_HOME_PATHS, } from './tool-authorization.js';
 export type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationHomeAccess, ToolAuthorizationLane, ToolAuthorizationMode, ToolAuthorizationTask, ToolAuthorizationVerdict, ToolCall, ToolFileAccess, ToolFileScope, ToolFileScopeRoot, ToolReminder, ToolRisk, ToolRiskReason, ToolAuthorizationDecision, ToolAuthorizationPolicy, ToolAuthorizationReason, ToolAuthorizationRules, ToolRule, } from './tool-authorization.js';
 export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter.js';
 // ==== @byok-sdk/client dist/input-preparation.d.ts ====
@@ -5151,7 +5005,7 @@ export declare function createMcpHttpServer(options: McpHttpServerOptions): McpH
 import { type McpServerRequestId } from './dispatch.js';
 export declare const MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS: readonly string[];
 export declare const MCP_SERVER_MAX_LINE_BYTES = 1048576;
-export declare const MCP_SERVER_MAX_FRAME_BYTES = 1048576;
+export { MCP_MAX_FRAME_BYTES as MCP_SERVER_MAX_FRAME_BYTES } from '../mcp/frame-limit.js';
 export declare const MCP_SERVER_MAX_IN_FLIGHT = 64;
 export declare const MCP_SERVER_MAX_SEEN_IDS = 4096;
 export interface McpServerToolDefinition {
@@ -5228,6 +5082,8 @@ export interface McpServerHandle {
     close(): void;
 }
 export declare function serveMcpOverStdio(options: McpServerOptions): McpServerHandle;
+// ==== @byok-sdk/client dist/mcp/frame-limit.d.ts ====
+export declare const MCP_MAX_FRAME_BYTES = 1048576;
 // ==== @byok-sdk/client dist/mcp/observation.d.ts ====
 // support
 export interface McpToolDescriptor {
@@ -5680,9 +5536,7 @@ export { InMemoryDeviceCredentialBackend } from './device-credentials.js';
 // ==== @byok-sdk/client dist/tool-authorization.d.ts ====
 import type { AgentRef } from './agent-home.js';
 export type ToolAuthorizationMode = 'auto' | 'all';
-export declare const TOOL_AUTHORIZATION_MODES: readonly ToolAuthorizationMode[];
 export type ToolFileAccess = 'read' | 'write';
-export declare const TOOL_FILE_ACCESS: readonly ToolFileAccess[];
 export interface ToolFileScopeRoot {
     readonly id: string;
     readonly path: string;
@@ -5866,7 +5720,6 @@ export type RuntimeDetectResult = {
     readonly version?: string;
     readonly rawVersion?: string;
     readonly authPresent?: boolean;
-    readonly advisory?: RuntimeDetectionAdvisory;
     readonly versionVerdict?: RuntimeVersionVerdict;
     readonly executablePath?: string;
     readonly executableSource?: RuntimeExecutableSource;
@@ -5880,10 +5733,6 @@ export type RuntimeDetectResult = {
     readonly reason: 'runtime_environment_unavailable';
     readonly code: ServiceEnvironmentUnavailableCode;
 };
-export interface RuntimeDetectionAdvisory {
-    readonly reason: 'runtime_version_unqualified';
-    readonly qualifiedVersion: string;
-}
 export type RuntimeDetectionRefusalReason = 'app_server_unavailable' | 'acp_unavailable' | 'platform_unsupported' | 'runtime_environment_unavailable' | 'agent_user_context_unavailable';
 export interface RuntimeIsolationCapabilities {
     readonly userInstructions: boolean;

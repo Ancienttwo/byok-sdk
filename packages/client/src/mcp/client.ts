@@ -15,6 +15,7 @@ import {
 } from '@modelcontextprotocol/client';
 import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/validators/cf-worker';
 import { McpAuthorityError } from './authority-error.js';
+import { MCP_MAX_FRAME_BYTES } from './frame-limit.js';
 import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 
 export { McpAuthorityError };
@@ -56,12 +57,6 @@ export { McpAuthorityError };
  */
 export const MCP_OBSERVATION_MAX_STDOUT_BYTES = 1_048_576;
 
-/**
- * Hard cap on a single JSON-RPC frame, always applied. A server that never
- * emits a newline cannot make the client accumulate without limit: the read
- * buffer rejects at this size and the connection fails closed.
- */
-export const MCP_MAX_FRAME_BYTES = 1_048_576;
 
 /** Default ceiling for one request/response round trip. */
 export const MCP_DEFAULT_REQUEST_TIMEOUT_MS = 10_000;

@@ -44,9 +44,6 @@ import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
  * unchanged) is the entire integration.
  */
 
-/** Every local event kind this daemon can emit — see {@link DaemonEvent}. */
-export type DaemonEventKind = DaemonEvent['kind'];
-
 import type { OutboundRejection } from './outbound-settlement.js';
 
 export type DaemonEvent =

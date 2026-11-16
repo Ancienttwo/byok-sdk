@@ -28,7 +28,7 @@ declared `true` with neither a check nor absent evidence fails the suite.
 
 | Case | Checks |
 | --- | --- |
-| `detect.version` | `detect()` is available. The suite reads the version text itself, so a broken adapter parser fails here. It also checks the effective version-policy verdict (allow for the qualified token, warn exactly where the unqualified-version advisory appears), that the unqualified-version advisory appears exactly when the version is not the qualified one, and that the `conn.hello`/`presence` projection reduces that verdict to `state` plus `qualifiedVersion` without leaking a local `matched` spec. |
+| `detect.version` | `detect()` is available. The suite reads the version text itself, so a broken adapter parser fails here. It also checks the effective version-policy verdict (allow for the qualified token; warn for an unqualified one where the adapter's default policy warns), and that the `conn.hello`/`presence` projection reduces that verdict to `state` plus `qualifiedVersion` without leaking a local `matched` spec. |
 | `detect.auth.*` | `authPresent` is false with no credential, and true for an API key in the environment and for the runtime's own stored login. |
 | `mcp.submitResult` | A Host MCP server's `submit_result` call reaches the server, including through deferred-tool search (Claude `ToolSearch`, Grok `search_tool`/`use_tool`). |
 | `instructions.project` | The project instruction file (AGENTS.md, or CLAUDE.md for Claude) reaches the model. |

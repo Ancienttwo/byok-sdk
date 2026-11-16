@@ -160,6 +160,35 @@ the explicit process-tree cleanup receipt; calling it initiates termination and
 is not a passive close wait. Internal process-tree cleanup still waits for the
 client's private close promise.
 
+### Aliases and convenience factories
+
+`AGENT_CONTENT_READ_CAPABILITY_WORKSPACE`, `AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT`
+and `AGENT_CONTENT_READ_CAPABILITY_ARTIFACT` are removed; read the same names from
+`AGENT_CONTENT_READ_CAPABILITIES.workspace`, `.transcript` and `.artifact`.
+`TOOL_AUTHORIZATION_MODES` and `TOOL_FILE_ACCESS` are removed; the
+`ToolAuthorizationMode` and `ToolFileAccess` types remain. `DaemonEventKind` is
+removed; use `DaemonEvent['kind']`.
+
+`createAgentHomeProjection()` and `AgentHomeProjectionFunction` are removed. Pass
+the projection object itself: `agentHome.projection: { prepare: async ({ agentRef, cwd }) => { ... } }`.
+
+### Installed skill-pack listing
+
+`listInstalledSkillPacks()` is removed. `installSkillPacks()` returns what it
+installed and kept, and `projectSkillPack()` copies one installed pack by name;
+a Host that needs an inventory keeps the names it installed.
+
+### Truth memory client
+
+`TruthMemoryClient`, `TruthMemoryClientError` and their option, input and result
+types (`LocalMemoryFilter`, `MemorySelector`, `TruthManifestQueryInput`,
+`TruthManifestRecord`, `TruthMemoryClientErrorCode`, `TruthMemoryClientOptions`,
+`TruthMemoryMetric`, `TruthSnapshotCandidateInput`, `TruthSnapshotWriteInput`,
+`TruthTerminalWriteInput`, `TruthWriteBody`, `TruthWriteResult`,
+`VerifiedTruthRecord`) are removed. No Host used them. The cloud truth routes and
+`createStoredDeviceProofSigner()` are unchanged; a Host that writes truth records
+calls those routes with a device proof from that signer.
+
 ## Blocked Turn projection ids (#2245)
 
 `@byok-sdk/bot-collaboration` publishes a Turn that cannot freeze as `blocked:<turnId>:<code>:<fingerprint>` with `{ owner, turnId, code, reason }`. 0.43.0 published `blocked:<turnId>` with `{ owner, turnId, reason }` each time the reason changed, so a reason that carries a model name or a byte count gave one id two values and K4 `project` threw `Projection identity conflict`. The upgrade manifest declares this as `bot-blocked-projection-id`.
@@ -396,3 +425,85 @@ with `service_stop_failed`.
 Retry `uninstall()` after any failure; a retry finishes once the cause is
 fixed. No Host change is needed for a stop program that runs from under
 `current`.
+
+## Runtime status carries every observation field inline
+
+`@byok-sdk/client` control `status` (`byok-agent status`, `doctor`) now returns
+each runtime's `versionVerdict`, `versionChange`, `executablePath` and
+`executableSource` inside `runtimes[]`, like `Daemon.status()`. The
+`runtimeVersionVerdicts`, `runtimeVersionChanges` and `runtimeExecutables` side
+arrays are gone. A status from an earlier daemon that still sends them is
+refused (`ControlStatusShapeUnsupportedError`): `status` reports the live status
+unavailable, and `doctor` reports the daemon status request failed and probes
+runtimes locally. Run `status` and `doctor` from the same release as the daemon.
+Audit records and the support bundle still carry neither the verdict, the
+restart comparison nor the executable path.
+
+## Version verdict is the one runtime version warning
+
+`RuntimeDetectResult.advisory` and the `RuntimeDetectionAdvisory` type are
+removed. An unqualified runtime version is reported only as
+`versionVerdict: { state: 'warn', qualifiedVersion }`, and
+`RuntimeObservation.qualifiedVersion` is that warning's projection. A custom
+runtime adapter whose `detect()` still returns `advisory` is refused by
+`validateRuntimeDetectResult()`; return `versionVerdict` instead (or
+`runtimeVersionDetectionFields()` output). A Host that read
+`availability.advisory.qualifiedVersion` reads
+`availability.versionVerdict?.state === 'warn' ? availability.versionVerdict.qualifiedVersion : undefined`.
+
+## Agent memory outbox version 2 is refused
+
+An Agent home whose `.byok/agent-memory-redacted-outbox-v2.json` still holds the
+0.32.0 version 2 state is no longer upgraded in memory. Memory projection for
+that home fails with `AgentMemoryOutboxVersionUnsupportedError`
+(`stateVersion: 2`); the file is neither read further, rewritten nor deleted, and
+a higher writer epoch does not replace it. Remove or archive the file to resume
+projection. Its pending memory mutations, if any, are not published.
+
+## Todo extension reads one config location
+
+The bundled Pi todo extension reads its settings only from
+`$XDG_CONFIG_HOME/rpiv-todo/config.json` (`~/.config/rpiv-todo/config.json`
+when `XDG_CONFIG_HOME` is unset). It no longer falls back to
+`~/.config/rpiv-todo/config.json` when `XDG_CONFIG_HOME` points elsewhere:
+if the `XDG_CONFIG_HOME` file is absent and the old one exists, loading the
+extension's config throws `TodoConfigLegacyLocationError` naming both paths.
+Only the old file's existence is checked; its content is never read. With a
+todo config at the old location, Pi reports this error when it loads the todo
+extension; moving the file fixes it.
+
+## DaemonConfig rejects unknown fields
+
+`@byok-sdk/client` `validateDaemonConfig()`, `checkDaemonConfig()`,
+`createDaemon()` / `createDaemonWithAdapters()` and the `byok-agent` config
+loader now refuse every unknown `DaemonConfig` field as an `unknown_field`
+error, with a "did you mean" hint when one is close. Before, an unknown field was
+a warning and the daemon started (Q4'), and a field removed in an earlier
+release (`permissionDefaults`, `agentEgress.sanitizer`, `mcpLaunchCwd`,
+`toolImplementationAuthority`, `hostedJournal`, `strictAgentOnly`,
+`gitWorkspace`, `workspaceRoot`, `resultDocument`,
+`maxConcurrentMutableSessionsPerAgentHome`, `durablePi`,
+`agentMemoryFilesystem`) threw `DaemonConfigFieldRemovedError`. Those fields
+are now unknown fields too: an embedded Host gets `DaemonConfigInvalidError`,
+and the CLI exits with the config error. `overrides.hostedJournal` and
+`overrides.gitWorkspace` throw a `TypeError`.
+
+Removed with it: `DaemonConfigFieldRemovedError` (and its setup-catalog code
+`daemon_config_field_removed`), the `removed_field` issue code,
+`DaemonConfigIssue.severity` and `.migration` (every issue is an error),
+`DaemonEffectiveConfig.warnings` (also gone from `Daemon.status().config`) and
+`byok-agent config check --strict`, which now prints usage. A config that
+rolls back to an older daemon no longer starts with fields that release does
+not know; remove them first. Run `byok-agent config check` against each config
+file before upgrading and delete every field it reports. The published
+`daemon-config.schema.json` now closes every object (`additionalProperties:
+false`) and declares the root `$schema`, so an editor that applies it flags
+the same unknown fields.
+
+## MCP frame ceiling has one authority
+
+`@byok-sdk/client/mcp-server` `MCP_SERVER_MAX_FRAME_BYTES` is unchanged at
+1 MiB. It is now a re-export of the same constant the SDK MCP client's read
+buffer and the HTTP server's `maxOutboundFrameBytes` default use, so the three
+can no longer drift apart. No Host change.
+

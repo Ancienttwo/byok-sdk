@@ -9,7 +9,6 @@ import { runConfigCheckCommand } from '../bin/commands/config-check';
 import { OFFICIAL_LOCAL_AGENT_RELEASE } from '../bin/official-release';
 import {
   DAEMON_CONFIG_SCHEMA_VERSION,
-  DaemonConfigFieldRemovedError,
   DaemonConfigInvalidError,
   checkDaemonConfig,
   createDaemon,
@@ -17,11 +16,11 @@ import {
   PiAdapter,
   validateDaemonConfig,
   type DaemonConfig,
+  type DaemonConfigIssue,
 } from '../index';
 import { parseToolAuthorizationPolicy, toolAuthorizationResolver } from '../tool-authorization';
 import { describeEffectiveDaemonConfig } from '../daemon/config-schema/effective';
 import { AgentEgressPolicyError, DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
-import { REMOVED_DAEMON_CONFIG_FIELDS } from '../daemon/config-schema/removed-fields';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testAgentHomeConfig } from './fixtures/test-agent';
@@ -42,9 +41,9 @@ async function writeConfig(value: unknown): Promise<string> {
   return file;
 }
 
-function runCheck(file: string, options: { strict?: boolean; json?: boolean } = {}): { code: number; out: string } {
+function runCheck(file: string, options: { json?: boolean } = {}): { code: number; out: string } {
   const lines: string[] = [];
-  const code = runConfigCheckCommand(file, { strict: options.strict ?? false, json: options.json ?? false }, { log: (line) => lines.push(line) });
+  const code = runConfigCheckCommand(file, { json: options.json ?? false }, { log: (line) => lines.push(line) });
   return { code, out: lines.join('\n') };
 }
 
@@ -86,7 +85,10 @@ describe('generated DaemonConfig schema (#1094)', () => {
     expect(schema.properties.agentHome.properties.projection).toMatchObject({ 'x-byok-surface': 'embedded-only' });
     expect(schema.properties.localAgentRelease).toMatchObject({ 'x-byok-surface': 'distribution-owned', not: {} });
     expect(schema.properties.codexSandbox).toMatchObject({ enum: ['danger-full-access', 'inherit', 'read-only', 'workspace-write'] });
-    expect(schema['x-byok-removedFields']).toEqual(REMOVED_DAEMON_CONFIG_FIELDS.map(({ path: field, migration }) => ({ path: field, migration })));
+    // Closed like the validator: every object without an index signature refuses other keys.
+    expect(schema.additionalProperties).toBe(false);
+    expect(schema.properties.agentHome.additionalProperties).toBe(false);
+    expect(schema.properties.toolAuthorization.properties.byRuntime.additionalProperties).toEqual({ enum: ['all', 'auto'] });
   });
 });
 
@@ -117,6 +119,12 @@ describe('validateDaemonConfig', () => {
     expect(functionIssues.map((issue) => issue.code)).toEqual(['invalid_type', 'distribution_owned']);
     const embedded = validateDaemonConfig({ ...base, toolAuthorization: { default: 'auto' }, localAgentRelease: { version: '1' } }, { source: 'embedded' });
     expect(embedded).toEqual({ ok: true, issues: [] });
+  });
+
+  it('accepts a declared property named like a schema annotation', () => {
+    const rule = { id: 'r', description: 'Display text', match: { toolName: 'bash' } };
+    expect(validateDaemonConfig({ ...base, toolAuthorization: { default: 'auto', rules: { alwaysAsk: [rule] } } }, { source: 'cli' }))
+      .toEqual({ ok: true, issues: [] });
   });
 
   it('accepts a $schema key at the root for editors', () => {
@@ -168,7 +176,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
   ])('refuses %s in a config file and at construction', async (_name, extra, code, issuePath) => {
     const fileCheck = checkDaemonConfig({ ...base, ...extra }, { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
     expect(fileCheck.ok).toBe(false);
-    expect(fileCheck.issues).toEqual([expect.objectContaining({ severity: 'error', code, path: issuePath })]);
+    expect(fileCheck.issues).toEqual([expect.objectContaining({ code, path: issuePath })]);
     const config = await bundled(extra as Partial<DaemonConfig>);
     expect(constructionIssues(() => createDaemon(config))).toEqual(fileCheck.issues);
   });
@@ -192,7 +200,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
   it('refuses a byRuntime key that names no runtime of the daemon', async () => {
     const extra: Partial<DaemonConfig> = { runtimeAllowlist: ['claude'], toolAuthorization: { default: 'all', byRuntime: { codex: 'all' } } };
     const issue = {
-      severity: 'error', code: 'invalid_value', path: 'toolAuthorization.byRuntime.codex',
+      code: 'invalid_value', path: 'toolAuthorization.byRuntime.codex',
       message: 'DaemonConfig.toolAuthorization.byRuntime.codex names no runtime of this daemon (runtimes: claude)',
     };
     const config = await bundled(extra);
@@ -217,14 +225,14 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
 
     const message = "DaemonConfig.storage.retention.ttlMs.agy-session-store must be at least retention.ttlMs['session-ledger'] plus one day";
     const withAgy = await bundled({ storage: storage(), runtimeAllowlist: ['agy'], toolAuthorization: { default: 'all' }, runtimes: { agy: { home } } });
-    expect(checkDaemonConfig(cliInput(withAgy), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE }).issues).toEqual([expect.objectContaining({ severity: 'error', code: 'invalid_value', message })]);
+    expect(checkDaemonConfig(cliInput(withAgy), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE }).issues).toEqual([expect.objectContaining({ code: 'invalid_value', message })]);
     expect(() => createDaemon(withAgy)).toThrow(message);
   });
 
   it('refuses auto for a runtime without toolAuthorizationAuto (codex), at the field that sets it', async () => {
     const fromDefault: Partial<DaemonConfig> = { runtimeAllowlist: ['claude', 'codex'], toolAuthorization: { default: 'auto' } };
     const defaultIssue = {
-      severity: 'error', code: 'invalid_value', path: 'toolAuthorization.default',
+      code: 'invalid_value', path: 'toolAuthorization.default',
       message: 'DaemonConfig.toolAuthorization.default gives runtime codex the auto mode, which codex does not support (no toolAuthorizationAuto); set toolAuthorization.byRuntime.codex to "all" or remove codex from runtimeAllowlist',
     };
     const defaultConfig = await bundled(fromDefault);
@@ -247,7 +255,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     const issues = constructionIssues(build);
     expect(build).toThrow('duplicate adapter descriptor.id: pi');
     expect(issues).toEqual([{
-      severity: 'error', code: 'invalid_value', path: 'adapters[1].descriptor.id',
+      code: 'invalid_value', path: 'adapters[1].descriptor.id',
       message: 'duplicate adapter descriptor.id: pi',
     }]);
     expect(checkDaemonConfig(config, { source: 'embedded', adapters })).toEqual({ ok: false, issues });
@@ -285,17 +293,17 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     ['a duplicate id across the two lists', { default: 'all', rules: {
       alwaysAsk: [{ id: 'same', match: { toolName: 'read' } }], allowWithoutAsking: [{ id: 'same', match: { toolName: 'write' } }],
     } }, 'toolAuthorization', 'invalid_value'],
-    ['an unknown selector', { default: 'auto', rules: { alwaysAsk: [{ id: 'bad', match: { commandRegex: '.*' } }] } }, 'toolAuthorization', 'invalid_value'],
+    ['an unknown selector', { default: 'auto', rules: { alwaysAsk: [{ id: 'bad', match: { commandRegex: '.*' } }] } }, 'toolAuthorization.rules.alwaysAsk[0].match.commandRegex', 'unknown_field'],
     ['a relative pathGlob', { default: 'auto', rules: { alwaysAsk: [{ id: 'rel', match: { pathGlob: 'src/**' } }] } }, 'toolAuthorization', 'invalid_value'],
     ['an invalid fileScope', { default: 'auto', fileScope: { mode: 'workspaces' } }, 'toolAuthorization.fileScope', 'invalid_file_scope'],
   ])('rejects %s at construction with DaemonConfigInvalidError', async (_label, policy, issuePath, code) => {
     const config = await bundled({ agentHome: testAgentHomeConfig(), toolAuthorization: policy as DaemonConfig['toolAuthorization'] });
     const adapters = [new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, toolAuthorizationAuto: true })];
     const issues = constructionIssues(() => createDaemonWithAdapters(config, adapters));
-    expect(issues).toEqual([expect.objectContaining({ severity: 'error', code, path: issuePath })]);
+    expect(issues).toEqual([expect.objectContaining({ code, path: issuePath })]);
     const check = checkDaemonConfig(config, { source: 'embedded', adapters });
     expect(check.ok).toBe(false);
-    expect(check.issues.filter(issue => issue.severity === 'error')).toEqual(issues);
+    expect(check.issues).toEqual(issues);
   });
 
   it.each([
@@ -308,7 +316,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     const message = `DaemonConfig.${key} is only supported by createDaemon; ${remedy}`;
     expect(() => createDaemonWithAdapters(config, adapters)).toThrow(new TypeError(message));
     expect(checkDaemonConfig(config, { source: 'embedded', adapters })).toEqual({
-      ok: false, issues: [{ severity: 'error', code: 'invalid_value', path: key, message }],
+      ok: false, issues: [{ code: 'invalid_value', path: key, message }],
     });
   });
 
@@ -339,24 +347,19 @@ describe('byok-agent config check: Salesko-shaped CLI config (#1094 acceptance)'
   it('reports the missing productName as an error', async () => {
     const { code, out } = runCheck(await writeConfig(salesko));
     expect(code).toBe(1);
-    expect(out).toContain('error   productName: config is missing required field "productName"');
+    expect(out).toContain('  productName: config is missing required field "productName"');
     expect(() => loadConfig(undefined, salesko)).toThrow(new ConfigError('config is missing required field "productName"'));
   });
 
-  it('warns on a misspelled field, passes without --strict and fails with it', async () => {
+  it('rejects a misspelled field in check and in start, with a suggestion', async () => {
     const storeDir = await tmpDir('byok-config-check-store-');
     const file = await writeConfig({ ...salesko, productName: 'Salesko', storeDir, runtimeAlowlist: ['codex'] });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const plain = runCheck(file);
-    expect(warn).not.toHaveBeenCalled();
-    expect(plain.code).toBe(0);
-    expect(plain.out).toContain('warning runtimeAlowlist: DaemonConfig.runtimeAlowlist is not a known field and is ignored; did you mean "runtimeAllowlist"?');
-    expect(plain.out).toContain('result: ok (0 errors, 1 warning)');
-    const strict = runCheck(file, { strict: true });
-    expect(strict.code).toBe(1);
-    expect(strict.out).toContain('result: invalid (0 errors, 1 warning; --strict fails on warnings)');
-    // Q4': loading the same file for `start` never rejects an unknown field.
-    expect(loadConfig(file)).toMatchObject({ productName: 'Salesko', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
+    const message = 'DaemonConfig.runtimeAlowlist is not a known field; did you mean "runtimeAllowlist"?';
+    const { code, out } = runCheck(file);
+    expect(code).toBe(1);
+    expect(out).toContain(`  runtimeAlowlist: ${message}`);
+    expect(out).toContain('result: invalid (1 error)');
+    expect(() => loadConfig(file)).toThrow(new ConfigError(message));
   });
 
   it('prints the same report as JSON, with the effective values', async () => {
@@ -364,7 +367,7 @@ describe('byok-agent config check: Salesko-shaped CLI config (#1094 acceptance)'
     const { code, out } = runCheck(await writeConfig({ ...salesko, productName: 'Salesko', storeDir }), { json: true });
     expect(code).toBe(0);
     const report = JSON.parse(out);
-    expect(report).toMatchObject({ ok: true, strict: false, issues: [] });
+    expect(report).toMatchObject({ ok: true, issues: [] });
     expect(report.effective).toMatchObject({
       schemaVersion: DAEMON_CONFIG_SCHEMA_VERSION,
       directories: { storeDir: { path: storeDir, source: 'config' } },
@@ -376,36 +379,25 @@ describe('byok-agent config check: Salesko-shaped CLI config (#1094 acceptance)'
   });
 });
 
-describe('removed workspaceRoot (#925) is a typed error with its migration note', () => {
-  const migration = 'docs/spec.md#removed-daemonconfig-fields';
+describe('daemon construction refuses unknown fields', () => {
+  const embedded = { localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme', serverUrl: 'http://127.0.0.1:1' };
 
-  it('on the CLI path', async () => {
-    const config = { productName: 'AiphaBee', productId: 'aiphabee', serverUrl: 'http://127.0.0.1:1', workspaceRoot: '/tmp/ws' };
-    expect(validateDaemonConfig(config, { source: 'cli' }).issues).toEqual([expect.objectContaining({ code: 'removed_field', path: 'workspaceRoot', migration })]);
-    const file = await writeConfig(config);
-    let thrown: unknown;
-    try { loadConfig(file); } catch (error) { thrown = error; }
-    expect(thrown).toBeInstanceOf(DaemonConfigFieldRemovedError);
-    expect(thrown).toMatchObject({ code: 'daemon_config_field_removed', field: 'workspaceRoot', migration });
-    expect(runCheck(await writeConfig(config)).code).toBe(1);
+  it('refuses a misspelled field with a suggestion', () => {
+    expect(() => createDaemonWithAdapters({ ...embedded, stroeDir: '/typo' } as unknown as DaemonConfig, []))
+      .toThrow(new DaemonConfigInvalidError([{ code: 'unknown_field', path: 'stroeDir', message: 'DaemonConfig.stroeDir is not a known field; did you mean "storeDir"?' }]));
   });
 
-  it('on the embedded path', () => {
-    let thrown: unknown;
-    try {
-      createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'AiphaBee', productId: 'aiphabee', serverUrl: 'http://127.0.0.1:1', workspaceRoot: '/tmp/ws' } as unknown as DaemonConfig, []);
-    } catch (error) { thrown = error; }
-    expect(thrown).toBeInstanceOf(DaemonConfigFieldRemovedError);
-    expect(thrown).toMatchObject({ code: 'daemon_config_field_removed', field: 'workspaceRoot', migration });
+  it('refuses a field an older release accepted (workspaceRoot, #925) as unknown, in a config file and at construction', async () => {
+    const issue: DaemonConfigIssue = { code: 'unknown_field', path: 'workspaceRoot', message: 'DaemonConfig.workspaceRoot is not a known field' };
+    const file = await writeConfig({ productName: 'AiphaBee', productId: 'aiphabee', serverUrl: 'http://127.0.0.1:1', workspaceRoot: '/tmp/ws' });
+    expect(() => loadConfig(file)).toThrow(new ConfigError(issue.message));
+    expect(() => createDaemonWithAdapters({ ...embedded, workspaceRoot: '/tmp/ws' } as unknown as DaemonConfig, []))
+      .toThrow(new DaemonConfigInvalidError([issue]));
   });
 
-  it('durablePi is removed in favour of the adapter-declared durable lane', () => {
-    let thrown: unknown;
-    try {
-      createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme', serverUrl: 'http://127.0.0.1:1', durablePi: true } as unknown as DaemonConfig, []);
-    } catch (error) { thrown = error; }
-    expect(thrown).toBeInstanceOf(DaemonConfigFieldRemovedError);
-    expect(thrown).toMatchObject({ code: 'daemon_config_field_removed', field: 'durablePi', migration });
+  it('refuses the retired overrides.gitWorkspace seam', () => {
+    expect(() => createDaemonWithAdapters(embedded as DaemonConfig, [], { gitWorkspace: {} } as never))
+      .toThrow(new TypeError('overrides.gitWorkspace is not a DaemonOverrides field'));
   });
 
   it('an adapter that declares the durable lane refuses to start without Agent home', () => {
@@ -415,7 +407,7 @@ describe('removed workspaceRoot (#925) is a typed error with its migration note'
 
   it('a wrong JSON type at construction is DaemonConfigInvalidError', () => {
     expect(() => createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme', productId: 'acme', serverUrl: 'http://127.0.0.1:1', dangerouslyAllowInsecureRemote: 'yes' } as unknown as DaemonConfig, []))
-      .toThrow(new DaemonConfigInvalidError([{ severity: 'error', code: 'invalid_type', path: 'dangerouslyAllowInsecureRemote', message: 'DaemonConfig.dangerouslyAllowInsecureRemote must be boolean, got string' }]));
+      .toThrow(new DaemonConfigInvalidError([{ code: 'invalid_type', path: 'dangerouslyAllowInsecureRemote', message: 'DaemonConfig.dangerouslyAllowInsecureRemote must be boolean, got string' }]));
   });
 });
 
@@ -445,7 +437,7 @@ describe('effective values', () => {
     ]);
     expect(checkDaemonConfig(config, { source: 'embedded', adapters: [] })).toEqual({
       ok: false, issues: [{
-        severity: 'error', code: 'invalid_value', path: 'agentEgress.policy.activity.maxCoalesceMs',
+        code: 'invalid_value', path: 'agentEgress.policy.activity.maxCoalesceMs',
         message: (thrown as AgentEgressPolicyError).issues[0]!.message,
       }],
     });
@@ -484,7 +476,7 @@ describe('effective values', () => {
     expect(report.ok).toBe(false);
     expect(report.effective).toBeUndefined();
     expect(report.issues).toEqual([expect.objectContaining({
-      code: 'invalid_value', severity: 'error', message: (constructionError as Error).message,
+      code: 'invalid_value', message: (constructionError as Error).message,
     })]);
   });
 
@@ -506,16 +498,12 @@ describe('effective values', () => {
     expect(resolveSource).not.toHaveBeenCalled();
   });
 
-  it('Daemon.status().config is the report checkDaemonConfig builds, unknown fields included as warnings', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const config = { ...await embeddedConfig({ agentHome: testAgentHomeConfig() }), stroeDir: '/typo' } as DaemonConfig;
+  it('Daemon.status().config is the report checkDaemonConfig builds', async () => {
+    const config = await embeddedConfig({ agentHome: testAgentHomeConfig() });
     const adapters = [new StubRuntimeAdapter('pi')];
     const daemon = createDaemonWithAdapters(config, adapters);
     const status = daemon.status();
     expect(status.config).toEqual(checkDaemonConfig(config, { source: 'embedded', adapters }).effective);
-    expect(status.config.warnings).toEqual([expect.objectContaining({ code: 'unknown_field', path: 'stroeDir', severity: 'warning' })]);
-    // Logged exactly once, at construction; checkDaemonConfig above only reports it.
-    expect(warn.mock.calls.filter(([line]) => String(line).includes('stroeDir'))).toEqual([['[byok/client] DaemonConfig.stroeDir is not a known field and is ignored; did you mean "storeDir"?']]);
     expect(status.config.runtimes).toEqual([{ id: 'pi', source: 'injected', toolAuthorizationAuto: false }]);
     expect(status.config.directories.agentHomes).toBe(path.join(path.resolve(config.agentHome!.hostStorageRoot), 'agents'));
     expect(status.config.memory.mcp).toBe(status.agentMemoryMcp);
@@ -547,7 +535,7 @@ describe('effective values', () => {
 
   const reportInput = (memory: Pick<Parameters<typeof describeEffectiveDaemonConfig>[0], 'memoryHelper' | 'agentMemoryMcpAdmission'>) => describeEffectiveDaemonConfig({
     config: { localAgentRelease: { version: '1' }, productName: 'A', productId: 'a', serverUrl: 'http://127.0.0.1:1', agentHome: { hostStorageRoot: '/h' } },
-    warnings: [], storeDir: '/s', scratchRoot: '/s/tmp', adapters: [], runtimeSource: 'injected', platform: 'darwin', ...memory,
+    storeDir: '/s', scratchRoot: '/s/tmp', adapters: [], runtimeSource: 'injected', platform: 'darwin', ...memory,
   });
 
   it('#614: a resolvable memory helper mounts the memory MCP on every Agent task', () => {
@@ -569,7 +557,7 @@ describe('effective values', () => {
         localAgentRelease: { version: '1' }, productName: 'A', productId: 'a', serverUrl: 'http://127.0.0.1:1',
         mcpToolsets: { crm: { mcpServers: { salesko: { command: '/bin/salesko-mcp' } } } }, toolAuthorization: { default: 'auto' }, localToolApproval: 'allow',
       },
-      warnings: [], memoryHelper: { state: 'not-needed' }, agentMemoryMcpAdmission: 'unavailable', storeDir: '/s', scratchRoot: '/s/tmp',
+      memoryHelper: { state: 'not-needed' }, agentMemoryMcpAdmission: 'unavailable', storeDir: '/s', scratchRoot: '/s/tmp',
       adapters: [], runtimeSource: 'injected', platform: 'linux',
     });
     expect(effective.mcpServers).toContainEqual({ name: 'salesko', kind: 'host-toolset', mount: 'per-task', detail: 'offers that require toolset crm' });

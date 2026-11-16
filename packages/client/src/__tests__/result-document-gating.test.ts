@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createEnvelope, decodeEnvelope, encodeEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentResultStore } from '../daemon/agent-result-store';
-import { createDaemon, createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
-import { DaemonConfigFieldRemovedError, DaemonJournalProtocolUnsupportedError } from '../daemon/daemon-errors';
+import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
+import { DaemonJournalProtocolUnsupportedError } from '../daemon/daemon-errors';
 import { journalHash } from '../daemon/journal/journal';
 import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { createTestDeviceStore } from './fixtures/device-credentials';
@@ -20,12 +20,10 @@ import { TestServer } from './fixtures/test-server';
 const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
 
 /**
- * Wire v3 result channel, daemon construction and startup:
- * - TE-B: every removed `DaemonConfig` field, `resultDocument` included,
- *   throws the typed {@link DaemonConfigFieldRemovedError}.
- * - A journal holding envelope bytes of another wire major stops startup
- *   with {@link DaemonJournalProtocolUnsupportedError} before any recovery
- *   write: the journal is byte-identical afterwards.
+ * Wire v3 result channel, daemon startup: a journal holding envelope bytes of
+ * another wire major stops startup with
+ * {@link DaemonJournalProtocolUnsupportedError} before any recovery write: the
+ * journal is byte-identical afterwards.
  */
 
 const cleanup: Array<() => Promise<unknown>> = [];
@@ -46,40 +44,6 @@ async function baseConfig(serverUrl = 'http://127.0.0.1:9'): Promise<DaemonConfi
     storeDir: await tmpDir('byok-result-gating-store-'),
   };
 }
-
-function expectRemoved(build: () => unknown, field: string): void {
-  let thrown: unknown;
-  try { build(); } catch (error) { thrown = error; }
-  expect(thrown).toBeInstanceOf(DaemonConfigFieldRemovedError);
-  expect(thrown).toMatchObject({ code: 'daemon_config_field_removed', field, name: 'DaemonConfigFieldRemovedError' });
-  expect((thrown as Error).message).toContain(`DaemonConfig.${field} was removed`);
-}
-
-describe('removed DaemonConfig fields (TE-B)', () => {
-  it('createDaemon and createDaemonWithAdapters refuse resultDocument with the typed error', async () => {
-    const config = { ...(await baseConfig()), resultDocument: { extract: () => ({}) } } as unknown as DaemonConfig;
-    expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()]), 'resultDocument');
-    expectRemoved(() => createDaemon(config), 'resultDocument');
-  });
-
-  it.each([
-    ['permissionDefaults', { permissionDefaults: {} }],
-    ['agentEgress.sanitizer', { agentEgress: { sanitizer: () => undefined } }],
-    ['mcpLaunchCwd', { mcpLaunchCwd: '/tmp' }],
-    ['toolImplementationAuthority', { toolImplementationAuthority: {} }],
-    ['maxConcurrentMutableSessionsPerAgentHome', { maxConcurrentMutableSessionsPerAgentHome: 1 }],
-    ['gitWorkspace', { gitWorkspace: { mode: 'local-checkpoints' } }],
-    ['workspaceRoot', { workspaceRoot: '/tmp' }],
-  ])('%s throws DaemonConfigFieldRemovedError with its path', async (field, extra) => {
-    const config = { ...(await baseConfig()), ...extra } as unknown as DaemonConfig;
-    expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()]), field);
-  });
-
-  it('refuses the removed overrides.gitWorkspace seam with the typed error', async () => {
-    const config = await baseConfig();
-    expectRemoved(() => createDaemonWithAdapters(config, [new StubRuntimeAdapter()], { gitWorkspace: {} } as never), 'gitWorkspace');
-  });
-});
 
 function majorBytes(bytes: string, v: number): string {
   const parsed = JSON.parse(bytes) as { v: number };

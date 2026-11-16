@@ -27,10 +27,6 @@ export const AGENT_CONTENT_READ_CAPABILITIES = Object.freeze({
   artifact: AGENT_CONTENT_ARTIFACT_READ_CAPABILITY,
 } as const);
 
-export const AGENT_CONTENT_READ_CAPABILITY_WORKSPACE = AGENT_CONTENT_READ_CAPABILITIES.workspace;
-export const AGENT_CONTENT_READ_CAPABILITY_TRANSCRIPT = AGENT_CONTENT_READ_CAPABILITIES.transcript;
-export const AGENT_CONTENT_READ_CAPABILITY_ARTIFACT = AGENT_CONTENT_READ_CAPABILITIES.artifact;
-
 export const AGENT_CONTENT_READ_DECISIONS = ['allow', 'deny'] as const;
 export type AgentContentReadDecision = (typeof AGENT_CONTENT_READ_DECISIONS)[number];
 
@@ -690,16 +686,6 @@ export class AgentContentReadPolicyEngine {
       ...(text === undefined ? {} : { text }),
       receipt,
     });
-  }
-
-  /** Alias used by integration adapters that call the operation request. */
-  async readContent(request: AgentContentReadRequest): Promise<AgentContentReadResult> {
-    return this.read(request);
-  }
-
-  /** A request is one bounded read, never a directory listing or recursive mirror. */
-  async request(request: AgentContentReadRequest): Promise<AgentContentReadResult> {
-    return this.read(request);
   }
 
   private async resolveRoot(policy: AgentContentReadPolicy, request: AgentContentReadRequest): Promise<string | RootPolicyError> {
