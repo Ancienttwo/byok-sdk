@@ -63,6 +63,20 @@ function requireObservation(value: BlobObservation | undefined): BlobObservation
 
 export function runBlobConformance(factory: CloudCompositionFactory): void {
   describe('blobs', () => {
+    it.each([
+      { name: 'foreign tenant', change: { tenantId: TENANT_B } },
+      { name: 'non-object kind', change: { kind: 'inline' as const } },
+      { name: 'settled state', change: { state: 'aborted' as const } },
+    ])('refuses an upload reservation with $name', async ({ change }) => {
+      await withCloudComposition(factory, async ({ stores }) => {
+        const declaration = await declarationFor('refused');
+        const reservation = { ...reservationFor(TENANT_A, declaration, 'res-refused'), ...change };
+        await expect(stores.blobs.createUpload(TENANT_A, reservation)).rejects.toMatchObject({
+          code: 'storage_integrity_mismatch',
+        });
+      });
+    });
+
     it('mints an upload grant for a declaration', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         const declaration = await declarationFor('one');

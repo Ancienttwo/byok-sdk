@@ -21,12 +21,14 @@ const factory: CloudCompositionFactory = {
       const clock = createMutableClock();
       const objectStorage = await createObjectStorageScope();
       const stores = await createPostgresCloudStores({ rateLimit: { tokensPerSecond: 1_000, burst: 1_000 }, pool: scope.pool, clock, crypto: createWebCrypto(), objectStorage: objectStorage.config });
+      const core = createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config });
       return {
+        presence: core.presence,
         stores, now: () => clock.now().toISOString(), advanceTime: ms => clock.advance(ms),
         landBlobBytes: async ({ grant, bytes, reservation }) => { const response = await fetch(grant.uploadUrl, { method: 'PUT', headers: { 'content-type': reservation.contentType, 'content-length': String(bytes.byteLength) }, body: bytes as unknown as BodyInit }); if (!response.ok) throw new Error('PUT refused'); },
         commitBlob: async () => { throw new Error('Receipt/TTL retention does not commit blobs.'); },
         retireCancellationDelivery: async () => { throw new Error('Receipt/TTL retention does not retire cancellations.'); },
-        mailbox: conformanceMailbox(createPostgresCoreStores({ pool: scope.pool, clock, objectStorage: objectStorage.config })),
+        mailbox: conformanceMailbox(core),
         holdMailboxExpiry: async () => { throw new Error('Receipt/TTL retention does not retire devices.'); },
         dispose: scope.dispose,
       };

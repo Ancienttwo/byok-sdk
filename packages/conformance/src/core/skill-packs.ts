@@ -199,6 +199,25 @@ export function runSkillPackConformance(factory: CoreCompositionFactory): void {
       });
     });
 
+    it.each([
+      { name: 'duplicate path', files: (pack: Pack) => [...pack.files, pack.files[0]!],
+        message: '"SKILL.md" was supplied twice.' },
+      { name: 'missing declared file', files: (pack: Pack) => [pack.files[0]!],
+        message: '"references/ledger.md" is declared but was not supplied.' },
+      { name: 'undeclared extra file', files: (pack: Pack) => [...pack.files, { path: 'extra.md', content: 'extra' }],
+        message: '3 files were supplied for 2 declared rows.' },
+    ])('refuses a publish with $name', async ({ files, message }) => {
+      await withComposition(factory, async ({ stores }) => {
+        const pack = makePack('long-task-git-workflow');
+        await expect(stores.skillPacks.publish(TENANT_A, { manifest: pack.manifest, files: files(pack) }))
+          .rejects.toMatchObject({
+            code: 'skill_pack_manifest_invalid',
+            message: `Refusing to publish "long-task-git-workflow": ${message}`,
+          });
+        expect(await stores.skillPacks.get(TENANT_A, pack.manifest.name)).toBeUndefined();
+      });
+    });
+
     it('keeps one tenant’s packs invisible to another', async () => {
       await withComposition(factory, async ({ stores }) => {
         await stores.skillPacks.publish(TENANT_A, makePack('long-task-git-workflow'));

@@ -14,7 +14,7 @@
  * so no composition may make it observable.
  */
 import { describe, expect, it } from 'vitest';
-import { TENANT_A } from './fixtures';
+import { registration, TENANT_A, TENANT_B } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 const CODE_TTL_MS = 10 * 60 * 1000;
@@ -31,6 +31,70 @@ function enrollment(pairingCode: string, deviceId: string) {
 }
 
 export function runPairingConformance(factory: CloudCompositionFactory): void {
+  describe('tenant readiness', () => {
+    it('returns zero counts and no devices for an empty tenant', async () => {
+      await withCloudComposition(factory, async ({ stores, presence }) => {
+        expect(await stores.devices.readiness(TENANT_A, presence)).toEqual({
+          tenantId: TENANT_A, activePairedDeviceCount: 0, revokedDeviceCount: 0,
+          observedPresenceCount: 0,
+          observedPresenceByLevel: { online: 0, thinking: 0, working: 0, error: 0, offline: 0 },
+          devices: [],
+        });
+      });
+    });
+
+    it('projects live presence in device order and excludes revoked, orphan and foreign hints', async () => {
+      await withCloudComposition(factory, async ({ stores, presence, advanceTime }) => {
+        for (const [deviceId, level] of [
+          ['c-working', 'working'], ['a-online', 'online'], ['e-offline', 'offline'],
+          ['b-thinking', 'thinking'], ['d-error', 'error'],
+        ] as const) {
+          await stores.devices.register(TENANT_A, registration(deviceId));
+          await presence.publish(TENANT_A, { deviceId, level, ttlMs: 60_000, minimumIntervalMs: 0 });
+        }
+        await stores.devices.register(TENANT_A, registration('f-unobserved'));
+        await stores.devices.register(TENANT_A, registration('revoked'));
+        await stores.devices.revoke(TENANT_A, 'revoked');
+        // Works around a known divergence: revoke deletes presence hints on Postgres but not on in-memory or SQLite (#2237).
+        await presence.publish(TENANT_A, { deviceId: 'revoked', level: 'online', ttlMs: 60_000, minimumIntervalMs: 0 });
+        await presence.publish(TENANT_A, { deviceId: 'orphan', level: 'thinking', ttlMs: 60_000, minimumIntervalMs: 0 });
+        await stores.devices.register(TENANT_B, registration('foreign'));
+        await presence.publish(TENANT_B, { deviceId: 'foreign', level: 'error', ttlMs: 60_000, minimumIntervalMs: 0 });
+        const hint = await presence.publish(TENANT_A, {
+          deviceId: 'c-working', level: 'working', detail: 'editing', configuredToolsets: ['git'],
+          clientVersion: 'test-client', protocolVersions: [2], runtimes: [{ id: 'pi', authPresent: true }],
+          ttlMs: 60_000, minimumIntervalMs: 0,
+        });
+
+        const readiness = await stores.devices.readiness(TENANT_A, presence);
+        expect(readiness).toMatchObject({
+          tenantId: TENANT_A, activePairedDeviceCount: 6, revokedDeviceCount: 0,
+          observedPresenceCount: 5,
+          observedPresenceByLevel: { online: 1, thinking: 1, working: 1, error: 1, offline: 1 },
+        });
+        expect(readiness.devices.map(device => device.deviceId)).toEqual([
+          'a-online', 'b-thinking', 'c-working', 'd-error', 'e-offline', 'f-unobserved',
+        ]);
+        expect(readiness.devices[2]).toEqual({
+          deviceId: 'c-working', productId: 'product-1', deviceName: 'name-c-working', revoked: false,
+          presence: {
+            level: 'working', detail: 'editing', configuredToolsets: ['git'],
+            clientVersion: 'test-client', protocolVersions: [2], runtimes: [{ id: 'pi', authPresent: true }],
+            observedAt: hint.observedAt, expiresAt: hint.expiresAt,
+          },
+        });
+        expect(readiness.devices[5]).not.toHaveProperty('presence');
+        expect(await presence.read(TENANT_A, 'revoked')).toBeDefined();
+
+        await advanceTime(60_000);
+        const expired = await stores.devices.readiness(TENANT_A, presence);
+        expect(expired.observedPresenceCount).toBe(0);
+        expect(expired.observedPresenceByLevel).toEqual({ online: 0, thinking: 0, working: 0, error: 0, offline: 0 });
+        expect(expired.devices).toEqual(readiness.devices.map(({ presence: _presence, ...device }) => device));
+      });
+    });
+  });
+
   describe('pairing enrollment', () => {
     it('registers under the code claims, exactly once', async () => {
       await withCloudComposition(factory, async (handle) => {
