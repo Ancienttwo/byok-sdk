@@ -1,11 +1,18 @@
 -- Wire v7 (#1757). v7 starts on a new database: nothing a v6 build wrote is
 -- migrated (docs/releases/host-upgrade-next-minor.md#wire-v7).
 --
--- Preflight: any row in any table except the migration ledger and the erasure
--- operation log means the database is not new, and the migration stops before
--- any change. Host configuration (storage entitlements, retention policy) is
--- written after the migrations, so it counts too. Each migration file is its
--- own transaction, so 0001-0039 stay applied.
+-- Preflight: any row in any table of this schema except the migration ledger
+-- and the erasure operation log means the database is not new, and the
+-- migration stops before any change. Host configuration (storage entitlements,
+-- retention policy) is written after the migrations, so it counts too. Each
+-- migration file is its own transaction, so 0001-0039 stay applied.
+--
+-- The scope is the schema the migrations run in (`current_schema()`, where
+-- every unqualified table above was created), not the database: a Host may
+-- share the database with other applications. A table is read without ONLY, so
+-- Postgres walks pg_inherits and the read covers every partition and inheriting
+-- child, whatever schema it lives in; a partitioned parent (relkind 'p') holds
+-- no rows of its own, so it is read the same way.
 
 DO $$
 DECLARE
@@ -17,11 +24,11 @@ BEGIN
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = current_schema()
-       AND c.relkind = 'r'
+       AND c.relkind IN ('r', 'p')
        AND c.relname NOT IN ('byok_schema_migration', 'tenant_erasure_operation')
      ORDER BY c.relname
   LOOP
-    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I)', relation.relname) INTO occupied;
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I)', current_schema(), relation.relname) INTO occupied;
     IF occupied THEN
       RAISE EXCEPTION '0040_wire_v7: table % holds rows; wire v7 starts on a new database and nothing was changed. Export the Host history you need, then run the migrations on a new database.', relation.relname;
     END IF;

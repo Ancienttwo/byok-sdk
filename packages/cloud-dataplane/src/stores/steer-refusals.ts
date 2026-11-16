@@ -53,8 +53,7 @@ export class PostgresTaskSteerRefusalStore implements TaskSteerRefusalStore {
     const client = await this.#pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended('steer-refusal' || E'\\x1f' || $1 || E'\\x1f' || $2, 0))`,
-        [tenant, input.taskId]);
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['steer-refusal', tenant, input.taskId])]);
       const existing = await selectOne(client, tenant, input.taskId, input.steerMessageId);
       const result = existing !== undefined
         ? { refusal: existing, created: false }

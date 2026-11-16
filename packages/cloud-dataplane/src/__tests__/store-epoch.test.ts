@@ -25,9 +25,18 @@ import {
   PostgresStoreEpochUnsupportedError,
   type PostgresObjectStorageOptions,
 } from '../stores/index';
-import { createDataplaneScope, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
+import { createDataplaneScope, POSTGRES_URL, SKIP_DATAPLANE, SKIP_REASON } from './support/dataplane';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
+
+/** A copy of every migration before 0040, for a database that 0040 has yet to see. */
+async function before0040(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), 'byok-before-0040-'));
+  for (const name of await readdir(DEPLOY_SQL)) {
+    if (name.endsWith('.sql') && name < '0040') await copyFile(join(DEPLOY_SQL, name), join(directory, name));
+  }
+  return directory;
+}
 
 /** Constructing the blob store opens no connection, so a static config is enough for the fence. */
 const OBJECT_STORAGE: PostgresObjectStorageOptions = {
@@ -99,11 +108,8 @@ describe.skipIf(SKIP_DATAPLANE)(`store wire-epoch fence [postgres] — ${SKIP_RE
 
   it('refuses to migrate a database that holds rows, changes nothing, and the composition refuses it', async () => {
     const scope = await createDataplaneScope();
-    const directory = await mkdtemp(join(tmpdir(), 'byok-before-0040-'));
+    const directory = await before0040();
     try {
-      for (const name of await readdir(DEPLOY_SQL)) {
-        if (name.endsWith('.sql') && name < '0040') await copyFile(join(DEPLOY_SQL, name), join(directory, name));
-      }
       await migrate(scope.pool, directory);
       // Host configuration counts: a new database has none before its migrations finish.
       await scope.pool.query(
@@ -119,6 +125,31 @@ describe.skipIf(SKIP_DATAPLANE)(`store wire-epoch fence [postgres] — ${SKIP_RE
       await expect(compose(scope.pool)).rejects.toMatchObject({ code: POSTGRES_STORE_EPOCH_UNSUPPORTED, requiredEpoch: PROTOCOL_VERSION });
     } finally {
       await rm(directory, { recursive: true, force: true });
+      await scope.dispose();
+    }
+  });
+
+  it('reads partitions in another schema, and ignores the rest of a shared database', async () => {
+    const scope = await createDataplaneScope();
+    const other = `${scope.schema}_other`;
+    const admin = createByokPool({ connectionString: POSTGRES_URL!, max: 1 });
+    const directory = await before0040();
+    try {
+      await migrate(scope.pool, directory);
+      await admin.query(`CREATE SCHEMA "${other}" AUTHORIZATION "${scope.role}"`);
+      await scope.pool.query(`CREATE TABLE host_partitioned (k integer NOT NULL) PARTITION BY LIST (k)`);
+      await scope.pool.query(`CREATE TABLE "${other}".leaf PARTITION OF host_partitioned FOR VALUES IN (1)`);
+      await scope.pool.query(`CREATE TABLE "${other}".unrelated (k integer)`);
+      await scope.pool.query(`INSERT INTO "${other}".unrelated VALUES (1)`);
+      await scope.pool.query(`INSERT INTO "${other}".leaf VALUES (1)`);
+
+      await expect(migrate(scope.pool, DEPLOY_SQL)).rejects.toThrow('0040_wire_v7: table host_partitioned holds rows');
+      await scope.pool.query(`DELETE FROM "${other}".leaf`);
+      await expect(migrate(scope.pool, DEPLOY_SQL)).resolves.toMatchObject({ applied: ['0040_wire_v7.sql'] });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+      await admin.query(`DROP SCHEMA IF EXISTS "${other}" CASCADE`);
+      await admin.end();
       await scope.dispose();
     }
   });
