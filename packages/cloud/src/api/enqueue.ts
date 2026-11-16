@@ -116,9 +116,10 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       ...(window === undefined ? {} : { nativeSessions: window }) };
     if (recorded === undefined) {
       await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', resolved));
-      if (resolved.harnessId !== undefined) {
+      if (resolved.target.lane === 'harness') {
+        const harnessId = resolved.target.harnessId;
         const target = await options.cloud.devices.get(tenant, deviceId);
-        if (!target?.harnesses?.some(harness => harness.id === resolved.harnessId)) throw new ByokCloudError('agent_capability_missing', 'requested custom harness is not advertised by this device');
+        if (!target?.harnesses?.some(harness => harness.id === harnessId)) throw new ByokCloudError('agent_capability_missing', 'requested custom harness is not advertised by this device');
       }
     }
     return resolved;

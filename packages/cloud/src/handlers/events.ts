@@ -31,18 +31,6 @@ import { isCoreConflictError } from '@byok-sdk/core';
 import { decodeEnvelope, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
 import { admitDeviceRequest, type DeviceRouteDeps } from './shared.js';
 
-/**
- * Server flags this cloud build advertises on every long-poll response and
- * handshake answer: the only advertisement a long-poll daemon sees.
- *
- * Wire v6 has no server-flag gate. Every daemon-to-server surface is baseline,
- * and the kernel accepts a sealed one by the task's frozen `sealing`, not by a
- * flag. The kernel reads the device's own flags off `conn.hello` instead.
- *
- * Exact-list drift guard: `packages/cloud/src/__tests__/protocol-capabilities.test.ts`.
- */
-export const CLOUD_PROTOCOL_CAPABILITIES: string[] = [];
-
 export interface EventsRouteDeps extends DeviceRouteDeps {
   readonly activityBounds: import('../coordination.js').ActivityBounds;
   /** How long an empty poll is held open, ms. */
@@ -137,7 +125,6 @@ export function eventsHandler(deps: EventsRouteDeps) {
           const response: EventsPollResponse = {
             events,
             cursor: page.nextSeq,
-            capabilities: CLOUD_PROTOCOL_CAPABILITIES,
             ingress: { activityMaxEvents: deps.activityBounds.maxEvents, activityMaxBytes: deps.activityBounds.maxBytes },
           };
           await stores.mailbox.recordDelivery({
@@ -157,7 +144,6 @@ export function eventsHandler(deps: EventsRouteDeps) {
     const response: EventsPollResponse = {
       events: [],
       cursor: afterSeq,
-      capabilities: CLOUD_PROTOCOL_CAPABILITIES,
       ingress: { activityMaxEvents: deps.activityBounds.maxEvents, activityMaxBytes: deps.activityBounds.maxBytes },
     };
     return c.json(response, 200);

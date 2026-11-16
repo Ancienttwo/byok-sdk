@@ -55,6 +55,7 @@ import {
   encodeEnvelope,
   PROTOCOL_VERSION,
   SEALED_SPLIT_TABLE,
+  steerRefusalEnvelopeId,
   isSealableMessageType,
   isSealedPayload,
   isSealedTaskPlainOutput,
@@ -65,7 +66,9 @@ import {
   type AgentMessageDispositionPayload,
   type AgentMessagePublishPayload,
   type AgentMessageServerContext,
+  type ClaimedExecutor,
   type Envelope,
+  type ExecutionTarget,
   type MessageType,
   type SealedSplitEntry,
   type TaskSealing,
@@ -143,11 +146,10 @@ export const INBOUND_REFUSAL_REASONS = [
   'task_not_found_for_device',
   'task_owned_by_other_device',
   'agent_identity_mismatch',
-  'terminal_harness_mismatch',
+  'terminal_executor_mismatch',
   // task.claim
   'claim_device_mismatch',
-  'claim_harness_and_runtime_conflict',
-  'claim_harness_mismatch',
+  'claim_executor_mismatch',
   'claim_harness_unavailable',
   'claim_offer_mismatch',
   'claim_not_won',
@@ -161,6 +163,9 @@ export const INBOUND_REFUSAL_REASONS = [
   'approval_event_invalid',
   // terminal receipt
   'terminal_receipt_not_canonical',
+  // task.steer_refused
+  'steer_refusal_id_mismatch',
+  'steer_refusal_unknown_steer',
 ] as const;
 export type InboundRefusalReason = (typeof INBOUND_REFUSAL_REASONS)[number];
 
@@ -718,16 +723,16 @@ async function applyInboundGate(
   ) return refuse('task_settled_by_cloud');
   if (envelope.type === 'task.claim' && envelope.payload.deviceId !== deviceId) return refuse('claim_device_mismatch');
   if (envelope.type === 'task.claim') {
-    const harnessId = envelope.payload.harnessId;
-    if (harnessId !== undefined && envelope.payload.runtime !== undefined) return refuse('claim_harness_and_runtime_conflict');
-    if (attempt.ownerDeviceId !== undefined && (harnessId !== undefined || attempt.claimedHarnessId !== undefined)
-      && harnessId !== attempt.claimedHarnessId) return refuse('claim_harness_mismatch');
-    const device = await stores.devices.get(deviceId);
-    if (harnessId !== undefined && device?.harnesses?.some(harness => harness.id === harnessId) !== true) return refuse('claim_harness_unavailable');
-    const rejected = await checkOfferHarnessBinding(stores, deviceId, attempt, envelope, 'claim_offer_mismatch');
+    const executor = envelope.payload.executor;
+    // A replay by the owner names the executor it already claimed with.
+    if (attempt.ownerDeviceId !== undefined && !sameExecutor(executor, attempt.claimedExecutor)) return refuse('claim_executor_mismatch');
+    if (executor.kind === 'harness') {
+      const device = await stores.devices.get(deviceId);
+      if (device?.harnesses?.some(harness => harness.id === executor.harnessId) !== true) return refuse('claim_harness_unavailable');
+    }
+    const rejected = await checkOfferBinding(stores, deviceId, attempt, envelope, 'claim_offer_mismatch');
     if (rejected !== undefined) return rejected;
   }
-  let unclaimedInterruption = false;
   if (envelope.type === 'task.fail' && envelope.payload.recovery !== undefined) {
     // Recovery reports a local decision interrupted across the claim boundary.
     // It cannot manufacture cloud execution ownership, nor loosen claimed identity.
@@ -735,14 +740,14 @@ async function applyInboundGate(
     if (envelope.payload.sealed !== undefined || envelope.payload.reason !== 'daemon_interrupted' || envelope.payload.retryable !== false) {
       return refuse('recovery_report_invalid');
     }
-    const rejected = await checkOfferHarnessBinding(stores, deviceId, attempt, envelope, 'recovery_offer_mismatch');
+    const rejected = await checkOfferBinding(stores, deviceId, attempt, envelope, 'recovery_offer_mismatch');
     if (rejected !== undefined) return rejected;
-    // For automatic selection the target device reports its sealed local
-    // admission. Inventory is mutable and is not historical claim authority.
-    unclaimedInterruption = attempt.ownerDeviceId === undefined && attempt.claimedHarnessId === undefined;
   }
-  if (['task.complete', 'task.fail', 'task.cancelled'].includes(envelope.type) && !unclaimedInterruption
-    && (envelope.payload as { harnessId?: string }).harnessId !== attempt.claimedHarnessId) return refuse('terminal_harness_mismatch');
+  // Wire v7 (§3.1): after a claim every terminal echoes exactly the claimed
+  // executor; before one (a cancel, an unclaimed interruption) it carries
+  // none. A complete needs a claim, so an unclaimed complete fails here too.
+  if ((envelope.type === 'task.complete' || envelope.type === 'task.fail' || envelope.type === 'task.cancelled')
+    && !sameExecutor(envelope.payload.executor, attempt.claimedExecutor)) return refuse('terminal_executor_mismatch');
 
   // Agent identity is an exact-match boundary. A missing echo is a mismatch
   // just like a different id or profile revision; accepting it would let an
@@ -845,8 +850,7 @@ async function applyLifecycle(
       const claimed = await stores.tasks.claim({
         taskId,
         deviceId,
-        ...(envelope.payload.runtime === undefined ? {} : { runtime: envelope.payload.runtime }),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        executor: envelope.payload.executor,
         ...(envelope.payload.capabilities === undefined
           ? {}
           : { capabilities: envelope.payload.capabilities }),
@@ -854,8 +858,7 @@ async function applyLifecycle(
       // The pre-read may be stale. Only the store's atomic result proves
       // this execution won ownership (or is an exact-identity replay).
       if (claimed === undefined || claimed.ownerDeviceId !== deviceId
-        || claimed.claimedRuntime !== envelope.payload.runtime
-        || claimed.claimedHarnessId !== envelope.payload.harnessId) return refuse('claim_not_won');
+        || !sameExecutor(claimed.claimedExecutor, envelope.payload.executor)) return refuse('claim_not_won');
       return undefined;
     }
     case 'task.started':
@@ -909,8 +912,42 @@ async function applyLifecycle(
       }
       return;
     }
+    case 'task.steer_refused':
+      return recordSteerRefusal(stores, deviceId, taskId, envelope);
     default:
       return;
+  }
+}
+
+/**
+ * Wire v7 (#2009): the device's first answer to a steer it did not deliver.
+ * It changes no task state and is taken in every state, terminal included.
+ * A recorded refusal is answered before the mailbox is read, because the
+ * steer's row may since have been dead-lettered or removed. Only the first
+ * refusal must prove the cloud sent this steer to this device for this task.
+ */
+async function recordSteerRefusal(
+  stores: TenantStores,
+  deviceId: string,
+  taskId: string,
+  envelope: Extract<Envelope, { type: 'task.steer_refused' }>,
+): Promise<Refused | undefined> {
+  const { steerMessageId, reason } = envelope.payload;
+  if (envelope.id !== await steerRefusalEnvelopeId(steerMessageId)) return refuse('steer_refusal_id_mismatch');
+  if (await stores.steerRefusals.get(taskId, steerMessageId) !== undefined) return undefined;
+  const steer = await stores.mailbox.readMessage({ deviceId, messageId: steerMessageId });
+  if (steer === undefined || !namesSteerOf(steer.body, taskId)) return refuse('steer_refusal_unknown_steer');
+  await stores.steerRefusals.record({ taskId, steerMessageId, reason, deviceId });
+  return undefined;
+}
+
+/** The mailbox row is the cloud's own encoded `task.steer` for this task; a tombstone or another type is not. */
+function namesSteerOf(body: string, taskId: string): boolean {
+  try {
+    const row = JSON.parse(body) as { readonly type?: unknown; readonly task_id?: unknown };
+    return row.type === 'task.steer' && row.task_id === taskId;
+  } catch {
+    return false;
   }
 }
 
@@ -1049,20 +1086,33 @@ async function taskRedacted(stores: TenantStores, taskId: string): Promise<boole
   return await stores.receipts.get(taskRedactionReceiptKey(taskId)) !== undefined;
 }
 
-/** Check a claim or recovery against its sealed offer, retaining each report's missing-offer and archive rules. */
-async function checkOfferHarnessBinding(
+/** Exact executor identity; two absent executors are equal. */
+function sameExecutor(left: ClaimedExecutor | undefined, right: ClaimedExecutor | undefined): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return left.kind === 'runtime'
+    ? right.kind === 'runtime' && left.runtimeId === right.runtimeId
+    : right.kind === 'harness' && left.harnessId === right.harnessId;
+}
+
+/**
+ * Check a claim or recovery against its sealed offer, retaining each report's
+ * missing-offer and archive rules. A harness target binds the claim to that
+ * harness, and a harness claim needs a harness or `auto` target. A recovery
+ * names only the offer: its executor, when claimed, is fenced by the caller.
+ */
+async function checkOfferBinding(
   stores: TenantStores,
   deviceId: string,
   attempt: TaskAttempt,
   envelope: Extract<Envelope, { type: 'task.claim' | 'task.fail' }>,
   reason: 'claim_offer_mismatch' | 'recovery_offer_mismatch',
 ): Promise<Refused | undefined> {
-  const harnessId = envelope.payload.harnessId;
+  const executor = envelope.type === 'task.claim' ? envelope.payload.executor : undefined;
   const messageId = await taskOfferMessageId(stores.tenant, attempt.taskId, deviceId, attempt.agentRef, hashOfferBytes);
   if (envelope.type === 'task.fail' && envelope.payload.recovery?.offerId !== messageId) return refuse(reason);
   const offer = await stores.receipts.get(`task-offer:${messageId}`);
   if (offer === undefined) {
-    return envelope.type === 'task.fail' || harnessId !== undefined ? refuse(reason) : undefined;
+    return envelope.type === 'task.fail' || executor?.kind === 'harness' ? refuse(reason) : undefined;
   }
   if (isTaskRedactionTombstone(offer.body)) {
     // Only an archive without explicit redaction permits replay. A claim
@@ -1078,9 +1128,10 @@ async function checkOfferHarnessBinding(
     }
     return;
   }
-  const sealed = JSON.parse(offer.body) as { payload: { harnessId?: string; runtime?: string; dispatchSelection?: unknown } };
-  if (harnessId !== undefined && (sealed.payload.runtime !== undefined || sealed.payload.dispatchSelection !== undefined)) return refuse(reason);
-  if (sealed.payload.harnessId !== undefined && sealed.payload.harnessId !== harnessId) return refuse(reason);
+  if (executor === undefined) return;
+  const { target } = (JSON.parse(offer.body) as { payload: { target: ExecutionTarget } }).payload;
+  if (target.lane === 'harness' && (executor.kind !== 'harness' || executor.harnessId !== target.harnessId)) return refuse(reason);
+  if (executor.kind === 'harness' && target.lane !== 'harness' && target.lane !== 'auto') return refuse(reason);
 }
 
 /** The archive (#1120) removed the content, and no explicit redaction did: redaction's refusals take precedence. */

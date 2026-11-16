@@ -149,6 +149,13 @@ export class InMemoryMailboxStore implements MailboxStore {
     };
   }
 
+  async readMessage(
+    tenant: TenantId,
+    input: { readonly deviceId: string; readonly messageId: string },
+  ): Promise<MailboxMessage | undefined> {
+    return this.#devices.get(tenantKey(tenant, input.deviceId))?.byMessageId.get(input.messageId);
+  }
+
   async advanceCursor(
     tenant: TenantId,
     input: MailboxAdvanceCursorInput,
