@@ -59,6 +59,21 @@ it('keeps a blocked root reply route until it resumes and replies', () => {
   });
 });
 
+it('closes a reply route after a blocked room seat is released', () => {
+  ledger().transaction(s => {
+    const state = stateOf(s.application), message = { ...incoming(), conversation: { kind: 'group', id: 'room' } as const };
+    state.team.rooms.room = { id: 'room', name: 'Room', members: ['main'], mode: 'mention', announcement: '', visibleFrom: { main: 0 }, messages: [] };
+    state.team.rounds.round = { id: 'round', root: 'round', roomId: 'room', input: '', seats: ['seat'], limit: 1, counts: { main: 1 }, closed: true };
+    state.team.seats.seat = { id: 'seat', roundId: 'round', botId: 'main', status: 'blocked', released: true, late: false };
+    const turn = addTurn(state, { id: 'seat', root: 'seat', botId: 'main', source: 'room_slot', request: 'request', hop: 0, authority: 'owner' });
+    turn.status = 'blocked';
+    rememberInbound(state, message, 'round');
+    expect(queueDelivery(s, state, turn, 'task', 'message', 'answer', 100)).toBeUndefined();
+    cleanReplyTokens(s, state, 100);
+    expect(state.channel!.inbounds[inboundKey(message)]!.reply?.token).toBeUndefined();
+  });
+});
+
 it('replaces a filtered inbound when the same message is admitted', () => {
   ledger().transaction(s => {
     const state = stateOf(s.application), message = incoming(), turn = state.turns.root!;
