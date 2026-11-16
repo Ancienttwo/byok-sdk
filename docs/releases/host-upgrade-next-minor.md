@@ -2,19 +2,18 @@
 
 Use this checklist in order: [before](#before-upgrading), [during](#during-the-upgrade),
 [after](#after-the-upgrade), then [known residuals](#known-residuals).
-It covers changes after 0.43.0. Earlier Hosts first apply the
-[previous checklist](host-upgrade-0.43.0.md) and its predecessors.
+Before upgrading, finish or explicitly abandon in-flight collaboration work.
+Older ledgers are refused regardless of any earlier migration; the candidate
+removes `migrateWouldDo`. See [Host ledgers](#host-ledgers-record-their-format-2286).
 
-**This is release preparation.** Main is the source for current changes.
-Sections marked **随 wire v7 合入 (with the wire v7 merge)** are staged outside
-main. Wire notes use `integration/wire-v7@dc42f346a` and
-`batch/wire-v7-1@a680fd500`; F1 notes use `feat/wire-v7-f1-impl@74d9f160a`.
-Reconcile these pinned sources with the final integration merge before release.
+**This is release preparation.** Sections marked **随 wire v7 合入 (with the
+wire v7 merge)** take effect with that merge. Check the final candidate's
+manifest before deployment.
 
 Sources below name PRs and entry ids in
 [`upgrade-manifest.json`](../../packages/client/upgrade-manifest.json).
-Wire/F1 ids refer to their branch manifests until merge. Where no dedicated
-entry exists, that gap is stated instead of inventing an id.
+Wire and pairing ids refer to their change manifests until merge. Missing
+dedicated entries are stated explicitly.
 
 ## Before upgrading
 
@@ -24,13 +23,17 @@ entry exists, that gap is stated instead of inventing an id.
    `host-ledger-format-table`, `reject-hosted-store-version-2`.
 2. Export required history **with the old build**, then stop its writers.
    Prepare separate cloud, K4/K8 ledger, and refused provider-store paths.
-   Old-format data is typed-refused: no content read, delete, migration, or
-   automatic rebuild. Keep the old stores for history. Sources: [#2290],
-   [#2309]; entries `reject-older-provider-kind-store`, `host-ledger-format-table`.
-3. Adapt Host calls/config below before deployment. Plan one cloud/daemon/CLI
-   upgrade window, cloud first. AiphaBee Local Agent and byok-host ship together.
-   Sources: [#2277], [#2303], [AiphaBee #1384]; entries `wire-v7`,
-   `wire-v7-client-negotiation-halt`, `runtime-status-side-arrays-refused`.
+   Old-format **stores** are refused with typed errors, without reading their
+   content, deleting, migrating or rebuilding them. Keep them for history.
+   Two qualifications: [v6 enrollments are deleted](#credentials-and-provider-keys)
+   with wire v7, and [WAL-only refusal can change store bytes](#wal-only-format-metadata).
+   Sources: [#2290], [#2309], [#2287]; entries `reject-older-provider-kind-store`,
+   `host-ledger-format-table`, `wire-v7-v6-enrollment-entry-deleted`.
+3. Complete the Host code, store and configuration adaptations below before
+   deployment. Plan one cloud/daemon/CLI window, cloud first. Sources: [#2277],
+   [#2303]; entries `wire-v7`, `wire-v7-client-negotiation-halt`.
+   AiphaBee's Local Agent and byok-host must ship together; its adoption checklist
+   lives in [AiphaBee #1384].
 
 ### Retired compatibility paths
 
@@ -58,9 +61,8 @@ An old hosted `entity_kind_check` is `hosted_schema_unsupported_old` before DDL.
 
 Sources: [#2256]. Manifest entries: `remove-task-terminal-read`.
 
-Remove `AgentSessionHandoffStore.getTaskTerminal()`. Failure handling still
-awaits `recordTaskTerminal()` before `task.fail`; use that write receipt.
-There is no public read replacement.
+Remove `AgentSessionHandoffStore.getTaskTerminal()`; use the
+`recordTaskTerminal()` receipt awaited before `task.fail`. No public read replaces it.
 
 #### Team workspaces
 
@@ -84,9 +86,8 @@ Remove `dropReceipts()` and `AgentEgressDropReceipt`. Pass only the reason to
 
 Sources: [#2256]. Manifest entries: `remove-standalone-daemon-log`.
 
-Remove `openDaemonLog()` and `DaemonLog`; own your line sink and rotation.
-`DaemonLogOptions` remains for the internal process-output router, which is
-not an exported standalone line writer.
+Replace `openDaemonLog()` / `DaemonLog` with a Host line sink and rotation.
+`DaemonLogOptions` remains for internal process output.
 
 #### Service exit disposition
 
@@ -122,9 +123,8 @@ the projection object itself: `agentHome.projection: { prepare: async ({ agentRe
 
 Sources: [#2288]. Manifest entries: `remove-list-installed-skill-packs`.
 
-`listInstalledSkillPacks()` is removed. `installSkillPacks()` returns what it
-installed and kept, and `projectSkillPack()` copies one installed pack by name;
-a Host that needs an inventory keeps the names it installed.
+Remove `listInstalledSkillPacks()`; retain the names returned by
+`installSkillPacks()`. `projectSkillPack()` copies an installed pack by name.
 
 #### Truth memory client
 
@@ -138,9 +138,9 @@ and result types. Call cloud truth routes with a device proof from
 
 Sources: [#2256]. Manifest entries: `remove-create-in-memory-blobs`.
 
-`@byok-sdk/cloud` removes `createInMemoryBlobs(objects, bytes)`. It only
-returned `bytes.bind(objects)`. Call `bind(objects)` on the `InMemoryBlobBytes`
-from `createInMemoryBlobBytes()` instead; it returns the same `InMemoryBlobs`.
+Replace `@byok-sdk/cloud`'s `createInMemoryBlobs(objects, bytes)` with
+`bytes.bind(objects)`, where `bytes` comes from `createInMemoryBlobBytes()`.
+The result remains `InMemoryBlobs`.
 
 ### DaemonConfig rejects unknown fields
 
@@ -162,9 +162,6 @@ older build.
 **随 wire v7 合入 (with the wire v7 merge).**
 
 Sources: [#2297]. Manifest entries: `cloud-unused-exports-removed`, `cloud-host-facade-methods-removed`, `cloud-approval-identity-required`, `cloud-approval-unnamed-observation-refused`, `cloud-agentless-archive-input-removed`, `cloud-error-agent-ref-missing-removed`, `dataplane-unused-exports-removed`, `dataplane-retention-policy-store-removed`, `dataplane-mailbox-row-tenant-validated`.
-
-These names had no caller in the SDK or its known Hosts. Remove the import and
-use the replacement named here.
 
 #### `@byok-sdk/cloud`
 
@@ -194,12 +191,10 @@ use the replacement named here.
 - **In-memory projection adapters.** `InMemoryAgentMemoryProjectionStore`
   and `InMemoryAgentMemoryProjectionAuthorizer` are no longer exported. A
   hosted composition supplies its own projection ports.
-- **Approval identity.** Every approval observation names its `approvalId`:
-  `approval_requested`, a local `approval_resolved`, and a host approve or
-  reject. `ApprovalObservationSchema`, `ApprovalTimelineEventSchema` and
-  `PendingApproval` now require the field. A stored timeline that holds an
-  observation without one is refused when read; no id is synthesized.
-  Wire v7 starts on new stores, so a v7 store never holds one.
+- **Approval identity.** Supply `approvalId` on requested/resolved and Host
+  approve/reject observations. `ApprovalObservationSchema`,
+  `ApprovalTimelineEventSchema` and `PendingApproval` require it;
+  reading stored observations without it fails without synthesizing an id.
 - **Archive input.** `taskArchiveInput` requires `agentRef`.
 - **Error code.** `task_attempt_agent_ref_missing` is removed from
   `CLOUD_ERROR_CODES`. Migration 0039 makes the Agent columns `NOT NULL`, so
@@ -224,19 +219,16 @@ use the replacement named here.
   `TenantRetentionPolicy` and `TenantRetentionPolicyInput` are removed. The
   `tenant_retention_policy` table and `runMaintenance` are unchanged: the
   Host writes and reads the policy with SQL and passes it to maintenance.
-- **Mailbox rows.** Every outbox read validates the row's tenant with
-  `tenantId()`, so a row with an invalid `tenant_id` fails the read with
-  `ByokCoreError` `tenant_id_invalid`. Rows the SDK wrote are unaffected.
-- **Agentless retirement.** `retireAgentlessTasks` and its option and result
-  types are removed. It moved pre-0039 rows that had no Agent identity, and
-  wire v7 starts on a new database. The retired-id fence stays: a task id in
-  `task_agentless_retired` still refuses a new offer with
-  `agent_task_already_exists`.
+- **Mailbox rows.** Invalid `tenant_id` in outbox reads raises
+  `ByokCoreError` `tenant_id_invalid`; SDK-written rows are unaffected.
+- **Agentless retirement.** Remove `retireAgentlessTasks` and its option/result
+  types. The `task_agentless_retired` fence still rejects new offers for
+  retired ids with `agent_task_already_exists`.
+
 ### Undici in the Host dependency tree
 
 Keep a Host override to **8.12.4**. Pi's exact dependency can still install a
-separate older copy. The owner chose Host overrides; there is no SDK Pi fork.
-Merge the setting into the Host root `package.json`, reinstall, and check:
+separate older copy. Merge the setting into the Host root `package.json`, reinstall, and check:
 
 | Manager | Setting | Verification |
 | --- | --- | --- |
@@ -245,152 +237,91 @@ Merge the setting into the Host root `package.json`, reinstall, and check:
 | pnpm | `"pnpm": { "overrides": { "undici": "8.12.4" } }` | `pnpm why -r undici` |
 
 Every listed undici version should be 8.12.4. This does not update Node's
-built-in undici or another package's bundled copy. Sources: [#2098] (owner
-policy), [#2095] (SDK fix). No new manifest entry: this carries forward the
+built-in undici or another package's bundled copy. Sources: [#2098], [#2095].
+No new manifest entry: this carries forward the
 [previous override advice](host-upgrade-0.43.0.md#undici-in-the-host-dependency-tree-2081).
-
-## During the upgrade
-
-1. Keep old writers stopped. With wire v7, run migrations on a **new Postgres
-   database**, then write storage entitlements and retention policy. Use the
-   same role, database, and `search_path` for migration and cloud startup.
-   Embedded Hosts point `storage.path` at a new SQLite file. Sources: [#2283],
-   [#2291]; entries `wire-v7-server-sqlite-store`,
-   `wire-v7-dataplane-postgres-new-database`, `wire-v7-dataplane-store-epoch`.
-2. Deploy cloud first, then daemons and CLI from the **same candidate release**.
-   A v6 daemon cannot work with v7; plan downtime during the gap. Never run
-   v6 and v7 cloud processes on one database. Sources: [#2277], [#2291], [#2303];
-   entries `wire-v7`, `wire-v7-dataplane-store-epoch`, `wire-v7-client-negotiation-halt`.
-3. Create a new K4/K8 ledger at a **new path** with `botLedgerOptions`, and a
-   separate hosted collaboration schema/database. Sources: [#2309]; entries
-   `host-ledger-format-table`, `host-ledger-format-api`, `reject-hosted-store-version-2`.
-4. Re-pair every device and configure providers again. Follow the credential
-   rules below. Sources: [#2290], [#2287]; entries `retire-compatibility-apis`,
-   `keys-store-refuse-before-write`, `wire-v7-v6-enrollment-entry-deleted`.
 
 ### SQLite stores decide their format before any write (#2286)
 
 Sources: [#2295], [#2309]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`.
 
-A store that refuses an older file now refuses it before it opens the file for
-writing, sets a pragma such as `journal_mode = WAL` or `auto_vacuum`, or runs
-DDL. The refused file keeps its bytes, and no `-wal`, `-shm` or `-journal` file
-appears next to it.
+SQLite stores check the unchanged main file before writable open, pragmas or
+DDL. Refusal preserves bytes and creates no sidecars, except for
+[WAL-only format metadata](#wal-only-format-metadata).
 
-The new entry `@byok-sdk/core/sqlite-node` exports
-`readSqliteFileUnchanged(path, readMetadata)`. It opens an existing, non-empty
-file read-only and immutable, runs `readMetadata` on the main file and closes
-it; it returns `undefined` for `:memory:`, a missing path or a zero-length
-file. A copy-and-own Host store can call it with its own format check before
-its writable open. The core root does not export it. Its functions need Node:
-they load `node:sqlite` and `node:fs` only when called, so a Worker bundle that
-reaches `HostLedger` through `@byok-sdk/bot-collaboration/host-kit` still
-resolves the entry.
+The Node entry `@byok-sdk/core/sqlite-node` exports
+`readSqliteFileUnchanged(path, readMetadata)` for copy-and-own stores. It reads
+existing non-empty files read-only and immutable; `:memory:`, missing and
+zero-length files return `undefined`. Call it before writable open. The core
+root does not export it; lazy Node imports let Worker bundles resolve it.
+`sqliteOpenPath` / `sqliteFileUri` use Windows extended-length paths for both
+opens, including paths past `MAX_PATH`; `:memory:` remains unchanged.
 
-`@byok-sdk/client`:
-
-- The local task journal has no version row. It is current when its tables and
-  columns are exactly this build's. Any other journal, including one that still
-  holds the retired `local_artifact_ref`, `local_cleanup_candidate` or
-  `local_storage_usage` table, is refused with `JournalUnavailableError` and
-  stays in place; startup no longer drops those tables, and a format refusal is
-  no longer moved to `quarantine/`. A file that SQLite cannot read is still
-  quarantined.
-- A journal that the read-only check cannot open is refused with
-  `JournalUnavailableError` and stays in place; it is not quarantined. Other
-  stores that call `readSqliteFileUnchanged` get `SqliteReadOnlyOpenError` in
-  the same case. On Windows the check opens a path past `MAX_PATH` in the
-  same `\\?\` extended-length form as the writable open: both name the file
-  through `sqliteOpenPath` / `sqliteFileUri` from `@byok-sdk/core/sqlite-node`.
-- A durable replica written in another pi-durable schema version than the
-  pinned one is refused instead of migrated forward.
-- A replica lock path that holds another database, such as the replica of a
-  task whose id ends in `.sqlite.lock`, is refused instead of written.
-
-Every released journal and replica is already current. Preserve or export a
-refused store and resolve it before starting this build.
-
-The copy-and-own examples follow the same order: the Desktop example
-`HostStore`, the basic example's Clarification and goal/btw stores and the MCP
-example `BetaLedger`. The basic example's two stores now record their format in
-a `host_format` table, one row per store, so they can share one Host database.
-A Host database with their tables but without `host_format` predates it and is
-refused; preserve it and configure a new store at a separate path.
-
-See [WAL-only format metadata](#wal-only-format-metadata) for the accepted exception to byte preservation.
+- Local task journals must have exactly the current tables and columns. Old
+  `local_artifact_ref`, `local_cleanup_candidate` or `local_storage_usage`
+  tables cause `JournalUnavailableError`; they are no longer dropped. Format
+  refusals and read-only open failures stay in place. Unreadable SQLite files
+  are still quarantined; other stores report `SqliteReadOnlyOpenError` for
+  read-only open failures.
+- A durable replica with a different pi-durable schema is refused with
+  `DurableReplicaFormatError`, without migration. A replica lock path holding
+  another database is also refused without writing it.
+- Released journals and replicas are current. Export or preserve refused
+  stores before starting the candidate.
+- Copy-and-own Desktop `HostStore`, basic Clarification and goal/btw stores,
+  and MCP `BetaLedger` follow this check. The basic stores share a database
+  through one `host_format` row per store. Existing tables without that
+  metadata require a separate new path.
 
 ### Host ledgers record their format (#2286)
 
 Sources: [#2309]. Manifest entries: `host-ledger-format-table`, `host-ledger-format-api`, `keys-store-refuse-before-write`, `reject-hosted-store-version-2`.
 
-`@byok-sdk/server/execution-core` `HostLedger` records the ledger's format in a
-`host_store_format(owner, version)` table, one row per layer: `k4` for the ledger
-itself and `k8` for a Bot collaboration ledger. It is the only format authority;
-the ledger body and the Bot collaboration state no longer carry a `version`. An
-existing ledger is decided on its unchanged main file, before the writable
-open, pragmas or DDL, and is refused with `HostStoreFormatError` (code
-`host_store_format_unsupported`) when a row's version differs, an expected layer
-is missing, an unknown layer is present, or it has tables but no
-`host_store_format`. A refused file is not migrated, repaired or deleted.
+`HostLedger` from `@byok-sdk/server/execution-core` uses
+`host_store_format(owner, version)` as its sole format authority: `k4` for
+itself, `k8` for Bot collaboration. Before writable open, a missing, unknown
+or mismatched layer, or tables without format metadata, raises
+`HostStoreFormatError` (`host_store_format_unsupported`).
 
-Every ledger written by 0.42 or 0.43 (and earlier releases) has no `host_store_format` and is
-refused. Before you upgrade, finish or abandon in-flight Bot collaboration work
-(open turns, delegations, routines and any topology switch). After the upgrade,
-open a new ledger file at a new path; keep the old file if you need its history,
-since this build does not read it.
+All previously released ledgers lack this table and are refused. Complete or
+abandon collaboration work and export needed history with the old build; open
+a new ledger at a new path for the candidate.
 
-- `HostLedgerOptions.expectedFormats` names each layer's row besides `k4`;
-  `ledger.formats` exposes the rows.
-- `@byok-sdk/bot-collaboration` exports `botLedgerOptions` (the compact veto and
-  the `k8` format). Open every Bot ledger with it, for example
-  `new HostLedger(file, tenant, { ...botLedgerOptions, projectionOutboxLimits })`.
-  `BotCollaboration` refuses a ledger opened without it, and `inspectLedger`
-  reports an older ledger as `rejected`.
-- `LedgerState.version`, `CollaborationState.version`, and `OldCollaborationStateError` are removed. Drop old collaboration `new-path-repair` handling too.
-  `LedgerDump` and `SWITCH_EXPORT_VERSION` are now 2, so a switch dump or switch
-  export written by an earlier release is refused; complete a topology switch
-  before upgrading.
+- `HostLedgerOptions.expectedFormats` names layers besides `k4`;
+  `ledger.formats` exposes the rows. Open Bot ledgers with
+  `new HostLedger(file, tenant, { ...botLedgerOptions, projectionOutboxLimits })`
+  using `botLedgerOptions` from `@byok-sdk/bot-collaboration`.
+  `BotCollaboration` refuses ledgers without it; `inspectLedger` reports
+  older ledgers as `rejected`.
+- Remove `LedgerState.version`, `CollaborationState.version`,
+  `OldCollaborationStateError` and collaboration `new-path-repair` handling.
+  `LedgerDump` and `SWITCH_EXPORT_VERSION` are 2; older dumps/exports are refused.
+- The hosted Postgres example uses `STORE_VERSION` 3. Version 2 scopes raise
+  `HostedStoreVersionError` under the scope lock before writes; schedulers
+  skip them. Finish or abandon their work, then use a new schema/database.
 
-The hosted bot-collaboration example (Postgres) follows the same decision: its
-`STORE_VERSION` is now 3, and a scope written by version 2 is refused when it is
-opened with `HostedStoreVersionError`, under the scope lock and before any
-write; the schedulers skip it. Finish or abandon its in-flight collaboration
-work before upgrading, then provision a new hosted store (a new schema or
-database).
-
-`@byok-sdk/keys` `SqliteProviderProfileStore` decides an existing store's format
-the same way, before `journal_mode` or DDL. A store with `provider_profile` but
-without one of its custody tables is refused with `PROVIDER_STORE_SCHEMA_STALE`
-instead of having the table created; a store the read-only check cannot open is
-refused with `PROVIDER_STORE_UNAVAILABLE`. Every released keys store is still
-accepted. Its configuration lock file is opened through `sqliteOpenPath` like
-the store.
-
-`sqliteOpenPath` from `@byok-sdk/core/sqlite-node` now returns `:memory:`
-unchanged on Windows too.
+For provider stores, follow [keys custody checks](#credentials-and-provider-keys).
 
 ### Credentials and provider keys
 
-A provider secret and a device enrollment are different records:
+Sources: [#2290], [#2309], [#2287]. Entries `retire-compatibility-apis`
+(removed Keychain option; no dedicated unprefixed-secret entry),
+`reject-older-provider-kind-store`, `keys-store-refuse-before-write`,
+`wire-v7-v6-enrollment-entry-deleted`.
 
-- An **unprefixed provider Keychain secret** is refused with
-  `KEYCHAIN_SECRET_DECODE_FAILED`. It is not read as a raw secret. There is no
-  `KEYCHAIN_LEGACY` code. Explicit provider reconfiguration may replace that
-  same-name legacy entry. Keep the existing decode-error UI.
-- A **keys store missing custody tables** is `PROVIDER_STORE_SCHEMA_STALE`
-  before WAL/DDL. The SDK does not create those tables. Preserve the old store
-  and configure a separate current store and providers. A read-only open failure
-  is `PROVIDER_STORE_UNAVAILABLE`; current released keys fixtures still open.
-- A **v6 device enrollment — 随 wire v7 合入** is recognized by format without
-  decoding its key. Start deletes it and reports re-pair required. Pair deletes
-  it and pairs as a first pairing; clear deletes it. A plain status read only
-  reports it. This explicit enrollment deletion does not delete old databases.
-
-Sources: [#2290], [#2309], [#2287],
-[AiphaBee correction](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6918385300).
-Entries `retire-compatibility-apis` (removed Keychain option; no dedicated
-unprefixed-secret entry), `reject-older-provider-kind-store`,
-`keys-store-refuse-before-write`, `wire-v7-v6-enrollment-entry-deleted`.
+- An unprefixed provider Keychain entry raises `KEYCHAIN_SECRET_DECODE_FAILED`.
+  Delete that entry in the OS keychain, then configure the provider again,
+  as the SDK error instructs. Keep the decode-error UI; there is no
+  `KEYCHAIN_LEGACY` code.
+- `SqliteProviderProfileStore` refuses a `provider_profile` store missing
+  custody tables with `PROVIDER_STORE_SCHEMA_STALE` before WAL/DDL. Preserve it
+  and configure a separate current store and providers. Read-only open failure
+  raises `PROVIDER_STORE_UNAVAILABLE`; released keys stores remain accepted.
+  Its configuration lock uses `sqliteOpenPath`, like the store.
+- With wire v7, the client recognizes a v6 enrollment by format without
+  decoding its key. `start` deletes it and requires re-pairing; `pair` deletes
+  it and performs first pairing; `clear` deletes it. Status only reports it.
+  This enrollment deletion does not delete old databases.
 
 ### Wire v7
 
@@ -403,23 +334,26 @@ cannot talk to each other.
 
 #### New store
 
-v7 starts on a new store. Retained v6 records (terminal receipts, task
-history, attempts) are not migrated, and a store a v6 build wrote is not
-supported:
+v7 requires new stores; v6 receipts, history and attempts are not migrated.
+Export needed history with the old build. Rotate K4 frozen work and outbox
+snapshots, and follow [credential handling](#credentials-and-provider-keys).
 
-- Export the history you need before you upgrade.
-- Devices pair again; a v6 device credential does not carry over.
-- The Host's K4 frozen work and outbox snapshots rotate: start them fresh on
-  the v7 store.
-- The SQLite startup check refuses a pending row of another major
-  (`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`). The hosted data plane checks the
-  database's wire epoch instead; see "Cloud data plane" below.
+- Postgres: run migrations on a **new database**, then write storage
+  entitlements and retention policy. Use the same role, database and
+  `search_path` for migration and cloud startup: both act on its first schema.
+  `0040_wire_v7.sql` refuses any populated table, including Host configuration,
+  before changes; otherwise it records epoch 7 in `byok_wire_epoch`.
+- Embedded SQLite: point `storage.path` at a **new file**. Schema 10 refuses
+  v6 schemas 6 to 9 with `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`.
+  `inspectSqliteStore` reports `new-path-repair`, an inspection label, not
+  automatic repair. A pending mailbox row from another major raises
+  `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`.
 
 #### What a v6 daemon sees
 
 - **Not paired again:** expected to stop at authentication with
-  `device_revoked`. To be verified in phase 1 against the pinned v6 daemon;
-  it must halt, not reconnect forever.
+  `device_revoked`. Verify with the deployed v6 daemon that it halts without
+  reconnecting forever.
 - **Paired again into the v7 store:** its lone `conn.hello` gets
   `rejected` with `protocol_version_unsupported`. It reads that as a refused
   handshake and halts with `handshake_rejected`.
@@ -429,15 +363,13 @@ A v7 daemon that reaches a v6 cloud gets HTTP 400 on its hello and halts with
 `localVersion`, `httpStatus`; `peerVersion` only when the peer stated it).
 Upgrade both sides to resolve it.
 
-In `@byok-sdk/client` this is the halt reason `protocol_negotiation_failed`
-(new in `DAEMON_HALT_REASONS`). The daemon takes it when its lone hello gets a
-`rejected` outcome with `protocol_version_unsupported` (`httpStatus` 200) or a
-4xx other than 401, 403, 409, 413 and 429. `DaemonLifecycle`'s `halted` phase
-carries `httpStatus` for it, `byok-agent start`, diagnostics and the support
-bundle print it, and `whenOpen()` rejects with a `DaemonHaltError` whose `cause`
-is the `ProtocolNegotiationError`. A 404 usually means a wrong server base URL
-or a Host that does not mount the messages route. Add the reason wherever a
-Host switches on halt reasons.
+Add `protocol_negotiation_failed` to Host halt-reason switches. The client
+uses it for hello rejection `protocol_version_unsupported` (HTTP 200) or a
+4xx except 401, 403, 409, 413 and 429. Halted `DaemonLifecycle` carries
+`httpStatus`; CLI start, diagnostics and support bundles print it.
+`whenOpen()` rejects with `DaemonHaltError` caused by
+`ProtocolNegotiationError`. A 404 usually means a wrong base URL or unmounted
+messages route.
 
 #### Offer `target` and claim `executor`
 
@@ -465,16 +397,25 @@ Host switches on halt reasons.
 
 #### `task.steer_refused`
 
-A device reports a steer it received and did not deliver with
-`task.steer_refused { steerMessageId, reason }`. Reasons: `input_too_large`,
-`steer_unsupported`, `task_not_active`; the list is open. The first reason
-wins. The report is plaintext on sealed tasks too.
+A device reports an undelivered steer as
+`task.steer_refused { steerMessageId, reason }`. Known reasons are
+`input_too_large`, `steer_unsupported`, `task_not_active`; the list is open.
+The first reason wins and remains plaintext on sealed tasks.
 
-The task event feed ends at its terminal. Read late refusals with
-`tasks.readSteerRefusal(taskId, messageId)` or
-`tasks.listSteerRefusals(taskId, { afterRevision, limit })`.
-Save the `{ messageId }` from `TaskHandle.steer`; enqueueing is not a delivery
-receipt. The cloud APIs and cursor change are listed below.
+Save the `{ messageId }` from `TaskHandle.steer` or the envelope id from
+`ByokCloud.steerTask`; enqueueing is not a delivery receipt. Read refusals with:
+
+| Surface | Single read | Page read |
+| --- | --- | --- |
+| Embedded | `tasks.readSteerRefusal(taskId, messageId)` | `tasks.listSteerRefusals(taskId, { afterRevision, limit })` |
+| Cloud | `ByokCloud.readSteerRefusal(tenant, taskId, steerMessageId)` | `ByokCloud.listSteerRefusals(tenant, { taskId, afterRevision, limit })` |
+
+These reads include refusals after the terminal, when the task event feed has
+ended. Before terminal, add `{ kind: 'steer_refused', messageId, reason, at }`
+to exhaustive `ServerTaskEvent` switches. Cloud accepts a refusal in any task
+state only for a steer it sent that device/task, without changing task state.
+Refusal rows carry no content and survive archive, redaction, retention and
+device retirement; tenant erasure removes them.
 
 #### Removed fields and flags
 
@@ -498,28 +439,26 @@ stays optional and open: read it with `readDeclineCode`, and expect
 A v7 device puts the code only in `code`: `reason` is the detail and no longer
 starts with `<code>: ` (for example `offer_capability_missing` and the offer
 selection rules). A Host that parsed a code out of `reason` reads `code`.
-See [Decline codes in the staged protocol](https://github.com/Ancienttwo/byok-sdk/blob/a680fd5008ab6b4110d43b3ec770281661cc559e/docs/protocol.md#decline-codes).
+Source: [#2293].
 
 #### Steer text bound
 
-A plaintext `task.steer` text is at most 65,536 UTF-8 bytes
-(`TASK_STEER_TEXT_MAX_BYTES`); the sender refuses a longer one before it
-enqueues. A sealed steer is not checked on the device. `conn.hello` carries
-at most 64 capability flags.
+Plaintext `task.steer` is limited to 65,536 UTF-8 bytes
+(`TASK_STEER_TEXT_MAX_BYTES`). Cloud `steerTask` and embedded
+`TaskHandle.steer` reject longer text with `ByokCloudError`
+`coordination_input_invalid` before enqueueing. Sealed steer text is not
+checked on the device. `conn.hello` carries at most 64 capability flags.
 
 #### Cloud (`@byok-sdk/cloud`)
 
-- **Claim and terminal executor.** The cloud records the winning claim's
-  `executor` as `TaskAttempt.claimedExecutor`. A replayed claim must name the
-  same executor. A claim's executor must be one the offer's target allows:
-  any under `auto`, otherwise exactly the named runtime or harness. After a
-  claim, every terminal must echo exactly that executor. Before a claim, a
-  cancel carries none, and a `task.complete` is rejected. An unclaimed
-  `daemon_interrupted` recovery may name the executor its device admitted
-  before a claim that never reached the cloud; it must be one the offer's
-  target allows, and it records no claim or owner. `TerminalResult.executor`
-  (and the third argument of `projectTerminalResult`) is the claimed
-  executor, so a task that was never claimed has none.
+- **Claim and terminal executor.** `TaskAttempt.claimedExecutor` records the
+  winning claim. Replays and later terminals must echo it. The offer target
+  allows any executor under `auto`, otherwise only the named runtime/harness.
+  Before claim, cancel carries none and `task.complete` is rejected. Unclaimed
+  `daemon_interrupted` recovery may name an admitted executor allowed by the
+  target, without recording a claim. `TerminalResult.executor` and
+  `projectTerminalResult`'s third argument reflect the claim and are absent
+  for unclaimed tasks.
 - **Renamed inbound refusal reasons** (`INBOUND_REFUSAL_REASONS`, as an
   observer reports them; the wire codes are unchanged). Rename these strings
   if your observer matches them:
@@ -530,29 +469,15 @@ at most 64 capability flags.
   - New: `steer_refusal_id_mismatch` (wire `payload_invalid`),
     `steer_refusal_unknown_steer` (wire `not_permitted`) and
     `task_not_claimed` (wire `not_permitted`).
-- **Reports before a claim** (#2289). Before a task is claimed, the cloud
-  takes only `task.claim`, `task.decline`, `task.cancelled` and a
-  `task.fail` with `recovery` from the offered device. Every other task
-  report is rejected with `task_not_claimed` (wire `not_permitted`) and
-  changes nothing: `task.started`, `task.progress`, `task.artifact`,
-  `task.await_approval`, `task.approval_resolved`, `task.steer_refused`,
-  `task.complete`, and a `task.fail` without `recovery`. The previous
-  release took them, so an unclaimed task could become running, awaiting
-  approval or terminal with no owner. Reports from any other device were already rejected
-  (`task_not_found_for_device`). A device that claims before it reports
-  sees no change.
+- **Reports before a claim** (#2289). Only `task.claim`, `task.decline`,
+  `task.cancelled` and `task.fail` with `recovery` are accepted from the
+  offered device before claim. All other reports return `task_not_claimed`
+  (wire `not_permitted`) without state changes. Other devices still get
+  `task_not_found_for_device`.
 - **Renamed fields.** `SteerRejectedError.executor` replaces `.runtime`, and
   `TerminalResult.executor` replaces `.harnessId`.
-- **Steer refusals.** Read them with
-  `ByokCloud.readSteerRefusal(tenant, taskId, steerMessageId)`, using the id
-  of the envelope `steerTask` returned. Or page them with
-  `ByokCloud.listSteerRefusals(tenant, { taskId, afterRevision, limit })`.
-  The cloud records a refusal only for a `task.steer` it sent that device for
-  that task. It takes the refusal in every task state and never changes the
-  task's state. Task archive and redaction keep refusal rows, as they keep
-  the terminal receipt; a row carries no content.
-- **Steer text bound.** `steerTask` rejects a plaintext text over 65,536 UTF-8
-  bytes with `coordination_input_invalid`, before any mailbox row exists.
+- For steer receipts and input limits, see [refusal reads](#tasksteer_refused)
+  and [text bounds](#steer-text-bound).
 - **`POST /byok/messages`** answers an entry of another wire major with
   `rejected` and `protocol_version_unsupported`, and an unknown type with
   `rejected` and `type_unsupported`, each with HTTP 200. The handshake answer
@@ -560,11 +485,7 @@ at most 64 capability flags.
 
 #### Cloud data plane (`@byok-sdk/cloud-dataplane`)
 
-- **New database.** Run the migrations on a new Postgres database, then write
-  the storage entitlements and retention policy. `0040_wire_v7.sql` stops
-  before any change when any table already holds a row, Host configuration
-  included, with an error that names the table. Otherwise it records wire
-  epoch 7 in `byok_wire_epoch`.
+- Prepare the [new database](#new-store) before starting cloud.
 - **Startup check.** `createPostgresCloudStores` rejects a database whose
   epoch is not 7, or that has none, with `PostgresStoreEpochUnsupportedError`
   (`code: 'POSTGRES_STORE_EPOCH_UNSUPPORTED'`, `requiredEpoch`, `foundEpoch`
@@ -572,28 +493,18 @@ at most 64 capability flags.
   `PostgresMailboxProtocolUnsupportedError` and
   `POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED` are removed. Match the new code
   where you matched the old one.
-- **New store.** `PostgresTaskSteerRefusalStore` is the `steerRefusals` port
-  (table `task_steer_refusal`); `createPostgresCloudStores` includes it.
-  Archive, redaction, retention and device retirement keep its rows; tenant
-  erasure deletes them (`TENANT_ERASURE_TABLES`).
-- **Claims.** A claimed task stores exactly one executor, in
-  `claimed_runtime` or `claimed_harness_id` (a new CHECK).
-- **One schema.** The migrations and the preflight act on the first schema of
-  the connecting role's `search_path` in that database. Run the migrations and
-  the cloud with the same role, database and `search_path`; changing the
-  `search_path` between them points the cloud at another schema.
-- **Cut over at once.** Per-task locks (steer refusals, approval timeline) use
-  new keys, which a v6 process does not take. Do not run v6 and v7 cloud
-  processes against one database; v7 starts on a new one.
+- `PostgresTaskSteerRefusalStore` supplies `steerRefusals` (table
+  `task_steer_refusal`); `createPostgresCloudStores` includes it. Its lifecycle
+  follows [steer refusal retention](#tasksteer_refused); tenant erasure includes
+  it in `TENANT_ERASURE_TABLES`.
+- A claimed task stores exactly one executor in `claimed_runtime` or
+  `claimed_harness_id`, enforced by CHECK.
+- Per-task locks use new keys for steer refusals and approval timelines.
+  Follow the [cutover order](#during-the-upgrade).
 
 #### Embedded server (`@byok-sdk/server`)
 
-- **SQLite store.** The schema is version 10 and no older file is upgraded in
-  place. Opening a file from a v6 build (schema 6 to 9) fails with
-  `SqliteSchemaError` `SQLITE_SCHEMA_UNSUPPORTED`, and `inspectSqliteStore`
-  reports `new-path-repair`. Point `storage.path` at a new file and pair again. Export required history
-  with the old build before the cutover. `new-path-repair` is the pinned
-  branch's inspection label, not automatic repair; align it with #2286 part C.
+- Prepare the [new SQLite file](#new-store) before starting the server.
 - **Dispatch.** `DispatchInput` takes one required `target` in place of
   `runtime`, `harnessId` and `dispatchSelection`. Pass `{ lane: 'auto' }` to
   keep the device's own runtime choice. An execution-core intent names a
@@ -601,64 +512,53 @@ at most 64 capability flags.
 - **Claimed executor.** `TaskSnapshot.claimedExecutor` and the `task.state`
   server event's `claimedExecutor` replace `claimedRuntime` and
   `claimedHarnessId`; `SteerRejectedError.executor` replaces `runtime`.
-- **Steer.** `TaskHandle.steer` resolves `{ messageId }`. Text over 65,536
-  UTF-8 bytes is refused with `ByokCloudError` `coordination_input_invalid`
-  before anything is enqueued.
-- **Steer refusals.** A task's event feed yields
-  `{ kind: 'steer_refused', messageId, reason, at }` for each refusal
-  recorded before its terminal; add the arm to exhaustive switches over
-  `ServerTaskEvent`. `tasks.readSteerRefusal(taskId, messageId)` and
-  `tasks.listSteerRefusals(taskId, { afterRevision, limit })` read every
-  refusal, including one recorded after the feed ended. A refusal is kept for
-  the life of the store, archived task included.
+- Apply the shared [steer refusal](#tasksteer_refused) and
+  [text bound](#steer-text-bound) changes.
 - **Event cursors.** `tasks.events` cursors start with `te2.`; a `te1.`
   cursor is refused with `cursor_unknown`. Start a new read.
 
-#### Daemon (`@byok-sdk/client`)
+#### Start the runtime after an accepted claim (#2294)
 
-- **Start after an accepted claim** (#2294). The daemon starts the runtime and
-  sends `task.started` only after the cloud accepts its `task.claim`. A refused
-  claim ends the attempt with one non-retryable `task.decline` whose `reason`
-  is `claim refused: <refusal reason>`, with no `code`. A claim still unsettled
-  at the offer's startup deadline fails with `runtime startup deadline exceeded`
-  (retryable). A Host that saw `task.started` refused after a lost claim now
-  sees that decline instead.
+Sources: [#2305] for [#2294], [#2303]. Entries `claim-accepted-before-runtime-start`,
+`wire-v7-client-execution-target`.
+
+The daemon starts the runtime and sends `task.started` only after an
+`accepted` or replayed `duplicate` claim, costing one round trip. A refusal
+produces one non-retryable `task.decline`, reason
+`claim refused: <refusal reason>`, without `code`. An unsettled claim reaches
+`runtime startup deadline exceeded` (retryable) at the existing startup
+deadline (default 30 seconds), which also bounds reconnects. Cancel and shutdown
+use the claimed-before-start terminal path. Wait for `task.started` before
+steering a running task. The client permanently settles `type_unsupported`
+and advances its cursor.
+
+#### Custom stores for steer refusals
+
+Sources: [#2277], [#2285]. Entries `wire-v7-steer-refused`,
+`wire-v7-cloud-steer-refusal-reads`.
+
+Implement `TaskSteerRefusalStore` and
+`MailboxStore.readMessage(tenant, { deviceId, messageId })`: an exact
+retained-row lookup without ack.
 
 #### Cancel runs ahead of a hung steer (#2304)
 
-A cancel runs immediately instead of waiting behind an unanswered steer of
-its task. Later controls still wait for the cancel. If teardown rejects the
-pending steer, the daemon reports `task_not_active`; if the steer resolves
-after cancel, it sends no refusal. Neither sends another terminal. Use the
-late-refusal reads above if the task feed already ended.
+Source: [#2311] for [#2304]. No dedicated entry; refusal surfaces are
+`wire-v7-steer-refused` and `wire-v7-server-steer-refused`.
 
-Source: [#2311] for [#2304]. No dedicated entry exists in the referenced
-batch; the refusal surfaces are `wire-v7-steer-refused` and
-`wire-v7-server-steer-refused`. Do not wait on `steer()` before sending cancel.
-Wait for `task.started`, not a sent claim, before steering a running task.
-
-The accepted-claim wait costs one round trip. `accepted` and a replayed
-`duplicate` start the runtime; cancel/shutdown/deadline use the existing
-claimed-before-start terminal path. The existing startup deadline (default
-30 seconds) also bounds reconnects. Source: [#2305] for [#2294]; entry
-`claim-accepted-before-runtime-start`.
-
-Custom stores implement `TaskSteerRefusalStore` and
-`MailboxStore.readMessage(tenant, { deviceId, messageId })` (exact retained-row
-lookup, no ack). Sources: [#2277], [#2285]; entries `wire-v7-steer-refused`,
-`wire-v7-cloud-steer-refusal-reads`. The client settles `type_unsupported`
-permanently and advances the cursor; it no longer retries that envelope.
-Source: [#2303]; entry `wire-v7-client-execution-target`.
+Send cancel without waiting for `steer()`. It runs immediately; later controls
+wait for cancel. Teardown rejection of the pending steer reports
+`task_not_active`; a steer resolving after cancel sends no refusal. Neither
+sends another terminal. Use [refusal reads](#tasksteer_refused) after the feed ends.
 
 ### Pairing registration fence (#2045)
 
-**随 wire v7 合入 (with the wire v7 merge).** F1 is separately staged; it is
-not in the pinned integration/batch heads above.
+**随 wire v7 合入 (with the wire v7 merge).**
 
 Sources: [#2282], [#2287]. Manifest entries: `wire-v7-pair-fencing`, `wire-v7-pair-field-bounds`, `wire-v7-tenant-id-text`, `wire-v7-pairing-enrollment-port`, `wire-v7-pairing-product-id-bound`, `wire-v7-pairing-product-id-refused`, `wire-v7-client-pairing-errors`, `wire-v7-device-credential-attempt`, `wire-v7-auth-manager-pair`, `wire-v7-pair-gate-split`, `wire-v7-pair-new-code-fresh-key`, `wire-v7-v6-enrollment-entry-deleted`, `wire-v7-auth-errors-without-server-text`, `wire-v7-access-token-in-memory`.
 
 `POST /byok/pair` fences machine supersession with a compare-and-set on the
-machine's current device. See [#2282] and [#2287] for the staged contract.
+machine's current device.
 
 - `PairRequest` requires `expectedDeviceDigest` (`null` or a
   `pairDeviceDigest`). A v6 client gets `400`.
@@ -693,8 +593,7 @@ machine's current device. See [#2282] and [#2287] for the staged contract.
   and has no `code`: its only cause is another store's staged attempt.
 - `pairing_attempt_unattributed` and
   `clearDeviceEnrollment({ clearUnattributedAttempt })` are removed: a v7
-  attempt always names its store. Hosts that handled them (AiphaBee:
-  aiphabee#1384) drop that path.
+  attempt always names its store. Remove that handling.
 - An injected `DeviceCredentialBackend` implements `readPairingAttempt` and
   `savePairingAttempt` in place of `readFirstPairingAttempt` and
   `saveFirstPairingAttempt`; the attempt type is `PairingAttempt`.
@@ -708,42 +607,23 @@ machine's current device. See [#2282] and [#2287] for the staged contract.
 - A pairing or renewal error carries only the HTTP status, never the server's
   response text. A malformed `2xx` body is `AuthResponseInvalidError` with no
   `cause`.
-- **Wire bounds.** `PairRequest.deviceName` and `PairResponse.deviceId` are
-  1 to 64 UTF-16 code units (`PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH`,
-  `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`) and a tenant id 1 to 200, of
-  well-formed text without control characters. Code units, not code points:
-  an astral character such as an emoji counts as two. One check,
-  `isPairingText(value, maxUnits)`, owns both length and text at every
-  boundary. The core tenant id mint (`tenantId`, `isTenantId`) now refuses any
-  control character or unpaired surrogate, not only NUL; a Host that mints
-  tenant ids with such characters changes them before upgrading. A client
-  refuses a longer `deviceId` as `AuthResponseInvalidError` and writes
-  nothing. These bounds are the wire contract, under which the largest OS
-  credential entry measures 2,106 bytes; the client guarantees the 2,400-byte
-  fit by checking the encoded entry before every write, and a pairing
-  validates everything it writes before it writes `device.json`. A Host whose
-  hostnames exceed 64 code units sets `deviceName`: `config check` reports it, and
-  pairing throws `PairingInputInvalidError` (`field: 'deviceName'`). A
-  `machineId` resolver must return a lowercase hex SHA-256, or pairing throws
-  `PairingInputInvalidError` (`field: 'machineId'`).
-- **The access token is no longer persisted.** `DeviceRecord` (and
-  `DeviceCredentialBackend.read` and `replace`) carries no `accessToken` or
-  `expiresAt`. The daemon exchanges a token with the device key on its first
-  request after start and after a `401`, and keeps it in memory: a start costs
-  the `/byok/challenge` and `/byok/token` round trips once. Renewal writes
-  nothing. An injected `DeviceCredentialBackend` drops those two fields, and
-  its `replace` always discards a staged attempt.
-- **v6 OS entry.** The client reads the OS entry's format version and never
-  decodes a v6 entry. `start` deletes it and reports re-pair required, pairing
-  deletes it and pairs as a first pairing, and a clear deletes it. Re-pair
-  every device after the cloud upgrade, as the operator order above says.
-
-## After the upgrade
-
-Run config check, `status`, and `doctor` with the daemon's own release. Verify
-fresh pairing/provider setup, one task reaching `task.started` and a terminal,
-and steer/cancel handling before restoring traffic. Package installation alone
-does not establish these Host paths. The observations below describe what changes.
+- **Wire bounds.** `PairRequest.deviceName` and `PairResponse.deviceId` allow
+  1 to 64 UTF-16 code units; tenant ids allow 1 to 200. All require well-formed
+  text without control characters. An astral character counts as two units.
+  `isPairingText(value, maxUnits)` enforces this alongside
+  `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` / `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`.
+  `tenantId` / `isTenantId` now reject all controls and unpaired surrogates.
+  Fix invalid tenant ids and set `deviceName` when a hostname exceeds the bound;
+  config check and pairing reject it (`PairingInputInvalidError`, field
+  `deviceName`). A `machineId` resolver must return lowercase hex SHA-256 or
+  raises the same error with field `machineId`. An invalid response device id
+  raises `AuthResponseInvalidError` without writes. Pairing validates all
+  writes before `device.json`, including the encoded OS entry's 2,400-byte fit.
+- **Access tokens stay in memory.** Remove `accessToken` and `expiresAt` from
+  injected `DeviceCredentialBackend` read/replace records (`DeviceRecord`).
+  `replace` always discards a staged attempt. First request after start and
+  after `401` exchanges a token through `/byok/challenge` and `/byok/token`;
+  renewal writes nothing. For v6 entries, see [credential handling](#credentials-and-provider-keys).
 
 ### Bot collaboration inbound conversation identity (#2250)
 
@@ -777,28 +657,25 @@ without the authority that step is `not-configured` and rows accumulate.
 
 Sources: [#2276]. Manifest entries: `grok-task-autoupdate-off`.
 
-Every Grok task gets `GROK_DISABLE_AUTOUPDATER=1`, overriding the task environment.
-If you relied on tasks to update Grok, update it outside tasks (the user's Grok
-or installer). Tasks no longer write the updater's `agent` link into the install.
+Grok tasks set `GROK_DISABLE_AUTOUPDATER=1` regardless of task environment and
+no longer write the updater's `agent` link. Arrange Grok updates outside tasks.
 
 ### Pi tasks and extension runs (#2299)
 
 Sources: [#2301], [#2307], [#2313]. Manifest entries: `pi-turn-own-run`.
 
-The first Pi prompt uses `streamingBehavior: 'followUp'` to join an active
-extension run. Its turn ends with that run and includes its remaining output.
-Unrelated runs outside the turn no longer settle it or report their progress,
-usage, or tool frames as the task's. Extension errors remain visible. A prompt
-handled without a run ends the turn immediately.
+The first prompt's `streamingBehavior: 'followUp'` joins an active extension
+run; its remaining output belongs to the task. Unrelated runs no longer settle
+the turn or contribute progress, usage or tool frames. Extension errors remain
+visible; a prompt handled without a run ends immediately.
 
-For output free of user extension runs, use `agentUserContext: 'excluded'` and
-only Host-owned `agentExtensionPaths`. Inherit loads user extensions too.
-An extension's settlement/compaction hook can still drop the first prompt;
-keep the Host startup deadline wired to cancellation. Startup waits now stop
-on abort (#2307), including durable startup (#2313). Those abort fixes have
-no separate manifest entry.
+For output free of user extension runs, use `agentUserContext: 'excluded'`
+and Host-owned `agentExtensionPaths`. Extension settlement/compaction hooks
+can still drop the first prompt, so wire startup deadlines to cancellation.
+Startup waits now stop on abort, including durable startup (#2307, #2313;
+no separate manifest entries).
 
-### OAR 0.110.0 (#2235, #2296)
+### Runtime adapter changes (#2235, #2296)
 
 #### Unconfirmed models fail non-retryable (Codex, agy)
 
@@ -814,10 +691,9 @@ retry the same mismatch as transient. dsh, Grok, and OpenCode are unchanged.
 
 Sources: [#2242], [#2298]. Manifest entries: `agy-model-confirmation-deadline`.
 
-A conflicting model notification is only an observation. A later notification
-with the requested model can still confirm it. A persistent mismatch fails at
-agy's 30-second request deadline. Allow that deadline in Host startup timeouts.
-A successful confirmation after an earlier conflict is valid.
+Allow agy's 30-second request deadline in Host startup timeouts. A conflicting
+model notification may be superseded by a valid confirmation; only a mismatch
+persisting to the deadline fails.
 
 #### agy runs with `--gemini-dir`
 
@@ -857,14 +733,10 @@ Under file scope, `read` refuses skills outside granted roots (`outside_scope`);
 
 ### Device retirement clears device-scoped state (#2237)
 
-`DeviceDirectory.revoke()` and machine supersession in `register()` (also
-reached through `pairing.redeemAndRegister()`) now delete the retired device's
-presence hint, challenge nonces and inbound dedup ledgers in every SDK
-composition: in-memory, the embedded SQLite server and Postgres. Before, only
-Postgres deleted them; in memory and on SQLite a revoked device's presence hint
-stayed until its TTL, and its nonces and dedup ledgers stayed until expiry or
-restart. Device-assertion replay entries are still kept until they expire
-(#2264).
+Revoke and machine supersession now clear presence, challenge nonces and
+inbound dedup state in all SDK compositions. Previously in-memory and SQLite
+state could survive until expiry or restart. Custom directories must follow
+the ports below, while keeping [assertion replay entries](#device-retirement-keeps-assertion-replay-entries-2264).
 
 #### Store ports gain deleteDevice
 
@@ -904,9 +776,6 @@ implement `deleteDevice`. Repeated revoke clears state without a device row.
 No schema change.
 
 ### E2EE member state on retirement (#2267)
-
-Retirement now clears E2EE member state in every opted-in composition. Follow
-the shared-store wiring and custom-directory rules below.
 
 #### E2EE member store moves into CloudStores
 
@@ -960,69 +829,58 @@ Sources: [#2278]. Manifest entries: `e2ee-composition-opt-ins`.
 
 Sources: [#2275], [#2280]. Manifest entries: `service-uninstall-stops-before-pointers`.
 
-Exercise uninstall/reinstall on supported service platforms. The order is
-stop/unregister while `current` exists, remove `current`, remove unit/launcher,
-then remove payloads, snapshots, and receipt.
-
-A failed/refused/timed-out stop removes nothing; the service can still start.
-A later unit-removal failure leaves no `current`, so it starts no payload.
-Retry `uninstall()` after fixing the cause. Windows user-scope retry does not
-run a missing stop program when no launcher runs. Failed first-install cleanup
-uses the same order. This fixes the previous Windows uninstall regression.
+The removal order is stop/unregister while `current` exists, remove
+`current`, remove unit/launcher, then payloads, snapshots and receipt.
+A failed/refused/timed-out stop removes nothing. A later unit-removal failure
+leaves no `current`, so no payload starts. Retry `uninstall()` after fixing
+the cause; Windows user-scope retry skips a missing stop program when no
+launcher runs. Failed first-install cleanup uses the same order.
 
 ### Runtime status carries every observation field inline
 
 Sources: [#2288]. Manifest entries: `runtime-status-inline`, `runtime-status-side-arrays-refused`.
 
-`@byok-sdk/client` control `status` (`byok-agent status`, `doctor`) now returns
-each runtime's `versionVerdict`, `versionChange`, `executablePath` and
-`executableSource` inside `runtimes[]`, like `Daemon.status()`. The
-`runtimeVersionVerdicts`, `runtimeVersionChanges` and `runtimeExecutables` side
-arrays are gone. A status from an earlier daemon that still sends them is
-refused (`ControlStatusShapeUnsupportedError`): `status` reports the live status
-unavailable, and `doctor` reports the daemon status request failed and probes
-runtimes locally. Run `status` and `doctor` from the same release as the daemon.
-Audit records and the support bundle still carry neither the verdict, the
-restart comparison nor the executable path.
+Read `versionVerdict`, `versionChange`, `executablePath` and
+`executableSource` inside `runtimes[]` in control `status` and `doctor`,
+as in `Daemon.status()`. Remove reads of `runtimeVersionVerdicts`,
+`runtimeVersionChanges` and `runtimeExecutables`. Older daemons sending
+these arrays cause `ControlStatusShapeUnsupportedError`: status is unavailable
+and doctor probes runtimes locally. Run both commands from the daemon's release.
+Audit/support bundles still omit verdicts, restart comparisons and paths.
 
 ### Version verdict is the one runtime version warning
 
 Sources: [#2288]. Manifest entries: `runtime-version-verdict-only`.
 
-`RuntimeDetectResult.advisory` and the `RuntimeDetectionAdvisory` type are
-removed. An unqualified runtime version is reported only as
-`versionVerdict: { state: 'warn', qualifiedVersion }`, and
-`RuntimeObservation.qualifiedVersion` is that warning's projection. A custom
-runtime adapter whose `detect()` still returns `advisory` is refused by
-`validateRuntimeDetectResult()`; return `versionVerdict` instead (or
-`runtimeVersionDetectionFields()` output). A Host that read
-`availability.advisory.qualifiedVersion` reads
+Remove `RuntimeDetectResult.advisory` and `RuntimeDetectionAdvisory`.
+Custom `detect()` results carrying `advisory` are refused by
+`validateRuntimeDetectResult()`; return `versionVerdict` or
+`runtimeVersionDetectionFields()`. For unqualified versions, the sole warning is
+`versionVerdict: { state: 'warn', qualifiedVersion }`;
+`RuntimeObservation.qualifiedVersion` projects it. Replace
+`availability.advisory.qualifiedVersion` with
 `availability.versionVerdict?.state === 'warn' ? availability.versionVerdict.qualifiedVersion : undefined`.
 
 ### Agent memory outbox version 2 is refused
 
 Sources: [#2288]. Manifest entries: `agent-memory-outbox-version-error`, `agent-memory-outbox-v2-rejected`.
 
-An Agent home whose `.byok/agent-memory-redacted-outbox-v2.json` still holds the
-0.32.0 version 2 state is no longer upgraded in memory. Memory projection for
-that home fails with `AgentMemoryOutboxVersionUnsupportedError`
-(`stateVersion: 2`); the file is neither read further, rewritten nor deleted, and
-a higher writer epoch does not replace it. Remove or archive the file to resume
-projection. Its pending memory mutations, if any, are not published.
+Before deployment, archive or remove any Agent home's
+`.byok/agent-memory-redacted-outbox-v2.json` holding version 2 state. Its pending
+mutations will not publish. Otherwise projection fails with
+`AgentMemoryOutboxVersionUnsupportedError` (`stateVersion: 2`), without
+further reading, rewriting or deleting the file; a higher writer epoch cannot
+replace it.
 
 ### Todo extension reads one config location
 
 Sources: [#2288]. Manifest entries: `todo-config-legacy-location-refused`.
 
-The bundled Pi todo extension reads its settings only from
-`$XDG_CONFIG_HOME/rpiv-todo/config.json` (`~/.config/rpiv-todo/config.json`
-when `XDG_CONFIG_HOME` is unset). It no longer falls back to
-`~/.config/rpiv-todo/config.json` when `XDG_CONFIG_HOME` points elsewhere:
-if the `XDG_CONFIG_HOME` file is absent and the old one exists, loading the
-extension's config throws `TodoConfigLegacyLocationError` naming both paths.
-Only the old file's existence is checked; its content is never read. With a
-todo config at the old location, Pi reports this error when it loads the todo
-extension; moving the file fixes it.
+Move existing todo settings to `$XDG_CONFIG_HOME/rpiv-todo/config.json` before
+deployment (`~/.config/rpiv-todo/config.json` only when `XDG_CONFIG_HOME` is
+unset). If XDG points elsewhere and only the old file exists, loading the
+bundled Pi extension throws `TodoConfigLegacyLocationError` naming both paths.
+It checks existence without reading the old content.
 
 ### MCP frame ceiling has one authority
 
@@ -1045,23 +903,39 @@ These entries linked to separate docs/issues; include them in the Host review to
 | Grok retention | Add `grok-session-store` to exhaustive switches. Default TTL is 31 days or session-ledger TTL + one day, whichever is longer; explicit TTL must meet the latter floor. Live sessions/running homes are protected; the search index is untouched. | [#2258], `grok-session-store` |
 | Codex on Windows | `excluded` without symlink privilege refuses detection with `agent_user_context_unavailable`; offers decline retryable before claim. Enable Developer Mode, use an administrator daemon, or choose `inherit`. Accept unknown unavailable causes through the protocol reader. | [#2259], `agent-user-context-unavailable-cause` |
 
-### AiphaBee same-release checklist
+## During the upgrade
 
-[AiphaBee #1384] and its comments are the adoption authority. Paths identify
-call sites, not stable line numbers. Adoption still needs the candidate and
-owner's MINOR approval through the advisor.
+1. Keep old writers stopped. Initialize the [wire v7 stores](#new-store)
+   and the [K4/K8 and hosted stores](#host-ledgers-record-their-format-2286)
+   prepared before deployment. Sources: [#2283], [#2291], [#2309].
+2. Deploy cloud first, then daemons and CLI from the **same candidate release**.
+   Plan downtime: v6 and v7 peers cannot communicate, and their cloud processes
+   must never share a database. Sources: [#2277], [#2291], [#2303]; entries
+   `wire-v7`, `wire-v7-dataplane-store-epoch`, `wire-v7-client-negotiation-halt`.
+3. Re-pair every device and configure providers following
+   [credentials and provider keys](#credentials-and-provider-keys).
+   Sources: [#2290], [#2287]; entries `retire-compatibility-apis`,
+   `wire-v7-v6-enrollment-entry-deleted`.
 
-| Same-release action | Source / SDK entries |
-| --- | --- |
-| Ship Local Agent and byok-host together; new cloud store, re-pair, configure providers. | [AiphaBee #1384], [#2277], [#2287]; `wire-v7`, `wire-v7-v6-enrollment-entry-deleted` |
-| Drop `pairing_attempt_unattributed` / `clearUnattributedAttempt` in `apps/local-agent/src/user-installer.ts`. Drop `migrateProviderProfileStore` there and in `packages/byok-host/src/coordinator.ts`. | [AiphaBee #1384], [#2287], [#2290]; `wire-v7-device-credential-attempt`, `retire-compatibility-apis` |
-| Remove `migrateWouldDo` and `WouldDoMigration` in `toolset-migration.ts` and byok-host's bot-collaboration re-exports; rework/delete the migration. | [Type comment](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6913636275), [#2290]; `retire-compatibility-apis` |
-| Replace `availability.advisory.qualifiedVersion` in `packages/agent-runtime/src/local-runtime-capabilities.ts` and its/byok-host runtime tests with `versionVerdict`. | [Status comment](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6913353618), [#2288]; `runtime-version-verdict-only` |
-| Remove `PROVIDER_TRUTH_INVALID` copy in all three locales in `apps/local-agent/src/settings-copy.ts`. Keep `KEYCHAIN_SECRET_DECODE_FAILED` copy; do not add `KEYCHAIN_LEGACY`. | [Copy comment](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6914910257), [Correction](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6918385300), [#2290]; `retire-compatibility-apis` |
-| In `research-pass-host.ts`, replace `execution-core-k8.sqlite` with a new path and use `botLedgerOptions`. Retarget `migrateLegacyBotChatStore` in `local-bot-chat-store.ts`. Drop `collaboration.version`, `OldCollaborationStateError`, and new-path-repair uses; use switch export 2. Respect keys custody refusal and core's default `sqlite-node` entry. | [Part B update](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6924493982), [#2309]; `host-ledger-format-table`, `host-ledger-format-api`, `keys-store-refuse-before-write`, `core-sqlite-node-entry` |
-| Check win-ci and every other paired device for in-flight/must-keep ledger work. The two checked Mac ledgers do not establish other devices' state. | [Device comment](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6921118095), [#2309]; `host-ledger-format-table` |
-| Current tenant/name sources needed no change in the coordinator's audit. If the cloud display name is later passed as SDK `deviceName`, tighten its 80-character validator to the SDK's 64-unit/text rule first. | [Name comment](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6916985327), [#2287]; `wire-v7-pair-field-bounds` |
-| Run typecheck/tests without removed compatibility calls; run #1016 win-ci install → reinstall with switched receipt → uninstall to baseline; test a staging LA build with re-pair. These gate the production LA hold and #1377/#1016/#983. | [AiphaBee #1384], [Uninstall update](https://github.com/Ancienttwo/aiphabee/issues/1384#issuecomment-6913995844), [#2275], [#2280]; `service-uninstall-stops-before-pointers` |
+## After the upgrade
+
+Before restoring traffic, verify these paths with the candidate release:
+
+- Run config check, `status` and `doctor` from the daemon's release. Check
+  pairing, provider access and the [inline runtime status](#runtime-status-carries-every-observation-field-inline).
+  Sources: [#2288], [#2287], [#2290].
+- Confirm a task reaches `task.started` only after its claim is accepted,
+  then reaches a terminal. Exercise steer/cancel and the
+  [refusal reads](#tasksteer_refused). Sources: [#2305], [#2311], [#2285].
+- Confirm the Host opens the new ledger and cloud stores, and an older store
+  produces its [typed format error](#sqlite-stores-decide-their-format-before-any-write-2286).
+  Check preserved artifacts against the [WAL exception](#wal-only-format-metadata).
+  Sources: [#2295], [#2309], [#2283], [#2291].
+- Exercise revoke and machine supersession: [device state](#device-retirement-clears-device-scoped-state-2237)
+  and [E2EE member packages](#e2ee-member-state-on-retirement-2267) disappear,
+  while unexpired assertion replay entries remain. Sources: [#2266], [#2268], [#2278].
+- Exercise [service uninstall/reinstall](#service-uninstall-stops-before-it-removes-current-2274)
+  on supported platforms, including retry after a failed stop. Sources: [#2275], [#2280].
 
 ## Known residuals
 
@@ -1069,18 +943,15 @@ owner's MINOR approval through the advisor.
 
 Sources: [#2295], [#2309], [#2283]. Manifest entries: `sqlite-stores-refuse-before-write`, `client-journal-exact-format`, `host-ledger-format-table`, `keys-store-refuse-before-write`, `wire-v7-server-sqlite-store`.
 
-Not handled: the format is read from the main file. A store created by an older
-version that crashed before its first checkpoint holds its schema only in its
-WAL; its format is decided on a writable connection, and when that connection
-closes after the refusal SQLite checkpoints the WAL into the main file and
-removes the `-wal` and `-shm` files. The refused store keeps its logical content,
-but its file bytes change. This applies to every store above, the Host ledger and
-the keys store below. Such a store holds almost no data. New stores checkpoint
-right after creating their schema, which keeps that window short.
+An older store that crashed before its first checkpoint can hold its schema
+only in WAL. Its format is then decided on a writable connection; closing after
+refusal checkpoints WAL into the main file and removes `-wal` and `-shm`.
+Logical content remains, but bytes change. This applies to the SQLite stores
+above, including Host ledgers, keys and the v7 server. New stores checkpoint
+immediately after schema creation to shorten this window.
 
-This accepted exception also covers the staged v7 server. Preserve the main
-file **and sidecars together** before trying the new build if an untouched
-artifact is required. Do not claim unconditional byte preservation.
+Preserve the main file **and sidecars together** before trying the candidate
+if an untouched artifact is required.
 
 ### Grok login preserved during excluded tasks
 
@@ -1092,10 +963,9 @@ deletes it. Source: [#2258]; entry `grok-agent-user-context`.
 
 ### Integration and adoption evidence
 
-Phase 2, part C/C2/P, F1, final manifest alignment, and pinned-v6 halt checks
-belong to the integration/release gate. This documentation does not establish
-those results. AiphaBee's Windows and staging acceptance stays under
-[AiphaBee #1384].
+Verify the candidate's store refusals, pairing and v6 handshake halts against
+its manifest before release. This guide is not evidence that those checks
+passed. Sources: [#2295], [#2309], [#2287], [#2303].
 
 [#2095]: https://github.com/Ancienttwo/byok-sdk/pull/2095
 [#2098]: https://github.com/Ancienttwo/byok-sdk/issues/2098
