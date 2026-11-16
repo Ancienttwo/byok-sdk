@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "e06ef77d3911c56ccfd11404cbc47a72bb3bee9036e419b85c11eef5a1247291"
+    "snapshotSha256": "bfe7df8f55bb0d0aa1c684910703b3ccb13aa9acdd29261cae6a6ab4fed94ce2"
   },
   "configFields": {
     "status": "tracked",
@@ -437,7 +437,7 @@
     {
       "id": "wire-v7-execution-target",
       "impact": "breaking",
-      "summary": "task.offer replaces runtime, harnessId and dispatchSelection with one required target (ExecutionTargetSchema: auto, runtime, subscription without providerId, byok, byok-profile, harness) and drops limits.maxTokens; nativeSessions needs an explicit Pi target. task.claim replaces runtime, harnessId and agentId with a required executor (ClaimedExecutorSchema); task.complete requires executor and task.fail and task.cancelled carry it after a claim. DispatchSelectionSchema and DispatchSelection are removed; the offer selection rules runtime_selection_mismatch and harness_selection_conflict are gone (OfferSelectionRule, offerSelectionViolation). @byok-sdk/cloud TaskAttempt.claimedExecutor replaces claimedRuntime and claimedHarnessId, and TaskAttemptStore.claim takes executor; AgentExecutionInputSchema and SealedAgentExecutionInputSchema embed the v7 offer. Build offers with target and read claimedExecutor.",
+      "summary": "task.offer replaces runtime, harnessId and dispatchSelection with one required target (ExecutionTargetSchema: auto, runtime, subscription without providerId, byok, byok-profile, harness) and drops limits.maxTokens; nativeSessions needs an explicit Pi target, which targetsPi(target) tells. task.claim replaces runtime, harnessId and agentId with a required executor (ClaimedExecutorSchema); task.complete requires executor and task.fail and task.cancelled carry it after a claim. DispatchSelectionSchema and DispatchSelection are removed; the offer selection rules runtime_selection_mismatch and harness_selection_conflict are gone (OfferSelectionRule, offerSelectionViolation). @byok-sdk/cloud TaskAttempt.claimedExecutor replaces claimedRuntime and claimedHarnessId, and TaskAttemptStore.claim takes executor; AgentExecutionInputSchema and SealedAgentExecutionInputSchema embed the v7 offer. Build offers with target and read claimedExecutor; the K4 example execution core (example:host-execution-core) does both.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "export:@byok-sdk/protocol#ExecutionTarget",
@@ -464,7 +464,18 @@
         "export:@byok-sdk/cloud#AgentExecutionInputSchema",
         "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
         "export:@byok-sdk/cloud#TaskAttempt",
-        "export:@byok-sdk/cloud#TaskAttemptStore"
+        "export:@byok-sdk/cloud#TaskAttemptStore",
+        "export:@byok-sdk/protocol#targetsPi",
+        "example:host-execution-core"
+      ]
+    },
+    {
+      "id": "wire-v7-dream-native-sessions-pi-target",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration BotOptions.dreaming.nativeSessions requests native session input only for a dream template whose target names Pi (targetsPi): a template with an auto, harness, Claude or Codex target dreams without it, where wire v6 sent the request with every runtime template. To dream with native session input, list a Pi-targeted template in dreaming.models.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-dream-native-sessions-pi-target"
       ]
     },
     {
@@ -1355,6 +1366,13 @@
       "item": "entry:@byok-sdk/core/sqlite-node",
       "change": "added",
       "entry": "core-sqlite-node-entry"
+    },
+    {
+      "item": "example:host-execution-core",
+      "change": "changed",
+      "before": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
+      "after": "K4 0.0.1 src-sha256=8c1fbd81a7d14099",
+      "entry": "wire-v7-execution-target"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
@@ -2795,6 +2813,11 @@
       "item": "export:@byok-sdk/protocol#steerRefusalEnvelopeId",
       "change": "added",
       "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#targetsPi",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
     },
     {
       "item": "export:@byok-sdk/protocol#uuidFromSha256",
