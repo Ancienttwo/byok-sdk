@@ -635,12 +635,21 @@ machine's current device.
   `isPairingText(value, maxUnits)` enforces this alongside
   `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` / `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`.
   `tenantId` / `isTenantId` now reject all controls and unpaired surrogates.
-  Fix invalid tenant ids and set `deviceName` when a hostname exceeds the bound;
-  config check and pairing reject it (`PairingInputInvalidError`, field
-  `deviceName`). A `machineId` resolver must return lowercase hex SHA-256 or
-  raises the same error with field `machineId`. An invalid response device id
-  raises `AuthResponseInvalidError` without writes. Pairing validates all
-  writes before `device.json`, including the encoded OS entry's 2,400-byte fit.
+  Fix invalid tenant ids. A `machineId` resolver must return lowercase hex
+  SHA-256, or pairing raises `PairingInputInvalidError` with field
+  `machineId`. An invalid response device id raises `AuthResponseInvalidError`
+  without writes. Pairing validates all writes before `device.json`, including
+  the encoded OS entry's 2,400-byte fit.
+- **Device name.** When the daemon config sets no `deviceName`, pairing uses
+  `os.hostname()`. If that name, or a configured one, is longer than 64 UTF-16
+  code units or holds a control character, `Daemon.pair()` and
+  `byok-agent pair` reject with `PairingInputInvalidError` (field
+  `deviceName`) before they stage an attempt or send a request. The SDK
+  does not truncate or replace the name. A configured `deviceName` also fails
+  the config check. Set `deviceName` to a name the Host controls, such as its
+  own naming rule, a user-editable setting or a label that fits in 64 units.
+  Do not rely on the hostname: some machines, including GitHub's macOS
+  runners, have longer hostnames.
 - **Access tokens stay in memory.** Remove `accessToken` and `expiresAt` from
   injected `DeviceCredentialBackend` read/replace records (`DeviceRecord`).
   `replace` always discards a staged attempt. First request after start and
