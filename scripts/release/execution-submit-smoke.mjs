@@ -584,13 +584,12 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     });
     const helloResponse = await publishAgentMessage(embedded.hono, embeddedAuthorization, helloEnvelope);
     assert.equal(helloResponse.status, 200);
-    // An accepted hello's answer carries the poll's capability advertisement (#391 Phase 2).
+    // Wire v7: an accepted hello's answer carries no server capability list.
     const helloAnswer = await helloResponse.json();
-    assert.deepEqual(Object.keys(helloAnswer).sort(), ['accepted', 'capabilities', 'ingress', 'outcomes']);
+    assert.deepEqual(Object.keys(helloAnswer).sort(), ['accepted', 'ingress', 'outcomes']);
     assert.equal(helloAnswer.accepted, 1);
     assert.deepEqual(helloAnswer.outcomes, [{ id: helloEnvelope.id, outcome: 'accepted' }]);
     assert.deepEqual(helloAnswer.ingress, { activityMaxEvents: 50, activityMaxBytes: 65_536 });
-    assert.deepEqual(helloAnswer.capabilities, [], 'wire v6 advertises no server flag');
     const embeddedSubmit = (taskId) => embedded.executions.submit(recurringInput(taskId, embeddedPaired.deviceId, `resolve embedded ${taskId}`, agentRef));
 
     // Accepted, end-to-end on the embedded surface.
