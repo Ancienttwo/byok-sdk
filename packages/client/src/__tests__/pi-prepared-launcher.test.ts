@@ -906,8 +906,8 @@ function launcherSpawn(options: {
       ambient: spawnOptions.env as NodeJS.ProcessEnv,
       projectionDir: parsed.piProjectionDir!,
       sessionDir: parsed.sessionDir,
-      secret: options.secret,
     });
+    if (options.secret !== undefined) env.PI_PROVIDER_API_KEY = options.secret;
     const projection = buildPiProviderProjection(options.profile, 'pi-prepared') as ProjectionShape;
     options.mutateProjection?.(projection);
     const projectionDir = env.PI_CODING_AGENT_DIR!;

@@ -385,15 +385,13 @@ export function projectKeysPiInheritedEnvironment(
 
 /**
  * The Pi child environment: the inherited names (with `PI_PACKAGE_DIR`), then
- * the two Pi directories this launch owns, then the projected key when one is
- * given. Only a prepared host is given one; the rpc and durable entries take
- * theirs over IPC. No ambient agent or session directory survives.
+ * the two Pi directories this launch owns. No ambient agent or session
+ * directory survives.
  */
 export function buildPiProviderChildEnvironment(options: {
   ambient: NodeJS.ProcessEnv;
   projectionDir: string;
   sessionDir: string;
-  secret: string | undefined;
   platform?: NodeJS.Platform;
 }): Record<string, string> {
   const result: Record<string, string> = {
@@ -401,7 +399,6 @@ export function buildPiProviderChildEnvironment(options: {
     PI_CODING_AGENT_DIR: options.projectionDir,
     PI_CODING_AGENT_SESSION_DIR: options.sessionDir,
   };
-  if (options.secret !== undefined) result[PI_PROJECTED_KEY_ENV] = options.secret;
   return result;
 }
 
@@ -647,7 +644,7 @@ export async function startPiProvider(
     ? buildPiPreparedArgs(options.piArgs)
     : buildPiProviderArgs(profile, options.piArgs);
   const env = buildPiProviderChildEnvironment({
-    ambient: dependencies.ambient, projectionDir, sessionDir: options.sessionDir, secret: undefined,
+    ambient: dependencies.ambient, projectionDir, sessionDir: options.sessionDir,
   });
   // Reject an invalid layout before opening custody.
   await assertPiProjectionDirectory(projectionDir);

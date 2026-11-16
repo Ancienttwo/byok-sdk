@@ -61,7 +61,7 @@ const __executionScratch = await testExecutionScratch();
     spawnFn: ((_cmd, args, options) => {
       const parsed = parsePiProviderLauncherOptions(args as string[]); expect(parsed.runtimeEntry).toBe('pi-durable');
       const delegated = buildPiPreparedArgs(parsed.piArgs);
-      const env = buildPiProviderChildEnvironment({ ambient: options!.env!, projectionDir: parsed.piProjectionDir!, sessionDir: parsed.sessionDir, secret: undefined });
+      const env = buildPiProviderChildEnvironment({ ambient: options!.env!, projectionDir: parsed.piProjectionDir!, sessionDir: parsed.sessionDir });
       writeFileSync(path.join(env.PI_CODING_AGENT_DIR!, 'models.json'), JSON.stringify(buildPiProviderProjection(profile, parsed.runtimeEntry)), { mode: 0o600 });
       const child = nativeSpawn(parsed.piBin, [...(parsed.piEntry ? [parsed.piEntry] : []), `--config-digest=${parsed.piConfigDigest}`, ...delegated], { ...options, env, cwd: parsed.piCwd!, stdio: ['pipe','pipe','pipe','ipc'], serialization: 'json' } as never);
       expect(env.PI_PROVIDER_API_KEY).toBeUndefined();
