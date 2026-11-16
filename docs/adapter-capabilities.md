@@ -564,7 +564,8 @@ declined before claim, including tasks without an `agentRef`: the decline
 carries `runtimeUnavailable.cause: 'agent_user_context_unavailable'`,
 `retryable: true` and the reason `agent_user_context_unavailable: runtime "codex" cannot keep user context out on this device. Windows refused to create a symbolic link (EPERM); turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit' on this device`.
 To fix it, turn on Developer Mode, or set `agentUserContext` back to
-`'inherit'` for this device. The keyring credential store is no alternative:
+`'inherit'` for this device, then restart the daemon: the refusal is kept for
+the life of the process, so a change takes effect only at the next start. The keyring credential store is no alternative:
 its entry is keyed by the `CODEX_HOME` path (above). Probed on Windows 11
 (build 26100) with Codex 0.169.0, a standard account with Developer Mode on:
 file links, directory links and the rename onto a resolved target work, and a

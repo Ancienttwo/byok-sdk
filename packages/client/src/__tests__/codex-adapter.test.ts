@@ -9,7 +9,6 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { createCodexAgentHome } from '../adapters/codex/agent-user-context';
 import * as ownedRuntimeHome from '../adapters/owned-runtime-home';
-import { AGENT_USER_CONTEXT_WINDOWS_REMEDY } from '../runtime-unavailable';
 import type { Session, MessageDraftDelta } from '../types';
 import {
   RuntimeExecutionFailure,
@@ -884,7 +883,7 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     dirs.push(dir);
     vi.spyOn(fs, 'symlink').mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
     await expect(createCodexAgentHome({ CODEX_HOME: user }, dir, path.join(dir, 'agent-home'), 'win32')).rejects.toMatchObject({
-      message: `codex Agent user context exclusion refused: ${AGENT_USER_CONTEXT_WINDOWS_REMEDY}` });
+      message: "codex Agent user context exclusion refused: Windows refused to create a symbolic link (EPERM); turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit' on this device" });
   });
 
   it('refuses detection when the SDK-owned home cannot be built, probing only under excluded (#2241)', async () => {

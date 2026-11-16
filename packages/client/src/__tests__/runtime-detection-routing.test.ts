@@ -13,7 +13,6 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../dae
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { appendAuditRecord } from '../daemon/audit-log';
 import { projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
-import { AGENT_USER_CONTEXT_WINDOWS_REMEDY } from '../runtime-unavailable';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -114,7 +113,7 @@ it('maps every explicit detection failure to its typed cause and retryable defau
       expect((declined.payload as { runtimeUnavailable?: { code?: string } }).runtimeUnavailable?.code).toBe('timeout');
     }
     if (cause === 'agent_user_context_unavailable') {
-      expect(declined.payload).toMatchObject({ reason: `agent_user_context_unavailable: runtime "codex" cannot keep user context out on this device. ${AGENT_USER_CONTEXT_WINDOWS_REMEDY}` });
+      expect(declined.payload).toMatchObject({ reason: `agent_user_context_unavailable: runtime "codex" cannot keep user context out on this device. Windows refused to create a symbolic link (EPERM); turn on Developer Mode, run the daemon as an administrator, or set agentUserContext to 'inherit' on this device` });
     }
   }
   expect(adapter.startCalls).toHaveLength(0);
