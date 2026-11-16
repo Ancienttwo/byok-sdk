@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 
 const root = path.resolve(import.meta.dirname, '../../vendor/rpiv-todo/2.15.0');
 const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
@@ -79,7 +80,10 @@ it('refuses a todo config left only at the legacy ~/.config location without rea
   vi.stubEnv('HOME', home);
   vi.stubEnv('XDG_CONFIG_HOME', xdg);
   try {
-    const { loadConfig, TodoConfigLegacyLocationError } = await import('../../vendor/rpiv-todo/2.15.0/config.ts');
+    // Loaded by URL so the vendored source stays outside this package's type program.
+    const { loadConfig, TodoConfigLegacyLocationError } = await import(pathToFileURL(path.join(root, 'config.ts')).href) as {
+      loadConfig(): unknown; TodoConfigLegacyLocationError: new (...args: never[]) => Error;
+    };
     expect(() => loadConfig()).toThrow(TodoConfigLegacyLocationError);
     mkdirSync(path.join(xdg, 'rpiv-todo'));
     writeFileSync(path.join(xdg, 'rpiv-todo/config.json'), '{"maxWidgetLines":30}');

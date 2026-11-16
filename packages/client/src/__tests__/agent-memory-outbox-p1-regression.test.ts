@@ -237,7 +237,7 @@ describe('Agent-memory projection outbox P1 regression', () => {
       expect(filesystem.files.get(`.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`)).toBe(body);
       // A non-numeric version keeps the file's content out of the message.
       filesystem.files.set(`.byok/${AGENT_MEMORY_OUTBOX_FILENAME}`, JSON.stringify({ version: { note: 'outbox-content-marker' } }));
-      expect((await project(filesystem, grant)).error?.message).not.toContain('outbox-content-marker');
+      expect(((await project(filesystem, grant)).error as Error).message).not.toContain('outbox-content-marker');
     });
   });
 });
