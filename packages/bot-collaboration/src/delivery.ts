@@ -6,6 +6,11 @@ const MAX_WAIT_MS = 60_000;
 type SendResult = Awaited<ReturnType<ChannelPort['send']>>;
 type ReadbackResult = Awaited<ReturnType<NonNullable<ChannelPort['readback']>>>;
 
+/** Manual replacements keep their predecessors as history, with acceptance still unknown. */
+export function supersededDeliveryIds(deliveries: Readonly<Record<string, Delivery>>): Set<string> {
+  return new Set(Object.values(deliveries).flatMap(row => row.resendOf === undefined ? [] : [row.resendOf]));
+}
+
 /** Manual resend supplies a nonce. The original delivery keeps its audit identity. */
 export function deliveryId(taskId: string, messageId: string, route: Delivery['route'], nonce?: string): string {
   const key = route.kind === 'reply' ? ['reply', route.inboundId] : ['push', route.pushRouteId];
