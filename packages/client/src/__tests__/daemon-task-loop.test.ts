@@ -62,7 +62,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     // a fresh offer's latest-value lane would coalesce the batch below. The
     // session it resumes comes from a first, fresh task.
     const agentRef = freshTestAgentRef();
-    server.send(createEnvelope('task.offer', { agentRef, ...FRESH_OFFER, instruction: 'start the session' }, { taskId: 'task-seed', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef, ...FRESH_OFFER, instruction: 'start the session' }, { taskId: 'task-seed', seq: server.nextSeq() }));
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-seed');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const seed = adapter.sessions[0]!;
@@ -72,7 +72,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef, ...resumeSession(seed.sessionRef), instruction: 'do the thing' },
+        { target: { lane: 'auto' }, agentRef, ...resumeSession(seed.sessionRef), instruction: 'do the thing' },
         { taskId: 'task-1', seq: server.nextSeq() },
       ),
     );
@@ -80,7 +80,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-1');
     expect(claim.payload).toMatchObject({ deviceId: 'device-1' });
     expect('taskId' in claim.payload).toBe(false);
-    expect(claim.payload).toMatchObject({ runtime: 'pi' });
+    expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
 
     // M1 gap #2: `task.claim` no longer implies `Running` — `task.started`
     // is the explicit, separate signal the adapter session actually started.
@@ -122,7 +122,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'long running thing' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'long running thing' },
         { taskId: 'task-2', seq: server.nextSeq() },
       ),
     );
@@ -168,7 +168,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer some progress then cancel' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer some progress then cancel' },
         { taskId: 'task-cancel-buffered', seq: server.nextSeq() },
       ),
     );
@@ -200,7 +200,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer, cancel, then outlast the batch deadline' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...batching.offer, instruction: 'buffer, cancel, then outlast the batch deadline' },
         { taskId: 'task-cancel-teardown', seq: server.nextSeq() },
       ),
     );
@@ -241,7 +241,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     // latest-value lane would coalesce the batch. The resumed session comes
     // from a first, fresh task.
     const agentRef = freshTestAgentRef();
-    server.send(createEnvelope('task.offer', { agentRef, ...batching.offer, instruction: 'start the session' }, { taskId: 'task-complete-seed', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef, ...batching.offer, instruction: 'start the session' }, { taskId: 'task-complete-seed', seq: server.nextSeq() }));
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-complete-seed');
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     const seed = adapter.sessions[0]!;
@@ -251,7 +251,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef, ...resumeSession(seed.sessionRef), instruction: 'buffer progress then finish' },
+        { target: { lane: 'auto' }, agentRef, ...resumeSession(seed.sessionRef), instruction: 'buffer progress then finish' },
         { taskId: 'task-complete-buffered', seq: server.nextSeq() },
       ),
     );
@@ -278,7 +278,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'race me' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'race me' },
         { taskId: 'task-race', seq: server.nextSeq() },
       ),
     );
@@ -321,7 +321,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'pi' },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } },
         { taskId: 'task-4', seq: server.nextSeq() },
       ),
     );
@@ -343,7 +343,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-6', seq: server.nextSeq() },
       ),
     );
@@ -364,7 +364,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-7', seq: server.nextSeq() },
       ),
     );
@@ -386,7 +386,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
+        { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' },
         { taskId: 'task-5', seq: server.nextSeq() },
       ),
     );
@@ -407,7 +407,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', runtime: 'pi' },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } },
           { taskId: 'task-runtime-explicit', seq: server.nextSeq() },
         ),
       );
@@ -423,7 +423,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, // no `runtime` — daemon auto-selects
+          { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, // no `runtime` — daemon auto-selects
           { taskId: 'task-runtime-auto', seq: server.nextSeq() },
         ),
       );
@@ -443,7 +443,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'needs a human' },
+          { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'needs a human' },
           { taskId, seq: server.nextSeq() },
         ),
       );

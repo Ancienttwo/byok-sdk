@@ -55,12 +55,11 @@ async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'cl
       'task.offer',
       { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
         instruction: 'observe terminal usage',
-        runtime,
-        // This requested selection must NOT become provider/model terminal
+        // This requested model must NOT become provider/model terminal
         // telemetry. The adapter did not observe either fact.
-        dispatchSelection: runtime === 'codex'
-          ? { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'gpt-5' }
-          : undefined,
+        target: runtime === 'codex'
+          ? { lane: 'subscription', runtimeId: 'codex', modelId: 'gpt-5' }
+          : { lane: 'runtime', runtimeId: runtime },
       },
       { taskId, seq: 1 },
     ),
@@ -223,7 +222,7 @@ describe('TaskRunner terminal inference usage projection', () => {
       const taskId = 'terminal-composition-release-identity';
       server.send(createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'finish', runtime: 'codex' },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'finish', target: { lane: 'runtime', runtimeId: 'codex' } },
         { taskId, seq: server.nextSeq() },
       ));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);

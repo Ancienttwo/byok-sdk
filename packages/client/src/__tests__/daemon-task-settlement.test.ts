@@ -51,7 +51,7 @@ describe('Daemon.whenTaskSettled', () => {
   }
 
   function offer(taskId: string, extra: Record<string, unknown> = {}): void {
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER, ...extra },
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER, ...extra },
       { taskId, seq: server.nextSeq() }));
   }
 
@@ -249,7 +249,7 @@ describe('Daemon.whenTaskSettled', () => {
     const d = build(adapter, storeDir);
     await d.pair('pairing-code');
     const identity = { tenantId: 'tenant-test', productId: 'test-product-settlement', deviceId: 'device-1' };
-    const original = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER },
+    const original = createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER },
       { taskId, seq: server.nextSeq() });
     const bytes = encodeEnvelope(original);
     // Crash window: the offer is durable, but its cursor and admission are not.
@@ -446,7 +446,7 @@ describe('Daemon.whenTaskSettled', () => {
     await d.pair('pairing-code');
     const identity = { tenantId: 'tenant-test', productId: 'test-product-settlement', deviceId: 'device-1' };
     const cancellation = createEnvelope('task.cancel', { reason: 'operator cancelled first' }, { taskId, seq: server.nextSeq() });
-    const original = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER },
+    const original = createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER },
       { taskId, seq: server.nextSeq() });
     // Crash window: the pre-cancel is acknowledged and the offer is durable, but its decline was never committed.
     const journal = new SqliteLocalTaskJournal({ storeDir });
@@ -609,7 +609,7 @@ describe('Daemon.whenTaskSettled', () => {
       await first.d.stop();
       const journal = new SqliteLocalTaskJournal({ storeDir: first.storeDir });
       const seq = server.nextSeq();
-      const offerBytes = encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER }, { taskId, seq }));
+      const offerBytes = encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'work', ...FRESH_OFFER }, { taskId, seq }));
       await journal.appendEnvelope({ identity, envelopeId: 'stored-offer', taskId, seq, bytes: offerBytes,
         bytesHash: journalHash(offerBytes), receivedAt: new Date().toISOString(), opensTask: true });
       const cancellation = createEnvelope('task.cancel', { reason: 'cancelled' }, { taskId, seq: server.nextSeq() });

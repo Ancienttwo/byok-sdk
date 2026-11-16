@@ -140,7 +140,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-approve-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -177,7 +177,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-approvalid-surfaces-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -227,7 +227,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-reject-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -268,7 +268,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-reject-terminal-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -300,7 +300,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-race-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -346,7 +346,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-timeout-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -373,7 +373,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-stale-approve-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -424,7 +424,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-stale-reject-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -494,7 +494,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-targeting-approve-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 
@@ -555,7 +555,7 @@ describe('M4 Phase 3: confirm-mode approval end-to-end (control socket + wire)',
 
     const taskId = 't-targeting-reject-1';
     server.send(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do gated work' }, { taskId, seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
 

@@ -50,7 +50,7 @@ function makeRunner(
 function offerEnvelope(taskId: string, seq = 1): Envelope {
   return createEnvelope(
     'task.offer',
-    { agentRef: freshTestAgentRef(), instruction: 's6 terminal', ...FRESH_OFFER },
+    { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 's6 terminal', ...FRESH_OFFER },
     { taskId, seq },
   );
 }

@@ -105,7 +105,7 @@ describe('Agent memory guidance', () => {
           'task.offer',
           {
             instruction: `agent instruction for ${runtime}`,
-            runtime,
+            target: { lane: 'runtime', runtimeId: runtime },
             agentRef: { agentId: `agent-${runtime}`, profileRevision: 'profile-1' },
             ...FRESH_OFFER,
           },
@@ -226,7 +226,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
   const offer = (taskId: string, options: { reader?: boolean; agentId?: string; agentMemory?: AgentMemorySelection; agentMemoryCommit?: 'on-success'; sessionRef?: string } = {}) =>
     runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: `instruction for ${taskId}`,
-      runtime: 'pi',
+      target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: { agentId: options.agentId ?? 'agent-admission', profileRevision: 'profile-1' },
       ...(options.sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef: options.sessionRef } }),
       ...(options.reader ? { homeAccess: 'memory-reader' as const } : {}),

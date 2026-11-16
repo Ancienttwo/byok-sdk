@@ -241,7 +241,7 @@ describe('Agent memory MCP local authority', () => {
       'task.offer',
       {
         ...FRESH_OFFER, instruction: 'strict Agent task must not receive an unsupported MCP surface',
-        runtime: 'codex',
+        target: { lane: 'runtime', runtimeId: 'codex' },
         agentRef: { agentId: 'agent-memory-mcp-toolsets', profileRevision: 'profile-1' },
       },
       { taskId: 'task-memory-mcp-toolsets', seq: 1 },
@@ -290,6 +290,7 @@ describe('Agent memory MCP local authority', () => {
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
       {
+        target: { lane: 'auto' },
         ...FRESH_OFFER, instruction: 'automatic strict Agent selection must skip MCP-incompatible runtimes',
         agentRef: { agentId: 'agent-memory-mcp-selection', profileRevision: 'profile-1' },
       },
@@ -330,7 +331,7 @@ describe('Agent memory MCP local authority', () => {
       ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/opt/byok-agent-memory-fs' } : {}),
     });
     const offer = runner.handleEnvelope(createEnvelope('task.offer', {
-      ...FRESH_OFFER, instruction: 'recall memory in the first turn', runtime: 'codex',
+      ...FRESH_OFFER, instruction: 'recall memory in the first turn', target: { lane: 'runtime', runtimeId: 'codex' },
       agentRef: { agentId: 'agent-memory-start', profileRevision: 'profile-1' },
     }, { taskId: 'task-memory-start', seq: 1 }));
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));

@@ -297,7 +297,7 @@ describe('the scoped approval floor through the real Pi tool pipeline (#1061 sli
       workspace: cwd, grant: await homeGrant(cwd),
       rules: { allowWithoutAsking: [{ id: 'allow-touch', match: { toolName: 'bash', commandGlob: `touch '${allowedFile}'` } }] },
     });
-    const session = await startPreparedOperation(adapter(), { instruction: 'Run the scripted calls, then finish.' }, {
+    const session = await startPreparedOperation(adapter(), { target: { lane: 'auto' }, instruction: 'Run the scripted calls, then finish.' }, {
       workspaceDir: cwd, agentHome: cwd,
       env: { HOME: root, PATH: process.env.PATH!, PI_CODING_AGENT_DIR: agentDir },
       toolAuthorization: g.toolAuthorization,
@@ -341,7 +341,7 @@ describe('the scoped approval floor through the real Pi tool pipeline (#1061 sli
       workspace: f.cwd, grant: await homeGrant(f.cwd),
       mcpIdentities: new Map([['mcp__salesko__echo', { server: 'salesko', tool: 'echo' }]]),
     });
-    const session = await startPreparedOperation(adapter(), { instruction: 'Run the scripted call, then finish.' }, {
+    const session = await startPreparedOperation(adapter(), { target: { lane: 'auto' }, instruction: 'Run the scripted call, then finish.' }, {
       workspaceDir: f.cwd, agentHome: f.cwd, env: f.env,
       mcpServers, mcpToolsetTools, toolAuthorization: g.toolAuthorization,
     });
@@ -363,7 +363,7 @@ describe('the scoped approval floor through the real Pi tool pipeline (#1061 sli
     const marker = path.join(await tmpDir('byok-scope-unscoped-'), 'marker.txt');
     const f = await realPiFixture([{ name: 'bash', arguments: { command: `touch '${marker}'` } }]);
     const g = scopedGate({ workspace: f.cwd });
-    const session = await startPreparedOperation(adapter(), { instruction: 'Run the scripted call, then finish.' }, {
+    const session = await startPreparedOperation(adapter(), { target: { lane: 'auto' }, instruction: 'Run the scripted call, then finish.' }, {
       workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization: g.toolAuthorization,
     });
     sessions.push(session);

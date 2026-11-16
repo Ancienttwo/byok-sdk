@@ -62,7 +62,7 @@ for (const phase of ['detect', 'prepare'] as const) {
         return originalPrepare(input);
       });
       const offer = (taskId: string) => createEnvelope('task.offer', {
-        ...FRESH_OFFER, instruction: 'work', harnessId: 'acme-harness', agentRef: { agentId: 'shared', profileRevision: 'r1' },
+        ...FRESH_OFFER, instruction: 'work', target: { lane: 'harness', harnessId: 'acme-harness' }, agentRef: { agentId: 'shared', profileRevision: 'r1' },
       }, { taskId, seq: server.nextSeq() });
       server.send(offer('blocked'));
       await vi.waitFor(() => expect(entered).toBe(true));

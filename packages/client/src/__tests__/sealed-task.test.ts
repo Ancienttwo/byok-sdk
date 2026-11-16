@@ -94,7 +94,7 @@ describe('SealedTasks memory after a terminal (#654 E3c)', () => {
     } as never, { taskId: 'finished', seq: 1 }));
 
     const sendTerminal = async (): Promise<WeakRef<Envelope>> => {
-      const sealed = await tasks.sealOutbound(createEnvelope('task.complete', { summary: 'r'.repeat(100_000), sessionRef: 'session' }, { taskId: 'finished' }));
+      const sealed = await tasks.sealOutbound(createEnvelope('task.complete', { summary: 'r'.repeat(100_000), sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'finished' }));
       expect(sealed?.type).toBe('task.complete');
       expect(sealed?.payload).toHaveProperty('sealed');
       tasks.plainOf(sealed!);
@@ -233,7 +233,7 @@ describe('the failure class of a sealed task (#869)', () => {
     const keyless: SealedScopeKeyring = new GatedKeyring();
     const tasks = await sealedTasks(keyless, 'complete-unsealable');
     keyless.sealingKey = async () => undefined;
-    const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session' }, { taskId: 'complete-unsealable' });
+    const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'complete-unsealable' });
     expect((await tasks.sealOutbound(complete))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' } });
   });
 });
@@ -267,7 +267,7 @@ describe('a terminal built for a sealed task in a run that may not seal it (#866
   });
 
   it('keeps every terminal of a task whose offer does not seal output', async () => {
-    const plainOffer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
+    const plainOffer = createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'plain instruction' }, { taskId: 'recovered', seq: 1 });
     const fail = createEnvelope('task.fail', { reason: 'plain reason', retryable: false }, { taskId: 'recovered' });
     expect(await tasks().sealRecovered(plainOffer, fail, false)).toBe(fail);
   });

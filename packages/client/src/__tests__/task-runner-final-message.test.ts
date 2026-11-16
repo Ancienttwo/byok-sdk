@@ -85,7 +85,7 @@ async function makeRunner(
 
 async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: INSTRUCTION, runtime, ...FRESH_OFFER }, { taskId, seq: 1 }),
+    createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: INSTRUCTION, target: { lane: 'runtime', runtimeId: runtime }, ...FRESH_OFFER }, { taskId, seq: 1 }),
   );
 }
 

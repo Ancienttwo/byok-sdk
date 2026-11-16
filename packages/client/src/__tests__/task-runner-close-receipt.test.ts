@@ -44,7 +44,7 @@ async function makeRunner(overrides: Partial<Pick<TaskRunnerDeps, 'awaitTerminal
     ...overrides,
   });
   const taskId = 'close-receipt-task';
-  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'run' }, { taskId, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'run' }, { taskId, seq: 1 }));
   const session = adapter.sessions[0]!;
   const terminals = () => sent.filter(event => ['task.complete', 'task.fail', 'task.cancelled'].includes(event.type));
   return { runner, session, taskId, terminals };

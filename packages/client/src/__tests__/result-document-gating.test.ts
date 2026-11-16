@@ -131,8 +131,8 @@ describe('startup refuses a journal of another wire major', () => {
     const { config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     // A v3 row first: scanning before acting means it gets no terminal either.
-    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
-    await seedOffer(journal, identity, 'v2-task', 2, majorBytes(encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v2-task', seq: 2 })), 2));
+    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
+    await seedOffer(journal, identity, 'v2-task', 2, majorBytes(encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v2-task', seq: 2 })), 2));
     await journal.close();
     await expectStartupRefused(config, { taskId: 'v2-task', record: 'recovery-offer' });
     expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
@@ -141,7 +141,7 @@ describe('startup refuses a journal of another wire major', () => {
   it('a v5 recovery offer, the last retired major, stops startup', async () => {
     const { config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
-    await seedOffer(journal, identity, 'v5-task', 1, majorBytes(encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v5-task', seq: 1 })), 5));
+    await seedOffer(journal, identity, 'v5-task', 1, majorBytes(encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v5-task', seq: 1 })), 5));
     await journal.close();
     await expectStartupRefused(config, { taskId: 'v5-task', record: 'recovery-offer', found: 5 });
     expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
@@ -150,8 +150,8 @@ describe('startup refuses a journal of another wire major', () => {
   it('a v2 pending terminal stops startup before replay', async () => {
     const { server, config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
-    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
-    const terminal = majorBytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's' }, { taskId: 'done-task', sessionRef: 's' })), 2);
+    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
+    const terminal = majorBytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'done-task', sessionRef: 's' })), 2);
     await journal.recordTerminal({ taskId: 'done-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
     await journal.close();
@@ -182,7 +182,7 @@ describe('result-document recovery from the journal', () => {
     const device = (await createTestDeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
     const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
     const offerBytes = (taskId: string) => encodeEnvelope(createEnvelope('task.offer', {
-      session: { mode: 'fresh' }, instruction: 'submit one result', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
+      session: { mode: 'fresh' }, instruction: 'submit one result', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
       ...(requiredReply ? { messageEgress: { mode: 'required', contract: 'reply.v1', contentType: 'text/plain', maxBytes: 1024 } } : {}),
     }, { taskId, seq: 1 }));
     const home = path.join(config.agentHome!.hostStorageRoot, 'agents', agentRef.agentId);
@@ -260,7 +260,7 @@ describe('result-document recovery from the journal', () => {
       bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
     await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
     const complete = encodeEnvelope(createEnvelope('task.complete', {
-      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef,
+      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef, executor: { kind: 'runtime', runtimeId: 'pi' },
     }, { taskId, sessionRef: 'session-1' }));
     await journal.recordTerminal({ taskId, terminalType: 'complete', bytes: complete, payloadHash: journalHash(complete),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });

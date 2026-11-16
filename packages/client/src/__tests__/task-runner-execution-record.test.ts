@@ -63,7 +63,7 @@ async function makeRunner(options: RunnerOptions = {}) {
     ...(options.withoutRecords === true ? {} : { onExecutionRecord: (record: ExecutionRecord) => { records.push(record); } }),
     ...options.deps,
   });
-  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
   const session = adapter.sessions[0]!;
   const terminals = () => sent.filter(envelope => TERMINAL_TYPES.includes(envelope.type));
   const finished = () => vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));
@@ -217,7 +217,7 @@ describe('TaskRunner execution record', () => {
       approvalRegistry: new ApprovalRegistry(),
       storeDir: directory, productId: 'execution-record-product', onExecutionRecord,
     });
-    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: RECORD_AGENT, ...FRESH_OFFER,  instruction: 'run' }, { taskId: TASK_ID, seq: 1 }));
     expect(sent.filter(envelope => TERMINAL_TYPES.includes(envelope.type)).map(envelope => envelope.type)).toEqual(['task.fail']);
     expect(onExecutionRecord).not.toHaveBeenCalled();
   });

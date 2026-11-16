@@ -78,7 +78,7 @@ const unusedBlobClient: BlobResolver = {
 function offerFor(taskId: string, seq: number): Envelope {
   return createEnvelope(
     'task.offer',
-    { instruction: 'work', runtime: 'pi', agentRef: AGENT_REF, ...FRESH_OFFER },
+    { instruction: 'work', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, ...FRESH_OFFER },
     { taskId, seq },
   );
 }

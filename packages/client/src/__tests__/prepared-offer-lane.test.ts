@@ -408,7 +408,7 @@ function preparedOffer(
     {
       session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      runtime: 'pi',
+      target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: AGENT_REF,
       preparation,
       agentMemory: 'none',
@@ -736,7 +736,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       offeredAgentMemory: 'read', memory: MEMORY,
       observation: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
-    if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
+    if (!admitted.ok) throw new Error(`${admitted.code}: ${admitted.detail}`);
     expect(admitted.launch.agentMemory).toBe('read');
     expect(admitted.launch.memory).toBe(MEMORY);
   });
@@ -1785,7 +1785,7 @@ describe('ordinary offers are untouched by the prepared lane', () => {
       'task.offer',
       {
         instruction: 'an ordinary instruction',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef: AGENT_REF,
         ...FRESH_OFFER,
         requiredToolsets: [TOOLSET_ID],
@@ -1983,7 +1983,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       offeredAgentMemory: 'none', memory: null, terminalProjection: SUMMARY_SELECTION,
       observation: {}, servers: [], toolsetDefinitionRevisions: {}, nowMs: Date.now(),
     });
-    if (!admitted.ok) throw new Error(`${admitted.reason}: ${admitted.detail}`);
+    if (!admitted.ok) throw new Error(`${admitted.code}: ${admitted.detail}`);
     expect(admitted.launch.agentMemory).toBe('none');
     expect(admitted.launch.memory).toBeNull();
     expect(admitted.launch.toolsetDefinitionRevisions).toEqual({});

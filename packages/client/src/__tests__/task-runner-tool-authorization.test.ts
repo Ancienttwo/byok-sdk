@@ -57,7 +57,7 @@ function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partia
   return { runner, approvalRegistry };
 }
 async function offer(runner: TaskRunner, taskId: string): Promise<void> {
-  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId, seq: 1 }));
 }
 const declineReason = (sent: Envelope[]) => {
   const decline = sent.find(e => e.type === 'task.decline');
@@ -375,7 +375,7 @@ describe('daemon tool authorization', () => {
         : { allowWithoutAsking: [{ id: 'first-read', match: { toolName: 'read' } }] } };
     } });
     const agentRef = freshTestAgentRef();
-    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef, ...FRESH_OFFER, instruction: 'first turn' }, { taskId: 'first-turn', seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef, ...FRESH_OFFER, instruction: 'first turn' }, { taskId: 'first-turn', seq: 1 }));
     const first = adapter.inputs[0]!;
     await expect(first.toolAuthorization!.authorize({ toolCallId: 'first-read', toolName: 'read', input: { path: 'notes.md' }, cwd: first.manifest.workspace.workspaceDir }))
       .resolves.toMatchObject({ decision: 'allow', authorization: { source: 'rule', ruleIds: ['first-read'] } });
@@ -383,7 +383,7 @@ describe('daemon tool authorization', () => {
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some(event => event.type === 'task.complete' && event.task_id === 'first-turn')).toBe(true));
     askOnResume = true;
-    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef, ...resumeSession(sessionRef), instruction: 'resumed turn' }, { taskId: 'resumed-turn', seq: 2 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef, ...resumeSession(sessionRef), instruction: 'resumed turn' }, { taskId: 'resumed-turn', seq: 2 }));
     expect(adapter.inputs).toHaveLength(2);
     expect(adapter.inputs[1]!.manifest.sessionRef).toBe(sessionRef);
     expect(seen).toEqual(['first-turn', 'resumed-turn']);
@@ -447,7 +447,7 @@ async function withPublicDaemon(
   try {
     await daemon.pair('pairing-code');
     await daemon.start();
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' },
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' },
       { taskId: 'public-task', seq: server.nextSeq() }));
     await server.waitFor(e => e.type === 'task.started' && e.task_id === 'public-task');
     await run(daemon, server, adapter, storeDir);

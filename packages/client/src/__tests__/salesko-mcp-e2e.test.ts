@@ -59,7 +59,7 @@ describe('Salesko fake connector MCP end to end', () => {
         'task.offer',
         { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: 'salesko:find-leads',
-          runtime: 'claude',
+          target: { lane: 'runtime', runtimeId: 'claude' },
           requiredToolsets: ['salesko'],
         },
         { taskId: 'task-salesko-e2e', seq: 1 },

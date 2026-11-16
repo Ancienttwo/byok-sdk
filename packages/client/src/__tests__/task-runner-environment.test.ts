@@ -68,7 +68,7 @@ function makeCapturingSpawn<T>(sink: { env?: NodeJS.ProcessEnv }): T {
 interface Harness {
   sent: Envelope[];
   captured: Record<RuntimeId, { env?: NodeJS.ProcessEnv }>;
-  offer(runtime: RuntimeId, taskId: string, dispatchSelection?: RuntimeTaskInput['dispatchSelection']): Promise<void>;
+  offer(runtime: RuntimeId, taskId: string, modelTarget?: RuntimeTaskInput['target']): Promise<void>;
   /** Best-effort teardown of every task this harness offered — interrupts + closes each real fixture-backed session so no child process is left running past the test. */
   cancelAll(): Promise<void>;
 }
@@ -107,14 +107,14 @@ async function makeHarness(): Promise<Harness> {
   let seq = 1;
   const taskIds: string[] = [];
 
-  async function offer(runtime: RuntimeId, taskId: string, dispatchSelection?: RuntimeTaskInput['dispatchSelection']): Promise<void> {
+  async function offer(runtime: RuntimeId, taskId: string, modelTarget?: RuntimeTaskInput['target']): Promise<void> {
     taskIds.push(taskId);
     // `adapter.start()` (and therefore the spawn call this test captures)
     // is awaited by `handleOffer` before `handleEnvelope` resolves, so the
     // capture below is always populated by the time this call returns —
     // no polling/`vi.waitFor` needed, unlike the full daemon-level tests.
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'say hi', runtime, ...(dispatchSelection === undefined ? {} : { dispatchSelection }), ...FRESH_OFFER }, { taskId, seq: seq++ }),
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'say hi', target: modelTarget ?? { lane: 'runtime', runtimeId: runtime }, ...FRESH_OFFER }, { taskId, seq: seq++ }),
     );
   }
 
@@ -171,7 +171,7 @@ describe('TaskRunner environment inheritance: real pi/claude/codex adapters via 
         const harness = await makeHarness();
         try {
           await harness.offer('codex', `task-codex-env-${lane}`, lane === 'subscription'
-            ? { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'gpt-5' }
+            ? { lane: 'subscription', runtimeId: 'codex', modelId: 'gpt-5' }
             : undefined);
           expect(harness.sent.some((e) => e.type === 'task.fail' || e.type === 'task.decline')).toBe(false);
           // Written by the fixture from its own process.env before initialize returns.

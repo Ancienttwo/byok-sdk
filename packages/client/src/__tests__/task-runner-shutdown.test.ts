@@ -62,7 +62,7 @@ describe('TaskRunner.stopAcceptingOffers', () => {
 
     runner.stopAcceptingOffers();
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'too late' }, { taskId: 'task-late', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'too late' }, { taskId: 'task-late', seq: 1 }),
     );
 
     expect(adapter.startCalls).toHaveLength(0);
@@ -80,7 +80,7 @@ describe('TaskRunner.stopAcceptingOffers', () => {
     runner.stopAcceptingOffers();
     runner.stopAcceptingOffers();
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId: 'task-1', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId: 'task-1', seq: 1 }),
     );
     expect(sent.filter((e) => e.type === 'task.decline')).toHaveLength(1);
   });
@@ -91,7 +91,7 @@ describe('TaskRunner.stopAcceptingOffers', () => {
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'already running' }, { taskId: 'task-early', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'already running' }, { taskId: 'task-early', seq: 1 }),
     );
     expect(runner.activeTaskCount).toBe(1);
 
@@ -107,7 +107,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'task-1', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'task-1', seq: 1 }),
     );
     expect(runner.activeTaskCount).toBe(1);
     const session = adapter.sessions[0];
@@ -130,7 +130,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'task-1', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'task-1', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -150,7 +150,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const runner = await makeRunner(adapter, sent, { shutdownInterruptTimeoutMs: 20 });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'task-hang', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'task-hang', seq: 1 }),
     );
     const session = adapter.sessions[0];
     expect(session).toBeDefined();
@@ -174,7 +174,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const adapter = new StubRuntimeAdapter();
     const sent: Envelope[] = [];
     const runner = await makeRunner(adapter, sent, { shutdownInterruptTimeoutMs: 10 });
-    await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER,
       instruction: 'cancel me',
     }, { taskId: 'bounded-cancel', seq: 1 }));
     const session = adapter.sessions[0]!;
@@ -192,10 +192,10 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     const runner = await makeRunner(adapter, sent);
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'a' }, { taskId: 'task-a', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'a' }, { taskId: 'task-a', seq: 1 }),
     );
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'b' }, { taskId: 'task-b', seq: 2 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'b' }, { taskId: 'task-b', seq: 2 }),
     );
     expect(runner.activeTaskCount).toBe(2);
 
@@ -215,7 +215,7 @@ describe('TaskRunner.shutdownActiveTasks', () => {
     });
 
     await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'task-disposal', seq: 1 }),
+      createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'task-disposal', seq: 1 }),
     );
     const session = adapter.sessions[0]!;
     const close = session.close.bind(session);

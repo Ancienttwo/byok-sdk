@@ -63,7 +63,7 @@ function claimed(sent: readonly Envelope[], taskId: string): number {
 
 function agentOffer(taskId: string, seq: number, extra: { sessionRef?: string } = {}): Envelope {
   return createEnvelope('task.offer', {
-    instruction: 'characterized work', runtime: 'pi', agentRef: AGENT,
+    instruction: 'characterized work', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
     ...(extra.sessionRef === undefined ? FRESH_OFFER : resumeSession(extra.sessionRef)),
   }, { taskId, seq });
 }
@@ -279,7 +279,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     vi.spyOn(AgentMessageOutbox, 'open').mockRejectedValueOnce(new Error('outbox fixture failure'));
     const taskId = 'agent-message-outbox-failed';
     const offer = (seq: number) => createEnvelope('task.offer', {
-      instruction: 'reply', runtime: 'pi', agentRef: AGENT, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq });
 

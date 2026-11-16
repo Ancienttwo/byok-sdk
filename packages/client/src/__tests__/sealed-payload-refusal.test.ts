@@ -64,12 +64,12 @@ describe('strict offer decline redelivery', () => {
   it('declines a redelivered plaintext offer with a missing capability only once', async () => {
     const sent: Envelope[] = [];
     const runner = await runnerWith(new StubRuntimeAdapter('pi'), sent, 'agent-egress-policy');
-    const payload = { agentRef: freshTestAgentRef(), session: { mode: 'resume' as const, sessionRef: 'session-1' }, instruction: 'x', runtime: 'pi' as const, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+    const payload = { agentRef: freshTestAgentRef(), session: { mode: 'resume' as const, sessionRef: 'session-1' }, instruction: 'x', target: { lane: 'runtime' as const, runtimeId: 'pi' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
     await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId: 'plain-decline', seq: 1 }));
     await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId: 'plain-decline', seq: 2 }));
     const declines = sent.filter((envelope) => envelope.type === 'task.decline');
     expect(declines).toHaveLength(1);
-    expect(declines[0]!.payload).toMatchObject({ reason: 'offer_capability_missing: this daemon does not advertise agent-egress-policy', retryable: false });
+    expect(declines[0]!.payload).toMatchObject({ code: 'offer_capability_missing', reason: 'this daemon does not advertise agent-egress-policy', retryable: false });
     expect(declines[0]!.payload).not.toHaveProperty('code');
   });
 });
@@ -105,7 +105,7 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
     const runner = await runnerWith(adapter, sent);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'plain task', runtime: 'pi' }, { taskId: 'plain-task', seq: 1 }));
+      await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'plain task', target: { lane: 'runtime', runtimeId: 'pi' } }, { taskId: 'plain-task', seq: 1 }));
       const session = adapter.sessions[0]!;
 
       await runner.handleEnvelope(createEnvelope('task.steer', sealedSteer as never, { taskId: 'plain-task', seq: 2 }));

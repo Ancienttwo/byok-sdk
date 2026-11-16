@@ -62,13 +62,13 @@ const MESSAGE_DEPS: Partial<TaskRunnerDeps> = {
 
 function agentOffer(taskId: string, seq: number): Envelope {
   return createEnvelope('task.offer', {
-    ...FRESH_OFFER, instruction: 'outbound offer work', runtime: 'pi', agentRef: AGENT,
+    ...FRESH_OFFER, instruction: 'outbound offer work', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
   }, { taskId, seq });
 }
 
 function messageOffer(taskId: string, seq: number): Envelope {
   return createEnvelope('task.offer', {
-    session: { mode: 'fresh' }, instruction: 'reply', runtime: 'pi', agentRef: AGENT, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    session: { mode: 'fresh' }, instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
   }, { taskId, seq });
 }
@@ -171,7 +171,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     localRoots.push(path.dirname(path.dirname(missingServer)));
 
     await taskRunner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
-      instruction: 'outbound offer work', runtime: 'pi', requiredToolsets: ['team'],
+      instruction: 'outbound offer work', target: { lane: 'runtime', runtimeId: 'pi' }, requiredToolsets: ['team'],
     }, { taskId: 'toolset-path', seq: 1 }));
 
     const reason = reasonOf(sent, 'task.decline', 'toolset-path');
@@ -227,7 +227,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     const { runner: taskRunner, sent, localRoots } = await runner(adapter);
     vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    await taskRunner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
+    await taskRunner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'outbound offer work' }, { taskId: 'artifact-path', seq: 1 }));
     adapter.sessions[0]!.emit({ type: 'artifact', name: 'missing report.txt', contentType: 'text/plain' });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(() => expect(sent.some((entry) => entry.type === 'task.complete' && entry.task_id === 'artifact-path')).toBe(true));

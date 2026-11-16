@@ -74,7 +74,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'mint a native session only after start',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },
@@ -98,7 +98,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'mint a native session only after start',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },
@@ -183,7 +183,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         instruction: 'this must not become fresh',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef,
         session: { mode: 'resume', sessionRef: 'mismatched-resume-session' },
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -223,7 +223,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'fail only at handoff fsync',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },

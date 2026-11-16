@@ -109,7 +109,7 @@ describe('admission timings on the message that ends admission (#1014)', () => {
   it('a claim with no timed phase carries only totalMs', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const { runner, sent } = await harness(adapter);
-    await runner.handleEnvelope(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'work', runtime: 'pi', agentRef: AGENT_REF }, { taskId: 'plain', seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'work', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF }, { taskId: 'plain', seq: 1 }));
     expect(admissionOf(sent, 'task.claim')).toEqual({ totalMs: expect.any(Number) });
     await runner.shutdownActiveTasks('test cleanup');
   });
@@ -123,7 +123,7 @@ describe('admission timings on the message that ends admission (#1014)', () => {
       agentResultMcpPreflight: () => sleep(PHASE_MS),
     });
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      ...FRESH_OFFER, instruction: 'reply and review', runtime: 'pi', agentRef: AGENT_REF,
+      ...FRESH_OFFER, instruction: 'reply and review', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF,
       messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
       terminalProjection: { mode: 'result-document', contract: 'example.review.v1', schema: { type: 'object' } },
     }, { taskId: 'helpers', seq: 1 }));
@@ -142,7 +142,7 @@ describe('admission timings on the message that ends admission (#1014)', () => {
       agentResultMcpPreflight: async () => { await sleep(PHASE_MS); throw new Error('helper tools/list omitted submit_result'); },
     });
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      ...FRESH_OFFER, instruction: 'review', runtime: 'pi', agentRef: AGENT_REF,
+      ...FRESH_OFFER, instruction: 'review', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF,
       terminalProjection: { mode: 'result-document', contract: 'example.review.v1', schema: { type: 'object' } },
     }, { taskId: 'result-preflight', seq: 1 }));
     const admission = admissionOf(sent, 'task.decline')!;
@@ -159,7 +159,7 @@ describe('admission timings on the message that ends admission (#1014)', () => {
       mcpToolsetToolsProbe: async (serverName) => { await sleep(PHASE_MS); return observationOf({ [serverName]: ['find_leads'] })[serverName]!; },
     });
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      ...FRESH_OFFER, instruction: 'find leads', runtime: 'claude', agentRef: AGENT_REF, requiredToolsets: ['salesko'],
+      ...FRESH_OFFER, instruction: 'find leads', target: { lane: 'runtime', runtimeId: 'claude' }, agentRef: AGENT_REF, requiredToolsets: ['salesko'],
     }, { taskId: 'toolsets', seq: 1 }));
     const admission = admissionOf(sent, 'task.claim')!;
     expect(Object.keys(admission).sort()).toEqual(['toolsetProbeMs', 'totalMs']);
@@ -170,7 +170,7 @@ describe('admission timings on the message that ends admission (#1014)', () => {
   it('a failed runtime launch declines with its duration', async () => {
     const adapter = new FailingLaunchAdapter('pi');
     const { runner, sent } = await harness(adapter);
-    await runner.handleEnvelope(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'work', runtime: 'pi', agentRef: AGENT_REF }, { taskId: 'launch', seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'work', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF }, { taskId: 'launch', seq: 1 }));
     expect(sent.find((envelope) => envelope.type === 'task.decline')?.payload).toMatchObject({ reason: 'runtime launch admission failed: launch fixture failure' });
     const admission = admissionOf(sent, 'task.decline')!;
     expect(Object.keys(admission).sort()).toEqual(['runtimeLaunchMs', 'totalMs']);
@@ -180,7 +180,7 @@ describe('admission timings on the message that ends admission (#1014)', () => {
   it('a decline before any phase ran carries only totalMs', async () => {
     const adapter = new StubRuntimeAdapter('pi');
     const { runner, sent } = await harness(adapter, { agentEgressPolicy: { ...DEFAULT_AGENT_EGRESS_POLICY, policyRevision: 'daemon-v2' } });
-    await runner.handleEnvelope(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'work', runtime: 'pi', agentRef: AGENT_REF }, { taskId: 'policy', seq: 1 }));
+    await runner.handleEnvelope(createEnvelope('task.offer', { ...FRESH_OFFER, instruction: 'work', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF }, { taskId: 'policy', seq: 1 }));
     expect(admissionOf(sent, 'task.decline')).toEqual({ totalMs: expect.any(Number) });
   });
 });
@@ -189,7 +189,7 @@ describe('DaemonObserver projects admission from the outbound envelope (#1014)',
   const admission = { totalMs: 90, resultHelperPreflightMs: 40 };
 
   it.each([
-    ['task.claim', createEnvelope('task.claim', { deviceId: 'device-1', admission }, { taskId: 'observed' }), { kind: 'claimed', ts: expect.any(String), taskId: 'observed', admission }],
+    ['task.claim', createEnvelope('task.claim', { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' }, admission }, { taskId: 'observed' }), { kind: 'claimed', ts: expect.any(String), taskId: 'observed', admission }],
     ['task.decline', createEnvelope('task.decline', { reason: 'busy', retryable: true, admission }, { taskId: 'observed' }), {
       kind: 'failed', ts: expect.any(String), taskId: 'observed', reason: 'busy', retryable: true, preClaim: true, admission,
     }],
