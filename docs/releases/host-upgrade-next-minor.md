@@ -893,6 +893,9 @@ machine's current device. See
   10's tables, indexes and triggers with this build's definitions: a missing
   or changed one is refused with `SQLITE_SCHEMA_INVALID` instead of being
   recreated, and an unknown one with `SQLITE_SCHEMA_UNSUPPORTED`. The `migration` option is no longer checked; the store has none.
+  A Host that keeps its own tables, indexes or triggers in the server's store
+  file is refused with `SQLITE_SCHEMA_UNSUPPORTED` after the upgrade. Move them
+  to a separate file; `ATTACH DATABASE` can mount it on the same connection.
   Receipt maintenance deletes no request receipt, as before: every SDK receipt
   is an identity fence.
 - **Dispatch.** `DispatchInput` takes one required `target` in place of
