@@ -35,7 +35,6 @@ if (!existsSync(DIST_RUNTIME)) {
 /** Every online symbol the subpath must carry, by name. */
 const ONLINE_EXPORTS = [
   // Portable maintenance policy and its shared error contract
-  'PostgresRetentionPolicyStore',
   'CLOUD_CLEANUP_ERROR_CODES',
   'CloudCleanupError',
   // pool
@@ -53,9 +52,7 @@ const ONLINE_EXPORTS = [
   'PostgresTaskSteerRefusalStore',
   'PostgresTaskCancellationStore',
   'PostgresAgentMemoryProjectionStore',
-  'createPostgresAgentMemoryProjectionStore',
   'PostgresTaskRedactionStore',
-  'createPostgresTaskRedactionStore',
   'PostgresE2eeMemberStore',
   'createPostgresCloudStores',
   // the composition's store wire-epoch fence
@@ -90,7 +87,6 @@ const ONLINE_EXPORTS = [
 
 /** Operations that belong to the root entry and must never reach the subpath. */
 const NODE_ONLY_EXPORTS = [
-  'createPostgresMailboxWake',
   'migrate',
   'migrationsDir',
   'readMigrationFiles',
@@ -99,7 +95,6 @@ const NODE_ONLY_EXPORTS = [
   'verifyMigrations',
   'MigrationStateMismatchError',
   'PostgresCloudCleanup',
-  'createPostgresCloudMaintenance',
 ];
 
 const runtimeNamespace = runtime as unknown as Record<string, unknown>;

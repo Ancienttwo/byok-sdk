@@ -2,11 +2,6 @@ import { createMutableClock } from '@byok-sdk/core';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { CLOUD_CAPABILITIES, fullCapabilityDeclaration } from '../capabilities';
-import {
-  BoardFeedClient,
-  BoardFeedRetryableError,
-  BoardFeedStoppedError,
-} from '../coordination-client';
 import { createHarness, grantAgentHome, offerPayload, TENANT_A, TENANT_B, TEST_AGENT_REF, type CloudHarness, type PairedDevice } from './support/harness';
 
 function jsonInit(device: PairedDevice, body: unknown, method = 'POST'): RequestInit {
@@ -131,7 +126,11 @@ describe('board coordination surface', () => {
         )
       ).status,
     ).toBe(403);
-    expect((await harness.cloud.acceptBoardItem(TENANT_A, 'review')).status).toBe('done');
+    expect((await harness.core.board.updateStatus(TENANT_A, {
+      itemId: 'review',
+      expectedStatus: 'in_review',
+      status: 'done',
+    })).status).toBe('done');
   });
 
   it('stores envelope progress and refuses direct activity writes without changing history', async () => {
@@ -166,7 +165,7 @@ describe('board coordination surface', () => {
     const sent = await harness.json('/byok/messages', jsonInit(device, { messages: [claim, progress, complete] }));
     expect(sent).toMatchObject({ status: 200, body: { accepted: 3 } });
 
-    expect((await harness.cloud.listBoardItems(TENANT_A, { afterSeq: 0 })).items[0]!.status).toBe(
+    expect((await harness.core.board.list(TENANT_A, { afterSeq: 0 })).items[0]!.status).toBe(
       'in_review',
     );
     const activity = await harness.cloud.readActivity(TENANT_A, 'projected');
@@ -385,103 +384,5 @@ describe('board SSE/poll parity', () => {
     const harness = createHarness({ capabilities });
     expect(harness.cloud.routes.some((route) => route.path === '/byok/board')).toBe(true);
     expect(harness.cloud.routes.some((route) => route.path === '/byok/board/stream')).toBe(false);
-  });
-});
-
-describe('BoardFeedClient declaration and retry behavior', () => {
-  const item = {
-    tenantId: 'tenant-a',
-    itemId: 'client-item',
-    channel: 'ops',
-    title: 'Client item',
-    status: 'todo',
-    boardSeq: 1,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  } as const;
-
-  it('uses first-class poll only when the declaration omits board.sse', async () => {
-    const capabilities = {
-      ...fullCapabilityDeclaration(),
-      capabilities: fullCapabilityDeclaration().capabilities.filter(
-        (capability) => capability !== CLOUD_CAPABILITIES.boardSse,
-      ),
-    };
-    const seen: string[] = [];
-    const client = new BoardFeedClient({
-      baseUrl: 'https://cloud.test',
-      accessToken: 'token',
-      capabilities,
-      fetch: (async (input) => {
-        seen.push(String(input));
-        return Response.json({ items: [item], nextSeq: 1, hasMore: false });
-      }) as typeof fetch,
-    });
-    expect(client.mode).toBe('poll');
-    expect(await client.readOnce(0)).toEqual({
-      type: 'poll',
-      page: { items: [item], nextSeq: 1, hasMore: false },
-    });
-    expect(seen[0]).toContain('/byok/board?since=0');
-  });
-
-  it('retries temporary SSE 5xx as SSE and never mutates into polling', async () => {
-    let calls = 0;
-    const client = new BoardFeedClient({
-      baseUrl: 'https://cloud.test',
-      accessToken: 'token',
-      capabilities: fullCapabilityDeclaration(),
-      fetch: (async () => {
-        calls += 1;
-        if (calls === 1) return new Response('temporary', { status: 503 });
-        return new Response(`event: board\nid: 1\ndata: ${JSON.stringify(item)}\n\n`, {
-          headers: { 'content-type': 'text/event-stream' },
-        });
-      }) as typeof fetch,
-    });
-    await expect(client.readOnce(0)).rejects.toBeInstanceOf(BoardFeedRetryableError);
-    expect(client.mode).toBe('sse');
-    expect(await client.readOnce(0)).toEqual({ type: 'board', item });
-    expect(client.mode).toBe('sse');
-  });
-
-  it('turns an idle SSE into a retryable watchdog failure without downgrading', async () => {
-    const client = new BoardFeedClient({
-      baseUrl: 'https://cloud.test',
-      accessToken: 'token',
-      capabilities: fullCapabilityDeclaration(),
-      idleWatchdogMs: 5,
-      fetch: (async () =>
-        new Response(new ReadableStream<Uint8Array>({ start() {} }), {
-          headers: { 'content-type': 'text/event-stream' },
-        })) as typeof fetch,
-    });
-    await expect(client.readOnce(0)).rejects.toBeInstanceOf(BoardFeedRetryableError);
-    expect(client.mode).toBe('sse');
-  });
-
-  it('stops on permanent HTTP failures instead of classifying them as retryable', async () => {
-    const client = new BoardFeedClient({
-      baseUrl: 'https://cloud.test',
-      accessToken: 'token',
-      capabilities: fullCapabilityDeclaration(),
-      fetch: (async () => new Response('forbidden', { status: 403 })) as typeof fetch,
-    });
-    const error = await client.readOnce(0).catch((caught: unknown) => caught);
-    expect(error).toBeInstanceOf(BoardFeedStoppedError);
-    expect(error).not.toBeInstanceOf(BoardFeedRetryableError);
-  });
-
-  it('fails closed when a board SSE frame omits its data payload', async () => {
-    const client = new BoardFeedClient({
-      baseUrl: 'https://cloud.test',
-      accessToken: 'token',
-      capabilities: fullCapabilityDeclaration(),
-      fetch: (async () =>
-        new Response('event: board\n\n', {
-          headers: { 'content-type': 'text/event-stream' },
-        })) as typeof fetch,
-    });
-    await expect(client.readOnce(0)).rejects.toThrow('Board SSE board event had no data.');
   });
 });

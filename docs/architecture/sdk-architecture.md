@@ -431,10 +431,10 @@ principal's tenant. The handler subscribes before reading, then waits for hints
 or the port's fallback interval (5 seconds by default), closing on every exit.
 Mailbox reads, delivery watermarks and client acknowledgement remain the only
 authorities; handlers carry no cross-request subscription state. Memory/SQLite
-compositions use an in-process wake. Resident Postgres Hosts use one dedicated
-session-mode LISTEN connection and migration 0024's outbox trigger; the listener
-and its Node imports stay out of the Worker runtime entry. Workers compose a
-per-invocation wake and choose the fallback latency. At 10x device load the
+compositions use an in-process wake. Postgres Hosts compose an in-process wake
+too: migration 0024's outbox trigger emits hints, but the SDK ships no listener
+for them, so a write from another process reaches a hold within the fallback
+interval. Workers compose a per-invocation wake and choose the fallback latency. At 10x device load the
 remaining pressure point is fallback reads and notification fan-out, rather
 than a 250 ms read loop per idle hold.
 
@@ -1157,7 +1157,7 @@ core 各行已于 S2（2026-08-07）落地为 `@byok-sdk/core` 的契约 + InMem
 | core `quota.ts` | tenant storage entitlement、usage、reservation、retention policy 与稳定 quota 错误码 | **已实现（S2）** |
 | core store ports | Truth/Mailbox/Board/Presence/Blob/Quota/StorageUsage async contracts；首参数永远是 tenant | **已实现（S2）**；tenant-scoped store 组装留给 S3 |
 | cloud device handlers | pair/challenge/token 与 frozen events/messages/blob HTTP surface，外加 hosted-only `GET /byok/capabilities` | **已实现（S3a）**：九条 device 路由无状态重现，既有 daemon 零改动跑通 long-poll |
-| cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | **已实现（S5）**：device bearer 只写非 `done` 协调态；host `acceptBoardItem` 独占 review acceptance |
+| cloud board handlers | list/incremental、SSE、claim/unclaim/status CAS | **已实现（S5）**：device bearer 只写非 `done` 协调态 |
 | cloud truth handlers | immutable terminal、profile/memory records、rev CAS、object refs | **已实现（S6-b）**：proof-only routes + Postgres atomic authority；client local path 于 S6-c 实现 |
 | cloud storage handlers | storage entitlement/usage/reservation 的执行面；reservation → presign → finalize/abort | **已实现（S4A/S4B）**：daemon 声明 hash authority；HEAD 只观测 existence/size/type（ADR-024） |
 | cloud cleanup workers | retention、tombstone、orphan GC 与 Postgres/R2 reconciliation | 当前实现（S4B-c） |
@@ -1210,7 +1210,6 @@ stateDiagram-v2
 - `task.complete` 可以把工作项推到 `in_review`，但不能自动变成 `done`——`done` 需要人工验收。
 - host 必须显式提供 bounded `channel`/`title`；cloud 不从 instruction/result 派生 label。
 - poll 与 SSE 共享 `BoardStore.list`；`board_seq` 是 per-tenant current-state cursor，不是完整事件历史。SSE 以 heartbeat 保活、以默认 120s（可由 `ByokCloudOptions` 注入）的 `reconcile` 信号要求 full poll，且每轮 query 返回后才 sleep。该数值是 BYOK 已测试的初始运营默认值，不是 RAFT production tuning 证据。
-- `BoardFeedClient` 只按 `GET /byok/capabilities` 的 `board.sse` 选择 transport；temporary 5xx/idle watchdog 是 retryable SSE failure，不会永久降级。401/revocation 与其他永久 non-5xx failure 则停止。
 
 #### presence 与 activity 规则（当前实现）
 
@@ -1808,7 +1807,7 @@ recovery floor，计入 `removed`），最后把 unacked 标 expired；quota 只
 budget；PG 在删除期间持有 manifest row lock，SQLite 同步 commit SQL 与 ledger
 release，避免同 hash 重建或 reservation 插入观察到半完成状态。
 
-`PostgresRetentionPolicyStore` 从 Worker runtime 读取/写入 policy，缺失时 fail closed。
+Retention policy 由 Host 持有并直接传给 `runMaintenance`；`tenant_retention_policy` 表保留，由 Host 用 SQL 读写。
 `PostgresCloudCleanup` 保留显式 dead-letter、`reconcileObjectStorage`
 与 `rebuildObjectUsage` operator APIs；`runTenant` 和 `cleanup_job` writers 已移除，
 历史 schema 保留到后续 forward migration。未追踪但 key 合法的 R2 object 先成为

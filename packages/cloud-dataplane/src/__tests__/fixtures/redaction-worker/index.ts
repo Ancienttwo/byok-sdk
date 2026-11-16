@@ -19,7 +19,7 @@ import {
   createByokPool,
   createPostgresCloudStores,
   createPostgresCoreStores,
-  createPostgresTaskRedactionStore,
+  PostgresTaskRedactionStore,
   PostgresProofReceiptRetentionAuthority,
 } from '@byok-sdk/cloud-dataplane/runtime';
 import type { Clock } from '@byok-sdk/core';
@@ -61,7 +61,7 @@ async function redact(env: Env, body: { readonly tenant: string; readonly taskId
         ...full,
         capabilities: full.capabilities.filter((capability) => capability !== CLOUD_CAPABILITIES.blobsContentProxy),
       },
-      taskRedactionStore: createPostgresTaskRedactionStore({ pool, clock, objectStorage }),
+      taskRedactionStore: new PostgresTaskRedactionStore({ pool, clock, objectStorage }),
     });
     return Response.json(await cloud.redactTasks(tenantId(body.tenant), { taskIds: body.taskIds }));
   } finally {

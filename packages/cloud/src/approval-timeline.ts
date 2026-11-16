@@ -24,7 +24,7 @@ const ApprovalRequestedEventSchema = z
   .object({
     type: z.literal('approval_requested'),
     summary: z.string(),
-    approvalId: NonBlankIdSchema.optional(),
+    approvalId: NonBlankIdSchema,
   })
   .strict();
 
@@ -40,9 +40,7 @@ const SealedApprovalRequestedEventSchema = z
 const LocalApprovalResolutionEventSchema = z
   .object({
     type: z.literal('approval_resolved'),
-    // Absent only when a daemon resolved the single outstanding request without
-    // native approval identity. No id is synthesized.
-    approvalId: NonBlankIdSchema.optional(),
+    approvalId: NonBlankIdSchema,
     decision: z.enum(['approve', 'reject']),
     // A daemon's `task.approval_resolved` is pure wire observation; it cannot
     // declare a host command payload.
@@ -54,7 +52,7 @@ const LocalApprovalResolutionEventSchema = z
 const HostApprovalResolutionEventSchema = z
   .object({
     type: z.literal('approval_resolved'),
-    approvalId: NonBlankIdSchema.optional(),
+    approvalId: NonBlankIdSchema,
     decision: z.literal('approve'),
     resolvedBy: z.literal('host'),
     at: z.iso.datetime({ offset: true }),
@@ -64,7 +62,7 @@ const HostApprovalResolutionEventSchema = z
 const HostRejectResolutionEventSchema = z
   .object({
     type: z.literal('approval_resolved'),
-    approvalId: NonBlankIdSchema.optional(),
+    approvalId: NonBlankIdSchema,
     decision: z.literal('reject'),
     resolvedBy: z.literal('host'),
     // Required even when the host deliberately omitted a wire reason. `null`
@@ -237,10 +235,7 @@ export function approvalTimelineCursor(
   return entries.at(-1)?.revision;
 }
 
-/**
- * The unresolved request: the latest request no later resolution names. A
- * resolution without an id resolves the single outstanding request.
- */
+/** The unresolved request: the latest request no later resolution names. */
 export function pendingApprovalObservation(entries: readonly ApprovalObservation[]): ApprovalObservation | undefined {
   let pending: ApprovalObservation | undefined;
   for (const entry of entries) {
@@ -248,7 +243,7 @@ export function pendingApprovalObservation(entries: readonly ApprovalObservation
       pending = entry;
       continue;
     }
-    if (pending !== undefined && (pending.event.approvalId === undefined || pending.event.approvalId === entry.event.approvalId)) {
+    if (pending !== undefined && pending.event.approvalId === entry.event.approvalId) {
       pending = undefined;
     }
   }

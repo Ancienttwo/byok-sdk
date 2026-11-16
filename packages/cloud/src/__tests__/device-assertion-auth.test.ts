@@ -1,5 +1,6 @@
 import { generateKeyPairSync, sign } from 'node:crypto';
 import {
+  CapabilityDeclarationSchema,
   DEVICE_ASSERTION_SCHEMA_ID,
   InMemoryDeviceAssertionReplayAuthority,
   TASK_ASSERTION_SCHEMA_ID,
@@ -15,7 +16,7 @@ import {
 import { HOST_MCP_TASK_CONTEXT_CAPABILITY } from '@byok-sdk/protocol';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { authenticateHostedDeviceAssertion, authenticateHostedTaskAssertion } from '../auth/device-assertion';
-import { CLOUD_CAPABILITIES, CapabilitiesResponseSchema, declares, fullCapabilityDeclaration } from '../capabilities';
+import { CLOUD_CAPABILITIES, declares, fullCapabilityDeclaration } from '../capabilities';
 import { createWebCrypto } from '../crypto/web-crypto';
 import { InMemoryDeviceDirectory } from '../stores/in-memory/device-directory';
 import { InMemoryTaskAttemptState } from '../stores/in-memory/task-attempts';
@@ -326,6 +327,6 @@ describe('host-mcp-task-context deployment capability', () => {
     const declared = fullCapabilityDeclaration(1, { includeHostMcpTaskContext: true });
     expect(declares(declared, CLOUD_CAPABILITIES.hostMcpTaskContext)).toBe(true);
     // Still a valid ADR-010 declaration on the wire.
-    expect(CapabilitiesResponseSchema.safeParse(declared).success).toBe(true);
+    expect(CapabilityDeclarationSchema.safeParse(declared).success).toBe(true);
   });
 });

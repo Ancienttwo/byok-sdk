@@ -155,7 +155,7 @@ describe('host task cancellation', () => {
       summary: 'success won',
       sessionRef: 'successful-session',
     });
-    await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolves.toMatchObject({
+    await expect(harness.core.board.list(TENANT_A, {})).resolves.toMatchObject({
       items: [{ itemId: offer.taskId, status: 'in_review' }],
     });
 
@@ -202,7 +202,7 @@ describe('host task cancellation', () => {
       reason: 'cancel wins',
       recordedAt: cancellation.cancellation?.requestedAt,
     });
-    await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolves.toMatchObject({ items: [] });
+    await expect(harness.core.board.list(TENANT_A, {})).resolves.toMatchObject({ items: [] });
   });
 
   it('does not project a racing success when cancellation lands between its read and status CAS', async () => {
@@ -276,7 +276,7 @@ describe('host task cancellation', () => {
       state: 'cancelled',
       reason: 'cancel wins the CAS',
     });
-    await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolves.toMatchObject({
+    await expect(harness.core.board.list(TENANT_A, {})).resolves.toMatchObject({
       items: [{ itemId: offer.taskId, status: 'in_progress' }],
     });
   });

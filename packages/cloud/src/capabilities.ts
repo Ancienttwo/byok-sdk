@@ -15,7 +15,7 @@
  * that does not declare `blobs.contentproxy` does not mount the two `/content`
  * routes, so the declaration and the surface cannot disagree.
  */
-import { CapabilityDeclarationSchema, hasCapability, type CapabilityDeclaration } from '@byok-sdk/core';
+import { hasCapability, type CapabilityDeclaration } from '@byok-sdk/core';
 import type { ByokCloudOptions } from './cloud.js';
 import type { CloudStores } from './stores/ports.js';
 
@@ -120,10 +120,6 @@ export const CLOUD_CAPABILITIES = {
 } as const;
 
 export type CloudCapability = (typeof CLOUD_CAPABILITIES)[keyof typeof CLOUD_CAPABILITIES];
-
-/** The wire DTO for `GET /byok/capabilities` — core's shape, bound to a cloud-owned route. */
-export const CapabilitiesResponseSchema = CapabilityDeclarationSchema;
-export type CapabilitiesResponse = CapabilityDeclaration;
 
 export interface FullCapabilityDeclarationOptions {
   /**

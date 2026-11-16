@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "c62a423fcfb7947653bdbfe9e4b2cbaaea22c5ef8725760df8f439f992a74722"
+    "snapshotSha256": "374876deb68b845a7fb07f30e3e9c48bd07488a33001ac5eaea918c267ac0673"
   },
   "configFields": {
     "status": "tracked",
@@ -513,7 +513,6 @@
       "summary": "@byok-sdk/cloud ByokCloud.readSteerRefusal and listSteerRefusals read a task's steer refusals by steer id or by revision; TenantStores.steerRefusals and TenantBoundMailbox.readMessage carry them, and @byok-sdk/core InMemoryMailboxStore implements readMessage.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
-        "export:@byok-sdk/cloud#ByokCloud",
         "export:@byok-sdk/cloud#TenantStores",
         "export:@byok-sdk/cloud#TenantBoundMailbox",
         "export:@byok-sdk/core#InMemoryMailboxStore"
@@ -585,6 +584,131 @@
         "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
         "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES"
+      ]
+    },
+    {
+      "id": "cloud-unused-exports-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud removes exports with no caller: BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError and the BoardFeed* types; CLOUD_PORT_INTERFACES; TRUTH_RECORD_CAPABILITY and TRUTH_INLINE_CONTENT_TYPE (use CLOUD_CAPABILITIES.truthRecords); CapabilitiesResponseSchema and CapabilitiesResponse (use CapabilityDeclarationSchema and CapabilityDeclaration from @byok-sdk/core); receiptRetentionClass; InMemoryAgentMemoryProjectionStore and InMemoryAgentMemoryProjectionAuthorizer.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#BoardFeedClient",
+        "export:@byok-sdk/cloud#BoardFeedClientOptions",
+        "export:@byok-sdk/cloud#BoardFeedItem",
+        "export:@byok-sdk/cloud#BoardFeedMode",
+        "export:@byok-sdk/cloud#BoardFeedPage",
+        "export:@byok-sdk/cloud#BoardFeedRead",
+        "export:@byok-sdk/cloud#BoardFeedRetryableError",
+        "export:@byok-sdk/cloud#BoardFeedStoppedError",
+        "export:@byok-sdk/cloud#CLOUD_PORT_INTERFACES",
+        "export:@byok-sdk/cloud#TRUTH_RECORD_CAPABILITY",
+        "export:@byok-sdk/cloud#TRUTH_INLINE_CONTENT_TYPE",
+        "export:@byok-sdk/cloud#CapabilitiesResponseSchema",
+        "export:@byok-sdk/cloud#CapabilitiesResponse",
+        "export:@byok-sdk/cloud#receiptRetentionClass",
+        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer"
+      ]
+    },
+    {
+      "id": "cloud-host-facade-methods-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ByokCloud removes completeAgentHomeProjection and completeInputPreparation (the device completion routes still complete both), listBoardItems and acceptBoardItem (use the tenant board store), enqueueSealedAgentOffer and enqueueSealedAgentEgressOffer with SealedAgentDispatchInput and SealedAgentEgressDispatchInput (submitSealedAgentExecution is the hosted sealed lane), and enqueueProviderProvisioningNotice with ProviderProvisioningNoticeInput. ByokCloud also gains readSteerRefusal and listSteerRefusals (wire-v7-cloud-steer-refusal-reads).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#ProviderProvisioningNoticeInput"
+      ]
+    },
+    {
+      "id": "cloud-approval-identity-required",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ApprovalObservationSchema, ApprovalTimelineEventSchema and PendingApproval require approvalId on approval_requested, a local approval_resolved and a host approve or reject. Every producer already sets it: the wire payloads require it and host decisions copy the pending request's id.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#ApprovalObservationSchema",
+        "export:@byok-sdk/cloud#ApprovalTimelineEventSchema",
+        "export:@byok-sdk/cloud#PendingApproval"
+      ]
+    },
+    {
+      "id": "cloud-approval-unnamed-observation-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud approval timeline stores (in-memory, Postgres, SQLite) refuse to read or append an observation without approvalId instead of folding it as the single outstanding request; ByokCloud.approve and reject no longer refuse a pre-v4 unnamed request specially. No id is synthesized. Wire v7 starts on new stores, so a v7 store holds none.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "behavior:cloud-approval-unnamed-observation-refused"
+      ]
+    },
+    {
+      "id": "cloud-agentless-archive-input-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud taskArchiveInput requires agentRef. @byok-sdk/cloud-dataplane removes retireAgentlessTasks, RetireAgentlessTasksOptions and RetireAgentlessTasksResult: wire v7 starts on a new database, so no pre-0039 agentless row exists. The retired-id fence stays: a task id in task_agentless_retired refuses a new offer with agent_task_already_exists.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#taskArchiveInput",
+        "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
+        "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+        "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult"
+      ]
+    },
+    {
+      "id": "cloud-error-agent-ref-missing-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud CLOUD_ERROR_CODES removes task_attempt_agent_ref_missing. Migration 0039 makes the task Agent columns NOT NULL, so the read that raised it cannot fail; drop any match on the code.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_ERROR_CODES"
+      ]
+    },
+    {
+      "id": "dataplane-unused-exports-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane removes the resident Postgres wakes (createPostgresMailboxWake, createPostgresTaskEventsWake, MailboxWakeProbeMissedError, TaskEventsWakeProbeMissedError and their types; use the cloud's in-process wake with fallbackMs; the SQL triggers stay) and the composition factories createPostgresCloudMaintenance, createPostgresTenantErasure, createPostgresTaskRedactionStore and createPostgresAgentMemoryProjectionStore with their option types (construct PostgresCloudCleanup, PostgresTenantErasure, PostgresTaskRedactionStore or PostgresAgentMemoryProjectionStore).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#createPostgresMailboxWake",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresCloudMaintenance",
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTenantErasure",
+        "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTaskRedactionStore",
+        "export:@byok-sdk/cloud-dataplane#createPostgresAgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#createPostgresTaskRedactionStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#createPostgresAgentMemoryProjectionStore"
+      ]
+    },
+    {
+      "id": "dataplane-retention-policy-store-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane removes PostgresRetentionPolicyStore, TenantRetentionPolicy and TenantRetentionPolicyInput. The tenant_retention_policy table and runMaintenance are unchanged: the Host writes and reads the policy with SQL and passes it to maintenance.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+        "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicy",
+        "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicyInput",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicy",
+        "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicyInput"
+      ]
+    },
+    {
+      "id": "dataplane-mailbox-row-tenant-validated",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane maps every outbox row through one projection (PostgresMailboxStore reads, task cancellation and PostgresCloudCleanup dead-letter pages and replay), and it brands the row's tenant with @byok-sdk/core tenantId(). A stored row whose tenant_id is not a valid tenant id now fails that read with ByokCoreError tenant_id_invalid instead of being passed through unchecked. Rows the SDK wrote always carry a valid tenant id.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "behavior:dataplane-mailbox-row-tenant-validated"
       ]
     }
   ],
@@ -709,9 +833,59 @@
       "entry": "wire-v7-execution-target"
     },
     {
+      "item": "export:@byok-sdk/cloud#ApprovalObservationSchema",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ApprovalTimelineEventSchema",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedClient",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedClientOptions",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedItem",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedMode",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedPage",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedRead",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedRetryableError",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedStoppedError",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#ByokCloud",
       "change": "changed",
-      "entry": "wire-v7-cloud-steer-refusal-reads"
+      "entry": "cloud-host-facade-methods-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",
@@ -719,9 +893,29 @@
       "entry": "e2ee-member-store-in-cloud-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+      "change": "changed",
+      "entry": "cloud-error-agent-ref-missing-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_PORT_INTERFACES",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
       "change": "changed",
       "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilitiesResponse",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilitiesResponseSchema",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#CapabilityPorts",
@@ -747,6 +941,16 @@
       "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
@@ -789,6 +993,26 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/cloud#PendingApproval",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ProviderProvisioningNoticeInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
       "change": "changed",
       "entry": "wire-v7-execution-target"
@@ -802,6 +1026,16 @@
       "item": "export:@byok-sdk/cloud#SteerRejectedError",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TRUTH_INLINE_CONTENT_TYPE",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TRUTH_RECORD_CAPABILITY",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#TaskAttempt",
@@ -849,9 +1083,19 @@
       "entry": "in-memory-directory-device-state"
     },
     {
-      "item": "export:@byok-sdk/cloud#projectTerminalResult",
+      "item": "export:@byok-sdk/cloud#receiptRetentionClass",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#taskArchiveInput",
       "change": "changed",
-      "entry": "wire-v7-cloud-executor"
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
@@ -862,6 +1106,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_STORE_EPOCH_UNSUPPORTED",
       "change": "added",
       "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
@@ -889,6 +1138,16 @@
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
@@ -897,6 +1156,11 @@
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresStoreEpochUnsupportedError",
@@ -909,14 +1173,94 @@
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskSteerRefusalStore",
       "change": "added",
       "entry": "wire-v7-dataplane-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
       "change": "changed",
       "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicy",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicyInput",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresCloudMaintenance",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresMailboxWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskRedactionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTenantErasure",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
@@ -964,6 +1308,11 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresStoreEpochUnsupportedError",
       "change": "added",
       "entry": "wire-v7-dataplane-store-epoch"
@@ -977,6 +1326,26 @@
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskSteerRefusalStore",
       "change": "added",
       "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicy",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicyInput",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createPostgresAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createPostgresTaskRedactionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/core#InMemoryMailboxStore",

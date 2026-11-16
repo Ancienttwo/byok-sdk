@@ -359,13 +359,6 @@ export class PostgresAgentMemoryProjectionStore implements AgentMemoryProjection
   }
 }
 
-/** Build the runtime-safe Postgres implementation of the optional cloud port. */
-export function createPostgresAgentMemoryProjectionStore(
-  options: PostgresAgentMemoryProjectionStoreOptions,
-): AgentMemoryProjectionStore {
-  return new PostgresAgentMemoryProjectionStore(options);
-}
-
 function assertNextMutation(
   head: ProjectionHeadRow | undefined,
   fence: EraseFenceRow | undefined,

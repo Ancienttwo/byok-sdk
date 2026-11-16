@@ -13,10 +13,8 @@ import { copyFile, mkdtemp, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createMutableClock, tenantId } from '@byok-sdk/core';
 import { describe, expect, it } from 'vitest';
 import { migrate } from '../migrate';
-import { PostgresRetentionPolicyStore } from '../stores/retention-policy';
 import { createDataplaneScope, SKIP_DATAPLANE, SKIP_REASON, type DataplaneScope } from './support/dataplane';
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
@@ -60,6 +58,25 @@ async function before0032(scope: DataplaneScope, policies: readonly StoredPolicy
   return directory;
 }
 
+/** The policy a tenant's entitlement names, as maintenance is handed it. */
+async function entitledPolicy(scope: DataplaneScope, tenant: string) {
+  const result = await scope.pool.query(
+    `SELECT p.mailbox_acked_retention_ms AS "mailboxAckedRetentionMs",
+            p.mailbox_unacked_retention_ms AS "mailboxUnackedRetentionMs",
+            p.mailbox_dead_letter_retention_ms AS "mailboxDeadLetterRetentionMs",
+            p.request_receipt_retention_ms AS "requestReceiptRetentionMs",
+            p.object_orphan_grace_ms AS "objectOrphanGraceMs",
+            p.terminal_task_archive_ms AS "terminalTaskArchiveMs",
+            p.updated_at AS "updatedAt"
+       FROM storage_entitlement e
+       JOIN tenant_retention_policy p
+         ON p.tenant_id = e.tenant_id AND p.policy_id = e.retention_policy_id
+      WHERE e.tenant_id = $1`,
+    [tenant],
+  );
+  return result.rows[0];
+}
+
 /** Everything a refused 0032 must leave as it was. */
 async function snapshot(scope: DataplaneScope) {
   const query = async (sql: string) => (await scope.pool.query(sql)).rows;
@@ -89,9 +106,8 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0032 and the policies stored before it
     ]);
     try {
       await expect(migrate(scope.pool, directory)).resolves.toMatchObject({ applied: [MIGRATION] });
-      const store = new PostgresRetentionPolicyStore(scope.pool, createMutableClock());
       for (const { policy, archiveMs } of cases) {
-        await expect(store.readRetentionPolicy(tenantId(policy.tenant))).resolves.toMatchObject({
+        await expect(entitledPolicy(scope, policy.tenant)).resolves.toMatchObject({
           mailboxAckedRetentionMs: DAY_MS,
           mailboxUnackedRetentionMs: policy.unackedMs,
           mailboxDeadLetterRetentionMs: policy.deadLetterMs,
@@ -143,7 +159,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres 0032 and the policies stored before it
       await expect(migrate(scope.pool, directory)).rejects.toThrow(/0032: /u);
       await scope.pool.query(`UPDATE tenant_retention_policy SET mailbox_unacked_retention_ms = $1 WHERE tenant_id = 'policy-sum-over'`, [MAX - 1n]);
       await expect(migrate(scope.pool, directory)).resolves.toMatchObject({ applied: [MIGRATION] });
-      await expect(new PostgresRetentionPolicyStore(scope.pool, createMutableClock()).readRetentionPolicy(tenantId('policy-sum-over')))
+      await expect(entitledPolicy(scope, 'policy-sum-over'))
         .resolves.toMatchObject({ mailboxUnackedRetentionMs: MAX - 1n, mailboxDeadLetterRetentionMs: 1n, terminalTaskArchiveMs: MAX });
     } finally {
       await rm(directory, { recursive: true, force: true });

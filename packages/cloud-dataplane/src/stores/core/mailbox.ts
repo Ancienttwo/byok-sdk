@@ -31,6 +31,7 @@ import {
   CoreConflictError,
   MailboxStreamClosedError,
   assertCanonicalTimestamp,
+  tenantId,
   type Clock,
   type ContentHash,
   type MailboxAdvanceCursorInput,
@@ -94,7 +95,7 @@ interface RetentionRow {
 
 export function toMailboxMessage(row: OutboxRow): MailboxMessage {
   return {
-    tenantId: row.tenant_id as TenantId,
+    tenantId: tenantId(row.tenant_id),
     deviceId: row.device_id,
     // `seq` is bigint in the column and `number` on the port, because it is the
     // envelope `seq` on the wire. The column is wide so the counter cannot wrap
