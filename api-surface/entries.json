@@ -1095,7 +1095,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 595399,
+      "budgetBytes": 591005,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2293,7 +2293,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 706311,
+      "budgetBytes": 694589,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2370,7 +2370,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 424970,
+      "budgetBytes": 415445,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2586,7 +2586,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2492647,
+      "budgetBytes": 2483100,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2927,7 +2927,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 190095,
+      "budgetBytes": 185242,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

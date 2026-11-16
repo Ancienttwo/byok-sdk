@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "c113e4df8fc7e468ded34acf86d405f56b9d5af6125b938f633a102ad8a1d662"
+    "snapshotSha256": "11a2f42707b3ea3620d2570a0338ba91edd6b070b01b8705129e1a8172ab31ef"
   },
   "configFields": {
     "status": "tracked",
@@ -3588,6 +3588,11 @@
       "item": "export:@byok-sdk/core/sealed-payload#verifyMemberChainFromAnchor",
       "change": "changed",
       "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#SQLITE_USER_OBJECT",
+      "change": "added",
+      "entry": "core-sqlite-node-entry"
     },
     {
       "item": "export:@byok-sdk/core/sqlite-node#SqliteReadOnlyOpenError",
