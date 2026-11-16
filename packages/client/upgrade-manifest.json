@@ -262,6 +262,15 @@
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore"
       ]
+    },
+    {
+      "id": "service-uninstall-stops-before-pointers",
+      "impact": "breaking",
+      "summary": "Corrects a 0.43.0 regression by restoring the 0.42.0 order: @byok-sdk/client ServiceInstallation.uninstall() runs the lifecycle's uninstall (stop, then unit removal) while current still points at the installed payload, then removes current, previous, versions/, snapshots/ and the receipt, so a Windows stop program under current runs instead of every uninstall failing with service_stop_failed. A failed, refused or timed-out stop throws as is and removes nothing: the unit and current both stay, so the service can start again until uninstall() is retried. This narrows the #2011 guarantee that a unit left behind starts no payload: when the stop succeeds and the unit's removal fails, the unit stays with current and a boot or login can start it. Retry uninstall() after any failure.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#service-uninstall-stops-before-it-removes-current-2274",
+      "items": [
+        "behavior:service-uninstall-stops-before-pointers"
+      ]
     }
   ],
   "changes": [

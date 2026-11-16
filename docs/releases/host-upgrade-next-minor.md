@@ -252,3 +252,25 @@ deletes the presence, nonce and dedup rows of the id even when no device row
 was left, so a repeated revoke clears rows a racing write recreated. Its E2EE
 member state is still deleted only with a row the call removed (#2267). No
 schema change.
+
+## Service uninstall stops before it removes `current` (#2274)
+
+This corrects a 0.43.0 regression by restoring the 0.42.0 order.
+`@byok-sdk/client` `ServiceInstallation.uninstall()` runs the lifecycle's
+uninstall, which stops the service, while `current` still points at the
+installed payload, and only then removes `current`, `previous`, `versions/`,
+`snapshots/` and the receipt. 0.43.0 removed `current` first (#2011), so a
+Windows stop program under `current` was gone when the stop ran, and every
+uninstall failed with `service_stop_failed`.
+
+- A stop that fails, times out or is refused (a stop program that exits
+  non-zero, a refused or timed-out `launchctl bootout`) throws as is and
+  removes nothing: the unit and `current` both stay, so the service can start
+  again, for example at the next login, and `uninstall()` can be retried.
+- The cost narrows the 0.43.0 guarantee that a unit an uninstall leaves
+  behind starts no payload (#2011). When the stop succeeds and the unit's
+  removal then fails, the unit stays with `current`, as in 0.42.0, so a boot
+  or login can start the installed payload until `uninstall()` is retried.
+  Retry `uninstall()` after any failure.
+
+No Host change is needed for a stop program that runs from under `current`.
