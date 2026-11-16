@@ -986,8 +986,8 @@ export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import { type ActivityReadOptions, type ActivityTail, type ApprovalTimelineTail, type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
-import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskEventEntry, TaskHandle, TaskSnapshot } from './types.js';
-export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types.js';
+import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, SteerRefusal, TaskEventEntry, TaskHandle, TaskSnapshot } from './types.js';
+export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, SteerRefusal, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types.js';
 export { TaskEventsUnavailableError } from './types.js';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 /**
@@ -1143,10 +1143,13 @@ export interface ByokServer {
          * this instance. A cursor survives a server restart on SQLite storage.
          *
          * Each read window yields the pending approval request when it is new, the
-         * state when it changed, then the activity log in revision order. State is
+         * steer refusals not yet yielded, the state when it changed, then the
+         * activity log in revision order. Every read, `from: 'state'` included,
+         * starts with all of the task's recorded steer refusals. State is
          * the current fact, coalesced: a reader that was not reading while a task
          * moved through several states sees only where it is now. A terminal state
-         * comes last, after the log was read past it, and ends the feed.
+         * comes last, after the refusals and the log were read past it, and ends
+         * the feed; a refusal recorded later reads from {@link tasks.readSteerRefusal}.
          *
          * The read starts after `after`; with `from: 'state'`, at the pending
          * request and current state, followed only by activity logged from then
@@ -1166,6 +1169,21 @@ export interface ByokServer {
             from?: 'state';
             signal?: AbortSignal;
         }): AsyncIterable<TaskEventEntry>;
+        /**
+         * The device's refusal of the steer `messageId` (the id
+         * {@link TaskHandle.steer} resolved with), or `undefined` when none was
+         * recorded. The first report is the fact; a replay does not change it.
+         */
+        readSteerRefusal(taskId: string, messageId: string): Promise<SteerRefusal | undefined>;
+        /**
+         * The task's steer refusals with `revision > afterRevision` (default 0),
+         * ascending, at most `limit` (default 100). Reads the refusals a device
+         * reported after the task's event feed ended.
+         */
+        listSteerRefusals(taskId: string, options?: {
+            afterRevision?: number;
+            limit?: number;
+        }): Promise<readonly SteerRefusal[]>;
         /**
          * One bounded page, keyset-paged by task id. Paged rather than "all of
          * them" because the underlying store is: an unbounded `list()` would have
@@ -1655,7 +1673,7 @@ export declare function inspectSqliteStore(path: string): Promise<StoreCompatibi
 import { type ActivityTail, type TaskEventsWake, type TenantId } from '@byok-sdk/cloud';
 import { type TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay.js';
-import { type ServerTaskEvent, type TaskEventEntry } from './types.js';
+import { type ServerTaskEvent, type SteerRefusal, type TaskEventEntry } from './types.js';
 /** One task's current facts, from the same reads `tasks.get` answers with. */
 export interface TaskEventFacts {
     readonly state: TaskState;
@@ -1677,6 +1695,8 @@ export interface TaskEventSources {
     readFacts(taskId: string): Promise<TaskEventFacts | undefined>;
     /** `ByokCloud.readActivity`, after `after` when given. */
     readActivity(taskId: string, after?: ActivityLogPosition): Promise<ActivityTail | undefined>;
+    /** The task's steer refusals with `revision > afterRevision`, ascending, at most `limit`. */
+    readSteerRefusals(taskId: string, afterRevision: number, limit: number): Promise<readonly SteerRefusal[]>;
 }
 export interface TaskEventDeps {
     readonly relay: TaskEventRelay;
@@ -1684,7 +1704,7 @@ export interface TaskEventDeps {
     readonly sources: TaskEventSources;
     /**
      * The stores' own commit hints (#1113 A4). Every writer of a task's state,
-     * activity log or approval timeline signals it, retirement and maintenance
+     * activity log, approval timeline or steer refusals signals it, retirement and maintenance
      * included; a reader no hint reaches re-reads within its fallback.
      */
     readonly wake: TaskEventsWake;
@@ -1707,7 +1727,7 @@ export interface TaskEventReadOptions {
 export declare function readTaskEvents<T = TaskEventEntry>(deps: TaskEventDeps, taskId: string, options?: TaskEventReadOptions, project?: (entry: TaskEventEntry) => T): AsyncIterable<T>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
 import { type ByokCloud, type SteerRejectionCode, type TaskAbandonCause, type TaskAttempt } from '@byok-sdk/cloud';
-import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
+import { type ClaimedExecutor, type TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay.js';
 import { type TaskEventDeps } from './task-events.js';
 import type { TaskHandle, TaskResult } from './types.js';
@@ -1715,8 +1735,8 @@ import type { TaskHandle, TaskResult } from './types.js';
  * Thrown by {@link TaskHandle.steer} when the kernel refuses the steer.
  *
  * This package keeps its OWN class rather than re-exporting the kernel's, and
- * that is deliberate rather than a leftover. The two carry the same `taskId`,
- * `code` and `runtime`, and differ in exactly one field: the kernel reports
+ * that is deliberate rather than a leftover. The two carry the same `taskId`
+ * and `code`, and differ in the fields read from the projection: the kernel reports
  * `status: TaskAttemptStatus` — its coarse, execution-free attempt disposition
  * (`running`, `offered`, …) — while this surface reports `state: TaskState`,
  * the WIRE vocabulary every other member of this package speaks
@@ -1728,7 +1748,8 @@ import type { TaskHandle, TaskResult } from './types.js';
  *
  * So the state here is not translated from the kernel's field — it is READ,
  * through the very projection `byok.tasks.get(taskId)` answers with, at the
- * moment of the refusal. One authority, two readers, no second mapping.
+ * moment of the refusal, and so is `executor`. One authority, two readers, no
+ * second mapping.
  *
  * Deviation from design packet §1.2, which had this class move to
  * `@byok-sdk/cloud` with the server re-exporting it: the wire `TaskState`
@@ -1741,20 +1762,21 @@ export declare class SteerRejectedError extends Error {
     readonly code: SteerRejectionCode;
     /** The task's state at the moment the steer was refused. */
     readonly state: TaskState;
-    /** `TaskSnapshot.claimedRuntime` — `undefined` when nothing was ever recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
-    readonly runtime: RuntimeId | undefined;
-    constructor(taskId: string, code: SteerRejectionCode, state: TaskState, runtime: RuntimeId | undefined);
+    /** `TaskSnapshot.claimedExecutor` — `undefined` when no claim was recorded, which is itself a reason `steer_unsupported_runtime` can fire. */
+    readonly executor: ClaimedExecutor | undefined;
+    constructor(taskId: string, code: SteerRejectionCode, state: TaskState, executor: ClaimedExecutor | undefined);
 }
 export interface TaskHandleDeps extends TaskEventDeps {
     readonly cloud: ByokCloud;
     /**
-     * The task's current `TaskSnapshot.state` and `updatedAt`, or `undefined`
-     * when the attempt is gone. The snapshot projection itself — never a second
-     * derivation.
+     * The task's current `TaskSnapshot.state`, `updatedAt` and
+     * `claimedExecutor`, or `undefined` when the attempt is gone. The snapshot
+     * projection itself — never a second derivation.
      */
     readonly readState: (taskId: string) => Promise<{
         readonly state: TaskState;
         readonly at: string;
+        readonly executor?: ClaimedExecutor;
     } | undefined>;
     /** The read-back this handle's `result()` answers with. */
     readonly readResult: (taskId: string) => Promise<TaskResult | undefined>;
@@ -1793,7 +1815,7 @@ export declare function createTaskHandle(taskId: string, deps: TaskHandleDeps): 
 export {};
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types.js';
@@ -1909,12 +1931,10 @@ interface DispatchInputBase {
     taskId?: string;
     instruction: string;
     /**
-     * Authoritative web-selected target. The device selects the adapter from
-     * `runtimeId`; a `runtime` that differs is refused.
+     * What the device runs: a built-in runtime, a model lane, a custom harness,
+     * or `{ lane: 'auto' }` for the device's own preference order.
      */
-    dispatchSelection?: DispatchSelection;
-    runtime?: RuntimeId;
-    harnessId?: string;
+    target: ExecutionTarget;
     /** Explicit target; registered offline devices may receive queued work. */
     deviceId: string;
     /** Logical device-local MCP toolsets required for this task; never executable definitions. */
@@ -2069,6 +2089,18 @@ export type ServerTaskEvent = {
     kind: 'await_approval';
     summary: string;
     approvalId: string;
+}
+/**
+ * The device did not deliver the steer `messageId` (the id
+ * {@link TaskHandle.steer} resolved with) to the runtime. A refusal the
+ * device reports after the feed ended reads only from
+ * `ByokServer.tasks.readSteerRefusal` / `listSteerRefusals`.
+ */
+ | {
+    kind: 'steer_refused';
+    messageId: string;
+    reason: SteerRefusalReasonReading;
+    at: string;
 } | {
     kind: 'error';
     reason: string;
@@ -2099,6 +2131,17 @@ export declare class TaskEventsUnavailableError extends Error {
     readonly taskId: string;
     readonly reason: 'cursor_unknown';
     constructor(taskId: string, reason: 'cursor_unknown');
+}
+/**
+ * A device's refusal of one steer (`task.steer_refused`), as the kernel
+ * recorded its first report. `revision` counts the task's refusals from 1 in
+ * commit order; `ByokServer.tasks.listSteerRefusals` pages by it.
+ */
+export interface SteerRefusal {
+    readonly messageId: string;
+    readonly reason: SteerRefusalReasonReading;
+    readonly at: string;
+    readonly revision: number;
 }
 /** Handle returned by {@link ByokServer.dispatch} for one in-flight task. */
 export interface TaskHandle {
@@ -2131,7 +2174,15 @@ export interface TaskHandle {
     reject(reason?: string, opts?: {
         approvalId?: string;
     }): Promise<void>;
-    steer(text: string): Promise<void>;
+    /**
+     * Enqueue a `task.steer` and resolve with its envelope id, the id a
+     * `steer_refused` event names. Text over `TASK_STEER_TEXT_MAX_BYTES` UTF-8
+     * bytes is refused with `ByokCloudError` `coordination_input_invalid`
+     * before anything is enqueued.
+     */
+    steer(text: string): Promise<{
+        readonly messageId: string;
+    }>;
     result(): Promise<TaskResult>;
 }
 /** Durable device identity plus its optional, unexpired presence lease. */
@@ -2195,23 +2246,15 @@ export interface TaskSnapshot {
      */
     pendingApprovalId?: string;
     /**
-     * M5 (claimed runtime, docs/protocol.md §3.1): the ACTUAL adapter the
-     * daemon reports having selected for this task (`task.claim.runtime`,
-     * snapshotted by the kernel's inbound gate at the `offered -> claimed`
-     * ownership CAS) — covers both the explicit-runtime
-     * path (echoes {@link runtime}) and the auto-select/pi-first path (a value
-     * where {@link runtime} is `undefined`, since no preference was ever
-     * requested). `undefined` until the first `task.claim` for this task
-     * arrives, and forever after for a legacy daemon that predates this field
-     * (an old daemon's `task.claim` simply omits it). Set exactly once, at the
-     * `Offered -> Claimed` transition, and never modified again afterward — a
-     * retried/idempotent claim from the same device is a no-op that never
-     * reaches `onClaim`'s patch at all (see `onClaim`'s own doc comment), so
-     * this can never be silently overwritten by a redelivered claim. Read
-     * straight off `TaskAttempt.claimedRuntime` (`@byok-sdk/cloud`).
+     * What the device reported running for this task on its winning
+     * `task.claim` (`task.claim.executor`): a built-in runtime or a custom
+     * harness, never a model. For `{ lane: 'auto' }` it is the runtime the
+     * device chose. `undefined` until a claim wins; written once, at the
+     * `Offered -> Claimed` transition, and never again: a redelivered claim does
+     * not reach the write. Read straight off `TaskAttempt.claimedExecutor`
+     * (`@byok-sdk/cloud`).
      */
-    claimedRuntime?: RuntimeId;
-    claimedHarnessId?: string;
+    claimedExecutor?: ClaimedExecutor;
     /**
      * S0/D-4 (runtime-honest control surface): the capability block the
      * CLAIMING adapter reported for itself on its own `task.claim`
@@ -2239,7 +2282,7 @@ export interface TaskSnapshot {
      * every task record written before S0 existed. Both are treated as a refusal
      * by the steer gate rather than filled in with a guessed default.
      *
-     * Written exactly once, alongside {@link claimedRuntime}, on the first
+     * Written exactly once, alongside {@link claimedExecutor}, on the first
      * real claim — a retried/idempotent claim returns from `onClaim` before
      * the patch, so this can never be silently rewritten later.
      */
@@ -2279,16 +2322,11 @@ export type ByokServerEvent = {
     state: TaskState;
     at: string;
     /**
-     * M5 (claimed runtime): mirrors {@link TaskSnapshot.claimedRuntime} at
-     * the moment of this transition — `undefined` until (and unless) the
-     * daemon's `task.claim` reported one, so it first appears on the
-     * `Offered -> Claimed` event and stays whatever value it had from then
-     * on for every later transition of the same task. See that field's own
-     * doc comment for the requested-vs-claimed distinction
-     * (docs/protocol.md §3.1).
+     * Mirrors {@link TaskSnapshot.claimedExecutor} at this transition:
+     * absent until a claim wins, so it first appears on the
+     * `Offered -> Claimed` event and keeps that value afterwards.
      */
-    claimedRuntime?: RuntimeId;
-    claimedHarnessId?: string;
+    claimedExecutor?: ClaimedExecutor;
 }
 /**
  * The daemon reported a locally-resolved approval with the wire

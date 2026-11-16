@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "112d09353ef288d06cfe5b9afaff9c848c912f1a45cb0e774c8446b922b0712e"
+    "snapshotSha256": "6ca84701803b949ae56c4d7c1e9db8aabce3a988949e3454116bc1ea51342b9d"
   },
   "configFields": {
     "status": "tracked",
@@ -381,6 +381,40 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
       "items": [
         "behavior:wire-v7-decline-reason-bound"
+      ]
+    },
+    {
+      "id": "wire-v7-server-execution-target",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server follows the wire v7 execution target. DispatchInput (AgentResumeDispatchInput) takes one required target: ExecutionTarget in place of runtime, harnessId and dispatchSelection; pass { lane: 'auto' } for the device's own runtime preference. TaskSnapshot and the task.state ByokServerEvent expose claimedExecutor (a runtime or a harness) in place of claimedRuntime and claimedHarnessId, and SteerRejectedError carries executor in place of runtime. An execution-core intent's fresh execution template must name a concrete target; auto is refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/server#AgentResumeDispatchInput",
+        "export:@byok-sdk/server#ByokServerEvent",
+        "export:@byok-sdk/server#TaskSnapshot",
+        "export:@byok-sdk/server#SteerRejectedError"
+      ]
+    },
+    {
+      "id": "wire-v7-server-steer-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server reports steer refusals. TaskHandle.steer resolves { messageId }, the id a refusal names, and refuses text over TASK_STEER_TEXT_MAX_BYTES UTF-8 bytes with ByokCloudError coordination_input_invalid before anything is enqueued. ServerTaskEvent gains { kind: 'steer_refused', messageId, reason, at }: a task's event feed yields the refusals recorded before its terminal, and ByokServer.tasks.readSteerRefusal and listSteerRefusals (SteerRefusal) read any refusal, including one recorded after the feed ended. tasks.events cursors move from te1. to te2.; a te1. cursor is refused with cursor_unknown. Exhaustive switches over ServerTaskEvent need the new arm.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/server#ServerTaskEvent",
+        "export:@byok-sdk/server#TaskHandle",
+        "export:@byok-sdk/server#ByokServer",
+        "export:@byok-sdk/server#SteerRefusal"
+      ]
+    },
+    {
+      "id": "wire-v7-server-sqlite-store",
+      "impact": "breaking",
+      "acceptance": "new-path-repair",
+      "summary": "The embedded server SQLite store moves to schema version 10 for wire v7 and upgrades no older file in place: opening a version 6 to 9 file fails with SqliteSchemaError SQLITE_SCHEMA_UNSUPPORTED, and inspectSqliteStore reports new-path-repair. Start the v7 server on a new state path and pair the daemons again; keep the old file to export its history first. Version 10 adds the task_steer_refusal table and keeps the claimed executor in two task_attempt columns, at most one of them set.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "store:server-sqlite"
       ]
     }
   ],
@@ -925,6 +959,46 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/server#AgentResumeDispatchInput",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServerEvent",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#ServerTaskEvent",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#SteerRefusal",
+      "change": "added",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#SteerRejectedError",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskHandle",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskSnapshot",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
       "change": "changed",
       "entry": "k4-settlement-notice"
@@ -933,6 +1007,13 @@
       "item": "export:@byok-sdk/server/execution-core#HostOptions",
       "change": "changed",
       "entry": "k4-settlement-notice"
+    },
+    {
+      "item": "store:server-sqlite",
+      "change": "changed",
+      "before": "schema_version=9",
+      "after": "schema_version=10",
+      "entry": "wire-v7-server-sqlite-store"
     },
     {
       "item": "union:wire#task.steer_refused",
