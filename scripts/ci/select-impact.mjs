@@ -809,6 +809,8 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/client/daemon-config.schema.json') {
       dirs.add('packages/client'); scripts = true; families.add('npm-release-pack'); continue;
     }
+    // Deleted paths remain CI inputs; packed NodeNext consumers cover this codemod's former output.
+    if (path === 'scripts/codemod/relative-js-specifiers.mjs') { scripts = true; families.add('npm-release-pack'); continue; }
     if (Object.hasOwn(reviewedScripts, path) || Object.hasOwn(scriptTestInputs, path)) {
       scripts = true;
       for (const id of reviewedScripts[path]?.families ?? []) families.add(id);

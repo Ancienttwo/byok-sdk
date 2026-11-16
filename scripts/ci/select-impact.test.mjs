@@ -365,6 +365,13 @@ test('OpenCode adapter, its contract and the shared spawn code select the OpenCo
   ]) assert.ok(selectImpact([path]).families.includes('opencode-real-windows'), path);
 });
 
+test('the deleted relative specifier codemod remains a reviewed CI input', () => {
+  const file = 'scripts/codemod/relative-js-specifiers.mjs';
+  const impact = selectImpact([file]);
+  assert.deepEqual(impact.files, [file]);
+  assert.deepEqual(impact.families, ['npm-release-pack']);
+});
+
 test('archived vendored Hermes paths stay mapped as root CI scripts (#1854)', () => {
   for (const path of ['.gitattributes', 'manifest.json', `${'a'.repeat(40)}/install.sh`, `${'a'.repeat(40)}/install.ps1`]) {
     const file = `scripts/ci/vendor/hermes/${path}`;
