@@ -325,7 +325,9 @@ export class HostExecutionCore {
         } else if (routine.next && !pending.has(routine.next.dedupKey)) scheduleNext(state, routine, this.now());
       }
     });
+    const concluded = this.concluded();
     this.resumeMemory();
+    this.noticeSettled(concluded);
     this.notifyOutbox();
     await this.drain();
   }

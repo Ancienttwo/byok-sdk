@@ -315,6 +315,24 @@ it('#2244: a memory reconciliation that fails a parked intent sends the settleme
   } finally { await host.close(); }
 });
 
+it('#2244: a parked intent that fails in startup recovery sends the settlement notice', async () => {
+  const onSettled = vi.fn();
+  const host = await openHost({ memory: page, reconcileMs: 60_000, onSettled });
+  try {
+    await host.core.close();
+    const input = host.intent('recover-stale');
+    host.ledger.transaction(state => {
+      const row = enqueue(state, host.ledger.tenant, input);
+      row.phase = 'memory_blocked';
+      row.memoryBlocked = { resume: 'queued', reason: 'Memory restore in progress' };
+    });
+    current = false;
+    await host.restartCore();
+    expect(host.core.intent(input.key)?.conclusion).toBe('failed');
+    expect(onSettled).toHaveBeenCalledTimes(1);
+  } finally { await host.close(); }
+});
+
 it('offers a blob instruction with memory on', async () => {
   const host = await openHost({ memory: page });
   try {
