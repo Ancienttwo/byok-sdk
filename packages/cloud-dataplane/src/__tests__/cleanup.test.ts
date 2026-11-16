@@ -59,6 +59,7 @@ function replayableOffer(seed: number) {
           instruction: `cleanup offer ${seed}`,
           agentRef: { agentId: `agent-cleanup-${seed}`, profileRevision: 'rev-1' },
           session: { mode: 'resume', sessionRef: `session-cleanup-${seed}` },
+          target: { lane: 'auto' },
         },
         {
           id: `00000000-0000-4000-8000-${String(seed).padStart(12, '0')}`,

@@ -188,7 +188,7 @@ export class PostgresApprovalTimelineStore implements ApprovalTimelineStore {
     const client = await this.pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(`SELECT pg_advisory_xact_lock(hashtextextended($1 || E'\\x1f' || $2, 0))`, [tenant, taskId]);
+      await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [JSON.stringify(['approval-timeline', tenant, taskId])]);
       const result = await work(client);
       await client.query('COMMIT');
       return result;

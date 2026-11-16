@@ -40,7 +40,8 @@ import { PostgresTaskCancellationStore } from './task-cancellations.js';
 import { PostgresActivityStore } from './activity.js';
 import { PostgresApprovalTimelineStore } from './approval-timeline.js';
 import { PostgresAgentEgressStore } from './agent-egress.js';
-import { assertPendingMailboxProtocol } from './mailbox-protocol.js';
+import { assertStoreEpoch } from './store-epoch.js';
+import { PostgresTaskSteerRefusalStore } from './steer-refusals.js';
 import { TokenBucketRateLimiter, type PostgresRateLimitOptions } from './rate-limiter.js';
 
 export { PostgresDeviceDirectory } from './devices.js';
@@ -56,9 +57,10 @@ export { PostgresApprovalTimelineStore } from './approval-timeline.js';
 export { PostgresAgentEgressStore } from './agent-egress.js';
 export type { PostgresRateLimitOptions } from './rate-limiter.js';
 export {
-  POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
-  PostgresMailboxProtocolUnsupportedError,
-} from './mailbox-protocol.js';
+  POSTGRES_STORE_EPOCH_UNSUPPORTED,
+  PostgresStoreEpochUnsupportedError,
+} from './store-epoch.js';
+export { PostgresTaskSteerRefusalStore } from './steer-refusals.js';
 export {
   PostgresAgentMemoryProjectionStore,
   createPostgresAgentMemoryProjectionStore,
@@ -128,25 +130,18 @@ export interface PostgresCloudStoreOptions {
 /**
  * Compose the cloud-local ports over one pool.
  *
- * Async because it first fences the wire major (PRD §8.3): if any pending
- * mailbox row is not a `PROTOCOL_VERSION` envelope it rejects with
- * {@link PostgresMailboxProtocolUnsupportedError} and returns no stores. The
- * check is read-only — no row is rewritten or deleted — and there is no
- * synchronous variant that skips it.
- *
- * The fence lives here, on the cloud composition, and not on
- * `createPostgresCoreStores`: the core `MailboxStore` port carries opaque
- * bodies (its conformance suite appends non-envelope strings), and only the
- * cloud layer gives those bodies wire-envelope meaning. A hosted cloud is
- * always composed with this factory, so it cannot start over an undrained v2
- * mailbox.
+ * Async because it first checks the store's wire epoch: unless the database
+ * was created for this build's `PROTOCOL_VERSION` (`byok_wire_epoch`, written
+ * by the migration that opens the epoch) it rejects with
+ * {@link PostgresStoreEpochUnsupportedError} and returns no stores. The check
+ * is read-only, and there is no synchronous variant that skips it.
  */
 export async function createPostgresCloudStores(
   options: PostgresCloudStoreOptions,
 ): Promise<PostgresCloudStores> {
   const { pool, clock, crypto } = options;
   assertByokPool(pool, 'createPostgresCloudStores');
-  await assertPendingMailboxProtocol(pool);
+  await assertStoreEpoch(pool);
   const devices = new PostgresDeviceDirectory(pool, clock);
   const pairing = new PostgresPairingCodeStore(pool, clock);
   return {
@@ -163,6 +158,7 @@ export async function createPostgresCloudStores(
     tasks: new PostgresTaskAttemptStore(pool, clock),
     cancellations: new PostgresTaskCancellationStore(pool, clock),
     receipts: new PostgresRequestReceiptStore(pool, clock),
+    steerRefusals: new PostgresTaskSteerRefusalStore(pool, clock),
     egress: new PostgresAgentEgressStore(pool, clock),
     proofReceipts: new PostgresProofRequestReceiptStore(pool, clock),
     // A second `PostgresObjectStore` instance, not a shared one: it is a
