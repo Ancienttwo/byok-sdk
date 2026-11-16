@@ -75,7 +75,7 @@ describe('adapters detect and launch through one resolved invocation (#763)', ()
   it('rejects a resolver failure the same way in both adapters, without a local path', async () => {
     const resolveBin = () => ({ command: 'unreadable-shim', source: 'path' as const });
     for (const [adapter, runtime] of [[new ClaudeAdapter({ resolveBin }), 'claude'], [new CodexAdapter({ resolveBin }), 'codex']] as const) {
-      expect(await adapter.prepare({ offer: { instruction: 'x' } } as never))
+      expect(await adapter.prepare({ offer: { target: { lane: 'runtime', runtimeId: runtime }, instruction: 'x' } } as never))
         .toEqual({ kind: 'reject', reason: `${runtime} installation refused: not-executable`, retryable: false });
     }
   });

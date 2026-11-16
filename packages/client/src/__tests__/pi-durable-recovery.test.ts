@@ -30,8 +30,8 @@ describe('durable parent recovery authority', () => {
     expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities).isolation?.userInstructions).toBe(false);
     expect(new PiAdapter({ agentUserContext: 'excluded' }).descriptor.capabilities.isolation?.userInstructions).toBe(true);
     expect(Object.isFrozen(adapter.descriptor.capabilities.isolation)).toBe(true);
-    expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
-    expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
+    expect((await adapter.prepare({ offer: { target: { lane: 'runtime', runtimeId: 'pi' } } } as never)).kind).toBe('reject');
+    expect((await adapter.prepare({ offer: { target: { lane: 'auto' } } } as never)).kind).toBe('reject');
   });
 
   it.skipIf(process.platform === 'win32')('refuses excluded user context on the durable lane before spawning', async () => {

@@ -90,11 +90,12 @@ describe('selection target', () => {
       const { id } = adapter.descriptor;
       const wire = RuntimeIdSchema.safeParse(id).success;
       expect(isWireRuntimeId(id)).toBe(wire);
-      expect(taskRuntimeTarget(adapter.descriptor)).toEqual(wire ? { runtime: id } : { harnessId: id });
+      expect(taskRuntimeTarget(adapter.descriptor)).toEqual(wire ? { lane: 'runtime', runtimeId: id } : { lane: 'harness', harnessId: id });
       if (!wire) expect(HarnessIdSchema.parse(id)).toBe(id);
     }
     expect(Object.values(adapters).map(adapter => taskRuntimeTarget(adapter.descriptor))).toEqual([
-      { runtime: 'claude' }, { runtime: 'codex' }, { runtime: 'pi' }, { harnessId: 'grok' }, { harnessId: 'dsh' }, { harnessId: 'agy' },
+      { lane: 'runtime', runtimeId: 'claude' }, { lane: 'runtime', runtimeId: 'codex' }, { lane: 'runtime', runtimeId: 'pi' },
+      { lane: 'harness', harnessId: 'grok' }, { lane: 'harness', harnessId: 'dsh' }, { lane: 'harness', harnessId: 'agy' },
     ]);
   });
 });

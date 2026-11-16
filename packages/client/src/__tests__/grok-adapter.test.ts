@@ -820,7 +820,7 @@ describe('AgyAdapter', () => {
   it('leases a resumed session against the store sweep, and only that session', async () => {
     const adapter = agy(await agyVersion('1.5.1'));
     const store = agySessionStoreOf(adapter)!;
-    const prepared = await adapter.prepare({ offer: { instruction: 'x' } } as never);
+    const prepared = await adapter.prepare({ offer: { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'x' } } as never);
     if (prepared.kind !== 'prepared') throw new Error('agy did not prepare');
     const lease = await prepared.operation.acquireSessionLease!('session-a');
     await expect(acquireAgySessionRetention(store, 'session-a')).rejects.toBeInstanceOf(PathMutationGateBusyError);
