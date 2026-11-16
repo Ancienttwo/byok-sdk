@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "e06ef77d3911c56ccfd11404cbc47a72bb3bee9036e419b85c11eef5a1247291"
+    "snapshotSha256": "a2f4c9bf8d27a8c5c67033d369c8781817b38978c642616611f14aab72f8e1ab"
   },
   "configFields": {
     "status": "tracked",
@@ -1799,8 +1799,13 @@
     },
     {
       "item": "export:@byok-sdk/cloud#AuthPlane",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AuthPlaneDeps",
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#BoardFeedClient",
@@ -1968,6 +1973,11 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/cloud#MintedAccessToken",
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#NonceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
@@ -1979,8 +1989,8 @@
     },
     {
       "item": "export:@byok-sdk/cloud#PairInput",
-      "change": "changed",
-      "entry": "wire-v7-pairing-enrollment-port"
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#PairingEnrollment",
@@ -2076,6 +2086,11 @@
       "item": "export:@byok-sdk/cloud#TerminalResult",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#createAuthPlane",
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#createInMemoryBlobs",
