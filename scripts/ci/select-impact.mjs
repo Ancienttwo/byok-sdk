@@ -320,6 +320,10 @@ export const familyOwners = Object.freeze({
   'execution-recovery-native': [
     /^packages\/client\/src\/(?:daemon\/journal|util\/sqlite-support\.ts)/,
     /^packages\/client\/src\/__tests__\/(?:execution-recovery|journal-sqlite)[^/]*$/,
+    // #2354: the fixture entries execution-recovery-kill.test.ts compiles with
+    // `bun build --compile`, and the test-side modules they or the test import,
+    // feed the compiled execution-recovery job, so changing them selects it too.
+    /^packages\/client\/src\/__tests__\/(?:fixtures\/(?:execution-recovery-daemon|execution-recovery-cloud|lifecycle-barrier|runtime-env|execution-scratch)|support\/cleanup-retry)\.ts$/,
     /^packages\/client\/vendor\/oar\/[a-f0-9]{7,40}\/(?:runtimes|shared)\//,
   ],
   'adapter-lifecycle-smoke': [
