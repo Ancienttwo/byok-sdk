@@ -54,6 +54,8 @@ describe.skipIf(!RUN)('H Worker faults on local workerd (#794 D3)', () => {
     await until(async () => (await h.turn(turnId))?.conclusion === 'succeeded' || undefined);
     await quiet();
     const stored = await h.substrate.store.dump(h.home);
+    // No routine can offer work during the comparison below.
+    expect(await h.routines()).toEqual([]);
     // Two more notified-style passes at once, and an alarm pass that started after the dump: alarms never overlap, so the
     // second report from here on comes from one. The rows are settled, so nothing changes.
     const alarms = alarmReports(worker).length;

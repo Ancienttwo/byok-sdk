@@ -16,7 +16,7 @@ async function setup(rest: Partial<BotOptions> = {}): Promise<BotOptions> {
   const options: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'channel' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
-    connector: async id => ({ ok: true, externalId: id }), ...rest };
+    connector: async id => ({ ok: true, externalId: id }), dreaming: false, ...rest };
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
   return options;
 }

@@ -29,7 +29,7 @@ async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> 
   clock = Date.now();
   fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
-    now: () => clock, ...rest });
+    now: () => clock, dreaming: false, ...rest });
   return bot;
 }
 const view = (id: string) => botRoutines([routineOf(bot!, id)])[0]!;

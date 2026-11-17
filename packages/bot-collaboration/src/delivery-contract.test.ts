@@ -82,7 +82,7 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
   const options: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'delivery' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
-    connector: async () => null, now: () => now,
+    connector: async () => null, now: () => now, dreaming: false,
     // Long enough for a held send to outlive the steps of its vector; a hanging send still times out within the case.
     channel: { port: { send, ...(readback ? { readback } : {}) }, self: { fake: ['own-bot'] }, sendTimeoutMs: 2_000 } };
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
