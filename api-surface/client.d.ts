@@ -41,7 +41,9 @@
 //   AgentHomeExecutionStatus -> dist/agent-home.d.ts
 //   AgentHomeLayout -> dist/agent-home.d.ts
 //   AgentHomeLease -> dist/agent-home.d.ts
+//   AgentHomeLeaseBlock -> dist/agent-home.d.ts
 //   AgentHomeLeaseCorruptError -> dist/agent-home.d.ts
+//   AgentHomeLeaseHeldError -> dist/agent-home.d.ts
 //   AgentHomeLeaseManager -> dist/agent-home.d.ts
 //   AgentHomeManager -> dist/agent-home.d.ts
 //   AgentHomeProjection -> dist/agent-home.d.ts
@@ -1188,8 +1190,12 @@ export interface DaemonRuntimesConfig extends RuntimeAdaptersRuntimes {
 export declare function createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAdapter[];
 // ==== @byok-sdk/client dist/agent-home-readers.d.ts ====
 export type AgentHomeAccessMode = 'memory-writer' | 'memory-reader';
+// ==== @byok-sdk/client dist/agent-home-writer.d.ts ====
+// support
+export type AgentHomeLeaseWriterBlock = 'legacy-marker' | 'unverifiable' | 'other-host' | 'other-pid-namespace' | 'writer-running';
 // ==== @byok-sdk/client dist/agent-home.d.ts ====
 import { type AgentHomeProjectionOutcome, type AgentHomeProjectionPayload, type AgentRef, type TerminalAgentHomeProjection } from '@byok-sdk/protocol';
+import { type AgentHomeLeaseWriterBlock } from './agent-home-writer.js';
 import { type AgentHomeAccessMode } from './agent-home-readers.js';
 export type { AgentRef } from '@byok-sdk/protocol';
 export declare const AGENT_HOME_PROJECTION_STATE_FILE = "agent-home-projection.json";
@@ -1207,6 +1213,12 @@ export declare class AgentHomeCollisionError extends AgentHomeResolutionError {
 }
 export declare class AgentHomeBusyError extends AgentHomeError {
     constructor(message: string);
+}
+export type AgentHomeLeaseBlock = AgentHomeLeaseWriterBlock | 'owner-reclaim-required';
+export declare class AgentHomeLeaseHeldError extends AgentHomeBusyError {
+    readonly blockedBy: AgentHomeLeaseBlock;
+    readonly markerPath: string;
+    constructor(message: string, blockedBy: AgentHomeLeaseBlock, markerPath: string);
 }
 export declare class AgentHomeReaderRunMissingError extends AgentHomeError {
     constructor(message: string);
@@ -1276,6 +1288,7 @@ export declare class AgentHomeLayout {
 // support
 export interface AgentHomeLeaseManagerOptions {
     ownerId?: string;
+    reclaimsResidue?: () => boolean;
     settleAgentMemoryCommit?: (home: Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>) => Promise<void>;
 }
 export declare function stableAgentHomeOwnerId(storeDir: string, productId: string): string;
@@ -1283,12 +1296,15 @@ export declare class AgentHomeLeaseManager {
     private static readonly held;
     private readonly ownerId;
     private readonly settleAgentMemoryCommit;
+    private readonly reclaimsResidue;
     constructor(options?: AgentHomeLeaseManagerOptions);
     private settleLeftoverCommitCopy;
     acquire(resolution: AgentHomeResolution): Promise<AgentHomeLease>;
     acquireMaintenance(agentsRoot: string, canonicalHome: string): Promise<{
         release(): Promise<void>;
     }>;
+    private markerRefusal;
+    private replaceableMarker;
     private linkLeaseMarker;
 }
 export interface AgentHomeExecutionStatus {
@@ -4118,10 +4134,11 @@ export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayo
 export type { StoreCompatibility } from '@byok-sdk/core';
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
-export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
+export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store.js';
 export type { AgentSessionHandoff, AgentSessionHandoffMatch, AgentTaskTerminalEvidence, AgentTaskTerminalMatch, AgentTerminalCause, } from './daemon/agent-session-handoff-store.js';
 export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home.js';
+export type { AgentHomeLeaseBlock } from './agent-home.js';
 export type { AgentHomeAccessMode } from './agent-home-readers.js';
 export { localStateRelocation, LocalStateRelocationError, LocalStateRelocationBusyError, LocalStateRelocationIntegrityError, } from './local-state-relocation.js';
 export type { LocalStateRelocationInput, LocalStateRelocationLease, } from './local-state-relocation.js';
