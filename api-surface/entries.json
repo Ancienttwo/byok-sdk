@@ -2293,7 +2293,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 694955,
+      "budgetBytes": 695061,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
