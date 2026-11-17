@@ -551,13 +551,34 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(harness.pi.startCalls).toHaveLength(1);
   });
 
-  // A retention pass the test runs by hand, after aging the Agent's session ledgers past the 30-day default.
+  // Retention passes the test runs by hand. One pass can end without removing an expired ledger (#2343): it skips a home
+  // whose base lease is still being released after `activeAttempts` reads 0, and a pass that runs out of its per-home
+  // deletion window leaves a directory cursor that the next pass resumes past entries it already read. So the test
+  // runs passes, each told apart by its report, until `removed` holds; `eachPass` checks what every pass must keep.
+  async function sweepUntil(harness: Harness, sweep: () => (() => void) | undefined, removed: () => Promise<boolean>,
+    eachPass: () => Promise<void> = async () => {}): Promise<void> {
+    let used: (() => void) | undefined;
+    for (let pass = 0; pass < 5; pass++) {
+      // The sweeper arms its next timer after the previous pass settles; a stale handler would join that pass.
+      await waitUntil(() => sweep() !== undefined && sweep() !== used, 'the retention timer');
+      used = sweep()!;
+      const before = harness.daemon.status().storage.lastSweep;
+      used();
+      await waitUntil(() => {
+        const report = harness.daemon.status().storage.lastSweep;
+        return report !== before && report?.trigger === 'periodic';
+      }, 'a retention pass');
+      await eachPass();
+      if (await removed()) return;
+    }
+    throw new Error('an expired session ledger survived 5 retention passes');
+  }
+  // Ages the Agent's session ledgers past the 30-day default and runs passes until none is left.
   async function expireSessionLedgers(harness: Harness, agentId: string, sweep: () => (() => void) | undefined): Promise<string> {
     const ledgers = path.join(await harness.home(agentId), '.byok', 'runtime-sessions');
     const expired = new Date(Date.now() - 31 * DAY_MS);
     for (const name of await fs.readdir(ledgers)) await fs.utimes(path.join(ledgers, name), expired, expired);
-    sweep()!();
-    await waitUntil(() => harness.daemon.status().storage.lastSweep?.trigger === 'periodic', 'a retention pass');
+    await sweepUntil(harness, sweep, async () => (await fs.readdir(ledgers)).every((name) => name.includes('-task-')));
     return ledgers;
   }
   const manualRetention = (): { options: Parameters<typeof createDaemonWithAdapters>[2]; sweep: () => (() => void) | undefined } => {
@@ -623,9 +644,10 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await claimed('kept-writer-resume');
     await complete(harness, 2, 'kept-writer-resume');
     await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the resume to release');
-    retention.sweep()!();
-    await waitUntil(() => harness.daemon.status().storage.lastSweep?.trigger === 'periodic', 'a retention pass');
-    const kept = (await fs.readdir(ledgers)).filter((name) => !name.includes('-task-'));
+    const sessionLedgers = async (): Promise<string[]> => (await fs.readdir(ledgers)).filter((name) => !name.includes('-task-'));
+    await sweepUntil(harness, retention.sweep, async () => !(await sessionLedgers()).includes(ledgerName(staleRef)),
+      async () => { expect(await sessionLedgers()).toContain(ledgerName(sessionRef)); });
+    const kept = await sessionLedgers();
     expect(kept).toEqual([ledgerName(sessionRef)]);
     expect(Date.now() - (await fs.stat(path.join(ledgers, kept[0]!))).mtimeMs).toBeLessThan(DAY_MS);
     expect(kept).not.toContain(ledgerName(staleRef));
