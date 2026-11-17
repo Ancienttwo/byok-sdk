@@ -1333,6 +1333,6 @@ Upstream changed 16 selected files and the selected closure gains three upstream
 SDK side:
 
 - agy refuses an unknown model, an ambiguous `<model>-<effort>` selector, or an effort outside the model's menu with a `ModelConfirmationError` carrying `catalogSelectorIds`, before any model request. 0.110 sent the selector and agy refused it as `model_unavailable`. `agyStartClassifier` (`src/adapters/runtime-start-failure.ts`) maps that typed error to the same non-retryable `model_unavailable` start failure; a confirmation failure without a catalog keeps the `oarStartClassifier` result.
-- The Codex bridge has no `queue` (`CheckCodexSessionMembers` in `scripts/api-surface/oar-bridge-types.ts`), so #839's `no_active_turn` refusal is unreachable from the SDK. Adding `queue` to the bridge has to handle that refusal first.
+- The Codex bridge has no `queue` (`CheckSessionMembers` in `scripts/api-surface/oar-bridge-types.ts`), so #839's `no_active_turn` refusal is unreachable from the SDK. Adding `queue` to the bridge has to handle that refusal first.
 - ACP `initialize` waits up to 60 seconds (Grok 15 and agy and OpenCode 30 before). The daemon races every start against `startupTimeoutMs` (`src/daemon/runtime-start.ts`, default 30 seconds), which stays the deadline; the profiles set no `initializeTimeoutMs`.
 - The dsh bridge's options type stays exact, so the SDK passes none of the four new dsh options and `DSH_RUNTIME_CAPABILITIES` is unchanged (ADR-051 §3). #2363 records the owner decision.
