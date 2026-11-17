@@ -3006,7 +3006,8 @@ import { type JournalOpenFaultSeam } from '../../util/sqlite-support.js';
 export declare const JOURNAL_DB_FILENAME = "daemon.db";
 export declare const JOURNAL_QUARANTINE_DIRNAME = "quarantine";
 // support
-export type JournalFaultStep = 'append:before-begin' | 'append:after-envelope' | 'append:after-task' | 'append:after-receipt' | 'append:before-commit' | 'append:after-commit' | 'admission:before-commit' | 'transition:before-commit' | 'terminal:before-commit' | 'terminal:after-commit' | 'recovery:after-commit' | 'confirm:before-commit' | 'confirm:after-commit' | 'replace:before-commit' | 'replace:after-commit' | 'recovery:before-commit' | 'cleanup:before-commit' | 'prune:before-commit';
+export type JournalFaultStep = 'append:before-begin' | 'append:after-envelope' | 'append:after-task' | 'append:after-receipt' | 'append:before-commit' | 'append:after-commit' | 'admission:before-commit' | 'transition:before-commit' | 'terminal:before-commit' | 'terminal:after-commit' | 'recovery:after-commit' | 'confirm:before-commit' | 'confirm:after-commit' | 'replace:before-commit' | 'replace:after-commit' | 'recovery:before-commit' | 'cleanup:before-commit' | 'prune:before-commit'
+ | 'batch:commit';
 // support
 export interface JournalFaultSeam {
     onStep?(step: JournalFaultStep): void;

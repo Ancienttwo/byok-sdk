@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "97bb6e55bc156054b7791a7b5c0df2c6e0d21b060b9818f4a79340b60a60cd51"
+    "snapshotSha256": "f59c69495e38c125fde24989159402298fbfb9f7d7c7f9a2f9eeb393426b1c8f"
   },
   "configFields": {
     "status": "tracked",
@@ -1725,7 +1725,7 @@
     {
       "id": "journal-fault-seam-exit-worker",
       "impact": "additive",
-      "summary": "@byok-sdk/client SqliteLocalTaskJournalOptions.faults (JournalFaultSeam) gains two test-only fields: exitWorkerAt, which ends the journal worker thread at a step ('open' ends it before the constructor's handshake), and workerOpenTimeoutMs, which bounds the constructor's wait for that handshake. Production never supplies faults; no Host action.",
+      "summary": "@byok-sdk/client SqliteLocalTaskJournalOptions.faults (JournalFaultSeam) gains two test-only fields: exitWorkerAt, which ends the journal worker thread at a step ('open' ends it before the constructor's handshake), and workerOpenTimeoutMs, which bounds the constructor's wait for that handshake. JournalFaultStep gains 'batch:commit', the worker's COMMIT of a batch that carries writes. Production never supplies faults; no Host action.",
       "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2332",
       "items": [
         "export:@byok-sdk/client#SqliteLocalTaskJournalOptions"

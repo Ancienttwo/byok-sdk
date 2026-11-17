@@ -178,7 +178,7 @@ export type JournalFaultStep =
   | 'recovery:before-commit'
   | 'cleanup:before-commit'
   | 'prune:before-commit'
-  /** The worker's `COMMIT` of a batch; a throw here fails that `COMMIT`. */
+  /** The worker's `COMMIT` of a batch that carries writes; a throw here fails that `COMMIT`. */
   | 'batch:commit';
 
 export interface JournalFaultSeam {

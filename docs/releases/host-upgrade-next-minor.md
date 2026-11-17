@@ -1039,7 +1039,9 @@ the journal directly:
   `--allow-worker` cannot open the journal.
 
 `JournalFaultSeam` gains the test-only fields `exitWorkerAt` and
-`workerOpenTimeoutMs`. Production never supplies `faults`.
+`workerOpenTimeoutMs`, and `JournalFaultStep` gains `'batch:commit'`. Production
+never supplies `faults`; add the new step to exhaustive switches over
+`JournalFaultStep`.
 
 ### Other manifest entries
 

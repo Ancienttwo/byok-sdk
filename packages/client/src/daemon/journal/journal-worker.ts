@@ -111,7 +111,7 @@ function serve(db: DatabaseSync): void {
     const batch = uncommitted;
     uncommitted = [];
     try {
-      fault('batch:commit');
+      if (batch.length > 0) fault('batch:commit');
       db.exec('COMMIT');
     } catch (error) {
       uncommitted = batch;
