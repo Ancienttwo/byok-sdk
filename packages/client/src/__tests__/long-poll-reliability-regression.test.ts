@@ -11,7 +11,7 @@ import { TestServer } from './fixtures/test-server';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
@@ -72,7 +72,9 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       return nativeFetch(input, init);
     });
 
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url,
       deviceId: paired.deviceId,
       productId: 'reliability-test',
@@ -86,7 +88,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       longPollIdleDelayMs: 15,
     });
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
     return { deviceId: paired.deviceId, pollCursors };
   }
 

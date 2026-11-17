@@ -9,7 +9,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { TestServer } from './fixtures/test-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -55,7 +55,9 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     let offerCallCount = 0;
     let shouldThrow = true;
 
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -75,7 +77,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     });
 
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
 
     const taskId = 'task-flaky-handler';
     // `server.nextSeq()` (not a hardcoded literal): the seq must be strictly
@@ -125,7 +127,9 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
     const attempts = new Map<number, number>();
+    const opens = openBarrier();
     connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
       onEnvelope: async (envelope) => {
         if (envelope.type !== 'task.offer') return;
@@ -136,7 +140,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       },
     });
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
     const offers = [1, 2, 3].map(n => createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' }, target: { lane: 'auto' }, 
       instruction: 'finite backlog',
     }, { taskId: String(n), seq: server.nextSeq() }));
@@ -161,11 +165,13 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       await save(url, id, seq);
     });
     const effect = vi.fn();
+    const opens = openBarrier();
     connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
       onEnvelope: async e => { if (e.type === 'task.offer') effect(); },
     });
-    await connection.start(); await waitForOpen(connection);
+    await connection.start(); await opens.waitForOpen(connection);
     const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'redelivery-session' }, target: { lane: 'auto' },  instruction: 'x' }, { taskId: 'a', seq: server.nextSeq() });
     server.send(offer);
     await vi.waitFor(() => expect(effect).toHaveBeenCalledTimes(1));
@@ -184,7 +190,9 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const cursorStore = new CursorStore(storeDir);
     let contentAttempts = 0;
 
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -200,7 +208,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       },
     });
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
 
     // The handshake moves no cursor.
     await expect(cursorStore.load(server.url, record.deviceId)).resolves.toBeUndefined();

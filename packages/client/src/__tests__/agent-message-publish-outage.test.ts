@@ -16,7 +16,7 @@ import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -61,7 +61,9 @@ async function openConnection() {
   const record = await auth.pair('pairing-code');
   const queuedPublishes: Envelope[] = [];
   const publishesPerPost: number[] = [];
+  const opens = openBarrier();
   const manager = new ConnectionManager({
+    onStateChange: opens.onStateChange, onHalted: opens.onHalted,
     serverUrl: instance.url, deviceId: record.deviceId, productId: 'publish-outage-test',
     capabilities: [], runtimes: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
     onOutboundQueued: (envelope) => { if (isPublish(envelope)) queuedPublishes.push(envelope); },
@@ -70,7 +72,7 @@ async function openConnection() {
   });
   connection = manager;
   await manager.start();
-  await waitForOpen(manager);
+  await opens.waitForOpen(manager);
   return { server: instance, manager, queuedPublishes, publishesPerPost };
 }
 
