@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "e923f1c3966fa7495d353c3f7eb26f4abe0fc293706a10a11fc40ae8ce414d0a"
+    "snapshotSha256": "3e1b53f2484280cd86a5be7c1220dc3004d10be3ccb5d143efb0679c29ef3664"
   },
   "configFields": {
     "status": "tracked",
@@ -1809,7 +1809,7 @@
       "item": "example:host-execution-core",
       "change": "changed",
       "before": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
-      "after": "K4 0.0.1 src-sha256=17c9ab1fc3785ffe",
+      "after": "K4 0.0.1 src-sha256=de7bf7d4abde271f",
       "entry": "wire-v7-execution-target"
     },
     {
@@ -5371,6 +5371,16 @@
       "item": "export:@byok-sdk/server/execution-core#LedgerState",
       "change": "changed",
       "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealRoutineTemplateInput",
+      "change": "removed",
+      "entry": "server-seal-routine-template-removed"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#sealRoutineTemplate",
+      "change": "removed",
+      "entry": "server-seal-routine-template-removed"
     },
     {
       "item": "store:bot-collaboration-ledger",
