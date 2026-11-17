@@ -178,7 +178,9 @@ describe.runIf(BUN !== undefined)('SQLite files after close under Bun (#2347)', 
         bundle: true, platform: 'node', format: 'esm', target: 'node22', packages: 'external', outfile: bundle, logLevel: 'warning',
         define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify('0.0.0-test'), __BYOK_JOURNAL_WORKER_SOURCE__: JSON.stringify(__BYOK_JOURNAL_WORKER_SOURCE__) },
       });
-      const run = spawnSync(BUN!, [bundle, root], { encoding: 'utf8', timeout: 60_000 });
+      // The store check copies into the temp dir: keep that copy under root too, where lsof looks.
+      const env = { ...process.env, TMPDIR: root, TEMP: root, TMP: root };
+      const run = spawnSync(BUN!, [bundle, root], { encoding: 'utf8', timeout: 60_000, env });
       expect(run.status, run.stderr).toBe(0);
       expect(JSON.parse(run.stdout.trim().split('\n').at(-1)!)).toEqual([]);
     } finally {
