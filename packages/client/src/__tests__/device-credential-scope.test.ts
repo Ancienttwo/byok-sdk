@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { DeviceStore } from '../daemon/store';
-import { DeviceCredentialStore, type DeviceCommandRunner } from '../daemon/device-credential-store';
+import { DeviceCredentialStore } from '../daemon/device-credential-store';
+import type { DeviceCommandRunner } from '../util/system-command';
 import { exportPrivateKeyPem, generateDeviceKeyPair } from '../daemon/device-keys';
 
 describe('device credential identity', () => {

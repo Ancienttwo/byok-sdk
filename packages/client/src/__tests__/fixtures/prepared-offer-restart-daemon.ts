@@ -7,7 +7,7 @@ import { AgentHomeLeaseManager, AgentHomeManager, stableAgentHomeOwnerId } from 
 import { AgentSessionHandoffStore } from '../../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../../daemon/approvals';
 import type { BlobResolver } from '../../daemon/blob-client';
-import { testRuntimeEnv } from './runtime-env';
+import { testRuntimeEnv, installTestLeaseWriterProbe } from './runtime-env';
 import { TaskRunner } from '../../daemon/task-runner';
 import {
   InputPreparationStore,
@@ -32,6 +32,9 @@ import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
 import { acceptClaimSettlement, testIngressBudget } from './activity-ingress';
 import { advertiseEveryDeviceFlag } from '../support/advertised-capabilities';
+
+// The test identity for Agent-home lease writers, the same as the parent's.
+await installTestLeaseWriterProbe();
 
 /**
  * One daemon LIFETIME of the prepared-offer lane, as its own operating-system
@@ -192,12 +195,15 @@ const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimS
   productId: PRODUCT_ID,
   agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
   // The SAME construction `create-daemon.ts` performs: a lease owner id that is
-  // stable across restarts for one store/product identity. Without it a killed
-  // lifetime leaves an unreclaimable marker behind and the restart declines on
-  // the Agent home instead of ever reaching the preparation record.
+  // stable across restarts for one store/product identity, and the right to
+  // reclaim a killed lifetime's marker. A started daemon has that right once it
+  // holds the owner lease and has reconciled; this lifetime is the store's only
+  // process and its stub runtime starts none. Without it a killed lifetime
+  // leaves an unreclaimable marker behind and the restart declines on the
+  // Agent home instead of ever reaching the preparation record.
   agentHome: new AgentHomeManager({
     hostStorageRoot: config.agentHomeDir,
-    leaseManager: new AgentHomeLeaseManager({ ownerId: stableAgentHomeOwnerId(config.runnerStoreDir, PRODUCT_ID) }),
+    leaseManager: new AgentHomeLeaseManager({ ownerId: stableAgentHomeOwnerId(config.runnerStoreDir, PRODUCT_ID), reclaimsResidue: () => true }),
   }),
   agentSessionHandoffs: new AgentSessionHandoffStore(),
   getMcpToolsets: () => toolsets,

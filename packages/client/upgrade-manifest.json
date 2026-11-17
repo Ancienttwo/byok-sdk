@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "3f0fbb0fa9efbca9a4a6699639224cc8f7cd06e5ce81b40357f0db3763d1038a"
+    "snapshotSha256": "161bae48e592440bb4703199522ca1483b076d0e7aba0f0b361c21ae14bca83a"
   },
   "configFields": {
     "status": "tracked",
@@ -1749,6 +1749,36 @@
       "items": [
         "behavior:client-journal-refuses-host-objects"
       ]
+    },
+    {
+      "id": "agent-home-lease-writer-liveness",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Agent-home lease markers record their writer (pid, start time, machine digest, boot, Linux PID namespace). A marker of the same owner is reclaimed only when its writer is proved gone and only by a caller that holds the owner's daemon lease and has reconciled its owned processes (a started daemon, the doctor operator actions, or a Host passing AgentHomeLeaseManagerOptions.reclaimsResidue). A marker from an earlier release is never reclaimed automatically, and exportAgentMemory or publishReliableAgentEgress on an unstarted daemon refuses a dead daemon's marker. Both throw the new AgentHomeLeaseHeldError (an AgentHomeBusyError) whose blockedBy names the case; the offer decline stays agent_home_writer_busy and retryable.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-home-lease-markers-record-their-writer-2348",
+      "items": [
+        "behavior:agent-home-lease-writer-liveness"
+      ]
+    },
+    {
+      "id": "agent-home-lease-held-error",
+      "impact": "additive",
+      "summary": "@byok-sdk/client exports AgentHomeLeaseHeldError, an AgentHomeBusyError with blockedBy (AgentHomeLeaseBlock) and markerPath, thrown when an Agent-home lease marker of the same owner refuses an acquire. AgentHomeLeaseManagerOptions gains reclaimsResidue; AgentHomeLeaseManager gains private members. See agent-home-lease-writer-liveness for the behavior.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-home-lease-markers-record-their-writer-2348",
+      "items": [
+        "export:@byok-sdk/client#AgentHomeLeaseHeldError",
+        "export:@byok-sdk/client#AgentHomeLeaseBlock",
+        "export:@byok-sdk/client#AgentHomeLeaseManager"
+      ]
+    },
+    {
+      "id": "device-operator-agent-lease-held",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DeviceOperatorErrorCode gains 'agent-lease-held', and DeviceOperatorError gains an optional blockedBy (AgentHomeLeaseBlock). An operator action refused by an Agent-home lease marker now reports agent-lease-held with why the marker blocks and what clears it in the message, where it reported agent-busy. agent-busy remains for a home another operation holds. Add the code to exhaustive switches over DeviceOperatorErrorCode.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-home-lease-markers-record-their-writer-2348",
+      "items": [
+        "export:@byok-sdk/client#DeviceOperatorError",
+        "export:@byok-sdk/client#DeviceOperatorErrorCode"
+      ]
     }
   ],
   "changes": [
@@ -1990,6 +2020,21 @@
       "entry": "remove-egress-drop-receipts"
     },
     {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseBlock",
+      "change": "added",
+      "entry": "agent-home-lease-held-error"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseHeldError",
+      "change": "added",
+      "entry": "agent-home-lease-held-error"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseManager",
+      "change": "changed",
+      "entry": "agent-home-lease-held-error"
+    },
+    {
       "item": "export:@byok-sdk/client#AgentHomeProjectionFunction",
       "change": "removed",
       "entry": "remove-unused-client-aliases"
@@ -2078,6 +2123,16 @@
       "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
       "change": "changed",
       "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceOperatorError",
+      "change": "changed",
+      "entry": "device-operator-agent-lease-held"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceOperatorErrorCode",
+      "change": "changed",
+      "entry": "device-operator-agent-lease-held"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",

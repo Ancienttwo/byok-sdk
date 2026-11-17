@@ -6,8 +6,9 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   archiveAgentTerminalMessages, exportDeviceSupportBundle, quarantineDeviceOperationalHealth,
-  DeviceOperatorError, AgentHomeManager, type DaemonConfig,
+  DeviceOperatorError, AgentHomeManager, stableAgentHomeOwnerId, type DaemonConfig,
 } from '../index';
+import { DeviceStore } from '../daemon/store';
 import { connectControlClient } from '../daemon/control-client';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { AgentMessageOutbox } from '../daemon/agent-message-outbox';
@@ -128,6 +129,15 @@ describe('public device operator boundaries', () => {
     const binding = await new AgentHomeManager(config.agentHome!).acquire(agentRef);
     try { await expect(archiveAgentTerminalMessages(config, { ...target, archiveDirectory })).rejects.toMatchObject({ code: 'agent-busy' }); }
     finally { await binding.lease.release(); }
+    // A marker an earlier release left for this store: the refusal keeps why, and what clears it.
+    const marker = path.join(binding.lease.canonicalHome, '.byok', 'agent-home.lease');
+    await fs.writeFile(marker, JSON.stringify({ version: 1, ownerId: stableAgentHomeOwnerId(DeviceStore.resolveDir(config.productId, config.storeDir), config.productId),
+      leaseId: 'earlier-release', agentRef, canonicalHome: binding.lease.canonicalHome }));
+    const held = await archiveAgentTerminalMessages(config, { ...target, archiveDirectory }).catch((error: unknown) => error);
+    expect(held).toMatchObject({ code: 'agent-lease-held', blockedBy: 'legacy-marker' });
+    expect((held as Error).message).toMatch(/never reclaimed automatically/u);
+    expect((held as Error).message).not.toContain(marker);
+    await fs.rm(marker);
     await fs.mkdir(archiveDirectory);
     await expect(archiveAgentTerminalMessages(config, { ...target, archiveDirectory })).rejects.toMatchObject({ code: 'output-exists' });
     expect(await fs.readFile(outbox.outboxPath, 'utf8')).toBe(before);

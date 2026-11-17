@@ -9,6 +9,8 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import {
   AgentHomeBusyError,
   AgentHomeLeaseCorruptError,
+  AgentHomeLeaseHeldError,
+  setAgentHomeLeaseFaultsForTests,
   AgentHomeLayout,
   AgentHomeResolutionError,
   AgentHomeLeaseManager,
@@ -16,6 +18,14 @@ import {
   validateAgentRef,
 } from '../agent-home';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
+import { installTestLeaseWriterProbe } from './fixtures/runtime-env';
+import {
+  currentAgentHomeLeaseWriter,
+  judgeAgentHomeLeaseWriter,
+  setAgentHomeLeaseWriterProbeForTests,
+  type AgentHomeLeaseWriter,
+  type AgentHomeLeaseWriterProbe,
+} from '../agent-home-writer';
 import { AgentSessionHandoffStore, AgentSessionHandoffMismatchError } from '../daemon/agent-session-handoff-store';
 import { isAgentSessionLedgerName, isAgentTaskTerminalName } from '../daemon/retention/session-ledgers';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
@@ -258,35 +268,146 @@ describe('SDK-owned Agent home contract', () => {
     await retry.lease.release();
   });
 
-  it('reclaims only exact daemon-owner crash residue and declines another owner', async () => {
+  // No pid is this large on any supported platform, so its writer is proved gone.
+  const DEAD_PID = 2147483646;
+  const crashedWriter = async (): Promise<AgentHomeLeaseWriter> => ({ ...(await currentAgentHomeLeaseWriter())!, pid: DEAD_PID });
+
+  it('reclaims its own owner\'s marker only once its writer is proved gone and the caller reclaims residue', async () => {
     const root = await makeRoot();
     const ownerId = 'store-product:stable-owner';
-    const manager = new AgentHomeManager({
+    const managerOf = (reclaimsResidue: boolean) => new AgentHomeManager({
       hostStorageRoot: root,
-      leaseManager: new AgentHomeLeaseManager({ ownerId }),
+      leaseManager: new AgentHomeLeaseManager({ ownerId, reclaimsResidue: () => reclaimsResidue }),
     });
+    const manager = managerOf(true);
     const initial = await manager.prepare(ref('one'));
     const home = initial.resolution.canonicalHome;
     await initial.lease.release();
     const marker = path.join(home, '.byok', 'agent-home.lease');
-    await fs.writeFile(marker, JSON.stringify({
-      version: 1,
-      ownerId,
-      leaseId: 'crashed-lease',
-      agentRef: ref('one'),
-      canonicalHome: home,
-    }), 'utf8');
+    const residue = { version: 1, ownerId, leaseId: 'crashed-lease', agentRef: ref('one'), canonicalHome: home };
+    const refusal = async (holder: AgentHomeManager) => (await holder.prepare(ref('one')).catch((error: unknown) => error)) as AgentHomeLeaseHeldError;
+
+    // A marker of an earlier release records no writer: never reclaimed automatically.
+    await fs.writeFile(marker, JSON.stringify(residue), 'utf8');
+    expect(await refusal(manager)).toMatchObject({ name: 'AgentHomeLeaseHeldError', blockedBy: 'legacy-marker', markerPath: marker });
+
+    // Its writer is gone, but only a caller that reclaims residue (a started daemon) may take it.
+    await fs.writeFile(marker, JSON.stringify({ ...residue, writer: await crashedWriter() }), 'utf8');
+    const held = await refusal(managerOf(false));
+    expect(held).toMatchObject({ blockedBy: 'owner-reclaim-required' });
+    expect(held.message).toMatch(/start this store's daemon once/u);
 
     const restarted = await manager.prepare(ref('one'));
     await restarted.lease.release();
     await fs.writeFile(marker, JSON.stringify({
-      version: 1,
+      ...residue,
       ownerId: 'store-product:another-owner',
       leaseId: 'live-lease',
-      agentRef: ref('one'),
-      canonicalHome: home,
     }), 'utf8');
     await expect(manager.prepare(ref('one'))).rejects.toBeInstanceOf(AgentHomeBusyError);
+  });
+
+  it('never takes a live marker of its own owner that another process holds', async () => {
+    const root = await makeRoot();
+    const gateRoot = await makeRoot();
+    const ownerId = 'store-product:stable-owner';
+    // Another process of the same owner (a running daemon beside a memory export): its own SDK copy, so its own registry.
+    vi.resetModules();
+    (await import('../util/path-mutation-gate')).setPosixGateRootForTests(gateRoot);
+    const other = await import('../agent-home');
+    const running = await new other.AgentHomeManager({ hostStorageRoot: root,
+      leaseManager: new other.AgentHomeLeaseManager({ ownerId }) }).acquire(ref('one'));
+    const marker = path.join(running.lease.canonicalHome, '.byok', 'agent-home.lease');
+    try {
+      const manager = new AgentHomeManager({ hostStorageRoot: root, leaseManager: new AgentHomeLeaseManager({ ownerId, reclaimsResidue: () => true }) });
+      await expect(manager.acquire(ref('one'))).rejects.toBeInstanceOf(AgentHomeBusyError);
+      expect(JSON.parse(await fs.readFile(marker, 'utf8'))).toMatchObject({ leaseId: running.lease.leaseId });
+    } finally {
+      await running.lease.release();
+    }
+  });
+
+  describe('a lease writer is gone only when proved', () => {
+    const HOST_A = 'a'.repeat(64);
+    const HOST_B = 'b'.repeat(64);
+    const BOOT_A = '0a0a0a0a-0000-4000-8000-00000000000a';
+    const BOOT_0 = '00000000-0000-4000-8000-000000000000';
+    const recorded: AgentHomeLeaseWriter = { pid: 7, start: '7000', host: HOST_A, boot: BOOT_A, pidNamespace: 'pid:[1]' };
+    const probeWith = (overrides: Partial<{ platform: NodeJS.Platform; host: string; boot: string; start: string; signal: 'exists' | 'gone' | 'denied' }>): AgentHomeLeaseWriterProbe => ({
+      platform: overrides.platform ?? 'linux',
+      pid: 1,
+      host: async () => ('host' in overrides ? overrides.host : HOST_A),
+      boot: async () => overrides.boot ?? BOOT_A,
+      pidNamespace: async () => 'pid:[1]',
+      processStart: async (pid) => (pid === 1 ? '1000' : ('start' in overrides ? overrides.start : '7000')),
+      signal: () => overrides.signal ?? 'exists',
+    });
+    it.each([
+      { case: 'written in an earlier boot', writer: { ...recorded, boot: BOOT_0 }, probe: {}, verdict: { gone: true } },
+      { case: 'no process has its pid (ESRCH)', writer: recorded, probe: { signal: 'gone' as const }, verdict: { gone: true } },
+      { case: 'its pid now names a later process', writer: recorded, probe: { start: '8000' }, verdict: { gone: true } },
+      { case: 'it still runs', writer: recorded, probe: {}, verdict: { gone: false, blockedBy: 'writer-running' } },
+      { case: 'it cannot be signalled (EPERM)', writer: recorded, probe: { signal: 'denied' as const }, verdict: { gone: false, blockedBy: 'writer-running' } },
+      { case: 'on Windows, its pid exists (no start time is read)', writer: { ...recorded, boot: '1700000000', start: undefined, pidNamespace: undefined }, probe: { platform: 'win32' as const, boot: '1700000000', start: '8000' }, verdict: { gone: false, blockedBy: 'writer-running' } },
+      { case: 'off Windows, it records no start time', writer: { ...recorded, start: undefined }, probe: { signal: 'gone' as const }, verdict: { gone: false, blockedBy: 'unverifiable' } },
+      { case: 'its start time cannot be read', writer: recorded, probe: { start: undefined }, verdict: { gone: false, blockedBy: 'unverifiable' } },
+      { case: 'written on another host', writer: { ...recorded, host: HOST_B }, probe: {}, verdict: { gone: false, blockedBy: 'other-host' } },
+      { case: 'this host\'s identity cannot be read', writer: recorded, probe: { host: undefined }, verdict: { gone: false, blockedBy: 'other-host' } },
+      { case: 'written in another PID namespace', writer: { ...recorded, pidNamespace: 'pid:[2]' }, probe: {}, verdict: { gone: false, blockedBy: 'other-pid-namespace' } },
+      { case: 'it records no writer', writer: undefined, probe: {}, verdict: { gone: false, blockedBy: 'legacy-marker' } },
+      { case: 'this boot id is malformed', writer: recorded, probe: { boot: 'boot-a' }, verdict: { gone: false, blockedBy: 'unverifiable' } },
+      { case: 'off Windows, it records a boot in Windows form', writer: { ...recorded, boot: '1700000000' }, probe: {}, verdict: { gone: false, blockedBy: 'unverifiable' } },
+      { case: 'on Windows, it records a boot in UUID form', writer: { ...recorded, boot: BOOT_A, start: undefined, pidNamespace: undefined }, probe: { platform: 'win32' as const, boot: '1700000000' }, verdict: { gone: false, blockedBy: 'unverifiable' } },
+    ])('$case', async ({ writer, probe, verdict }) => {
+      setAgentHomeLeaseWriterProbeForTests(probeWith(probe));
+      try {
+        expect(await judgeAgentHomeLeaseWriter(writer)).toEqual(verdict);
+      } finally {
+        await installTestLeaseWriterProbe();
+      }
+    });
+
+    it('keeps no failed read of this process\'s identity: the next acquire records its writer', async () => {
+      const root = await makeRoot();
+      const manager = new AgentHomeManager({ hostStorageRoot: root });
+      let hostReads = 0;
+      // A transient failure, as an ioreg past its timeout, on the first read only.
+      setAgentHomeLeaseWriterProbeForTests({ ...probeWith({}), host: async () => (++hostReads === 1 ? undefined : HOST_A) });
+      try {
+        const writerOf = async (binding: { lease: { canonicalHome: string; release(): Promise<void> } }) => {
+          const marker = JSON.parse(await fs.readFile(path.join(binding.lease.canonicalHome, '.byok', 'agent-home.lease'), 'utf8')) as { writer: unknown };
+          await binding.lease.release();
+          return marker.writer;
+        };
+        expect(await writerOf(await manager.prepare(ref('one')))).toBeNull();
+        expect(await writerOf(await manager.prepare(ref('one')))).toEqual({ pid: 1, start: '1000', host: HOST_A, boot: BOOT_A, pidNamespace: 'pid:[1]' });
+        expect(hostReads).toBe(2);
+      } finally {
+        await installTestLeaseWriterProbe();
+      }
+    });
+
+    it.skipIf(process.platform === 'win32')('records and judges the same start time whatever the locale and time zone', async () => {
+      const saved = { TZ: process.env.TZ, LANG: process.env.LANG, LC_ALL: process.env.LC_ALL };
+      const environment = async (values: Record<string, string>) => {
+        Object.assign(process.env, values);
+        await installTestLeaseWriterProbe(); // a fresh read of this process's identity
+      };
+      try {
+        await environment({ TZ: 'Asia/Tokyo', LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8' });
+        const written = (await currentAgentHomeLeaseWriter())!;
+        expect(written.start).toMatch(/^\d+$/u);
+        await environment({ TZ: 'America/Los_Angeles', LANG: 'fr_FR.UTF-8', LC_ALL: 'fr_FR.UTF-8' });
+        expect((await currentAgentHomeLeaseWriter())!.start).toBe(written.start);
+        expect(await judgeAgentHomeLeaseWriter(written)).toEqual({ gone: false, blockedBy: 'writer-running' });
+      } finally {
+        for (const [name, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+        await installTestLeaseWriterProbe();
+      }
+    });
   });
 
   it('treats a corrupt persisted lease marker as non-retryable integrity failure', async () => {
@@ -316,7 +437,7 @@ describe('SDK-owned Agent home contract', () => {
 
   const leaseTemps = async (home: string) => (await fs.readdir(path.join(home, '.byok'))).filter((name) => /^agent-home\.lease\..+\.tmp$/u.test(name));
 
-  it('publishes the lease marker whole, and removes the temp files of a killed acquire', async () => {
+  it('publishes the lease marker whole, and removes a killed acquire\'s temp file once its writer is proved gone', async () => {
     const root = await makeRoot();
     const ownerId = 'store-product:stable-owner';
     const manager = new AgentHomeManager({ hostStorageRoot: root, leaseManager: new AgentHomeLeaseManager({ ownerId }) });
@@ -324,27 +445,61 @@ describe('SDK-owned Agent home contract', () => {
     const home = initial.resolution.canonicalHome;
     expect(await leaseTemps(home)).toEqual([]);
     await initial.lease.release();
-    // Killed while writing the temp file, and killed after the link but before the unlink.
     const internal = path.join(home, '.byok');
-    await fs.writeFile(path.join(internal, 'agent-home.lease.4242-0.tmp'), '{"version":1,"own', 'utf8');
-    await fs.writeFile(path.join(internal, 'agent-home.lease.4242-1.tmp'), 'complete residue', 'utf8');
+    const complete = 'agent-home.lease.00000000-0000-4000-8000-000000000001.tmp';
+    const torn = 'agent-home.lease.00000000-0000-4000-8000-000000000002.tmp';
+    const earlierRelease = 'agent-home.lease.4242-0.tmp';
+    // Killed after its temp file was synced; killed while writing one; and one an earlier release left.
+    await fs.writeFile(path.join(internal, complete), JSON.stringify({ version: 1, ownerId, writer: await crashedWriter() }), 'utf8');
+    await fs.writeFile(path.join(internal, torn), '{"version":1,"own', 'utf8');
+    await fs.writeFile(path.join(internal, earlierRelease), 'complete residue', 'utf8');
 
     const next = await manager.prepare(ref('one'));
-    expect(await leaseTemps(home)).toEqual([]);
+    // Only a temp file whose writer is proved gone goes; the others hold no lease.
+    expect((await leaseTemps(home)).sort()).toEqual([earlierRelease, torn].sort());
     const stored = JSON.parse(await fs.readFile(path.join(internal, 'agent-home.lease'), 'utf8')) as { ownerId: string; leaseId: string };
     expect(stored).toMatchObject({ ownerId, leaseId: next.lease.leaseId });
     await next.lease.release();
   });
 
+  it('keeps another SDK copy\'s temp file in this process while it is being linked, for the same owner', async () => {
+    const root = await makeRoot();
+    const gateRoot = await makeRoot();
+    const ownerId = 'store-product:shared-owner';
+    let ran = false;
+    setAgentHomeLeaseFaultsForTests({ onStep: async (step) => {
+      if (step !== 'acquire:temp-synced' || ran) return;
+      ran = true;
+      // A second copy of the SDK with the same owner and no daemon, as an
+      // export beside a running daemon is: its acquire runs while this one
+      // holds a synced temp file, before the link.
+      vi.resetModules();
+      (await import('../util/path-mutation-gate')).setPosixGateRootForTests(gateRoot);
+      const second = await import('../agent-home');
+      const other = await new second.AgentHomeManager({ hostStorageRoot: root,
+        leaseManager: new second.AgentHomeLeaseManager({ ownerId }) }).acquire(ref('one'));
+      await other.lease.release();
+    } });
+    try {
+      const manager = new AgentHomeManager({ hostStorageRoot: root, leaseManager: new AgentHomeLeaseManager({ ownerId }) });
+      const binding = await manager.acquire(ref('one'));
+      expect(await leaseTemps(binding.resolution.canonicalHome)).toEqual([]);
+      await binding.lease.release();
+    } finally {
+      setAgentHomeLeaseFaultsForTests(undefined);
+    }
+    expect(ran).toBe(true);
+  });
+
   it('refuses a marker linked by another writer during reclaim, and leaves no temp file', async () => {
     const root = await makeRoot();
     const ownerId = 'store-product:stable-owner';
-    const manager = new AgentHomeManager({ hostStorageRoot: root, leaseManager: new AgentHomeLeaseManager({ ownerId }) });
+    const manager = new AgentHomeManager({ hostStorageRoot: root, leaseManager: new AgentHomeLeaseManager({ ownerId, reclaimsResidue: () => true }) });
     const initial = await manager.prepare(ref('one'));
     const home = initial.resolution.canonicalHome;
     await initial.lease.release();
     const marker = path.join(home, '.byok', 'agent-home.lease');
-    const residue = { version: 1, ownerId, leaseId: 'crashed-lease', agentRef: ref('one'), canonicalHome: home };
+    const residue = { version: 1, ownerId, leaseId: 'crashed-lease', agentRef: ref('one'), canonicalHome: home, writer: await crashedWriter() };
     await fs.writeFile(marker, JSON.stringify(residue), 'utf8');
     const link = fs.link.bind(fs);
     let calls = 0;
@@ -387,7 +542,7 @@ describe('SDK-owned Agent home contract', () => {
     else await expect(refused).rejects.toThrow(/needs a hard link in .+ which its filesystem refused \(EPERM\)/u);
   });
 
-  it('keeps an acquired lease when the temp file cannot be removed, and removes it on the next acquire', async () => {
+  it('keeps an acquired lease when the temp file cannot be removed, and removes it once its writer is proved gone', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });
     const rm = fs.rm.bind(fs);
@@ -401,12 +556,19 @@ describe('SDK-owned Agent home contract', () => {
     await first.lease.release();
     refuse.mockRestore();
 
+    // Its writer, this process, still runs.
+    const [left] = await leaseTemps(home);
+    await (await manager.prepare(ref('one'))).lease.release();
+    expect(await leaseTemps(home)).toEqual([left]);
+    // As this process would be after a restart.
+    const file = path.join(home, '.byok', left!);
+    await fs.writeFile(file, JSON.stringify({ ...JSON.parse(await fs.readFile(file, 'utf8')), writer: await crashedWriter() }), 'utf8');
     const next = await manager.prepare(ref('one'));
     expect(await leaseTemps(home)).toEqual([]);
     await next.lease.release();
   });
 
-  it('runs only the lease temp file fsync while it holds the Agent-home root gate, and names every holder when the gate is busy', async () => {
+  it('runs no fsync while it holds the Agent-home root gate, and names every holder when the gate is busy', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });
     // The first resolve of a layout materializes the configured root, once, under the gate.
@@ -430,8 +592,7 @@ describe('SDK-owned Agent home contract', () => {
     await binding.lease.release();
     vi.restoreAllMocks();
     expect(syncs).toBeGreaterThan(0);
-    // The directory barriers run outside the gate; the lease temp file is written and linked under it.
-    expect(syncedUnderGate).toEqual([expect.stringMatching(/^agent-home\.lease\.\d+-\d+\.tmp$/u)]);
+    expect(syncedUnderGate).toEqual([]);
 
     const held = await acquirePathMutationGate({ scope: 'agent-home-root', targetPath: agentsRoot });
     try {

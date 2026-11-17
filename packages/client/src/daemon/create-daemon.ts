@@ -30,7 +30,7 @@ import { assertCodexSandboxSetting, type CodexSandboxSetting } from '../adapters
 import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
 import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals.js';
 import { AuthManager } from './auth-manager.js';
-import { resolveMachineId } from './machine-id.js';
+import { resolveMachineId } from '../util/machine-id.js';
 import { DaemonHaltError, type DaemonLifecycle, type DaemonNotOpenError } from './daemon-lifecycle.js';
 import type { EmbeddedPairingError } from './daemon-errors.js';
 import {
@@ -956,6 +956,9 @@ function buildDaemon(
   } = composeDaemonWorkspaces({
     storeDir, config, egressPolicy,
     settleAgentMemoryCommit: home => agentMemoryCommitStore(daemonScope).settle(home),
+    // Only a started run reclaims a crashed run's lease markers: it holds the
+    // owner lease and has ended that run's owned processes under it.
+    reclaimsResidue: () => daemonState.daemonOwnerLease !== undefined && daemonState.ownedProcessesReconciledUnder === daemonState.daemonOwnerLease,
   });
 
   const retentionRegistry = createRetentionRegistry({
@@ -1071,6 +1074,7 @@ function buildDaemon(
     serviceEnrollmentEpoch: undefined,
     serviceEnrollmentTransitioning: false,
     daemonOwnerLease: undefined,
+    ownedProcessesReconciledUnder: undefined,
     presencePublisher: undefined,
     detectedRuntimeFacts: [],
     detectedRuntimeUnavailable: [],

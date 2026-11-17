@@ -77,9 +77,12 @@ it('keeps corrupt marker errors non-retryable when the root gate release fails',
   const home = new AgentHomeManager({ hostStorageRoot: root });
   const resolution = await home.layout.resolve({ agentId: 'agent', profileRevision: '1' });
   await fs.mkdir(path.join(resolution.canonicalHome, '.byok'), { recursive: true });
-  await fs.writeFile(path.join(resolution.canonicalHome, '.byok', 'agent-home.lease'), 'invalid');
   const failure = new Error('release root');
-  vi.spyOn(gates, 'acquirePathMutationGate').mockResolvedValue({ release: async () => { throw failure; } } as never);
+  // Linked by another writer once this acquire found no marker, so it is read under the gate.
+  vi.spyOn(gates, 'acquirePathMutationGate').mockImplementation(async () => {
+    await fs.writeFile(path.join(resolution.canonicalHome, '.byok', 'agent-home.lease'), 'invalid');
+    return { release: async () => { throw failure; } } as never;
+  });
   const error = await home.leaseManager.acquire(resolution).catch(e => e);
   expect(error).toBeInstanceOf(AgentHomeLeaseCorruptError);
   expect(error.cause.errors[0]).toBeInstanceOf(AgentHomeLeaseCorruptError);

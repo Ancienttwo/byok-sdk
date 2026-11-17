@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { runDeviceCommand } from '../daemon/device-credential-store';
+import { runDeviceCommand } from '../util/system-command';
 import { defaultRunner } from '../lifecycle/platform-command';
 import { resolveSystemTool, SystemToolUnavailableError, type SystemToolHost } from '@byok-sdk/core/system-tool';
 

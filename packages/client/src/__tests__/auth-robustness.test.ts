@@ -8,10 +8,8 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import {
   DeviceCredentialCommandAbortedError,
   DeviceCredentialStore,
-  type DeviceCommandResult,
-  type DeviceCommandRunner,
-  runDeviceCommand,
 } from '../daemon/device-credential-store';
+import { runDeviceCommand, type DeviceCommandResult, type DeviceCommandRunner } from '../util/system-command';
 import { DeviceStore } from '../daemon/store';
 import { createTestDeviceStore } from './fixtures/device-credentials';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';

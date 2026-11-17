@@ -42,3 +42,30 @@ export function testRuntimeEnvironment(live: Readonly<Record<string, string | un
 export function testRuntimeEnv(live: Readonly<Record<string, string | undefined>> = process.env, platform?: NodeJS.Platform): Record<string, string> {
   return testRuntimeEnvironment(live, platform).env;
 }
+
+/**
+ * The Agent-home lease writer identity of every test process (#2348): a fixed
+ * machine digest, boot and PID namespace, so no test reads this machine's
+ * identifier. Process start times and signals stay real, so a killed child
+ * process is told from a live one. A child process that writes lease markers
+ * installs it too (a `.mjs` child gets TEST_LEASE_WRITER_IDENTITY from its
+ * parent), or the parent would read its markers as another host's.
+ */
+export const TEST_LEASE_WRITER_IDENTITY = {
+  host: '0'.repeat(64),
+  boot: process.platform === 'win32' ? '1700000000' : '00000000-0000-4000-8000-000000000000',
+  pidNamespace: 'pid:[4026531836]',
+} as const;
+
+export async function installTestLeaseWriterProbe(): Promise<void> {
+  // Imported here, not at the top: the setup file loads this module before a
+  // test file's vi.mock calls apply, and a static import would bind the
+  // writer's command runner to the unmocked node:child_process.
+  const { setAgentHomeLeaseWriterProbeForTests, systemAgentHomeLeaseWriterProbe } = await import('../../agent-home-writer');
+  setAgentHomeLeaseWriterProbeForTests({
+    ...systemAgentHomeLeaseWriterProbe,
+    host: async () => TEST_LEASE_WRITER_IDENTITY.host,
+    boot: async () => TEST_LEASE_WRITER_IDENTITY.boot,
+    pidNamespace: async () => TEST_LEASE_WRITER_IDENTITY.pidNamespace,
+  });
+}

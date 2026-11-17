@@ -15,9 +15,9 @@ import type { DaemonStoreScope } from './stores.js';
  * policies, and the egress controller used until enrollment is loaded.
  */
 export function composeDaemonWorkspaces(
-  input: Pick<DaemonInputs & DaemonStoreScope, 'storeDir' | 'config' | 'egressPolicy'> & Required<Pick<AgentHomeLeaseManagerOptions, 'settleAgentMemoryCommit'>>,
+  input: Pick<DaemonInputs & DaemonStoreScope, 'storeDir' | 'config' | 'egressPolicy'> & Required<Pick<AgentHomeLeaseManagerOptions, 'settleAgentMemoryCommit' | 'reclaimsResidue'>>,
 ) {
-  const { storeDir, config, egressPolicy, settleAgentMemoryCommit } = input;
+  const { storeDir, config, egressPolicy, settleAgentMemoryCommit, reclaimsResidue } = input;
   const logMember = (message: string): void => console.warn(`[byok/client] ${message}`);
   const operationalHealth = new OperationalHealthTracker(storeDir);
   const ownedProcessLedger = new OwnedProcessLedger(storeDir);
@@ -31,6 +31,7 @@ export function composeDaemonWorkspaces(
         leaseManager: new AgentHomeLeaseManager({
           ownerId: stableAgentHomeOwnerId(storeDir, config.productId),
           settleAgentMemoryCommit,
+          reclaimsResidue,
         }),
       });
   const agentSessionHandoffs = config.agentHome === undefined ? undefined : new AgentSessionHandoffStore();

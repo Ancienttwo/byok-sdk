@@ -1,4 +1,4 @@
-import { testRuntimeEnvironment } from './runtime-env';
+import { testRuntimeEnvironment, installTestLeaseWriterProbe } from './runtime-env';
 import type { RuntimeEnvironment } from '../../runtime/environment';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, promises as fs, readFileSync, renameSync, writeFileSync } from 'node:fs';
@@ -24,6 +24,9 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types';
+
+// The test identity for Agent-home lease writers, the same as the parent's.
+await installTestLeaseWriterProbe();
 
 interface Config {
   readonly deviceCredentials?: { readonly macosKeychainPath: string };

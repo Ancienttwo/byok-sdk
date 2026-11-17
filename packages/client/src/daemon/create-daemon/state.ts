@@ -122,6 +122,8 @@ export interface DaemonState {
   serviceEnrollmentEpoch: number | undefined;
   serviceEnrollmentTransitioning: boolean;
   daemonOwnerLease: DaemonOwnerLease | undefined;
+  /** The owner lease under which `OwnedProcessLedger.reconcile()` last succeeded: Agent-home lease residue is reclaimed only under it (#2348). */
+  ownedProcessesReconciledUnder: DaemonOwnerLease | undefined;
   // Presence and task context share one deployment declaration. Discovery is
   // asynchronous to start(); only Agent offers with host toolsets wait for it.
   presencePublisher: PresencePublisher | undefined;

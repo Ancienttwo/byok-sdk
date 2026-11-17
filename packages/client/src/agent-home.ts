@@ -10,6 +10,13 @@ import {
   type AgentRef,
   type TerminalAgentHomeProjection,
 } from '@byok-sdk/protocol';
+import {
+  currentAgentHomeLeaseWriter,
+  judgeAgentHomeLeaseWriter,
+  parseAgentHomeLeaseWriter,
+  type AgentHomeLeaseWriter,
+  type AgentHomeLeaseWriterBlock,
+} from './agent-home-writer.js';
 import { atomicWriteFile } from './util/atomic-write.js';
 import { type ExistingAncestor, resolveExistingAncestor } from './util/existing-ancestor.js';
 import { ConfiguredPathLinkError, foldNameAliases } from './util/fold-name-aliases.js';
@@ -67,11 +74,51 @@ export class AgentHomeBusyError extends AgentHomeError {
   }
 }
 
+/**
+ * Why an Agent-home lease marker of this owner refuses an acquire (#2348):
+ * its writer is not proved gone ({@link AgentHomeLeaseWriterBlock}), or it
+ * is and this caller may not reclaim it (`owner-reclaim-required`).
+ */
+export type AgentHomeLeaseBlock = AgentHomeLeaseWriterBlock | 'owner-reclaim-required';
+
+/** A lease marker of this owner refuses the acquire; `blockedBy` says why and the message says what clears it. */
+export class AgentHomeLeaseHeldError extends AgentHomeBusyError {
+  readonly blockedBy: AgentHomeLeaseBlock;
+  readonly markerPath: string;
+
+  constructor(message: string, blockedBy: AgentHomeLeaseBlock, markerPath: string) {
+    super(message);
+    this.name = 'AgentHomeLeaseHeldError';
+    this.blockedBy = blockedBy;
+    this.markerPath = markerPath;
+  }
+}
+
+/** What an operator does about a lease marker that blocks an acquire. Names no path, so it may leave the device. */
+export function agentHomeLeaseGuidance(blockedBy: AgentHomeLeaseBlock): string {
+  const remove = 'confirm that no process uses this Agent home, then delete its lease marker';
+  switch (blockedBy) {
+    case 'legacy-marker': return `It was written by an SDK release that does not record its writer, so it is never reclaimed automatically; ${remove}.`;
+    case 'unverifiable': return `Its writer could not be verified (its identity, or this process's, could not be read); retry, and if this persists, ${remove}.`;
+    case 'other-host': return 'It was written on another machine or container that uses this store, or this machine\'s identity cannot be read; delete it only once that writer no longer uses this store.';
+    case 'other-pid-namespace': return 'It was written in another PID namespace (container) of this machine; delete it only once that container no longer uses this store.';
+    case 'writer-running': return 'Its writer process is still running; retry once it has released the Agent home.';
+    case 'owner-reclaim-required': return 'It was left by an ended run of this store; start this store\'s daemon once, which ends that run\'s processes and reclaims the marker, then retry.';
+  }
+}
+
+function leaseHeld(canonicalHome: string, markerPath: string, blockedBy: AgentHomeLeaseBlock, writer?: AgentHomeLeaseWriter | null): AgentHomeLeaseHeldError {
+  const by = blockedBy === 'writer-running' && writer ? ` of process ${writer.pid}` : '';
+  return new AgentHomeLeaseHeldError(`Agent home ${canonicalHome} is held by lease marker ${markerPath}${by}. ${agentHomeLeaseGuidance(blockedBy)}`, blockedBy, markerPath);
+}
+
 function withHomeReleaseFailures<T>(error: T, releaseFailures: readonly unknown[]): T | Error {
   if (releaseFailures.length === 0) return error;
   if (error instanceof AgentHomeError) {
     const originalClass = error.constructor as new (message: string) => AgentHomeError;
-    const rebuilt = new originalClass(error.message);
+    const rebuilt = error instanceof AgentHomeLeaseHeldError
+      ? new AgentHomeLeaseHeldError(error.message, error.blockedBy, error.markerPath)
+      : new originalClass(error.message);
     rebuilt.cause = new AggregateError([error, ...releaseFailures]);
     return rebuilt;
   }
@@ -276,12 +323,16 @@ async function assertRealDirectoryIfPresent(target: string): Promise<void> {
   }
 }
 
-const LEASE_TEMP = /^agent-home\.lease\.\d+-\d+\.tmp$/u;
-let leaseTempSeq = 0;
+const LEASE_TEMP = /^agent-home\.lease\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.tmp$/u;
+const LEASE_TEMP_MAX_BYTES = 64 * 1024;
 
-/** A complete, synced copy of the marker beside the lease path. */
+/**
+ * A complete, synced copy of the marker beside the lease path. The name is
+ * random, so no two acquires, in one process or in several, pick the same
+ * file. An open that fails created nothing, so nothing is removed for it.
+ */
 async function writeLeaseTemp(lockPath: string, body: string): Promise<string> {
-  const temp = `${lockPath}.${process.pid}-${leaseTempSeq++}.tmp`;
+  const temp = `${lockPath}.${randomUUID()}.tmp`;
   const handle = await fs.open(temp, 'wx', 0o600);
   try {
     await handle.writeFile(body, 'utf8');
@@ -295,17 +346,32 @@ async function writeLeaseTemp(lockPath: string, body: string): Promise<string> {
   return temp;
 }
 
+/** The writer a lease temp file records, or `undefined` when it records none or cannot be read whole. */
+async function leaseTempWriter(file: string): Promise<AgentHomeLeaseWriter | undefined> {
+  try {
+    const stat = await fs.lstat(file);
+    if (!stat.isFile() || stat.size > LEASE_TEMP_MAX_BYTES) return undefined;
+    return parseAgentHomeLeaseWriter((JSON.parse(await fs.readFile(file, 'utf8')) as { writer?: unknown }).writer);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
- * Lease temp files of an acquire that was killed. Every acquire of this
- * home holds the agent-home-root gate across processes, so under it no
- * other write of such a file is running. Best effort: one that cannot be
- * removed now goes on the next acquire.
+ * Lease temp files whose writer is proved gone. This runs outside the
+ * Agent-home root gate, beside other acquires' temp files, so a temp file
+ * still being written, one that records no writer, and one whose writer may
+ * run all stay. A temp file left by an earlier release has another name and
+ * stays too; it holds no lease. Best effort: one that cannot be removed now
+ * goes on a later acquire.
  */
 async function removeLeaseTemps(internalDir: string): Promise<void> {
   for (const entry of await fs.readdir(internalDir)) {
     if (!LEASE_TEMP.test(entry)) continue;
     const file = path.join(internalDir, entry);
-    if ((await fs.lstat(file).catch(() => undefined))?.isFile()) await fs.unlink(file).catch(() => {});
+    const writer = await leaseTempWriter(file);
+    if (writer === undefined || !(await judgeAgentHomeLeaseWriter(writer)).gone) continue;
+    await fs.unlink(file).catch(() => {});
   }
 }
 
@@ -654,6 +720,15 @@ function agentHomeRootBusy(error: PathMutationGateBusyError): AgentHomeBusyError
 export interface AgentHomeLeaseManagerOptions {
   ownerId?: string;
   /**
+   * Whether this caller may now reclaim a lease marker of its own owner whose
+   * writer is proved gone (#2348). Return true only while the caller holds
+   * this owner's `DaemonOwnerLease` and has ended the owner's earlier runtime
+   * processes (`OwnedProcessLedger.reconcile()`): those can outlive the
+   * writer and still write its home. When absent or false, such a marker
+   * refuses the acquire with `owner-reclaim-required`.
+   */
+  reclaimsResidue?: () => boolean;
+  /**
    * Runs after each base lease is taken and before the caller gets it. The
    * execution lease group takes one base lease, and intent, export, projection
    * and maintenance take one each, so every path into a home passes here. A
@@ -665,7 +740,7 @@ export interface AgentHomeLeaseManagerOptions {
 /**
  * The crash points of a lease acquire:
  * - `acquire:temp-synced`: the complete marker temp file is written and
- *   synced under the Agent-home root gate; no marker exists yet.
+ *   synced; the Agent-home root gate is not yet taken and no marker exists.
  * - `acquire:linked`: the marker is linked under the gate; the temp file is
  *   still beside it.
  */
@@ -673,8 +748,8 @@ export type AgentHomeLeaseFaultStep = 'acquire:temp-synced' | 'acquire:linked';
 
 /** Same shape as the journal's `JournalFaultSeam`. */
 export interface AgentHomeLeaseFaultSeam {
-  /** Throw to stop the acquire at exactly this step. Return normally to proceed. */
-  onStep?(step: AgentHomeLeaseFaultStep): void;
+  /** Throw (or reject) to stop the acquire at exactly this step. Return (or resolve) to proceed. */
+  onStep?(step: AgentHomeLeaseFaultStep): void | Promise<void>;
 }
 
 // Only tests set it. Not exported from the package entry.
@@ -691,6 +766,8 @@ interface StoredLeaseMarker {
   readonly leaseId: string;
   readonly agentRef: AgentRef;
   readonly canonicalHome: string;
+  /** Absent in a marker of an earlier release; `null` when its writer could not identify itself. */
+  readonly writer?: AgentHomeLeaseWriter | null;
 }
 
 /** `storeDir` must come from `DeviceStore.resolveDir`, so every alias of a store yields one owner. */
@@ -729,8 +806,14 @@ function parseLeaseMarker(value: string, lockPath: string): StoredLeaseMarker {
   } catch {
     throw corruptLeaseMarker(lockPath, 'has an invalid AgentRef');
   }
-  const marker = parsed as Omit<StoredLeaseMarker, 'agentRef'>;
-  return { ...marker, agentRef, canonicalHome: path.resolve(marker.canonicalHome) };
+  const marker = parsed as Omit<StoredLeaseMarker, 'agentRef' | 'writer'> & { writer?: unknown };
+  const { writer: recorded, ...fields } = marker;
+  const base = { ...fields, agentRef, canonicalHome: path.resolve(marker.canonicalHome) };
+  if (recorded === undefined) return base;
+  if (recorded === null) return { ...base, writer: null };
+  const writer = parseAgentHomeLeaseWriter(recorded);
+  if (writer === undefined) throw corruptLeaseMarker(lockPath, 'has an invalid writer');
+  return { ...base, writer };
 }
 
 /**
@@ -800,10 +883,12 @@ export class AgentHomeLeaseManager {
   private static readonly held = new Map<string, HeldBaseLease>();
   private readonly ownerId: string;
   private readonly settleAgentMemoryCommit: AgentHomeLeaseManagerOptions['settleAgentMemoryCommit'];
+  private readonly reclaimsResidue: () => boolean;
 
   constructor(options: AgentHomeLeaseManagerOptions = {}) {
     this.ownerId = options.ownerId ?? `process:${randomUUID()}`;
     this.settleAgentMemoryCommit = options.settleAgentMemoryCommit;
+    this.reclaimsResidue = options.reclaimsResidue ?? (() => false);
   }
 
   private async settleLeftoverCommitCopy(canonicalHome: string, homeIdentity: AgentHomeLease['homeIdentity']): Promise<void> {
@@ -837,10 +922,14 @@ export class AgentHomeLeaseManager {
     let lockPath: string | undefined;
     let rootGate: PathMutationGate | undefined;
     let ownsMarker = false;
+    let temp: string | undefined;
     let homeIdentity: Readonly<{ dev: bigint; ino: bigint }> | undefined;
     try {
-      // Before the gate, under the in-process claim, this acquire only
-      // creates its home's internal directory and runs that barrier.
+      // Before the gate, under the in-process claim, this acquire writes only
+      // inside its own home: the internal directory with its barrier, then a
+      // complete, synced temp file. Linking that file makes the marker appear
+      // whole or not at all; a marker created empty and killed before its
+      // write would be refused on every later acquire.
       homeIdentity = await realDirectoryIdentity(canonicalHome);
       const internal = await createDirectoryNoSymlink(
         canonicalHome,
@@ -854,12 +943,16 @@ export class AgentHomeLeaseManager {
         leaseId,
         agentRef,
         canonicalHome,
+        writer: await currentAgentHomeLeaseWriter(),
       };
+      await removeLeaseTemps(internal.path);
+      temp = await writeLeaseTemp(lockPath, JSON.stringify(marker));
+      await leaseFaults?.onStep?.('acquire:temp-synced');
+      // Judged before the gate: telling whether a writer runs may start a process.
+      const replaceable = await this.replaceableMarker(lockPath, canonicalHome, agentRef.agentId);
       // The gate is the local-state relocation fence: relocation sees no
-      // marker only if every marker is linked under it. It also spans each
-      // lease temp file from creation to removal, so one acquire's cleanup
-      // never meets a temp file another acquire is about to link; that costs
-      // one file fsync under the gate. The directory barriers above stay out.
+      // marker only if every marker is linked under it. It covers the home
+      // identity check and the link, and no fsync.
       rootGate = await acquirePathMutationGate({
         scope: 'agent-home-root',
         targetPath: resolution.agentsRoot,
@@ -868,26 +961,13 @@ export class AgentHomeLeaseManager {
       if (current.dev !== homeIdentity.dev || current.ino !== homeIdentity.ino) {
         throw new AgentHomeError(`Agent home ${canonicalHome} was replaced while its lease was being acquired`);
       }
-      // The marker appears whole or not at all: a complete, synced temp file
-      // is linked onto the lease path. A process killed between creating and
-      // writing the marker would otherwise leave it empty, and an empty
-      // marker is refused on every later acquire.
-      await removeLeaseTemps(internal.path);
-      const temp = await writeLeaseTemp(lockPath, JSON.stringify(marker));
-      try {
-        leaseFaults?.onStep?.('acquire:temp-synced');
-        await this.linkLeaseMarker(temp, lockPath, canonicalHome, agentRef.agentId);
-        ownsMarker = true;
-        leaseFaults?.onStep?.('acquire:linked');
-      } finally {
-        // A temp file left here goes on the next acquire; its removal must
-        // not replace the outcome of the link.
-        await fs.rm(temp, { force: true }).catch(() => {});
-      }
+      await this.linkLeaseMarker(temp, lockPath, canonicalHome, replaceable);
+      ownsMarker = true;
+      await leaseFaults?.onStep?.('acquire:linked');
       // No directory sync: the marker excludes live writers only. A process
       // crash keeps the link visible, and after a power loss no writer is
-      // alive; a lost link frees the home and a revived temp file goes on the
-      // next acquire.
+      // alive; a lost link frees the home and a revived temp file goes once
+      // its writer is proved gone.
       await rootGate.release();
       rootGate = undefined;
     } catch (error) {
@@ -904,6 +984,10 @@ export class AgentHomeLeaseManager {
         throw primary;
       }
       throw withHomeReleaseFailures(primary, releaseFailures);
+    } finally {
+      // A temp file left here goes once this process has ended; its removal
+      // must not replace the outcome of the acquire.
+      if (temp !== undefined) await fs.rm(temp, { force: true }).catch(() => {});
     }
     const acquiredLockPath = lockPath;
     if (acquiredLockPath === undefined) throw new AgentHomeError('Agent home lease marker path was not established');
@@ -981,8 +1065,9 @@ export class AgentHomeLeaseManager {
       if (markerStat !== undefined) {
         if (!markerStat.isFile() || markerStat.isSymbolicLink()) throw new AgentHomeLeaseCorruptError('invalid maintenance lease marker');
         const prior = parseLeaseMarker(await fs.readFile(marker, 'utf8'), marker);
-        if (prior.ownerId !== this.ownerId || prior.canonicalHome !== canonicalHome || prior.agentRef.agentId !== path.basename(canonicalHome)) throw new AgentHomeBusyError('Agent home belongs to another writer');
-        // Same-owner crash residue is retained. The daemon already reconciled its processes.
+        const refusal = await this.markerRefusal(prior, marker, canonicalHome, path.basename(canonicalHome));
+        if (refusal !== undefined) throw refusal;
+        // Residue this caller may reclaim is retained; the next acquire reclaims it.
       }
       await this.settleLeftoverCommitCopy(canonicalHome, { dev: stat.dev, ino: stat.ino });
     } catch (error) {
@@ -1007,23 +1092,49 @@ export class AgentHomeLeaseManager {
     } };
   }
 
-  // Link `temp` onto `lockPath`. An existing marker refuses the link, as `wx` refused the create.
-  private async linkLeaseMarker(temp: string, lockPath: string, canonicalHome: string, agentId: string): Promise<void> {
-    if (await linkExclusive(temp, lockPath)) return;
-    const prior = parseLeaseMarker(await fs.readFile(lockPath, 'utf8'), lockPath);
+  /**
+   * Why this acquire may not replace `prior`, or `undefined` when it may: a
+   * marker of its own owner, for this home, whose writer is proved gone
+   * ({@link judgeAgentHomeLeaseWriter}), while this caller reclaims residue.
+   * One owner can run in several processes at once (a memory export beside
+   * its daemon), so the owner alone never makes a marker residue.
+   */
+  private async markerRefusal(prior: StoredLeaseMarker, markerPath: string, canonicalHome: string, agentId: string): Promise<AgentHomeBusyError | undefined> {
     if (prior.ownerId !== this.ownerId) {
-      throw new AgentHomeBusyError(`Agent home ${prior.canonicalHome} already has a mutable writer lease`);
+      return new AgentHomeBusyError(`Agent home ${prior.canonicalHome} already has a mutable writer lease`);
     }
     if (prior.canonicalHome !== canonicalHome || prior.agentRef.agentId !== agentId) {
-      throw new AgentHomeBusyError(`Agent home lease marker ${lockPath} does not match its canonical Agent identity`);
+      return new AgentHomeBusyError(`Agent home lease marker ${markerPath} does not match its canonical Agent identity`);
     }
-    // A marker owned by this daemon identity but absent from the in-process
-    // registry is crash residue. DaemonOwnerLease prevents two live daemon
-    // processes for the same store/product identity, so exact-owner reclaim is
-    // the only permitted restart path. The owner lease alone does not prove
-    // the crashed run's runtime processes are gone; daemon start does that
-    // first (`daemon/owned-process-ledger.ts` `reconcile()`), refusing to start
-    // while one survives, and leases are acquired only after it.
+    const verdict = await judgeAgentHomeLeaseWriter(prior.writer);
+    if (!verdict.gone) return leaseHeld(canonicalHome, markerPath, verdict.blockedBy, prior.writer);
+    if (!this.reclaimsResidue()) return leaseHeld(canonicalHome, markerPath, 'owner-reclaim-required');
+    return undefined;
+  }
+
+  /** The lease id of the marker this acquire may replace, `undefined` when none exists; otherwise throws its refusal. */
+  private async replaceableMarker(lockPath: string, canonicalHome: string, agentId: string): Promise<string | undefined> {
+    let contents: string;
+    try {
+      contents = await fs.readFile(lockPath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+      throw error;
+    }
+    const prior = parseLeaseMarker(contents, lockPath);
+    const refusal = await this.markerRefusal(prior, lockPath, canonicalHome, agentId);
+    if (refusal !== undefined) throw refusal;
+    return prior.leaseId;
+  }
+
+  // Link `temp` onto `lockPath`. An existing marker refuses the link, as `wx`
+  // refused the create, unless it is still the one judged replaceable.
+  private async linkLeaseMarker(temp: string, lockPath: string, canonicalHome: string, replaceable: string | undefined): Promise<void> {
+    if (await linkExclusive(temp, lockPath)) return;
+    const prior = parseLeaseMarker(await fs.readFile(lockPath, 'utf8'), lockPath);
+    if (replaceable === undefined || prior.leaseId !== replaceable) {
+      throw new AgentHomeBusyError(`Agent home ${canonicalHome} already has a mutable writer lease`);
+    }
     await fs.rm(lockPath);
     if (!await linkExclusive(temp, lockPath)) {
       throw new AgentHomeBusyError(`Agent home lease ${lockPath} was concurrently reclaimed`);

@@ -113,8 +113,14 @@ describe('the embedded agent-memory entry module graph', () => {
     // #2200 splits the helper facade into its private implementation and probe
     // outcome/budget leaf. Both stay within memory filesystem authority.
     // The stdio server's frame ceiling is the import-free leaf mcp/frame-limit.ts, shared with the MCP client.
+    // #2348: agent-home.ts records and judges lease writers through
+    // agent-home-writer.ts, which reads the machine identifier through
+    // util/machine-id.ts and runs its probes through the leaf
+    // util/system-command.ts, moved out of the device credential store so no
+    // credential surface comes along. Inert here like the rest of this tail.
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
+      'agent-home-writer.ts',
       'agent-home.ts',
       'agent-memory/index.ts',
       'agent-memory/mcp-server.ts',
@@ -140,8 +146,10 @@ describe('the embedded agent-memory entry module graph', () => {
       'util/atomic-write.ts',
       'util/existing-ancestor.ts',
       'util/fold-name-aliases.ts',
+      'util/machine-id.ts',
       'util/path-mutation-gate.ts',
       'util/private-unix-socket.ts',
+      'util/system-command.ts',
       'util/with-release.ts',
     ]);
   });

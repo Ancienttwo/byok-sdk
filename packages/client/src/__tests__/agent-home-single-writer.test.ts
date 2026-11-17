@@ -15,6 +15,7 @@ import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { connectControlClient } from '../daemon/control-client';
+import { currentAgentHomeLeaseWriter } from '../agent-home-writer';
 import { type ControlStatusResult } from '../daemon/control-protocol';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -268,7 +269,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const agentRef = { agentId: 'residue-agent', profileRevision: 'r1' };
     const homeDir = path.join(await fs.realpath(hostStorageRoot), AGENT_HOME_DIRECTORY, agentRef.agentId);
     const markerPath = path.join(homeDir, AGENT_HOME_INTERNAL_DIRECTORY, 'agent-home.lease');
-    const writeMarker = async (ownerId: string): Promise<void> => {
+    const writeMarker = async (ownerId: string, writer?: object): Promise<void> => {
       await fs.mkdir(path.dirname(markerPath), { recursive: true });
       await fs.writeFile(markerPath, JSON.stringify({
         version: 1,
@@ -276,6 +277,7 @@ describe('canonical Agent home single writer (WP0)', () => {
         leaseId: '00000000-0000-4000-8000-000000000000',
         agentRef,
         canonicalHome: homeDir,
+        ...(writer === undefined ? {} : { writer }),
       }), { mode: 0o600 });
     };
 
@@ -290,8 +292,9 @@ describe('canonical Agent home single writer (WP0)', () => {
     await foreign.daemon.stop();
     daemon = undefined;
 
-    // The same stable owner identity restarting after a crash reclaims it.
-    await writeMarker(stableAgentHomeOwnerId(storeDir, productId));
+    // The same stable owner identity restarting after a crash reclaims it once
+    // its writer is proved gone (no pid is this large).
+    await writeMarker(stableAgentHomeOwnerId(storeDir, productId), { ...(await currentAgentHomeLeaseWriter())!, pid: 2147483646 });
     const restarted = await start({}, { storeDir, hostStorageRoot, productId });
     server.send(offer('residue-reclaimed', agentRef.agentId, 'pi'));
     await server.waitFor((entry) => entry.type === 'task.claim' && entry.task_id === 'residue-reclaimed');

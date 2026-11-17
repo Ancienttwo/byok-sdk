@@ -75,7 +75,7 @@ describe('localStateRelocation', () => {
     const agent = { agentId: 'one', profileRevision: '1' };
     const owner = () => new AgentHomeManager({
       hostStorageRoot: input.sourceHostStorageRoot,
-      leaseManager: new AgentHomeLeaseManager({ ownerId: 'store-product:crash-owner' }),
+      leaseManager: new AgentHomeLeaseManager({ ownerId: 'store-product:crash-owner', reclaimsResidue: () => true }),
     });
     const internal = path.join(input.sourceHostStorageRoot, 'agents', 'one', '.byok');
     // What a killed process leaves on disk: the files as they are at the step, with no cleanup after it.
@@ -91,7 +91,11 @@ describe('localStateRelocation', () => {
       setAgentHomeLeaseFaultsForTests(undefined);
     }
     for (const name of await fs.readdir(internal)) await fs.rm(path.join(internal, name));
-    for (const [name, bytes] of left) await fs.writeFile(path.join(internal, name), bytes);
+    // Their writer is now gone: no pid is this large on any supported platform.
+    for (const [name, bytes] of left) {
+      const file = JSON.parse(bytes.toString('utf8')) as { writer: { pid: number } };
+      await fs.writeFile(path.join(internal, name), JSON.stringify({ ...file, writer: { ...file.writer, pid: 2147483646 } }));
+    }
     expect([...left.keys()].filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
 
     if (step === 'acquire:temp-synced') {

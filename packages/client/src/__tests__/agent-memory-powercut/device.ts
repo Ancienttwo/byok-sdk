@@ -53,8 +53,8 @@ export async function runDevice(storeRoot: string, link: PowercutLink, backend: 
   };
   const homes = new AgentHomeManager({
     hostStorageRoot: storeRoot,
-    // The daemon's stable owner identity: a restart reclaims its own lease marker.
-    leaseManager: new AgentHomeLeaseManager({ ownerId: stableAgentHomeOwnerId(storeRoot, 'byok-w5-powercut') }),
+    // The daemon's stable owner identity: a restart, the store's only process, reclaims its own lease marker.
+    leaseManager: new AgentHomeLeaseManager({ ownerId: stableAgentHomeOwnerId(storeRoot, 'byok-w5-powercut'), reclaimsResidue: () => true }),
   });
   const processor = createAgentMemoryIntentProcessor({
     tenantId: POWERCUT_TENANT_ID, deviceId: POWERCUT_DEVICE_ID, transport, homes, backend,

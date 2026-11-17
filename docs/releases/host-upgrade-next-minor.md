@@ -270,6 +270,41 @@ receipt or mailbox write. Match the code instead of the message, and add the
 code to any exhaustive switch over `CloudErrorCode`. The sealed lane keeps
 `agent_message_sealed_consumer_missing`.
 
+### Agent-home lease markers record their writer (#2348)
+
+Manifest entries: `agent-home-lease-writer-liveness`, `agent-home-lease-held-error`, `device-operator-agent-lease-held`.
+
+An Agent-home lease marker now records the process that wrote it: its pid and
+start time, a digest of the machine identifier (never the raw value), the boot,
+and on Linux the PID namespace. A marker of this owner is reclaimed only when
+its writer is proved gone (same machine and namespace, and an earlier boot, no
+process with that pid, or another process under it), and only by a caller that
+holds the owner's daemon lease and has ended the earlier run's processes: a
+started daemon, or the doctor operator actions. Before, any acquire of the same
+owner reclaimed it, so a memory export or reliable egress append from a second
+process could take the marker of a running daemon and write the same home.
+
+What changes for a Host:
+
+- A marker written by an earlier release records no writer and is never
+  reclaimed automatically. After upgrading from a daemon that crashed, an
+  acquire of that home fails with `AgentHomeLeaseHeldError`
+  (`blockedBy: 'legacy-marker'`). Confirm that no process uses the home, then
+  delete the marker file it names.
+- `exportAgentMemory` and `publishReliableAgentEgress` on a daemon that is not
+  started no longer reclaim a dead daemon's marker. They fail with
+  `blockedBy: 'owner-reclaim-required'`; start the daemon once, then retry.
+- A Host that uses `AgentHomeLeaseManager` with a stable `ownerId` reclaims
+  residue only when it passes `reclaimsResidue`, returning true only while it
+  holds that owner's daemon lease and has reconciled its owned processes.
+- An operator action (`archiveAgentTerminalMessages`) refused by such a marker
+  throws `DeviceOperatorError` with the new code `agent-lease-held` and its
+  `blockedBy`, where it threw `agent-busy`. Add the code to exhaustive switches.
+- `AgentHomeLeaseHeldError` extends `AgentHomeBusyError`, so the offer decline
+  stays `agent_home_writer_busy` and retryable. Its `blockedBy` tells
+  `other-host`, `other-pid-namespace`, `writer-running`, `unverifiable`,
+  `legacy-marker` and `owner-reclaim-required` apart.
+
 ### Undici in the Host dependency tree
 
 Keep a Host override to **8.12.4**. Pi's exact dependency can still install a
