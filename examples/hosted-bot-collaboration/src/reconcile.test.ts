@@ -118,6 +118,17 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H reconciliation on a real SDK server and da
       await l.close();
     }
   });
+
+  it('concludes cancelled a claimed attempt that cloud abandoned, with no device terminal (#2335)', async () => {
+    const { scope, turnId, task } = await delivered(), run = await session(task);
+    await vi.waitFor(async () => expect(await host!.port.attempt(task)).toMatchObject({ ownerDeviceId: host!.deviceId }), { timeout: 5000 });
+    await host!.cloud.abandonTask(host!.tenant, task, 'operator');
+    expect(await reconciler(host!.port).run()).toEqual({ concluded: 1, failed: [] });
+    expect(await row(scope, turnId)).toMatchObject({ conclusion: 'cancelled', started: true, terminal: null,
+      attempt: { status: 'cancelled', terminalCause: 'operator', ownerDeviceId: host!.deviceId } });
+    await run.finish(DOCUMENT);
+    await waitForTaskCleanup(host!.daemon, run);
+  });
 });
 
 /** An SDK tenant in memory: the offer, the attempt and the terminal of each task, and each cancel call. */

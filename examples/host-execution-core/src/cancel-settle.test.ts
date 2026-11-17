@@ -87,3 +87,16 @@ it('keeps probing after failed terminal reads and settles soon after the reads r
     await vi.waitFor(() => expect(host!.core.intent('flaky')?.conclusion).toBe('cancelled'), { timeout: 5000 });
   } finally { release(); }
 });
+
+it('settles a claimed intent that cloud abandoned without a device terminal, and releases the Agent FIFO (#2335)', async () => {
+  host = await openHost({ reconcileMs: 60_000 });
+  const first = await host.core.enqueue(host.intent('abandoned'));
+  await running('abandoned');
+  await vi.waitFor(async () => expect(await host!.server.tasks.attempt(first.taskId)).toMatchObject({ ownerDeviceId: host!.deviceId }), { timeout: 5000 });
+  const second = await host.core.enqueue(host.intent('behind'));
+  await host.server.tasks.abandon(first.taskId, 'operator');
+  expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ status: 'cancelled', terminalCause: 'operator', ownerDeviceId: host.deviceId });
+  await vi.waitFor(async () => { await host!.core.drain(); expect(host!.core.intent('abandoned')?.conclusion).toBe('cancelled'); }, { timeout: 5000 });
+  expect(await host.server.tasks.deviceTerminal(first.taskId)).toBeUndefined();
+  await vi.waitFor(async () => expect(await host!.server.tasks.offer(second.taskId)).toBeDefined(), { timeout: 5000 });
+});
