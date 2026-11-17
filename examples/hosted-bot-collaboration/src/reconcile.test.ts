@@ -119,13 +119,19 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H reconciliation on a real SDK server and da
     }
   });
 
-  it('concludes cancelled a claimed attempt that cloud abandoned, with no device terminal (#2335)', async () => {
-    const { scope, turnId, task } = await delivered(), run = await session(task);
+  it('concludes cancelled a claimed attempt that cloud abandoned, with no device terminal, and frees its Agent FIFO (#2335)', async () => {
+    const agentId = randomUUID(), { scope, turnId, task } = await delivered(agentId), run = await session(task);
+    const behind = await inSchema(opened!.pool, store().schema, client => freezeIntent(client, scope,
+      { key: 'behind', source: 'user', execution: template(host!.deviceId, agentId), waitUntil: Date.now() + 60_000 }));
+    const submitted: string[] = [], fifo = new HostedSubmitter(opened!.pool, store().schema, { port: () => ({
+      offer: async () => undefined, submit: async input => { submitted.push(input.taskId); return undefined as never; } }) });
     await vi.waitFor(async () => expect(await host!.port.attempt(task)).toMatchObject({ ownerDeviceId: host!.deviceId }), { timeout: 5000 });
     await host!.cloud.abandonTask(host!.tenant, task, 'operator');
+    expect(await fifo.run()).toEqual({ tried: 0, failed: [] });
     expect(await reconciler(host!.port).run()).toEqual({ concluded: 1, failed: [] });
     expect(await row(scope, turnId)).toMatchObject({ conclusion: 'cancelled', started: true, terminal: null,
       attempt: { status: 'cancelled', terminalCause: 'operator', ownerDeviceId: host!.deviceId } });
+    expect([await fifo.run(), submitted]).toEqual([{ tried: 1, failed: [] }, [behind.taskId]]);
     await run.finish(DOCUMENT);
     await waitForTaskCleanup(host!.daemon, run);
   });
@@ -243,6 +249,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
       changed: () => { throw new Error('Host sync refused'); } });
     await expect(throwing.run()).rejects.toThrow('Host sync refused');
     expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
+  });
+
+  it('finishes a device task.cancelled whose receipt lands between the terminal read and the attempt read (#2335)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    sdk.deliver(input, { status: 'cancelled', ownerDeviceId: 'device', terminalCause: 'stopped on the device' });
+    sdk.during.attempt = () => { sdk.terminals.set(input.taskId,
+      { envelope: { task_id: input.taskId, type: 'task.cancelled', payload: { reason: 'stopped on the device' } }, recordedAt: 'now' } as never); };
+    expect(await run(sdk.port)).toEqual({ concluded: 1, failed: [] });
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled', terminal: { envelope: { type: 'task.cancelled' } } });
   });
 
   it('cancels the SDK task of a sync-cancelled tried row, and concludes cancelled once the attempt is cancelled unclaimed', async () => {

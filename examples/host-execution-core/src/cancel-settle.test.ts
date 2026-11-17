@@ -100,3 +100,35 @@ it('settles a claimed intent that cloud abandoned without a device terminal, and
   expect(await host.server.tasks.deviceTerminal(first.taskId)).toBeUndefined();
   await vi.waitFor(async () => expect(await host!.server.tasks.offer(second.taskId)).toBeDefined(), { timeout: 5000 });
 });
+
+it('settles a claimed intent whose device was revoked, without a device terminal (#2335)', async () => {
+  host = await openHost({ reconcileMs: 60_000 });
+  const intent = await host.core.enqueue(host.intent('revoked'));
+  await running('revoked');
+  await vi.waitFor(async () => expect(await host!.server.tasks.attempt(intent.taskId)).toMatchObject({ ownerDeviceId: host!.deviceId }), { timeout: 5000 });
+  await host.server.devices.revoke(host.deviceId);
+  expect(await host.server.tasks.attempt(intent.taskId)).toMatchObject({ status: 'cancelled', terminalCause: 'device_revoked', ownerDeviceId: host.deviceId });
+  await vi.waitFor(async () => { await host!.core.drain(); expect(host!.core.intent('revoked')?.conclusion).toBe('cancelled'); }, { timeout: 5000 });
+  expect(await host.server.tasks.deviceTerminal(intent.taskId)).toBeUndefined();
+});
+
+it('finishes a device task.cancelled whose receipt lands between the terminal read and the attempt read (#2335)', async () => {
+  // Cloud stores the device's receipt, then the cancelled status with the device's reason as `terminalCause`.
+  let landing: string | undefined, landed = false;
+  host = await openHost({ reconcileMs: 60_000, wrapServer: server => ({ ...server, tasks: { ...server.tasks,
+    deviceTerminal: async id => id !== landing ? server.tasks.deviceTerminal(id)
+      : landed ? { envelope: { task_id: id, type: 'task.cancelled', payload: { reason: 'stopped on the device' } }, recordedAt: 'now' } as never : undefined,
+    attempt: async id => {
+      const attempt = await server.tasks.attempt(id);
+      if (id !== landing || !attempt) return attempt;
+      landed = true;
+      return { ...attempt, status: 'cancelled', terminalCause: 'stopped on the device' };
+    },
+  } }) });
+  const intent = await host.core.enqueue(host.intent('landing'));
+  await running('landing');
+  await vi.waitFor(async () => expect(await host!.server.tasks.attempt(intent.taskId)).toMatchObject({ ownerDeviceId: host!.deviceId }), { timeout: 5000 });
+  landing = intent.taskId;
+  await vi.waitFor(async () => { await host!.core.drain(); expect(host!.core.intent('landing')?.conclusion).toBe('cancelled'); }, { timeout: 5000 });
+  expect(host.ledger.snapshot().executions[intent.taskId]?.terminal).toMatchObject({ envelope: { type: 'task.cancelled' } });
+});

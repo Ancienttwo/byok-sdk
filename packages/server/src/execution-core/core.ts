@@ -823,6 +823,9 @@ export class HostExecutionCore {
     });
     // An attempt that cloud settled itself (device revoked or superseded, task abandoned) carries its `terminalCause` and gets
     // no device terminal, claimed or not (#2335). No device can report it any more, so it settles like an unclaimed cancel.
+    // A device's own task.cancelled also sets `terminalCause`. Cloud stores its receipt before the attempt status, so read the
+    // terminal again once the attempt reads cancelled: one that landed between the two reads is finished, not settled past.
+    if (attempt?.status === 'cancelled' && !terminal) terminal = await this.server.tasks.deviceTerminal(intent.taskId);
     if (attempt?.status === 'cancelled' && !terminal && (attempt.terminalCause !== undefined || (!attempt.claimedExecutor && !attempt.ownerDeviceId))) {
       this.ledger.transaction(state => settle(state, state.intents[intent.id]!, intent.cancelReason === 'expired' ? 'expired' : 'cancelled'));
       return true;
