@@ -1100,6 +1100,7 @@ export class SqliteTaskCancellationStore implements TaskCancellationStore {
         // Only retention deletes a row, and only once acked: a missing row was delivered.
         return row === undefined ? { attempt: existing } : { attempt: existing, message: mailboxMessage(row) };
       }
+      if (input.ifUnclaimed === true && existing.ownerDeviceId !== undefined) return { attempt: existing };
 
       const message = await appendMailbox(db, this.clock, this.quota, tenant, {
         deviceId: existing.deviceId,

@@ -20,7 +20,9 @@ type RoutineRow = { id: string; definition: RoutineDefinition; pending: RoutineD
 type OccurrenceRow = { key: string; routine_id: string; definition_version: number; trigger_kind: Occurrence['trigger']['kind']; planned_at: string;
   recorded_at: string; next_at: string | null; execution_superseded: boolean; job: { summary?: Json } | null };
 type IntentRow = OccurrenceRow & { intent_key: string; ordinal: string; agent: string; input: FrozenExecutionInput; wait_until: string; tries: number;
-  retry: RetryPolicy; retry_until: string | null; cancel_reason: Intent['cancelReason'] | null; conclusion: Intent['conclusion'] | null };
+  retry: RetryPolicy; retry_until: string | null; cancel_reason: Intent['cancelReason'] | null; conclusion: Intent['conclusion'] | null;
+  submission: Execution['submission']; started: boolean; attempt: Execution['attempt'] | null };
+type Execution = LedgerState['executions'][string];
 
 const OCCURRENCE_COLUMNS = `o.key, o.routine_id, o.definition_version, o.trigger_kind, o.planned_at::text, o.recorded_at::text, o.next_at::text,
   o.execution_superseded, o.job`;
@@ -46,7 +48,8 @@ function occurrence(row: OccurrenceRow, intentKey?: string): Occurrence {
 /**
  * Loads every routine of the scope in insertion order, and its open occurrences: one with no intent and no conclusion, or
  * one whose intent `occurrence:<key>` has no conclusion. A promoted occurrence keeps `conclusion IS NULL` for good (DDL D5),
- * so its intent decides whether it is open. Named dreams also load settled intents until K8 syncs their results.
+ * so its intent decides whether it is open. Named dreams also load settled intents until K8 syncs their results. Each
+ * intent gets its K4 execution with the stored attempt, whose cancellation reason K8 reads when it closes a dream (#2334).
  * The caller holds the scope lock.
  */
 export async function loadSlice(client: PoolClient, scopeKey: string, dreams: readonly string[] = []): Promise<RoutineSlice> {
@@ -67,7 +70,7 @@ export async function loadSlice(client: PoolClient, scopeKey: string, dreams: re
     AND NOT EXISTS (SELECT 1 FROM intent i WHERE i.scope = o.scope AND i.key = ${INTENT_OF}) ORDER BY o.ordinal`, [scopeKey]);
   for (const row of unpromoted.rows) state.occurrences[JSON.parse(row.key) as string] = occurrence(row);
   const promoted = await client.query<IntentRow>(`SELECT ${OCCURRENCE_COLUMNS}, i.key AS intent_key, i.ordinal::text, i.agent, i.input, i.wait_until::text,
-    i.tries, i.retry, i.retry_until::text, i.cancel_reason, i.conclusion FROM intent i JOIN occurrence o ON o.scope = i.scope AND o.key = ${OCCURRENCE_OF}
+    i.tries, i.retry, i.retry_until::text, i.cancel_reason, i.conclusion, i.submission, i.started, i.attempt FROM intent i JOIN occurrence o ON o.scope = i.scope AND o.key = ${OCCURRENCE_OF}
     WHERE i.scope = $1 AND i.source = 'routine' AND (i.conclusion IS NULL OR o.key = ANY($2::text[])) ORDER BY i.ordinal`,
     [scopeKey, dreams.map(storedKey)]);
   for (const row of promoted.rows) {
@@ -79,6 +82,7 @@ export async function loadSlice(client: PoolClient, scopeKey: string, dreams: re
       sequence: Number(row.ordinal), phase: row.conclusion ? 'settled' : row.tries === 0 ? 'queued' : 'inflight', generation: 0, taskId, notBefore: 0, attempts: row.tries, ...concluded,
       occurrence: JSON.parse(row.key) as string, ...(row.retry_until === null ? {} : { retryUntil: Number(row.retry_until) }),
       ...(row.cancel_reason === null ? {} : { cancelReason: row.cancel_reason }) };
+    state.executions[taskId] = { input: row.input, submission: row.submission, started: row.started, ...(row.attempt ? { attempt: row.attempt } : {}) };
   }
   return { state, before: structuredClone({ routines: state.routines, occurrences: state.occurrences, intents: state.intents }) };
 }

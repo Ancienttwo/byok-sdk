@@ -44,6 +44,8 @@ appliesTo:
 
 **D6. K4 管队列。** K8 自己的 occurrence hook `bot-dream` 把 occurrence 记成待做梦，K8 的 sync 再决定跳过，或者把它提升进这个 Bot 的 FIFO。FIFO 位置、顶替和截止时间都由 K4 管。用户输入排在还没开始的做梦前面。正在跑的做梦不打断，用户输入最多等 `maxDurationMs`，默认 15 分钟。`dreams.open` 记下每个做梦 intent 的归属，所以它的终态到不了 Host intent handler。
 
+> 2026-11-17 补充（[#2334](https://github.com/Ancienttwo/byok-sdk/issues/2334)）：「还没开始」指设备还没认领。用户 Turn（非 `routine`、`bot_request` 来源）在 Bot 有已提交的做梦时冻结，等待时间是该做梦 offer 的 `maxDurationMs` 加平常的 5 分钟，没有已提交的做梦时仍是 5 分钟。已提交但没观察到认领的做梦，遇到同一 Bot 排队中或已冻结（`processing`）的用户 Turn 时，Host 请 SDK 只在无人认领时取消，取消和认领是同一步：取消成功则做梦以 `cancelled`、reason `user_input` 结束，reason 只读已存 attempt 上的取消原因；认领先到则做梦照常跑完。Turn 的 intent 结束后、下一次同步记下之前，它仍是 `processing`，这个窗口里未认领的做梦可能让给已经跑完的输入，代价只是这次做梦顺延到下一次，计入 `userInputCancels`，已认领的做梦不受影响。被让出的 occurrence 已结束，`since` 不推进，下一次 03:00 覆盖同一窗口。`userInputCancels` 记连续因用户输入让出的次数，其他结局清零，只展示不强制。已认领的做梦仍不打断。
+
 **D7. H 跑完整做梦（B4，#1516）。** H 通过 K8 package exports 使用同一份 `dream.ts` 规则，默认开启；每个 scope 的 Host config 可配置 `dreaming` 或用 `false` 关闭。H 在 scope 事务中记录 occurrence、决定 promotion 并持久化结果。成功终态属于 dream，不经过 Bot outcome parser；后续 sync 从 intent conclusion 关闭 dream，只有成功推进 mark。Host history 在事务外读取，缺结果等待、失败记 skip，不回退到本地 Turn。`dreams.open` 在结果同步前保留，因此 #1500 的 compaction veto 同样适用；H 仍不压缩 routine intents。H 和 L 共用 `userFirst` 及后台 intent 集合，用户 Turn 在入队事务内越过同 Agent 尚未提交的 routine、bot_request 和 dream intent；H 的 device slot reservation 不在这次范围内。
 
 ## 3. 影响

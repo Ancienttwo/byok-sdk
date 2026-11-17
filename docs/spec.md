@@ -4607,8 +4607,30 @@ memory.
 
 K8's occurrence hook `bot-dream` records the occurrence, and the K8 sync skips it
 or promotes it into the Bot's FIFO. K4 owns the FIFO position, supersede and
-deadline. User input goes ahead of a dream that has not started, and a running
-dream is not interrupted, so that input waits at most `maxDurationMs`.
+deadline. User input goes ahead of a dream that has not been claimed by its
+device, and a running dream is not interrupted, so that input waits at most
+`maxDurationMs` (#2334):
+
+- A Turn that is not autonomous (any source but `routine` and `bot_request`)
+  and freezes while its Bot has a submitted dream waits `maxDurationMs` of that
+  dream's offer plus the usual 5 minutes. Without a submitted dream it waits
+  the usual 5 minutes. The wait is frozen with the Turn's intent.
+- While a submitted dream has no observed claim and its Bot has a Turn that is
+  not autonomous and is queued or frozen (`processing`), the Host asks the SDK to cancel the dream task only if
+  no device has claimed it, in one step against the claim. If the cancel wins,
+  the dream's intent concludes `cancelled` and `snapshot().dreams` records
+  outcome `cancelled` with reason `user_input`, read from the cancellation that
+  the stored attempt carries. If the claim wins, the dream runs on and is not
+  interrupted. A Turn whose intent has concluded still reads `processing` until
+  the next sync records it, so in that window an unclaimed dream can yield to
+  input that has already finished. Its only cost is one dream deferred to the
+  next occurrence, counted in `userInputCancels`; claimed work is never
+  affected.
+- A yielded dream's occurrence is concluded. The next routine occurrence (the
+  next 03:00) dreams over the same window, because `since` is not advanced.
+- `userInputCancels` on the Bot's dream record counts the dreams in a row that
+  ended with reason `user_input`. Any other outcome clears it. It is visible
+  only: nothing enforces a limit on it.
 
 The hosted example runs the same dreaming rules through K8 package exports
 (#1516). Each scope's Host config controls `dreaming`, on by default. Its scope

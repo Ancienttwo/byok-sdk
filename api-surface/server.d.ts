@@ -243,6 +243,7 @@ export interface HostOptions {
     applyMessage?: (input: AgentMessageInput, transaction: MessageTransaction) => MessageDecision;
     applyOutcome?: (document: unknown, transaction: OutcomeTransaction) => void;
     admitSubmit?: (intent: Readonly<Intent>, state: Readonly<LedgerState>) => boolean;
+    yieldUnclaimed?: (state: Readonly<LedgerState>, intent: Readonly<Intent>) => string | undefined;
 }
 export declare class HostExecutionCore {
     readonly server: ExecutionServer;
@@ -964,7 +965,9 @@ export interface ByokServer {
         }): AsyncIterable<AgentMessageDraftEvent>;
         agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
         messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
-        cancel(taskId: string, reason?: string): Promise<void>;
+        cancel(taskId: string, reason?: string, options?: {
+            readonly ifUnclaimed?: true;
+        }): Promise<void>;
         abandon(taskId: string, cause: import('@byok-sdk/cloud').TaskAbandonCause): Promise<void>;
         approve(taskId: string, opts?: {
             approvalId?: string;

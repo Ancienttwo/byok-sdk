@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "3e1b53f2484280cd86a5be7c1220dc3004d10be3ccb5d143efb0679c29ef3664"
+    "snapshotSha256": "a0f0f6b0c46b1d451bacad3a4df6fdcfe31cfebc98a8a588591392a472afb691"
   },
   "configFields": {
     "status": "tracked",
@@ -1672,6 +1672,28 @@
       "items": [
         "behavior:claim-accepted-before-runtime-start"
       ]
+    },
+    {
+      "id": "task-cancel-if-unclaimed",
+      "impact": "additive",
+      "summary": "ByokCloud.cancelTask(tenant, taskId, reason?, options?) and ByokServer.tasks.cancel(taskId, reason?, options?) take an optional { ifUnclaimed: true }, carried to stores as TaskCancellationRequest.ifUnclaimed. The store decides it in the same transaction, row lock or critical section as task.claim: an attempt no device has claimed is cancelled exactly as without the option, and a claimed, unsettled attempt is returned unchanged, with no tombstone, no task.cancel and no host transition, so its run is never interrupted. A cancel taken first still refuses a later claim. A Host-implemented TaskCancellationStore must honor the field. No Host action is required otherwise.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2334",
+      "items": [
+        "export:@byok-sdk/cloud#TaskCancellationRequest"
+      ]
+    },
+    {
+      "id": "dream-yield-user-input",
+      "impact": "additive",
+      "summary": "K8 dreaming keeps user input ahead of a dream its device has not claimed (#2334). dreamYield(state, intentKey) returns 'user_input' for an open dream whose Bot has queued user input; a Host passes it as the K4 yieldUnclaimed option, which cancels the dream's task only if no device has claimed it. dreamHolds(state) gives each Bot's submitted dream maxDurationMs; SyncFacts.dreamHold lets a Turn frozen behind a submitted dream wait that long plus OFFER_WAIT_MS. DreamRecord.reason names its values, including 'user_input', and DreamBot.userInputCancels counts consecutive user_input cancels. A Host that builds SyncFacts or the K4 Host without the new optional members keeps the earlier behaviour.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2334",
+      "items": [
+        "export:@byok-sdk/bot-collaboration/host-kit#DreamBot",
+        "export:@byok-sdk/bot-collaboration/host-kit#DreamRecord",
+        "export:@byok-sdk/bot-collaboration/host-kit#dreamHolds",
+        "export:@byok-sdk/bot-collaboration/host-kit#dreamYield",
+        "export:@byok-sdk/bot-collaboration/rules#SyncFacts"
+      ]
     }
   ],
   "changes": [
@@ -1828,6 +1850,16 @@
       "entry": "host-ledger-format-api"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamBot",
+      "change": "changed",
+      "entry": "dream-yield-user-input"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamRecord",
+      "change": "changed",
+      "entry": "dream-yield-user-input"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION",
       "change": "changed",
       "entry": "host-ledger-format-api"
@@ -1848,6 +1880,16 @@
       "entry": "retire-compatibility-apis"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#dreamHolds",
+      "change": "added",
+      "entry": "dream-yield-user-input"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#dreamYield",
+      "change": "added",
+      "entry": "dream-yield-user-input"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
       "change": "removed",
       "entry": "retire-compatibility-apis"
@@ -1866,6 +1908,11 @@
       "item": "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds",
       "change": "added",
       "entry": "bot-delivery-supersession"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+      "change": "changed",
+      "entry": "dream-yield-user-input"
     },
     {
       "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_ARTIFACT",
@@ -2506,6 +2553,11 @@
       "item": "export:@byok-sdk/cloud#TaskAttemptStore",
       "change": "changed",
       "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskCancellationRequest",
+      "change": "changed",
+      "entry": "task-cancel-if-unclaimed"
     },
     {
       "item": "export:@byok-sdk/cloud#TaskSteerRefusalStore",
