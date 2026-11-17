@@ -27,6 +27,8 @@
 #
 # Ports are offset from the defaults (5433 not 5432, 9100 not 8333/9000) so a
 # developer's own Postgres or S3 server keeps working while this stack is up.
+# Both are published on 127.0.0.1 only: the weak credentials above must not be
+# reachable from the network the host is on.
 
 name: byok-dataplane-test
 
@@ -38,7 +40,7 @@ services:
       POSTGRES_PASSWORD: byok
       POSTGRES_DB: byok_test
     ports:
-      - '5433:5432'
+      - '127.0.0.1:5433:5432'
     # `-U byok -d byok_test` matters: bare `pg_isready` probes the `root`
     # user and reports healthy while the init script is still creating the
     # database, which is precisely the race `--wait` is supposed to remove.
@@ -86,7 +88,7 @@ services:
       AWS_ACCESS_KEY_ID: byokminio
       AWS_SECRET_ACCESS_KEY: byokminio
     ports:
-      - '9100:8333'
+      - '127.0.0.1:9100:8333'
     # `/healthz` is the S3 server's own route on the S3 port; `mini` brings the
     # S3 server up only after master, volume and filer report ready, so a 200
     # here means the whole stack behind it is serving.

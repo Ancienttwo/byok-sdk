@@ -1,5 +1,5 @@
-import type { ConnectionManager } from '../../daemon/connection-manager';
-import type { DaemonStatus } from '../../daemon/create-daemon';
+import type { ConnectionHalt, ConnectionManager, ConnectionState } from '../../daemon/connection-manager';
+import type { Daemon } from '../../daemon/create-daemon';
 import type { DaemonLifecycle } from '../../daemon/daemon-lifecycle';
 
 /**
@@ -11,34 +11,57 @@ import type { DaemonLifecycle } from '../../daemon/daemon-lifecycle';
 
 export const OPEN_LIFECYCLE: DaemonLifecycle = { phase: 'running', connection: 'open' };
 
-async function poll(check: () => boolean, halted: () => string | undefined, timeoutMs: number, what: string): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  while (!check()) {
-    const reason = halted();
-    if (reason !== undefined) throw new Error(`${what} halted: ${reason}`);
-    if (Date.now() >= deadline) throw new Error(`timed out after ${timeoutMs}ms waiting for ${what} to open`);
-    await new Promise((resolve) => setTimeout(resolve, 5));
+export interface OpenBarrier {
+  readonly onStateChange: (state: ConnectionState) => void;
+  readonly onHalted: (halt: ConnectionHalt) => void;
+  /** Resolves once the server has accepted this session's `conn.hello`. */
+  waitForOpen(connection: Pick<ConnectionManager, 'isOpen' | 'getHaltReason'>, timeoutMs?: number): Promise<void>;
+}
+
+/**
+ * Pass `onStateChange` and `onHalted` to the `ConnectionManager` it waits on.
+ * Event-driven because an outage session is open for only 1-2 ms, which a
+ * poll can miss every time (#2354).
+ */
+export function openBarrier(): OpenBarrier {
+  const waiters = new Set<(failure: Error | undefined) => void>();
+  const wake = (failure: Error | undefined): void => {
+    for (const waiter of [...waiters]) waiter(failure);
+  };
+  return {
+    onStateChange: (state) => {
+      if (state === 'open') wake(undefined);
+    },
+    onHalted: (halt) => wake(new Error(`the connection halted: ${halt.reason}`)),
+    waitForOpen: (connection, timeoutMs = 10_000) => {
+      if (connection.isOpen()) return Promise.resolve();
+      const reason = connection.getHaltReason();
+      if (reason !== undefined) return Promise.reject(new Error(`the connection halted: ${reason}`));
+      return new Promise<void>((resolve, reject) => {
+        const waiter = (failure: Error | undefined): void => {
+          clearTimeout(timer);
+          waiters.delete(waiter);
+          if (failure === undefined) resolve();
+          else reject(failure);
+        };
+        const timer = setTimeout(() => waiter(new Error(`timed out after ${timeoutMs}ms waiting for the connection to open`)), timeoutMs);
+        waiters.add(waiter);
+      });
+    },
+  };
+}
+
+/**
+ * Resolves once the lifecycle is `running` + `open`; a halt rejects with
+ * `DaemonHaltError`. Event-driven on `whenOpen()` because an outage session
+ * is open for only 1-2 ms, which a poll can miss every time (#2354).
+ */
+export async function waitForDaemonOpen(daemon: Pick<Daemon, 'whenOpen'>, timeoutMs = 10_000): Promise<void> {
+  const signal = AbortSignal.timeout(timeoutMs);
+  try {
+    await daemon.whenOpen({ signal });
+  } catch (error) {
+    if (signal.aborted && error === signal.reason) throw new Error(`timed out after ${timeoutMs}ms waiting for the daemon to open`);
+    throw error;
   }
-}
-
-/** Resolves once the server has accepted this session's `conn.hello`. */
-export function waitForOpen(connection: ConnectionManager, timeoutMs = 10_000): Promise<void> {
-  return poll(() => connection.isOpen(), () => connection.getHaltReason(), timeoutMs, 'the connection');
-}
-
-/** Resolves once `status().lifecycle` is `running` + `open`. */
-export function waitForDaemonOpen(daemon: { status(): Pick<DaemonStatus, 'lifecycle'> }, timeoutMs = 10_000): Promise<void> {
-  return poll(
-    () => {
-      const lifecycle = daemon.status().lifecycle;
-      return lifecycle.phase === 'running' && lifecycle.connection === 'open';
-    },
-    () => {
-      const lifecycle = daemon.status().lifecycle;
-      if (lifecycle.phase === 'halted') return lifecycle.reason;
-      return lifecycle.phase === 'crashed' ? 'crashed' : undefined;
-    },
-    timeoutMs,
-    'the daemon',
-  );
 }

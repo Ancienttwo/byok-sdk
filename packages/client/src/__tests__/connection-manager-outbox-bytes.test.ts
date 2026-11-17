@@ -9,7 +9,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager, MAX_OUTBOX_EPHEMERAL_BYTES, type OutboundSettlement } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { TestServer } from './fixtures/test-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 /** The outbound drain cuts each POST before its encoded body passes the server's request-body ceiling. */
 describe('drainOutbox chunks outbound sends by encoded bytes', () => {
@@ -30,14 +30,16 @@ describe('drainOutbox chunks outbound sends by encoded bytes', () => {
     const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
     const record = await auth.pair('pairing-code');
     const posts: Envelope[][] = [];
+    const opens = openBarrier();
     manager = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url, deviceId: record.deviceId, productId: 'outbox-bytes-test',
       capabilities: [], runtimes: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
       beforeOutboundPost: batch => { if (batch.every(e => e.type !== 'conn.hello')) posts.push([...batch]); },
       longPollRetryDelayMs: 10, longPollIdleDelayMs: 10,
     });
     await manager.start();
-    await waitForOpen(manager);
+    await opens.waitForOpen(manager);
     return { manager, posts };
   }
 
@@ -87,7 +89,9 @@ describe('the outbox drops its oldest ephemeral envelopes past its byte cap', ()
     const record = await auth.pair('pairing-code');
     const posted: Envelope[] = [];
     const dropped: Envelope[] = [];
+    const opens = openBarrier();
     manager = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url, deviceId: record.deviceId, productId: 'outbox-cap-test',
       capabilities: [], runtimes: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
       beforeOutboundPost: batch => { for (const e of batch) if (e.type !== 'conn.hello') posted.push(e); },
@@ -112,7 +116,7 @@ describe('the outbox drops its oldest ephemeral envelopes past its byte cap', ()
     expect(manager.outboxLength()).toBe(count - dropped.length + 1);
 
     await manager.start();
-    await waitForOpen(manager);
+    await opens.waitForOpen(manager);
     await vi.waitFor(() => expect(manager!.outboxLength()).toBe(0));
     const postedIds = posted.map(e => e.id);
     expect(new Set(postedIds).size).toBe(postedIds.length);

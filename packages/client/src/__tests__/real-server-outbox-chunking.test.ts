@@ -8,7 +8,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -92,7 +92,9 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
       return res;
     }) as typeof globalThis.fetch;
 
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: real.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -106,7 +108,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
     });
 
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
 
     const totalEnvelopes = MAX_MESSAGES_PER_BATCH + 44; // comfortably over the cap — forces >= 2 chunked POSTs
     const sentIds = new Set<string>();

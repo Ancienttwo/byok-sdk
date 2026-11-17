@@ -294,10 +294,11 @@ function parseRecordLine(line: string | undefined): DaemonRecord | undefined {
     case 'retention-sweep': {
       if (typeof raw.trigger !== 'string' || !['startup', 'periodic', 'pressure', 'home-lease'].includes(raw.trigger)
         || !['deleted', 'bytesReclaimed', 'failures', 'durationMs'].every(key => typeof raw[key] === 'number' && Number.isFinite(raw[key]) && (raw[key] as number) >= 0)
+        || !Number.isSafeInteger(raw.busyHomes) || (raw.busyHomes as number) < 0
         || typeof raw.truncated !== 'boolean' || raw.at !== raw.ts) return undefined;
       return { kind: 'retention-sweep', ts: raw.ts, trigger: raw.trigger as RetentionTrigger, at: raw.at,
         deleted: raw.deleted as number, bytesReclaimed: raw.bytesReclaimed as number, failures: raw.failures as number,
-        truncated: raw.truncated, durationMs: raw.durationMs as number };
+        truncated: raw.truncated, busyHomes: raw.busyHomes as number, durationMs: raw.durationMs as number };
     }
     case 'retention-failure': {
       if (typeof raw.trigger !== 'string' || !['startup', 'periodic', 'pressure', 'home-lease'].includes(raw.trigger)

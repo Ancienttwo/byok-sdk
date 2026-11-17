@@ -31,6 +31,12 @@ export interface SweepReport {
   readonly bytesReclaimed: number;
   readonly failures: number;
   readonly truncated: boolean;
+  /**
+   * How many distinct Agent homes this pass skipped at least once, across classes, because they were
+   * not idle: an execution lease held the home, or it held a commit copy. A count only; no home name
+   * or path is reported.
+   */
+  readonly busyHomes: number;
   readonly durationMs: number;
 }
 export interface SweepBudget {
@@ -40,6 +46,8 @@ export interface SweepBudget {
   remaining(): number;
   removed(bytes: number): void;
   truncate(): void;
+  /** Records that the sweep skipped Agent home `home` because it was not idle. */
+  busy(home: string): void;
   /** Reports an item the sweep keeps and must not remove, such as a held Grok login, as a failure of `classId`. */
   report(classId: RetentionClassId, code: string, path: string): void;
 }

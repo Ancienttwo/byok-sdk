@@ -8,7 +8,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 /**
  * #1118 (PR #1146 review P1): an outbox chunk may hold more envelopes than the
@@ -56,7 +56,9 @@ describe('a backlog larger than the rate burst still drains (real @byok-sdk/serv
       return res;
     }) as typeof globalThis.fetch;
 
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: real.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -69,7 +71,7 @@ describe('a backlog larger than the rate burst still drains (real @byok-sdk/serv
       longPollIdleDelayMs: 20,
     });
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
 
     const total = MAX_MESSAGES_PER_BATCH + 44;
     const sent = new Set<string>();

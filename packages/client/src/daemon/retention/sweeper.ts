@@ -70,6 +70,7 @@ export class RetentionSweeper {
   private async pass(trigger: RetentionTrigger): Promise<SweepReport> {
     const started = performance.now(), now = this.clock();
     let deleted = 0, bytesReclaimed = 0, failures = 0, truncated = false, inspections = 0;
+    const busyHomes = new Set<string>();
     const passInspections = registryPassInspections.get(this.options.registry) ?? RETENTION_LIMITS.passInspections;
     const budget: SweepBudget = {
       trigger, now,
@@ -81,6 +82,7 @@ export class RetentionSweeper {
       remaining: () => this.options.config.maxDeletionsPerPass - deleted,
       removed: bytes => { deleted++; bytesReclaimed += bytes; },
       truncate: () => { truncated = true; },
+      busy: home => { busyHomes.add(home); },
       report: (classId, code, file) => { failures++; this.options.onFailure?.(trigger, classId, code, undefined, file); },
     };
     const { registry, pressure } = this.options;
@@ -128,7 +130,7 @@ export class RetentionSweeper {
     }
     bytesReclaimed += runtimeReclaimedBytes.get(budget) ?? 0;
     runtimeReclaimedBytes.delete(budget);
-    const report: SweepReport = { trigger, at: now.toISOString(), deleted, bytesReclaimed, failures, truncated, durationMs: performance.now() - started };
+    const report: SweepReport = { trigger, at: now.toISOString(), deleted, bytesReclaimed, failures, truncated, busyHomes: busyHomes.size, durationMs: performance.now() - started };
     this.status = { measuredAt, usedBytes: classes.reduce((sum, entry) => sum + entry.bytes, 0), freeBytes, classes, lastSweep: report };
     this.options.onSweep?.(report);
     if (startupFailure !== undefined) throw startupFailure;

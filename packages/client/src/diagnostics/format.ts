@@ -111,7 +111,7 @@ export function formatDaemonEventLine(event: DaemonEvent): string {
   switch (event.kind) {
     case 'outbound-rejected':
       return `${prefix} outbound-rejected envelopeId=${event.envelopeId} type=${event.type} reason=${event.reason} terminal=${event.terminal}${event.taskId === undefined ? '' : ` taskId=${quote(event.taskId)}`}`;
-    case 'retention-sweep': return `${prefix} retention-sweep trigger=${event.trigger} deleted=${event.deleted} bytesReclaimed=${event.bytesReclaimed} failures=${event.failures} truncated=${event.truncated}`;
+    case 'retention-sweep': return `${prefix} retention-sweep trigger=${event.trigger} deleted=${event.deleted} bytesReclaimed=${event.bytesReclaimed} failures=${event.failures} truncated=${event.truncated} busyHomes=${event.busyHomes}`;
     case 'retention-failure': return `${prefix} retention-failure trigger=${event.trigger} class=${event.classId} count=${event.count} code=${event.code}${event.taskId === undefined ? '' : ` taskId=${quote(event.taskId)}`}${event.path === undefined ? '' : ` path=${quote(event.path)}`}`;
     case 'offered':
       return `${prefix} offered taskId=${quote(event.taskId)}${event.runtime ? ` runtime=${event.runtime}` : ''}`;
@@ -467,7 +467,7 @@ export function formatLiveStatusLines(live: ControlStatusResult): string[] {
     lines.push(`live-storage: used=${storage.usedBytes} free=${storage.freeBytes ?? 'unknown'} measuredAt=${storage.measuredAt ?? 'unknown'}`);
     if (storage.budget) lines.push(`live-storage-budget: state=${storage.budget.pressureState} bytes=${storage.budget.budgetBytes}`);
     for (const entry of storage.classes) lines.push(`live-storage-class: ${entry.classId} bytes=${entry.bytes} entries=${entry.entries} protected=${entry.protected} measured=${entry.measured} truncated=${entry.truncated}`);
-    if (storage.lastSweep) lines.push(`live-storage-sweep: trigger=${storage.lastSweep.trigger} deleted=${storage.lastSweep.deleted} failures=${storage.lastSweep.failures} truncated=${storage.lastSweep.truncated}`);
+    if (storage.lastSweep) lines.push(`live-storage-sweep: trigger=${storage.lastSweep.trigger} deleted=${storage.lastSweep.deleted} failures=${storage.lastSweep.failures} truncated=${storage.lastSweep.truncated} busyHomes=${storage.lastSweep.busyHomes}`);
   }
   return lines;
 }

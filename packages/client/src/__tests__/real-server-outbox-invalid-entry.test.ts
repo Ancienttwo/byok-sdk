@@ -8,7 +8,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager, type OutboundSettlement } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 /**
  * #1121: one envelope the server cannot decode is answered `rejected:
@@ -46,7 +46,9 @@ describe('an invalid envelope does not hold the report queue (real @byok-sdk/ser
     }) as typeof globalThis.fetch;
 
     const settled = new Map<string, OutboundSettlement>();
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: real.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -60,7 +62,7 @@ describe('an invalid envelope does not hold the report queue (real @byok-sdk/ser
       longPollIdleDelayMs: 20,
     });
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
 
     const before = createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'entry-task-1' });
     // A payload this wire version cannot decode (task_id must be a string).
