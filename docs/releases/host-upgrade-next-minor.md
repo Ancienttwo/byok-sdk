@@ -1207,15 +1207,19 @@ for that execution, and blocks later Grok starts. The user moves the file back
 to their Grok home or deletes it and logs in again. The SDK never restores or
 deletes it. Source: [#2258]; entry `grok-agent-user-context`.
 
-### Bun on Windows keeps SQLite files open after close
+### Bun on Windows: compile with Bun 1.4.4 or newer
 
-A Bun-compiled daemon or Host on Windows keeps a SQLite database's files open
-after `close()` until garbage collection, for every connection on which it
-prepared a statement. Node releases them at `close()`. Deleting or renaming a
-store that the same process has just closed can fail with `EBUSY`; a separate
-process after the daemon has exited is not affected. The journal worker's own
-connection is released when its thread exits. Tracked in [#2347], with no fix
-in this release.
+Under Bun 1.4.2, a Bun-compiled daemon or Host kept a SQLite database's files
+open after `close()` until garbage collection, for every connection on which it
+prepared a statement. On Windows, deleting or renaming those files in the same
+process then failed with `EBUSY`: journal quarantine, the retention sweep's Pi
+replica reset and lock removal, `inspectDaemonStores`, doctor's journal check,
+and a Host that deletes or moves a store it has just closed. Bun 1.4.4 releases
+the files at `close()`, and this repository now builds and tests with it.
+Compile with Bun 1.4.4 or newer, and without Bun's
+`--disallow-code-generation-from-strings=strict`: the journal starts its worker
+from inline source, which that mode refuses. Node Hosts are not affected. No manifest
+entry: the SDK does not ship a Bun runtime. Source: [#2347].
 
 ### Integration and adoption evidence
 

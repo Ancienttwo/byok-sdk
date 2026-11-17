@@ -37,6 +37,26 @@ test('version-only changes select packaging; ordinary dependency upgrades qualif
   f.lock.packages.x = ['x@2.0.0']; f.write('bun.lock', f.lock);
   assert.ok(selectImpact(['bun.lock'], f).dirs.includes('packages/client'));
 });
+test('#2347: the Bun pin admits one exact bun@X.Y.Z alone and selects every routine family', t => {
+  const f = fixture(t), routine = knownFamilies.filter(id => id !== 'build-test' && id !== 'macos-client').sort();
+  const manifest = { ...f.rootManifest, packageManager: 'bun@1.4.2' };
+  f.write('package.json', manifest); commit(f, 'bun pin');
+  f.write('package.json', { ...manifest, packageManager: 'bun@1.4.4' });
+  assert.deepEqual(selectImpact(['package.json'], f), { dirs: [], files: ['package.json'], families: routine, reason: 'impacted' });
+  const scripts = { 'test:scripts': manifest.scripts['test:scripts'] + ' scripts/ci/new.test.mjs' };
+  for (const changed of [
+    { ...manifest, packageManager: 'bun@1.4.4', scripts },
+    { ...manifest, packageManager: 'bun@^1.4.4' },
+    { ...manifest, packageManager: 'bun@1.4.4+sha512.abc' },
+    { ...manifest, packageManager: 'npm@11.0.0' },
+    { ...manifest, packageManager: ['bun@1.4.4'] },
+    { ...manifest, packageManager: [['bun@1.4.4']] },
+    { scripts: manifest.scripts },
+  ]) {
+    f.write('package.json', changed);
+    assert.throws(() => selectImpact(['package.json'], f), /changes? (?:only packageManager|more than the reviewed fields)/, JSON.stringify(changed));
+  }
+});
 test('root test command permits only existing additive CI tests, retaining command and old tests', t => {
   const f = fixture(t), old = f.rootManifest.scripts['test:scripts'];
   f.write('package.json', { scripts: { 'test:scripts': old + ' scripts/ci/new.test.mjs' } });
