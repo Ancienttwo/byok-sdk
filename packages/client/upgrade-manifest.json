@@ -1748,9 +1748,9 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
       "items": [
         "behavior:client-journal-refuses-host-objects"
-        ]
-      },
-      {
+      ]
+    },
+    {
       "id": "agent-home-lease-writer-liveness",
       "impact": "breaking",
       "summary": "@byok-sdk/client Agent-home lease markers record their writer (pid, start time, machine digest, boot, Linux PID namespace). A marker of the same owner is reclaimed only when its writer is proved gone and only by a caller that holds the owner's daemon lease and has reconciled its owned processes (a started daemon, the doctor operator actions, or a Host passing AgentHomeLeaseManagerOptions.reclaimsResidue). A marker from an earlier release is never reclaimed automatically, and exportAgentMemory or publishReliableAgentEgress on an unstarted daemon refuses a dead daemon's marker. Both throw the new AgentHomeLeaseHeldError (an AgentHomeBusyError) whose blockedBy names the case; the offer decline stays agent_home_writer_busy and retryable.",
@@ -1768,6 +1768,16 @@
         "export:@byok-sdk/client#AgentHomeLeaseHeldError",
         "export:@byok-sdk/client#AgentHomeLeaseBlock",
         "export:@byok-sdk/client#AgentHomeLeaseManager"
+      ]
+    },
+    {
+      "id": "device-operator-agent-lease-held",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DeviceOperatorErrorCode gains 'agent-lease-held', and DeviceOperatorError gains an optional blockedBy (AgentHomeLeaseBlock). An operator action refused by an Agent-home lease marker now reports agent-lease-held with why the marker blocks and what clears it in the message, where it reported agent-busy. agent-busy remains for a home another operation holds. Add the code to exhaustive switches over DeviceOperatorErrorCode.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-home-lease-markers-record-their-writer-2348",
+      "items": [
+        "export:@byok-sdk/client#DeviceOperatorError",
+        "export:@byok-sdk/client#DeviceOperatorErrorCode"
       ]
     }
   ],
