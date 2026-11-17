@@ -1099,12 +1099,21 @@ can no longer drift apart. No Host change.
 
 ### Retention sweeps count busy Agent homes (#2349)
 
-Sources: [#2349]. Manifest entries: `retention-sweep-busy-homes`, `retention-sweep-audit-lines-without-busy-homes-skipped`.
+Sources: [#2349]. Manifest entries: `retention-sweep-busy-homes`, `retention-sweep-audit-lines-without-busy-homes-skipped`, `agent-home-active-homes-includes-base-lease-release`.
 
 `SweepReport.busyHomes` counts the distinct Agent homes a retention pass skipped
 because they were not idle. `byok-agent status` and `byok-agent tasks` skip
 `retention-sweep` lines an older daemon wrote to `audit.jsonl`, because they lack
 `busyHomes`; the file stays on disk and every other line still renders.
+
+`status().agentHomeExecution.activeHomes` now counts a home until its base lease
+is released, not only while it holds an execution lease. `activeAttempts` still
+drops to 0 as soon as the last Attempt releases. A Host that waits for a home to
+be free for maintenance waits for `activeHomes === 0` instead of
+`activeAttempts === 0`; in between, a retention pass skips the home and counts it
+in `busyHomes`. A home is free only after its base lease released successfully:
+a release that fails also drops the home from `activeHomes`, its error reaches the
+caller that released, and a lease marker it leaves still keeps maintenance out.
 
 ### Local task journal commits on a worker thread (#2332)
 
