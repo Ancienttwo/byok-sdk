@@ -7,6 +7,7 @@ import {
   type AgentExecutionInput,
   type SealedAgentExecutionInput,
 } from '../agent-execution.js';
+import { ByokCloudError } from '../errors.js';
 import { refuseSealedFields, type EnqueuePaths } from './enqueue.js';
 
 interface Dependencies {
@@ -47,7 +48,7 @@ export function createAgentExecutionsApi({
     // A task that seals its message needs `consumeSealed` instead; agentMessageOfferWriter checks it.
     const sealsMessage = requested.sealing?.categories.includes('agent-message') === true;
     if (requested.messageEgress !== undefined && !sealsMessage && typeof options.agentMessage?.consume !== 'function') {
-      throw new Error('Agent execution with messageEgress requires a registered Agent message consumer.');
+      throw new ByokCloudError('agent_message_consumer_missing', 'Agent execution with messageEgress requires a registered Agent message consumer.');
     }
     const beforeMailbox = agentMessageOfferWriter(deviceId, requested, validated.agentMessageContext);
     const payload = await resolveOfferPayload(tenant, deviceId, requested, validated.taskId);

@@ -1684,6 +1684,16 @@
         "export:@byok-sdk/bot-collaboration/host-kit#dreamYield",
         "export:@byok-sdk/bot-collaboration/rules#SyncFacts"
       ]
+    },
+    {
+      "id": "cloud-agent-message-consumer-missing-code",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud CLOUD_ERROR_CODES adds agent_message_consumer_missing. A plaintext submitAgentExecution with messageEgress on a cloud without agentMessage.consume throws ByokCloudError with that code instead of a plain Error; the message and the refusal before any write are unchanged. Match the code, and add it to exhaustive switches over CloudErrorCode.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#missing-agent-message-consumer-is-a-typed-cloud-error",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+        "export:@byok-sdk/cloud#CloudErrorCode"
+      ]
     }
   ],
   "changes": [

@@ -230,6 +230,18 @@ Sources: [#2297]. Manifest entries: `cloud-unused-exports-removed`, `cloud-host-
   types. The `task_agentless_retired` fence still rejects new offers for
   retired ids with `agent_task_already_exists`.
 
+### Missing Agent message consumer is a typed cloud error
+
+Manifest entries: `cloud-agent-message-consumer-missing-code`.
+
+A plaintext `submitAgentExecution` with `messageEgress` on a cloud without
+`agentMessage.consume` now throws `ByokCloudError` with code
+`agent_message_consumer_missing`, in place of a plain `Error`. The message text
+and the timing are the same: the refusal still comes before any attempt,
+receipt or mailbox write. Match the code instead of the message, and add the
+code to any exhaustive switch over `CloudErrorCode`. The sealed lane keeps
+`agent_message_sealed_consumer_missing`.
+
 ### Undici in the Host dependency tree
 
 Keep a Host override to **8.12.4**. Pi's exact dependency can still install a
