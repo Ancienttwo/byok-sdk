@@ -28,6 +28,7 @@ import { comparablePath } from '../../util/comparable-path.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
+import { agentPersona } from '../agent-persona.js';
 import { DSH_RUNTIME_CAPABILITIES } from './dsh-capabilities.js';
 import { assertDshModelSelection, assertDshSandboxMode, dshAgentsHome, dshEnvironment, dshPatch, dshRoute } from './dsh-profile.js';
 import { DSH_VERSION_POLICY, dshVersionToken } from './dsh-version.js';
@@ -229,6 +230,12 @@ export class DshAdapter implements RuntimeAdapter {
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('dsh manifest has no sealed cwd');
     const resume = input.manifest.sessionRef;
+    // A writer runs in the Agent home, which dsh loads as the project's AGENTS.md. A reader runs in `.byok/runs/<task>`,
+    // and dsh climbs to the home only when it has `.git`, where that reader sees the persona twice. OAR re-applies the
+    // append on every resume and the section is gone when it is omitted, so the reader's persona goes in every open.
+    const persona = input.manifest.homeAccess === 'memory-reader'
+      ? await agentPersona('dsh', input.manifest, { reappliesOnResume: true })
+      : undefined;
     const model = `${dshRoute(this.options.model)}/${this.options.model.model}`;
     const session = new DshSession(
       input.scratch,
@@ -259,6 +266,7 @@ export class DshAdapter implements RuntimeAdapter {
           launch: { directory: input.scratch.sdkDir, patches: [patch], env },
           retainedBytes: this.maxRetainedBytes,
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
+          ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
           ...(resume === undefined ? {} : { resume }),
         },
         {

@@ -9,8 +9,9 @@ import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../t
  * The adapter reads each assistant message once it is committed, so there is no
  * draft. dsh's only pre-execution ask is a sandbox escalation, so there is no
  * `auto` gate. The SDK-owned `DSH_HOME` and an empty `DSH_AGENTS_HOME` keep user
- * instructions, skills, the persona and MCP servers out; the acp profile always persists
- * sessions, which resume needs.
+ * instructions, skills, the user's `personaPrefix` and MCP servers out; the Agent's
+ * own persona (its home's `AGENTS.md`) is task input, not a user source. The acp
+ * profile always persists sessions, which resume needs.
  */
 export const DSH_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   steer: true,

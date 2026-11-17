@@ -865,8 +865,21 @@ deadline, can see an `initialize` take up to 60 seconds.
 - A tool call that ends after its turn no longer marks an OAR session running.
   The SDK does not use OAR's status fold, so turn-end detection is unchanged.
 - dsh now accepts `name`, `disallowedTools`, `systemPrompt` and
-  `appendSystemPrompt`. The SDK passes none of them and its dsh capabilities
-  are unchanged. [#2363] tracks whether a Host gets them.
+  `appendSystemPrompt`. The SDK passes only `appendSystemPrompt`, below; its
+  dsh capabilities are unchanged.
+
+#### dsh memory readers get the Agent persona (#2363)
+
+A dsh `memory-reader` Agent task now gets its Agent home's `AGENTS.md` as an
+appended system prompt section, on a new session and again on every resume,
+as agy and OpenCode readers do. A writer already reads that file as dsh
+project instructions, so it gets nothing appended. If the Agent home has a
+`.git` directory, dsh also finds the home from the reader's run directory and
+the reader sees the persona twice, as an agy reader does. The persona must be
+a regular UTF-8 file of at most 64 KiB; a reader whose `AGENTS.md` is not
+fails to start, non-retryable. The SDK does not pass `name`,
+`disallowedTools` or `systemPrompt`: no Host input maps to them. No Host
+action and no manifest entry. Source: [#2363].
 
 ### Blocked Turn projection ids (#2245)
 

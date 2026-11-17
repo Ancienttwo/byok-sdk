@@ -66,6 +66,8 @@ export declare function dshSession(
     launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> };
     /** OAR SessionOptions.retainedBytes: past it the kernel elides the oldest native payloads. */
     retainedBytes: number;
+    /** OAR SessionOptions.appendSystemPrompt: one literal section after dsh's persona suffix, re-applied on every resume. */
+    appendSystemPrompt?: string;
   },
   hooks?: {
     onReady?: (sessionId: string) => void;
