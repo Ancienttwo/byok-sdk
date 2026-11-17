@@ -3,8 +3,8 @@ import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { AgentRefSchema, type AgentRef } from '@byok-sdk/protocol';
 import {
-  AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeLeaseManager, AgentHomeManager,
-  agentHomeLeaseGuidance, stableAgentHomeOwnerId, type AgentHomeLeaseBlock,
+  AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeLeaseManager, AgentHomeLeaseMarkerMismatchError, AgentHomeManager,
+  agentHomeLeaseGuidance, releaseAgentHomeLeaseMarkers, stableAgentHomeOwnerId, type AgentHomeLeaseBlock, type AgentHomeLeaseMarkerName,
 } from '../agent-home.js';
 import { connectControlClient } from '../daemon/control-client.js';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner.js';
@@ -64,6 +64,25 @@ export interface ArchiveAgentTerminalMessagesInput extends ConfirmDeviceMaintena
   /** Absolute NEW directory in an existing parent; contains sensitive audit bodies. */
   archiveDirectory: string;
 }
+export interface ReleaseAgentHomeLeasesInput extends ConfirmDeviceMaintenanceInput {
+  /**
+   * A marker `byok-agent doctor` lists, removed whichever owner wrote it:
+   * its `markerPath` and the `ownerId` it records (`null` for a corrupt
+   * marker). Name one only once the machine, container or store that wrote
+   * it no longer writes to this `agentHome.hostStorageRoot`. A marker whose
+   * writer is proved running is never removed.
+   */
+  marker?: AgentHomeLeaseMarkerName;
+}
+export interface AgentHomeLeasesReleaseResult {
+  action: 'release-agent-home-leases'; scope: 'device';
+  /** This store's markers removed: their writer is proved gone, or they record none. */
+  released: number;
+  namedRemoved: boolean;
+  removedTemps: number;
+  /** Markers left in place because they cannot be proved free; `byok-agent doctor` lists them. */
+  kept: { own: number; foreignOwner: number; corrupt: number };
+}
 export type AgentTerminalMessagesArchiveResult = {
   action: 'archive-terminal-messages'; scope: 'agent';
 } & ({ status: 'not-needed' } | { status: 'archived'; archivedRecords: number; archiveFileName: string });
@@ -75,11 +94,12 @@ function closedError(error: unknown): DeviceOperatorError {
   if (error instanceof DeviceOperatorError) return error;
   if (error instanceof DaemonOwnerActiveError) return new DeviceOperatorError('store-busy');
   if (error instanceof AgentHomeLeaseHeldError) return new DeviceOperatorError('agent-lease-held', error.blockedBy);
+  if (error instanceof AgentHomeLeaseMarkerMismatchError) return new DeviceOperatorError('target-mismatch');
   if (error instanceof AgentHomeBusyError) return new DeviceOperatorError('agent-busy');
   if (error instanceof OwnedProcessResidueError) return new DeviceOperatorError('owned-process-residue');
   return new DeviceOperatorError('operation-failed');
 }
-async function requireOffline(config: DaemonConfig, storeDir: string): Promise<void> {
+async function requireOffline(config: Pick<DaemonConfig, 'productId'>, storeDir: string): Promise<void> {
   const control = await connectControlClient({ productId: config.productId, storeDir });
   if (control.ok) {
     control.client.close();
@@ -193,5 +213,51 @@ export async function archiveAgentTerminalMessages(
           archivedRecords, archiveFileName: path.basename(archivePath) };
       } finally { await binding.lease.release(); }
     } finally { await owner.release(); }
+  } catch (error) { throw closedError(error); }
+}
+
+/**
+ * {@link releaseAgentHomeLeases} without the closed error codes: a refusal is
+ * thrown as is and may name a path, for a local caller such as uninstall.
+ *
+ * @internal
+ */
+export async function releaseStoreAgentHomeLeases(
+  config: Pick<DaemonConfig, 'productId' | 'storeDir'>, hostStorageRoot: string, marker?: AgentHomeLeaseMarkerName,
+): Promise<AgentHomeLeasesReleaseResult> {
+  const storeDir = DeviceStore.resolveDir(config.productId, config.storeDir);
+  await requireOffline(config, storeDir);
+  const owner = await acquireDaemonOwner(storeDir, 'doctor');
+  try {
+    // Removing this owner's markers is the reclaim a started daemon does, so
+    // its runtime processes must be proved gone first (#393).
+    await new OwnedProcessLedger(storeDir).reconcile();
+    const result = await releaseAgentHomeLeaseMarkers(hostStorageRoot, stableAgentHomeOwnerId(storeDir, config.productId), marker);
+    const kept = (own: boolean, corrupt: boolean) => result.kept.filter((entry) => entry.own === own && (entry.state === 'corrupt') === corrupt).length;
+    return { action: 'release-agent-home-leases', scope: 'device', released: result.released, namedRemoved: result.namedRemoved,
+      removedTemps: result.removedTemps,
+      kept: { own: kept(true, false), foreignOwner: kept(false, false), corrupt: kept(false, true) } };
+  } finally { await owner.release(); }
+}
+
+/**
+ * Release this store's Agent-home lease markers, and a `marker` the operator
+ * names, so other stores sharing `agentHome.hostStorageRoot` can use those
+ * homes (#2333). Run it after the daemon exits and before a store is deleted;
+ * service uninstall runs it itself. It refuses, removing nothing, while a
+ * writer of this store runs or while the named marker's writer is proved
+ * running; a marker it cannot prove free is kept and counted.
+ */
+export async function releaseAgentHomeLeases(
+  config: DaemonConfig, input: ReleaseAgentHomeLeasesInput,
+): Promise<AgentHomeLeasesReleaseResult> {
+  requireConfirmation(input);
+  const marker = input.marker;
+  if (!config.agentHome || (marker !== undefined && (typeof marker?.markerPath !== 'string' || !path.isAbsolute(marker.markerPath)
+    || (marker.ownerId !== null && typeof marker.ownerId !== 'string')))) {
+    throw new DeviceOperatorError('invalid-input');
+  }
+  try {
+    return await releaseStoreAgentHomeLeases(config, config.agentHome.hostStorageRoot, marker);
   } catch (error) { throw closedError(error); }
 }

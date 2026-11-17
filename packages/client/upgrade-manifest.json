@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "161bae48e592440bb4703199522ca1483b076d0e7aba0f0b361c21ae14bca83a"
+    "snapshotSha256": "0373f43b43991c2cc371c4b2caace62f141be775eab65a6aaa9a1590d1d0d6b1"
   },
   "configFields": {
     "status": "tracked",
@@ -1797,6 +1797,42 @@
       "items": [
         "behavior:client-journal-macos-fullfsync"
       ]
+    },
+    {
+      "id": "agent-home-lease-release",
+      "impact": "additive",
+      "summary": "@byok-sdk/client adds releaseAgentHomeLeases(config, { confirmed: true, marker? }), an offline operator action that releases this store's Agent-home lease markers whose writer is proved gone or that record none and lease temp files no writer can still use, and returns how many markers it kept because they cannot be proved free (this store's from another machine, container or an unverifiable writer, another owner's, corrupt). It refuses, removing nothing, while a writer of this store runs or while the named marker's writer is proved running. marker names a kept marker to remove once the machine, container or store that wrote it no longer uses agentHome.hostStorageRoot; a marker whose writer is proved running is never removed. An acquire refused by another owner's marker throws AgentHomeForeignLeaseError (an AgentHomeBusyError) naming that owner's ownerId; the offer decline stays agent_home_writer_busy and its reason keeps the ownerId without the paths. A named marker that is absent or records another owner is AgentHomeLeaseMarkerMismatchError (DeviceOperatorError target-mismatch). DiagnosticsSnapshot and the support bundle gain agentHomeLeases counts; byok-agent doctor counts this store's markers whose writer is proved gone in one line and lists every other marker with its path, owner, blockedBy and the step that clears it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#releasing-a-retired-stores-agent-home-lease-markers-2333",
+      "items": [
+        "export:@byok-sdk/client#releaseAgentHomeLeases",
+        "export:@byok-sdk/client#ReleaseAgentHomeLeasesInput",
+        "export:@byok-sdk/client#AgentHomeLeasesReleaseResult",
+        "export:@byok-sdk/client#AgentHomeLeaseMarkerName",
+        "export:@byok-sdk/client#AgentHomeForeignLeaseError",
+        "export:@byok-sdk/client#AgentHomeLeaseMarkerMismatchError",
+        "export:@byok-sdk/client#ServiceUninstallResult"
+      ]
+    },
+    {
+      "id": "service-installation-release-store-leases",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client ServiceInstallationOptions gains a required releaseStoreLeases: a function that releases the Agent-home lease markers of the stores the installation serves and returns the kept counts (releaseAgentHomeLeases's result fits), or 'no-agent-home' when its daemon has no agentHome. ServiceInstallation.uninstall() now resolves to ServiceUninstallResult instead of void. ServiceInstallationErrorCode gains agent_home_lease_held. agentServiceInstallation passes the daemon's own release when config.agentHome is set (AgentServiceInstallationInput.config now reads agentHome). A Host that builds ServiceInstallationOptions itself adds the field, and adds agent_home_lease_held to exhaustive switches over ServiceInstallationErrorCode.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#releasing-a-retired-stores-agent-home-lease-markers-2333",
+      "items": [
+        "export:@byok-sdk/client#ServiceInstallationOptions",
+        "export:@byok-sdk/client#ServiceInstallationErrorCode",
+        "export:@byok-sdk/client#AgentServiceInstallationInput",
+        "export:@byok-sdk/client#ServiceInstallation"
+      ]
+    },
+    {
+      "id": "service-uninstall-releases-agent-home-leases",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client ServiceInstallation.uninstall() and byok-agent uninstall (with or without a payload install) release the store's Agent-home lease markers once the service is stopped and before anything is removed. Markers no running writer holds are released; markers that cannot be proved free stay and are counted in keptAgentHomeLeases (byok-agent uninstall prints the count; byok-agent doctor lists them). While a writer of the store still runs, uninstall throws agent_home_lease_held and removes nothing, leaving the stopped service able to start again; end that process and retry. Before, uninstall left every marker, which blocked other stores sharing agentHome.hostStorageRoot. On Windows, the uninstall's stop treats a service that is already stopped (1062) as stopped, so an uninstall retried after a refusal completes.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#releasing-a-retired-stores-agent-home-lease-markers-2333",
+      "items": [
+        "behavior:service-uninstall-releases-agent-home-leases"
+      ]
     }
   ],
   "changes": [
@@ -2038,6 +2074,11 @@
       "entry": "remove-egress-drop-receipts"
     },
     {
+      "item": "export:@byok-sdk/client#AgentHomeForeignLeaseError",
+      "change": "added",
+      "entry": "agent-home-lease-release"
+    },
+    {
       "item": "export:@byok-sdk/client#AgentHomeLeaseBlock",
       "change": "added",
       "entry": "agent-home-lease-held-error"
@@ -2053,6 +2094,21 @@
       "entry": "agent-home-lease-held-error"
     },
     {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseMarkerMismatchError",
+      "change": "added",
+      "entry": "agent-home-lease-release"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseMarkerName",
+      "change": "added",
+      "entry": "agent-home-lease-release"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeLeasesReleaseResult",
+      "change": "added",
+      "entry": "agent-home-lease-release"
+    },
+    {
       "item": "export:@byok-sdk/client#AgentHomeProjectionFunction",
       "change": "removed",
       "entry": "remove-unused-client-aliases"
@@ -2061,6 +2117,11 @@
       "item": "export:@byok-sdk/client#AgentMemoryOutboxVersionUnsupportedError",
       "change": "added",
       "entry": "agent-memory-outbox-version-error"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentServiceInstallationInput",
+      "change": "changed",
+      "entry": "service-installation-release-store-leases"
     },
     {
       "item": "export:@byok-sdk/client#AgentSessionHandoffStore",
@@ -2223,6 +2284,11 @@
       "entry": "wire-v7-client-pairing-errors"
     },
     {
+      "item": "export:@byok-sdk/client#ReleaseAgentHomeLeasesInput",
+      "change": "added",
+      "entry": "agent-home-lease-release"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeDetectResult",
       "change": "changed",
       "entry": "runtime-version-verdict-only"
@@ -2251,6 +2317,26 @@
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallation",
+      "change": "changed",
+      "entry": "service-installation-release-store-leases"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationErrorCode",
+      "change": "changed",
+      "entry": "service-installation-release-store-leases"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceInstallationOptions",
+      "change": "changed",
+      "entry": "service-installation-release-store-leases"
+    },
+    {
+      "item": "export:@byok-sdk/client#ServiceUninstallResult",
+      "change": "added",
+      "entry": "agent-home-lease-release"
     },
     {
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournalOptions",
@@ -2356,6 +2442,11 @@
       "item": "export:@byok-sdk/client#openDaemonLog",
       "change": "removed",
       "entry": "remove-standalone-daemon-log"
+    },
+    {
+      "item": "export:@byok-sdk/client#releaseAgentHomeLeases",
+      "change": "added",
+      "entry": "agent-home-lease-release"
     },
     {
       "item": "export:@byok-sdk/client#resolveStorageConfig",

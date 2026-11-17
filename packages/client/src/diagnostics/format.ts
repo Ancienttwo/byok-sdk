@@ -3,6 +3,7 @@ import type { DaemonBranding, DaemonEvent, DaemonTaskInfo, LocalAgentReleaseIden
 import { parseDaemonLifecycle, type DaemonHaltReason, type DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
 import type { ControlStatusResult, PendingApproval } from '../daemon/control-protocol.js';
 import type { DoctorRuntimeEnvironment } from './diagnostics.js';
+import type { AgentHomeLeaseScan } from '../agent-home.js';
 import type { ServiceEnvironmentStatus } from '../login-shell-environment.js';
 import type { McpToolsetReloadReceipt, McpToolsetStatus } from '../types.js';
 import type { RuntimeObservation } from '../runtime-detection.js';
@@ -526,4 +527,36 @@ export function formatApprovalsListLines(approvals: readonly PendingApproval[], 
     const ageMs = nowMs - Date.parse(approval.createdAt);
     return `${approval.approvalId} taskId=${quote(approval.taskId)} age=${formatAge(ageMs)} summary=${quote(summaryExcerpt(approval.summary))}`;
   });
+}
+
+/**
+ * `doctor`'s Agent-home lease lines (#2333): every marker that blocks a home,
+ * with its path, owner and why, and the step that clears it. Local only: the
+ * snapshot keeps counts.
+ */
+export function formatAgentHomeLeaseLines(scan: AgentHomeLeaseScan): string[] {
+  const own = scan.markers.filter((marker) => marker.own);
+  const gone = own.filter((marker) => marker.state === 'reclaimable');
+  const legacy = own.filter((marker) => marker.state === 'legacy-marker');
+  const lines = [`agent-home-leases: ${scan.markers.length}${scan.truncated ? '+' : ''} markers, own=${own.length} ownReclaimable=${gone.length + legacy.length}`];
+  if (gone.length > 0) {
+    lines.push(`  ${gone.length} of this store's markers whose writer is gone: a started daemon reclaims each when it next uses that home, and byok-agent uninstall releases them once this store is retired`);
+  }
+  for (const marker of scan.markers) {
+    if (gone.includes(marker)) continue;
+    const pid = marker.writerPid === undefined ? '' : ` pid=${marker.writerPid}`;
+    lines.push(`  ${marker.markerPath} owner=${marker.ownerId ?? '(unreadable)'} blockedBy=${marker.state}${pid}`);
+    if (marker.state === 'writer-running') {
+      lines.push('    its writer is running; retry once it has released the Agent home');
+      continue;
+    }
+    if (legacy.includes(marker)) {
+      // #2348: it records no writer, so no daemon start reclaims it.
+      lines.push('    written by an earlier release, so no daemon reclaims it: byok-agent uninstall releases it once this store is retired; otherwise confirm that no process uses this Agent home, then delete ' + marker.markerPath);
+      continue;
+    }
+    if (!marker.own && marker.state !== 'corrupt') lines.push('    its owner\'s byok-agent uninstall releases it');
+    lines.push(`    only once you have confirmed that the machine or container that wrote it no longer writes to this store, delete ${marker.markerPath}`);
+  }
+  return lines;
 }

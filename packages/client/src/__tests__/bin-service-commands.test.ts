@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { DaemonConfig, ServiceLifecycle } from '../index';
+import type { HeldServiceLifecycle } from '../lifecycle/managed-lifecycle';
 import {
   CLI_SERVICE_OWNER,
   cliServiceDefinition,
@@ -171,12 +172,34 @@ describe('bin/commands/service: run*Command (DI lifecycle)', () => {
     expect(lifecycle.install).toHaveBeenCalledWith({ replaceUnmarked: true });
   });
 
-  it('runUninstallCommand calls lifecycle.uninstall() and honors --name for the logged label', async () => {
-    const lifecycle = fakeLifecycle();
+  /** A managed lifecycle whose held uninstall steps record their order. */
+  const ownedLifecycle = (order: string[]) => fakeLifecycle({ owned: async (operation: (held: HeldServiceLifecycle) => Promise<unknown>) => operation({
+    install: async () => undefined, deactivate: async () => { order.push('deactivate'); }, removeFiles: async () => { order.push('removeFiles'); } }) } as never);
+
+  it('runUninstallCommand deactivates and removes the unit through the managed lifecycle and honors --name for the logged label', async () => {
+    const order: string[] = [];
     const { log, lines } = collectLog();
-    await runUninstallCommand(baseConfig(), '/c.json', ['--name', 'custom'], { lifecycle, log });
-    expect(lifecycle.uninstall).toHaveBeenCalledTimes(1);
+    await runUninstallCommand(baseConfig({ agentHome: undefined }), '/c.json', ['--name', 'custom'], { lifecycle: ownedLifecycle(order), log });
+    expect(order).toEqual(['deactivate', 'removeFiles']);
     expect(lines).toEqual(['service uninstalled: custom']);
+  });
+
+  it('#2333: a plain service uninstall releases the store\'s Agent-home leases between its stop and the unit removal, and counts the markers it keeps', async () => {
+    const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-cli-uninstall-')));
+    try {
+      const home = path.join(root, 'homes', 'agents', 'a1');
+      await fs.mkdir(path.join(home, '.byok'), { recursive: true });
+      await fs.writeFile(path.join(home, '.byok', 'agent-home.lease'), JSON.stringify({ version: 1, ownerId: 'store-product:other', leaseId: 'l',
+        agentRef: { agentId: 'a1', profileRevision: '1' }, canonicalHome: home }));
+      const order: string[] = [];
+      const lifecycle = ownedLifecycle(order);
+      const { log, lines } = collectLog();
+      await runUninstallCommand(baseConfig({ storeDir: path.join(root, 'store'), agentHome: { hostStorageRoot: path.join(root, 'homes') } }), '/c.json', [], { lifecycle, log });
+      expect(order).toEqual(['deactivate', 'removeFiles']);
+      expect(lifecycle.stop).not.toHaveBeenCalled();
+      expect(lines).toEqual(['service uninstalled: acme-product',
+        'agent-home-leases: 1 lease markers remain that could not be proved free; run byok-agent doctor to see each and what clears it']);
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
   });
 
   it('runServiceStartCommand calls lifecycle.start()', async () => {
@@ -282,7 +305,7 @@ describe('#1097 slice 2: payload installations through the CLI', () => {
       upgrade: async (payload) => { calls.push(`upgrade ${payload}`); return receipt; },
       rollback: async () => { calls.push('rollback'); return { ...receipt, state: 'rolled-back' }; },
       recover: async () => { calls.push('recover'); return undefined; },
-      uninstall: async () => { calls.push('uninstall'); },
+      uninstall: async () => { calls.push('uninstall'); return { keptAgentHomeLeases: 0 }; },
       receipt: async () => receipt,
       currentVersion: async () => '2',
     };

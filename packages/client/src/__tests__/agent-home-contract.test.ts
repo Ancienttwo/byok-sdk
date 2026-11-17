@@ -19,6 +19,7 @@ import {
 } from '../agent-home';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { installTestLeaseWriterProbe } from './fixtures/runtime-env';
+import { outboundErrorMessage } from '../daemon/outbound-error';
 import {
   currentAgentHomeLeaseWriter,
   judgeAgentHomeLeaseWriter,
@@ -346,7 +347,12 @@ describe('SDK-owned Agent home contract', () => {
       ownerId: 'store-product:another-owner',
       leaseId: 'live-lease',
     }), 'utf8');
-    await expect(manager.prepare(ref('one'))).rejects.toBeInstanceOf(AgentHomeBusyError);
+    // #2333: the refusal names the owner; the reason that leaves the device keeps it and drops the paths.
+    const foreign = await manager.prepare(ref('one')).catch((error: unknown) => error);
+    expect(foreign).toMatchObject({ name: 'AgentHomeForeignLeaseError', ownerId: 'store-product:another-owner', markerPath: marker });
+    expect(foreign).toBeInstanceOf(AgentHomeBusyError);
+    expect(outboundErrorMessage(foreign)).toContain('of owner store-product:another-owner');
+    expect(outboundErrorMessage(foreign)).not.toContain(marker);
   });
 
   it('never takes a live marker of its own owner that another process holds', async () => {

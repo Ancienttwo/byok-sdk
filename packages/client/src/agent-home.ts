@@ -94,6 +94,18 @@ export class AgentHomeLeaseHeldError extends AgentHomeBusyError {
   }
 }
 
+/**
+ * Another owner's lease marker holds the home (#2333). `ownerId` is the
+ * marker's opaque owner id, never a path; that owner reclaims the marker on
+ * its next start, or an operator releases it once that owner is retired.
+ */
+export class AgentHomeForeignLeaseError extends AgentHomeBusyError {
+  constructor(readonly ownerId: string, readonly markerPath: string, readonly canonicalHome: string) {
+    super(`Agent home ${canonicalHome} is held by lease marker ${markerPath} of owner ${ownerId}; that owner's service uninstall releases it. Delete the marker only once you have confirmed that the machine or container that wrote it no longer writes to this store.`);
+    this.name = 'AgentHomeForeignLeaseError';
+  }
+}
+
 /** What an operator does about a lease marker that blocks an acquire. Names no path, so it may leave the device. */
 export function agentHomeLeaseGuidance(blockedBy: AgentHomeLeaseBlock): string {
   const remove = 'confirm that no process uses this Agent home, then delete its lease marker';
@@ -103,7 +115,7 @@ export function agentHomeLeaseGuidance(blockedBy: AgentHomeLeaseBlock): string {
     case 'other-host': return 'It was written on another machine or container that uses this store, or this machine\'s identity cannot be read; delete it only once that writer no longer uses this store.';
     case 'other-pid-namespace': return 'It was written in another PID namespace (container) of this machine; delete it only once that container no longer uses this store.';
     case 'writer-running': return 'Its writer process is still running; retry once it has released the Agent home.';
-    case 'owner-reclaim-required': return 'It was left by an ended run of this store; start this store\'s daemon once, which ends that run\'s processes and reclaims the marker, then retry.';
+    case 'owner-reclaim-required': return 'It was left by an ended run of this store; start this store\'s daemon once, which ends that run\'s processes and reclaims the marker, then retry. If this store is retired, its service uninstall releases the marker instead.';
   }
 }
 
@@ -373,6 +385,200 @@ async function removeLeaseTemps(internalDir: string): Promise<void> {
     if (writer === undefined || !(await judgeAgentHomeLeaseWriter(writer)).gone) continue;
     await fs.unlink(file).catch(() => {});
   }
+}
+
+/** A temp file of a release before #2348; it holds no lease and only an operator release removes it. */
+const LEGACY_LEASE_TEMP = /^agent-home\.lease\.\d+-\d+\.tmp$/u;
+/** How many Agent homes a `doctor` scan reads; the rest is reported as truncated. A release reads every home. */
+const LEASE_SCAN_LIMIT = 10_000;
+
+/** A lease marker judged for one owner (#2333): its writer is proved gone, why it is not, or the marker cannot be read. */
+export type AgentHomeLeaseMarkerState = 'reclaimable' | AgentHomeLeaseWriterBlock | 'corrupt';
+
+/** One lease marker under `<hostStorageRoot>/agents`. Local only: it names paths. */
+export interface AgentHomeLeaseMarker {
+  readonly markerPath: string;
+  /** `null` when the marker is corrupt, so no owner can be read from it. */
+  readonly ownerId: string | null;
+  readonly own: boolean;
+  readonly state: AgentHomeLeaseMarkerState;
+  /** The recorded writer's pid, when the marker names one. */
+  readonly writerPid?: number;
+}
+
+export interface AgentHomeLeaseScan {
+  readonly markers: readonly AgentHomeLeaseMarker[];
+  readonly truncated: boolean;
+}
+
+interface ReadMarker {
+  readonly marker: AgentHomeLeaseMarker;
+  readonly writer?: AgentHomeLeaseWriter | null;
+  /** The bytes judged: a removal goes ahead only while the file still holds them. */
+  readonly contents: string;
+}
+
+async function readLeaseMarker(markerPath: string, homeName: string, ownerId: string): Promise<ReadMarker | undefined> {
+  const stat = await fs.lstat(markerPath).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (stat === undefined) return undefined;
+  const corrupt = (contents: string): ReadMarker => ({ marker: { markerPath, ownerId: null, own: false, state: 'corrupt' }, contents });
+  if (!stat.isFile() || stat.size > LEASE_TEMP_MAX_BYTES) return corrupt('');
+  const contents = await fs.readFile(markerPath, 'utf8');
+  let prior: StoredLeaseMarker;
+  try {
+    prior = parseLeaseMarker(contents, markerPath);
+  } catch (error) {
+    if (error instanceof AgentHomeLeaseCorruptError) return corrupt(contents);
+    throw error;
+  }
+  const home = path.dirname(path.dirname(markerPath));
+  if (prior.canonicalHome !== home || prior.agentRef.agentId !== homeName) return corrupt(contents);
+  const verdict = await judgeAgentHomeLeaseWriter(prior.writer);
+  return {
+    marker: {
+      markerPath,
+      ownerId: prior.ownerId,
+      own: prior.ownerId === ownerId,
+      state: verdict.gone ? 'reclaimable' : verdict.blockedBy,
+      ...(prior.writer ? { writerPid: prior.writer.pid } : {}),
+    },
+    writer: prior.writer,
+    contents,
+  };
+}
+
+/** Every `<agents>/<name>/.byok` that is a real directory, of at most `limit` homes. */
+async function leaseDirectories(hostStorageRoot: string, limit = Infinity): Promise<{ agentsRoot: string; dirs: Array<{ name: string; internal: string }>; truncated: boolean }> {
+  // Canonical, as the homes a marker records are.
+  const agentsRoot = path.join(await canonicalPath(path.resolve(hostStorageRoot)), AGENT_HOME_DIRECTORY);
+  await assertRealDirectoryIfPresent(agentsRoot);
+  const names = await fs.readdir(agentsRoot).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return [] as string[];
+    throw error;
+  });
+  const dirs: Array<{ name: string; internal: string }> = [];
+  for (const name of names.sort().slice(0, limit)) {
+    const internal = path.join(agentsRoot, name, AGENT_HOME_INTERNAL_DIRECTORY);
+    const stat = await fs.lstat(internal).catch(() => undefined);
+    if (stat?.isDirectory()) dirs.push({ name, internal });
+  }
+  return { agentsRoot, dirs, truncated: names.length > limit };
+}
+
+/** Read-only: every lease marker under `hostStorageRoot`, judged for `ownerId` (#2333). */
+export async function scanAgentHomeLeaseMarkers(hostStorageRoot: string, ownerId: string): Promise<AgentHomeLeaseScan> {
+  const { dirs, truncated } = await leaseDirectories(hostStorageRoot, LEASE_SCAN_LIMIT);
+  const markers: AgentHomeLeaseMarker[] = [];
+  for (const { name, internal } of dirs) {
+    const read = await readLeaseMarker(path.join(internal, 'agent-home.lease'), name, ownerId);
+    if (read !== undefined) markers.push(read.marker);
+  }
+  return { markers, truncated };
+}
+
+/** A marker named for removal: its path and the owner it must record, `null` for a corrupt marker. */
+export interface AgentHomeLeaseMarkerName {
+  readonly markerPath: string;
+  readonly ownerId: string | null;
+}
+
+/** A named marker that is absent, or records another owner than named; nothing was removed. */
+export class AgentHomeLeaseMarkerMismatchError extends AgentHomeError {
+  constructor(readonly markerPath: string) {
+    super(`No lease marker at ${markerPath} records the named owner; nothing was removed`);
+    this.name = 'AgentHomeLeaseMarkerMismatchError';
+  }
+}
+
+export interface AgentHomeLeaseRelease {
+  /** This owner's markers removed: their writer is proved gone, or they record none (an earlier release). */
+  readonly released: number;
+  readonly namedRemoved: boolean;
+  readonly removedTemps: number;
+  /** The markers left in place. Local only: they name paths. */
+  readonly kept: readonly AgentHomeLeaseMarker[];
+}
+
+/**
+ * Remove `ownerId`'s lease markers whose writer is proved gone or that record
+ * none, the `named` marker, and lease temp files no writer can still use
+ * (#2333). The caller must hold this owner's `DaemonOwnerLease` and have
+ * reconciled its owned processes, as a started daemon does before it reclaims.
+ *
+ * A marker whose writer still runs is never removed, named or not: naming
+ * fills in what cannot be proved (another host or PID namespace, an
+ * unverifiable or legacy writer, a corrupt file), never overrides a writer
+ * proved alive, and a marker of `ownerId` whose writer runs refuses the
+ * call. Every other marker that cannot be proved free (another host or PID
+ * namespace, an unverifiable writer, another owner, a corrupt file) stays
+ * unless named, and is returned as kept. Everything is judged before
+ * anything is removed, so a refusal removes nothing. Each removal re-reads its
+ * marker under the Agent-home root gate and goes ahead only while the file
+ * holds the bytes judged.
+ */
+export async function releaseAgentHomeLeaseMarkers(
+  hostStorageRoot: string, ownerId: string, named?: AgentHomeLeaseMarkerName,
+): Promise<AgentHomeLeaseRelease> {
+  // Every home, unlike the doctor scan: a marker left unread would stay unreported.
+  const { agentsRoot, dirs } = await leaseDirectories(hostStorageRoot);
+  const read: ReadMarker[] = [];
+  for (const { name, internal } of dirs) {
+    const marker = await readLeaseMarker(path.join(internal, 'agent-home.lease'), name, ownerId);
+    if (marker !== undefined) read.push(marker);
+  }
+  const namedPath = named === undefined ? undefined : path.resolve(named.markerPath);
+  if (named !== undefined) {
+    const target = read.find(({ marker }) => marker.markerPath === namedPath);
+    if (target === undefined || target.marker.ownerId !== named.ownerId) throw new AgentHomeLeaseMarkerMismatchError(named.markerPath);
+  }
+  // Refuse before anything is removed: a writer proved alive is never
+  // overridden. A marker that cannot be proved free stays, and is kept.
+  for (const { marker, writer } of read) {
+    if (marker.state === 'writer-running' && (marker.own || marker.markerPath === namedPath)) {
+      throw leaseHeld(path.dirname(path.dirname(marker.markerPath)), marker.markerPath, 'writer-running', writer);
+    }
+  }
+  const remove = read.filter(({ marker }) => marker.markerPath === namedPath
+    || (marker.own && (marker.state === 'reclaimable' || marker.state === 'legacy-marker')));
+  let released = 0;
+  let namedRemoved = false;
+  const removed = new Set<string>();
+  if (remove.length > 0) {
+    let gate: PathMutationGate | undefined;
+    try {
+      gate = await acquirePathMutationGate({ scope: 'agent-home-root', targetPath: agentsRoot }, { waitMs: 1_000 });
+      for (const { marker, contents } of remove) {
+        const now = await fs.readFile(marker.markerPath, 'utf8').catch(() => undefined);
+        if (now !== contents) continue;
+        await fs.rm(marker.markerPath);
+        removed.add(marker.markerPath);
+        if (marker.markerPath === namedPath) namedRemoved = true;
+        else released += 1;
+      }
+    } catch (error) {
+      if (error instanceof PathMutationGateBusyError) throw agentHomeRootBusy(error);
+      throw error;
+    } finally {
+      await gate?.release();
+    }
+  }
+  let removedTemps = 0;
+  for (const { internal } of dirs) {
+    for (const entry of await fs.readdir(internal)) {
+      const file = path.join(internal, entry);
+      const legacy = LEGACY_LEASE_TEMP.test(entry);
+      if (!legacy && !LEASE_TEMP.test(entry)) continue;
+      if (!legacy) {
+        const writer = await leaseTempWriter(file);
+        if (writer === undefined || !(await judgeAgentHomeLeaseWriter(writer)).gone) continue;
+      }
+      if (await fs.unlink(file).then(() => true, () => false)) removedTemps += 1;
+    }
+  }
+  return { released, namedRemoved, removedTemps, kept: read.map(({ marker }) => marker).filter((marker) => !removed.has(marker.markerPath)) };
 }
 
 /** The identity of `directory`, which must be a real directory reached through no symlink. */
@@ -1100,9 +1306,7 @@ export class AgentHomeLeaseManager {
    * its daemon), so the owner alone never makes a marker residue.
    */
   private async markerRefusal(prior: StoredLeaseMarker, markerPath: string, canonicalHome: string, agentId: string): Promise<AgentHomeBusyError | undefined> {
-    if (prior.ownerId !== this.ownerId) {
-      return new AgentHomeBusyError(`Agent home ${prior.canonicalHome} already has a mutable writer lease`);
-    }
+    if (prior.ownerId !== this.ownerId) return new AgentHomeForeignLeaseError(prior.ownerId, markerPath, canonicalHome);
     if (prior.canonicalHome !== canonicalHome || prior.agentRef.agentId !== agentId) {
       return new AgentHomeBusyError(`Agent home lease marker ${markerPath} does not match its canonical Agent identity`);
     }
@@ -1132,6 +1336,7 @@ export class AgentHomeLeaseManager {
   private async linkLeaseMarker(temp: string, lockPath: string, canonicalHome: string, replaceable: string | undefined): Promise<void> {
     if (await linkExclusive(temp, lockPath)) return;
     const prior = parseLeaseMarker(await fs.readFile(lockPath, 'utf8'), lockPath);
+    if (prior.ownerId !== this.ownerId) throw new AgentHomeForeignLeaseError(prior.ownerId, lockPath, canonicalHome);
     if (replaceable === undefined || prior.leaseId !== replaceable) {
       throw new AgentHomeBusyError(`Agent home ${canonicalHome} already has a mutable writer lease`);
     }

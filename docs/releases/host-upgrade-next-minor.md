@@ -306,6 +306,60 @@ What changes for a Host:
   `other-host`, `other-pid-namespace`, `writer-running`, `unverifiable`,
   `legacy-marker` and `owner-reclaim-required` apart.
 
+### Releasing a retired store's Agent-home lease markers (#2333)
+
+Manifest entries: `agent-home-lease-release`, `service-installation-release-store-leases`, `service-uninstall-releases-agent-home-leases`.
+
+Only the store that wrote a lease marker reclaims it, on its next start. A
+store that never starts again (uninstalled, deleted, or with a changed
+`storeDir` or `productId`) left its markers behind, and they blocked every other
+store or product sharing `agentHome.hostStorageRoot` until someone deleted the
+files by hand.
+
+What changes for a Host:
+
+- `ServiceInstallationOptions.releaseStoreLeases` is required. uninstall()
+  calls it once the service is stopped and before it removes `current`.
+  `agentServiceInstallation` passes the daemon's own when `config.agentHome`
+  is set, so pass the config with `agentHome`. A Host that builds the options
+  itself passes `() => releaseAgentHomeLeases(config, { confirmed: true })`
+  (summing `kept` when several daemon stores have an `agentHome`), or
+  `'no-agent-home'`.
+- uninstall() releases the markers no running writer holds and returns
+  `ServiceUninstallResult` with `keptAgentHomeLeases`, the markers it could not
+  prove free; `byok-agent uninstall` prints that count. While a writer of the
+  store still runs, it throws `ServiceInstallationError` with the new code
+  `agent_home_lease_held` and removes nothing: end that process and retry. Add
+  the code to exhaustive switches. A plain `byok-agent uninstall`, without a
+  payload install, stops the service, releases the same way, then removes it.
+  On Windows, uninstall treats a service that is already stopped (1062) as
+  stopped, so an uninstall retried after a refusal completes.
+- `releaseAgentHomeLeases(config, { confirmed: true, marker? })` runs offline,
+  under the store's owner lease, after ending the store's leftover runtime
+  processes. It releases this store's markers whose writer is proved gone or
+  that record none, and lease temp files no writer can still use. It refuses,
+  removing nothing, while a writer of this store runs or while the named
+  marker's writer is proved running; every marker it cannot prove free is kept
+  and counted in `kept`. `marker` names one of those
+  to remove it, once the machine, container or store that wrote it no longer
+  uses the root. A marker whose writer is proved running is never removed,
+  named or not.
+- An acquire refused by another owner's marker throws
+  `AgentHomeForeignLeaseError`, an `AgentHomeBusyError` with that owner's
+  `ownerId` and the `markerPath`. The offer decline stays
+  `agent_home_writer_busy`; its reason now names the owner, without paths.
+- `DiagnosticsSnapshot.agentHomeLeases`, the support bundle and
+  `byok-agent doctor --json` count the markers. The `byok-agent doctor` text
+  counts this store's markers whose writer is proved gone in one line (a
+  started daemon reclaims each when it next uses that home, and
+  `byok-agent uninstall` releases them). Every other marker is listed with its
+  path, owner and `blockedBy`, and the step that clears it: a running writer,
+  retry once it has released the home; this store's marker from an earlier
+  release, `byok-agent uninstall`, or delete it once no process uses the home;
+  another owner's marker, that owner's `byok-agent uninstall`; and any marker
+  but a running writer's, delete it once the machine or container that wrote
+  it no longer writes to this store.
+
 ### Undici in the Host dependency tree
 
 Keep a Host override to **8.12.4**. Pi's exact dependency can still install a
