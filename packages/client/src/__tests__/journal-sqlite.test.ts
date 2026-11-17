@@ -466,6 +466,8 @@ describe('SqliteLocalTaskJournal', () => {
       } finally {
         main.close();
       }
+      // The checkpoint runs after the schema transaction commits, and leaves nothing in the WAL.
+      expect((await fs.stat(`${path.join(storeDir, JOURNAL_DB_FILENAME)}-wal`)).size).toBe(0);
     });
 
     it('recovers everything it committed after a clean close and reopen', async () => {

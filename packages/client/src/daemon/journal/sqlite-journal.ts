@@ -485,7 +485,10 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       // The main file may hold no schema yet while a WAL does: the writable
       // connection sees both and makes the final decision.
       created = assertCurrentJournalFormat(db) === 'empty';
-      db.exec(SCHEMA);
+      // One transaction, so a new journal pays one synchronous=FULL commit
+      // instead of one per statement, and a failure leaves no partial schema.
+      // It begins only after both format checks (#2295).
+      db.exec(`BEGIN IMMEDIATE;\n${SCHEMA}\nCOMMIT;`);
     } catch (err) {
       // `openJournalDatabase` owns the handle until it returns. If that helper
       // could not prove cleanup, this constructor has no handle to close and
@@ -513,8 +516,9 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     // refusal to start, not corruption, so the file stays in place.
     try {
       db.exec(ENVELOPE_TASK_INDEX);
-      // A new journal's schema reaches the main file at once, so the window in
-      // which only the WAL describes the format stays short.
+      // After the schema transaction and the index commit: a new journal's
+      // schema reaches the main file at once and the WAL is left empty, so
+      // the window in which only the WAL describes the format stays short.
       if (created) db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
     } catch (err) {
       db.close();

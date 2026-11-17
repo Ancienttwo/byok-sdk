@@ -121,6 +121,12 @@ export const CLOUD_ERROR_CODES = {
   /** A first-write-wins Agent control record was replayed with a different body. */
   agent_content_request_mismatch: 'agent_content_request_mismatch',
   /**
+   * A plaintext task with `messageEgress` was submitted to a cloud with no
+   * `agentMessage.consume`, so no consumer could ever decide its message.
+   * Raised before any attempt, receipt or mailbox write.
+   */
+  agent_message_consumer_missing: 'agent_message_consumer_missing',
+  /**
    * A task that seals its Agent message (#1045) was submitted to a cloud with
    * no `agentMessage.consumeSealed`, so no consumer could ever decide it.
    * Raised before any attempt, receipt or mailbox write.

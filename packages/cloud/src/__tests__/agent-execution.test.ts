@@ -60,7 +60,8 @@ describe('fresh Agent execution submission', () => {
     const harness = createHarness();
     const record = vi.spyOn(harness.stores.receipts, 'record');
     await expect(harness.cloud.submitAgentExecution(TENANT_A, AgentExecutionInputSchema.parse(input)))
-      .rejects.toThrow('Agent execution with messageEgress requires a registered Agent message consumer');
+      .rejects.toMatchObject({ name: 'ByokCloudError', code: 'agent_message_consumer_missing',
+        message: 'Agent execution with messageEgress requires a registered Agent message consumer.' });
     expect(record).not.toHaveBeenCalled();
     expect(await harness.cloud.readTaskAttempt(TENANT_A, input.taskId)).toBeUndefined();
     expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId: input.deviceId, afterSeq: 0 })).messages).toEqual([]);

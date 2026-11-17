@@ -3957,7 +3957,8 @@ new execution; the Host recovers through exact `tasks.offer(taskId)` (Cloud
 received: a registered device that is offline is enqueued normally.
 
 Submission with messageEgress requires a registered Agent message consumer before
-any admission side effect. An unavailable consumer after restart blocks that
+any admission side effect; without one the cloud throws `ByokCloudError`
+`agent_message_consumer_missing`. An unavailable consumer after restart blocks that
 submission until registration is restored; it does not clear persisted
 cancellation or message evidence. A result-document execution without messageEgress
 needs neither that consumer nor message context. Context without messageEgress is
