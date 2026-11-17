@@ -3010,7 +3010,8 @@ export type JournalFaultStep = 'append:before-begin' | 'append:after-envelope' |
 // support
 export interface JournalFaultSeam {
     onStep?(step: JournalFaultStep): void;
-    exitWorkerAt?: JournalFaultStep;
+    exitWorkerAt?: JournalFaultStep | 'open';
+    workerOpenTimeoutMs?: number;
 }
 export interface SqliteLocalTaskJournalOptions {
     readonly storeDir: string;
