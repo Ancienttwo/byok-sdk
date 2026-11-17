@@ -545,6 +545,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     expect(starts()).toHaveLength(1);
   }, 30_000);
 
+  // TEMP probe (#2344): base comparison run for this job; never merged.
   it('#687: keeps task.started that shared a batch with a never-admitted message across SIGKILL', async () => {
     const cloud = await startCloud();
     const { daemon, deviceId } = await pair(cloud, { agentHome: true });
