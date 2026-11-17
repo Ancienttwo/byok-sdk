@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "e923f1c3966fa7495d353c3f7eb26f4abe0fc293706a10a11fc40ae8ce414d0a"
+    "snapshotSha256": "a0f0f6b0c46b1d451bacad3a4df6fdcfe31cfebc98a8a588591392a472afb691"
   },
   "configFields": {
     "status": "tracked",
@@ -1840,6 +1840,16 @@
       "entry": "host-ledger-format-api"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamBot",
+      "change": "changed",
+      "entry": "dream-yield-user-input"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#DreamRecord",
+      "change": "changed",
+      "entry": "dream-yield-user-input"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#SWITCH_EXPORT_VERSION",
       "change": "changed",
       "entry": "host-ledger-format-api"
@@ -1860,6 +1870,16 @@
       "entry": "retire-compatibility-apis"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#dreamHolds",
+      "change": "added",
+      "entry": "dream-yield-user-input"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#dreamYield",
+      "change": "added",
+      "entry": "dream-yield-user-input"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#importForSwitch",
       "change": "removed",
       "entry": "retire-compatibility-apis"
@@ -1878,6 +1898,11 @@
       "item": "export:@byok-sdk/bot-collaboration/host-kit#supersededDeliveryIds",
       "change": "added",
       "entry": "bot-delivery-supersession"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+      "change": "changed",
+      "entry": "dream-yield-user-input"
     },
     {
       "item": "export:@byok-sdk/client#AGENT_CONTENT_READ_CAPABILITY_ARTIFACT",
@@ -2518,6 +2543,11 @@
       "item": "export:@byok-sdk/cloud#TaskAttemptStore",
       "change": "changed",
       "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskCancellationRequest",
+      "change": "changed",
+      "entry": "task-cancel-if-unclaimed"
     },
     {
       "item": "export:@byok-sdk/cloud#TaskSteerRefusalStore",
