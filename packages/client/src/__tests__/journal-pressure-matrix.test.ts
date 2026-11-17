@@ -40,6 +40,7 @@ import {
   JOURNAL_DB_FILENAME,
   JOURNAL_QUARANTINE_DIRNAME,
   SqliteLocalTaskJournal,
+  openJournalWithFaultsForTests,
   DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
@@ -254,8 +255,7 @@ describe('S3.4 disk-pressure matrix, points 7-12', () => {
       const storeDir = await tmpDir('byok-pressure-10-store-');
       let failing = true;
       let faultFired = false;
-      const journal = new SqliteLocalTaskJournal({
-        storeDir,
+      const journal = openJournalWithFaultsForTests({ storeDir }, {
         faults: {
           onStep(step: JournalFaultStep) {
             if (step !== 'append:before-commit' || !failing) return;

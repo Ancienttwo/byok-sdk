@@ -1723,12 +1723,13 @@
       ]
     },
     {
-      "id": "journal-fault-seam-exit-worker",
-      "impact": "additive",
-      "summary": "@byok-sdk/client SqliteLocalTaskJournalOptions.faults (JournalFaultSeam) gains two test-only fields: exitWorkerAt, which ends the journal worker thread at a step ('open' ends it before the constructor's handshake), and workerOpenTimeoutMs, which bounds the constructor's wait for that handshake. JournalFaultStep gains 'batch:commit', the worker's COMMIT of a batch that carries writes. Production never supplies faults; no Host action.",
+      "id": "journal-test-fault-seams-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client SqliteLocalTaskJournalOptions no longer has faults or openFaults, and DaemonOverrides no longer has journalOpenFaults. They were test-only fault seams that production never supplied; the package's own tests reach them through an internal module the package entry does not export. A Host that passed any of them removes the option; nothing replaces it.",
       "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2332",
       "items": [
-        "export:@byok-sdk/client#SqliteLocalTaskJournalOptions"
+        "export:@byok-sdk/client#SqliteLocalTaskJournalOptions",
+        "export:@byok-sdk/client#DaemonOverrides"
       ]
     },
     {
@@ -2176,7 +2177,7 @@
     {
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournalOptions",
       "change": "changed",
-      "entry": "journal-fault-seam-exit-worker"
+      "entry": "journal-test-fault-seams-removed"
     },
     {
       "item": "export:@byok-sdk/client#SweepReport",

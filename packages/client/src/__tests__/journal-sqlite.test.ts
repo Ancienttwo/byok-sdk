@@ -34,6 +34,9 @@ import {
   JournalHandleCleanupError,
   SqliteLocalTaskJournal,
   type JournalFaultStep,
+  type JournalTestFaults,
+  openJournalWithFaultsForTests,
+  type SqliteLocalTaskJournalOptions,
 } from '../daemon/journal/sqlite-journal';
 import { TASK_ENVELOPE_ROWS } from '../daemon/journal/journal-store';
 import {
@@ -104,8 +107,12 @@ describe('SqliteLocalTaskJournal', () => {
     return dir;
   }
 
-  function build(storeDir: string, options: Partial<ConstructorParameters<typeof SqliteLocalTaskJournal>[0]> = {}): SqliteLocalTaskJournal {
-    const journal = new SqliteLocalTaskJournal({ storeDir, ...options });
+  function build(storeDir: string, options: Partial<SqliteLocalTaskJournalOptions> & JournalTestFaults = {}): SqliteLocalTaskJournal {
+    const { faults, openFaults, ...rest } = options;
+    const journal = openJournalWithFaultsForTests({ storeDir, ...rest }, {
+      ...(faults === undefined ? {} : { faults }),
+      ...(openFaults === undefined ? {} : { openFaults }),
+    });
     open.push(journal);
     return journal;
   }
@@ -198,8 +205,7 @@ describe('SqliteLocalTaskJournal', () => {
     it.each(OPEN_STEPS)('closes the native handle when initialization fails at %s', async (step) => {
       const storeDir = await tmpStore(`byok-journal-open-fault-${step}-`);
       expect(() =>
-        new SqliteLocalTaskJournal({
-          storeDir,
+        openJournalWithFaultsForTests({ storeDir }, {
           openFaults: {
             onStep(current) {
               if (current === step) throw new Error(`injected open fault at ${step}`);
@@ -217,8 +223,7 @@ describe('SqliteLocalTaskJournal', () => {
     it('preserves a typed barrier failure and does not quarantine when handle cleanup cannot be proven', async () => {
       const storeDir = await tmpStore('byok-journal-open-cleanup-failure-');
       expect(() =>
-        new SqliteLocalTaskJournal({
-          storeDir,
+        openJournalWithFaultsForTests({ storeDir }, {
           openFaults: {
             onStep(step) {
               if (step === 'after-open') throw new Error('injected post-open failure');
@@ -692,7 +697,7 @@ describe('SqliteLocalTaskJournal', () => {
     const refused = terminal('refused-terminal');
     const replacement = terminal('replacement-terminal', 'failed', '2026-08-07T00:00:09.000Z');
 
-    async function refusedJournal(options: Partial<ConstructorParameters<typeof SqliteLocalTaskJournal>[0]> = {}) {
+    async function refusedJournal(options: Partial<SqliteLocalTaskJournalOptions> & JournalTestFaults = {}) {
       const storeDir = await tmpStore();
       const journal = build(storeDir, options);
       await journal.appendEnvelope(envelopeRecord());

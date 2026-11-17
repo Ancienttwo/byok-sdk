@@ -11,7 +11,7 @@ import { connectControlClient } from '../../daemon/control-client';
 import { runSdkReservedHelperCommand } from '../../lifecycle/sdk-reserved-helper-command';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonOverrides } from '../../daemon/create-daemon';
-import { SqliteLocalTaskJournal, type JournalFaultStep } from '../../daemon/journal/sqlite-journal';
+import { openJournalWithFaultsForTests, type JournalFaultStep } from '../../daemon/journal/sqlite-journal';
 import { CursorStore } from '../../daemon/cursor-store';
 import { DeviceStore } from '../../daemon/store';
 import { createDeviceCredentialStore } from '../../daemon/device-credential-provider';
@@ -212,9 +212,9 @@ class ControlledAdapter implements RuntimeAdapter {
 
 // Only a journal fault or barrier needs an injected journal; otherwise the
 // daemon opens its own, as with the default config.
-const journal = config.journalFault === undefined && config.holdTerminalConfirmation !== true ? undefined : new SqliteLocalTaskJournal({
-  storeDir: config.storeDir,
-  ...(config.journalFault === undefined
+const journal = config.journalFault === undefined && config.holdTerminalConfirmation !== true ? undefined : openJournalWithFaultsForTests(
+  { storeDir: config.storeDir },
+  config.journalFault === undefined
     ? {}
     : {
         faults: {
@@ -222,8 +222,8 @@ const journal = config.journalFault === undefined && config.holdTerminalConfirma
             if (step === config.journalFault) killAt(step);
           },
         },
-      }),
-});
+      },
+);
 // Test-only barrier: cloud acceptance can precede the daemon's durable confirmation.
 if (journal !== undefined && config.holdTerminalConfirmation === true) {
   const confirmTerminal = journal.confirmTerminal.bind(journal);

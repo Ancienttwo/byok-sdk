@@ -39,6 +39,7 @@ import { journalHash, type JournalIdentity, type ReceivedEnvelopeRecord } from '
 import {
   JOURNAL_DB_FILENAME,
   SqliteLocalTaskJournal,
+  openJournalWithFaultsForTests,
   DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
@@ -112,7 +113,7 @@ describe('S3.4 crash matrix, points 1-6', () => {
   // -------------------------------------------------------------------
   it('1: crash before the local append leaves no trace, and the mailbox redelivery is the whole recovery', async () => {
     const storeDir = await store('byok-crash-1-');
-    const crashing = new SqliteLocalTaskJournal({ storeDir, faults: faultOnce('append:before-begin') });
+    const crashing = openJournalWithFaultsForTests({ storeDir }, { faults: faultOnce('append:before-begin') });
 
     await expect(crashing.appendEnvelope(offerRecord('task-1', 1))).rejects.toThrow(/crash injected/);
 

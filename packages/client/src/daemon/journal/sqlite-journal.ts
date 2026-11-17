@@ -196,6 +196,31 @@ export interface JournalFaultSeam {
   workerOpenTimeoutMs?: number;
 }
 
+/** The journal's test fault seams: writes and worker (`faults`), and the SQLite open (`openFaults`). */
+export interface JournalTestFaults {
+  readonly faults?: JournalFaultSeam;
+  readonly openFaults?: JournalOpenFaultSeam;
+}
+
+// Only tests set it. Not exported from the package entry, so no Host can reach a fault seam.
+let testFaults: JournalTestFaults | undefined;
+
+/** Internal test seam: every journal constructed while it is set takes these faults; `undefined` removes it. */
+export function setJournalFaultsForTests(faults: JournalTestFaults | undefined): void {
+  testFaults = faults;
+}
+
+/** Internal test seam: one journal constructed with `faults`. */
+export function openJournalWithFaultsForTests(options: SqliteLocalTaskJournalOptions, faults: JournalTestFaults): SqliteLocalTaskJournal {
+  const prior = testFaults;
+  testFaults = faults;
+  try {
+    return new SqliteLocalTaskJournal(options);
+  } finally {
+    testFaults = prior;
+  }
+}
+
 export interface SqliteLocalTaskJournalOptions {
   /** The daemon's store directory. The database lives at `<storeDir>/daemon.db` and quarantine at `<storeDir>/quarantine/`. */
   readonly storeDir: string;
@@ -209,10 +234,6 @@ export interface SqliteLocalTaskJournalOptions {
    * declined ({@link SqliteLocalTaskJournal.appendWithheldOffer}, #826).
    */
   readonly maxRecordBytes?: number;
-  /** Test seam — see {@link JournalFaultSeam}. Never supplied in production. */
-  readonly faults?: JournalFaultSeam;
-  /** Test seam for post-open/pre-return SQLite initialization failures. Never supplied in production. */
-  readonly openFaults?: JournalOpenFaultSeam;
   /** Injected clock, read when an operation is called (its admission time) and for quarantine stamps, so they are deterministic under test. Defaults to the real one. */
   readonly clock?: () => Date;
 }
@@ -546,6 +567,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
   readonly #exited: Promise<void>;
 
   constructor(options: SqliteLocalTaskJournalOptions) {
+    const { faults, openFaults } = testFaults ?? {};
     // Checked BEFORE anything touches the filesystem: §12.7.2's
     // no-silent-downgrade rule is about refusing to start, and a refusal that
     // has already created directories is a worse refusal.
@@ -581,7 +603,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       db = openJournalDatabase(
         dbPath,
         options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
-        options.openFaults,
+        openFaults,
       );
       // The main file may hold no schema yet while a WAL does: the writable
       // connection sees both and makes the final decision.
@@ -645,8 +667,8 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       dbPath,
       quarantineDir: join(options.storeDir, JOURNAL_QUARANTINE_DIRNAME),
       busyTimeoutMs: options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
-      ...(options.faults === undefined ? {} : { faults: options.faults.exitWorkerAt === undefined ? {} : { exitWorkerAt: options.faults.exitWorkerAt } }),
-    }, options.faults);
+      ...(faults === undefined ? {} : { faults: faults.exitWorkerAt === undefined ? {} : { exitWorkerAt: faults.exitWorkerAt } }),
+    }, faults);
     this.#worker = worker;
     this.#port = port;
     let exited!: () => void;

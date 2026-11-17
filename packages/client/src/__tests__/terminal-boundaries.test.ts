@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, decodeEnvelope, encodeEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 import { AuthManager } from '../daemon/auth-manager';
-import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
+import { SqliteLocalTaskJournal, openJournalWithFaultsForTests } from '../daemon/journal/sqlite-journal';
 import { journalHash, type LocalTerminalRecord } from '../daemon/journal/journal';
 import { CursorStore } from '../daemon/cursor-store';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -54,7 +54,7 @@ describe('terminal durability and actual harness boundaries', () => {
     vi.spyOn(adapter, 'detect').mockImplementation(async () => available
       ? { kind: 'available', version: '0.0.0' } : { kind: 'not-found' });
     let fail = true;
-    const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir!, faults: { onStep(step) {
+    const journal = openJournalWithFaultsForTests({ storeDir: cfg.storeDir! }, { faults: { onStep(step) {
       if (step === 'terminal:before-commit' && fail) throw new Error('injected EIO before commit');
     } } });
     const candidates: LocalTerminalRecord[] = [];
@@ -95,7 +95,7 @@ describe('terminal durability and actual harness boundaries', () => {
     const cfg = await config(server.url);
     const adapter = new StubRuntimeAdapter();
     let fail = false;
-    const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir!, faults: { onStep(step) {
+    const journal = openJournalWithFaultsForTests({ storeDir: cfg.storeDir! }, { faults: { onStep(step) {
       if (step === 'terminal:before-commit' && fail) throw new Error('injected EIO before commit');
     } } });
     const candidates: LocalTerminalRecord[] = [];
@@ -192,7 +192,7 @@ it('R1/R6: committed decline settles its failed receipt after cancellation filte
   const adapter = new StubRuntimeAdapter();
   let available = false, fail = true;
   vi.spyOn(adapter, 'detect').mockImplementation(async () => available ? { kind: 'available', version: '0.0.0' } : { kind: 'not-found' });
-  const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir!, faults: { onStep(step) {
+  const journal = openJournalWithFaultsForTests({ storeDir: cfg.storeDir! }, { faults: { onStep(step) {
     if (step === 'terminal:before-commit' && fail) throw new Error('injected EIO');
   } } });
   const candidates: LocalTerminalRecord[] = [];

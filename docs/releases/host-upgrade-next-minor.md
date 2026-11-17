@@ -1060,7 +1060,7 @@ because they were not idle. `byok-agent status` and `byok-agent tasks` skip
 
 ### Local task journal commits on a worker thread (#2332)
 
-Sources: [#2332], [#2344]. Manifest entries: `journal-worker-group-commit`, `journal-fault-seam-exit-worker`.
+Sources: [#2332], [#2344]. Manifest entries: `journal-worker-group-commit`, `journal-test-fault-seams-removed`.
 
 `SqliteLocalTaskJournal` runs every SQLite commit on a worker thread, so
 `synchronous=FULL` fsyncs no longer block the daemon's event loop. An operation
@@ -1082,10 +1082,9 @@ the journal directly:
 - allows worker threads. A Node process run with `--permission` and without
   `--allow-worker` cannot open the journal.
 
-`JournalFaultSeam` gains the test-only fields `exitWorkerAt` and
-`workerOpenTimeoutMs`, and `JournalFaultStep` gains `'batch:commit'`. Production
-never supplies `faults`; add the new step to exhaustive switches over
-`JournalFaultStep`.
+`SqliteLocalTaskJournalOptions` no longer has `faults` or `openFaults`, and
+`DaemonOverrides` no longer has `journalOpenFaults`. They were test-only fault
+seams that production never supplied. Remove any use; nothing replaces them.
 
 ### Other manifest entries
 

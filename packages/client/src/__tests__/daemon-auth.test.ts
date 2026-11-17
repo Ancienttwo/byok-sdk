@@ -714,10 +714,19 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await pairer.pair('pairing-code');
 
-    const distEntry = new URL('../../dist/index.js', import.meta.url).href;
+    // The journal's fault seam is internal, so the child loads the daemon from source.
     const childSource = `
-      const { createDaemonWithAdapters } = await import(process.argv[1]);
-      const config = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
+      import { readFileSync } from 'node:fs';
+      import { createRequire, registerHooks } from 'node:module';
+      const { transformSync } = createRequire(import.meta.resolve('tsup'))('esbuild');
+      registerHooks({ load(url, context, nextLoad) {
+        if (!url.endsWith('.ts')) return nextLoad(url, context);
+        return { format: 'module', shortCircuit: true, source: transformSync(readFileSync(new URL(url), 'utf8'), { loader: 'ts', format: 'esm', sourcefile: url }).code };
+      } });
+      globalThis.__BYOK_CLIENT_PACKAGE_VERSION__ = '0.0.0-test';
+      const { setJournalFaultsForTests } = await import(${JSON.stringify(new URL('../daemon/journal/sqlite-journal.ts', import.meta.url).href)});
+      const { createDaemonWithAdapters } = await import(${JSON.stringify(new URL('../daemon/create-daemon.ts', import.meta.url).href)});
+      const config = JSON.parse(Buffer.from(process.argv[1], 'base64url').toString('utf8'));
       const adapter = {
         descriptor: Object.freeze({
           id: 'pi',
@@ -727,8 +736,8 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
         detect: async () => ({ kind: 'available', version: 'test', authPresent: true }),
         prepare: async () => ({ kind: 'prepared', operation: { start: async () => { throw new Error('not used'); } } }),
       };
-      const daemon = createDaemonWithAdapters(config, [adapter], {
-        journalOpenFaults: {
+      setJournalFaultsForTests({
+        openFaults: {
           onStep(step) {
             if (step === 'after-open') throw new Error('injected post-open failure');
           },
@@ -738,6 +747,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
           },
         },
       });
+      const daemon = createDaemonWithAdapters(config, [adapter]);
       try {
         await daemon.start();
         process.send?.({ kind: 'unexpected-start' });
@@ -748,7 +758,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     `;
     const child = spawn(
       process.execPath,
-      ['-e', childSource, distEntry, Buffer.from(JSON.stringify(config)).toString('base64url')],
+      ['--import', new URL('./fixtures/ts-source-resolve-hook.mjs', import.meta.url).href, '--input-type=module', '-e', childSource, Buffer.from(JSON.stringify(config)).toString('base64url')],
       { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
     );
     let childStderr = '';
