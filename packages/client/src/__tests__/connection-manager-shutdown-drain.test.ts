@@ -9,7 +9,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { TestServer } from './fixtures/test-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -50,7 +50,9 @@ describe('ConnectionManager.stop(drainTimeoutMs) — bounded outbox drain before
     const record = await auth.pair('pairing-code');
     const cursorStore = new CursorStore(storeDir);
 
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -64,7 +66,7 @@ describe('ConnectionManager.stop(drainTimeoutMs) — bounded outbox drain before
     });
 
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
     // `waitForOpen()` means the session's handshake `conn.hello` was
     // accepted; freeze this test only after anything queued behind it has
     // drained, so the assertions below remain about the one shutdown

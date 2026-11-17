@@ -9,7 +9,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { TestServer } from './fixtures/test-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -51,7 +51,9 @@ describe('a revoked device stops draining its outbox instead of retrying forever
 
     const postBatchSpy = vi.spyOn(LongPollClient.prototype, 'postBatch');
 
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -65,7 +67,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
     });
 
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
 
     // Revoke server-side, THEN queue outbound envelopes — the drain's very
     // first attempt discovers revocation (401 on the send, then on the

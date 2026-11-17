@@ -8,7 +8,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -60,7 +60,9 @@ describe('protocol-version admission at real long-poll receive', () => {
       });
     }) as typeof fetch);
 
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: real.url,
       deviceId: record.deviceId,
       productId: 'version-admission-client',
@@ -75,7 +77,7 @@ describe('protocol-version admission at real long-poll receive', () => {
       longPollIdleDelayMs: 10,
     });
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
     await real.byok.dispatch({
       deviceId: record.deviceId, instruction: 'known v1 offer must not run', target: { lane: 'auto' },
       agentRef: { agentId: 'version-admission-agent', profileRevision: 'rev-1' }, sessionRef: 'version-admission-session',

@@ -10,7 +10,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import type { FleetJitter } from '../daemon/deterministic-jitter';
 import { TestServer } from './fixtures/test-server';
-import { waitForOpen } from './fixtures/lifecycle-barrier';
+import { openBarrier } from './fixtures/lifecycle-barrier';
 
 /**
  * This file is about tolerance and redelivery, not retry pacing: every
@@ -77,7 +77,9 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     const cursorStore = new CursorStore(storeDir);
 
     const received: Envelope[] = [];
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -94,7 +96,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     });
 
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
     return { record, cursorStore, received };
   }
 
@@ -484,7 +486,9 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     const cursorStore = new CursorStore(storeDir);
 
     let attempts = 0;
+    const opens = openBarrier();
     connection = new ConnectionManager({
+      onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url,
       deviceId: record.deviceId,
       productId: 'test-product',
@@ -506,7 +510,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
     });
 
     await connection.start();
-    await waitForOpen(connection);
+    await opens.waitForOpen(connection);
 
     const realSeq1 = createEnvelope(
       'task.offer',
