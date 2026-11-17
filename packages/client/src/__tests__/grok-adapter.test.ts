@@ -718,8 +718,7 @@ describe('AgyAdapter', () => {
     vi.stubEnv('GOOGLE_API_KEY', 'host-key-2');
     vi.stubEnv('GOOGLE_GEMINI_BASE_URL', 'https://elsewhere.test');
     vi.stubEnv('AGY_ADC_AUTH', '1');
-    vi.stubEnv('FAKE_ACP_MODEL_CATALOG', 'gemini-3.5-pro,gemini-3.8-flash');
-    const resources = await agyCtx({ GEMINI_HOME: '/user/.gemini', XDG_CONFIG_HOME: '/user/.config', XDG_RUNTIME_DIR: '/run/user/1', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus', APPDATA: '/user/roaming' });
+    const resources = await agyCtx({ FAKE_ACP_MODEL_CATALOG: 'gemini-3.5-pro,gemini-3.8-flash', GEMINI_HOME: '/user/.gemini', XDG_CONFIG_HOME: '/user/.config', XDG_RUNTIME_DIR: '/run/user/1', DBUS_SESSION_BUS_ADDRESS: 'unix:path=/run/user/1/bus', APPDATA: '/user/roaming' });
     const s = await open(agy(home, { model: 'gemini-3.8-flash' }), { target: GROK_TARGET, instruction: 'hello' }, resources);
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, { type: 'turn_end' }]);
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
