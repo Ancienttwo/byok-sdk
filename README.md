@@ -477,12 +477,12 @@ Third-party dependencies and code-generation evidence follow static dependency e
 
 | Import / command | Purpose | Third-party dependencies | Zod | Normalized budget |
 | --- | --- | --- | --- | ---: |
-| `@byok-sdk/bot-collaboration` | K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2835786 B |
+| `@byok-sdk/bot-collaboration` | K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2844216 B |
 | `@byok-sdk/bot-collaboration/host-kit` | K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client | `@cfworker/json-schema`, `zod` | allowed | 611685 B |
 | `@byok-sdk/bot-collaboration/package.json` | Package metadata | — | forbidden | 2086 B |
 | `@byok-sdk/bot-collaboration/rules` | K8 pure rules; Worker-safe, no node:sqlite | `@cfworker/json-schema`, `zod` | allowed | 248602 B |
-| `@byok-sdk/bot-collaboration/testing` | K8 shared vectors and L test Host | `@cfworker/json-schema`, `@hono/node-server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `chai`, `eventsource`, `eventsource-parser`, `expect-type`, `hono`, `pkce-challenge`, `tinybench`, `vite`, `vitest`, `zod` | allowed | 3281910 B |
-| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2506577 B |
+| `@byok-sdk/bot-collaboration/testing` | K8 shared vectors and L test Host | `@cfworker/json-schema`, `@hono/node-server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `chai`, `eventsource`, `eventsource-parser`, `expect-type`, `hono`, `pkce-challenge`, `tinybench`, `vite`, `vitest`, `zod` | allowed | 3290340 B |
+| `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2515007 B |
 | `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 574944 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 84606 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 128330 B |
@@ -519,7 +519,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1761 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 571018 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1215 B |
-| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2516808 B |
+| `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2527777 B |
 | `bin:byok-agent-memory-mcp` | Agent memory MCP helper | — | forbidden | 46403 B |
 | `bin:byok-agent-message-mcp` | Agent message MCP helper | — | forbidden | 46407 B |
 | `bin:byok-agent-result-mcp` | Task-bound structured outcome MCP helper | — | forbidden | 46403 B |
