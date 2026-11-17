@@ -34,7 +34,8 @@ import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, 
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 import type { RuntimeEnvironmentLaneReport, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment.js';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal.js';
-import { isSqliteAvailable, loadSqliteModule } from '../util/sqlite-support.js';
+import { isSqliteAvailable, openSqliteCopyReadOnly } from '../util/sqlite-support.js';
+import type { DatabaseSync } from 'node:sqlite';
 import {
   inspectOperationalHealthHandle,
   inspectOperationalHealthFile,
@@ -287,8 +288,7 @@ async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['jo
         };
       }
       const tempDir = await createDaemonScratch(storeDir, 'diag');
-      const { DatabaseSync } = loadSqliteModule();
-      let db: InstanceType<typeof DatabaseSync> | undefined;
+      let db: DatabaseSync | undefined;
       try {
         for (const name of componentNames) {
           const component = opened.get(name);
@@ -319,7 +319,7 @@ async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['jo
         } finally {
           await copiedHandle.close();
         }
-        db = new DatabaseSync(path.join(tempDir, JOURNAL_DB_FILENAME), { readOnly: true });
+        db = openSqliteCopyReadOnly(path.join(tempDir, JOURNAL_DB_FILENAME));
         const result = db.prepare('PRAGMA quick_check(1)').get() as { quick_check?: unknown } | undefined;
         if (result?.quick_check !== 'ok') {
           return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal quick_check failed' };

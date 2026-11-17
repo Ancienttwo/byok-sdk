@@ -1216,6 +1216,18 @@ for that execution, and blocks later Grok starts. The user moves the file back
 to their Grok home or deletes it and logs in again. The SDK never restores or
 deletes it. Source: [#2258]; entry `grok-agent-user-context`.
 
+### Journal commits on macOS flush the drive cache (#2336)
+
+Source: [#2336]. Manifest entry: `client-journal-macos-fullfsync`.
+
+On macOS the journal sets `PRAGMA fullfsync = ON`, because `synchronous=FULL`
+alone stops at the drive's volatile write cache. A commit takes a few
+milliseconds longer: on an idle Apple Silicon M4 Pro, one write went from a p50
+of 0.13 ms to 3.8 ms and a burst from 1.2 ms to 9.9 ms per operation; on an
+idle Intel Mac Pro, from 0.41 ms to 22.6 ms and from 4.9 ms to 93 ms. Commits
+run on the journal worker, so the event loop is unaffected. No action is
+needed.
+
 ### Bun on Windows: compile with Bun 1.4.4 or newer
 
 Under Bun 1.4.2, a Bun-compiled daemon or Host kept a SQLite database's files
@@ -1287,3 +1299,4 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2332]: https://github.com/Ancienttwo/byok-sdk/issues/2332
 [#2344]: https://github.com/Ancienttwo/byok-sdk/pull/2344
 [#2347]: https://github.com/Ancienttwo/byok-sdk/issues/2347
+[#2336]: https://github.com/Ancienttwo/byok-sdk/issues/2336
