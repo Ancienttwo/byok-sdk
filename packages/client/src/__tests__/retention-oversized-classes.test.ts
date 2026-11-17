@@ -44,7 +44,7 @@ function budget(trigger: SweepBudget['trigger'] = 'periodic') {
   const tally = { inspections: 0, deleted: 0, bytes: 0, truncated: false };
   const value: SweepBudget = { trigger, now, available: () => ++tally.inspections <= limits.passInspections,
     remaining: () => 256 - tally.deleted, removed: bytes => { tally.deleted++; tally.bytes += bytes; },
-    truncate: () => { tally.truncated = true; }, report: () => {} };
+    truncate: () => { tally.truncated = true; }, report: () => {}, busy: () => {} };
   return { value, tally };
 }
 async function count(directory: string) {

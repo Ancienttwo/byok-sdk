@@ -304,7 +304,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
     }
     for await (const entry of entries(id, root, budget)) {
       if (!entry.isDirectory()) continue;
-      await manager.withIdleHomeLease(entry.name, async home => {
+      const idle = await manager.withIdleHomeLease(entry.name, async home => {
         // Complete authority is read under this lease using the original pass's
         // soft budget. Only deletion gets a fresh window (limits.homeDeletionWindowMs); references are
         // never cached across passes or used when the scan is incomplete.
@@ -403,6 +403,7 @@ export function createRetentionRegistry(options: ProducerOptions): RetentionRegi
           await visit(home, false); await visit(path.join(home, 'notes'), false); await visit(path.join(home, '.byok'), true);
         }
       });
+      if (!idle) budget.busy(entry.name);
     }
   }
   async function sweepSkills(budget: SweepBudget): Promise<void> {

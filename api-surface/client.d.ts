@@ -3494,6 +3494,7 @@ export interface SweepReport {
     readonly bytesReclaimed: number;
     readonly failures: number;
     readonly truncated: boolean;
+    readonly busyHomes: number;
     readonly durationMs: number;
 }
 // ==== @byok-sdk/client dist/daemon/retention/scratch.d.ts ====
