@@ -41,6 +41,8 @@ import {
   OperationalHealthTracker,
 } from '../daemon/operational-health';
 import { loadSqliteModule } from '../util/sqlite-support';
+import { stableAgentHomeOwnerId } from '../agent-home';
+import { currentAgentHomeLeaseWriter } from '../agent-home-writer';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner';
 import { DAEMON_OWNER_FILENAME } from '../util/daemon-owner';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter } from '../types';
@@ -428,6 +430,42 @@ describe('diagnostics collector', () => {
     expect(snapshot.quarantine.count).toBeGreaterThanOrEqual(MAX_QUARANTINE_ENTRIES);
     expect(snapshot.quarantine.count).toBeLessThanOrEqual(MAX_QUARANTINE_ENTRIES + 5);
     expect(snapshot.quarantine.truncated).toBe(true);
+  });
+
+  it('#2333: counts Agent-home lease markers in the snapshot and lists the blocking ones with their remedy only in doctor', async () => {
+    const dir = await tempDir();
+    const hostStorageRoot = await fs.realpath(await tempDir());
+    const writeMarker = async (agentId: string, ownerId: string, writer: unknown) => {
+      const home = path.join(hostStorageRoot, 'agents', agentId);
+      await fs.mkdir(path.join(home, '.byok'), { recursive: true });
+      const file = path.join(home, '.byok', 'agent-home.lease');
+      await fs.writeFile(file, JSON.stringify({ version: 1, ownerId, leaseId: agentId, agentRef: { agentId, profileRevision: '1' }, canonicalHome: home, writer }));
+      return file;
+    };
+    const gone = { ...(await currentAgentHomeLeaseWriter())!, pid: 2147483646 };
+    const own = await writeMarker('own', stableAgentHomeOwnerId(dir, 'acme-product'), gone);
+    const foreign = await writeMarker('foreign', 'store-product:retired', { ...gone, host: 'b'.repeat(64) });
+    const legacy = await writeMarker('legacy', stableAgentHomeOwnerId(dir, 'acme-product'), undefined);
+    const withLeases = { ...config(dir), agentHome: { hostStorageRoot } };
+
+    const snapshot = await collectDiagnostics(withLeases, dir, { adapters: [], connectControl: unreachable });
+    expect(snapshot.agentHomeLeases).toEqual({ status: 'measured', own: 2, ownReclaimable: 2, foreignOwner: 1, corrupt: 0, truncated: false });
+    expect(JSON.stringify(snapshot)).not.toContain(hostStorageRoot);
+    expect(JSON.stringify(snapshot)).not.toContain('store-product:retired');
+
+    const lines: string[] = [];
+    await runDoctorCommand(withLeases, { adapters: [], connectControl: unreachable, log: (line) => lines.push(line) });
+    const leaseLines = lines.filter((line) => line.startsWith('agent-home-leases') || line.startsWith('  '));
+    expect(leaseLines.join('\n')).toContain(`${foreign} owner=store-product:retired blockedBy=other-host`);
+    expect(leaseLines.join('\n')).toContain(`only once you have confirmed that the machine or container that wrote it no longer writes to this store, delete ${foreign}`);
+    expect(leaseLines.join('\n')).toContain('a started daemon reclaims each when it next uses that home');
+    // #2348: no daemon reclaims a marker that records no writer, so it is listed with its own remedy.
+    expect(leaseLines.join('\n')).toContain(`byok-agent uninstall releases it once this store is retired; otherwise confirm that no process uses this Agent home, then delete ${legacy}`);
+    expect(leaseLines.join('\n')).not.toContain(own);
+    expect(leaseLines.join('\n')).not.toContain('releaseAgentHomeLeases(');
+    const json: string[] = [];
+    await runDoctorCommand(withLeases, { adapters: [], connectControl: unreachable, json: true, log: (line) => json.push(line) });
+    expect(json.join('\n')).not.toContain(hostStorageRoot);
   });
 
   it('refuses a symlinked quarantine inventory without following the target', async () => {

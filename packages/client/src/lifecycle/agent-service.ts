@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { DaemonConfig } from '../daemon/create-daemon.js';
 import { serviceLogDir } from '../daemon/host-layout.js';
 import { DeviceStore } from '../daemon/store.js';
+import { releaseStoreAgentHomeLeases } from '../diagnostics/operator-actions.js';
 import type { ServiceInstallationOptions } from './service-installation.js';
 import { nodeAgentProgram, type ServiceDefinition } from './service-types.js';
 
@@ -47,7 +48,9 @@ export function agentServiceDefinition(input: AgentServiceDefinitionInput): Serv
 /** The entry a `byok-agent` payload ships at its root: a single-file bundle (`@byok-sdk/client/packaging`). */
 export const AGENT_PAYLOAD_ENTRY = 'byok-agent.mjs';
 
-export interface AgentServiceInstallationInput extends Omit<AgentServiceDefinitionInput, 'agentBin'> {
+export interface AgentServiceInstallationInput extends Omit<AgentServiceDefinitionInput, 'agentBin' | 'config'> {
+  /** With `agentHome`, uninstall releases this store's Agent-home lease markers (#2333). */
+  config: AgentServiceDefinitionInput['config'] & Pick<DaemonConfig, 'agentHome'>;
   /** See {@link ServiceInstallationOptions.installRoot}. */
   installRoot: string;
 }
@@ -69,5 +72,17 @@ export function agentServiceInstallation(input: AgentServiceInstallationInput): 
     installRoot: input.installRoot,
     program: (versionDir) => nodeAgentProgram({ agentBin: path.join(versionDir, AGENT_PAYLOAD_ENTRY), configPath, nodeBin, service: true }),
     precheck: (versionDir) => ({ command: nodeBin, args: [path.join(versionDir, AGENT_PAYLOAD_ENTRY), 'upgrade', 'check', '--store', '--json', '--config', configPath] }),
+    releaseStoreLeases: agentHomeLeaseRelease(input.config),
   };
+}
+
+/**
+ * The Agent-home lease release a `byok-agent` service uninstall runs for
+ * `config` (#2333).
+ *
+ * @internal
+ */
+export function agentHomeLeaseRelease(config: Pick<DaemonConfig, 'productId' | 'storeDir' | 'agentHome'>): ServiceInstallationOptions['releaseStoreLeases'] {
+  const agentHome = config.agentHome;
+  return agentHome === undefined ? 'no-agent-home' : () => releaseStoreAgentHomeLeases(config, agentHome.hostStorageRoot);
 }

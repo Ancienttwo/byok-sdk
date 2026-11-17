@@ -287,7 +287,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     const foreign = await start({}, { storeDir, hostStorageRoot, productId });
     server.send(offer('residue-foreign', agentRef.agentId, 'pi'));
     const declined = await server.waitFor(declineFor('residue-foreign'));
-    expect(declineReason(declined)).toMatch(/already has a mutable writer lease/);
+    expect(declineReason(declined)).toMatch(/of owner store-product:not-this-daemon/);
     expect(foreign.pi.startCalls).toHaveLength(0);
     await foreign.daemon.stop();
     daemon = undefined;

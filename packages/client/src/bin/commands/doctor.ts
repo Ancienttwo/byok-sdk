@@ -9,7 +9,7 @@ import {
 import { resolveStoreDir } from '../config.js';
 import { serviceLogDir } from '../../daemon/host-layout.js';
 import type { ServiceEnvironmentRecord } from '../../login-shell-environment.js';
-import { formatRuntimeEnvironmentLines, formatRuntimeExecutable, formatServiceEnvironment } from '../../diagnostics/format.js';
+import { formatAgentHomeLeaseLines, formatRuntimeEnvironmentLines, formatRuntimeExecutable, formatServiceEnvironment } from '../../diagnostics/format.js';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor.js';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {
@@ -88,6 +88,9 @@ function formatDoctorLines(diagnostics: DoctorDiagnostics, logDir: string, envir
   if (snapshot.health.status === 'corrupt' || snapshot.health.status === 'unavailable') {
     lines.push(`health-detail: ${snapshot.health.reason}; bytes=${snapshot.health.sizeBytes ?? 'unknown'}`);
   }
+  // #2333: the markers that block an Agent home, with what clears each. Local only.
+  if (diagnostics.agentHomeLeases !== undefined) lines.push(...formatAgentHomeLeaseLines(diagnostics.agentHomeLeases));
+  else if (snapshot.agentHomeLeases.status === 'unavailable') lines.push('agent-home-leases: unavailable');
   if (snapshot.quarantine.truncated) {
     lines.push(`quarantine-detail: inventory truncated after ${snapshot.quarantine.scannedCount} scanned entries`);
   }

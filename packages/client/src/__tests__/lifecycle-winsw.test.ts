@@ -394,6 +394,18 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.xml', { force: true });
   });
 
+  it('uninstall() of a service already stopped (1062) finishes, so an uninstall retried after a refusal completes (#2333)', async () => {
+    const calls: string[] = [];
+    const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {
+      calls.push(`${cmd} ${args.join(' ')}`);
+      return args[0] === 'stop' ? fail(1062, '', 'The service has not been started.') : ok();
+    });
+    const fs = fakeFs();
+    await createWinswLifecycle(def(), { run, fs }).uninstall();
+    expect(calls).toEqual(['C:\\acme\\logs/Acme-Agent-.exe stop', 'C:\\acme\\logs/Acme-Agent-.exe uninstall']);
+    expect(fs.rm).toHaveBeenCalledWith('C:\\acme\\logs/Acme-Agent-.exe', { force: true });
+  });
+
   it('uninstall() throws and does NOT delete exe/xml when "stop" fails for a real reason, and never calls "uninstall" (P1 #7)', async () => {
     const calls: string[] = [];
     const run = vi.fn<Runner>().mockImplementation(async (cmd, args) => {

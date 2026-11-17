@@ -5,9 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-  archiveAgentTerminalMessages, exportDeviceSupportBundle, quarantineDeviceOperationalHealth,
+  archiveAgentTerminalMessages, exportDeviceSupportBundle, quarantineDeviceOperationalHealth, releaseAgentHomeLeases,
   DeviceOperatorError, AgentHomeManager, stableAgentHomeOwnerId, type DaemonConfig,
 } from '../index';
+import { currentAgentHomeLeaseWriter } from '../agent-home-writer';
 import { DeviceStore } from '../daemon/store';
 import { connectControlClient } from '../daemon/control-client';
 import { acquireDaemonOwner } from '../util/daemon-owner';
@@ -204,5 +205,72 @@ describe('public device operator boundaries', () => {
       expect(String(error)).not.toContain('private-secret-missing');
       expect((error as Error).cause).toBeUndefined();
     }
+  });
+
+  describe('releaseAgentHomeLeases (#2333)', () => {
+    const DEAD_PID = 2147483646;
+    const ownerOf = (storeDir: string) => stableAgentHomeOwnerId(DeviceStore.resolveDir(config.productId, storeDir), config.productId);
+    const gone = async () => ({ ...(await currentAgentHomeLeaseWriter())!, pid: DEAD_PID });
+    /** A marker in Agent home `agentId`: its JSON fields, or raw bytes. */
+    async function marker(agentId: string, fields: Record<string, unknown> | string): Promise<string> {
+      const home = path.join(await fs.realpath(root), 'homes', 'agents', agentId);
+      await fs.mkdir(path.join(home, '.byok'), { recursive: true });
+      const file = path.join(home, '.byok', 'agent-home.lease');
+      await fs.writeFile(file, typeof fields === 'string' ? fields
+        : JSON.stringify({ version: 1, leaseId: `lease-${agentId}`, agentRef: { agentId, profileRevision: '1' }, canonicalHome: home, ...fields }));
+      return file;
+    }
+    const exists = (file: string) => fs.stat(file).then(() => true, () => false);
+
+    it('releases this store\'s gone and legacy markers and dead temp files, and keeps and counts another owner\'s and corrupt ones', async () => {
+      const own = ownerOf(config.storeDir!);
+      const dead = await marker('a1', { ownerId: own, writer: await gone() });
+      const legacy = await marker('a2', { ownerId: own });
+      const foreign = await marker('a3', { ownerId: 'store-product:other', writer: { ...(await gone()), host: 'b'.repeat(64) } });
+      const corrupt = await marker('a4', '{');
+      // This store's marker from another machine cannot be proved free: kept, not refused.
+      const elsewhere = await marker('a5', { ownerId: own, writer: { ...(await gone()), host: 'b'.repeat(64) } });
+      const internal = path.dirname(dead);
+      const deadTemp = path.join(internal, 'agent-home.lease.00000000-0000-4000-8000-000000000001.tmp');
+      const liveTemp = path.join(internal, 'agent-home.lease.00000000-0000-4000-8000-000000000002.tmp');
+      const legacyTemp = path.join(internal, 'agent-home.lease.123-4.tmp');
+      await fs.writeFile(deadTemp, JSON.stringify({ writer: await gone() }));
+      await fs.writeFile(liveTemp, JSON.stringify({ writer: await currentAgentHomeLeaseWriter() }));
+      await fs.writeFile(legacyTemp, '{}');
+
+      await expect(releaseAgentHomeLeases(config, { confirmed: true })).resolves.toEqual({ action: 'release-agent-home-leases', scope: 'device',
+        released: 2, namedRemoved: false, removedTemps: 2, kept: { own: 1, foreignOwner: 1, corrupt: 1 } });
+      expect(await Promise.all([dead, legacy, deadTemp, legacyTemp, foreign, corrupt, elsewhere, liveTemp].map(exists))).toEqual([false, false, false, false, true, true, true, true]);
+
+      // Named once that writer is retired: another owner's marker and a corrupt one.
+      await expect(releaseAgentHomeLeases(config, { confirmed: true, marker: { markerPath: foreign, ownerId: 'store-product:wrong' } })).rejects.toMatchObject({ code: 'target-mismatch' });
+      await expect(releaseAgentHomeLeases(config, { confirmed: true, marker: { markerPath: foreign, ownerId: 'store-product:other' } })).resolves.toMatchObject({ namedRemoved: true, kept: { own: 1, foreignOwner: 0, corrupt: 1 } });
+      await expect(releaseAgentHomeLeases(config, { confirmed: true, marker: { markerPath: corrupt, ownerId: null } })).resolves.toMatchObject({ namedRemoved: true, kept: { corrupt: 0 } });
+    });
+
+    it('never removes a marker whose writer is proved running, named or not, and then removes nothing', async () => {
+      const own = ownerOf(config.storeDir!);
+      const dead = await marker('b1', { ownerId: own, writer: await gone() });
+      const running = await marker('b2', { ownerId: 'store-product:other', writer: await currentAgentHomeLeaseWriter() });
+      const refusal = await releaseAgentHomeLeases(config, { confirmed: true, marker: { markerPath: running, ownerId: 'store-product:other' } }).catch((error: unknown) => error);
+      expect(refusal).toMatchObject({ code: 'agent-lease-held', blockedBy: 'writer-running' });
+      expect((refusal as Error).message).not.toContain(running);
+      expect(await Promise.all([dead, running].map(exists))).toEqual([true, true]);
+      // This store's own marker of a running writer (a memory export beside it) refuses the unnamed release too.
+      await fs.writeFile(running, JSON.stringify({ ...JSON.parse(await fs.readFile(running, 'utf8')), ownerId: own }));
+      await expect(releaseAgentHomeLeases(config, { confirmed: true })).rejects.toMatchObject({ code: 'agent-lease-held', blockedBy: 'writer-running' });
+      expect(await exists(dead)).toBe(true);
+    });
+
+    it('frees a home a retired store\'s crash left for another store sharing the root', async () => {
+      await seed();
+      const retired: DaemonConfig = { ...config, storeDir: path.join(root, 'retired-store') };
+      const residue = await marker(agentRef.agentId, { ownerId: ownerOf(retired.storeDir!), agentRef, writer: await gone() });
+      const archive = { ...target, archiveDirectory: path.join(root, 'audit') };
+      await expect(archiveAgentTerminalMessages(config, archive)).rejects.toMatchObject({ code: 'agent-busy' });
+      await expect(releaseAgentHomeLeases(retired, { confirmed: true })).resolves.toMatchObject({ released: 1 });
+      expect(await exists(residue)).toBe(false);
+      await expect(archiveAgentTerminalMessages(config, archive)).resolves.toMatchObject({ status: 'archived' });
+    });
   });
 });

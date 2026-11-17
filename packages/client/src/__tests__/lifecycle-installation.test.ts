@@ -30,6 +30,7 @@ import * as secureDir from '../util/secure-dir';
 import { acquireDaemonOwner } from '../util/daemon-owner';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { OwnedProcessLedger, OwnedProcessResidueError, type OwnedProcessReconciliation } from '../daemon/owned-process-ledger';
+import { AgentHomeLeaseHeldError } from '../agent-home';
 import { useInProcessServiceLifecycleGate } from './support/service-lifecycle-gate';
 
 useInProcessServiceLifecycleGate();
@@ -220,6 +221,7 @@ async function cliOverAppOwner(installRootFor = installRoot): Promise<ServiceIns
     program: () => def.program,
     precheck: (versionDir) => ({ command: process.execPath, args: [path.join(versionDir, 'precheck.cjs'), path.join(root, 'verdicts.json')] }),
     healthCheck: async () => undefined,
+    releaseStoreLeases: 'no-agent-home',
   }, createManagedLifecycle(def, unit));
 }
 
@@ -270,6 +272,7 @@ function installationOver(lifecycle: ManagedServiceLifecycle, extra: Partial<Ser
     },
     healthTimeoutMs: 5_000,
     stopTimeoutMs: 2_000,
+    releaseStoreLeases: 'no-agent-home',
     ...extra,
   }, lifecycle);
 }
@@ -1063,6 +1066,20 @@ describe('createServiceInstallation (#1097 slice 2)', () => {
     const receipt = await installation.receipt();
     await expect(installation.uninstall()).rejects.toBe(failed);
     expect([stop.mock.calls.length, removeFiles.mock.calls.length, ...await layout(), await installation.receipt()]).toEqual([1, 0, '2.0.0', '1.0.0', ['1.0.0', '2.0.0'], receipt]);
+  });
+
+  it('uninstall releases the Agent-home leases once the service is stopped; a running writer is agent_home_lease_held and removes nothing, and a retry reports the kept markers (#2333)', async () => {
+    const failed = new AgentHomeLeaseHeldError('held', 'writer-running', '/homes/agents/a/.byok/agent-home.lease');
+    const deactivate = vi.fn(async () => undefined);
+    const releaseStoreLeases = vi.fn<() => Promise<{ kept: { own: number; foreignOwner: number; corrupt: number } }>>()
+      .mockRejectedValueOnce(failed).mockResolvedValue({ kept: { own: 1, foreignOwner: 1, corrupt: 0 } });
+    const base = fakeLifecycle();
+    installation = installationOver({ ...base, owned: (operation) => withServiceOwnerGate(() => operation({ ...fakeHeld(), deactivate })) }, { releaseStoreLeases });
+    await installation.install(await payload('1.0.0'));
+    await expect(installation.uninstall()).rejects.toMatchObject({ code: 'agent_home_lease_held', cause: failed });
+    expect([deactivate.mock.calls.length, releaseStoreLeases.mock.calls.length, ...await layout()]).toEqual([1, 1, '1.0.0', undefined, ['1.0.0']]);
+    await expect(installation.uninstall()).resolves.toEqual({ keptAgentHomeLeases: 2 });
+    expect(await fs.readdir(installRoot)).toEqual([]);
   });
 
   it('uninstall whose unit removal fails after the stop leaves no current, so the unit starts no payload; a retry finishes (#2279)', async () => {
@@ -2578,7 +2595,7 @@ print(json.dumps(result))
 
     it('the program must run from <installRoot>/current, and upgrade() and rollback() need the exact unit', async () => {
       const options = (program: string) => ({ service: { name: 'svc', storeDir, logDir: root, owner: 'app' }, productId: 'svc', installRoot,
-        program: () => ({ command: process.execPath, args: [program] }), precheck: () => ({ command: process.execPath, args: [] }) });
+        program: () => ({ command: process.execPath, args: [program] }), precheck: () => ({ command: process.execPath, args: [] }), releaseStoreLeases: 'no-agent-home' as const });
       for (const program of [path.join(installRoot, 'current-old', 'host.js'), path.join(root, 'elsewhere.js')]) {
         expect(() => createServiceInstallation(options(program))).toThrow(expect.objectContaining({ code: 'service_program_not_current' }));
       }
