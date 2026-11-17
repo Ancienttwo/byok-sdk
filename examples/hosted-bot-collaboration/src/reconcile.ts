@@ -164,7 +164,7 @@ export class HostedReconciler {
     if (cancelReason && !terminal) {
       // No attempt: conclude, but only when no submit try held the row at the read. K4 serializes this with every submit;
       // H uses the lease.
-      if (!attempt) return this.conclude(scopeKey, key, cancelReason, attemptReadAt);
+      if (!attempt) return this.conclude(scopeKey, key, cancelReason, undefined, attemptReadAt);
       await port.cancel(task, cancelReason);
       attempt = verified(row.input, await port.attempt(task));
       if (!attempt) throw new Error('Attempt disappeared after cancellation');
@@ -172,7 +172,7 @@ export class HostedReconciler {
     }
     if (attempt && await this.record(scopeKey, key, attempt)) started();
     if (attempt?.status === 'cancelled' && !attempt.claimedExecutor && !attempt.ownerDeviceId && !terminal) {
-      return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled');
+      return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled', attempt);
     }
     if (terminal) {
       if (terminal.envelope.task_id !== task) throw new Error('Terminal identity conflict');
@@ -227,12 +227,16 @@ export class HostedReconciler {
 
   /**
    * Concludes a row with no device terminal. With `attemptReadAt`, the row's submit lease must have ended by the time that
-   * the attempt was read as absent, because a try in flight then could still create an attempt.
+   * the attempt was read as absent, because a try in flight then could still create an attempt. `attempt` is the one the
+   * conclusion was decided on: it is written in the same UPDATE, so a stale `record` of another reconciler between this
+   * reconciler's `record` and this conclusion cannot leave a stored attempt without the cancellation that K8 reads.
    */
-  private conclude(scopeKey: string, key: string, conclusion: 'expired' | 'cancelled', attemptReadAt?: number): Promise<boolean> {
+  private conclude(scopeKey: string, key: string, conclusion: 'expired' | 'cancelled', attempt?: TaskAttempt,
+    attemptReadAt?: number): Promise<boolean> {
     return this.locked(scopeKey, async (client, now) => {
-      const done = await client.query(`UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2 AND conclusion IS NULL
-        AND ($4::bigint IS NULL OR next_at <= $4)`, [scopeKey, key, conclusion, attemptReadAt ?? null]);
+      const done = await client.query(`UPDATE intent SET conclusion = $3, attempt = coalesce($5::json, attempt) WHERE scope = $1 AND key = $2
+        AND conclusion IS NULL AND ($4::bigint IS NULL OR next_at <= $4)`,
+      [scopeKey, key, conclusion, attemptReadAt ?? null, attempt === undefined ? null : JSON.stringify(attempt)]);
       if (done.rowCount) {
         await switchDueVersions(client, scopeKey, now);
         return true;
