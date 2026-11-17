@@ -10,8 +10,10 @@ release pipeline.
 
 ## Prerequisites
 
-- [bun](https://bun.com) installed (`curl -fsSL https://bun.com/install | bash`,
-  or see bun's own install docs for your platform).
+- [bun](https://bun.com) 1.4.4 or newer (`curl -fsSL https://bun.com/install | bash`,
+  or see bun's own install docs for your platform). Bun 1.4.2 keeps closed
+  SQLite files open on Windows, so deleting a store after closing it fails
+  with `EBUSY` (#2347).
 - Node.js 24.22.1 or newer for the external pi CLI sidecar. `bun install`
   may install the npm graph, but pi's supported production runtime is Node.
 - Your product's launcher entry point built against `@byok-sdk/client` (see
