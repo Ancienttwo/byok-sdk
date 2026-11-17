@@ -680,7 +680,13 @@ export function selectImpact(paths, context = {}) {
       const impact = verifyReviewedContent(path, context);
       for (const dir of impact.dirs) { dirs.add(dir); dependencyDirs.add(dir); }
       if (impact.fullMatrixReason) fullMatrixReason = impact.fullMatrixReason;
-      if (path === 'package.json') { scripts = true; if (dependencyDirs.size) families.add('npm-release-pack'); continue; }
+      if (path === 'package.json') {
+        scripts = true;
+        if (dependencyDirs.size) families.add('npm-release-pack');
+        // The Bun pin runs every platform job, like .node-version; the complete suite stays nightly/release validation.
+        if (impact.toolchain) for (const id of knownFamilies) if (id !== 'build-test' && id !== 'macos-client') families.add(id);
+        continue;
+      }
       if (path === 'bun.lock') { families.add('npm-release-pack'); continue; }
       const dir = path.slice(0, -'/package.json'.length);
       if (!workspaceGraph[dir]) requireMapping(path);

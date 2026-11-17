@@ -343,6 +343,18 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   } else if (path === 'examples/host-execution-core/package.json') {
     if (before.private !== true || after.private !== true) throw new Error('The host execution core example must stay private');
   } else if (path === 'package.json') {
+    if (before.packageManager !== after.packageManager) {
+      // #2347: every setup-bun step and the pinned Bun archive checksums follow
+      // this pin. As with .node-version (#702), admit only one exact bun@X.Y.Z
+      // replacing another, with every other byte of the manifest unchanged.
+      const pin = /^bun@(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
+      const from = JSON.stringify(before.packageManager), to = JSON.stringify(after.packageManager);
+      if (!pin.test(before.packageManager ?? '') || !pin.test(after.packageManager ?? '')
+        || beforeText.split(from).length !== 2 || beforeText.replace(from, to) !== afterText) {
+        throw new Error('Reviewed CI mapping required: package.json may change only packageManager, from one exact bun@X.Y.Z to another');
+      }
+      return { dirs: [], toolchain: true };
+    }
     // Reserve the CI helper before generic script normalization can erase it.
     // Only this exact composition may wrap the existing ordered test list.
     const ciHelper = 'test:scripts:ci';
