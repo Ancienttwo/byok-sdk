@@ -30,7 +30,12 @@ vi.mock('node:http2', () => sandbox.deny('import node:http2'));
 vi.mock('node:net', () => sandbox.deny('import node:net'));
 vi.mock('node:tls', () => sandbox.deny('import node:tls'));
 vi.mock('node:dgram', () => sandbox.deny('import node:dgram'));
-vi.mock('node:fs/promises', () => sandbox.deny('import node:fs/promises'));
+// Denied per call, as node:fs below is: the shared test setup imports the
+// Agent-home lease writer, whose machine id probe imports this module (#2348).
+vi.mock('node:fs/promises', () => Object.fromEntries([
+  'access', 'appendFile', 'chmod', 'copyFile', 'link', 'lstat', 'mkdir', 'mkdtemp', 'open', 'readFile', 'readdir',
+  'realpath', 'rename', 'rm', 'stat', 'unlink', 'writeFile',
+].map((name) => [name, () => sandbox.deny(`node:fs/promises ${name}`)])));
 vi.mock('node:fs', () => ({
   readFileSync: () => sandbox.deny('readFileSync'),
   existsSync: () => sandbox.deny('existsSync'),
