@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { createRoutine, hash, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, occurrenceOfIntentKey, promoteOccurrence, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
@@ -247,11 +247,13 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     await query(`UPDATE ${table('intent')} SET tries = 1, submission = 'delivered', reconcile_at = 0 WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(intent)]);
     const { input } = (await intentRow(scope, intent))! as unknown as { input: { deviceId: string; payload: { agentRef: Json } } };
     const attempt = { taskId: taskId(intent, 0), deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'offered' } as unknown as TaskAttempt;
-    const asked: string[] = [];
+    const asked: string[] = [], read = vi.spyOn(host, 'read');
     const port = { offer: async () => undefined, deviceTerminal: async () => undefined, attempt: async () => attempt, cancel: async () => undefined };
     await new HostedReconciler(opened!.pool, store().schema, host, { port: () => port, now: () => at,
       yieldUnclaimed: (_state, key) => { asked.push(key); return undefined; } }).run();
     expect(asked).toEqual([]);
+    expect(read).not.toHaveBeenCalled();
+    read.mockRestore();
   });
 
   it('stages, switches, pauses, resumes and completes a routine through the Main Bot owner API, and refuses another Bot', async () => {
