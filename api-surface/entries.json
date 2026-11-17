@@ -2933,7 +2933,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 185242,
+      "budgetBytes": 185339,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
