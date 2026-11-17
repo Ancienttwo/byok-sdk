@@ -34,6 +34,13 @@ import type { JournalFaultStep } from './sqlite-journal.js';
 
 const data = workerData as JournalWorkerData;
 const WRITES: ReadonlySet<string> = new Set(JOURNAL_WRITE_OPS);
+/**
+ * Writes that call the journal's thread mid-transaction (prune checks each
+ * stored cancellation binding there). Each runs in a transaction of its own,
+ * so a stalled journal thread delays only this write, never the commit of
+ * other writes that would have shared its batch.
+ */
+const WRITES_ALONE: ReadonlySet<string> = new Set(['pruneConfirmedJournalTask']);
 const SAVEPOINT = 'journal_op';
 
 /** A synchronous call to the journal's own thread; this thread waits for the answer. */
@@ -166,6 +173,12 @@ function serve(db: DatabaseSync): void {
         reply({ id: request.id, ok: true, value: undefined });
         data.port.close();
         return;
+      }
+      if (WRITES_ALONE.has(request.op)) {
+        commit();
+        write(request.id, request.op, request.args);
+        commit();
+        continue;
       }
       if (WRITES.has(request.op)) {
         write(request.id, request.op, request.args);
