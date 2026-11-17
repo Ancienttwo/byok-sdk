@@ -218,7 +218,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     // and no pending approvals yet.
     expect(status.queueWatermarks).toEqual([{ taskId: 't1', progressBatcherPending: 0, pendingApprovals: 0 }]);
 
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    // The daemon sends task.started only after start() resolved, so the session is recorded.
+    expect(adapter.sessions).toHaveLength(1);
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete');
 
@@ -240,7 +241,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
 
     const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
     if (!conn.ok) throw new Error('expected reachable');
@@ -285,7 +286,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete');
 
@@ -308,7 +309,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
 
     const observed: Array<{ kind: string }> = [];
     daemon.subscribe((event) => observed.push(event));
@@ -354,10 +355,15 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't-stalled', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
 
     const observed: DaemonEvent[] = [];
-    daemon.subscribe((event) => observed.push(event));
+    let completed!: () => void;
+    const shutdownCompleted = new Promise<void>((resolve) => { completed = resolve; });
+    daemon.subscribe((event) => {
+      observed.push(event);
+      if (event.kind === 'shutdown-complete') completed();
+    });
 
     // Genuinely stalled — never settles — the exact scenario this finding
     // names, not merely a slow-but-eventually-ok POST.
@@ -365,17 +371,13 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
     const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
     if (!conn.ok) throw new Error('expected reachable');
-    const startedAt = Date.now();
     await expect(conn.client.request('shutdown', { reason: 'operator' })).resolves.toEqual({ acknowledged: true });
     conn.client.close();
 
-    await vi.waitFor(() => expect(observed.some((e) => e.kind === 'shutdown-complete')).toBe(true), { timeout: 3000 });
-    const elapsedMs = Date.now() - startedAt;
-
-    // Bounded — proves this test's own stalled mock actually matters (the
-    // shutdown genuinely completed instead of hanging on the stalled POST),
-    // and stays comfortably under the outer SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS.
-    expect(elapsedMs).toBeLessThan(5000);
+    // Shutdown completes despite the POST that never settles: the drain gives up
+    // after outboxDrainTimeoutMs. A shutdown that hung would fail this test at
+    // its own timeout, so no wall-clock assertion is needed.
+    await shutdownCompleted;
 
     const shutdownComplete = observed.find((e) => e.kind === 'shutdown-complete');
     if (shutdownComplete?.kind !== 'shutdown-complete') throw new Error('unreachable');
@@ -395,9 +397,13 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
     const lines: string[] = [];
     const controller = new AbortController(); // deliberately never aborted
-    const startPromise = runStartCommand(config, { daemon, log: (l) => lines.push(l), signal: controller.signal });
+    // daemon.start() is disk-bound (fsync, SQLite open); wait for its ready hook, not a wall-clock poll.
+    let ready!: () => void;
+    const started = new Promise<void>((resolve) => { ready = resolve; });
+    const startPromise = runStartCommand(config, { daemon, log: (l) => lines.push(l), signal: controller.signal, onReady: () => ready() });
 
-    await vi.waitFor(() => expect(lines.some((l) => l.includes('"kind":"daemon-started"'))).toBe(true));
+    await started;
+    expect(lines.some((l) => l.includes('"kind":"daemon-started"'))).toBe(true);
 
     const conn = await connectControlClient({ storeDir, productId: config.productId });
     if (!conn.ok) throw new Error('expected reachable');
@@ -434,9 +440,12 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
     const lines: string[] = [];
     const controller = new AbortController(); // deliberately never aborted — only the control socket drives this shutdown
-    const startPromise = runStartCommand(config, { daemon, log: (l) => lines.push(l), signal: controller.signal });
+    let ready!: () => void;
+    const started = new Promise<void>((resolve) => { ready = resolve; });
+    const startPromise = runStartCommand(config, { daemon, log: (l) => lines.push(l), signal: controller.signal, onReady: () => ready() });
 
-    await vi.waitFor(() => expect(lines.some((l) => l.includes('"kind":"daemon-started"'))).toBe(true));
+    await started;
+    expect(lines.some((l) => l.includes('"kind":"daemon-started"'))).toBe(true);
 
     server.send(
       createEnvelope(
@@ -446,7 +455,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       ),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
 
     const conn = await connectControlClient({ storeDir, productId: config.productId });
     if (!conn.ok) throw new Error('expected reachable');
@@ -486,27 +495,38 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     daemon = built.daemon;
 
     const linesLive: string[] = [];
+    let liveStarted!: () => void;
+    const liveStartedLine = new Promise<void>((resolve) => { liveStarted = resolve; });
+    let markSubscribed!: () => void;
+    const subscribed = new Promise<void>((resolve) => { markSubscribed = resolve; });
     const liveController = new AbortController();
-    const liveFollow = runTasksFollowCommand(built.config, { log: (l) => linesLive.push(l), signal: liveController.signal });
-
-    // The control socket's `tasks.subscribe` handshake+dispatch (a separate
-    // connection from the WS one `server.send` rides) needs a moment to
-    // register server-side before an event sent right now is guaranteed to
-    // be observed — retry with a fresh taskId each attempt (a task.offer for
-    // an already-active/finished id is a documented no-op, so only a taskId
-    // that hasn't been tried yet can prove a later attempt actually worked).
-    let attempt = 0;
-    await vi.waitFor(
-      () => {
-        if (linesLive.some((l) => /started taskId="t-live-\d+"/.test(l))) return;
-        attempt += 1;
-        server.send(
-          createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: `t-live-${attempt}`, seq: server.nextSeq() }),
-        );
-        throw new Error('live subscription not yet active');
+    const liveFollow = runTasksFollowCommand(built.config, {
+      log: (l) => {
+        linesLive.push(l);
+        if (l.includes('started taskId="t-live"')) liveStarted();
       },
-      { timeout: 3000 },
+      signal: liveController.signal,
+      // The control server dispatches one connection's requests in order, and
+      // tasks.subscribe registers its observer when dispatched, so a reply to a
+      // later request on the same connection proves the subscription is live.
+      connectControl: async (options) => {
+        const conn = await connectControlClient(options);
+        if (!conn.ok) return conn;
+        const subscribe = conn.client.subscribe;
+        conn.client.subscribe = (method, params, onEvent) => {
+          const subscription = subscribe(method, params, onEvent);
+          void conn.client.request('status').then(() => markSubscribed());
+          return subscription;
+        };
+        return conn;
+      },
+    });
+
+    await subscribed;
+    server.send(
+      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'x', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't-live', seq: server.nextSeq() }),
     );
+    await liveStartedLine;
     liveController.abort();
     await liveFollow;
 
