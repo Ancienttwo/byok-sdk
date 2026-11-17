@@ -36,6 +36,13 @@ Missing dedicated entries are stated explicitly.
    AiphaBee's Local Agent and byok-host must ship together; its adoption checklist
    lives in [AiphaBee #1384].
 
+### Hyperdrive query caching
+
+For each existing Hyperdrive configuration used by the SDK, run
+`wrangler hyperdrive update <id> --caching-disabled` before deployment. See
+[Hyperdrive query caching](../../packages/cloud-dataplane/README.md#hyperdrive-query-caching).
+Sources: [#2373]. No dedicated manifest entry.
+
 ### Retired compatibility paths
 
 Sources: [#2290]. Manifest entries: `retire-compatibility-apis`, `reject-hosted-old-entity-constraint`, `reject-older-provider-kind-store`, `reject-local-old-would-do`, `reject-hosted-frame-would-do`, `reject-hosted-old-would-do-row`.
@@ -1360,6 +1367,7 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2349]: https://github.com/Ancienttwo/byok-sdk/issues/2349
 [#2361]: https://github.com/Ancienttwo/byok-sdk/issues/2361
 [#2363]: https://github.com/Ancienttwo/byok-sdk/issues/2363
+[#2373]: https://github.com/Ancienttwo/byok-sdk/pull/2373
 [#2356]: https://github.com/Ancienttwo/byok-sdk/issues/2356
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384
 [#2319]: https://github.com/Ancienttwo/byok-sdk/pull/2319

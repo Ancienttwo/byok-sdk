@@ -86,7 +86,7 @@ preserve existing entitlements; new tenants get the example limits (1 GB total, 
 
 | Name | Kind | Meaning |
 | --- | --- | --- |
-| `BYOK_PG` | Hyperdrive binding | the database of the SDK, H and `host_scope` schemas |
+| `BYOK_PG` | Hyperdrive binding | the database of the SDK, H and `host_scope` schemas; see [Hyperdrive query caching](../../packages/cloud-dataplane/README.md#hyperdrive-query-caching) |
 | `HOST_CLOCK` | Durable Object binding | the namespace of `HostClock` (SQLite-backed class, migration `v1`) |
 | `H_SCHEMA`, `HOST_SCHEMA` | var | the H store's schema; the schema of `host_scope` |
 | `BYOK_TOKEN_SECRET` | secret | lowercase hex HMAC key of the SDK token signer |
