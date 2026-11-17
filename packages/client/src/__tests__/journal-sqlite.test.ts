@@ -412,6 +412,13 @@ describe('SqliteLocalTaskJournal', () => {
       ['a table this build does not have', 'CREATE TABLE local_storage_usage (category TEXT PRIMARY KEY)'],
       // `_` is a LIKE wildcard, so NOT LIKE 'sqlite_%' would not see this table (#2318).
       ['a user table named like an SQLite one', 'CREATE TABLE sqliteX_notes (v TEXT)'],
+      // A Host's own index, trigger or view in the journal file (#2356).
+      ['a Host index', 'CREATE INDEX host_terminal_state ON journal_terminal (truth_state)'],
+      ['a Host trigger', 'CREATE TRIGGER host_task_audit AFTER INSERT ON journal_task BEGIN SELECT 1; END'],
+      ['a Host view', 'CREATE VIEW host_tasks AS SELECT task_id FROM journal_task'],
+      // An index this build creates that is missing, or whose definition differs (#2356).
+      ['a journal without one of its indexes', 'DROP INDEX journal_envelope_seq'],
+      ['a journal index with another definition', 'DROP INDEX journal_terminal_retention; CREATE INDEX journal_terminal_retention ON journal_terminal (updated_at)'],
     ])('refuses %s before any write, leaving the file and its directory unchanged', async (_label, reshape) => {
       const storeDir = await tmpStore();
       const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
