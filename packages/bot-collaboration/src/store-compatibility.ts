@@ -24,7 +24,10 @@ export function inspectLedger(path: string, tenant: string): StoreCompatibility 
     if (suffixes.some((suffix, i) => fingerprint(suffix) !== before[i])) throw new Error(`${file} changed while it was being checked; stop its owner and check again`);
     try {
       const { DatabaseSync } = process.getBuiltinModule('node:sqlite');
-      const db = new DatabaseSync(copy, { readOnly: true });
+      // Writable, on the private copy only (#2371): Bun 1.4.4 removes -wal and
+      // -shm on close, and a read-only connection cannot create them, so it
+      // refuses a WAL ledger copied without them. HostLedger opens it writable next.
+      const db = new DatabaseSync(copy);
       try {
         if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='host_ledger'").get()) throw new Error('Not a Host ledger');
       } finally { db.close(); }

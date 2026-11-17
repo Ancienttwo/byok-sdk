@@ -2,7 +2,7 @@ import { chmodSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
 
-import { sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
+import { sqliteFileUri, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 
 import { ByokKeysError } from './errors.js';
 
@@ -116,8 +116,13 @@ export function openSqliteDatabase(
   if (path !== ':memory:' && !readOnly) {
     mkdirSync(dirname(path), { mode: SECURE_DIR_MODE, recursive: true });
   }
-  const { validateSchema, ...databaseOptions } = options ?? {};
-  const database = new DatabaseSync(path === ':memory:' ? path : sqliteOpenPath(path), {
+  const { validateSchema, readOnly: _readOnly, ...databaseOptions } = options ?? {};
+  // A read-only store opens a read-write connection that cannot create the
+  // file (`mode=rw`) and only reads (#2371): Bun 1.4.4 removes -wal and -shm
+  // on close, and a read-only connection cannot recreate them, so it refuses a
+  // WAL store whose writer is not running.
+  const target = path === ':memory:' ? path : readOnly ? `${sqliteFileUri(path)}?mode=rw` : sqliteOpenPath(path);
+  const database = new DatabaseSync(target, {
     timeout: DEFAULT_BUSY_TIMEOUT_MS,
     ...databaseOptions,
   });
