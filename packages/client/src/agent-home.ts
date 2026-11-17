@@ -309,6 +309,15 @@ async function removeLeaseTemps(internalDir: string): Promise<void> {
   }
 }
 
+/** The identity of `directory`, which must be a real directory reached through no symlink. */
+async function realDirectoryIdentity(directory: string): Promise<Readonly<{ dev: bigint; ino: bigint }>> {
+  const stat = await fs.lstat(directory, { bigint: true });
+  if (!stat.isDirectory() || await fs.realpath(directory) !== directory) {
+    throw new AgentHomeResolutionError(`Agent home ${directory} is not a real directory`);
+  }
+  return Object.freeze({ dev: stat.dev, ino: stat.ino });
+}
+
 /**
  * A filesystem that cannot hold the lease, because it has no hard links.
  * On Windows, libuv maps ERROR_ACCESS_DENIED to EPERM, which also covers a
@@ -401,9 +410,23 @@ async function materializeDirectory(inputPath: string): Promise<string> {
 }
 
 export async function ensureDirectoryNoSymlink(root: string, target: string): Promise<string> {
+  const created = await createDirectoryNoSymlink(root, target);
+  await syncDirectoryParents(created.unsynced);
+  return created.path;
+}
+
+/**
+ * The namespace half of {@link ensureDirectoryNoSymlink}: creates and checks
+ * every component, and returns the entries whose parent barrier is still
+ * owed. The caller runs {@link syncDirectoryParents} on them before anything
+ * can depend on `target`; `resolve()` does so after releasing the
+ * Agent-home root gate, so no fsync runs inside it.
+ */
+async function createDirectoryNoSymlink(root: string, target: string): Promise<{ path: string; unsynced: string[] }> {
   if (!isWithin(root, target)) throw new AgentHomeResolutionError('Agent home is outside hostStorageRoot');
   const relative = path.relative(root, target);
   const components = relative === '' ? [] : relative.split(path.sep);
+  const unsynced: string[] = [];
   let cursor = root;
   for (const component of components) {
     cursor = path.join(cursor, component);
@@ -416,15 +439,20 @@ export async function ensureDirectoryNoSymlink(root: string, target: string): Pr
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       await mkdirOrAcceptRacedDirectory(cursor);
     }
-    // Repeat the barrier for an existing entry. A prior attempt may have
+    // An existing entry owes the barrier too. A prior attempt may have
     // created it and then failed to sync its parent.
-    await syncDirectoryParent(cursor);
+    unsynced.push(cursor);
   }
   const realized = await fs.realpath(target);
   if (!isWithin(root, realized) || realized !== target) {
     throw new AgentHomeResolutionError('Agent home changed through a symlink while it was being prepared');
   }
-  return realized;
+  return { path: realized, unsynced };
+}
+
+/** Parent barriers in creation order, outermost first. */
+async function syncDirectoryParents(entries: readonly string[]): Promise<void> {
+  for (const entry of entries) await syncDirectoryParent(entry);
 }
 
 async function ensurePreservedFile(filePath: string): Promise<void> {
@@ -468,18 +496,23 @@ export class AgentHomeLayout {
 
   async resolve(agentRefInput: AgentRef): Promise<AgentHomeResolution> {
     const gate = await this.acquireRootMutationGate();
-    return withRelease(async () => {
+    // The gate covers only namespace changes. The parent barriers they owe
+    // run after its release and before this returns, the first point at
+    // which anything can depend on the home.
+    const { resolution, unsynced } = await withRelease(async () => {
       const agentRef = validateAgentRef(agentRefInput);
       const hostStorageRoot = await this.resolveRoot();
-      const agentsRoot = await ensureDirectoryNoSymlink(
+      const agents = await createDirectoryNoSymlink(
         hostStorageRoot,
         path.join(hostStorageRoot, AGENT_HOME_DIRECTORY),
       );
+      const agentsRoot = agents.path;
       const lexicalHome = path.join(agentsRoot, agentRef.agentId);
       // Materialize and verify the exact lexical Agent segment. Canonicalizing
       // first would accidentally turn an in-root `two -> one` symlink into the
       // already-valid `one` directory and bypass cross-Agent isolation.
-      const canonicalHome = await ensureDirectoryNoSymlink(agentsRoot, lexicalHome);
+      const home = await createDirectoryNoSymlink(agentsRoot, lexicalHome);
+      const canonicalHome = home.path;
       const priorAgentId = this.agentIdByCanonicalHome.get(canonicalHome);
       if (priorAgentId !== undefined && priorAgentId !== agentRef.agentId) {
         throw new AgentHomeCollisionError(
@@ -487,14 +520,19 @@ export class AgentHomeLayout {
         );
       }
       this.agentIdByCanonicalHome.set(canonicalHome, agentRef.agentId);
-      return Object.freeze({
-        agentRef,
-        hostStorageRoot,
-        agentsRoot,
-        homeDir: canonicalHome,
-        canonicalHome,
-      });
+      return {
+        resolution: Object.freeze({
+          agentRef,
+          hostStorageRoot,
+          agentsRoot,
+          homeDir: canonicalHome,
+          canonicalHome,
+        }),
+        unsynced: [...agents.unsynced, ...home.unsynced],
+      };
     }, () => gate.release(), withHomeReleaseFailures);
+    await syncDirectoryParents(unsynced);
+    return resolution;
   }
 
   /**
@@ -595,12 +633,22 @@ export class AgentHomeLayout {
         targetPath: path.join(this.hostStorageRootInput, AGENT_HOME_DIRECTORY),
       }, { waitMs: 1_000 });
     } catch (error) {
-      if (error instanceof PathMutationGateBusyError) {
-        throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
-      }
+      if (error instanceof PathMutationGateBusyError) throw agentHomeRootBusy(error);
       throw error;
     }
   }
+}
+
+/**
+ * The gate does not record its holder, so the refusal names every operation
+ * that takes it and keeps the gate error as its cause.
+ */
+function agentHomeRootBusy(error: PathMutationGateBusyError): AgentHomeBusyError {
+  const busy = new AgentHomeBusyError(
+    `Agent-home root ${error.targetPath} is held by another Agent-home operation (an admission, maintenance or a local-state relocation)`,
+  );
+  busy.cause = error;
+  return busy;
 }
 
 export interface AgentHomeLeaseManagerOptions {
@@ -612,6 +660,29 @@ export interface AgentHomeLeaseManagerOptions {
    * failure releases the lease and fails this acquire.
    */
   settleAgentMemoryCommit?: (home: Pick<AgentHomeLease, 'canonicalHome' | 'homeIdentity'>) => Promise<void>;
+}
+
+/**
+ * The crash points of a lease acquire:
+ * - `acquire:temp-synced`: the complete marker temp file is written and
+ *   synced under the Agent-home root gate; no marker exists yet.
+ * - `acquire:linked`: the marker is linked under the gate; the temp file is
+ *   still beside it.
+ */
+export type AgentHomeLeaseFaultStep = 'acquire:temp-synced' | 'acquire:linked';
+
+/** Same shape as the journal's `JournalFaultSeam`. */
+export interface AgentHomeLeaseFaultSeam {
+  /** Throw to stop the acquire at exactly this step. Return normally to proceed. */
+  onStep?(step: AgentHomeLeaseFaultStep): void;
+}
+
+// Only tests set it. Not exported from the package entry.
+let leaseFaults: AgentHomeLeaseFaultSeam | undefined;
+
+/** Internal test seam: `undefined` removes it. */
+export function setAgentHomeLeaseFaultsForTests(faults: AgentHomeLeaseFaultSeam | undefined): void {
+  leaseFaults = faults;
 }
 
 interface StoredLeaseMarker {
@@ -768,19 +839,15 @@ export class AgentHomeLeaseManager {
     let ownsMarker = false;
     let homeIdentity: Readonly<{ dev: bigint; ino: bigint }> | undefined;
     try {
-      rootGate = await acquirePathMutationGate({
-        scope: 'agent-home-root',
-        targetPath: resolution.agentsRoot,
-      }, { waitMs: 1_000 });
-      await ensureDirectoryNoSymlink(resolution.agentsRoot, canonicalHome);
-      const homeStat = await fs.stat(canonicalHome, { bigint: true });
-      if (!homeStat.isDirectory()) throw new AgentHomeResolutionError(`Agent home ${canonicalHome} is not a directory`);
-      homeIdentity = Object.freeze({ dev: homeStat.dev, ino: homeStat.ino });
-      const internalDir = await ensureDirectoryNoSymlink(
+      // Before the gate, under the in-process claim, this acquire only
+      // creates its home's internal directory and runs that barrier.
+      homeIdentity = await realDirectoryIdentity(canonicalHome);
+      const internal = await createDirectoryNoSymlink(
         canonicalHome,
         path.join(canonicalHome, AGENT_HOME_INTERNAL_DIRECTORY),
       );
-      lockPath = path.join(internalDir, 'agent-home.lease');
+      await syncDirectoryParents(internal.unsynced);
+      lockPath = path.join(internal.path, 'agent-home.lease');
       const marker: StoredLeaseMarker = {
         version: 1,
         ownerId: this.ownerId,
@@ -788,15 +855,30 @@ export class AgentHomeLeaseManager {
         agentRef,
         canonicalHome,
       };
+      // The gate is the local-state relocation fence: relocation sees no
+      // marker only if every marker is linked under it. It also spans each
+      // lease temp file from creation to removal, so one acquire's cleanup
+      // never meets a temp file another acquire is about to link; that costs
+      // one file fsync under the gate. The directory barriers above stay out.
+      rootGate = await acquirePathMutationGate({
+        scope: 'agent-home-root',
+        targetPath: resolution.agentsRoot,
+      }, { waitMs: 1_000 });
+      const current = await realDirectoryIdentity(canonicalHome);
+      if (current.dev !== homeIdentity.dev || current.ino !== homeIdentity.ino) {
+        throw new AgentHomeError(`Agent home ${canonicalHome} was replaced while its lease was being acquired`);
+      }
       // The marker appears whole or not at all: a complete, synced temp file
       // is linked onto the lease path. A process killed between creating and
       // writing the marker would otherwise leave it empty, and an empty
       // marker is refused on every later acquire.
-      await removeLeaseTemps(internalDir);
+      await removeLeaseTemps(internal.path);
       const temp = await writeLeaseTemp(lockPath, JSON.stringify(marker));
       try {
+        leaseFaults?.onStep?.('acquire:temp-synced');
         await this.linkLeaseMarker(temp, lockPath, canonicalHome, agentRef.agentId);
         ownsMarker = true;
+        leaseFaults?.onStep?.('acquire:linked');
       } finally {
         // A temp file left here goes on the next acquire; its removal must
         // not replace the outcome of the link.
@@ -815,9 +897,7 @@ export class AgentHomeLeaseManager {
       }
       try { await rootGate?.release(); } catch (releaseError) { releaseFailures.push(releaseError); }
       dropBaseLease(canonicalHome, leaseId);
-      if (error instanceof PathMutationGateBusyError) {
-        throw new AgentHomeBusyError('Agent-home root is reserved for local-state relocation');
-      }
+      if (error instanceof PathMutationGateBusyError) throw agentHomeRootBusy(error);
       const primary = error instanceof AgentHomeError ? error : new AgentHomeError(`could not acquire Agent home lease: ${error instanceof Error ? error.message : String(error)}`);
       if (primary !== error && releaseFailures.length) {
         primary.cause = new AggregateError([error, ...releaseFailures]);
@@ -909,9 +989,7 @@ export class AgentHomeLeaseManager {
       const releaseFailures: unknown[] = [];
       try { await gate?.release(); } catch (releaseError) { releaseFailures.push(releaseError); }
       finally { dropBaseLease(canonicalHome, leaseId); }
-      if (error instanceof PathMutationGateBusyError) {
-        throw new AgentHomeBusyError('Agent-home root is reserved for another writer');
-      }
+      if (error instanceof PathMutationGateBusyError) throw agentHomeRootBusy(error);
       throw withHomeReleaseFailures(error, releaseFailures);
     }
     const heldGate = gate;
