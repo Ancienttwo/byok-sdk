@@ -14,6 +14,7 @@ import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support'
 import { TENANT_A, createHarness } from '../../../packages/cloud/src/__tests__/support/harness';
 import { seedCollaboration } from './commit-vectors.test-support';
 import { historyRowFromTurn } from './rules/context';
+import { OFFER_WAIT_MS } from './rules/sync';
 
 let fixture: TestHost | undefined, bot: BotCollaboration | undefined, clock = 0;
 afterEach(async () => { await bot?.close(); await fixture?.close(); bot = fixture = undefined; });
@@ -275,4 +276,47 @@ it.each(['lagging', 'empty', 'failed'] as const)('advances the dream mark only t
   expect(bot!.core.intent(next)!.execution.payload.instruction).not.toContain('Already visible');
   await finish(next, undefined);
   expect(record()?.throughTurn).toBe(Object.keys(bot!.snapshot().turns)[1]);
+});
+
+it('a Turn frozen behind a submitted dream also waits out its time limit, and only then (#2334)', async () => {
+  await open({ dreaming: { timeZone: ZONE, maxDurationMs: 60_000 } });
+  await completedTurn('history');
+  const plain = await bot!.input('plain', 'plain');
+  expect(bot!.core.intent(plain)!.waitUntil).toBe(clock + OFFER_WAIT_MS);
+  await finish(plain, {});
+  await session(await due());
+  const behind = await bot!.input('behind', 'behind');
+  expect(bot!.core.intent(behind)!.waitUntil).toBe(clock + 60_000 + OFFER_WAIT_MS);
+});
+
+/** A dream offered to the offline device: delivered, and no device claimed it. */
+async function unclaimedDream() {
+  await open();
+  await completedTurn('history');
+  await fixture!.offline();
+  const key = await due(), taskId = bot!.core.intent(key)!.taskId;
+  await vi.waitFor(async () => { await bot!.drain(); expect(fixture!.ledger.snapshot().executions[taskId]?.submission).toBe('delivered'); }, { timeout: 5000 });
+  return { key, taskId, since: record()!.since };
+}
+it('user input makes a dream that no device claimed yield, keeps its window and counts it (#2334)', async () => {
+  const { since } = await unclaimedDream();
+  await bot!.input('urgent', 'urgent');
+  await vi.waitFor(async () => { await bot!.drain(); expect(record()?.last).toMatchObject({ outcome: 'cancelled', reason: 'user_input' }); }, { timeout: 5000 });
+  expect(record()).toMatchObject({ since, userInputCancels: 1 });
+});
+it('a claim that wins against the yield is not interrupted, and the dream ends as usual (#2334)', async () => {
+  const { key, taskId } = await unclaimedDream();
+  const cancel = fixture!.server.tasks.cancel.bind(fixture!.server.tasks), calls: unknown[] = [];
+  vi.spyOn(fixture!.server.tasks, 'cancel').mockImplementation(async (id, reason, options) => {
+    calls.push([id, reason, options]);
+    // The device claims the dream before the cancel reaches the cloud.
+    await fixture!.online();
+    await vi.waitFor(() => expect(fixture!.adapter.sessions.has(id)).toBe(true), { timeout: 5000 });
+    return cancel(id, reason, options);
+  });
+  await bot!.input('urgent', 'urgent');
+  await finish(key, undefined);
+  expect(calls).toEqual([[taskId, 'user_input', { ifUnclaimed: true }]]);
+  expect(record()?.last).toMatchObject({ outcome: 'succeeded' });
+  expect(record()?.userInputCancels).toBeUndefined();
 });

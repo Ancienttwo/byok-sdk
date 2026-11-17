@@ -5,7 +5,7 @@ import { canonical, concludeOccurrence, hash, occurrenceIntentKey, occurrenceRun
 import { acceptDeliveryEcho, admitUserInput, applyHomeTerminal, applyManagement, applyModels, BOT_DREAM, botOutcomePorts, type BotRoutineInput,
   botRoutines, type Card, type ChannelPort, checkDreamInstruction, classifyInbound, cleanReplyTokens, type CollaborationState, type Command,
   type CommandPorts, type CommitRequest, type CommitResult, type DelegationCancelResult, type Delivery, deliveryRoute, type DreamingOptions,
-  dreamPolicy, type DreamSync, echoCandidates, enablePush, endable, exportMarkOf, failHomeFlush, homeEnqueued, homeHead, type HomeReadback,
+  dreamHolds, dreamPolicy, type DreamSync, echoCandidates, enablePush, endable, exportMarkOf, failHomeFlush, homeEnqueued, homeHead, type HomeReadback,
   type InboundClass, inboundKey, type InboundMessage, type IntentOutcomeError, type OutboxIntent, owned, planHomeRetry, type PushRoute,
   readbackDelivery, reconcileDreamRoutines, recordDream, recoverDelivery, refuseRoute, rememberInbound, type ReplyRoute, resealDefinition,
   resendUnknown, type RetentionInput, type RetentionLimits, type RetentionResult, revisionOf, revokePush, routineTurn, sealedDefinition,
@@ -546,7 +546,7 @@ export class HostedCollaborationStore {
           await cancelIntent(client, scope, seatId, options.now);
         }
         const released = releasedSeats(state);
-        const facts = await syncFacts(client, scope, Object.keys(state.turns), state.team.bots);
+        const facts = await syncFacts(client, scope, Object.keys(state.turns), state.team.bots, dreamHolds(slice.state));
         const steps: Array<[Turn, SyncStep<ExecutionTemplate>]> = [];
         for (const turn of Object.values(state.turns)) {
           const step = syncTurn(state, turn, facts, { ...options, models, readOnlyToolsets, routines, history: options.history?.get(turn.id),

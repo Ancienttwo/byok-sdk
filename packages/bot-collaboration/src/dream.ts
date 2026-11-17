@@ -4,6 +4,7 @@ import { concludeOccurrence, hash, occurrenceIntentKey, occurrenceOfIntentKey, p
 import { json, stateOf, type CollaborationState, type Turn } from './model.js';
 import { BOT_DREAM, dreamTable, ROUTINE_LATE_AFTER_MS, routineCalendar } from './routines.js';
 import { handoffFrameBytes, handoffTurn, type ContextTurn } from './rules/context.js';
+import { isAutonomous } from './rules/priority.js';
 import { inactive } from './rules/team.js';
 
 // Dreaming (#1475): each Bot gets a daily routine that tidies its memory. K8 owns the schedule and K4 owns the FIFO position,
@@ -47,13 +48,19 @@ export function dreamPolicy(options: DreamingOptions | false | undefined): Dream
 
 export type DreamSkip = 'superseded' | 'dreaming_off' | 'bot_archived' | 'bot_suspended' | 'device_unavailable' | 'bot_not_ready' | 'no_new_turns'
   | 'model_unavailable' | 'history_unavailable';
-/** How one occurrence ended. `template` and `fallback` are set once a dream was offered. */
+/**
+ * How one occurrence ended. `template` and `fallback` are set once a dream was offered. `user_input`: the dream yielded to
+ * user input before a device claimed it (#2334), with outcome `cancelled`.
+ */
 export interface DreamRecord {
   occurrenceKey: string; at: number; outcome: 'skipped' | 'succeeded' | 'failed' | 'declined' | 'cancelled' | 'expired' | 'superseded';
-  reason?: string; template?: string; fallback?: boolean;
+  reason?: DreamSkip | 'intent_compacted' | 'user_input'; template?: string; fallback?: boolean;
 }
-/** `since` starts the next window. `throughTurn` is the last Turn of the settled run of Turns that the last successful dream covered. */
-export interface DreamBot { since: number; throughTurn?: string; last?: DreamRecord }
+/**
+ * `since` starts the next window. `throughTurn` is the last Turn of the settled run of Turns that the last successful dream covered.
+ * `userInputCancels` counts the dreams in a row that yielded to user input (#2334), so a Host can see a Bot that never dreams.
+ */
+export interface DreamBot { since: number; throughTurn?: string; last?: DreamRecord; userInputCancels?: number }
 /** An occurrence that K8 has not closed. `template` is set when it joined the FIFO. */
 export interface OpenDream { botId: string; windowEnd: number; template?: string; fallback?: boolean; throughTurn?: string }
 /** The dream table. It owns each dream intent, as `hostIntents` owns a Host intent, and the Host intent API never reads it. */
@@ -71,6 +78,24 @@ export function dreamOf(state: CollaborationState, intentKey: string): OpenDream
 /** The intent ids of open dreams: background work that user input goes ahead of. */
 export function dreamIntentIds(state: CollaborationState): string[] {
   return Object.keys(state.dreams?.open ?? {}).map(key => hash(occurrenceIntentKey(key)));
+}
+/**
+ * The K4 `yieldUnclaimed` predicate (#2334): `user_input` when the intent is an open dream and its Bot has a queued Turn that
+ * is not autonomous. K4 then cancels the dream only if no device has claimed it; a claimed dream is never interrupted.
+ */
+export function dreamYield(state: CollaborationState, intentKey: string): 'user_input' | undefined {
+  const dream = dreamOf(state, intentKey);
+  return dream && Object.values(state.turns).some(turn => turn.botId === dream.botId && !isAutonomous(turn)
+    && (turn.status === 'queued' || turn.status === 'processing')) ? 'user_input' : undefined;
+}
+/** The `limits.maxDurationMs` of each Bot's submitted dream, by Bot (#2334): the `dreamHold` sync fact. */
+export function dreamHolds(s: LedgerState): Map<string, number> {
+  const holds = new Map<string, number>();
+  for (const [key, run] of Object.entries(stateOf(s.application).dreams?.open ?? {})) {
+    const intent = s.intents[hash(occurrenceIntentKey(key))];
+    if (intent?.phase === 'inflight') holds.set(run.botId, intent.execution.payload.limits!.maxDurationMs!);
+  }
+  return holds;
 }
 /** The `bot-dream` occurrence hook. A hook gets no K4 state, so the sync decides and promotes, as for a routine Turn. */
 export function recordDream(state: CollaborationState, run: HostOccurrenceRun, now: number): void {
@@ -154,10 +179,12 @@ export function syncDreams(s: LedgerState, sync: DreamSync): boolean {
   const state = stateOf(s.application), dreams = state.dreams;
   if (!dreams) return false;
   let changed = false;
-  const close = (key: string, run: OpenDream, outcome: DreamRecord['outcome'], reason?: string) => {
+  const close = (key: string, run: OpenDream, outcome: DreamRecord['outcome'], reason?: DreamRecord['reason']) => {
     const bot = dreams.bots[run.botId] ??= { since: run.windowEnd };
     bot.last = { occurrenceKey: key, at: run.windowEnd, outcome, ...(reason === undefined ? {} : { reason }),
       ...(run.template === undefined ? {} : { template: run.template, fallback: run.fallback! }) };
+    if (reason === 'user_input') bot.userInputCancels = (bot.userInputCancels ?? 0) + 1;
+    else delete bot.userInputCancels;
     if (outcome === 'succeeded') {
       bot.since = run.windowEnd;
       if (run.throughTurn !== undefined) bot.throughTurn = run.throughTurn;
@@ -174,7 +201,9 @@ export function syncDreams(s: LedgerState, sync: DreamSync): boolean {
     if (run.template !== undefined) {
       const intent = s.intents[hash(occurrenceIntentKey(key))];
       if (!intent) close(key, run, 'failed', 'intent_compacted');
-      else if (intent.conclusion) close(key, run, intent.conclusion);
+      // Only the cancellation that the yield stored on the attempt says that user input ended the dream.
+      else if (intent.conclusion) close(key, run, intent.conclusion, intent.conclusion === 'cancelled'
+        && s.executions[intent.taskId]?.attempt?.cancellation?.reason === 'user_input' ? 'user_input' : undefined);
       else if (stopped && intent.phase !== 'inflight' && !intent.cancelReason) intent.cancelReason = 'cancelled';
       continue;
     }

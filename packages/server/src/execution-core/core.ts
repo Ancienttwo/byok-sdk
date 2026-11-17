@@ -103,6 +103,13 @@ export interface HostOptions {
    * submit of this core, the timer drain and direct `enqueue` calls included. Must be synchronous. Absent: every submit is admitted.
    */
   admitSubmit?: (intent: Readonly<Intent>, state: Readonly<LedgerState>) => boolean;
+  /**
+   * Yield of unclaimed work (#2334): asked in the reconcile of a delivered intent that has no terminal, no cancel reason and no
+   * observed claim, with the ledger state and the intent. A reason cancels the task only if no device has claimed it, in one
+   * step against the claim. If the cancel won, the intent concludes `cancelled`; if a claim won, nothing changed and the work
+   * runs on. The intent gets no `cancelReason`, so a claim is never interrupted. Must be synchronous. Absent: nothing yields.
+   */
+  yieldUnclaimed?: (state: Readonly<LedgerState>, intent: Readonly<Intent>) => string | undefined;
 }
 
 /** One instance per embedded tenant. Only horizon retries use a process-local timer. */
@@ -788,6 +795,10 @@ export class HostExecutionCore {
     if (!terminal && !intent.cancelReason && !execution.started && this.now() >= intent.waitUntil) {
       this.ledger.transaction(state => { state.intents[intent.id]!.cancelReason = 'expired'; });
       intent.cancelReason = 'expired';
+    }
+    if (!terminal && !intent.cancelReason && !execution.started && execution.submission === 'delivered') {
+      const reason = this.options.yieldUnclaimed?.(this.ledger.snapshot(), intent);
+      if (reason !== undefined) await this.server.tasks.cancel(intent.taskId, reason, { ifUnclaimed: true });
     }
     let attempt = await this.server.tasks.attempt(intent.taskId);
     this.verifyAttempt(intent, attempt);

@@ -195,7 +195,7 @@ async function compose(env: Env, notify: () => void): Promise<Host> {
           if (terminal) await hang(env, 'hang-after-terminal-read', id);
           return terminal;
         },
-        cancel: async (id, reason) => cloud.cancelTask(await known(), id, reason),
+        cancel: async (id, reason, options) => cloud.cancelTask(await known(), id, reason, options),
       };
     };
     const submitLeaseMs = milliseconds(env.H_SUBMIT_LEASE_MS, 'H_SUBMIT_LEASE_MS'), reconcilePollMs = milliseconds(env.H_RECONCILE_POLL_MS, 'H_RECONCILE_POLL_MS');

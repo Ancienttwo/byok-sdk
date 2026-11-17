@@ -28,7 +28,8 @@ export type HostedIntentHandler = (document: unknown, transaction: HostedIntentT
 export interface HostedTaskPort extends Pick<FrozenSubmitPort, 'offer'> {
   attempt(taskId: string): Promise<TaskAttempt | undefined>;
   deviceTerminal(taskId: string): Promise<DeviceTerminal | undefined>;
-  cancel(taskId: string, reason: string): Promise<unknown>;
+  /** `ifUnclaimed`: cancel only a task that no device has claimed, in one step against the claim. */
+  cancel(taskId: string, reason: string, options?: { readonly ifUnclaimed?: true }): Promise<unknown>;
 }
 /** The device terminal of a task and the attempt read after it. */
 export interface TaskEvidence { terminal: DeviceTerminal; attempt: TaskAttempt }
@@ -50,11 +51,18 @@ export interface ReconcilerOptions {
    * scope the same way, also when the call then refuses.
    */
   changed?: (scope: string) => void;
+  /**
+   * K4 `yieldUnclaimed` (#2334), as K8 `dreamYield`: asked with the scope's committed K8 state, read on its own, for a
+   * delivered routine row with no terminal, no cancel reason and no observed claim. A reason cancels the task only if no
+   * device has claimed it. The row gets no cancel reason, so a claim is never interrupted. Absent: nothing yields.
+   */
+  yieldUnclaimed?: (state: CollaborationState, intentKey: string) => string | undefined;
 }
 /** A row whose reconciliation threw. The pass went on with the next row. */
 export interface ReconcileFailure { scope: string; turnId: string; error: unknown }
 export interface ReconcilePass { concluded: number; failed: ReconcileFailure[] }
-type Row = { input: FrozenExecutionInput; waitUntil: number; cancelReason: 'expired' | 'cancelled' | null; concluded: boolean; started: boolean };
+type Row = { input: FrozenExecutionInput; waitUntil: number; cancelReason: 'expired' | 'cancelled' | null; concluded: boolean; started: boolean;
+  delivered: boolean; routine: boolean };
 
 /**
  * Reads the SDK result of each tried intent and concludes it (#793 D2d), with the K4 rules of `reconcile` and `finish`.
@@ -144,6 +152,12 @@ export class HostedReconciler {
       if (stored === 'concluded') return false;
       cancelReason = stored;
     }
+    // Only a routine occurrence can be a dream, so no other row reads the state.
+    const { yieldUnclaimed } = this.options;
+    if (yieldUnclaimed && !terminal && !cancelReason && !row.started && row.delivered && row.routine) {
+      const reason = yieldUnclaimed(await this.store.read(JSON.parse(scopeKey) as string), JSON.parse(key) as string);
+      if (reason !== undefined) await port.cancel(task, reason, { ifUnclaimed: true });
+    }
     // Read before the attempt: a submit lease that ended by then held no try that could still create an attempt.
     const attemptReadAt = this.now();
     let attempt = verified(row.input, await port.attempt(task));
@@ -173,11 +187,13 @@ export class HostedReconciler {
 
   private async read(scopeKey: string, key: string): Promise<Row | undefined> {
     const found = await inSchema(this.pool, this.schema, client => client.query<{ input: FrozenExecutionInput; wait_until: string;
-      cancel_reason: Row['cancelReason']; concluded: boolean; started: boolean }>(
-      `SELECT input, wait_until::text, cancel_reason, conclusion IS NOT NULL AS concluded, started FROM intent WHERE scope = $1 AND key = $2`,
+      cancel_reason: Row['cancelReason']; concluded: boolean; started: boolean; delivered: boolean; routine: boolean }>(
+      `SELECT input, wait_until::text, cancel_reason, conclusion IS NOT NULL AS concluded, started, submission = 'delivered' AS delivered,
+        source = 'routine' AS routine FROM intent WHERE scope = $1 AND key = $2`,
       [scopeKey, key]), true);
     const row = found.rows[0];
-    return row && { input: row.input, waitUntil: Number(row.wait_until), cancelReason: row.cancel_reason, concluded: row.concluded, started: row.started };
+    return row && { input: row.input, waitUntil: Number(row.wait_until), cancelReason: row.cancel_reason, concluded: row.concluded, started: row.started,
+      delivered: row.delivered, routine: row.routine };
   }
 
   /**
