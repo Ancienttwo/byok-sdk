@@ -49,6 +49,7 @@
         "node:stream",
         "node:url",
         "node:util",
+        "node:worker_threads",
         "node:zlib",
         "os",
         "path",
@@ -95,6 +96,7 @@
           "node:stream",
           "node:url",
           "node:util",
+          "node:worker_threads",
           "node:zlib",
           "os",
           "path"
@@ -341,6 +343,7 @@
         "node:stream",
         "node:url",
         "node:util",
+        "node:worker_threads",
         "node:zlib",
         "os",
         "path",
@@ -399,6 +402,7 @@
           "node:stream",
           "node:url",
           "node:util",
+          "node:worker_threads",
           "node:zlib",
           "os",
           "path",
@@ -505,6 +509,7 @@
         "node:stream",
         "node:url",
         "node:util",
+        "node:worker_threads",
         "node:zlib",
         "path",
         "zod"
@@ -548,6 +553,7 @@
           "node:stream",
           "node:url",
           "node:util",
+          "node:worker_threads",
           "node:zlib",
           "path"
         ],
@@ -2623,6 +2629,7 @@
         "node:stream",
         "node:url",
         "node:util",
+        "node:worker_threads",
         "path",
         "zod"
       ],
@@ -2667,6 +2674,7 @@
           "node:stream",
           "node:url",
           "node:util",
+          "node:worker_threads",
           "path"
         ],
         "thirdParty": [
