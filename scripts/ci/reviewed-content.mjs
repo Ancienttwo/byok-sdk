@@ -349,7 +349,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       // replacing another, with every other byte of the manifest unchanged.
       const pin = /^bun@(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$/;
       const from = JSON.stringify(before.packageManager), to = JSON.stringify(after.packageManager);
-      if (!pin.test(before.packageManager ?? '') || !pin.test(after.packageManager ?? '')
+      const exact = value => typeof value === 'string' && pin.test(value);
+      if (!exact(before.packageManager) || !exact(after.packageManager)
         || beforeText.split(from).length !== 2 || beforeText.replace(from, to) !== afterText) {
         throw new Error('Reviewed CI mapping required: package.json may change only packageManager, from one exact bun@X.Y.Z to another');
       }

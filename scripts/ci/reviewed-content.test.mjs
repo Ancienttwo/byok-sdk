@@ -49,6 +49,8 @@ test('#2347: the Bun pin admits one exact bun@X.Y.Z alone and selects every rout
     { ...manifest, packageManager: 'bun@^1.4.4' },
     { ...manifest, packageManager: 'bun@1.4.4+sha512.abc' },
     { ...manifest, packageManager: 'npm@11.0.0' },
+    { ...manifest, packageManager: ['bun@1.4.4'] },
+    { ...manifest, packageManager: [['bun@1.4.4']] },
     { scripts: manifest.scripts },
   ]) {
     f.write('package.json', changed);
