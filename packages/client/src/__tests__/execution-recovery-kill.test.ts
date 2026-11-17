@@ -13,6 +13,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { BYOK_CAPABILITIES_PATH, decodeEnvelope } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeManager } from '../agent-home';
 import { sdkNativeAssetTargets } from '../sdk-native-assets';
+import { journalWorkerBunDefine } from '../../scripts/journal-worker-source';
 
 interface ChildConfig {
   readonly deviceCredentials?: { readonly macosKeychainPath: string };
@@ -314,7 +315,7 @@ beforeAll(async () => {
   const exe = process.platform === 'win32' ? '.exe' : '';
   daemonBin = path.join(suiteRoot, `execution-recovery-daemon${exe}`);
   cloudBin = path.join(suiteRoot, `execution-recovery-cloud${exe}`);
-  await run('bun', ['build', 'packages/client/src/__tests__/fixtures/execution-recovery-daemon.ts', '--compile', '--outfile', daemonBin]);
+  await run('bun', ['build', 'packages/client/src/__tests__/fixtures/execution-recovery-daemon.ts', journalWorkerBunDefine(), '--compile', '--outfile', daemonBin]);
   await run('bun', ['build', 'packages/client/src/__tests__/fixtures/execution-recovery-cloud.ts', '--compile', '--outfile', cloudBin]);
   if (process.platform === 'win32') nativeAssetRoot = await writeKoffiAssetRoot(path.join(suiteRoot, 'native'), sdkNativeAssetTargets['win32-x64']);
 }, 120_000);

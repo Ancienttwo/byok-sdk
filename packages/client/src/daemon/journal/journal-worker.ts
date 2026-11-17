@@ -16,7 +16,7 @@
  */
 import { receiveMessageOnPort, workerData } from 'node:worker_threads';
 import type { DatabaseSync } from 'node:sqlite';
-import { JournalHandleCleanupError, openJournalDatabase } from '../../util/sqlite-support.js';
+import { JournalHandleCleanupError, openJournalConnection } from '../../util/sqlite-support.js';
 import { JournalStore, type JournalWrite } from './journal-store.js';
 import {
   decodeError,
@@ -59,9 +59,9 @@ function handshake(reply: JournalOpenReply): void {
 
 let db: DatabaseSync | undefined;
 try {
-  db = openJournalDatabase(data.dbPath, data.busyTimeoutMs);
+  db = openJournalConnection(data.dbPath, data.busyTimeoutMs);
 } catch (error) {
-  // `openJournalDatabase` closes its handle before throwing, unless it says otherwise.
+  // `openJournalConnection` closes its handle before throwing, unless it says otherwise.
   handshake({ ok: false, error: encodeError(error), closed: !(error instanceof JournalHandleCleanupError) });
   data.port.close();
 }

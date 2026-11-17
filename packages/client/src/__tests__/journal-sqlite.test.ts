@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import {
@@ -35,6 +35,7 @@ import {
   SqliteLocalTaskJournal,
   type JournalFaultStep,
 } from '../daemon/journal/sqlite-journal';
+import { TASK_ENVELOPE_ROWS } from '../daemon/journal/journal-store';
 import {
   openJournalDatabase,
   type JournalOpenStep,
@@ -169,17 +170,9 @@ describe('SqliteLocalTaskJournal', () => {
       await build(storeDir).close();
       readRows(storeDir, 'DROP INDEX journal_envelope_task');
       const journal = build(storeDir);
-      // Plan the statement the journal actually prepares, not a copy of its text.
-      const prepare = vi.spyOn(DatabaseSync.prototype, 'prepare');
-      let statements: string[];
-      try {
-        await journal.readTaskCancellation('task-1', IDENTITY, 0);
-        statements = prepare.mock.calls.map(([statement]) => statement).filter((statement) => statement.includes('FROM journal_envelope'));
-      } finally {
-        prepare.mockRestore();
-      }
-      expect(statements).toHaveLength(1);
-      const plan = readRows(storeDir, `EXPLAIN QUERY PLAN ${statements[0]}`).map((row) => String(row.detail));
+      await expect(journal.readTaskCancellation('task-1', IDENTITY, 0)).resolves.toBeUndefined();
+      // Plan the statement the journal's store prepares, not a copy of its text.
+      const plan = readRows(storeDir, `EXPLAIN QUERY PLAN ${TASK_ENVELOPE_ROWS}`).map((row) => String(row.detail));
       expect(plan.join('\n')).toMatch(/SEARCH journal_envelope USING INDEX journal_envelope_task \(task_id=\?\)/);
     });
 
@@ -839,6 +832,34 @@ describe('SqliteLocalTaskJournal', () => {
 
       expect(await journal.listRecoverable()).toEqual([]);
       expect(countRows(storeDir, 'journal_task')).toBe(1);
+    });
+  });
+
+  describe('worker thread (#2332)', () => {
+    function offer(n: number): ReceivedEnvelopeRecord {
+      const bytes = JSON.stringify({ v: 1, id: `env-${n}`, type: 'task.offer', task_id: `task-${n}` });
+      return envelopeRecord({ envelopeId: `env-${n}`, taskId: `task-${n}`, seq: n, bytes, bytesHash: journalHash(bytes) });
+    }
+
+    it('rolls back only the write that failed when writes share a commit', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir, { faults: faultOnce('append:before-commit') });
+      const settled = await Promise.allSettled([1, 2, 3].map((n) => journal.appendEnvelope(offer(n))));
+      expect(settled.map((result) => result.status)).toEqual(['rejected', 'fulfilled', 'fulfilled']);
+      expect(readRows(storeDir, 'SELECT envelope_id FROM journal_envelope ORDER BY envelope_id').map((row) => row.envelope_id)).toEqual(['env-2', 'env-3']);
+    });
+
+    it('fails closed when the worker ends mid-commit: nothing in flight or queued counts as durable, and the handle barrier holds', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir, { faults: { exitWorkerAt: 'append:before-commit' } });
+      const inFlight = journal.appendEnvelope(offer(1));
+      const queued = journal.appendEnvelope(offer(2));
+      await expect(inFlight).rejects.toBeInstanceOf(JournalUnavailableError);
+      await expect(queued).rejects.toBeInstanceOf(JournalUnavailableError);
+      // No restart behind the caller's back: every later operation fails the same way.
+      await expect(journal.readTask('task-1', IDENTITY)).rejects.toBeInstanceOf(JournalUnavailableError);
+      await expect(journal.close()).rejects.toBeInstanceOf(JournalHandleCleanupError);
+      expect(countRows(storeDir, 'journal_envelope')).toBe(0);
     });
   });
 

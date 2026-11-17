@@ -39,3 +39,8 @@ export function journalWorkerSource(): string {
     '',
   ].join('\n');
 }
+
+/** The same definition as a `bun build` argument, for test fixtures that bundle client source themselves. */
+export function journalWorkerBunDefine(): string {
+  return `--define=__BYOK_JOURNAL_WORKER_SOURCE__=${JSON.stringify(journalWorkerSource())}`;
+}

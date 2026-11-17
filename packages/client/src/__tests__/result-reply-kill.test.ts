@@ -13,6 +13,7 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { startRealServer, type RealServerHandle } from './fixtures/real-server';
 import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 import { testScratchRoot } from './fixtures/execution-scratch';
+import { journalWorkerBunDefine } from '../../scripts/journal-worker-source';
 
 let root: string | undefined;
 let child: ChildProcess | undefined;
@@ -32,7 +33,7 @@ it.skipIf(process.platform === 'win32').each([
 ] as const)('recovers required reply after SIGKILL at $checkpointMode with $outcome disposition', async ({ checkpointMode, outcome }) => {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-result-reply-kill-'));
   const bundle = path.join(root, 'daemon.mjs');
-  execFileSync('bun', ['build', fileURLToPath(new URL('./fixtures/result-reply-kill-daemon.ts', import.meta.url)), '--target=node', '--outfile', bundle], { stdio: 'pipe' });
+  execFileSync('bun', ['build', fileURLToPath(new URL('./fixtures/result-reply-kill-daemon.ts', import.meta.url)), journalWorkerBunDefine(), '--target=node', '--outfile', bundle], { stdio: 'pipe' });
   const consumed: string[] = [];
   const terminalPresentAtConsumption: boolean[] = [];
   server = await startRealServer({ productId: 'result-reply-kill', storage: { kind: 'memory' }, longPollHoldMs: 30,

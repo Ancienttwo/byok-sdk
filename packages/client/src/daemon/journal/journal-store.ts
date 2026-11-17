@@ -77,6 +77,11 @@ const CANCELLED_RECEIVED_TASK = `t.local_state = 'received' AND t.recovery_marke
 const LATER_CANCELLATION = `FROM journal_envelope c WHERE c.task_id = t.task_id AND c.seq > t.seq AND c.withheld_bytes IS NULL
   AND CASE WHEN json_valid(c.bytes) THEN json_extract(c.bytes, '$.type') END = 'task.cancel'`;
 
+/** Every stored envelope of one task, in sequence order; reads through the `journal_envelope_task` index. */
+export const TASK_ENVELOPE_ROWS = `SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash, committed_at, withheld_bytes FROM journal_envelope
+  WHERE task_id = ?
+  ORDER BY seq, envelope_id`;
+
 /** `local_state` for a task whose admission declined it — terminal for local purposes, and NOT something recovery should re-offer. */
 const DECLINED_STATE = 'declined';
 /** `local_state` a task starts in: its offer envelope is durable, nothing has been decided yet. */
@@ -556,9 +561,7 @@ export class JournalStore {
 
   /** Every non-withheld stored envelope of the task, in sequence order, after its enrollment and hash are verified. */
   #taskEnvelopeRows(taskId: string, identity: JournalIdentity): Record<string, unknown>[] {
-    const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash, committed_at, withheld_bytes FROM journal_envelope
-      WHERE task_id = ?
-      ORDER BY seq, envelope_id`).all(taskId) as Record<string, unknown>[];
+    const rows = this.#db.prepare(TASK_ENVELOPE_ROWS).all(taskId) as Record<string, unknown>[];
     // Validate every candidate before its content can exclude it, including
     // candidates after the first valid cancellation.
     integrity(taskId, () => {
