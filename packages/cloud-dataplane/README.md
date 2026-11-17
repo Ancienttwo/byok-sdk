@@ -128,6 +128,28 @@ the Worker composition for real through the `worker-smoke/` fixture (packaged
 with `wrangler deploy --dry-run`, served by `wrangler dev` against the test
 substrate; see Testing below).
 
+### Hyperdrive query caching
+
+Hyperdrive configurations used by the SDK must have query caching disabled.
+SDK Postgres reads require current device, capability, task, and approval state;
+query caching can return rows as old as the configured `max_age` (60 seconds by
+default). Stale-while-revalidate can serve them longer.
+
+When creating a configuration, supply the origin options and disable caching:
+
+```sh
+wrangler hyperdrive create <name> --caching-disabled <origin-options>
+```
+
+For an existing configuration, run:
+
+```sh
+wrangler hyperdrive update <id> --caching-disabled
+```
+
+For the API or `cf` CLI, set `{"caching":{"disabled":true}}` on the
+Hyperdrive configuration.
+
 ## Blobs
 
 `blobs` mints grants and never carries a byte. `createUpload` writes the
