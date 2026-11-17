@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "f59c69495e38c125fde24989159402298fbfb9f7d7c7f9a2f9eeb393426b1c8f"
+    "snapshotSha256": "3f0fbb0fa9efbca9a4a6699639224cc8f7cd06e5ce81b40357f0db3763d1038a"
   },
   "configFields": {
     "status": "tracked",
@@ -2063,6 +2063,11 @@
       "item": "export:@byok-sdk/client#DaemonObserver",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonOverrides",
+      "change": "changed",
+      "entry": "journal-test-fault-seams-removed"
     },
     {
       "item": "export:@byok-sdk/client#DeviceCredentialBackend",
