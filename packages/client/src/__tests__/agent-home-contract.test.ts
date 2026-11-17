@@ -15,6 +15,7 @@ import {
   AgentHomeManager,
   validateAgentRef,
 } from '../agent-home';
+import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { AgentSessionHandoffStore, AgentSessionHandoffMismatchError } from '../daemon/agent-session-handoff-store';
 import { isAgentSessionLedgerName, isAgentTaskTerminalName } from '../daemon/retention/session-ledgers';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
@@ -403,6 +404,44 @@ describe('SDK-owned Agent home contract', () => {
     const next = await manager.prepare(ref('one'));
     expect(await leaseTemps(home)).toEqual([]);
     await next.lease.release();
+  });
+
+  it('runs only the lease temp file fsync while it holds the Agent-home root gate, and names every holder when the gate is busy', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    // The first resolve of a layout materializes the configured root, once, under the gate.
+    await (await manager.prepare(ref('warm'))).lease.release();
+    const agentsRoot = path.join(await fs.realpath(root), 'agents');
+    let syncs = 0;
+    const syncedUnderGate: string[] = [];
+    const realOpen = fs.open.bind(fs);
+    vi.spyOn(fs, 'open').mockImplementation(async (...args: Parameters<typeof fs.open>) => {
+      const handle = await realOpen(...args);
+      const sync = handle.sync.bind(handle);
+      vi.spyOn(handle, 'sync').mockImplementation(async () => {
+        syncs += 1;
+        await acquirePathMutationGate({ scope: 'agent-home-root', targetPath: agentsRoot })
+          .then((gate) => gate.release(), () => { syncedUnderGate.push(path.basename(String(args[0]))); });
+        await sync();
+      });
+      return handle;
+    });
+    const binding = await manager.prepare(ref('fresh'));
+    await binding.lease.release();
+    vi.restoreAllMocks();
+    expect(syncs).toBeGreaterThan(0);
+    // The directory barriers run outside the gate; the lease temp file is written and linked under it.
+    expect(syncedUnderGate).toEqual([expect.stringMatching(/^agent-home\.lease\.\d+-\d+\.tmp$/u)]);
+
+    const held = await acquirePathMutationGate({ scope: 'agent-home-root', targetPath: agentsRoot });
+    try {
+      const refused = await manager.layout.resolve(ref('other')).catch((error: unknown) => error);
+      expect(refused).toBeInstanceOf(AgentHomeBusyError);
+      expect((refused as Error).message).toBe(`Agent-home root ${agentsRoot} is held by another Agent-home operation (an admission, maintenance or a local-state relocation)`);
+      expect((refused as Error).cause).toBeInstanceOf(PathMutationGateBusyError);
+    } finally {
+      await held.release();
+    }
   });
 
   it('persists exact AgentRef/profileRevision/session/runtime/cwd and terminal cause in Agent home', async () => {

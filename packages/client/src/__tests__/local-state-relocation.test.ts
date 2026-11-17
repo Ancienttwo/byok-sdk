@@ -1,14 +1,16 @@
-import { promises as fs } from 'node:fs';
+import { promises as fs, readdirSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   AgentHomeBusyError,
+  AgentHomeLeaseManager,
   AgentHomeManager,
   LocalStateRelocationBusyError,
   LocalStateRelocationIntegrityError,
   localStateRelocation,
 } from '../index';
+import { setAgentHomeLeaseFaultsForTests } from '../agent-home';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner';
 import { claimServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError } from '../lifecycle/service-unit';
 import * as mutationGate from '../util/path-mutation-gate';
@@ -65,6 +67,43 @@ describe('localStateRelocation', () => {
 
     const after = await manager.acquire({ agentId: 'two', profileRevision: '1' });
     await after.lease.release();
+  });
+
+  it.each(['acquire:temp-synced', 'acquire:linked'] as const)('after a crash at %s, relocation and the next admission treat the temp file as garbage', async (step) => {
+    const root = await makeRoot();
+    const input = relocationInput(root);
+    const agent = { agentId: 'one', profileRevision: '1' };
+    const owner = () => new AgentHomeManager({
+      hostStorageRoot: input.sourceHostStorageRoot,
+      leaseManager: new AgentHomeLeaseManager({ ownerId: 'store-product:crash-owner' }),
+    });
+    const internal = path.join(input.sourceHostStorageRoot, 'agents', 'one', '.byok');
+    // What a killed process leaves on disk: the files as they are at the step, with no cleanup after it.
+    let left = new Map<string, Buffer>();
+    setAgentHomeLeaseFaultsForTests({ onStep: (at) => {
+      if (at !== step) return;
+      left = new Map(readdirSync(internal).map((name) => [name, readFileSync(path.join(internal, name))]));
+      throw new Error(`crash at ${at}`);
+    } });
+    try {
+      await expect(owner().acquire(agent)).rejects.toThrow(`crash at ${step}`);
+    } finally {
+      setAgentHomeLeaseFaultsForTests(undefined);
+    }
+    for (const name of await fs.readdir(internal)) await fs.rm(path.join(internal, name));
+    for (const [name, bytes] of left) await fs.writeFile(path.join(internal, name), bytes);
+    expect([...left.keys()].filter((name) => name.endsWith('.tmp'))).toHaveLength(1);
+
+    if (step === 'acquire:temp-synced') {
+      expect(left.has('agent-home.lease')).toBe(false);
+      await (await localStateRelocation.acquire(input)).release();
+    } else {
+      expect(JSON.parse(left.get('agent-home.lease')!.toString('utf8'))).toMatchObject({ ownerId: 'store-product:crash-owner', agentRef: agent });
+      await expect(localStateRelocation.acquire(input)).rejects.toBeInstanceOf(LocalStateRelocationBusyError);
+    }
+    const restarted = await owner().acquire(agent);
+    expect((await fs.readdir(internal)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    await restarted.lease.release();
   });
 
   it('refuses active and corrupt daemon ownership without reclaiming either state', async () => {
