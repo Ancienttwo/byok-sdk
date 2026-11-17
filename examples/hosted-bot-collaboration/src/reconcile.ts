@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
+import { canonical, FrozenOfferMismatchError, occurrenceOfIntentKey, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
   type Json } from '@byok-sdk/server/execution-core';
 import { botOutcomePorts, type CollaborationState, IntentOutcomeError, type OutboxIntent, outcomeFailure, revisionOf, routeTerminal,
   runHostIntentHandler } from '@byok-sdk/bot-collaboration/host-kit';
@@ -28,7 +28,8 @@ export type HostedIntentHandler = (document: unknown, transaction: HostedIntentT
 export interface HostedTaskPort extends Pick<FrozenSubmitPort, 'offer'> {
   attempt(taskId: string): Promise<TaskAttempt | undefined>;
   deviceTerminal(taskId: string): Promise<DeviceTerminal | undefined>;
-  cancel(taskId: string, reason: string): Promise<unknown>;
+  /** `ifUnclaimed`: cancel only a task that no device has claimed, in one step against the claim. */
+  cancel(taskId: string, reason: string, options?: { readonly ifUnclaimed?: true }): Promise<unknown>;
 }
 /** The device terminal of a task and the attempt read after it. */
 export interface TaskEvidence { terminal: DeviceTerminal; attempt: TaskAttempt }
@@ -50,11 +51,18 @@ export interface ReconcilerOptions {
    * scope the same way, also when the call then refuses.
    */
   changed?: (scope: string) => void;
+  /**
+   * K4 `yieldUnclaimed` (#2334), as K8 `dreamYield`: asked with the scope's committed K8 state, read on its own, for a
+   * delivered routine row with no terminal, no cancel reason and no observed claim. A reason cancels the task only if no
+   * device has claimed it. The row gets no cancel reason, so a claim is never interrupted. Absent: nothing yields.
+   */
+  yieldUnclaimed?: (state: CollaborationState, intentKey: string) => string | undefined;
 }
 /** A row whose reconciliation threw. The pass went on with the next row. */
 export interface ReconcileFailure { scope: string; turnId: string; error: unknown }
 export interface ReconcilePass { concluded: number; failed: ReconcileFailure[] }
-type Row = { input: FrozenExecutionInput; waitUntil: number; cancelReason: 'expired' | 'cancelled' | null; concluded: boolean; started: boolean };
+type Row = { input: FrozenExecutionInput; waitUntil: number; cancelReason: 'expired' | 'cancelled' | null; concluded: boolean; started: boolean;
+  delivered: boolean; routine: boolean };
 
 /**
  * Reads the SDK result of each tried intent and concludes it (#793 D2d), with the K4 rules of `reconcile` and `finish`.
@@ -144,21 +152,32 @@ export class HostedReconciler {
       if (stored === 'concluded') return false;
       cancelReason = stored;
     }
+    // Only an open dream can yield, so a row reads the whole scope state only when `dream_state` names its occurrence (#2338).
+    const { yieldUnclaimed } = this.options;
+    if (yieldUnclaimed && !terminal && !cancelReason && !row.started && row.delivered && row.routine && await this.openDream(scopeKey, key)) {
+      const reason = yieldUnclaimed(await this.store.read(JSON.parse(scopeKey) as string), JSON.parse(key) as string);
+      if (reason !== undefined) await port.cancel(task, reason, { ifUnclaimed: true });
+    }
     // Read before the attempt: a submit lease that ended by then held no try that could still create an attempt.
     const attemptReadAt = this.now();
     let attempt = verified(row.input, await port.attempt(task));
     if (cancelReason && !terminal) {
       // No attempt: conclude, but only when no submit try held the row at the read. K4 serializes this with every submit;
       // H uses the lease.
-      if (!attempt) return this.conclude(scopeKey, key, cancelReason, attemptReadAt);
+      if (!attempt) return this.conclude(scopeKey, key, cancelReason, undefined, attemptReadAt);
       await port.cancel(task, cancelReason);
       attempt = verified(row.input, await port.attempt(task));
       if (!attempt) throw new Error('Attempt disappeared after cancellation');
       terminal = await port.deviceTerminal(task);
     }
     if (attempt && await this.record(scopeKey, key, attempt)) started();
-    if (attempt?.status === 'cancelled' && !attempt.claimedExecutor && !attempt.ownerDeviceId && !terminal) {
-      return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled');
+    // An attempt that cloud settled itself (device revoked or superseded, task abandoned) carries its `terminalCause` and gets
+    // no device terminal, claimed or not (#2335). No device can report it any more, so it settles like an unclaimed cancel.
+    // A device's own task.cancelled also sets `terminalCause`. Cloud stores its receipt before the attempt status, so read the
+    // terminal again once the attempt reads cancelled: one that landed between the two reads is finished, not settled past.
+    if (attempt?.status === 'cancelled' && !terminal) terminal = await port.deviceTerminal(task);
+    if (attempt?.status === 'cancelled' && !terminal && (attempt.terminalCause !== undefined || (!attempt.claimedExecutor && !attempt.ownerDeviceId))) {
+      return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled', attempt);
     }
     if (terminal) {
       if (terminal.envelope.task_id !== task) throw new Error('Terminal identity conflict');
@@ -171,13 +190,24 @@ export class HostedReconciler {
     return false;
   }
 
+  /** Whether the K8 dream table of the scope has the routine row's occurrence open. */
+  private async openDream(scopeKey: string, key: string): Promise<boolean> {
+    const occurrence = occurrenceOfIntentKey(JSON.parse(key) as string);
+    if (occurrence === undefined) return false;
+    const found = await inSchema(this.pool, this.schema, client => client.query<{ open: boolean }>(
+      `SELECT (body->'open'->$2) IS NOT NULL AS open FROM dream_state WHERE scope = $1`, [scopeKey, occurrence]), true);
+    return found.rows[0]?.open === true;
+  }
+
   private async read(scopeKey: string, key: string): Promise<Row | undefined> {
     const found = await inSchema(this.pool, this.schema, client => client.query<{ input: FrozenExecutionInput; wait_until: string;
-      cancel_reason: Row['cancelReason']; concluded: boolean; started: boolean }>(
-      `SELECT input, wait_until::text, cancel_reason, conclusion IS NOT NULL AS concluded, started FROM intent WHERE scope = $1 AND key = $2`,
+      cancel_reason: Row['cancelReason']; concluded: boolean; started: boolean; delivered: boolean; routine: boolean }>(
+      `SELECT input, wait_until::text, cancel_reason, conclusion IS NOT NULL AS concluded, started, submission = 'delivered' AS delivered,
+        source = 'routine' AS routine FROM intent WHERE scope = $1 AND key = $2`,
       [scopeKey, key]), true);
     const row = found.rows[0];
-    return row && { input: row.input, waitUntil: Number(row.wait_until), cancelReason: row.cancel_reason, concluded: row.concluded, started: row.started };
+    return row && { input: row.input, waitUntil: Number(row.wait_until), cancelReason: row.cancel_reason, concluded: row.concluded, started: row.started,
+      delivered: row.delivered, routine: row.routine };
   }
 
   /**
@@ -211,12 +241,16 @@ export class HostedReconciler {
 
   /**
    * Concludes a row with no device terminal. With `attemptReadAt`, the row's submit lease must have ended by the time that
-   * the attempt was read as absent, because a try in flight then could still create an attempt.
+   * the attempt was read as absent, because a try in flight then could still create an attempt. `attempt` is the one the
+   * conclusion was decided on: it is written in the same UPDATE, so a stale `record` of another reconciler between this
+   * reconciler's `record` and this conclusion cannot leave a stored attempt without the cancellation that K8 reads.
    */
-  private conclude(scopeKey: string, key: string, conclusion: 'expired' | 'cancelled', attemptReadAt?: number): Promise<boolean> {
+  private conclude(scopeKey: string, key: string, conclusion: 'expired' | 'cancelled', attempt?: TaskAttempt,
+    attemptReadAt?: number): Promise<boolean> {
     return this.locked(scopeKey, async (client, now) => {
-      const done = await client.query(`UPDATE intent SET conclusion = $3 WHERE scope = $1 AND key = $2 AND conclusion IS NULL
-        AND ($4::bigint IS NULL OR next_at <= $4)`, [scopeKey, key, conclusion, attemptReadAt ?? null]);
+      const done = await client.query(`UPDATE intent SET conclusion = $3, attempt = coalesce($5::json, attempt) WHERE scope = $1 AND key = $2
+        AND conclusion IS NULL AND ($4::bigint IS NULL OR next_at <= $4)`,
+      [scopeKey, key, conclusion, attemptReadAt ?? null, attempt === undefined ? null : JSON.stringify(attempt)]);
       if (done.rowCount) {
         await switchDueVersions(client, scopeKey, now);
         return true;

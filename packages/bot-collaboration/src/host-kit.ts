@@ -55,7 +55,7 @@ export { admitUserInput } from './coalesce.js';
 export { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, supersededDeliveryIds, unknownDelivery } from './delivery.js';
 export { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, promoteStaged, queueDelivery, refuseRoute, rememberInbound, resendUnknown,
   revokePush, type IntentConclusions } from './delivery-routing.js';
-export { checkDreamInstruction, dreamIntentIds, dreamPolicy, reconcileDreamRoutines, recordDream, syncDreams, type DreamSync } from './dream.js';
+export { checkDreamInstruction, dreamHolds, dreamIntentIds, dreamPolicy, dreamYield, reconcileDreamRoutines, recordDream, syncDreams, type DreamSync } from './dream.js';
 export { exportMarkOf, type SwitchExportMark, type SwitchHeader } from './migration.js';
 export { stateOf } from './model.js';
 export { concludeRoutineTurn, createDefinition, endable, owned, resealDefinition, ROUTINE_LATE_AFTER_MS, ROUTINE_WAIT_MS, routineCalendar,

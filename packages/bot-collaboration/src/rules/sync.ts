@@ -8,6 +8,7 @@ import { outcomeSchema, promptActions, type ContextBot, type ContextRoutine, typ
 import { botTurnInstruction, type BotHistoryState, type ContextTurn, type InstructionLimits } from './context.js';
 import { admitBotToolsets, inactive } from './team.js';
 import { publishSettled, seatSettled, type RoomMessage, type Seat } from './rooms.js';
+import { isAutonomous } from './priority.js';
 
 /**
  * The per-Turn step of a Host sync as a pure rule (#793 D2b Q2). L and H run the same step, so a frozen offer is the same in both.
@@ -88,6 +89,12 @@ export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
    * A refusal holds that Bot's Turns that have no intent, and the rest of the scope syncs. Absent: no check.
    */
   deviceRefusal?(botId: string): SyncRefusal | undefined;
+  /**
+   * The `limits.maxDurationMs` of the offer of the Bot's submitted dream (#2334), or `undefined` when the Bot has none. A
+   * claimed dream is not interrupted, so a Turn that is not autonomous and freezes behind it waits that much longer.
+   * Absent: no Bot has a submitted dream.
+   */
+  dreamHold?(botId: string): number | undefined;
 }
 export interface SyncOptions<R extends ContextRoutine> {
   now: number;
@@ -257,8 +264,10 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   delete turn.blockedReason;
   turn.status = 'processing';
   if (turn.source === 'routine') return { kind: 'routine', execution: offer };
+  // The wait is frozen with the intent, so the hold counts only for a dream submitted when the Turn freezes.
+  const hold = isAutonomous(turn) ? 0 : facts.dreamHold?.(turn.botId) ?? 0;
   return { kind: 'freeze', input: { key: turn.id, source: turn.source === 'user' || turn.source === 'answer' ? 'user' : 'bot',
-    waitUntil: options.now + OFFER_WAIT_MS, execution: offer } };
+    waitUntil: options.now + hold + OFFER_WAIT_MS, execution: offer } };
 }
 
 /**

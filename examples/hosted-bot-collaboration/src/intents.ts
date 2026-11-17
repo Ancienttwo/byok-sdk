@@ -151,15 +151,18 @@ export async function seatFacts(client: PoolClient, scope: string, seatIds: read
  * (D2d). `retired` reads the intent tombstones of compaction (S8) and the Turn tombstones of retention (D2g).
  * `deviceRefusal` (#956) reads the binding of each Bot's current device once, so the K8 step holds a Turn whose device a
  * freeze would refuse, and the rest of the scope syncs. The freeze still checks the binding as the last guard.
+ * `dreamHold` (#2334) is K8 `dreamHolds` of the scope's routine slice, where a tried row is inflight.
  */
-export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[], bots: CollaborationState['team']['bots']): Promise<SyncFacts> {
+export async function syncFacts(client: PoolClient, scope: string, turnIds: readonly string[], bots: CollaborationState['team']['bots'],
+  dreamHolds: ReadonlyMap<string, number>): Promise<SyncFacts> {
   const { intent, started } = await loadIntentFacts(client, scope, turnIds);
   // Retention retires Turn ids (#793 D2g). Compaction retires intents (#793 S8): a compacted intent comes first, as in L's sync.
   const retired = await retiredTurns(client, storedKey(scope), turnIds), compacted = await retiredIntents(client, storedKey(scope), turnIds);
   const devices = await deviceRefusals(client, storedKey(scope), [...new Set(Object.values(bots).map(bot => bot.execution.deviceId))]);
   return { intent, executionStarted: turnId => started.has(storedKey(turnId)),
     retired: turnId => compacted.has(turnId) ? 'result_retired' : retired.has(turnId) ? 'turn_retired' : undefined,
-    deviceRefusal: botId => Object.hasOwn(bots, botId) ? devices.get(bots[botId]!.execution.deviceId) : undefined };
+    deviceRefusal: botId => Object.hasOwn(bots, botId) ? devices.get(bots[botId]!.execution.deviceId) : undefined,
+    dreamHold: botId => dreamHolds.get(botId) };
 }
 
 /**

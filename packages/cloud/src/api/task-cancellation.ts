@@ -16,13 +16,14 @@ export function createTaskCancellationApi({ root, controlPlane, options }: Depen
   'cancelTask'
 > {
   return {
-    async cancelTask(tenant, taskId, reason) {
+    async cancelTask(tenant, taskId, reason, cancelOptions) {
       const stores = tenantStoresFor(controlPlane(tenant), root);
       const proposedMessageId = options.crypto.randomUuid();
       const mutation = await stores.cancellations.request({
         taskId,
         proposedMessageId,
         ...(reason === undefined ? {} : { reason }),
+        ...(cancelOptions?.ifUnclaimed === true ? { ifUnclaimed: true as const } : {}),
         materialize: async (seq, messageId) => {
           const envelope = createEnvelope('task.cancel', reason === undefined ? {} : { reason }, {
             id: messageId,

@@ -685,8 +685,18 @@ export interface ByokCloud {
   ): Promise<{ readonly member: E2eeMemberKeyBundle; readonly deviceMac?: string } | undefined>;
   /** Host control plane: relay the client pairing MAC to a registered device (§7.2 step 4). */
   relayClientPairingMac(tenant: TenantId, deviceId: string, input: E2eeClientPairingMac): Promise<void>;
-  /** Host control plane: durably request cancellation by tenant/task id. Idempotent. */
-  cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
+  /**
+   * Host control plane: durably request cancellation by tenant/task id.
+   * Idempotent. With `ifUnclaimed`, an attempt a device has already claimed
+   * is returned unchanged and nothing is sent; the check and the cancellation
+   * are one step against the claim.
+   */
+  cancelTask(
+    tenant: TenantId,
+    taskId: string,
+    reason?: string,
+    options?: { readonly ifUnclaimed?: true },
+  ): Promise<TaskAttempt>;
   /**
    * Host control plane: settle a task no device will finish. In one store
    * transaction an unfinished attempt becomes `cancelled` with

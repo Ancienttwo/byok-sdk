@@ -23,7 +23,7 @@ import { callCardsInLedger, CommitConflict, commitInLedger, commitInRows, retain
 import type { RetentionInput, RetentionResult } from './retention.js';
 import { BOT_DREAM, BOT_ROUTINE, botRoutines, endable, owned, routineCalendar, routineTurn,
   ownerRoutineUpdate, updateDefinition, type BotRoutineInput } from './routines.js';
-import { checkDreamInstruction, dreamPolicy, dreamReads, reconcileDreamRoutines, recordDream, syncDreams, type DreamPolicy, type DreamingOptions } from './dream.js';
+import { checkDreamInstruction, dreamPolicy, dreamReads, dreamYield, reconcileDreamRoutines, recordDream, syncDreams, type DreamPolicy, type DreamingOptions } from './dream.js';
 import { DEFAULT_AUTONOMY, autonomyOf, wouldDoRows, type Autonomy, type WouldDo } from './rules/autonomy.js';
 import { botOutcomePorts, IntentOutcomeError, outcomeFailure, routeTerminal, runHostIntentHandler, syncHead, syncTail } from './adapter-steps.js';
 import { DEVICE_CONCURRENCY, admitDeviceSlot, type DispatchIntent } from './rules/priority.js';
@@ -365,7 +365,9 @@ export class BotCollaboration {
       // #957: K4 sends nothing to a device that is frozen or owned by H: not the timer drain, not a `bot.core` call.
       // #1229: the Host also reserves one slot of each device for user-source work.
       admitSubmit: (intent, state) => !deviceRefusal(stateOf(state.application as LedgerState['application']), intent.execution.deviceId)
-        && this.admitsDeviceSlot(intent, state) });
+        && this.admitsDeviceSlot(intent, state),
+      // #2334: a dream that no device has claimed yields to user input of its Bot.
+      yieldUnclaimed: (state, intent) => dreamYield(stateOf(state.application as LedgerState['application']), intent.key) });
     // An exported domain stays as it was exported (#975), also across a restart.
     if (!stateOf(persisted.application).switchExport) ledger.transaction(s => {
       const state = stateOf(s.application);

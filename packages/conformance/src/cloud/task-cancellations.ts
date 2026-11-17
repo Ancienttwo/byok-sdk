@@ -42,6 +42,38 @@ export function runTaskCancellationConformance(factory: CloudCompositionFactory)
       });
     });
 
+    it('cancels only unclaimed work when asked ifUnclaimed, in either order against claim', async () => {
+      await withCloudComposition(factory, async ({ stores, mailbox }) => {
+        const cancel = (taskId: string, proposedMessageId: string, ifUnclaimed?: true) =>
+          stores.cancellations.request(TENANT, {
+            taskId,
+            proposedMessageId,
+            ...(ifUnclaimed === undefined ? {} : { ifUnclaimed }),
+            materialize: async () => body(proposedMessageId),
+          });
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'claimed-first', deviceId: 'device-if', agentRef: AGENT_REF });
+        const claimed = await stores.tasks.claim(TENANT, { taskId: 'claimed-first', deviceId: 'device-if', executor: PI_EXECUTOR });
+        await expect(cancel('claimed-first', 'cancel-if-claimed', true)).resolves.toEqual({ attempt: claimed });
+        await expect(stores.tasks.get(TENANT, 'claimed-first')).resolves.toEqual(claimed);
+        expect((await mailbox.inspect(TENANT, 'device-if')).pending).toEqual([]);
+
+        // A conditional request never lends its answer to a concurrent unconditional one.
+        const [, forced] = await Promise.all([
+          cancel('claimed-first', 'cancel-if-again', true),
+          cancel('claimed-first', 'cancel-forced'),
+        ]);
+        expect(forced?.attempt.status).toBe('cancel_requested');
+        expect(forced?.message?.messageId).toBe('cancel-forced');
+
+        await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'cancel-first', deviceId: 'device-if', agentRef: AGENT_REF });
+        const cancelled = await cancel('cancel-first', 'cancel-if-unclaimed', true);
+        expect(cancelled?.attempt.status).toBe('cancelled');
+        expect(cancelled?.message?.messageId).toBe('cancel-if-unclaimed');
+        await expect(stores.tasks.claim(TENANT, { taskId: 'cancel-first', deviceId: 'device-if', executor: PI_EXECUTOR }))
+          .resolves.toEqual(cancelled?.attempt);
+      });
+    });
+
     it('is idempotent and retains the first tombstone and delivery', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'repeat', deviceId: 'device-repeat', agentRef: AGENT_REF });

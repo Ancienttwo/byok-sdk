@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { createRoutine, hash, MIN_TOMBSTONE_RETENTION_MS, occurrenceIntentKey, occurrenceOfIntentKey, promoteOccurrence, taskId, type FrozenSubmitPort, type Json, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
-import { BOT_DREAM, type CollaborationState, createDefinition, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/bot-collaboration/host-kit';
+import { BOT_DREAM, type CollaborationState, createDefinition, dreamYield, ROUTINE_WAIT_MS, routineCalendar, routineTurn } from '@byok-sdk/bot-collaboration/host-kit';
 import { seedCollaboration, SYNC_OPTIONS } from '@byok-sdk/bot-collaboration/testing';
 import { freezeIntent, HostedSubmitter } from './intents';
 import { assemble, FRAME_MAX_BYTES, split, storedKey } from './layout';
@@ -214,6 +214,46 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
     expect(await new HostedSubmitter(opened!.pool, store().schema, { port: () => port, now: () => FIRST }).run()).toEqual({ tried: 1, failed: [] });
     expect(submitted).toEqual([taskId('user', 0)]);
     expect(await intentRow(scope, occurrenceIntentKey(key))).toMatchObject({ tries: 0, conclusion: null });
+  });
+
+  it('makes a delivered dream that no device claimed yield to a queued user Turn, and records user_input (#2334)', async () => {
+    const scope = await scoped(), { host, key, at, intent } = await dreamDue(scope), task = taskId(intent, 0);
+    await host.sync(scope, { ...SYNC, now: at });
+    const since = (await host.read(scope)).dreams!.bots.main!.since;
+    await query(`UPDATE ${table('intent')} SET tries = 1, submission = 'delivered', reconcile_at = 0 WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(intent)]);
+    await host.seed(scope, state => {
+      state.turns.user = { id: 'user', root: 'user', botId: 'main', source: 'user', request: 'Urgent', hop: 0, status: 'queued', authority: 'owner' };
+    });
+    const { input } = (await intentRow(scope, intent))! as unknown as { input: { deviceId: string; payload: { agentRef: Json } } };
+    let attempt = { taskId: task, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'offered' } as unknown as TaskAttempt;
+    const cancels: unknown[] = [];
+    const port = { offer: async () => undefined, deviceTerminal: async () => undefined, attempt: async () => attempt,
+      cancel: async (id: string, reason: string, options?: { readonly ifUnclaimed?: true }) => {
+        cancels.push([id, reason, options]);
+        attempt = { ...attempt, status: 'cancelled', cancellation: { requestedAt: new Date(at).toISOString(), reason } };
+      } };
+    expect(await new HostedReconciler(opened!.pool, store().schema, host, { port: () => port, now: () => at, yieldUnclaimed: dreamYield }).run())
+      .toEqual({ concluded: 1, failed: [] });
+    expect(cancels).toEqual([[task, 'user_input', { ifUnclaimed: true }]]);
+    await host.sync(scope, { ...SYNC, now: at });
+    expect((await host.read(scope)).dreams).toEqual({ bots: { main: { since, userInputCancels: 1,
+      last: { occurrenceKey: key, at, outcome: 'cancelled', reason: 'user_input', template: 'default', fallback: true } } }, open: {} });
+  });
+
+  it('does not ask yieldUnclaimed about a delivered routine row whose dream is not open (#2338)', async () => {
+    const scope = await scoped(), { host, at, intent } = await dreamDue(scope);
+    await host.sync(scope, { ...SYNC, now: at });
+    await host.seed(scope, state => { state.dreams!.open = {}; });
+    await query(`UPDATE ${table('intent')} SET tries = 1, submission = 'delivered', reconcile_at = 0 WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(intent)]);
+    const { input } = (await intentRow(scope, intent))! as unknown as { input: { deviceId: string; payload: { agentRef: Json } } };
+    const attempt = { taskId: taskId(intent, 0), deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'offered' } as unknown as TaskAttempt;
+    const asked: string[] = [], read = vi.spyOn(host, 'read');
+    const port = { offer: async () => undefined, deviceTerminal: async () => undefined, attempt: async () => attempt, cancel: async () => undefined };
+    await new HostedReconciler(opened!.pool, store().schema, host, { port: () => port, now: () => at,
+      yieldUnclaimed: (_state, key) => { asked.push(key); return undefined; } }).run();
+    expect(asked).toEqual([]);
+    expect(read).not.toHaveBeenCalled();
+    read.mockRestore();
   });
 
   it('stages, switches, pauses, resumes and completes a routine through the Main Bot owner API, and refuses another Bot', async () => {

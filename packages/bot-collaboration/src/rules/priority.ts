@@ -1,9 +1,13 @@
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import type { Turn } from './turn.js';
 
+/** Background work that user input goes ahead of: a routine Turn, or another Bot's request. */
+export function isAutonomous(turn: Pick<Turn, 'source'>): boolean {
+  return turn.source === 'routine' || turn.source === 'bot_request';
+}
 /** The background intents that user input overtakes; dream ids already use the ledger's hashed identity. */
 export function autonomousIntentIds(turns: readonly Pick<Turn, 'id' | 'source'>[], dreams: readonly string[]): Set<string> {
-  return new Set(turns.filter(turn => turn.source === 'routine' || turn.source === 'bot_request').map(turn => hash(turn.id)).concat(dreams));
+  return new Set(turns.filter(isAutonomous).map(turn => hash(turn.id)).concat(dreams));
 }
 
 /**

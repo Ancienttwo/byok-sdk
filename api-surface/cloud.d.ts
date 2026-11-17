@@ -1583,7 +1583,9 @@ export interface ByokCloud {
         readonly deviceMac?: string;
     } | undefined>;
     relayClientPairingMac(tenant: TenantId, deviceId: string, input: E2eeClientPairingMac): Promise<void>;
-    cancelTask(tenant: TenantId, taskId: string, reason?: string): Promise<TaskAttempt>;
+    cancelTask(tenant: TenantId, taskId: string, reason?: string, options?: {
+        readonly ifUnclaimed?: true;
+    }): Promise<TaskAttempt>;
     abandonTask(tenant: TenantId, taskId: string, cause: TaskAbandonCause): Promise<TaskAttempt>;
     approveTask(tenant: TenantId, taskId: string, opts?: ApproveTaskOptions): Promise<EnqueuedAgentControl>;
     rejectTask(tenant: TenantId, taskId: string, opts?: RejectTaskOptions): Promise<EnqueuedAgentControl>;
@@ -2776,6 +2778,7 @@ export interface TaskCancellationRequest {
     readonly taskId: string;
     readonly proposedMessageId: string;
     readonly reason?: string;
+    readonly ifUnclaimed?: true;
     readonly materialize: (seq: number, messageId: string) => MailboxBody | Promise<MailboxBody>;
 }
 export interface TaskCancellationMutation {
