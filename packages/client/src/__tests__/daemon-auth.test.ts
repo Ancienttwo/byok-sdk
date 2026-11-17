@@ -720,6 +720,12 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       import { createRequire, registerHooks } from 'node:module';
       const { transformSync } = createRequire(import.meta.resolve('tsup'))('esbuild');
       registerHooks({ load(url, context, nextLoad) {
+        // Source imports package.json without an import attribute, as the bundler allows.
+        if (url.startsWith('file:') && url.endsWith('.json')) {
+          const json = readFileSync(new URL(url), 'utf8');
+          const names = Object.keys(JSON.parse(json)).filter((key) => /^[A-Za-z_$][\\w$]*$/.test(key));
+          return { format: 'module', shortCircuit: true, source: 'const json = ' + json + '; export default json; export const { ' + names.join(', ') + ' } = json;' };
+        }
         if (!url.endsWith('.ts')) return nextLoad(url, context);
         return { format: 'module', shortCircuit: true, source: transformSync(readFileSync(new URL(url), 'utf8'), { loader: 'ts', format: 'esm', sourcefile: url }).code };
       } });
