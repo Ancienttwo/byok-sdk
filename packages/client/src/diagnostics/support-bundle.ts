@@ -80,6 +80,8 @@ export interface SupportBundle {
   };
   /** #1097: log sizes only — never a path, a file name or log content. */
   logs: DiagnosticsSnapshot['logs'];
+  /** #2333: lease marker counts only — never a path or an owner id. */
+  agentHomeLeases: DiagnosticsSnapshot['agentHomeLeases'];
   checks: Array<Pick<DiagnosticsSnapshot['checks'][number], 'id' | 'status'>>;
   recentEvents: {
     status: 'available' | 'missing' | 'unavailable';
@@ -256,6 +258,7 @@ export async function createSupportBundle(
       entries: snapshot.quarantine.entries,
     },
     logs: snapshot.logs,
+    agentHomeLeases: snapshot.agentHomeLeases,
     checks: snapshot.checks.map(({ id, status }) => ({ id, status })),
     recentEvents,
     redaction: {

@@ -1,5 +1,5 @@
 import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
-import { loadSqliteModule } from '../../util/sqlite-support.js';
+import { loadSqliteModule, openSqliteCopyReadOnly } from '../../util/sqlite-support.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -26,8 +26,7 @@ export function durableReplicaFiles(names: readonly string[]): string[] {
 
 /** Inspect an existing private copy and close its read-only handle even on refusal. */
 export function inspectReplicaDatabase<T>(file: string, inspect: (db: import('node:sqlite').DatabaseSync) => T): T {
-  const { DatabaseSync } = loadSqliteModule();
-  const db = new DatabaseSync(file, { readOnly: true });
+  const db = openSqliteCopyReadOnly(file);
   try { return inspect(db); } finally { db.close(); }
 }
 

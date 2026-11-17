@@ -106,6 +106,15 @@ export interface DiagnosticsSnapshot {
           | { idHash: string; status: 'failed' }
         >;
       };
+  /**
+   * #2333: the lease markers under `agentHome.hostStorageRoot`, as counts.
+   * `ownReclaimable` are this store's markers `releaseAgentHomeLeases`
+   * removes without naming them. Paths and owners stay out of the snapshot
+   * and the support bundle: only `doctor` prints them.
+   */
+  agentHomeLeases:
+    | { status: 'unconfigured' | 'unavailable' }
+    | { status: 'measured'; own: number; ownReclaimable: number; foreignOwner: number; corrupt: number; truncated: boolean };
   checks: DiagnosticCheck[];
 }
 

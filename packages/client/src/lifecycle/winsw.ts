@@ -293,7 +293,9 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       // denied, the exe locked/busy, a WinSW/SCM fault) at EITHER step must
       // NOT be masked: the exe+xml are only deleted once the service is
       // stopped and unregistered (cross-model-review P1 #7).
-      await runIdempotent(runWinsw, exePath, ['stop'], 'winsw stop', WINSW_NOT_INSTALLED);
+      // A service already stopped (1062) is stopped: an uninstall retried
+      // after a refusal that came once the stop succeeded must finish (#2333).
+      await runIdempotent(runWinsw, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
       await runIdempotent(runWinsw, exePath, ['uninstall'], 'winsw uninstall', WINSW_NOT_INSTALLED);
     },
     async removeFiles() {

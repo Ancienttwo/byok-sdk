@@ -19,6 +19,7 @@ import {
 } from '../agent-home';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
 import { installTestLeaseWriterProbe } from './fixtures/runtime-env';
+import { outboundErrorMessage } from '../daemon/outbound-error';
 import {
   currentAgentHomeLeaseWriter,
   judgeAgentHomeLeaseWriter,
@@ -185,6 +186,48 @@ describe('SDK-owned Agent home contract', () => {
     await expect(fs.stat(path.join(home, 'artifacts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('counts a home in activeHomes, and keeps maintenance out, until its base lease is released (#2349)', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const resolution = await manager.layout.resolve(ref('one'));
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const acquire = manager.leaseManager.acquire.bind(manager.leaseManager);
+    vi.spyOn(manager.leaseManager, 'acquire').mockImplementationOnce(async (claim) => {
+      const base = await acquire(claim);
+      const release = base.release.bind(base);
+      (base as { release(): Promise<void> }).release = async () => { await gate; await release(); };
+      return base;
+    });
+    const execution = await manager.executionLeaseManager.acquire(resolution, { taskId: 'task-1' });
+
+    const releasing = execution.release();
+    await vi.waitFor(() => expect(manager.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 1, attempts: 0, readerAttempts: 0 }));
+    expect(await manager.withIdleHomeLease('one', async () => {})).toBe(false);
+
+    open();
+    await releasing;
+    expect(manager.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0, readerAttempts: 0 });
+    expect(await manager.withIdleHomeLease('one', async () => {})).toBe(true);
+  });
+
+  it('drops a home from activeHomes and passes the error on when its base lease release fails (#2349)', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const resolution = await manager.layout.resolve(ref('one'));
+    const acquire = manager.leaseManager.acquire.bind(manager.leaseManager);
+    vi.spyOn(manager.leaseManager, 'acquire').mockImplementationOnce(async (claim) => {
+      const base = await acquire(claim);
+      const release = base.release.bind(base);
+      (base as { release(): Promise<void> }).release = async () => { await release(); throw new Error('base release failed'); };
+      return base;
+    });
+    const execution = await manager.executionLeaseManager.acquire(resolution, { taskId: 'task-1' });
+
+    await expect(execution.release()).rejects.toThrow('base release failed');
+    expect(manager.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0, readerAttempts: 0 });
+  });
+
   it('an execution claim whose acquire throws synchronously leaves no task mark: a later standalone acquire of the same resolution fails at once', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });
@@ -304,7 +347,12 @@ describe('SDK-owned Agent home contract', () => {
       ownerId: 'store-product:another-owner',
       leaseId: 'live-lease',
     }), 'utf8');
-    await expect(manager.prepare(ref('one'))).rejects.toBeInstanceOf(AgentHomeBusyError);
+    // #2333: the refusal names the owner; the reason that leaves the device keeps it and drops the paths.
+    const foreign = await manager.prepare(ref('one')).catch((error: unknown) => error);
+    expect(foreign).toMatchObject({ name: 'AgentHomeForeignLeaseError', ownerId: 'store-product:another-owner', markerPath: marker });
+    expect(foreign).toBeInstanceOf(AgentHomeBusyError);
+    expect(outboundErrorMessage(foreign)).toContain('of owner store-product:another-owner');
+    expect(outboundErrorMessage(foreign)).not.toContain(marker);
   });
 
   it('never takes a live marker of its own owner that another process holds', async () => {

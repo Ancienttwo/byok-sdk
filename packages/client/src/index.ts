@@ -40,6 +40,8 @@ export {
   AgentHomeCollisionError,
   AgentHomeBusyError,
   AgentHomeLeaseHeldError,
+  AgentHomeForeignLeaseError,
+  AgentHomeLeaseMarkerMismatchError,
   AgentHomeLeaseCorruptError,
   AgentHomeReaderRunMissingError,
   AgentHomeLayout,
@@ -511,7 +513,7 @@ export { readServiceInstallationRecord } from './util/service-installation-recor
 export type { ServiceInstallationRecord } from './util/service-installation-record.js';
 export type {
   ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions,
-  ServiceStoreVerdict, ServiceUpgradeReceipt,
+  ServiceStoreVerdict, ServiceUninstallResult, ServiceUpgradeReceipt,
 } from './lifecycle/service-installation.js';
 export { SERVICE_PAYLOAD_MANIFEST } from './service-payload-manifest.js';
 export type { ServicePayloadManifest } from './service-payload-manifest.js';
@@ -574,10 +576,11 @@ export type {
   ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode,
 } from './diagnostics/device-doctor.js';
 
-export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions.js';
+export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, releaseAgentHomeLeases, DeviceOperatorError } from './diagnostics/operator-actions.js';
 export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput,
   DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult,
-  DeviceOperatorErrorCode } from './diagnostics/operator-actions.js';
+  ReleaseAgentHomeLeasesInput, AgentHomeLeasesReleaseResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions.js';
+export type { AgentHomeLeaseMarkerName } from './agent-home.js';
 
 export { NativeInteractionController, NativeInteractionError } from './native-interactions.js';
 export type {

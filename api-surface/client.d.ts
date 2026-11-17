@@ -39,12 +39,16 @@
 //   AgentHomeExecutionBinding -> dist/agent-home.d.ts
 //   AgentHomeExecutionLease -> dist/agent-home.d.ts
 //   AgentHomeExecutionStatus -> dist/agent-home.d.ts
+//   AgentHomeForeignLeaseError -> dist/agent-home.d.ts
 //   AgentHomeLayout -> dist/agent-home.d.ts
 //   AgentHomeLease -> dist/agent-home.d.ts
 //   AgentHomeLeaseBlock -> dist/agent-home.d.ts
 //   AgentHomeLeaseCorruptError -> dist/agent-home.d.ts
 //   AgentHomeLeaseHeldError -> dist/agent-home.d.ts
 //   AgentHomeLeaseManager -> dist/agent-home.d.ts
+//   AgentHomeLeaseMarkerMismatchError -> dist/agent-home.d.ts
+//   AgentHomeLeaseMarkerName -> dist/agent-home.d.ts
+//   AgentHomeLeasesReleaseResult -> dist/diagnostics/operator-actions.d.ts
 //   AgentHomeManager -> dist/agent-home.d.ts
 //   AgentHomeProjection -> dist/agent-home.d.ts
 //   AgentHomeProjectionApplyFunction -> dist/agent-home.d.ts
@@ -341,6 +345,7 @@
 //   RecoverableTask -> dist/daemon/journal/journal.d.ts
 //   RecoveryDisposition -> dist/daemon/journal/journal.d.ts
 //   RecoveryOutcome -> dist/daemon/journal/journal.d.ts
+//   ReleaseAgentHomeLeasesInput -> dist/diagnostics/operator-actions.d.ts
 //   RepairDeviceEnrollmentMetadataInput -> dist/diagnostics/device-doctor.d.ts
 //   ReplayCursorTooOldError -> dist/daemon/replay-cursor.d.ts
 //   RequestDeviceAssertionErrorCode -> dist/daemon/assertion-client.d.ts
@@ -429,6 +434,7 @@
 //   ServiceRepairResult -> dist/lifecycle/service-unit.d.ts
 //   ServiceStatusResult -> dist/lifecycle/service-types.d.ts
 //   ServiceStoreVerdict -> dist/lifecycle/service-installation.d.ts
+//   ServiceUninstallResult -> dist/lifecycle/service-installation.d.ts
 //   ServiceUnitError -> dist/lifecycle/service-unit.d.ts
 //   ServiceUnitErrorCode -> dist/lifecycle/service-unit.d.ts
 //   ServiceUnitInspection -> dist/lifecycle/service-unit.d.ts
@@ -560,6 +566,7 @@
 //   readPayloadManifest -> dist/lifecycle/service-installation.d.ts
 //   readServiceInstallationRecord -> dist/util/service-installation-record.d.ts
 //   readServiceLifecycleOwner -> dist/lifecycle/service-unit.d.ts
+//   releaseAgentHomeLeases -> dist/diagnostics/operator-actions.d.ts
 //   releaseServiceLifecycleOwner -> dist/lifecycle/service-unit.d.ts
 //   repairDeviceEnrollmentMetadata -> dist/diagnostics/device-doctor.d.ts
 //   requestDeviceAssertion -> dist/daemon/assertion-client.d.ts
@@ -1220,6 +1227,12 @@ export declare class AgentHomeLeaseHeldError extends AgentHomeBusyError {
     readonly markerPath: string;
     constructor(message: string, blockedBy: AgentHomeLeaseBlock, markerPath: string);
 }
+export declare class AgentHomeForeignLeaseError extends AgentHomeBusyError {
+    readonly ownerId: string;
+    readonly markerPath: string;
+    readonly canonicalHome: string;
+    constructor(ownerId: string, markerPath: string, canonicalHome: string);
+}
 export declare class AgentHomeReaderRunMissingError extends AgentHomeError {
     constructor(message: string);
 }
@@ -1272,6 +1285,14 @@ export interface AgentHomeExecutionBinding {
     readonly lease: AgentHomeExecutionLease;
 }
 export declare function validateAgentRef(value: unknown): AgentRef;
+export interface AgentHomeLeaseMarkerName {
+    readonly markerPath: string;
+    readonly ownerId: string | null;
+}
+export declare class AgentHomeLeaseMarkerMismatchError extends AgentHomeError {
+    readonly markerPath: string;
+    constructor(markerPath: string);
+}
 export declare class AgentHomeLayout {
     private readonly hostStorageRootInput;
     private readonly agentIdByCanonicalHome;
@@ -3899,7 +3920,7 @@ export declare class DeviceCursorResetError extends Error {
 export declare function resetDeviceCursor(config: DaemonConfig, input: ResetDeviceCursorInput): Promise<DeviceCursorResetResult>;
 // ==== @byok-sdk/client dist/diagnostics/operator-actions.d.ts ====
 import { type AgentRef } from '@byok-sdk/protocol';
-import { type AgentHomeLeaseBlock } from '../agent-home.js';
+import { type AgentHomeLeaseBlock, type AgentHomeLeaseMarkerName } from '../agent-home.js';
 import type { DaemonConfig } from '../daemon/create-daemon.js';
 import type { OperationalHealthFixResult } from './types.js';
 import type { DiagnoseDeviceOptions } from './device-doctor.js';
@@ -3945,6 +3966,21 @@ export interface ArchiveAgentTerminalMessagesInput extends ConfirmDeviceMaintena
     agentRef: AgentRef;
     archiveDirectory: string;
 }
+export interface ReleaseAgentHomeLeasesInput extends ConfirmDeviceMaintenanceInput {
+    marker?: AgentHomeLeaseMarkerName;
+}
+export interface AgentHomeLeasesReleaseResult {
+    action: 'release-agent-home-leases';
+    scope: 'device';
+    released: number;
+    namedRemoved: boolean;
+    removedTemps: number;
+    kept: {
+        own: number;
+        foreignOwner: number;
+        corrupt: number;
+    };
+}
 export type AgentTerminalMessagesArchiveResult = {
     action: 'archive-terminal-messages';
     scope: 'agent';
@@ -3958,6 +3994,7 @@ export type AgentTerminalMessagesArchiveResult = {
 export declare function quarantineDeviceOperationalHealth(config: DaemonConfig, input: ConfirmDeviceMaintenanceInput): Promise<DeviceHealthQuarantineResult>;
 export declare function exportDeviceSupportBundle(config: DaemonConfig, input: ExportDeviceSupportBundleInput): Promise<DeviceSupportBundleExportResult>;
 export declare function archiveAgentTerminalMessages(config: DaemonConfig, input: ArchiveAgentTerminalMessagesInput): Promise<AgentTerminalMessagesArchiveResult>;
+export declare function releaseAgentHomeLeases(config: DaemonConfig, input: ReleaseAgentHomeLeasesInput): Promise<AgentHomeLeasesReleaseResult>;
 // ==== @byok-sdk/client dist/diagnostics/store-compatibility.d.ts ====
 import type { StoreCompatibility } from '@byok-sdk/core';
 export interface InspectDaemonStoresInput {
@@ -4095,6 +4132,16 @@ export interface DiagnosticsSnapshot {
             status: 'failed';
         }>;
     };
+    agentHomeLeases: {
+        status: 'unconfigured' | 'unavailable';
+    } | {
+        status: 'measured';
+        own: number;
+        ownReclaimable: number;
+        foreignOwner: number;
+        corrupt: number;
+        truncated: boolean;
+    };
     checks: DiagnosticCheck[];
 }
 // support
@@ -4137,7 +4184,7 @@ export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayo
 export type { StoreCompatibility } from '@byok-sdk/core';
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
-export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
+export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeForeignLeaseError, AgentHomeLeaseMarkerMismatchError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store.js';
 export type { AgentSessionHandoff, AgentSessionHandoffMatch, AgentTaskTerminalEvidence, AgentTaskTerminalMatch, AgentTerminalCause, } from './daemon/agent-session-handoff-store.js';
 export type { AgentHomeResolution, AgentHomeProjection, AgentHomeProjectionInput, AgentHomeProjectionApplyInput, AgentHomeProjectionApplyFunction, AgentHomeLease, AgentHomeBinding, AgentHomeExecutionLease, AgentHomeExecutionBinding, AgentHomeExecutionStatus, } from './agent-home.js';
@@ -4228,7 +4275,7 @@ export type { AgentServiceDefinitionInput, AgentServiceInstallationInput } from 
 export { createServiceInstallation, readPayloadManifest, ServiceInstallationError } from './lifecycle/service-installation.js';
 export { readServiceInstallationRecord } from './util/service-installation-record.js';
 export type { ServiceInstallationRecord } from './util/service-installation-record.js';
-export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceStoreVerdict, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
+export type { ServiceDaemonStore, ServiceInstallation, ServiceInstallationErrorCode, ServiceInstallationOptions, ServiceStoreVerdict, ServiceUninstallResult, ServiceUpgradeReceipt, } from './lifecycle/service-installation.js';
 export { SERVICE_PAYLOAD_MANIFEST } from './service-payload-manifest.js';
 export type { ServicePayloadManifest } from './service-payload-manifest.js';
 export { claimServiceLifecycleOwner, generateServiceLauncher, readServiceLifecycleOwner, releaseServiceLifecycleOwner, ServiceUnitError, } from './lifecycle/service-unit.js';
@@ -4261,8 +4308,9 @@ export { AgyAdapter, type AgyAdapterOptions } from './adapters/antigravity/agy-a
 export { DshAdapter, type DshAdapterOptions, type DshModelSelection, type DshSandboxMode } from './adapters/dsh/dsh-adapter.js';
 export { diagnoseDevice, repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from './diagnostics/device-doctor.js';
 export type { DiagnoseDeviceOptions, DiagnosticsSnapshot, DiagnosticCheck, DiagnosticStatus, RepairDeviceEnrollmentMetadataInput, DeviceMetadataRepairResult, DeviceMetadataRepairErrorCode, ResetDeviceCursorInput, DeviceCursorResetResult, DeviceCursorResetErrorCode, } from './diagnostics/device-doctor.js';
-export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, DeviceOperatorError } from './diagnostics/operator-actions.js';
-export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions.js';
+export { quarantineDeviceOperationalHealth, exportDeviceSupportBundle, archiveAgentTerminalMessages, releaseAgentHomeLeases, DeviceOperatorError } from './diagnostics/operator-actions.js';
+export type { ConfirmDeviceMaintenanceInput, DeviceHealthQuarantineResult, ExportDeviceSupportBundleInput, DeviceSupportBundleExportResult, ArchiveAgentTerminalMessagesInput, AgentTerminalMessagesArchiveResult, ReleaseAgentHomeLeasesInput, AgentHomeLeasesReleaseResult, DeviceOperatorErrorCode } from './diagnostics/operator-actions.js';
+export type { AgentHomeLeaseMarkerName } from './agent-home.js';
 export { NativeInteractionController, NativeInteractionError } from './native-interactions.js';
 export type { NativeApprovalDecision, NativeInteractionCapabilities, NativeInteractionIdentity, NativeQuestion, NativeQuestionAnswer, NativeInteractionInput, NativeInteractionRequest, NativeInteractionResponse, NativeInteractionReceipt, NativeInteractionEndReason, NativeInteractionChannel, NativeInteractionOptions, NativeInteractionHostOptions, NativeInteractionTransport, NativeInteractionErrorCode, } from './native-interactions.js';
 export type { OutboundStatus, OutboundRejection } from './daemon/outbound-settlement.js';
@@ -4597,7 +4645,8 @@ export interface AgentServiceDefinitionInput {
 }
 export declare function agentServiceDefinition(input: AgentServiceDefinitionInput): ServiceDefinition;
 export declare const AGENT_PAYLOAD_ENTRY = "byok-agent.mjs";
-export interface AgentServiceInstallationInput extends Omit<AgentServiceDefinitionInput, 'agentBin'> {
+export interface AgentServiceInstallationInput extends Omit<AgentServiceDefinitionInput, 'agentBin' | 'config'> {
+    config: AgentServiceDefinitionInput['config'] & Pick<DaemonConfig, 'agentHome'>;
     installRoot: string;
 }
 export declare function agentServiceInstallation(input: AgentServiceInstallationInput): ServiceInstallationOptions;
@@ -4686,6 +4735,13 @@ export interface ServiceInstallationOptions {
     installRoot: string;
     program(versionDir: string): ServiceProgram;
     precheck(versionDir: string): ServiceProgram;
+    releaseStoreLeases: (() => Promise<{
+        kept: {
+            own: number;
+            foreignOwner: number;
+            corrupt: number;
+        };
+    }>) | 'no-agent-home';
     migrate?(versionDir: string): ServiceProgram;
     healthCheck?(signal: AbortSignal): Promise<void>;
     healthTimeoutMs?: number;
@@ -4712,7 +4768,7 @@ export interface ServiceInstallation {
     upgrade(payloadDir: string): Promise<ServiceUpgradeReceipt>;
     rollback(): Promise<ServiceUpgradeReceipt>;
     recover(): Promise<ServiceUpgradeReceipt | undefined>;
-    uninstall(): Promise<void>;
+    uninstall(): Promise<ServiceUninstallResult>;
     receipt(): Promise<ServiceUpgradeReceipt | undefined>;
     currentVersion(): Promise<string | undefined>;
 }
@@ -4750,8 +4806,12 @@ declare const ERROR_MESSAGES: {
     readonly install_root_ancestor_unsafe: 'Another user could replace the install root. Nothing was changed; move it, or fix the owner or mode of';
     readonly snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.';
     readonly store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.';
+    readonly agent_home_lease_held: 'A process of this store still writes an Agent home after the service stopped (the cause names it). The service is stopped and nothing was removed; end that process, then retry uninstall().';
 };
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
+export interface ServiceUninstallResult {
+    keptAgentHomeLeases: number;
+}
 export declare class ServiceInstallationError extends Error {
     readonly code: ServiceInstallationErrorCode;
     readonly stores?: readonly ServiceStoreVerdict[] | undefined;

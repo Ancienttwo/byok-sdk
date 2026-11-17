@@ -815,7 +815,10 @@ await installation.upgrade(verifiedPayloadDir); // throws ServiceInstallationErr
 ```
 
 A Host whose service is not `byok-agent` calls `createServiceInstallation`
-with its own `program(versionDir)` and `precheck(versionDir)`; the precheck
+with its own `program(versionDir)`, `precheck(versionDir)` and
+`releaseStoreLeases` (`() => releaseAgentHomeLeases(config, { confirmed: true })`,
+summing the results when several daemon stores have an `agentHome`, or
+`'no-agent-home'`); the precheck
 prints `{ "stores": [...] }` as `upgrade check --store --json` does and lists
 every store the candidate rewrites, including any server or provider-key
 store (`inspectSqliteStore`, `inspectProviderProfileStore`). A listed store
@@ -972,6 +975,24 @@ unit. To remove the enrollment too, unpair before uninstalling, or call
 ([Clearing an enrollment without running the daemon](#clearing-an-enrollment-without-running-the-daemon)). Remove the installed application
 through the Host's installer/package manager. Service uninstall is not a promise
 to erase the SDK store, Agent files, provider keys or runtime login directories.
+
+With an `agentHome`, uninstall also releases the store's Agent-home lease
+markers once the service is stopped (#2333). A marker the store left after a
+crash would otherwise block every other store or product that shares
+`agentHome.hostStorageRoot`, since only its own daemon reclaims it. Uninstall
+releases the markers no running writer holds. While a process of this store
+still writes a home (a memory export, for example), it fails with
+`agent_home_lease_held` and removes nothing; end that process and run uninstall
+again. Markers it cannot prove free (written on another machine or in a
+container, an unverifiable writer, another store's, a corrupt file) stay, and
+uninstall prints how many: `byok-agent doctor` lists each with its path, owner
+and what clears it. Delete one only once you have confirmed that the machine or
+container that wrote it no longer writes to this store.
+
+An embedded Host that retires a store without uninstalling its service calls
+`releaseAgentHomeLeases(config, { confirmed: true })` after the daemon exits and
+before it deletes the store; `marker: { markerPath, ownerId }` names a marker
+it cannot prove free, under the same condition.
 
 ## Reset
 

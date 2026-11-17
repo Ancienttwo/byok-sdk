@@ -104,6 +104,20 @@ export interface ServiceInstallationOptions {
    */
   precheck(versionDir: string): ServiceProgram;
   /**
+   * Releases the Agent-home lease markers of the stores this installation
+   * serves and returns the ones it kept (#2333), or `'no-agent-home'` when
+   * its daemon has no `agentHome`: a marker left by a retired store blocks
+   * every other store that shares its `agentHome.hostStorageRoot`. A Host
+   * passes `() => releaseAgentHomeLeases(config, { confirmed: true })`, or
+   * sums its stores' results; {@link agentServiceInstallation} passes the
+   * daemon's own. uninstall() calls it once the service is stopped and
+   * before it removes `current`. A rejection because a writer of the store
+   * still runs (`blockedBy: 'writer-running'`) is `agent_home_lease_held`
+   * and removes nothing; any other rejection is thrown as is and removes
+   * nothing either.
+   */
+  releaseStoreLeases: (() => Promise<{ kept: { own: number; foreignOwner: number; corrupt: number } }>) | 'no-agent-home';
+  /**
    * The candidate's store migration, run from its staged `versionDir` after
    * the snapshot when the precheck reports a store as `migration-required`;
    * exit 0 is success. The precheck then runs again and must report every
@@ -379,8 +393,8 @@ export interface ServiceInstallation {
    * failures follow the same rule as on `rollback()`.
    */
   recover(): Promise<ServiceUpgradeReceipt | undefined>;
-  /** Stops and unregisters the service while `current` still holds its payload, removes `current`, then the unit files, then `previous`, `versions/`, `snapshots/` and the receipt. A failed stop throws as is and removes nothing, so the unit and `current` stay and the service can start again until `uninstall()` is retried. A unit whose removal fails after the stop stays without `current`, so it starts no payload (#2011); retry `uninstall()`. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
-  uninstall(): Promise<void>;
+  /** Stops and unregisters the service while `current` still holds its payload, releases the store's Agent-home lease markers ({@link ServiceInstallationOptions.releaseStoreLeases}; a refusal removes nothing) and returns how many it kept, removes `current`, then the unit files, then `previous`, `versions/`, `snapshots/` and the receipt. A failed stop throws as is and removes nothing, so the unit and `current` stay and the service can start again until `uninstall()` is retried. A unit whose removal fails after the stop stays without `current`, so it starts no payload (#2011); retry `uninstall()`. Install snapshots (`snapshots/.install-*`) are kept, and so is `snapshots/` around them. A symlinked `snapshots/` is refused with `snapshots_symlinked` before anything changes. The store is not touched. */
+  uninstall(): Promise<ServiceUninstallResult>;
   /** The last receipt, or `undefined`. */
   receipt(): Promise<ServiceUpgradeReceipt | undefined>;
   /** The version `current` points at, or `undefined` before install. */
@@ -420,9 +434,36 @@ const ERROR_MESSAGES = {
   install_root_ancestor_unsafe: 'Another user could replace the install root. Nothing was changed; move it, or fix the owner or mode of',
   snapshots_symlinked: 'A path under the install root\'s snapshots/ is a symbolic link. Nothing changed; replace the link, then retry.',
   store_overlaps_service_state: 'A store overlaps the install root or a daemon store\'s service/ directory.',
+  agent_home_lease_held: 'A process of this store still writes an Agent home after the service stopped (the cause names it). The service is stopped and nothing was removed; end that process, then retry uninstall().',
 } as const;
 
 export type ServiceInstallationErrorCode = keyof typeof ERROR_MESSAGES;
+
+/** What uninstall() left behind (#2333). */
+export interface ServiceUninstallResult {
+  /** Agent-home lease markers it could not prove free; `byok-agent doctor` lists each with what clears it. */
+  keptAgentHomeLeases: number;
+}
+
+/**
+ * Run `release` for an uninstall whose service is stopped, and count what it
+ * kept: only a writer of the store that still runs refuses (#2333).
+ *
+ * @internal
+ */
+export async function releaseStoreLeasesForUninstall(release: ServiceInstallationOptions['releaseStoreLeases']): Promise<number> {
+  if (release === 'no-agent-home') return 0;
+  try {
+    const { kept } = await release();
+    return kept.own + kept.foreignOwner + kept.corrupt;
+  } catch (error) {
+    // AgentHomeLeaseHeldError and DeviceOperatorError both carry `blockedBy`.
+    if ((error as { blockedBy?: unknown } | null)?.blockedBy === 'writer-running') {
+      throw new ServiceInstallationError('agent_home_lease_held', undefined, { cause: error });
+    }
+    throw error;
+  }
+}
 
 /** Closed codes; a store refusal carries the precheck verdicts, and `snapshot_failed` the copy error as `cause`. */
 export class ServiceInstallationError extends Error {
@@ -1748,7 +1789,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
     });
   }
 
-  function uninstall(): Promise<void> {
+  function uninstall(): Promise<ServiceUninstallResult> {
     return rootOwned(async (held) => {
       await refusePending();
       // The Host's stop program may run from under `current` (Windows runs it
@@ -1756,6 +1797,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       // (#2274), and before the unit files, so a unit whose removal fails
       // starts no payload (#2279).
       await held.deactivate();
+      const keptAgentHomeLeases = await releaseStoreLeasesForUninstall(opts.releaseStoreLeases);
       await setPointer('current', undefined);
       await held.removeFiles();
       await setPointer('previous', undefined);
@@ -1771,6 +1813,7 @@ export function serviceInstallationOver(opts: ServiceInstallationOptions, lifecy
       }
       await fs.rm(receiptPath, { force: true });
       await fs.rm(serviceInstallationRecordPath(storeDir), { force: true });
+      return { keptAgentHomeLeases };
     });
   }
 

@@ -274,15 +274,16 @@ code to any exhaustive switch over `CloudErrorCode`. The sealed lane keeps
 
 Manifest entries: `agent-home-lease-writer-liveness`, `agent-home-lease-held-error`, `device-operator-agent-lease-held`.
 
-An Agent-home lease marker now records the process that wrote it: its pid and
-start time, a digest of the machine identifier (never the raw value), the boot,
-and on Linux the PID namespace. A marker of this owner is reclaimed only when
-its writer is proved gone (same machine and namespace, and an earlier boot, no
-process with that pid, or another process under it), and only by a caller that
-holds the owner's daemon lease and has ended the earlier run's processes: a
-started daemon, or the doctor operator actions. Before, any acquire of the same
-owner reclaimed it, so a memory export or reliable egress append from a second
-process could take the marker of a running daemon and write the same home.
+An Agent-home lease marker now records the process that wrote it: its pid and,
+off Windows, its start time, a digest of the machine identifier (never the raw
+value), the boot, and on Linux the PID namespace. A marker of this owner is
+reclaimed only when its writer is proved gone (same machine and namespace, and
+an earlier boot, no process with that pid, or another process under it), and
+only by a caller that holds the owner's daemon lease and has ended the earlier
+run's processes: a started daemon, or the doctor operator actions. Before, any
+acquire of the same owner reclaimed it, so a memory export or reliable egress
+append from a second process could take the marker of a running daemon and
+write the same home.
 
 What changes for a Host:
 
@@ -304,6 +305,60 @@ What changes for a Host:
   stays `agent_home_writer_busy` and retryable. Its `blockedBy` tells
   `other-host`, `other-pid-namespace`, `writer-running`, `unverifiable`,
   `legacy-marker` and `owner-reclaim-required` apart.
+
+### Releasing a retired store's Agent-home lease markers (#2333)
+
+Manifest entries: `agent-home-lease-release`, `service-installation-release-store-leases`, `service-uninstall-releases-agent-home-leases`.
+
+Only the store that wrote a lease marker reclaims it, on its next start. A
+store that never starts again (uninstalled, deleted, or with a changed
+`storeDir` or `productId`) left its markers behind, and they blocked every other
+store or product sharing `agentHome.hostStorageRoot` until someone deleted the
+files by hand.
+
+What changes for a Host:
+
+- `ServiceInstallationOptions.releaseStoreLeases` is required. uninstall()
+  calls it once the service is stopped and before it removes `current`.
+  `agentServiceInstallation` passes the daemon's own when `config.agentHome`
+  is set, so pass the config with `agentHome`. A Host that builds the options
+  itself passes `() => releaseAgentHomeLeases(config, { confirmed: true })`
+  (summing `kept` when several daemon stores have an `agentHome`), or
+  `'no-agent-home'`.
+- uninstall() releases the markers no running writer holds and returns
+  `ServiceUninstallResult` with `keptAgentHomeLeases`, the markers it could not
+  prove free; `byok-agent uninstall` prints that count. While a writer of the
+  store still runs, it throws `ServiceInstallationError` with the new code
+  `agent_home_lease_held` and removes nothing: end that process and retry. Add
+  the code to exhaustive switches. A plain `byok-agent uninstall`, without a
+  payload install, stops the service, releases the same way, then removes it.
+  On Windows, uninstall treats a service that is already stopped (1062) as
+  stopped, so an uninstall retried after a refusal completes.
+- `releaseAgentHomeLeases(config, { confirmed: true, marker? })` runs offline,
+  under the store's owner lease, after ending the store's leftover runtime
+  processes. It releases this store's markers whose writer is proved gone or
+  that record none, and lease temp files no writer can still use. It refuses,
+  removing nothing, while a writer of this store runs or while the named
+  marker's writer is proved running; every marker it cannot prove free is kept
+  and counted in `kept`. `marker` names one of those
+  to remove it, once the machine, container or store that wrote it no longer
+  uses the root. A marker whose writer is proved running is never removed,
+  named or not.
+- An acquire refused by another owner's marker throws
+  `AgentHomeForeignLeaseError`, an `AgentHomeBusyError` with that owner's
+  `ownerId` and the `markerPath`. The offer decline stays
+  `agent_home_writer_busy`; its reason now names the owner, without paths.
+- `DiagnosticsSnapshot.agentHomeLeases`, the support bundle and
+  `byok-agent doctor --json` count the markers. The `byok-agent doctor` text
+  counts this store's markers whose writer is proved gone in one line (a
+  started daemon reclaims each when it next uses that home, and
+  `byok-agent uninstall` releases them). Every other marker is listed with its
+  path, owner and `blockedBy`, and the step that clears it: a running writer,
+  retry once it has released the home; this store's marker from an earlier
+  release, `byok-agent uninstall`, or delete it once no process uses the home;
+  another owner's marker, that owner's `byok-agent uninstall`; and any marker
+  but a running writer's, delete it once the machine or container that wrote
+  it no longer writes to this store.
 
 ### Undici in the Host dependency tree
 
@@ -869,7 +924,9 @@ not call this API and need no change.
 The vendored OAR moves from 0.110.0 to 0.112.0 ([#2361]). No Host action is
 required and there is no manifest entry. OAR's removed public exports,
 `usability()` and the changed installation snapshot type do not reach a Host,
-because the SDK re-exports no OAR API.
+because the SDK re-exports from the vendored OAR only typed errors, session
+factories and the projection and helper functions its sessions use, and none
+of the removed APIs.
 
 #### agy model selectors agy's catalog does not resolve
 
@@ -1099,12 +1156,21 @@ can no longer drift apart. No Host change.
 
 ### Retention sweeps count busy Agent homes (#2349)
 
-Sources: [#2349]. Manifest entries: `retention-sweep-busy-homes`, `retention-sweep-audit-lines-without-busy-homes-skipped`.
+Sources: [#2349]. Manifest entries: `retention-sweep-busy-homes`, `retention-sweep-audit-lines-without-busy-homes-skipped`, `agent-home-active-homes-includes-base-lease-release`.
 
 `SweepReport.busyHomes` counts the distinct Agent homes a retention pass skipped
 because they were not idle. `byok-agent status` and `byok-agent tasks` skip
 `retention-sweep` lines an older daemon wrote to `audit.jsonl`, because they lack
 `busyHomes`; the file stays on disk and every other line still renders.
+
+`status().agentHomeExecution.activeHomes` now counts a home until its base lease
+is released, not only while it holds an execution lease. `activeAttempts` still
+drops to 0 as soon as the last Attempt releases. A Host that waits for a home to
+be free for maintenance waits for `activeHomes === 0` instead of
+`activeAttempts === 0`; in between, a retention pass skips the home and counts it
+in `busyHomes`. A home is free only after its base lease released successfully:
+a release that fails also drops the home from `activeHomes`, its error reaches the
+caller that released, and a lease marker it leaves still keeps maintenance out.
 
 ### Local task journal commits on a worker thread (#2332)
 
@@ -1207,6 +1273,18 @@ for that execution, and blocks later Grok starts. The user moves the file back
 to their Grok home or deletes it and logs in again. The SDK never restores or
 deletes it. Source: [#2258]; entry `grok-agent-user-context`.
 
+### Journal commits on macOS flush the drive cache (#2336)
+
+Source: [#2336]. Manifest entry: `client-journal-macos-fullfsync`.
+
+On macOS the journal sets `PRAGMA fullfsync = ON`, because `synchronous=FULL`
+alone stops at the drive's volatile write cache. A commit takes a few
+milliseconds longer: on an idle Apple Silicon M4 Pro, one write went from a p50
+of 0.13 ms to 3.8 ms and a burst from 1.2 ms to 9.9 ms per operation; on an
+idle Intel Mac Pro, from 0.41 ms to 22.6 ms and from 4.9 ms to 93 ms. Commits
+run on the journal worker, so the event loop is unaffected. No action is
+needed.
+
 ### Bun on Windows: compile with Bun 1.4.4 or newer
 
 Under Bun 1.4.2, a Bun-compiled daemon or Host kept a SQLite database's files
@@ -1216,10 +1294,21 @@ process then failed with `EBUSY`: journal quarantine, the retention sweep's Pi
 replica reset and lock removal, `inspectDaemonStores`, doctor's journal check,
 and a Host that deletes or moves a store it has just closed. Bun 1.4.4 releases
 the files at `close()`, and this repository now builds and tests with it.
-Compile with Bun 1.4.4 or newer, and without Bun's
-`--disallow-code-generation-from-strings=strict`: the journal starts its worker
-from inline source, which that mode refuses. Node Hosts are not affected. No manifest
-entry: the SDK does not ship a Bun runtime. Source: [#2347].
+Compile with Bun 1.4.4 or newer. Do not run the daemon under Bun's
+`--disallow-code-generation-from-strings=strict`, whether it is passed to
+`bun`, embedded with `bun build --compile --compile-exec-argv`, or set through
+`BUN_OPTIONS`. That mode refuses `new Worker(source, { eval: true })`, which is
+how the journal starts its worker. `new SqliteLocalTaskJournal()` then throws
+`JournalUnavailableError` (cause: `EvalError: Code generation from strings
+disallowed for this context`), and `daemon.start()` rejects with it before
+pairing, so the daemon fails closed. Bun's non-strict
+`--disallow-code-generation-from-strings` and Node's
+`--disallow-code-generation-from-strings` block `eval` and `new Function` but
+not the journal worker. That holds on the Node command line and through
+`NODE_OPTIONS` for a Node SEA; measured with Node 24.22.1 and Bun 1.4.4. A
+Host that wants strict mode for its own code runs the daemon in a separate
+process without it. Node Hosts are not affected. No manifest entry: the SDK
+does not ship a Bun runtime. Source: [#2347].
 
 ### Integration and adoption evidence
 
@@ -1278,3 +1367,4 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2332]: https://github.com/Ancienttwo/byok-sdk/issues/2332
 [#2344]: https://github.com/Ancienttwo/byok-sdk/pull/2344
 [#2347]: https://github.com/Ancienttwo/byok-sdk/issues/2347
+[#2336]: https://github.com/Ancienttwo/byok-sdk/issues/2336

@@ -1,8 +1,9 @@
 import path from 'node:path';
 import { createServiceLifecycle, type DaemonConfig, type ServiceDefinition, type ServiceLifecycle } from '../../index.js';
-import { agentServiceDefinition, agentServiceInstallation } from '../../lifecycle/agent-service.js';
-import { createServiceInstallation, ServiceInstallationError, type ServiceInstallation } from '../../lifecycle/service-installation.js';
+import { agentHomeLeaseRelease, agentServiceDefinition, agentServiceInstallation } from '../../lifecycle/agent-service.js';
+import { createServiceInstallation, releaseStoreLeasesForUninstall, ServiceInstallationError, type ServiceInstallation } from '../../lifecycle/service-installation.js';
 import { readServiceInstallationRecord } from '../../util/service-installation-record.js';
+import type { ManagedServiceLifecycle } from '../../lifecycle/managed-lifecycle.js';
 import { readLastLifecycleRecord } from '../../daemon/audit-log.js';
 import { argValue, hasFlag, resolveStoreDir } from '../config.js';
 import { formatLifecycle, formatLifecycleRemedy } from '../../diagnostics/format.js';
@@ -118,8 +119,24 @@ export async function runInstallCommand(config: DaemonConfig, configPath: string
 export async function runUninstallCommand(config: DaemonConfig, configPath: string, rest: string[], deps: ServiceCommandDeps = {}): Promise<void> {
   const log = deps.log ?? ((line: string) => console.log(line));
   const installation = deps.lifecycle ? undefined : await cliServiceInstallation(config, configPath, rest, deps);
-  await (installation ?? await buildLifecycle(config, configPath, rest, deps)).uninstall();
+  let kept: number;
+  if (installation) {
+    kept = (await installation.uninstall()).keptAgentHomeLeases;
+  } else {
+    // As a payload installation does (#2333): the store's lease markers are
+    // released between the lifecycle's own stop and the unit's removal, so a
+    // refusal removes nothing. Every platform lifecycle is a managed one.
+    const lifecycle = await buildLifecycle(config, configPath, rest, deps) as ServiceLifecycle & Partial<ManagedServiceLifecycle>;
+    if (lifecycle.owned === undefined) throw new Error('service uninstall needs a managed service lifecycle');
+    kept = await lifecycle.owned(async (held) => {
+      await held.deactivate();
+      const released = await releaseStoreLeasesForUninstall(agentHomeLeaseRelease(config));
+      await held.removeFiles();
+      return released;
+    });
+  }
   log(`service uninstalled: ${serviceNameFor(config, rest)}`);
+  if (kept > 0) log(`agent-home-leases: ${kept} lease markers remain that could not be proved free; run byok-agent doctor to see each and what clears it`);
 }
 
 /** Starts an already-installed service (named so it never collides with the existing `start`, which runs the daemon in the foreground — see `byok-agent.ts`'s header comment). */

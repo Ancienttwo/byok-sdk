@@ -60,6 +60,7 @@ access until each listed store has no live owner:
 ```ts
 createServiceInstallation({
   service, productId, installRoot, program, precheck,
+  releaseStoreLeases: 'no-agent-home',       // or a function that releases each store's Agent-home leases
   healthCheck,                               // required with daemonStores
   daemonStores: async () => [
     { storeDir: service.storeDir, productId },

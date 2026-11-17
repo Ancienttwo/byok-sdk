@@ -1,7 +1,7 @@
 import { inspectServiceLogs } from '../lifecycle/service-log.js';
 import { serviceLogDir } from '../daemon/host-layout.js';
 import { createDaemonScratch } from '../daemon/retention/scratch.js';
-import { AgentHomeResolutionError, ensureDirectoryNoSymlink } from '../agent-home.js';
+import { AgentHomeResolutionError, ensureDirectoryNoSymlink, scanAgentHomeLeaseMarkers, stableAgentHomeOwnerId, type AgentHomeLeaseScan } from '../agent-home.js';
 import type { DiagnosticCheck, DiagnosticsSnapshot } from './types.js';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeDetectResult } from '../types.js';
 import { createHash, randomUUID } from 'node:crypto';
@@ -34,7 +34,8 @@ import { isRecord, RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, 
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
 import type { RuntimeEnvironmentLaneReport, RuntimeEnvironmentRemovalRule, RuntimeEnvironmentSource } from '../runtime/environment.js';
 import { JOURNAL_DB_FILENAME, JOURNAL_QUARANTINE_DIRNAME } from '../daemon/journal/sqlite-journal.js';
-import { isSqliteAvailable, loadSqliteModule } from '../util/sqlite-support.js';
+import { isSqliteAvailable, openSqliteCopyReadOnly } from '../util/sqlite-support.js';
+import type { DatabaseSync } from 'node:sqlite';
 import {
   inspectOperationalHealthHandle,
   inspectOperationalHealthFile,
@@ -287,8 +288,7 @@ async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['jo
         };
       }
       const tempDir = await createDaemonScratch(storeDir, 'diag');
-      const { DatabaseSync } = loadSqliteModule();
-      let db: InstanceType<typeof DatabaseSync> | undefined;
+      let db: DatabaseSync | undefined;
       try {
         for (const name of componentNames) {
           const component = opened.get(name);
@@ -319,7 +319,7 @@ async function inspectJournal(storeDir: string): Promise<DiagnosticsSnapshot['jo
         } finally {
           await copiedHandle.close();
         }
-        db = new DatabaseSync(path.join(tempDir, JOURNAL_DB_FILENAME), { readOnly: true });
+        db = openSqliteCopyReadOnly(path.join(tempDir, JOURNAL_DB_FILENAME));
         const result = db.prepare('PRAGMA quick_check(1)').get() as { quick_check?: unknown } | undefined;
         if (result?.quick_check !== 'ok') {
           return { status: 'corrupt', sizeBytes, ...(walBytes === undefined ? {} : { walBytes }), reason: 'journal quick_check failed' };
@@ -781,6 +781,8 @@ export type DoctorRuntimeEnvironment =
 export interface DoctorDiagnostics {
   snapshot: DiagnosticsSnapshot;
   runtimeEnvironment: DoctorRuntimeEnvironment;
+  /** The markers `snapshot.agentHomeLeases` counts, with their paths; `undefined` when not measured. */
+  agentHomeLeases?: AgentHomeLeaseScan;
 }
 
 /**
@@ -796,7 +798,7 @@ export async function collectDoctorDiagnostics(
 ): Promise<DoctorDiagnostics> {
   const resolvedStoreDir = path.resolve(storeDir);
   const connectControl = options.connectControl ?? connectControlClient;
-  const [deviceInspection, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment, serviceLogs] = await Promise.all([
+  const [deviceInspection, health, journal, quarantine, controlConnection, lastAudited, lastEnvironment, serviceLogs, leaseScan] = await Promise.all([
     inspectDevice(resolvedStoreDir),
     inspectOperationalHealthFile(resolvedStoreDir),
     inspectJournal(resolvedStoreDir),
@@ -805,6 +807,9 @@ export async function collectDoctorDiagnostics(
     readLastLifecycleRecord(resolvedStoreDir).catch(() => 'unreadable' as const),
     readLastEnvironmentRecord(resolvedStoreDir).catch(() => 'unreadable' as const),
     inspectServiceLogs(serviceLogDir(resolvedStoreDir)),
+    config.agentHome === undefined
+      ? undefined
+      : scanAgentHomeLeaseMarkers(config.agentHome.hostStorageRoot, stableAgentHomeOwnerId(resolvedStoreDir, config.productId)).catch(() => 'unavailable' as const),
   ]);
 
   let control: DiagnosticsSnapshot['control'];
@@ -924,6 +929,14 @@ export async function collectDoctorDiagnostics(
       files: serviceLogs.files.map(({ kind, sizeBytes }) => ({ kind, sizeBytes })),
       truncated: serviceLogs.truncated,
     },
+    agentHomeLeases: leaseScan === undefined || leaseScan === 'unavailable' ? { status: leaseScan === undefined ? 'unconfigured' : 'unavailable' } : {
+      status: 'measured',
+      own: leaseScan.markers.filter((marker) => marker.own).length,
+      ownReclaimable: leaseScan.markers.filter((marker) => marker.own && (marker.state === 'reclaimable' || marker.state === 'legacy-marker')).length,
+      foreignOwner: leaseScan.markers.filter((marker) => !marker.own && marker.state !== 'corrupt').length,
+      corrupt: leaseScan.markers.filter((marker) => marker.state === 'corrupt').length,
+      truncated: leaseScan.truncated,
+    },
   };
   return {
     snapshot: { ...withoutChecks, checks: checksFor(withoutChecks, deviceInspection.reason, storeDirMode, {
@@ -933,6 +946,7 @@ export async function collectDoctorDiagnostics(
     runtimeEnvironment: liveRuntimeEnvironment === undefined
       ? { status: 'unknown', reason: runtimeEnvironmentUnknown }
       : { status: 'known', runtimes: liveRuntimeEnvironment.runtimes },
+    ...(leaseScan === undefined || leaseScan === 'unavailable' ? {} : { agentHomeLeases: leaseScan }),
   };
 }
 

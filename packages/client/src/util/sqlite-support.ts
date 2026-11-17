@@ -19,7 +19,7 @@
  *   see `JournalUnavailableError` in `journal.ts`.
  */
 import { chmodSync, existsSync } from 'node:fs';
-import { sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
+import { sqliteFileUri, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 import type { DatabaseSync } from 'node:sqlite';
 
 /** Every post-construction boundary crossed before a journal handle is returned to its owner. */
@@ -124,7 +124,8 @@ const SECURE_FILE_MODE = 0o600;
 
 /** Per-connection settings: every connection to the journal applies both. */
 const FOREIGN_KEYS_ON = 'PRAGMA foreign_keys = ON;';
-const SYNCHRONOUS_FULL = 'PRAGMA synchronous = FULL;';
+// #2336: on darwin fsync() stops at the drive's volatile cache; F_FULLFSYNC flushes it.
+const SYNCHRONOUS_FULL = process.platform === 'darwin' ? 'PRAGMA synchronous = FULL; PRAGMA fullfsync = ON;' : 'PRAGMA synchronous = FULL;';
 
 /**
  * Open (or create) the journal database at `path` with the durability
@@ -222,6 +223,21 @@ export function openJournalConnection(path: string, busyTimeoutMs: number): Data
     }
     throw err;
   }
+}
+
+/**
+ * Open a private copy of a SQLite store read-only (#2371). A copy with no WAL
+ * or rollback journal beside it holds every committed transaction in its main
+ * file, so it is opened immutable: a read-only connection to a WAL database
+ * whose `-wal` is absent cannot create it, and Bun 1.4.4 then refuses the open.
+ * A copy with one is opened read-only without `immutable`, which would skip
+ * it, so SQLite replays it. Only for a private copy: on a file another process
+ * may write, `immutable` reads pages that change under it.
+ */
+export function openSqliteCopyReadOnly(path: string): DatabaseSync {
+  const { DatabaseSync } = loadSqliteModule();
+  const settled = !existsSync(`${path}-wal`) && !existsSync(`${path}-journal`);
+  return new DatabaseSync(settled ? `${sqliteFileUri(path)}?mode=ro&immutable=1` : path, { readOnly: true });
 }
 
 /**
