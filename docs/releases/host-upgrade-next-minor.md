@@ -964,6 +964,15 @@ Sources: [#2288]. Manifest entries: `mcp-frame-ceiling-single-authority`.
 buffer and the HTTP server's `maxOutboundFrameBytes` default use, so the three
 can no longer drift apart. No Host change.
 
+### Retention sweeps count busy Agent homes (#2349)
+
+Sources: [#2349]. Manifest entries: `retention-sweep-busy-homes`, `retention-sweep-audit-lines-without-busy-homes-skipped`.
+
+`SweepReport.busyHomes` counts the distinct Agent homes a retention pass skipped
+because they were not idle. `byok-agent status` and `byok-agent tasks` skip
+`retention-sweep` lines an older daemon wrote to `audit.jsonl`, because they lack
+`busyHomes`; the file stays on disk and every other line still renders.
+
 ### Other manifest entries
 
 These entries linked to separate docs/issues; include them in the Host review too.
@@ -1081,4 +1090,5 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2313]: https://github.com/Ancienttwo/byok-sdk/pull/2313
 [#2316]: https://github.com/Ancienttwo/byok-sdk/pull/2316
 [#2318]: https://github.com/Ancienttwo/byok-sdk/issues/2318
+[#2349]: https://github.com/Ancienttwo/byok-sdk/issues/2349
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384

@@ -44,6 +44,18 @@ describe('daemon/audit-log: createAuditAppender / readAuditRecords', () => {
     expect(await readAuditRecords(storeDir)).toEqual([record]);
   });
 
+  it('skips an older build\'s retention-sweep line without busyHomes and keeps the lines around it (#2349)', async () => {
+    const storeDir = await tmpDir('byok-audit-retention-sweep-');
+    const ts = '2026-10-14T00:00:00.000Z', sweep = { trigger: 'periodic' as const, deleted: 1, bytesReclaimed: 5, failures: 0, truncated: false, durationMs: 3 };
+    const old = JSON.stringify({ kind: 'retention-sweep', ts, at: ts, ...sweep });
+    const current: DaemonRecord = { kind: 'retention-sweep', ts: '2026-10-14T00:00:01.000Z', at: '2026-10-14T00:00:01.000Z', ...sweep, busyHomes: 2 };
+    const failure: DaemonRecord = { kind: 'retention-failure', ts: '2026-10-14T00:00:02.000Z', trigger: 'periodic', classId: 'agent-result', code: 'sweep_failed', count: 1 };
+    await fs.writeFile(auditLogPath(storeDir), `${old}\n${formatDaemonRecordLine(current)}\n${formatDaemonRecordLine(failure)}\n`, { mode: 0o600 });
+    const records = await readAuditRecords(storeDir);
+    expect(records).toEqual([current, failure]);
+    expect(records[0]).toMatchObject({ busyHomes: 2 });
+  });
+
   it('captures queued lines before nested records mutate, and returns the exact stdout bytes', async () => {
     const storeDir = await tmpDir('byok-audit-capture-');
     const appender = createAuditAppender(storeDir);

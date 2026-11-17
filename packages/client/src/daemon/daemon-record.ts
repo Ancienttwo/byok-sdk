@@ -261,7 +261,7 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
     }
     case 'retention-sweep':
       return { kind: event.kind, ts, trigger: event.trigger, at: event.at, deleted: event.deleted,
-        bytesReclaimed: event.bytesReclaimed, failures: event.failures, truncated: event.truncated, durationMs: event.durationMs };
+        bytesReclaimed: event.bytesReclaimed, failures: event.failures, truncated: event.truncated, busyHomes: event.busyHomes, durationMs: event.durationMs };
     case 'retention-failure':
       return { kind: event.kind, ts, trigger: event.trigger, classId: event.classId, count: event.count, code: event.code,
         ...(event.taskId === undefined ? {} : { taskId: event.taskId }), ...(event.path === undefined ? {} : { path: event.path }) };

@@ -201,7 +201,7 @@ it('home maintenance shares the Attempt base lease, preserves tombstones and rel
  const home=new AgentHomeManager({hostStorageRoot:testScratchRoot()}),binding=await home.prepare({agentId:'agent',profileRevision:'1'}),directory=binding.resolution.canonicalHome;
  const temp=path.join(directory,'.byok-memory-12345678-1234-1234-1234-123456789012.tmp'),tombstone=path.join(directory,'.byok-memory-delete-12345678-1234-1234-1234-123456789012.tmp');
  await fs.writeFile(temp,'pending');await fs.writeFile(tombstone,'evidence');await old(temp);await old(tombstone);const f=await fixture({home});
- await f.sweeper.runPass('periodic');expect(await exists(temp)).toBe(true);await binding.lease.release();await f.sweeper.runPass('periodic');expect(await exists(temp)).toBe(false);expect(await exists(tombstone)).toBe(true);
+ expect((await f.sweeper.runPass('periodic')).busyHomes).toBe(1);expect(await exists(temp)).toBe(true);await binding.lease.release();expect((await f.sweeper.runPass('periodic')).busyHomes).toBe(0);expect(await exists(temp)).toBe(false);expect(await exists(tombstone)).toBe(true);
  await fs.writeFile(temp,'pending');await old(temp);const marker=path.join(directory,'.byok','agent-home.lease');await fs.writeFile(marker,'invalid');
  expect((await f.sweeper.runPass('periodic')).failures).toBeGreaterThan(0);expect(await exists(temp)).toBe(true);await fs.rm(marker);expect(await home.withIdleHomeLease('agent',async()=>{})).toBe(true);await f.sweeper.runPass('periodic');await f.sweeper.runPass('periodic');expect(await exists(temp)).toBe(false);
 });
@@ -401,7 +401,7 @@ it('accounts partial runtime bytes and resumes after registry restart without co
  await s.release();f.advance(DAY);
  const marker=path.join(path.dirname(s.runtimeDir),'released'),released=await fs.readFile(marker,'utf8');
  let deleted=0,bytes=0,steps=0;
- const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1-deleted,removed:n=>{deleted++;bytes+=n;},truncate:()=>{},report:()=>{}};
+ const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1-deleted,removed:n=>{deleted++;bytes+=n;},truncate:()=>{},report:()=>{},busy:()=>{}};
  await f.registry.sweep('exec-runtime',budget);
  expect(deleted).toBe(0);expect(runtimeReclaimedBytes.get(budget)).toBeGreaterThan(0);expect(runtimeReclaimedBytes.get(budget)).toBeLessThan(36);
  expect(await fs.readFile(marker,'utf8')).toBe(released);
@@ -415,7 +415,7 @@ it('rechecks release eligibility before resuming a partial runtime cleanup',asyn
  const f=await fixture(),s=await f.scratch.create();
  for(let i=0;i<12;i++)await fs.writeFile(path.join(s.runtimeDir,`file-${i}`),'abc');
  await s.release();f.advance(DAY);
- let steps=0;const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1,removed:()=>{},truncate:()=>{},report:()=>{}};
+ let steps=0;const budget: SweepBudget={now:f.clock(),trigger:'periodic',available:()=>++steps<=5,remaining:()=>1,removed:()=>{},truncate:()=>{},report:()=>{},busy:()=>{}};
  await f.registry.sweep('exec-runtime',budget);
  const remaining=await fs.readdir(s.runtimeDir);
  await fs.writeFile(path.join(path.dirname(s.runtimeDir),'released'),f.clock().toISOString());
@@ -436,7 +436,7 @@ it('retains release eligibility when final token removal fails and accounts its 
  for(let pass=0;pass<3;pass++){const report=await f.sweeper.runPass('periodic');deleted+=report.deleted;bytes+=report.bytesReclaimed;}
  expect(deleted).toBe(1);expect(bytes).toBe(Buffer.byteLength(released));expect(await exists(target)).toBe(false);
 });
-const runtimeBudget=(f:{clock:()=>Date},tally:{deleted:number;bytes:number}):SweepBudget=>({now:f.clock(),trigger:'periodic',available:()=>true,remaining:()=>1-tally.deleted,removed:n=>{tally.deleted++;tally.bytes+=n;},truncate:()=>{},report:()=>{}});
+const runtimeBudget=(f:{clock:()=>Date},tally:{deleted:number;bytes:number}):SweepBudget=>({now:f.clock(),trigger:'periodic',available:()=>true,remaining:()=>1-tally.deleted,removed:n=>{tally.deleted++;tally.bytes+=n;},truncate:()=>{},report:()=>{},busy:()=>{}});
 it.skipIf(process.platform==='win32')('unlinks a symlink inside a released runtime without touching its target',async()=>{
  const f=await fixture(),s=await f.scratch.create(),outside=testScratchRoot(),keep=path.join(outside,'keep');
  await fs.writeFile(keep,'protected');const link=path.join(s.runtimeDir,'link');await fs.symlink(outside,link);const linkBytes=(await fs.lstat(link)).size;
