@@ -9,9 +9,11 @@ import { buildSync } from 'esbuild';
  * inlines everything except Node builtins. tsup and vitest both define
  * `__BYOK_JOURNAL_WORKER_SOURCE__` from this one function.
  *
- * A failure while the bundle loads (before its own open handshake can run) is
- * reported through that handshake, so the constructor fails at once instead
- * of waiting out its timeout.
+ * The bundle needs only Node builtins, and it gets them from
+ * `process.getBuiltinModule`, not from the `require` an eval worker may or may
+ * not have (a Node SEA restricts it). A failure while the bundle loads (before
+ * its own open handshake can run) is reported through that handshake, so the
+ * constructor fails at once instead of waiting out its timeout.
  */
 export function journalWorkerSource(): string {
   const result = buildSync({
@@ -28,6 +30,7 @@ export function journalWorkerSource(): string {
   const [output] = result.outputFiles;
   if (output === undefined) throw new Error('journal worker bundle produced no output');
   return [
+    '(function (require) {',
     'try {',
     output.text,
     '} catch (error) {',
@@ -36,6 +39,11 @@ export function journalWorkerSource(): string {
     '  Atomics.store(workerData.signal, 0, 1);',
     '  Atomics.notify(workerData.signal, 0);',
     '}',
+    '})((id) => {',
+    '  const builtin = process.getBuiltinModule(id);',
+    "  if (builtin === undefined) throw new Error('the journal worker requires only Node builtins; ' + id + ' is not one');",
+    '  return builtin;',
+    '});',
     '',
   ].join('\n');
 }
