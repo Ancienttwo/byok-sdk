@@ -24,7 +24,7 @@
  */
 import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
-import { runDeviceCommand, type DeviceCommandRunner } from '../util/system-command.js';
+import { runDeviceCommand, type DeviceCommandRunner } from './system-command.js';
 
 export interface ResolveMachineIdOptions {
   /** Domain separator for the digest — the same machine yields a different value per product. */

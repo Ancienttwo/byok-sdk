@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
+import { TEST_LEASE_WRITER_IDENTITY } from './fixtures/runtime-env';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -271,7 +272,7 @@ describe('Agent-home projection writeHomeFile under a process kill', () => {
    */
   async function killAt(root: string, checkpoint: string): Promise<number> {
     const input = path.join(root, 'child-input.json');
-    await fs.writeFile(input, JSON.stringify({ clientEntry, root, ownerId: OWNER, files: FILES, checkpoint, payload: desired('2') }));
+    await fs.writeFile(input, JSON.stringify({ clientEntry, root, ownerId: OWNER, files: FILES, checkpoint, payload: desired('2'), leaseWriter: TEST_LEASE_WRITER_IDENTITY }));
     const child = spawn(process.execPath, [childScript, input], { stdio: ['ignore', 'pipe', 'pipe'] });
     children.push(child);
     let output = '';

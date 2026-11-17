@@ -7,7 +7,7 @@ import { AgentHomeLeaseManager, AgentHomeManager, stableAgentHomeOwnerId } from 
 import { AgentSessionHandoffStore } from '../../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../../daemon/approvals';
 import type { BlobResolver } from '../../daemon/blob-client';
-import { testRuntimeEnv } from './runtime-env';
+import { testRuntimeEnv, installTestLeaseWriterProbe } from './runtime-env';
 import { TaskRunner } from '../../daemon/task-runner';
 import {
   InputPreparationStore,
@@ -32,6 +32,9 @@ import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
 import { acceptClaimSettlement, testIngressBudget } from './activity-ingress';
 import { advertiseEveryDeviceFlag } from '../support/advertised-capabilities';
+
+// The test identity for Agent-home lease writers, the same as the parent's.
+await installTestLeaseWriterProbe();
 
 /**
  * One daemon LIFETIME of the prepared-offer lane, as its own operating-system

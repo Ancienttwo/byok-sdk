@@ -12,7 +12,7 @@
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import type { DeviceCommandResult, DeviceCommandRunner } from '../util/system-command';
-import { resolveMachineId } from '../daemon/machine-id';
+import { resolveMachineId } from '../util/machine-id';
 
 const PRODUCT_ID = 'test-product';
 

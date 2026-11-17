@@ -30,7 +30,7 @@ import { assertCodexSandboxSetting, type CodexSandboxSetting } from '../adapters
 import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
 import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals.js';
 import { AuthManager } from './auth-manager.js';
-import { resolveMachineId } from './machine-id.js';
+import { resolveMachineId } from '../util/machine-id.js';
 import { DaemonHaltError, type DaemonLifecycle, type DaemonNotOpenError } from './daemon-lifecycle.js';
 import type { EmbeddedPairingError } from './daemon-errors.js';
 import {

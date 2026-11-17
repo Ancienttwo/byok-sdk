@@ -115,7 +115,7 @@ describe('the embedded agent-memory entry module graph', () => {
     // The stdio server's frame ceiling is the import-free leaf mcp/frame-limit.ts, shared with the MCP client.
     // #2348: agent-home.ts records and judges lease writers through
     // agent-home-writer.ts, which reads the machine identifier through
-    // daemon/machine-id.ts and runs its probes through the leaf
+    // util/machine-id.ts and runs its probes through the leaf
     // util/system-command.ts, moved out of the device credential store so no
     // credential surface comes along. Inert here like the rest of this tail.
     expect(GRAPH.modules).toEqual([
@@ -132,7 +132,6 @@ describe('the embedded agent-memory entry module graph', () => {
       'daemon/agent-memory-home-check.ts',
       'daemon/agent-memory-start-record.ts',
       'daemon/agent-memory.ts',
-      'daemon/machine-id.ts',
       'daemon/memory-guidance.ts',
       'daemon/outbound-error.ts',
       'mcp-server/dispatch.ts',
@@ -147,6 +146,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'util/atomic-write.ts',
       'util/existing-ancestor.ts',
       'util/fold-name-aliases.ts',
+      'util/machine-id.ts',
       'util/path-mutation-gate.ts',
       'util/private-unix-socket.ts',
       'util/system-command.ts',

@@ -8,6 +8,21 @@ import { promises as fs, readFileSync } from 'node:fs';
 import path from 'node:path';
 
 const input = JSON.parse(readFileSync(process.argv[2], 'utf8'));
+const LEASE_WRITER = input.leaseWriter;
+// The parent's test identity for Agent-home lease writers (fixtures/runtime-env.ts),
+// so no process of the test reads this machine's identifier. This child is ended
+// before another process judges its markers, so its own start time is a constant.
+globalThis[Symbol.for('@byok-sdk/client:agent-home-lease-writer')] = { probe: {
+  platform: process.platform,
+  pid: process.pid,
+  host: async () => LEASE_WRITER.host,
+  boot: async () => LEASE_WRITER.boot,
+  pidNamespace: async () => LEASE_WRITER.pidNamespace,
+  processStart: async () => '1',
+  signal: (pid) => {
+    try { process.kill(pid, 0); return 'exists'; } catch (error) { return error.code === 'ESRCH' ? 'gone' : 'denied'; }
+  },
+} };
 const { AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer } = await import(input.clientEntry);
 const [kind, file] = (input.checkpoint ?? ':').split(':');
 

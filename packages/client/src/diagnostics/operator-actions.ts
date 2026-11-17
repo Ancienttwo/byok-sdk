@@ -2,7 +2,10 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { isTenantId } from '@byok-sdk/core';
 import { AgentRefSchema, type AgentRef } from '@byok-sdk/protocol';
-import { AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeBusyError, AgentHomeLeaseManager, AgentHomeManager, stableAgentHomeOwnerId } from '../agent-home.js';
+import {
+  AGENT_HOME_INTERNAL_DIRECTORY, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeLeaseManager, AgentHomeManager,
+  agentHomeLeaseGuidance, stableAgentHomeOwnerId, type AgentHomeLeaseBlock,
+} from '../agent-home.js';
 import { connectControlClient } from '../daemon/control-client.js';
 import { acquireDaemonOwner, DaemonOwnerActiveError } from '../util/daemon-owner.js';
 import { OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger.js';
@@ -21,6 +24,7 @@ const MESSAGES = {
   'daemon-running': 'Stop the host daemon before local maintenance.',
   'store-busy': 'Another operation owns the device store.',
   'agent-busy': 'Another operation owns the Agent home.',
+  'agent-lease-held': 'An Agent home lease marker blocks this action.',
   'owned-process-residue': 'Runtime processes a crashed daemon left could not be ended. Start the daemon to see the record path, verify the processes are gone, then delete that record from the owned-processes directory of the device store.',
   'target-mismatch': 'The stored device or Agent records do not match the authorized target.',
   'source-unavailable': 'The local source cannot be accessed safely; preserve it for inspection.',
@@ -29,10 +33,14 @@ const MESSAGES = {
 } as const;
 export type DeviceOperatorErrorCode = keyof typeof MESSAGES;
 
-/** Closed codes only: never attach filesystem/OS error text, paths or nested causes. */
+/**
+ * Closed codes only: never attach filesystem/OS error text, paths or nested
+ * causes. `agent-lease-held` also carries why the marker blocks
+ * (`blockedBy`) and what clears it, in the message.
+ */
 export class DeviceOperatorError extends Error {
-  constructor(readonly code: DeviceOperatorErrorCode) {
-    super(MESSAGES[code]);
+  constructor(readonly code: DeviceOperatorErrorCode, readonly blockedBy?: AgentHomeLeaseBlock) {
+    super(blockedBy === undefined ? MESSAGES[code] : `${MESSAGES[code]} ${agentHomeLeaseGuidance(blockedBy)}`);
     this.name = 'DeviceOperatorError';
   }
 }
@@ -66,6 +74,7 @@ function requireConfirmation(input: ConfirmDeviceMaintenanceInput): void {
 function closedError(error: unknown): DeviceOperatorError {
   if (error instanceof DeviceOperatorError) return error;
   if (error instanceof DaemonOwnerActiveError) return new DeviceOperatorError('store-busy');
+  if (error instanceof AgentHomeLeaseHeldError) return new DeviceOperatorError('agent-lease-held', error.blockedBy);
   if (error instanceof AgentHomeBusyError) return new DeviceOperatorError('agent-busy');
   if (error instanceof OwnedProcessResidueError) return new DeviceOperatorError('owned-process-residue');
   return new DeviceOperatorError('operation-failed');

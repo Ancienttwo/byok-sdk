@@ -4,7 +4,8 @@
  * at once (a daemon and a memory export beside it, or two products sharing a
  * root), so a file's owner alone never proves its writer gone.
  *
- * A writer is its pid and that process's start time, on one host and boot:
+ * A writer is its pid and, off Windows, that process's start time, on one
+ * host and boot:
  * - `host`: a domain-separated digest of the OS machine identifier
  *   ({@link resolveMachineId}); the raw identifier is never stored;
  * - `pidNamespace`: Linux only, the inode of `/proc/self/ns/pid`. A pid names
@@ -14,16 +15,21 @@
  *   `kern.boottime`, which moves when the clock is stepped), win32
  *   `LastBootUpTime` rounded to the second.
  *
+ * Windows records no start time: reading one starts PowerShell, which took
+ * 213-310 ms per read on a Windows 11 machine. There a live pid counts as its
+ * writer, so a reused pid keeps a marker until the next boot, never the
+ * reverse.
+ *
  * Every read that fails, on either side, decides toward "may be running".
  */
 import { promises as fs } from 'node:fs';
 import { runDeviceCommand } from './util/system-command.js';
-import { resolveMachineId } from './daemon/machine-id.js';
+import { resolveMachineId } from './util/machine-id.js';
 
 export interface AgentHomeLeaseWriter {
   readonly pid: number;
-  /** The OS start time of `pid`, in that platform's own form; only compared for equality. */
-  readonly start: string;
+  /** The OS start time of `pid`, in that platform's own form; only compared for equality. Absent on Windows. */
+  readonly start?: string;
   readonly host: string;
   readonly boot: string;
   readonly pidNamespace?: string;
@@ -50,7 +56,7 @@ export interface AgentHomeLeaseWriterProbe {
   host(): Promise<string | undefined>;
   boot(): Promise<string | undefined>;
   pidNamespace(): Promise<string | undefined>;
-  /** `null` when no process has `pid`. */
+  /** `null` when no process has `pid`. Not called on Windows. */
   processStart(pid: number): Promise<string | null | undefined>;
   /** `kill(pid, 0)`: only ESRCH is `gone`. */
   signal(pid: number): 'exists' | 'gone' | 'denied';
@@ -58,6 +64,38 @@ export interface AgentHomeLeaseWriterProbe {
 
 const COMMAND_TIMEOUT_MS = 2_000;
 const IDENTITY_MAX_LENGTH = 128;
+
+/**
+ * The only forms an identity part may take; anything else is a failed read
+ * (fail closed this time, kept for no later call) or a corrupt record.
+ */
+const FORMAT = {
+  host: /^[0-9a-f]{64}$/u,
+  bootUuid: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u,
+  bootSeconds: /^\d{1,12}$/u,
+  pidNamespace: /^pid:\[\d{1,20}\]$/u,
+  start: /^\d{1,20}$/u,
+} as const;
+
+function formatted(value: string | undefined, format: RegExp): string | undefined {
+  return value !== undefined && format.test(value) ? value : undefined;
+}
+
+/** Linux and darwin name a boot by UUID, Windows by its start in epoch seconds. */
+function bootFormat(platform: NodeJS.Platform): RegExp {
+  return platform === 'win32' ? FORMAT.bootSeconds : FORMAT.bootUuid;
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** `ps -o lstart=` under `LC_ALL=C TZ=UTC0` (`Tue Nov 17 05:53:37 2026`) as epoch seconds; any other form is unreadable. */
+export function lstartEpochSeconds(lstart: string): string | undefined {
+  const match = /^[A-Z][a-z]{2} ([A-Z][a-z]{2}) (\d{1,2}) (\d{2}):(\d{2}):(\d{2}) (\d{4})$/u.exec(lstart);
+  const month = match === null ? -1 : MONTHS.indexOf(match[1]!);
+  if (match === null || month < 0) return undefined;
+  const [, , day, hour, minute, second, year] = match.map(Number);
+  return String(Date.UTC(year!, month, day, hour, minute, second) / 1000);
+}
 
 function identity(value: string | undefined): string | undefined {
   const trimmed = value?.trim().replace(/\s+/gu, ' ');
@@ -85,20 +123,25 @@ async function readText(file: string): Promise<string | undefined> {
   }
 }
 
-const systemProbe: AgentHomeLeaseWriterProbe = {
+/**
+ * The reads of this machine. Linux reads `/proc/<pid>/stat` field 22
+ * (`starttime`, clock ticks since boot); darwin reads `ps` as above. Writing a
+ * marker (this process's start) and judging one (its writer's) use the same
+ * `processStart`. Exported for test fixtures only; not from the package entry.
+ */
+export const systemAgentHomeLeaseWriterProbe: AgentHomeLeaseWriterProbe = {
   platform: process.platform,
   pid: process.pid,
   async host() {
-    return resolveMachineId({ productId: 'byok-agent-home-lease-writer' });
+    return resolveMachineId({ productId: 'byok-agent-home-lease-writer', timeoutMs: COMMAND_TIMEOUT_MS });
   },
   async boot() {
     if (this.platform === 'linux') return identity(await readText('/proc/sys/kernel/random/boot_id'));
     if (this.platform === 'win32') {
-      const seconds = identity(await powershell('[math]::Round([DateTimeOffset]::new((Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime).ToUnixTimeMilliseconds() / 1000)'));
-      return seconds !== undefined && /^\d+$/u.test(seconds) ? seconds : undefined;
+      return identity(await powershell('[math]::Round([DateTimeOffset]::new((Get-CimInstance -ClassName Win32_OperatingSystem).LastBootUpTime).ToUnixTimeMilliseconds() / 1000)'));
     }
     const result = await command('/usr/sbin/sysctl', ['-n', 'kern.bootsessionuuid']);
-    return result?.exitCode === 0 ? identity(result.stdout) : undefined;
+    return result?.exitCode === 0 ? identity(result.stdout)?.toLowerCase() : undefined;
   },
   async pidNamespace() {
     try {
@@ -119,15 +162,13 @@ const systemProbe: AgentHomeLeaseWriterProbe = {
       const start = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
       return start !== undefined && /^\d+$/u.test(start) ? start : undefined;
     }
-    if (this.platform === 'win32') {
-      const out = identity(await powershell(`$p = Get-Process -Id ${pid} -ErrorAction SilentlyContinue; if ($p) { $p.StartTime.ToUniversalTime().Ticks } else { 'none' }`));
-      if (out === 'none') return null;
-      return out !== undefined && /^\d+$/u.test(out) ? out : undefined;
-    }
-    const result = await command('/bin/ps', ['-o', 'lstart=', '-p', String(pid)]);
+    // `lstart` follows the locale and time zone, so `ps` runs with fixed ones
+    // and nothing else: a marker written in one environment and judged in
+    // another must read the same start.
+    const result = await command('/usr/bin/env', ['-i', 'LC_ALL=C', 'TZ=UTC0', '/bin/ps', '-o', 'lstart=', '-p', String(pid)]);
     if (result === undefined) return undefined;
     const start = identity(result.stdout);
-    if (result.exitCode === 0) return start;
+    if (result.exitCode === 0) return start === undefined ? undefined : lstartEpochSeconds(start);
     return result.exitCode === 1 && start === undefined ? null : undefined;
   },
   signal(pid) {
@@ -154,8 +195,8 @@ interface WriterState {
 }
 
 /**
- * Process-wide, so every loaded copy of the SDK reads this process's identity
- * once and judges with the same probe. Created on first use.
+ * Process-wide, so every loaded copy of the SDK shares this process's identity
+ * and judges with the same probe. Created on first use.
  */
 function writerState(): WriterState {
   const processWide = globalThis as Record<symbol, WriterState | undefined>;
@@ -163,27 +204,50 @@ function writerState(): WriterState {
 }
 
 function probe(): AgentHomeLeaseWriterProbe {
-  return writerState().probe ?? systemProbe;
+  return writerState().probe ?? systemAgentHomeLeaseWriterProbe;
 }
 
 async function readLocalIdentity(reads: AgentHomeLeaseWriterProbe): Promise<LocalIdentity> {
-  const [host, boot, pidNamespace, start] = await Promise.all([
+  const [rawHost, rawBoot, rawPidNamespace, rawStart] = await Promise.all([
     reads.host(),
     reads.boot(),
     reads.platform === 'linux' ? reads.pidNamespace() : Promise.resolve(undefined),
-    reads.processStart(reads.pid),
+    reads.platform === 'win32' ? Promise.resolve(undefined) : reads.processStart(reads.pid),
   ]);
-  const complete = host !== undefined && boot !== undefined && typeof start === 'string' &&
+  const host = formatted(rawHost, FORMAT.host);
+  const boot = formatted(rawBoot, bootFormat(reads.platform));
+  const pidNamespace = formatted(rawPidNamespace, FORMAT.pidNamespace);
+  const start = typeof rawStart === 'string' ? formatted(rawStart, FORMAT.start) : undefined;
+  const complete = host !== undefined && boot !== undefined &&
+    (reads.platform === 'win32' || typeof start === 'string') &&
     (reads.platform !== 'linux' || pidNamespace !== undefined);
   return {
     host, boot, pidNamespace,
-    writer: complete ? { pid: reads.pid, start, host, boot, ...(pidNamespace === undefined ? {} : { pidNamespace }) } : null,
+    writer: complete ? {
+      pid: reads.pid, host, boot,
+      ...(typeof start === 'string' ? { start } : {}),
+      ...(pidNamespace === undefined ? {} : { pidNamespace }),
+    } : null,
   };
 }
 
+/**
+ * This process's identity. A complete read is kept for the life of the
+ * process: none of its parts changes while the process runs. An incomplete
+ * one is not kept, so a transient failure (an `ioreg` past its timeout) costs
+ * only the calls that met it: each of them fails closed, and the next call
+ * reads again, each read bounded by {@link COMMAND_TIMEOUT_MS}. Concurrent
+ * callers share one read.
+ */
 function localIdentity(): Promise<LocalIdentity> {
   const state = writerState();
-  return state.local ??= readLocalIdentity(probe());
+  if (state.local !== undefined) return state.local;
+  const reading = readLocalIdentity(probe()).then((local) => {
+    if (local.writer === null && state.local === reading) state.local = undefined;
+    return local;
+  });
+  state.local = reading;
+  return reading;
 }
 
 /** This process as the writer of a lease file, or `null` when its identity cannot be read. */
@@ -200,6 +264,8 @@ function blocked(blockedBy: AgentHomeLeaseWriterBlock): AgentHomeLeaseWriterVerd
  * that records no writer, `null` one whose writer could not identify itself.
  * Gone means: the same host and PID namespace, and either a later boot, or no
  * process with that pid, or a process with that pid and another start time.
+ * On Windows a writer is running while its pid exists. Elsewhere a writer
+ * must record its start time; one without it is `unverifiable`.
  */
 export async function judgeAgentHomeLeaseWriter(writer: AgentHomeLeaseWriter | null | undefined): Promise<AgentHomeLeaseWriterVerdict> {
   if (writer === undefined) return blocked('legacy-marker');
@@ -211,12 +277,14 @@ export async function judgeAgentHomeLeaseWriter(writer: AgentHomeLeaseWriter | n
     return blocked('other-pid-namespace');
   }
   if (local.boot === undefined) return blocked('unverifiable');
+  if (reads.platform !== 'win32' && writer.start === undefined) return blocked('unverifiable');
   if (writer.boot !== local.boot) return { gone: true };
   const signal = reads.signal(writer.pid);
   if (signal === 'gone') return { gone: true };
-  if (signal === 'denied') return blocked('writer-running');
-  const start = await reads.processStart(writer.pid);
-  if (start === null) return { gone: true };
+  if (signal === 'denied' || reads.platform === 'win32') return blocked('writer-running');
+  const read = await reads.processStart(writer.pid);
+  if (read === null) return { gone: true };
+  const start = formatted(read, FORMAT.start);
   if (start === undefined) return blocked('unverifiable');
   return start === writer.start ? blocked('writer-running') : { gone: true };
 }
@@ -225,10 +293,12 @@ export async function judgeAgentHomeLeaseWriter(writer: AgentHomeLeaseWriter | n
 export function parseAgentHomeLeaseWriter(value: unknown): AgentHomeLeaseWriter | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const { pid, start, host, boot, pidNamespace } = value as Record<string, unknown>;
-  const text = (field: unknown): field is string => typeof field === 'string' && identity(field) === field;
+  const matches = (field: unknown, ...formats: RegExp[]): field is string =>
+    typeof field === 'string' && formats.some((format) => format.test(field));
   if (typeof pid !== 'number' || !Number.isSafeInteger(pid) || pid <= 0) return undefined;
-  if (!text(start) || !text(host) || !text(boot) || (pidNamespace !== undefined && !text(pidNamespace))) return undefined;
-  return { pid, start, host, boot, ...(pidNamespace === undefined ? {} : { pidNamespace }) };
+  if (!matches(host, FORMAT.host) || !matches(boot, FORMAT.bootUuid, FORMAT.bootSeconds)) return undefined;
+  if ((start !== undefined && !matches(start, FORMAT.start)) || (pidNamespace !== undefined && !matches(pidNamespace, FORMAT.pidNamespace))) return undefined;
+  return { pid, host, boot, ...(start === undefined ? {} : { start }), ...(pidNamespace === undefined ? {} : { pidNamespace }) };
 }
 
 /** Internal test seam: judge with `reads` instead of the system; `undefined` restores it. Not exported from the package entry. */

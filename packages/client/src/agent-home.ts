@@ -94,17 +94,22 @@ export class AgentHomeLeaseHeldError extends AgentHomeBusyError {
   }
 }
 
+/** What an operator does about a lease marker that blocks an acquire. Names no path, so it may leave the device. */
+export function agentHomeLeaseGuidance(blockedBy: AgentHomeLeaseBlock): string {
+  const remove = 'confirm that no process uses this Agent home, then delete its lease marker';
+  switch (blockedBy) {
+    case 'legacy-marker': return `It was written by an SDK release that does not record its writer, so it is never reclaimed automatically; ${remove}.`;
+    case 'unverifiable': return `Its writer could not be verified (its identity, or this process's, could not be read); retry, and if this persists, ${remove}.`;
+    case 'other-host': return 'It was written on another machine or container that uses this store, or this machine\'s identity cannot be read; delete it only once that writer no longer uses this store.';
+    case 'other-pid-namespace': return 'It was written in another PID namespace (container) of this machine; delete it only once that container no longer uses this store.';
+    case 'writer-running': return 'Its writer process is still running; retry once it has released the Agent home.';
+    case 'owner-reclaim-required': return 'It was left by an ended run of this store; start this store\'s daemon once, which ends that run\'s processes and reclaims the marker, then retry.';
+  }
+}
+
 function leaseHeld(canonicalHome: string, markerPath: string, blockedBy: AgentHomeLeaseBlock, writer?: AgentHomeLeaseWriter | null): AgentHomeLeaseHeldError {
-  const remove = 'confirm that no process uses this Agent home, then delete the marker file';
-  const why: Record<AgentHomeLeaseBlock, string> = {
-    'legacy-marker': `was written by an SDK release that does not record its writer, so it is never reclaimed automatically; ${remove}`,
-    unverifiable: `has a writer that could not be verified (its identity, or this process's, could not be read); retry, and if this persists, ${remove}`,
-    'other-host': 'was written on another machine or container that uses this store, or this machine\'s identity cannot be read; delete it only once that writer no longer uses this store',
-    'other-pid-namespace': 'was written in another PID namespace (container) of this machine; delete it only once that container no longer uses this store',
-    'writer-running': `is held by process ${writer?.pid ?? 'unknown'}, which is still running`,
-    'owner-reclaim-required': 'was left by an ended run of this store; start this store\'s daemon once, which ends that run\'s processes and reclaims the marker, then retry',
-  };
-  return new AgentHomeLeaseHeldError(`Agent home ${canonicalHome} lease marker ${markerPath} ${why[blockedBy]}`, blockedBy, markerPath);
+  const by = blockedBy === 'writer-running' && writer ? ` of process ${writer.pid}` : '';
+  return new AgentHomeLeaseHeldError(`Agent home ${canonicalHome} is held by lease marker ${markerPath}${by}. ${agentHomeLeaseGuidance(blockedBy)}`, blockedBy, markerPath);
 }
 
 function withHomeReleaseFailures<T>(error: T, releaseFailures: readonly unknown[]): T | Error {

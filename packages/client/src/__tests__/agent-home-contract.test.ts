@@ -18,6 +18,7 @@ import {
   validateAgentRef,
 } from '../agent-home';
 import { acquirePathMutationGate, PathMutationGateBusyError } from '../util/path-mutation-gate';
+import { installTestLeaseWriterProbe } from './fixtures/runtime-env';
 import {
   currentAgentHomeLeaseWriter,
   judgeAgentHomeLeaseWriter,
@@ -327,33 +328,82 @@ describe('SDK-owned Agent home contract', () => {
   });
 
   describe('a lease writer is gone only when proved', () => {
-    const recorded: AgentHomeLeaseWriter = { pid: 7, start: 'start-7', host: 'host-a', boot: 'boot-a', pidNamespace: 'ns-a' };
-    const probeWith = (overrides: Partial<{ host: string; start: string; signal: 'exists' | 'gone' | 'denied' }>): AgentHomeLeaseWriterProbe => ({
-      platform: 'linux',
+    const HOST_A = 'a'.repeat(64);
+    const HOST_B = 'b'.repeat(64);
+    const BOOT_A = '0a0a0a0a-0000-4000-8000-00000000000a';
+    const BOOT_0 = '00000000-0000-4000-8000-000000000000';
+    const recorded: AgentHomeLeaseWriter = { pid: 7, start: '7000', host: HOST_A, boot: BOOT_A, pidNamespace: 'pid:[1]' };
+    const probeWith = (overrides: Partial<{ platform: NodeJS.Platform; host: string; boot: string; start: string; signal: 'exists' | 'gone' | 'denied' }>): AgentHomeLeaseWriterProbe => ({
+      platform: overrides.platform ?? 'linux',
       pid: 1,
-      host: async () => ('host' in overrides ? overrides.host : 'host-a'),
-      boot: async () => 'boot-a',
-      pidNamespace: async () => 'ns-a',
-      processStart: async (pid) => (pid === 1 ? 'start-1' : ('start' in overrides ? overrides.start : 'start-7')),
+      host: async () => ('host' in overrides ? overrides.host : HOST_A),
+      boot: async () => overrides.boot ?? BOOT_A,
+      pidNamespace: async () => 'pid:[1]',
+      processStart: async (pid) => (pid === 1 ? '1000' : ('start' in overrides ? overrides.start : '7000')),
       signal: () => overrides.signal ?? 'exists',
     });
     it.each([
-      { case: 'written in an earlier boot', writer: { ...recorded, boot: 'boot-0' }, probe: {}, verdict: { gone: true } },
+      { case: 'written in an earlier boot', writer: { ...recorded, boot: BOOT_0 }, probe: {}, verdict: { gone: true } },
       { case: 'no process has its pid (ESRCH)', writer: recorded, probe: { signal: 'gone' as const }, verdict: { gone: true } },
-      { case: 'its pid now names a later process', writer: recorded, probe: { start: 'start-8' }, verdict: { gone: true } },
+      { case: 'its pid now names a later process', writer: recorded, probe: { start: '8000' }, verdict: { gone: true } },
       { case: 'it still runs', writer: recorded, probe: {}, verdict: { gone: false, blockedBy: 'writer-running' } },
       { case: 'it cannot be signalled (EPERM)', writer: recorded, probe: { signal: 'denied' as const }, verdict: { gone: false, blockedBy: 'writer-running' } },
+      { case: 'on Windows, its pid exists (no start time is read)', writer: { ...recorded, boot: '1700000000', start: undefined, pidNamespace: undefined }, probe: { platform: 'win32' as const, boot: '1700000000', start: '8000' }, verdict: { gone: false, blockedBy: 'writer-running' } },
+      { case: 'off Windows, it records no start time', writer: { ...recorded, start: undefined }, probe: { signal: 'gone' as const }, verdict: { gone: false, blockedBy: 'unverifiable' } },
       { case: 'its start time cannot be read', writer: recorded, probe: { start: undefined }, verdict: { gone: false, blockedBy: 'unverifiable' } },
-      { case: 'written on another host', writer: { ...recorded, host: 'host-b' }, probe: {}, verdict: { gone: false, blockedBy: 'other-host' } },
+      { case: 'written on another host', writer: { ...recorded, host: HOST_B }, probe: {}, verdict: { gone: false, blockedBy: 'other-host' } },
       { case: 'this host\'s identity cannot be read', writer: recorded, probe: { host: undefined }, verdict: { gone: false, blockedBy: 'other-host' } },
-      { case: 'written in another PID namespace', writer: { ...recorded, pidNamespace: 'ns-b' }, probe: {}, verdict: { gone: false, blockedBy: 'other-pid-namespace' } },
+      { case: 'written in another PID namespace', writer: { ...recorded, pidNamespace: 'pid:[2]' }, probe: {}, verdict: { gone: false, blockedBy: 'other-pid-namespace' } },
       { case: 'it records no writer', writer: undefined, probe: {}, verdict: { gone: false, blockedBy: 'legacy-marker' } },
+      { case: 'this boot id is malformed', writer: recorded, probe: { boot: 'boot-a' }, verdict: { gone: false, blockedBy: 'unverifiable' } },
     ])('$case', async ({ writer, probe, verdict }) => {
       setAgentHomeLeaseWriterProbeForTests(probeWith(probe));
       try {
         expect(await judgeAgentHomeLeaseWriter(writer)).toEqual(verdict);
       } finally {
-        setAgentHomeLeaseWriterProbeForTests(undefined);
+        await installTestLeaseWriterProbe();
+      }
+    });
+
+    it('keeps no failed read of this process\'s identity: the next acquire records its writer', async () => {
+      const root = await makeRoot();
+      const manager = new AgentHomeManager({ hostStorageRoot: root });
+      let hostReads = 0;
+      // A transient failure, as an ioreg past its timeout, on the first read only.
+      setAgentHomeLeaseWriterProbeForTests({ ...probeWith({}), host: async () => (++hostReads === 1 ? undefined : HOST_A) });
+      try {
+        const writerOf = async (binding: { lease: { canonicalHome: string; release(): Promise<void> } }) => {
+          const marker = JSON.parse(await fs.readFile(path.join(binding.lease.canonicalHome, '.byok', 'agent-home.lease'), 'utf8')) as { writer: unknown };
+          await binding.lease.release();
+          return marker.writer;
+        };
+        expect(await writerOf(await manager.prepare(ref('one')))).toBeNull();
+        expect(await writerOf(await manager.prepare(ref('one')))).toEqual({ pid: 1, start: '1000', host: HOST_A, boot: BOOT_A, pidNamespace: 'pid:[1]' });
+        expect(hostReads).toBe(2);
+      } finally {
+        await installTestLeaseWriterProbe();
+      }
+    });
+
+    it.skipIf(process.platform === 'win32')('records and judges the same start time whatever the locale and time zone', async () => {
+      const saved = { TZ: process.env.TZ, LANG: process.env.LANG, LC_ALL: process.env.LC_ALL };
+      const environment = async (values: Record<string, string>) => {
+        Object.assign(process.env, values);
+        await installTestLeaseWriterProbe(); // a fresh read of this process's identity
+      };
+      try {
+        await environment({ TZ: 'Asia/Tokyo', LANG: 'de_DE.UTF-8', LC_ALL: 'de_DE.UTF-8' });
+        const written = (await currentAgentHomeLeaseWriter())!;
+        expect(written.start).toMatch(/^\d+$/u);
+        await environment({ TZ: 'America/Los_Angeles', LANG: 'fr_FR.UTF-8', LC_ALL: 'fr_FR.UTF-8' });
+        expect((await currentAgentHomeLeaseWriter())!.start).toBe(written.start);
+        expect(await judgeAgentHomeLeaseWriter(written)).toEqual({ gone: false, blockedBy: 'writer-running' });
+      } finally {
+        for (const [name, value] of Object.entries(saved)) {
+          if (value === undefined) delete process.env[name];
+          else process.env[name] = value;
+        }
+        await installTestLeaseWriterProbe();
       }
     });
   });
