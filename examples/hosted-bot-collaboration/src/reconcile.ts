@@ -1,6 +1,6 @@
 import type { Pool, PoolClient } from 'pg';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
-import { canonical, FrozenOfferMismatchError, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
+import { canonical, FrozenOfferMismatchError, occurrenceOfIntentKey, sameFrozenOffer, type Conclusion, type FrozenExecutionInput, type FrozenSubmitPort,
   type Json } from '@byok-sdk/server/execution-core';
 import { botOutcomePorts, type CollaborationState, IntentOutcomeError, type OutboxIntent, outcomeFailure, revisionOf, routeTerminal,
   runHostIntentHandler } from '@byok-sdk/bot-collaboration/host-kit';
@@ -152,9 +152,9 @@ export class HostedReconciler {
       if (stored === 'concluded') return false;
       cancelReason = stored;
     }
-    // Only a routine occurrence can be a dream, so no other row reads the state.
+    // Only an open dream can yield, so a row reads the whole scope state only when `dream_state` names its occurrence (#2338).
     const { yieldUnclaimed } = this.options;
-    if (yieldUnclaimed && !terminal && !cancelReason && !row.started && row.delivered && row.routine) {
+    if (yieldUnclaimed && !terminal && !cancelReason && !row.started && row.delivered && row.routine && await this.openDream(scopeKey, key)) {
       const reason = yieldUnclaimed(await this.store.read(JSON.parse(scopeKey) as string), JSON.parse(key) as string);
       if (reason !== undefined) await port.cancel(task, reason, { ifUnclaimed: true });
     }
@@ -188,6 +188,15 @@ export class HostedReconciler {
     }
     await this.later(scopeKey, key);
     return false;
+  }
+
+  /** Whether the K8 dream table of the scope has the routine row's occurrence open. */
+  private async openDream(scopeKey: string, key: string): Promise<boolean> {
+    const occurrence = occurrenceOfIntentKey(JSON.parse(key) as string);
+    if (occurrence === undefined) return false;
+    const found = await inSchema(this.pool, this.schema, client => client.query<{ open: boolean }>(
+      `SELECT (body->'open'->$2) IS NOT NULL AS open FROM dream_state WHERE scope = $1`, [scopeKey, occurrence]), true);
+    return found.rows[0]?.open === true;
   }
 
   private async read(scopeKey: string, key: string): Promise<Row | undefined> {
