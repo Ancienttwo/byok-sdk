@@ -241,8 +241,12 @@ export interface ByokServer {
     agentMessage(taskId: string, deviceId: string, agentRef: AgentRef): Promise<import('@byok-sdk/cloud').TaskAgentMessage | undefined>;
     /** Exact SDK message decision; pending is undefined and corrupt persisted evidence throws. */
     messageDisposition(taskId: string, deviceId: string, payload: AgentMessagePublishPayload): Promise<AgentMessageDispositionPayload | undefined>;
-    /** Request cancellation through the kernel without a process-owned TaskHandle. */
-    cancel(taskId: string, reason?: string): Promise<void>;
+    /**
+     * Request cancellation through the kernel without a process-owned
+     * TaskHandle. With `ifUnclaimed`, a task a device has already claimed is
+     * left running and nothing is recorded (`ByokCloud.cancelTask`).
+     */
+    cancel(taskId: string, reason?: string, options?: { readonly ifUnclaimed?: true }): Promise<void>;
     /** Settle a task no device will finish through the kernel (`ByokCloud.abandonTask`), without a process-owned TaskHandle. */
     abandon(taskId: string, cause: import('@byok-sdk/cloud').TaskAbandonCause): Promise<void>;
     /**
@@ -812,8 +816,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       messageDisposition(taskId, deviceId, payload) {
         return cloud.readAgentMessageDisposition(tenant, deviceId, taskId, payload);
       },
-      async cancel(taskId, reason) {
-        const attempt = await cloud.cancelTask(tenant, taskId, reason);
+      async cancel(taskId, reason, options) {
+        const attempt = await cloud.cancelTask(tenant, taskId, reason, options);
         if (attempt.cancellation !== undefined) {
           relay.noteHostTransition(taskId, 'Cancelled', attempt.cancellation.requestedAt);
         }

@@ -76,6 +76,11 @@ export class PostgresTaskCancellationStore implements TaskCancellationStore {
           ? { attempt: taskRowToAttempt(current) }
           : { attempt: taskRowToAttempt(current), message: toMailboxMessage(message) };
       }
+      // The row lock above is the one claim's guarded UPDATE waits on.
+      if (input.ifUnclaimed === true && current.owner_device_id !== null) {
+        await client.query('COMMIT');
+        return { attempt: taskRowToAttempt(current) };
+      }
 
       const now = this.#clock.now().toISOString();
       const messageId = input.proposedMessageId;

@@ -1662,6 +1662,15 @@
       "items": [
         "behavior:claim-accepted-before-runtime-start"
       ]
+    },
+    {
+      "id": "task-cancel-if-unclaimed",
+      "impact": "additive",
+      "summary": "ByokCloud.cancelTask(tenant, taskId, reason?, options?) and ByokServer.tasks.cancel(taskId, reason?, options?) take an optional { ifUnclaimed: true }, carried to stores as TaskCancellationRequest.ifUnclaimed. The store decides it in the same transaction, row lock or critical section as task.claim: an attempt no device has claimed is cancelled exactly as without the option, and a claimed, unsettled attempt is returned unchanged, with no tombstone, no task.cancel and no host transition, so its run is never interrupted. A cancel taken first still refuses a later claim. A Host-implemented TaskCancellationStore must honor the field. No Host action is required otherwise.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2334",
+      "items": [
+        "export:@byok-sdk/cloud#TaskCancellationRequest"
+      ]
     }
   ],
   "changes": [

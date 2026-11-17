@@ -31,12 +31,14 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
     input: TaskCancellationRequest,
   ): Promise<TaskCancellationMutation | undefined> {
     const key = tenantKey(tenant, input.taskId);
-    const running = this.#inFlight.get(key);
+    // A conditional request may answer differently, so it never shares an unconditional one's result.
+    const flight = input.ifUnclaimed === true ? `${key}\u0000ifUnclaimed` : key;
+    const running = this.#inFlight.get(flight);
     if (running !== undefined) return running;
     const operation = this.#request(tenant, key, input).finally(() => {
-      this.#inFlight.delete(key);
+      this.#inFlight.delete(flight);
     });
-    this.#inFlight.set(key, operation);
+    this.#inFlight.set(flight, operation);
     return operation;
   }
 
@@ -77,6 +79,7 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
       if (existing.status === 'complete' || existing.status === 'failed' || existing.status === 'cancelled') {
         return { attempt: existing };
       }
+      if (input.ifUnclaimed === true && existing.ownerDeviceId !== undefined) return { attempt: existing };
 
       const messageId = input.proposedMessageId;
       const message = await this.#mailbox.append(tenant, {

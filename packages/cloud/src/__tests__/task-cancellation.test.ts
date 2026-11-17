@@ -84,6 +84,11 @@ describe('host task cancellation', () => {
       createEnvelope('task.started', {}, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
 
+    // Claimed work is out of reach of a conditional cancel; the single task.cancel below is the forced one's.
+    const spared = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'only if idle', { ifUnclaimed: true });
+    expect(spared.status).toBe('running');
+    expect(spared.cancellation).toBeUndefined();
+
     const cancellation = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'stop runtime');
     expect(cancellation.status).toBe('cancel_requested');
 
