@@ -353,8 +353,22 @@ cannot talk to each other.
 #### New store
 
 v7 requires new stores; v6 receipts, history and attempts are not migrated.
-Export needed history with the old build. Rotate K4 frozen work and outbox
-snapshots, and follow [credential handling](#credentials-and-provider-keys).
+Export needed history with the old build, and follow
+[credential handling](#credentials-and-provider-keys).
+
+Rotate the Host's frozen work as well. A K4 or K8 ledger freezes each
+intent's complete execution template and keeps outbox rows that dispatch it. A
+v6 template names `runtime` or `dispatchSelection` where v7 requires `target`,
+and the candidate refuses every previously released ledger
+([Host ledgers record their format](#host-ledgers-record-their-format-2286)).
+
+1. With the old build, let pending intents and outbox rows settle, or abandon
+   them. Record the work that must run again.
+2. With the candidate, open a new ledger at a new path, and enqueue that work
+   again with v7 execution templates.
+
+Archive or remove an Agent home's version 2 memory outbox before deployment
+([outbox version 2](#agent-memory-outbox-version-2-is-refused)).
 
 - Postgres: run migrations on a **new database**, then write storage
   entitlements and retention policy. Use the same role, database and
