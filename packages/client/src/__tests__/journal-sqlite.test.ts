@@ -861,6 +861,14 @@ describe('SqliteLocalTaskJournal', () => {
       await expect(journal.close()).rejects.toBeInstanceOf(JournalHandleCleanupError);
       expect(countRows(storeDir, 'journal_envelope')).toBe(0);
     });
+
+    it('fails closed within its bound when the worker never answers the open handshake', async () => {
+      const storeDir = await tmpStore();
+      const started = performance.now();
+      // A worker that never answered may still hold a handle, so the barrier holds as on close().
+      expect(() => build(storeDir, { faults: { exitWorkerAt: 'open', workerOpenTimeoutMs: 200 } })).toThrow(JournalHandleCleanupError);
+      expect(performance.now() - started).toBeLessThan(5_000);
+    });
   });
 
   describe('corrupt database quarantine', () => {

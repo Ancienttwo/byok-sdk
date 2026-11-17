@@ -68,6 +68,8 @@ function handshake(reply: JournalOpenReply): void {
   Atomics.notify(data.signal, 0);
 }
 
+// Test fault seam: a worker that dies before it answers the handshake.
+if (data.faults?.exitWorkerAt === 'open') process.exit(70);
 let db: DatabaseSync | undefined;
 try {
   db = openJournalConnection(data.dbPath, data.busyTimeoutMs);

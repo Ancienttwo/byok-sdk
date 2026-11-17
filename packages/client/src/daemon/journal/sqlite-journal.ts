@@ -185,8 +185,13 @@ export interface JournalFaultSeam {
    * to proceed. Called on the journal's own thread; the worker waits for it.
    */
   onStep?(step: JournalFaultStep): void;
-  /** End the journal worker thread at this step, as a crash or an out-of-memory kill would. */
-  exitWorkerAt?: JournalFaultStep;
+  /**
+   * End the journal worker thread at this step, as a crash or an out-of-memory
+   * kill would. `'open'` ends it before it answers the constructor's handshake.
+   */
+  exitWorkerAt?: JournalFaultStep | 'open';
+  /** Test-only bound on the constructor's wait for that handshake. Default 30 s. */
+  workerOpenTimeoutMs?: number;
 }
 
 export interface SqliteLocalTaskJournalOptions {
@@ -426,6 +431,7 @@ function startJournalWorker(
   const channel = new MessageChannel();
   const hostChannel = new MessageChannel();
   const signal = new Int32Array(new SharedArrayBuffer(8));
+  const openTimeoutMs = faults?.workerOpenTimeoutMs ?? WORKER_OPEN_TIMEOUT_MS;
   let worker: Worker | undefined;
   let reply: JournalOpenReply | undefined;
   let startError: unknown;
@@ -434,7 +440,7 @@ function startJournalWorker(
     worker = new Worker(__BYOK_JOURNAL_WORKER_SOURCE__, { eval: true, workerData, transferList: [channel.port2, hostChannel.port2] });
     // A worker that fails after a failed handshake is already accounted for below.
     worker.on('error', () => {});
-    if (Atomics.wait(signal, 0, 0, WORKER_OPEN_TIMEOUT_MS) !== 'timed-out') {
+    if (Atomics.wait(signal, 0, 0, openTimeoutMs) !== 'timed-out') {
       reply = receiveMessageOnPort(channel.port1)?.message as JournalOpenReply | undefined;
     }
   } catch (error) {
@@ -453,7 +459,7 @@ function startJournalWorker(
   void worker?.terminate();
   const cause = reply?.ok === false
     ? decodeError(reply.error)
-    : startError ?? new Error(`the journal worker did not open the database within ${WORKER_OPEN_TIMEOUT_MS} ms`);
+    : startError ?? new Error(`the journal worker did not open the database within ${openTimeoutMs} ms`);
   // No worker means no second handle; a worker that never answered may hold one.
   const workerHandleClosed = worker === undefined || (reply?.ok === false && reply.closed);
   let closeError: unknown;
