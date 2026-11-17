@@ -1216,7 +1216,9 @@ process then failed with `EBUSY`: journal quarantine, the retention sweep's Pi
 replica reset and lock removal, `inspectDaemonStores`, doctor's journal check,
 and a Host that deletes or moves a store it has just closed. Bun 1.4.4 releases
 the files at `close()`, and this repository now builds and tests with it.
-Compile with Bun 1.4.4 or newer. Node Hosts are not affected. No manifest
+Compile with Bun 1.4.4 or newer, and without Bun's
+`--disallow-code-generation-from-strings=strict`: the journal starts its worker
+from inline source, which that mode refuses. Node Hosts are not affected. No manifest
 entry: the SDK does not ship a Bun runtime. Source: [#2347].
 
 ### Integration and adoption evidence
