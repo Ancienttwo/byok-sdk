@@ -240,6 +240,20 @@ describe.skipIf(POSTGRES_URL === undefined)('H routines on real Postgres (#793 D
       last: { occurrenceKey: key, at, outcome: 'cancelled', reason: 'user_input', template: 'default', fallback: true } } }, open: {} });
   });
 
+  it('does not ask yieldUnclaimed about a delivered routine row whose dream is not open (#2338)', async () => {
+    const scope = await scoped(), { host, at, intent } = await dreamDue(scope);
+    await host.sync(scope, { ...SYNC, now: at });
+    await host.seed(scope, state => { state.dreams!.open = {}; });
+    await query(`UPDATE ${table('intent')} SET tries = 1, submission = 'delivered', reconcile_at = 0 WHERE scope = $1 AND key = $2`, [storedKey(scope), storedKey(intent)]);
+    const { input } = (await intentRow(scope, intent))! as unknown as { input: { deviceId: string; payload: { agentRef: Json } } };
+    const attempt = { taskId: taskId(intent, 0), deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'offered' } as unknown as TaskAttempt;
+    const asked: string[] = [];
+    const port = { offer: async () => undefined, deviceTerminal: async () => undefined, attempt: async () => attempt, cancel: async () => undefined };
+    await new HostedReconciler(opened!.pool, store().schema, host, { port: () => port, now: () => at,
+      yieldUnclaimed: (_state, key) => { asked.push(key); return undefined; } }).run();
+    expect(asked).toEqual([]);
+  });
+
   it('stages, switches, pauses, resumes and completes a routine through the Main Bot owner API, and refuses another Bot', async () => {
     const scope = await scoped(), id = await created(scope);
     // No occurrence is open and no slot is due, so the staged version switches at once.
