@@ -124,6 +124,11 @@ export interface JournalReceipt {
   readonly envelopeId: string;
   readonly seq: number;
   readonly bytesHash: string;
+  /**
+   * When the append was admitted: read from the journal's clock when
+   * `appendEnvelope` was called, not when the commit reached disk. Appends
+   * commit in admission order, so these times are monotonic with commit order.
+   */
   readonly committedAt: string;
   /**
    * `false` when this exact envelope id was ALREADY durable and this call
