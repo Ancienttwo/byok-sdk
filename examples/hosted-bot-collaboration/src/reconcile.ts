@@ -171,7 +171,9 @@ export class HostedReconciler {
       terminal = await port.deviceTerminal(task);
     }
     if (attempt && await this.record(scopeKey, key, attempt)) started();
-    if (attempt?.status === 'cancelled' && !attempt.claimedExecutor && !attempt.ownerDeviceId && !terminal) {
+    // An attempt that cloud settled itself (device revoked or superseded, task abandoned) carries its `terminalCause` and gets
+    // no device terminal, claimed or not (#2335). No device can report it any more, so it settles like an unclaimed cancel.
+    if (attempt?.status === 'cancelled' && !terminal && (attempt.terminalCause !== undefined || (!attempt.claimedExecutor && !attempt.ownerDeviceId))) {
       return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled', attempt);
     }
     if (terminal) {

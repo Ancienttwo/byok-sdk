@@ -821,7 +821,9 @@ export class HostExecutionCore {
       if (attempt) row.attempt = attempt;
       if (attempt?.claimedExecutor || attempt?.ownerDeviceId) row.started = true;
     });
-    if (attempt?.status === 'cancelled' && !attempt.claimedExecutor && !attempt.ownerDeviceId && !terminal) {
+    // An attempt that cloud settled itself (device revoked or superseded, task abandoned) carries its `terminalCause` and gets
+    // no device terminal, claimed or not (#2335). No device can report it any more, so it settles like an unclaimed cancel.
+    if (attempt?.status === 'cancelled' && !terminal && (attempt.terminalCause !== undefined || (!attempt.claimedExecutor && !attempt.ownerDeviceId))) {
       this.ledger.transaction(state => settle(state, state.intents[intent.id]!, intent.cancelReason === 'expired' ? 'expired' : 'cancelled'));
       return true;
     }
