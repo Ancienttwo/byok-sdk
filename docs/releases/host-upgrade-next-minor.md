@@ -158,11 +158,25 @@ Remove `--strict`, `DaemonConfigFieldRemovedError`, `removed_field`,
 JSON schema closes every object. A rollback also needs config accepted by the
 older build.
 
+### Narrowed protocol and core APIs
+
+**With the wire v7 merge.**
+
+Sources: [#2319]. Manifest entries: `narrow-protocol-core-public-api`.
+
+`@byok-sdk/protocol` and `@byok-sdk/core` (including `@byok-sdk/core/sealed-payload`
+and `@byok-sdk/protocol/constants`) remove public declarations and exports
+that no Host used: 411 names in total, listed as the entry's items in the
+manifest. Check your imports against that list and remove any that no longer
+resolve; use the retained public contracts and operations instead. Accepted
+wire values and capability token bytes are unchanged, and names another SDK
+package imports stay public.
+
 ### Removed cloud and data-plane APIs
 
 **With the wire v7 merge.**
 
-Sources: [#2297]. Manifest entries: `cloud-unused-exports-removed`, `cloud-host-facade-methods-removed`, `cloud-approval-identity-required`, `cloud-approval-unnamed-observation-refused`, `cloud-agentless-archive-input-removed`, `cloud-error-agent-ref-missing-removed`, `dataplane-unused-exports-removed`, `dataplane-retention-policy-store-removed`, `dataplane-mailbox-row-tenant-validated`.
+Sources: [#2297]. Manifest entries: `cloud-unused-exports-removed`, `cloud-host-facade-methods-removed`, `cloud-approval-identity-required`, `cloud-approval-unnamed-observation-refused`, `cloud-agentless-archive-input-removed`, `cloud-error-agent-ref-missing-removed`, `cloud-auth-plane-export-removed`, `dataplane-unused-exports-removed`, `dataplane-retention-policy-store-removed`, `dataplane-mailbox-row-tenant-validated`.
 
 #### `@byok-sdk/cloud`
 
@@ -203,7 +217,9 @@ Sources: [#2297]. Manifest entries: `cloud-unused-exports-removed`, `cloud-host-
 - **Archive input.** `taskArchiveInput` requires `agentRef`.
 - **Error code.** `task_attempt_agent_ref_missing` is removed from
   `CLOUD_ERROR_CODES`. Migration 0039 makes the Agent columns `NOT NULL`, so
-  the read that raised it cannot fail.
+  the read that raised it cannot fail; drop any match on the code. The same
+  table gains `agent_message_consumer_missing`
+  ([typed consumer refusal](#missing-agent-message-consumer-is-a-typed-cloud-error)).
 
 #### `@byok-sdk/cloud-dataplane`
 
@@ -305,14 +321,15 @@ objects named `sqliteX…` because `_` matches any character in `LIKE`.
 - A durable replica with a different pi-durable schema is refused with
   `DurableReplicaFormatError`, without migration. A replica lock path holding
   another database is also refused without writing it.
-- The server store file and the local task journal hold only the SDK's
-  objects. A Host table, index or trigger in the server store, or a Host
-  table in the journal, is refused as above. Keep Host objects in a separate
-  file; `ATTACH DATABASE` can mount it on the same connection.
+- The embedded server's store file holds only the SDK's objects: a Host
+  table, index, trigger or view in it is refused as above. The local task
+  journal refuses a Host table but does not check indexes, triggers or views.
+  Keep every Host object in a separate database file that the Host opens itself.
 - Released journals and replicas are current. Export or preserve refused
   stores before starting the candidate.
 - Copy-and-own Desktop `HostStore`, basic Clarification and goal/btw stores,
-  and MCP `BetaLedger` follow this check. The basic stores share a database
+  and MCP `BetaLedger` follow the check-before-write rule above: they decide
+  an existing file's format before any write. The basic stores share a database
   through one `host_format` row per store. Existing tables without that
   metadata require a separate new path.
 
@@ -369,7 +386,7 @@ Sources: [#2290], [#2309], [#2287]. Entries `retire-compatibility-apis`
 
 **With the wire v7 merge.**
 
-Sources: [#2277], [#2285], [#2283], [#2291], [#2293], [#2302], [#2303], [#2305]. Manifest entries: `wire-v7`, `wire-v7-execution-target`, `wire-v7-steer-refused`, `wire-v7-no-server-capabilities`, `wire-v7-decline-codes`, `wire-v7-retired-flags-and-bounds`, `wire-v7-decline-reason-bound`, `wire-v7-server-execution-target`, `wire-v7-server-steer-refused`, `wire-v7-server-sqlite-store`, `wire-v7-cloud-executor`, `wire-v7-cloud-steer-refusal-reads`, `wire-v7-cloud-terminal-executor`, `wire-v7-cloud-unclaimed-task-reports`, `wire-v7-cloud-steer-text-bound`, `wire-v7-dataplane-postgres-new-database`, `wire-v7-dataplane-store-epoch`, `wire-v7-dataplane-stores`, `wire-v7-client-negotiation-halt`, `wire-v7-client-execution-target`, `wire-v7-client-decline-reason-detail`, `wire-v7-client-selection-before-native-sessions`, `claim-accepted-before-runtime-start`.
+Sources: [#2277], [#2285], [#2283], [#2291], [#2293], [#2302], [#2303], [#2305]. Manifest entries: `wire-v7`, `wire-v7-execution-target`, `wire-v7-steer-refused`, `wire-v7-no-server-capabilities`, `wire-v7-decline-codes`, `wire-v7-retired-flags-and-bounds`, `wire-v7-decline-reason-bound`, `wire-v7-server-execution-target`, `wire-v7-server-steer-refused`, `wire-v7-server-sqlite-store`, `wire-v7-cloud-executor`, `wire-v7-cloud-steer-refusal-reads`, `wire-v7-cloud-terminal-executor`, `wire-v7-cloud-unclaimed-task-reports`, `wire-v7-cloud-steer-text-bound`, `wire-v7-dataplane-postgres-new-database`, `wire-v7-dataplane-store-epoch`, `wire-v7-dataplane-stores`, `wire-v7-client-negotiation-halt`, `wire-v7-client-execution-target`, `wire-v7-client-decline-reason-detail`, `wire-v7-client-selection-before-native-sessions`, `claim-accepted-before-runtime-start`, `wire-v7-dream-native-sessions-pi-target`.
 
 `PROTOCOL_VERSION` is 7. There is no v6 reader: a v6 peer and a v7 peer
 cannot talk to each other.
@@ -444,7 +461,9 @@ messages route.
   device checks the selection rules first.
 - Bot collaboration dreams request `nativeSessions` only when the template's
   `target` explicitly names Pi; `auto`, harness, Claude and Codex templates
-  still run dreams without native session input. Source: [#2321](https://github.com/Ancienttwo/byok-sdk/pull/2321);
+  still run dreams without native session input, where wire v6 sent the
+  request with every runtime template. To dream with native session input,
+  list a Pi-targeted template in `dreaming.models`. Source: [#2321](https://github.com/Ancienttwo/byok-sdk/pull/2321);
   entry `wire-v7-dream-native-sessions-pi-target`.
 - `task.claim` takes one required `executor`
   (`{ kind: 'runtime', runtimeId }` or `{ kind: 'harness', harnessId }`) in
@@ -458,6 +477,13 @@ messages route.
   as the offer `target`.
 - Cloud `TaskAttempt.claimedExecutor` replaces `claimedRuntime` and
   `claimedHarnessId`. Host offer and task APIs take `target` too.
+- `claim` takes the claim `executor` on every task attempt store:
+  `TaskAttemptStore.claim` (implement it in a custom store),
+  `InMemoryTaskAttemptStore.claim`, `TenantBoundTaskAttempts.claim` and
+  `PostgresTaskAttemptStore.claim`. `AgentExecutionInputSchema` and
+  `SealedAgentExecutionInputSchema` embed the v7 offer, so Host execution
+  input carries `target`. Entries `wire-v7-execution-target`,
+  `wire-v7-cloud-executor`, `wire-v7-dataplane-stores`.
 
 #### `task.steer_refused`
 
@@ -488,7 +514,10 @@ device retirement; tenant erasure removes them.
 - `limits.maxTokens` on `task.offer`.
 - The offer selection rules `runtime_selection_mismatch` and
   `harness_selection_conflict`.
-- The device flags `steer` and `provider-profile-binding`.
+- The device flags `steer` and `provider-profile-binding`
+  (`PROVIDER_PROFILE_BINDING_CAPABILITY` is removed). Steering is gated on the
+  claim's runtime capabilities instead, and a device that cannot bind a
+  provider profile declines the offer.
 - `WireAddition.kind`, `.rule` and `.advertisedBy`.
 
 #### Decline codes
@@ -511,7 +540,8 @@ Plaintext `task.steer` is limited to 65,536 UTF-8 bytes
 (`TASK_STEER_TEXT_MAX_BYTES`). Cloud `steerTask` and embedded
 `TaskHandle.steer` reject longer text with `ByokCloudError`
 `coordination_input_invalid` before enqueueing. Sealed steer text is not
-checked on the device. `conn.hello` carries at most 64 capability flags.
+checked on the device. Send longer follow-up input as a new task.
+`conn.hello` carries at most 64 capability flags.
 
 #### Cloud (`@byok-sdk/cloud`)
 
@@ -607,8 +637,9 @@ retained-row lookup without ack.
 
 #### Cancel runs ahead of a hung steer (#2304)
 
-Source: [#2311] for [#2304]. No dedicated entry; refusal surfaces are
-`wire-v7-steer-refused` and `wire-v7-server-steer-refused`.
+Source: [#2311] for [#2304]. No manifest entry: the ordering is not a public
+type or configuration change. The refusal surfaces are `wire-v7-steer-refused`
+and `wire-v7-server-steer-refused`.
 
 Send cancel without waiting for `steer()`. It runs immediately; later controls
 wait for cancel. Teardown rejection of the pending steer reports
@@ -647,6 +678,10 @@ machine's current device.
 
 #### Client pairing
 
+Manifest entries: `wire-v7-pair-field-bounds`, `wire-v7-tenant-id-text`, `wire-v7-client-pairing-errors`, `wire-v7-device-credential-attempt`, `wire-v7-auth-manager-pair`, `wire-v7-pair-gate-split`, `wire-v7-pair-new-code-fresh-key`, `wire-v7-v6-enrollment-entry-deleted`, `wire-v7-auth-errors-without-server-text`, `wire-v7-access-token-in-memory`.
+The v6 enrollment deletion (`wire-v7-v6-enrollment-entry-deleted`) is in
+[credentials and provider keys](#credentials-and-provider-keys).
+
 - `Daemon.pair()` and `byok-agent pair` reject with three new errors:
   `PairingSupersededError` (another pairing of this `productId` replaced this
   one while its request was in flight; nothing was written), `PairingBusyError`
@@ -667,7 +702,11 @@ machine's current device.
 - Pairing no longer holds the `productId` lock across its request or across
   its E2EE member custody. Re-pairing a running daemon shuts it down outside
   the lock; the member entries are written only while the new enrollment
-  still holds.
+  still holds. A Host that relied on another store's pairing waiting for this
+  one gets the server's registration fence instead.
+- `AuthManager.pair`, reached through `BlobClient` and
+  `InstallSkillPacksOptions`, no longer takes the internal custody option.
+  Nothing changes unless a Host passed it.
 - A pairing or renewal error carries only the HTTP status, never the server's
   response text. A malformed `2xx` body is `AuthResponseInvalidError` with no
   `cause`.
@@ -722,6 +761,8 @@ Sources: [#2266]. Manifest entries: `dataplane-revoke-keeps-assertion-replay`.
 
 Keep replay entries through revoke/supersession until the assertion expires
 (at most five minutes after issue). Postgres now matches in-memory and SQLite.
+A device or task assertion spent before the retirement is therefore refused
+when the same `deviceId` registers again with the same key.
 Custom directories must do the same. Pass `deviceAssertionReplay` to
 `createByokCloud` and schedule `runMaintenance()` to collect expired rows;
 without the authority that step is `not-configured` and rows accumulate.
@@ -974,6 +1015,8 @@ These entries linked to separate docs/issues; include them in the Host review to
 | Delivery supersession | Delivery adapters can use `supersededDeliveryIds` to exclude manual-resend predecessors from active work and retention protection. | [#2262], `bot-delivery-supersession` |
 | Grok user context | `inherit` stays the default. With `excluded`, use a sealed Agent home; user instructions/sessions stay out. Switching a Bot from inherit cannot resume its old user-store sessions. Isolation refusal is non-retryable. See [Grok isolation](../adapter-capabilities.md#agentusercontext-grok). | [#2258], `grok-agent-user-context` |
 | Grok retention | Add `grok-session-store` to exhaustive switches. Default TTL is 31 days or session-ledger TTL + one day, whichever is longer; explicit TTL must meet the latter floor. Live sessions/running homes are protected; the search index is untouched. | [#2258], `grok-session-store` |
+| Unclaimed cancel | `ByokCloud.cancelTask` and `ByokServer.tasks.cancel` take optional `{ ifUnclaimed: true }`: an attempt no device has claimed is cancelled as before; a claimed, unsettled one is left running, with no tombstone and no `task.cancel`. A Host-implemented `TaskCancellationStore` must honor `TaskCancellationRequest.ifUnclaimed` in the same transaction as `task.claim`. No other Host action. | [#2334], `task-cancel-if-unclaimed` |
+| Dreams yield to user input | Optional K8 wiring: pass `dreamYield(state, intentKey)` as the K4 `yieldUnclaimed` option so user input cancels a dream no device has claimed, and supply `SyncFacts.dreamHold` from `dreamHolds(state)` so a Turn frozen behind a submitted dream waits that dream's own `maxDurationMs` plus `OFFER_WAIT_MS`. Add `'user_input'` to switches over `DreamRecord.reason`. A Host that sets neither keeps the earlier behaviour. | [#2334], `dream-yield-user-input` |
 | Codex on Windows | `excluded` without symlink privilege refuses detection with `agent_user_context_unavailable`; offers decline retryable before claim. Enable Developer Mode, use an administrator daemon, or choose `inherit`. Accept unknown unavailable causes through the protocol reader. | [#2259], `agent-user-context-unavailable-cause` |
 
 ## During the upgrade
@@ -1082,3 +1125,5 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2316]: https://github.com/Ancienttwo/byok-sdk/pull/2316
 [#2318]: https://github.com/Ancienttwo/byok-sdk/issues/2318
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384
+[#2319]: https://github.com/Ancienttwo/byok-sdk/pull/2319
+[#2334]: https://github.com/Ancienttwo/byok-sdk/issues/2334
