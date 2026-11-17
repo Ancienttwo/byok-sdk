@@ -1154,7 +1154,12 @@ export class AgentHomeLeaseManager {
 export interface AgentHomeExecutionStatus {
   /** Effective `DaemonConfig.maxConcurrentReaderAttemptsPerAgentHome`. A home always has at most one writer. */
   maxConcurrentReaderAttemptsPerAgentHome: number;
-  /** Canonical Agent homes this daemon currently holds at least one execution lease in. */
+  /**
+   * Canonical Agent homes this daemon holds an execution lease in, or is still
+   * releasing the base lease of. It reads 0 only once every such home is free
+   * for maintenance; `activeAttempts` drops to 0 as soon as the last Attempt
+   * releases, before its home's base lease is released.
+   */
   activeHomes: number;
   /** Total Attempts, writers and readers, holding an execution lease across those homes. */
   activeAttempts: number;
@@ -1318,8 +1323,14 @@ export class AgentHomeExecutionLeaseManager {
             currentGroup.leasesByKey.delete(currentKey);
             released = true;
             if (currentGroup.leasesByKey.size === 0) {
-              AgentHomeExecutionLeaseManager.groups.delete(resolution.canonicalHome);
-              await currentGroup.baseLease.release();
+              // The group stays until its base lease is released, so `activeHomes`
+              // reads 0 only once maintenance can take the home (#2349). An
+              // acquire of this home waits in the same `exclusive` queue.
+              try {
+                await currentGroup.baseLease.release();
+              } finally {
+                AgentHomeExecutionLeaseManager.groups.delete(resolution.canonicalHome);
+              }
             }
           });
         },

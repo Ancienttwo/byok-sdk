@@ -185,6 +185,31 @@ describe('SDK-owned Agent home contract', () => {
     await expect(fs.stat(path.join(home, 'artifacts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('counts a home in activeHomes, and keeps maintenance out, until its base lease is released (#2349)', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const resolution = await manager.layout.resolve(ref('one'));
+    let open!: () => void;
+    const gate = new Promise<void>((resolve) => { open = resolve; });
+    const acquire = manager.leaseManager.acquire.bind(manager.leaseManager);
+    vi.spyOn(manager.leaseManager, 'acquire').mockImplementationOnce(async (claim) => {
+      const base = await acquire(claim);
+      const release = base.release.bind(base);
+      (base as { release(): Promise<void> }).release = async () => { await gate; await release(); };
+      return base;
+    });
+    const execution = await manager.executionLeaseManager.acquire(resolution, { taskId: 'task-1' });
+
+    const releasing = execution.release();
+    await vi.waitFor(() => expect(manager.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 1, attempts: 0, readerAttempts: 0 }));
+    expect(await manager.withIdleHomeLease('one', async () => {})).toBe(false);
+
+    open();
+    await releasing;
+    expect(manager.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0, readerAttempts: 0 });
+    expect(await manager.withIdleHomeLease('one', async () => {})).toBe(true);
+  });
+
   it('an execution claim whose acquire throws synchronously leaves no task mark: a later standalone acquire of the same resolution fails at once', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });
