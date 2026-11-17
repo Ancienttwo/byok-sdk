@@ -10,7 +10,7 @@
   },
   "include": [
     "vendor/rpiv-todo/2.15.0/**/*.ts",
-    "vendor/oar/552a4f9/**/*.ts",
+    "vendor/oar/bc1b2ac/**/*.ts",
     "src/bin/pi-todo-runtime.js",
     "src/runtime/dsh-session-runtime.js",
     "src/runtime/claude-session-runtime.js",

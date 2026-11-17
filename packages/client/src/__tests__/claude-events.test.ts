@@ -14,8 +14,8 @@ import {
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { memoryClaude } from './fixtures/memory-claude';
-import { foldStreamJsonStdout } from '../../vendor/oar/552a4f9/shared/stream-json/projection';
-import { claudeProjectionProfile, initialClaudeProjection } from '../../vendor/oar/552a4f9/runtimes/claude/projection';
+import { foldStreamJsonStdout } from '../../vendor/oar/bc1b2ac/shared/stream-json/projection';
+import { claudeProjectionProfile, initialClaudeProjection } from '../../vendor/oar/bc1b2ac/runtimes/claude/projection';
 
 async function tmpWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-events-test-'));

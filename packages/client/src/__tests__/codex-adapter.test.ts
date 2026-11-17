@@ -24,7 +24,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/552a4f9/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/bc1b2ac/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
 const fixture = fileURLToPath(
