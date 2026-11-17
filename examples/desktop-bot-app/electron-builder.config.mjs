@@ -77,6 +77,10 @@ export default {
     entitlementsInherit: entitlements,
     notarize,
   },
+  dmg: {
+    // Ad-hoc identities cannot meaningfully sign the DMG container.
+    sign: macIdentity !== '-',
+  },
   win: {
     target: ['nsis'],
     // koffi.node ships unsigned and the SDK refuses a modified addon, so no signing pass may reach a .node file.
