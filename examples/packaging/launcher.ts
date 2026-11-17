@@ -55,6 +55,38 @@ import path from 'node:path';
 
 const PROBE_MARKER = 'BYOK_PACKAGING_PROBE';
 
+// TEMP #2332 diagnostic: which SQLite handle outlives close() on this runtime.
+async function handleDiagnostic(scratchRoot: string): Promise<Record<string, unknown>> {
+  const { readdirSync, rmSync, mkdirSync } = await import('node:fs');
+  const { Worker } = await import('node:worker_threads');
+  const sqlite = process.getBuiltinModule('node:sqlite') as typeof import('node:sqlite');
+  const busy = (dir: string): string[] => readdirSync(dir).filter((name) => {
+    try { rmSync(path.join(dir, name)); return false; } catch { return true; }
+  });
+  const gc = (globalThis as { Bun?: { gc(force: boolean): void } }).Bun?.gc;
+  const out: Record<string, unknown> = { runtime: (globalThis as { Bun?: { version: string } }).Bun?.version ?? process.version };
+  out.journal = busy(path.join(scratchRoot, 'journal'));
+  if (gc) { gc(true); out.journalAfterGc = busy(path.join(scratchRoot, 'journal')); }
+  const mainDir = path.join(scratchRoot, 'main'); mkdirSync(mainDir);
+  const prepared = new sqlite.DatabaseSync(path.join(mainDir, 'x.db'));
+  prepared.exec('PRAGMA journal_mode = WAL; CREATE TABLE t (x)');
+  prepared.prepare('SELECT count(*) FROM t').get();
+  prepared.close();
+  out.mainPrepared = busy(mainDir);
+  const execDir = path.join(scratchRoot, 'exec'); mkdirSync(execDir);
+  const plain = new sqlite.DatabaseSync(path.join(execDir, 'x.db'));
+  plain.exec('PRAGMA journal_mode = WAL; CREATE TABLE t (x)');
+  plain.close();
+  out.mainExecOnly = busy(execDir);
+  const workerDir = path.join(scratchRoot, 'worker'); mkdirSync(workerDir);
+  const worker = new Worker(`const s = process.getBuiltinModule('node:sqlite'); const d = new s.DatabaseSync(require('node:worker_threads').workerData);
+    d.exec('PRAGMA journal_mode = WAL; CREATE TABLE t (x)'); d.prepare('SELECT count(*) FROM t').get(); d.close();`, { eval: true, workerData: path.join(workerDir, 'x.db') });
+  await new Promise((resolve) => worker.once('exit', resolve));
+  out.workerPrepared = busy(workerDir);
+  if (gc) { gc(true); out.afterGc = { mainPrepared: busy(mainDir), workerPrepared: busy(workerDir) }; }
+  return out;
+}
+
 async function main(): Promise<void> {
   const scratchRoot = await realpath(await mkdtemp(path.join(
     process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-pkg-',
@@ -87,12 +119,14 @@ async function main(): Promise<void> {
     const journal = new SqliteLocalTaskJournal({ storeDir: path.join(scratchRoot, 'journal') });
     const journalEntries = (await journal.measureUsage()).journalEntries;
     await journal.close();
+    const diag = await handleDiagnostic(scratchRoot); // TEMP #2332 diagnostic, reverted after one CI run
 
     const result = {
       ok: true as const,
       daemonStatus,
       piDetect,
       journalEntries,
+      diag,
       byokPiBinSet: process.env.BYOK_PI_BIN !== undefined,
     };
     console.log(`${PROBE_MARKER} ${JSON.stringify(result)}`);
