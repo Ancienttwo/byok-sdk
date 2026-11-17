@@ -369,11 +369,13 @@ snapshots, and follow [credential handling](#credentials-and-provider-keys).
 
 #### What a v6 daemon sees
 
-- **Not paired again:** stops at authentication with `device_revoked`. Its
-  challenge and token requests get the typed `device_not_registered` 401,
-  and a bearer it still holds gets a 401 before its hello is read, which
-  sends it to that renewal. The 0.43.0 daemon halts on that typed 401
-  without retrying. The cloud answers are verified in cloud `protocol-version-admission.test.ts` › stops a v6 daemon that was not paired again at authentication, before its hello is read.
+- **Not paired again:** stops at authentication with `device_revoked`.
+  Cloud side, tested in cloud `protocol-version-admission.test.ts` › stops a v6 daemon that was not paired again at authentication, before its hello is read: its challenge and token requests
+  get the typed `device_not_registered` 401, and a bearer it still holds
+  gets a 401 before its hello is read, which sends it to that renewal.
+  Daemon side, confirmed by reading `AuthManager.readUnauthorized` and `markRevoked` in `packages/client/src/daemon/auth-manager.ts` at `v0.43.0` and not by running a v6
+  binary: on that typed 401 it marks the device revoked and halts with
+  `device_revoked` without retrying.
 - **Paired again into the v7 store:** its lone `conn.hello` gets
   `rejected` with `protocol_version_unsupported`. It reads that as a refused
   handshake and halts with `handshake_rejected`.
