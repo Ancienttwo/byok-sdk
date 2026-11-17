@@ -203,6 +203,14 @@ test('docs/security.md selects the dataplane job that checks its plaintext inven
   assert.deepEqual(selectImpact(['docs/hosted-host-contract.md']).families, []);
 });
 
+test('docker-compose.test.yml selects the dataplane job, the only job that starts it', () => {
+  const ci = readFileSync(new URL('.github/workflows/ci.yml', root), 'utf8');
+  assert.equal(ci.match(/docker compose -f docker-compose\.test\.yml up/g)?.length, 1);
+  assert.deepEqual(selectImpact(['docker-compose.test.yml']), {
+    dirs: [], files: ['docker-compose.test.yml'], families: ['dataplane'], reason: 'impacted',
+  });
+});
+
 test('a deploy/sql migration selects cloud-dataplane, its Postgres suites and the packed-tarball migrate job (#654)', () => {
   for (const reader of ['packages/cloud-dataplane/scripts/copy-migrations.mjs', 'scripts/release/pg-migrate-smoke.mjs']) {
     assert.match(readFileSync(new URL(reader, root), 'utf8'), /deploy\/sql/, reader);

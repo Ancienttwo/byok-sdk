@@ -874,6 +874,8 @@ export function selectImpact(paths, context = {}) {
     // checks the inventory table in this doc against real Postgres and S3.
     if (path === 'docs/device-setup.md') { dirs.add('packages/client'); continue; }
     if (path === 'docs/security.md') { families.add('dataplane'); continue; }
+    // The dataplane job is the only one that brings this substrate up (`docker compose -f docker-compose.test.yml up`).
+    if (path === 'docker-compose.test.yml') { families.add('dataplane'); continue; }
     // #654 E2c: `deploy/sql` is the only authored copy of the Postgres
     // migrations. cloud-dataplane builds it into `dist/sql`, its suites migrate
     // from it, and the packed tarball must carry it and migrate a database.
