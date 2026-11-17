@@ -276,7 +276,8 @@ export async function judgeAgentHomeLeaseWriter(writer: AgentHomeLeaseWriter | n
   if ((reads.platform === 'linux' && local.pidNamespace === undefined) || writer.pidNamespace !== local.pidNamespace) {
     return blocked('other-pid-namespace');
   }
-  if (local.boot === undefined) return blocked('unverifiable');
+  // A boot recorded in another platform's form names no boot of this one, so it proves nothing gone.
+  if (local.boot === undefined || formatted(writer.boot, bootFormat(reads.platform)) === undefined) return blocked('unverifiable');
   if (reads.platform !== 'win32' && writer.start === undefined) return blocked('unverifiable');
   if (writer.boot !== local.boot) return { gone: true };
   const signal = reads.signal(writer.pid);

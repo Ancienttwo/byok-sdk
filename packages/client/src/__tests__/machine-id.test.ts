@@ -159,7 +159,11 @@ describe('resolveMachineId — every failure is `undefined`, never a throw', () 
 describe('resolveMachineId — the probe is bounded', () => {
   it('resolves undefined within the timeout when the runner never settles', async () => {
     const started = Date.now();
-    const run: DeviceCommandRunner = () => new Promise<DeviceCommandResult>(() => {});
+    const signals: (AbortSignal | undefined)[] = [];
+    const run: DeviceCommandRunner = (_executable, _args, _stdin, signal) => {
+      signals.push(signal);
+      return new Promise<DeviceCommandResult>(() => {});
+    };
 
     const resolved = await resolveMachineId({
       productId: PRODUCT_ID,
@@ -173,6 +177,9 @@ describe('resolveMachineId — the probe is bounded', () => {
     // "no supersession" case instead of holding the pair request open.
     expect(resolved).toBeUndefined();
     expect(Date.now() - started).toBeLessThan(2000);
+    // The timeout also aborts the command, so a wedged ioreg is killed rather than left running.
+    expect(signals).toHaveLength(1);
+    expect(signals[0]?.aborted).toBe(true);
   });
 
   it('does not cut short a probe that settles inside the timeout', async () => {

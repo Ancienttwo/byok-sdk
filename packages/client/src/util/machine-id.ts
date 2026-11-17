@@ -53,8 +53,8 @@ const WIN32_GUID_RE = /MachineGuid\s+REG_SZ\s+(\S+)/u;
 
 const LINUX_MACHINE_ID_PATHS = ['/etc/machine-id', '/var/lib/dbus/machine-id'] as const;
 
-async function probeDarwin(run: DeviceCommandRunner): Promise<string | undefined> {
-  const result = await run('ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice']);
+async function probeDarwin(run: DeviceCommandRunner, signal: AbortSignal): Promise<string | undefined> {
+  const result = await run('ioreg', ['-rd1', '-c', 'IOPlatformExpertDevice'], undefined, signal);
   if (result.exitCode !== 0) return undefined;
   return DARWIN_UUID_RE.exec(result.stdout)?.[1];
 }
@@ -71,36 +71,41 @@ async function probeLinux(readFile: (path: string) => Promise<string>): Promise<
   return undefined;
 }
 
-async function probeWin32(run: DeviceCommandRunner): Promise<string | undefined> {
+async function probeWin32(run: DeviceCommandRunner, signal: AbortSignal): Promise<string | undefined> {
   const result = await run('reg', [
     'query',
     'HKLM\\SOFTWARE\\Microsoft\\Cryptography',
     '/v',
     'MachineGuid',
-  ]);
+  ], undefined, signal);
   if (result.exitCode !== 0) return undefined;
   return WIN32_GUID_RE.exec(result.stdout)?.[1];
 }
 
 /**
- * Resolve `probe`, or `undefined` once `timeoutMs` elapses — whichever happens
- * first. The timer is `unref`'d where the runtime supports it, so a probe that
- * never settles cannot keep the process alive past its own work. `race` keeps
- * a handler attached to `probe`, so a rejection that arrives after the timeout
- * already won is still handled rather than becoming an unhandled rejection.
+ * Run `start`, or resolve `undefined` once `timeoutMs` elapses, whichever comes
+ * first. On expiry the signal given to `start` is aborted, so a probe command
+ * that is still running is killed rather than left behind: a failed read is
+ * not cached and the next call probes again. The timer is `unref`'d where the
+ * runtime supports it. `race` keeps a handler attached to the probe, so a
+ * rejection that arrives after the timeout won is still handled.
  */
 async function withTimeout(
-  probe: Promise<string | undefined>,
+  start: (signal: AbortSignal) => Promise<string | undefined>,
   timeoutMs: number,
 ): Promise<string | undefined> {
+  const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
   const expiry = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), timeoutMs);
+    timer = setTimeout(() => {
+      resolve(undefined);
+      controller.abort(new Error(`machine id probe exceeded ${timeoutMs} ms`));
+    }, timeoutMs);
     (timer as { unref?: () => void }).unref?.();
   });
 
   try {
-    return await Promise.race([probe, expiry]);
+    return await Promise.race([start(controller.signal), expiry]);
   } finally {
     if (timer !== undefined) clearTimeout(timer);
   }
@@ -117,10 +122,10 @@ export async function resolveMachineId(options: ResolveMachineIdOptions): Promis
   const run = options.run ?? runDeviceCommand;
   const readFile = options.readFile ?? ((path: string) => fs.readFile(path, 'utf8'));
 
-  let probe: Promise<string | undefined> | undefined;
-  if (platform === 'darwin') probe = probeDarwin(run);
-  else if (platform === 'linux') probe = probeLinux(readFile);
-  else if (platform === 'win32') probe = probeWin32(run);
+  let probe: ((signal: AbortSignal) => Promise<string | undefined>) | undefined;
+  if (platform === 'darwin') probe = (signal) => probeDarwin(run, signal);
+  else if (platform === 'linux') probe = () => probeLinux(readFile);
+  else if (platform === 'win32') probe = (signal) => probeWin32(run, signal);
   if (probe === undefined) return undefined;
 
   let raw: string | undefined;

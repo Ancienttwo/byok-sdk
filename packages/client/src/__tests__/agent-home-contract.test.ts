@@ -356,6 +356,8 @@ describe('SDK-owned Agent home contract', () => {
       { case: 'written in another PID namespace', writer: { ...recorded, pidNamespace: 'pid:[2]' }, probe: {}, verdict: { gone: false, blockedBy: 'other-pid-namespace' } },
       { case: 'it records no writer', writer: undefined, probe: {}, verdict: { gone: false, blockedBy: 'legacy-marker' } },
       { case: 'this boot id is malformed', writer: recorded, probe: { boot: 'boot-a' }, verdict: { gone: false, blockedBy: 'unverifiable' } },
+      { case: 'off Windows, it records a boot in Windows form', writer: { ...recorded, boot: '1700000000' }, probe: {}, verdict: { gone: false, blockedBy: 'unverifiable' } },
+      { case: 'on Windows, it records a boot in UUID form', writer: { ...recorded, boot: BOOT_A, start: undefined, pidNamespace: undefined }, probe: { platform: 'win32' as const, boot: '1700000000' }, verdict: { gone: false, blockedBy: 'unverifiable' } },
     ])('$case', async ({ writer, probe, verdict }) => {
       setAgentHomeLeaseWriterProbeForTests(probeWith(probe));
       try {
