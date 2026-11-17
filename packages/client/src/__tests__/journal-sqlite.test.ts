@@ -841,12 +841,47 @@ describe('SqliteLocalTaskJournal', () => {
       return envelopeRecord({ envelopeId: `env-${n}`, taskId: `task-${n}`, seq: n, bytes, bytesHash: journalHash(bytes) });
     }
 
-    it('rolls back only the write that failed when writes share a commit', async () => {
+    // Appends 2-4 are called while the worker waits inside batch 1's COMMIT, so they form the next batch.
+    function batchBehindFirstCommit(storeDir: string, atStep: (step: JournalFaultStep, commits: number) => void) {
+      const steps: JournalFaultStep[] = [];
+      let behind: Array<Promise<unknown>> = [];
+      const journal = build(storeDir, {
+        faults: {
+          onStep(step) {
+            if (step !== 'append:before-commit' && step !== 'batch:commit') return;
+            steps.push(step);
+            const commits = steps.filter((seen) => seen === 'batch:commit').length;
+            if (step === 'batch:commit' && commits === 1) behind = [2, 3, 4].map((n) => journal.appendEnvelope(offer(n)));
+            atStep(step, commits);
+          },
+        },
+      });
+      const first = journal.appendEnvelope(offer(1));
+      return { journal, steps, settle: async () => [await Promise.allSettled([first]), await Promise.allSettled(behind)].flat() };
+    }
+
+    it('commits the writes queued behind a commit in one COMMIT, rolling back only the write that failed', async () => {
       const storeDir = await tmpStore();
-      const journal = build(storeDir, { faults: faultOnce('append:before-commit') });
-      const settled = await Promise.allSettled([1, 2, 3].map((n) => journal.appendEnvelope(offer(n))));
-      expect(settled.map((result) => result.status)).toEqual(['rejected', 'fulfilled', 'fulfilled']);
-      expect(readRows(storeDir, 'SELECT envelope_id FROM journal_envelope ORDER BY envelope_id').map((row) => row.envelope_id)).toEqual(['env-2', 'env-3']);
+      let ran = 0;
+      const { steps, settle } = batchBehindFirstCommit(storeDir, (step) => {
+        if (step === 'append:before-commit' && ++ran === 2) throw new Error('injected fault in write 2');
+      });
+      expect((await settle()).map((result) => result.status)).toEqual(['fulfilled', 'rejected', 'fulfilled', 'fulfilled']);
+      expect(steps).toEqual(['append:before-commit', 'batch:commit', 'append:before-commit', 'append:before-commit', 'append:before-commit', 'batch:commit']);
+      expect(readRows(storeDir, 'SELECT envelope_id FROM journal_envelope ORDER BY envelope_id').map((row) => row.envelope_id)).toEqual(['env-1', 'env-3', 'env-4']);
+    });
+
+    it('rejects every write of a batch whose COMMIT fails and keeps none of them', async () => {
+      const storeDir = await tmpStore();
+      const { journal, settle } = batchBehindFirstCommit(storeDir, (step, commits) => {
+        if (step === 'batch:commit' && commits === 2) throw new Error('injected COMMIT failure');
+      });
+      expect((await settle()).map((result) => result.status)).toEqual(['fulfilled', 'rejected', 'rejected', 'rejected']);
+      for (const [table, key] of [['journal_envelope', 'envelope_id'], ['journal_task', 'task_id'], ['journal_idempotency', 'task_id']] as const) {
+        expect(readRows(storeDir, `SELECT ${key} AS k FROM ${table}`).map((row) => row.k), table).toEqual([table === 'journal_envelope' ? 'env-1' : 'task-1']);
+      }
+      // The failed batch leaves the journal open: the next write commits.
+      await expect(journal.appendEnvelope(offer(5))).resolves.toMatchObject({ created: true });
     });
 
     it('fails closed when the worker ends mid-commit: nothing in flight or queued counts as durable, and the handle barrier holds', async () => {
