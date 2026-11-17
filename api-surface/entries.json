@@ -2293,7 +2293,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 694600,
+      "budgetBytes": 694936,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2370,7 +2370,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 415456,
+      "budgetBytes": 415714,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
