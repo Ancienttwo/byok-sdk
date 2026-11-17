@@ -303,6 +303,20 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
   });
 
+  it('keeps the user_input cancellation it concluded on when a stale record lands between its record and its conclusion (#2334)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    sdk.deliver(input);
+    const stale = sdk.attempts.get(input.taskId)!;
+    sdk.deliver(input, { status: 'cancelled', cancellation: { requestedAt: 'now', reason: 'user_input' } });
+    // No SDK call separates B's record from its conclusion, so A's stale record runs right after B's record commits.
+    type Recording = { record(scopeKey: string, key: string, attempt: TaskAttempt): Promise<boolean> };
+    const a = reconciler(sdk.port, () => clock) as unknown as Recording, b = reconciler(sdk.port, () => clock) as unknown as Recording;
+    const record = b.record.bind(b);
+    b.record = async (scopeKey, key, attempt) => { const claimed = await record(scopeKey, key, attempt); await a.record(scopeKey, key, stale); return claimed; };
+    expect(await (b as unknown as HostedReconciler).run()).toEqual({ concluded: 1, failed: [] });
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled', attempt: { status: 'cancelled', cancellation: { reason: 'user_input' } } });
+  });
+
   it.each(['attempt', 'offer'])('throws on another %s identity, and writes no evidence', async field => {
     const { scope, input } = await tried(), sdk = fakePort();
     sdk.deliver(field === 'offer' ? { ...input, payload: { ...input.payload, instruction: 'Another Turn.' } } : input,
