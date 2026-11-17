@@ -162,8 +162,10 @@
 //   contextTurns -> dist/rules/context.d.ts
 //   createDefinition -> dist/routines.d.ts
 //   deliveryRoute -> dist/delivery-routing.d.ts
+//   dreamHolds -> dist/dream.d.ts
 //   dreamIntentIds -> dist/dream.d.ts
 //   dreamPolicy -> dist/dream.d.ts
+//   dreamYield -> dist/dream.d.ts
 //   echoCandidates -> dist/delivery-routing.d.ts
 //   enablePush -> dist/delivery-routing.d.ts
 //   endable -> dist/routines.d.ts
@@ -652,7 +654,7 @@ export interface DreamRecord {
     occurrenceKey: string;
     at: number;
     outcome: 'skipped' | 'succeeded' | 'failed' | 'declined' | 'cancelled' | 'expired' | 'superseded';
-    reason?: string;
+    reason?: DreamSkip | 'intent_compacted' | 'user_input';
     template?: string;
     fallback?: boolean;
 }
@@ -660,6 +662,7 @@ export interface DreamBot {
     since: number;
     throughTurn?: string;
     last?: DreamRecord;
+    userInputCancels?: number;
 }
 export interface OpenDream {
     botId: string;
@@ -673,6 +676,8 @@ export interface DreamState {
     open: Record<string, OpenDream>;
 }
 export declare function dreamIntentIds(state: CollaborationState): string[];
+export declare function dreamYield(state: CollaborationState, intentKey: string): 'user_input' | undefined;
+export declare function dreamHolds(s: LedgerState): Map<string, number>;
 export declare function recordDream(state: CollaborationState, run: HostOccurrenceRun, now: number): void;
 export declare function reconcileDreamRoutines(s: LedgerState, policy: DreamPolicy | undefined, models: Readonly<Record<string, ExecutionTemplate>>, now: number): void;
 export declare function checkDreamInstruction(instructionMaxBytes: number): void;
@@ -743,7 +748,7 @@ export { isOwner, verified } from './channel.js';
 export { admitUserInput } from './coalesce.js';
 export { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, supersededDeliveryIds, unknownDelivery } from './delivery.js';
 export { cleanReplyTokens, deliveryRoute, echoCandidates, enablePush, promoteStaged, queueDelivery, refuseRoute, rememberInbound, resendUnknown, revokePush, type IntentConclusions } from './delivery-routing.js';
-export { checkDreamInstruction, dreamIntentIds, dreamPolicy, reconcileDreamRoutines, recordDream, syncDreams, type DreamSync } from './dream.js';
+export { checkDreamInstruction, dreamHolds, dreamIntentIds, dreamPolicy, dreamYield, reconcileDreamRoutines, recordDream, syncDreams, type DreamSync } from './dream.js';
 export { exportMarkOf, type SwitchExportMark, type SwitchHeader } from './migration.js';
 export { stateOf } from './model.js';
 export { concludeRoutineTurn, createDefinition, endable, owned, resealDefinition, ROUTINE_LATE_AFTER_MS, ROUTINE_WAIT_MS, routineCalendar, routineOccurrence, routineTurn, sealedDefinition, sealedTemplate, SealedRoutineVersionError, updateDefinition, type SealedRoutineAction } from './routines.js';
@@ -2332,6 +2337,7 @@ export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
     executionStarted(turnId: string): boolean;
     retired(turnId: string): 'result_retired' | 'turn_retired' | undefined;
     deviceRefusal?(botId: string): SyncRefusal | undefined;
+    dreamHold?(botId: string): number | undefined;
 }
 export interface SyncOptions<R extends ContextRoutine> {
     now: number;

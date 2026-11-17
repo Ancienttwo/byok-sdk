@@ -662,6 +662,12 @@ export interface TaskCancellationRequest {
   readonly taskId: string;
   readonly proposedMessageId: string;
   readonly reason?: string;
+  /**
+   * Cancel only an attempt no device has claimed (`ownerDeviceId` absent),
+   * decided under the same serialization as `TaskAttemptStore.claim`. A
+   * claimed, unsettled attempt is returned unchanged and nothing is written.
+   */
+  readonly ifUnclaimed?: true;
   readonly materialize: (seq: number, messageId: string) => MailboxBody | Promise<MailboxBody>;
 }
 

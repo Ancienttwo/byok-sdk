@@ -118,6 +118,23 @@ describe.skipIf(SKIP_HOSTED_CLOUD)('H reconciliation on a real SDK server and da
       await l.close();
     }
   });
+
+  it('concludes cancelled a claimed attempt that cloud abandoned, with no device terminal, and frees its Agent FIFO (#2335)', async () => {
+    const agentId = randomUUID(), { scope, turnId, task } = await delivered(agentId), run = await session(task);
+    const behind = await inSchema(opened!.pool, store().schema, client => freezeIntent(client, scope,
+      { key: 'behind', source: 'user', execution: template(host!.deviceId, agentId), waitUntil: Date.now() + 60_000 }));
+    const submitted: string[] = [], fifo = new HostedSubmitter(opened!.pool, store().schema, { port: () => ({
+      offer: async () => undefined, submit: async input => { submitted.push(input.taskId); return undefined as never; } }) });
+    await vi.waitFor(async () => expect(await host!.port.attempt(task)).toMatchObject({ ownerDeviceId: host!.deviceId }), { timeout: 5000 });
+    await host!.cloud.abandonTask(host!.tenant, task, 'operator');
+    expect(await fifo.run()).toEqual({ tried: 0, failed: [] });
+    expect(await reconciler(host!.port).run()).toEqual({ concluded: 1, failed: [] });
+    expect(await row(scope, turnId)).toMatchObject({ conclusion: 'cancelled', started: true, terminal: null,
+      attempt: { status: 'cancelled', terminalCause: 'operator', ownerDeviceId: host!.deviceId } });
+    expect([await fifo.run(), submitted]).toEqual([{ tried: 1, failed: [] }, [behind.taskId]]);
+    await run.finish(DOCUMENT);
+    await waitForTaskCleanup(host!.daemon, run);
+  });
 });
 
 /** An SDK tenant in memory: the offer, the attempt and the terminal of each task, and each cancel call. */
@@ -234,6 +251,15 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
   });
 
+  it('finishes a device task.cancelled whose receipt lands between the terminal read and the attempt read (#2335)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    sdk.deliver(input, { status: 'cancelled', ownerDeviceId: 'device', terminalCause: 'stopped on the device' });
+    sdk.during.attempt = () => { sdk.terminals.set(input.taskId,
+      { envelope: { task_id: input.taskId, type: 'task.cancelled', payload: { reason: 'stopped on the device' } }, recordedAt: 'now' } as never); };
+    expect(await run(sdk.port)).toEqual({ concluded: 1, failed: [] });
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled', terminal: { envelope: { type: 'task.cancelled' } } });
+  });
+
   it('cancels the SDK task of a sync-cancelled tried row, and concludes cancelled once the attempt is cancelled unclaimed', async () => {
     const { scope, input } = await tried(), sdk = fakePort();
     sdk.deliver(input);
@@ -301,6 +327,20 @@ describe.skipIf(POSTGRES_URL === undefined)('H reconciliation edge cases on real
     sdk.during.attempt = undefined;
     expect(await run(sdk.port)).toEqual({ concluded: 1, failed: [] });
     expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled' });
+  });
+
+  it('keeps the user_input cancellation it concluded on when a stale record lands between its record and its conclusion (#2334)', async () => {
+    const { scope, input } = await tried(), sdk = fakePort();
+    sdk.deliver(input);
+    const stale = sdk.attempts.get(input.taskId)!;
+    sdk.deliver(input, { status: 'cancelled', cancellation: { requestedAt: 'now', reason: 'user_input' } });
+    // No SDK call separates B's record from its conclusion, so A's stale record runs right after B's record commits.
+    type Recording = { record(scopeKey: string, key: string, attempt: TaskAttempt): Promise<boolean> };
+    const a = reconciler(sdk.port, () => clock) as unknown as Recording, b = reconciler(sdk.port, () => clock) as unknown as Recording;
+    const record = b.record.bind(b);
+    b.record = async (scopeKey, key, attempt) => { const claimed = await record(scopeKey, key, attempt); await a.record(scopeKey, key, stale); return claimed; };
+    expect(await (b as unknown as HostedReconciler).run()).toEqual({ concluded: 1, failed: [] });
+    expect(await row(scope, 'q1')).toMatchObject({ conclusion: 'cancelled', attempt: { status: 'cancelled', cancellation: { reason: 'user_input' } } });
   });
 
   it.each(['attempt', 'offer'])('throws on another %s identity, and writes no evidence', async field => {

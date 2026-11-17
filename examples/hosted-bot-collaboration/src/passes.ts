@@ -8,13 +8,13 @@ import { HostedReplyChecker, type HostedReplyPort, type ReplyCheckerOptions } fr
 import { HostedRoutineScheduler, type SchedulerOptions } from './scheduler';
 import { HostedOutboxSender, type CardConnector, type HostedHomePort, type ProjectionPort, type SendFailure, type SenderOptions } from './sender';
 import type { HostedCollaborationStore, HostedSyncOptions, SyncResult } from './store';
-import type { ChannelPort } from '@byok-sdk/bot-collaboration/host-kit';
+import { dreamYield, type ChannelPort } from '@byok-sdk/bot-collaboration/host-kit';
 
 /** Pass options that the deployment tunes. Each is the pass's own option type without the fields that `HostedPasses` wires. */
 export interface HostedPassTimings {
   routines?: Omit<SchedulerOptions, 'intervalMs' | 'changed'>;
   submitter?: Omit<SubmitterOptions, 'port' | 'changed'>;
-  reconciler?: Omit<ReconcilerOptions, 'port' | 'changed'>;
+  reconciler?: Omit<ReconcilerOptions, 'port' | 'changed' | 'yieldUnclaimed'>;
   due?: Omit<DueSchedulerOptions, 'sync'>;
   replies?: Omit<ReplyCheckerOptions, 'port'>;
   devices?: Omit<DeviceObserverOptions, 'port'>;
@@ -91,7 +91,8 @@ export class HostedPasses {
       changed: scope => { sentChanged.add(scope); } });
     const routines = new HostedRoutineScheduler(pool, store, { ...timings.routines, intervalMs: ports.intervalMs, changed: scope => { changed.add(scope); } });
     const submitter = new HostedSubmitter(pool, store.schema, { ...timings.submitter, port: ports.task, changed: scope => { concluded.add(scope); } });
-    const reconciler = new HostedReconciler(pool, store.schema, store, { ...timings.reconciler, port: ports.task, changed: scope => { changed.add(scope); } });
+    const reconciler = new HostedReconciler(pool, store.schema, store, { ...timings.reconciler, port: ports.task, yieldUnclaimed: dreamYield,
+      changed: scope => { changed.add(scope); } });
     const due = new HostedDueScheduler(pool, store, { ...timings.due, sync: this.syncScope });
     const syncAll = async (scopes: Iterable<string>) => {
       const synced: PassSynced[] = [];
@@ -127,7 +128,7 @@ export class HostedPasses {
   async failStuckIntent(scope: string, key: string): Promise<void> {
     const touched = new Set<string>();
     const reconciler = new HostedReconciler(this.pool, this.store.schema, this.store,
-      { ...this.ports.timings?.reconciler, port: this.ports.task, changed: changed => { touched.add(changed); } });
+      { ...this.ports.timings?.reconciler, port: this.ports.task, yieldUnclaimed: dreamYield, changed: changed => { touched.add(changed); } });
     let callError: unknown, failed = false;
     try { await reconciler.failStuckIntent(scope, key); } catch (error) { callError = error; failed = true; }
     try { for (const changed of touched) await this.syncScope(changed, Date.now()); }

@@ -103,6 +103,13 @@ export interface HostOptions {
    * submit of this core, the timer drain and direct `enqueue` calls included. Must be synchronous. Absent: every submit is admitted.
    */
   admitSubmit?: (intent: Readonly<Intent>, state: Readonly<LedgerState>) => boolean;
+  /**
+   * Yield of unclaimed work (#2334): asked in the reconcile of a delivered intent that has no terminal, no cancel reason and no
+   * observed claim, with the ledger state and the intent. A reason cancels the task only if no device has claimed it, in one
+   * step against the claim. If the cancel won, the intent concludes `cancelled`; if a claim won, nothing changed and the work
+   * runs on. The intent gets no `cancelReason`, so a claim is never interrupted. Must be synchronous. Absent: nothing yields.
+   */
+  yieldUnclaimed?: (state: Readonly<LedgerState>, intent: Readonly<Intent>) => string | undefined;
 }
 
 /** One instance per embedded tenant. Only horizon retries use a process-local timer. */
@@ -789,6 +796,10 @@ export class HostExecutionCore {
       this.ledger.transaction(state => { state.intents[intent.id]!.cancelReason = 'expired'; });
       intent.cancelReason = 'expired';
     }
+    if (!terminal && !intent.cancelReason && !execution.started && execution.submission === 'delivered') {
+      const reason = this.options.yieldUnclaimed?.(this.ledger.snapshot(), intent);
+      if (reason !== undefined) await this.server.tasks.cancel(intent.taskId, reason, { ifUnclaimed: true });
+    }
     let attempt = await this.server.tasks.attempt(intent.taskId);
     this.verifyAttempt(intent, attempt);
     if (intent.cancelReason && !terminal) {
@@ -810,7 +821,12 @@ export class HostExecutionCore {
       if (attempt) row.attempt = attempt;
       if (attempt?.claimedExecutor || attempt?.ownerDeviceId) row.started = true;
     });
-    if (attempt?.status === 'cancelled' && !attempt.claimedExecutor && !attempt.ownerDeviceId && !terminal) {
+    // An attempt that cloud settled itself (device revoked or superseded, task abandoned) carries its `terminalCause` and gets
+    // no device terminal, claimed or not (#2335). No device can report it any more, so it settles like an unclaimed cancel.
+    // A device's own task.cancelled also sets `terminalCause`. Cloud stores its receipt before the attempt status, so read the
+    // terminal again once the attempt reads cancelled: one that landed between the two reads is finished, not settled past.
+    if (attempt?.status === 'cancelled' && !terminal) terminal = await this.server.tasks.deviceTerminal(intent.taskId);
+    if (attempt?.status === 'cancelled' && !terminal && (attempt.terminalCause !== undefined || (!attempt.claimedExecutor && !attempt.ownerDeviceId))) {
       this.ledger.transaction(state => settle(state, state.intents[intent.id]!, intent.cancelReason === 'expired' ? 'expired' : 'cancelled'));
       return true;
     }

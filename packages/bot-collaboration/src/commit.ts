@@ -4,7 +4,7 @@ import { admitLedgerWouldDo } from './ledger-compatibility.js';
 import { intentFacts } from './delegation.js';
 import { turnIntentRetired } from './compaction.js';
 import { concludeRoutineTurn, routineOccurrence, type BotRoutine } from './routines.js';
-import { dreamIntentIds } from './dream.js';
+import { dreamHolds, dreamIntentIds } from './dream.js';
 import { syncTurn, type SyncFacts, type SyncOptions } from './rules/sync.js';
 import { autonomousIntentIds, userFirst } from './rules/priority.js';
 import { cardCallDue, commitCommand, CONNECTOR_OUTCOME_UNKNOWN, refuseRetired, retiredIdentity, settleCardCall, type AdmittedIds, type Command,
@@ -86,6 +86,7 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
     retired: id => turnIntentRetired(ledger, s, turn, options.now) ? 'result_retired' : retiredIdentity('turn', id, (namespace, row) => rows.isRetired(namespace, row)) ? 'turn_retired' : undefined,
     // #957: a Turn whose Bot's device is frozen for a switch, or owned by H, is held and never frozen into an intent.
     deviceRefusal: botId => botDeviceRefusal(stateOf(s.application), botId),
+    dreamHold: botId => dreamHolds(s).get(botId),
   };
   refuseImported(stateOf(s.application));
   const step = syncTurn(stateOf(s.application), turn, facts, options, (key, value) => project(s, key, value));

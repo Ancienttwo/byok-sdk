@@ -18,7 +18,9 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
   readonly #mailbox: MailboxStore;
   readonly #devices: Pick<DeviceDirectory, 'get'>;
   readonly #messageIds = new Map<string, string>();
+  // A conditional request may answer differently, so it never shares an unconditional one's result.
   readonly #inFlight = new Map<string, Promise<TaskCancellationMutation | undefined>>();
+  readonly #inFlightIfUnclaimed = new Map<string, Promise<TaskCancellationMutation | undefined>>();
 
   constructor(state: InMemoryTaskAttemptState, mailbox: MailboxStore, devices: Pick<DeviceDirectory, 'get'>) {
     this.#state = state;
@@ -31,12 +33,13 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
     input: TaskCancellationRequest,
   ): Promise<TaskCancellationMutation | undefined> {
     const key = tenantKey(tenant, input.taskId);
-    const running = this.#inFlight.get(key);
+    const inFlight = input.ifUnclaimed === true ? this.#inFlightIfUnclaimed : this.#inFlight;
+    const running = inFlight.get(key);
     if (running !== undefined) return running;
     const operation = this.#request(tenant, key, input).finally(() => {
-      this.#inFlight.delete(key);
+      inFlight.delete(key);
     });
-    this.#inFlight.set(key, operation);
+    inFlight.set(key, operation);
     return operation;
   }
 
@@ -77,6 +80,7 @@ export class InMemoryTaskCancellationStore implements TaskCancellationStore {
       if (existing.status === 'complete' || existing.status === 'failed' || existing.status === 'cancelled') {
         return { attempt: existing };
       }
+      if (input.ifUnclaimed === true && existing.ownerDeviceId !== undefined) return { attempt: existing };
 
       const messageId = input.proposedMessageId;
       const message = await this.#mailbox.append(tenant, {
