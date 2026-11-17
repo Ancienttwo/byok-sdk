@@ -141,7 +141,7 @@ CREATE TABLE IF NOT EXISTS intent (
   memory_blocked json,
   cancel_reason  text    CHECK (cancel_reason IN ('expired', 'cancelled')),
   conclusion     text    CHECK (conclusion IN ('succeeded', 'failed', 'declined', 'cancelled', 'expired', 'superseded')),
-  -- K4 Execution.started: the SDK attempt has claimedRuntime or ownerDeviceId.
+  -- K4 Execution.started: the SDK attempt has claimedExecutor or ownerDeviceId.
   started        boolean NOT NULL DEFAULT false,
   -- The last SDK attempt and the device terminal that the reconciliation read.
   attempt        json,

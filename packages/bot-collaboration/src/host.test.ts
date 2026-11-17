@@ -254,7 +254,7 @@ it('reports a missing outcome as failure and exposes cancellation through the se
   const cancelled = await bot.input('cancel-turn', 'Stop this work');
   await running(cancelled);
   await vi.waitFor(async () => expect(await fixture.server.tasks.attempt(bot.core.intent(cancelled)!.taskId))
-    .toMatchObject({ claimedRuntime: 'pi', ownerDeviceId: fixture.deviceId }), { timeout: 5000 });
+    .toMatchObject({ claimedExecutor: { kind: 'runtime', runtimeId: 'pi' }, ownerDeviceId: fixture.deviceId }), { timeout: 5000 });
   await bot.cancelTurn(cancelled);
   await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[cancelled]).toMatchObject({ status: 'failed', conclusion: 'cancelled' }); }, { timeout: 5000 });
 });
@@ -283,7 +283,7 @@ it('#2244: a cancel terminal found by the K4 probe ends the Turn with no further
   const id = await bot.input('self-cancel', 'Stop this work');
   await running(id);
   await vi.waitFor(async () => expect(await fixture.server.tasks.attempt(bot.core.intent(id)!.taskId))
-    .toMatchObject({ claimedRuntime: 'pi', ownerDeviceId: fixture.deviceId }), { timeout: 5000 });
+    .toMatchObject({ claimedExecutor: { kind: 'runtime', runtimeId: 'pi' }, ownerDeviceId: fixture.deviceId }), { timeout: 5000 });
   await bot.cancelTurn(id);
   await observed(id, { status: 'failed', conclusion: 'cancelled' });
 });

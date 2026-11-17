@@ -150,7 +150,7 @@ async function smoke(owner, server, payloads) {
   // The Windows service is a single-file bundle, so its credential store loads koffi from an asset root.
   const nativeAssetRoot = isWindows ? await writeKoffiAssetRoot(path.join(work, `${owner}-native`), sdkNativeAssetTargets['win32-x64']) : undefined;
   await fs.writeFile(variant.config, JSON.stringify({
-    productName: 'Upgrade Smoke', productId: server.productId, serverUrl: server.url, storeDir, serviceEnrollment: { enabled: true }, nativeAssetRoot,
+    productName: 'Upgrade Smoke', deviceName: 'ci-smoke', productId: server.productId, serverUrl: server.url, storeDir, serviceEnrollment: { enabled: true }, nativeAssetRoot,
   }, null, 2));
   const cmd = commands(variant);
   log(`${owner}: store ${storeDir} (${storeDir.length} chars)`);

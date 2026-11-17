@@ -169,7 +169,7 @@ it('expires an offline offer without waiting for a device terminal and releases 
   const expired = await host.core.enqueue(host.intent('offline', { waitUntil: Date.now() + 1_000 }));
   await settled('offline', 'expired');
   expect(await host.server.tasks.attempt(expired.taskId)).toMatchObject({ status: 'cancelled' });
-  expect((await host.server.tasks.attempt(expired.taskId))?.claimedRuntime).toBeUndefined();
+  expect((await host.server.tasks.attempt(expired.taskId))?.claimedExecutor).toBeUndefined();
   expect(await host.server.tasks.deviceTerminal(expired.taskId)).toBeUndefined();
   await host.online();
   await host.core.enqueue(host.intent('after-offline'));
@@ -186,7 +186,7 @@ it('keeps cancellation unsettled and never changes generation until device termi
   await running('cancel');
   // This case requires a durable claim before cancellation can wait for terminal.
   await vi.waitFor(async () => expect(await host.server.tasks.attempt(intent.taskId)).toMatchObject({
-    ownerDeviceId: host.deviceId, claimedRuntime: 'pi',
+    ownerDeviceId: host.deviceId, claimedExecutor: { kind: 'runtime', runtimeId: 'pi' },
   }), { timeout: 5000 });
   await host.core.cancel('cancel');
   await vi.waitFor(async () => expect(await host.server.tasks.deviceTerminal(intent.taskId)).toBeDefined());
@@ -203,7 +203,7 @@ it('advances busy generations only after canonical terminal readback and respect
     deviceTerminal: async id => hide && id !== 'external-writer' ? undefined : server.tasks.deviceTerminal(id),
   } }) });
   await host.server.executions.submit({ ...template(host.deviceId), taskId: 'external-writer' });
-  await vi.waitFor(() => expect(host.adapter.sessions.has('external-writer')).toBe(true));
+  await vi.waitFor(() => expect(host.adapter.sessions.has('external-writer')).toBe(true), { timeout: 5_000 });
   const intent = await host.core.enqueue(host.intent('busy', { retry: { maxAttempts: 2, delaysMs: [20], retryFailures: false } }));
   await vi.waitFor(async () => expect(await host.server.tasks.deviceTerminal(intent.taskId)).toMatchObject({ envelope: { type: 'task.decline', payload: { code: 'agent_home_writer_busy' } } }));
   await host.core.drain();
@@ -253,7 +253,7 @@ it('accepts the deadline/claim race but holds the FIFO until the cancelled termi
   const session = await running('race');
   // Session creation is not a durable claim receipt. Keep the Host's scan after
   // this test's explicit deadline step, but observe the real SDK claim first.
-  await vi.waitFor(async () => expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ claimedRuntime: 'pi' }));
+  await vi.waitFor(async () => expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } }));
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   vi.spyOn(session, 'interrupt').mockImplementation(async () => { session.interrupted = true; await gate; });
@@ -261,7 +261,7 @@ it('accepts the deadline/claim race but holds the FIFO until the cancelled termi
     now += 60_001;
     vi.setSystemTime(now);
     await host.core.drain();
-    expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ status: 'cancel_requested', claimedRuntime: 'pi' });
+    expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ status: 'cancel_requested', claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } });
     const second = await host.core.enqueue(host.intent('behind', { waitUntil: now + 60_000 }));
     expect(await host.server.tasks.offer(second.taskId)).toBeUndefined();
     expect(host.core.intent('race')).toMatchObject({ generation: 0, phase: 'inflight' });

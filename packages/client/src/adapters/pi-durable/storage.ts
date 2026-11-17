@@ -1,5 +1,5 @@
 import type { Storage } from '@earendil-works/pi-durable';
-import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, SQLITE_USER_OBJECT } from '@byok-sdk/core/sqlite-node';
 import { existsSync } from 'node:fs';
 import { inspectReplicaDatabase, readInRolledBackTransaction } from './replica.js';
 
@@ -28,7 +28,7 @@ export const openLocalDurableStorage: DurableStorageFactory<string> = async file
     import('@earendil-works/pi-durable/storage/sqlite'),
   ]);
   const assertCurrent = (db: import('node:sqlite').DatabaseSync): 'empty' | 'current' => {
-    if (db.prepare("SELECT 1 FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").get() === undefined) return 'empty';
+    if (db.prepare(`SELECT 1 FROM sqlite_schema WHERE ${SQLITE_USER_OBJECT}`).get() === undefined) return 'empty';
     const table = db.prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = 'durable_schema'").get();
     const row = table === undefined ? undefined : db.prepare('SELECT version FROM durable_schema WHERE singleton = 1').get() as { version: unknown } | undefined;
     if (row?.version !== CURRENT_SQLITE_SCHEMA_VERSION) {

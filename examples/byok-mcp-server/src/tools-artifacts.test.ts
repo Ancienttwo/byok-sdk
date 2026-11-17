@@ -14,9 +14,9 @@ it('lists artifacts of a finished task and returns a working download URL only t
   const { taskId } = (await call(client, 'byok_task_submit', { runtime: 'pi', instruction: 'Produce a report file.' })).value;
   const content = Buffer.from('# B3 report\n');
   const ref = await host.uploadBlob(content, 'text/markdown');
-  await host.send(createEnvelope('task.claim', { deviceId: host.deviceId, agentRef: AGENT, runtime: 'pi' }, { taskId }));
+  await host.send(createEnvelope('task.claim', { deviceId: host.deviceId, agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }));
   await host.send(createEnvelope('task.started', {}, { taskId }));
-  await host.send(createEnvelope('task.complete', { agentRef: AGENT, summary: 'done', finalMessage: 'Report attached.', sessionRef: 'b3-sim', artifactRefs: [ref] }, { taskId }));
+  await host.send(createEnvelope('task.complete', { agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', finalMessage: 'Report attached.', sessionRef: 'b3-sim', artifactRefs: [ref] }, { taskId }));
 
   expect((await call(client, 'byok_task_status', { taskId })).value).toEqual({ taskId, state: 'Complete', finalMessage: 'Report attached.',
     artifacts: [{ index: 0, contentType: 'text/markdown', size: content.length }] });
@@ -43,8 +43,8 @@ it('pages this key\'s tasks newest first and filters by state', async () => {
   for (const name of ['first', 'second', 'third']) {
     ids.push((await call(client, 'byok_task_submit', { runtime: 'pi', instruction: `Task ${name}.`, clientRequestId: name })).value.taskId);
   }
-  await host.send(createEnvelope('task.claim', { deviceId: host.deviceId, agentRef: AGENT, runtime: 'pi' }, { taskId: ids[0]! }));
-  await host.send(createEnvelope('task.complete', { agentRef: AGENT, summary: 'done', sessionRef: 'b3-sim' }, { taskId: ids[0]! }));
+  await host.send(createEnvelope('task.claim', { deviceId: host.deviceId, agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: ids[0]! }));
+  await host.send(createEnvelope('task.complete', { agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'b3-sim' }, { taskId: ids[0]! }));
 
   const first = (await call(client, 'byok_task_list', { limit: 2 })).value;
   expect(first.tasks.map((task: { taskId: string }) => task.taskId)).toEqual([ids[2], ids[1]]);
@@ -65,7 +65,7 @@ it('dispatches toolsets on the Agent execution offer and accepts a retry only th
   const args = { runtime: 'pi', instruction: 'Use the docs toolset.', toolsets: ['docs', 'search.web'], clientRequestId: 'toolsets-1' };
   const submitted = (await call(client, 'byok_task_submit', args)).value;
   expect(await host.server.tasks.offer(submitted.taskId)).toMatchObject({ type: 'task.offer', deviceId: host.deviceId,
-    payload: { instruction: 'Use the docs toolset.', runtime: 'pi', agentRef: AGENT, terminalProjection: { mode: 'none' },
+    payload: { instruction: 'Use the docs toolset.', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT, terminalProjection: { mode: 'none' },
       requiredToolsets: ['docs', 'search.web'], session: { mode: 'fresh' }, egressPolicy: expect.any(Object) } });
   expect((await call(client, 'byok_task_submit', args)).value).toEqual({ ...submitted, deduplicated: true });
 });

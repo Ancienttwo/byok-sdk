@@ -36,7 +36,7 @@ const settled = await bot.reconcileGoal(hostGoalId, latest.revision);
 // and reserve a NEW taskId. waiting/blocked/paused never implicitly dispatch.
 ```
 
-`target` supplies exact deviceId, AgentRef, runtime and egressPolicy;
+`target` supplies exact deviceId, AgentRef, explicit ExecutionTarget and egressPolicy;
 requiredToolsets may be selected explicitly. The example uses one internal
 result-document channel and no user messageEgress. Wire v3 carries the frozen result schema; no result-document capability flag is negotiated. The SDK still applies canonical-home admission:
 no positive physical release receipt is inferred from a terminal. A busy home

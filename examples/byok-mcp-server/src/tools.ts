@@ -3,7 +3,7 @@ import type { AgentExecutionInput, ByokServer, MachineInfo, TaskSnapshot } from 
 import { RequiredToolsetsSchema, TASK_STATES, type RuntimeId, type TaskState } from '@byok-sdk/protocol';
 import type { ScopedTool } from './http';
 import type { BetaLedger } from './ledger';
-import { BetaError, canonicalJson, invalid, object, taskArguments, text, type Caller, type KeyInfo, type TaskArguments,
+import { BetaError, canonicalJson, invalid, object, runtimeTarget, taskArguments, text, type Caller, type KeyInfo, type TaskArguments,
   type TaskReservation } from './model';
 
 /** The public SDK surface the task tools use. The Host passes its own `createByokServer` instance. */
@@ -93,7 +93,7 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
     if (offer.type !== 'task.offer' || offer.payload.session.mode !== 'fresh' || offer.payload.sealing !== undefined || offer.taskId !== reservation.taskId
       || offer.deviceId !== reservation.binding.deviceId
       || canonicalJson(offer.payload.agentRef) !== canonicalJson(bindingAgent(reservation))
-      || offer.payload.instruction !== args.instruction || offer.payload.runtime !== args.runtime
+      || offer.payload.instruction !== args.instruction || canonicalJson(offer.payload.target) !== canonicalJson(runtimeTarget(args.runtime))
       || canonicalJson(offer.payload.requiredToolsets ?? null) !== canonicalJson(args.toolsets ?? null)) {
       throw new Error('SDK offer does not match the saved task binding');
     }
@@ -106,7 +106,7 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
     const agentRef = bindingAgent(reservation);
     try {
       await sdk.executions.submit({ taskId: reservation.taskId, deviceId: reservation.binding.deviceId, payload: {
-        runtime: args.runtime, session: { mode: 'fresh' }, instruction: args.instruction, agentRef,
+        target: runtimeTarget(args.runtime), session: { mode: 'fresh' }, instruction: args.instruction, agentRef,
         egressPolicy: options.egressPolicy, terminalProjection: { mode: 'none' },
         ...(args.toolsets ? { requiredToolsets: [...args.toolsets] } : {}) } });
     } catch {

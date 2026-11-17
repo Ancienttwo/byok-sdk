@@ -5,7 +5,7 @@
 // the receiver must durably deduplicate deliveryId. Never use SDK/Agent DBs here.
 import { randomUUID } from 'node:crypto';
 import type { ByokServer, AgentExecutionInput } from '@byok-sdk/server';
-import type { ResultSchema } from '@byok-sdk/protocol';
+import { ExecutionTargetSchema, type ResultSchema } from '@byok-sdk/protocol';
 import { HostRevisionConflict, type HostSnapshot } from './goal-btw-store';
 import type { BotTarget } from './goal-btw';
 import { SqliteClarificationStore } from './clarification-store';
@@ -75,10 +75,11 @@ function canonical(value: unknown): string {
   return JSON.stringify(value) ?? 'undefined';
 }
 function validateTarget(target: BotTarget): void {
-  const t = object(target); const allowed = ['deviceId','agentRef','runtime','egressPolicy','requiredToolsets'];
+  const t = object(target); const allowed = ['deviceId','agentRef','target','egressPolicy','requiredToolsets'];
   if (Object.keys(t).some(k => !allowed.includes(k))) throw new Error('Target contains undeclared authority');
   text(target.deviceId, 'deviceId', 200); text(target.agentRef?.agentId, 'agentId', 200); text(target.agentRef?.profileRevision, 'profileRevision', 200);
-  if (!['pi','claude','codex'].includes(target.runtime) || !target.egressPolicy) throw new Error('Invalid target');
+  const selected = ExecutionTargetSchema.safeParse(target.target);
+  if (!selected.success || selected.data.lane === 'auto' || !target.egressPolicy) throw new Error('Invalid target');
 }
 export function parseClarification(document: unknown): ClarificationResult {
   if (Buffer.byteLength(JSON.stringify(document) ?? '') > 16384) throw new Error('Clarification document too large');

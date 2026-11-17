@@ -28,7 +28,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   let extraStores: SqliteGoalBtwStore[];
   const accepted: (outcome: unknown) => boolean = () => true; // Fixture acceptance, not a production semantic proof.
   const target = (agentId = 'main-agent'): BotTarget => ({
-    deviceId, agentRef: { agentId, profileRevision: '1' }, runtime: 'pi', egressPolicy: policy,
+    deviceId, agentRef: { agentId, profileRevision: '1' }, target: { lane: 'runtime', runtimeId: 'pi' }, egressPolicy: policy,
   });
   function newGoal(id = 'goal', budget = 3, deadline = now + 10_000, agent = 'main-agent') {
     return host.startGoal({ id, objective: 'Complete the approved task', target: target(agent), maxSteps: budget, deadline });
@@ -60,7 +60,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     });
     closeHttp = listening.close;
     adapter = new BotStubAdapter();
-    daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' }, productName: 'Example Bot',
+    daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' }, productName: 'Example Bot', deviceName: 'ci-smoke',
       productId: 'goal-btw-test', serverUrl: listening.url, storeDir: path.join(root, 'sdk'),
       agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
     }, [adapter], { deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
@@ -79,7 +79,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     const sent = await startStep();
     const offer = await byok.tasks.offer('step-1');
     expect(offer).toMatchObject({ taskId: 'step-1', deviceId, type: 'task.offer', delivered: true,
-      payload: { runtime: 'pi', session: { mode: 'fresh' }, agentRef: target().agentRef, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } });
+      payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: target().agentRef, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } });
     expect(offer?.payload).not.toHaveProperty('sessionRef'); expect(offer?.payload).not.toHaveProperty('messageEgress');
     adapter.sessions.get('step-1')!.finish(result('continue')); await terminal('step-1');
     const continued = await host.reconcileGoal('goal', sent.revision);
@@ -353,13 +353,17 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
 });
 
 describe('goal/btw Host database format', () => {
-  it('refuses a store from before host_format without writing to it', async () => {
+  it.each([
+    ['a store from before host_format', `CREATE TABLE bot_state (host_id TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(host_id, key));
+        CREATE TABLE bot_execution_ids (host_id TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(host_id, task_id));`],
+    // `_` is a LIKE wildcard: NOT LIKE 'sqlite_%' would count this file as new (#2318).
+    ['a file whose only table is named like an SQLite one', 'CREATE TABLE sqliteX_notes (v TEXT)'],
+  ])('refuses %s without writing to it', async (_label, ddl) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'goal-btw-format-'));
     try {
       const file = path.join(dir, 'host.sqlite');
       const old = new DatabaseSync(file);
-      old.exec(`CREATE TABLE bot_state (host_id TEXT NOT NULL, key TEXT NOT NULL, revision INTEGER NOT NULL, body TEXT NOT NULL, PRIMARY KEY(host_id, key));
-        CREATE TABLE bot_execution_ids (host_id TEXT NOT NULL, task_id TEXT NOT NULL, PRIMARY KEY(host_id, task_id));`);
+      old.exec(ddl);
       old.close();
       const sha = () => createHash('sha256').update(readFileSync(file)).digest('hex');
       const before = sha();

@@ -1,7 +1,7 @@
 import { chmodSync, existsSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 
-import { readSqliteFileUnchanged, SqliteReadOnlyOpenError, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, SQLITE_USER_OBJECT, SqliteReadOnlyOpenError, sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 
 import {
   PROVIDER_CONFIGURATION_LOCK_WAIT_MS,
@@ -204,7 +204,7 @@ function assertCustodySchemaIsCurrent(database: DatabaseSync, path: string): voi
     if (typeof stored === 'string' && normalizeTableDdl(stored) === normalizeTableDdl(ddl)) continue;
     throw new ByokKeysError(
       'PROVIDER_STORE_SCHEMA_STALE',
-      `Provider profile store at ${path} lacks the current credential-custody schema; open it once with this @byok-sdk/keys version in writable mode before reading credentials`,
+      `Provider profile store at ${path} lacks the current credential-custody schema. A new, empty store gets it from its first writable open; for an existing store, keep this file and configure a new store at a new path`,
     );
   }
 }
@@ -218,7 +218,7 @@ function assertCustodySchemaIsCurrent(database: DatabaseSync, path: string): voi
  */
 function assertCurrentKeysStoreFormat(database: DatabaseSync, path: string): 'empty' | 'current' {
   const objects = database
-    .prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'")
+    .prepare(`SELECT count(*) AS n FROM sqlite_schema WHERE ${SQLITE_USER_OBJECT}`)
     .get() as { n: number };
   if (Number(objects.n) === 0) return 'empty';
   assertProviderProfileSchemaIsCurrent(database, path);

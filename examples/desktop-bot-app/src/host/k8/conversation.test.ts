@@ -38,7 +38,7 @@ afterEach(async () => {
 /** The daemon's own ready fact: the server accepted this run's hello. */
 const ready = (daemon: Daemon) => daemon.whenOpen({ signal: AbortSignal.timeout(5000) });
 function newDaemon(fx: Pick<Fixture, 'root' | 'listener' | 'adapter' | 'deviceCredentials'>): Daemon {
-  return createDaemonWithAdapters({ productId, productName: 'Desktop K8 Test', localAgentRelease: { version: '0.0.0-test' },
+  return createDaemonWithAdapters({ productId, productName: 'Desktop K8 Test', deviceName: 'ci-smoke', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: fx.listener.serverUrl, storeDir: path.join(fx.root, 'sdk'),
     agentHome: { hostStorageRoot: fx.root, projection: createBotPersonaProjection() }, agentEgress: { policy },
   }, [fx.adapter], { deviceCredentials: fx.deviceCredentials });
@@ -65,7 +65,7 @@ async function open(): Promise<Fixture> {
   const { deviceId } = await daemon.pair((await server.pairing.createPairingCode({ productId })).code);
   await daemon.start(); await ready(daemon);
   const execution: ExecutionTemplate = { deviceId, agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'desktop' }, payload: {
-    runtime: 'pi', session: { mode: 'fresh' }, instruction: 'Answer the user.', agentRef: { agentId: 'host', profileRevision: '1' }, egressPolicy: policy,
+    target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, instruction: 'Answer the user.', agentRef: { agentId: 'host', profileRevision: '1' }, egressPolicy: policy,
     messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
     terminalProjection: { mode: 'result-document', contract: 'desktop-test-v1', schema: { type: 'object' } },
   } };
@@ -277,14 +277,24 @@ it('refuses a created or re-pointed Bot whose model is not in the catalog before
   await refused(fx, { ...WRITER, model: 'missing' }, /Unavailable model: missing/);
 });
 
-it('refuses an older Host store before any write, leaving the file and its directory unchanged', async () => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'desktop-store-'));
-  try {
-    const file = path.join(root, 'store.sqlite');
+it.each([
+  ['an older Host store', (file: string) => {
     HostStore.open(file).close();
     const old = new DatabaseSync(file);
     old.exec(`PRAGMA journal_mode = DELETE; UPDATE meta SET value = 0 WHERE key = 'schema';`);
     old.close();
+  }],
+  // `_` is a LIKE wildcard: NOT LIKE 'sqlite_%' would count this file as new (#2318).
+  ['a file whose only table is named like an SQLite one', (file: string) => {
+    const old = new DatabaseSync(file);
+    old.exec('CREATE TABLE sqliteX_notes (v TEXT)');
+    old.close();
+  }],
+])('refuses %s before any write, leaving the file and its directory unchanged', async (_label, write) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'desktop-store-'));
+  try {
+    const file = path.join(root, 'store.sqlite');
+    write(file);
     const sha = async () => createHash('sha256').update(await readFile(file)).digest('hex');
     const before = await sha(), entries = await readdir(root);
     expect(() => HostStore.open(file)).toThrow(StoreFormatError);

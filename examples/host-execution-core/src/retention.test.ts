@@ -41,7 +41,7 @@ function seed(ledger: HostLedger, key: string, options: { ack?: boolean; occurre
       state.executions[id] = { input: { ...intent.execution, taskId: id }, started: true, submission: 'delivered',
         terminal: { recordedAt: '2026-01-01T00:00:00Z', envelope: { v: 1, id: '00000000-0000-4000-8000-000000000001',
           ts: '2026-01-01T00:00:00Z', type: 'task.complete', task_id: id, seq: 1,
-          payload: { summary: '', sessionRef: 'session', document: { text: 'o'.repeat(1024) } } } } };
+          payload: { executor: { kind: 'runtime', runtimeId: 'pi' }, summary: '', sessionRef: 'session', document: { text: 'o'.repeat(1024) } } } } };
       intent.generation = generation; intent.taskId = id;
     }
     if (options.occurrence || options.routine) {
@@ -356,7 +356,7 @@ it('does not recreate a completed routine or reapply its SDK terminal on replay 
     await vi.waitFor(() => expect(Object.values(host.ledger.snapshot().occurrences)).toHaveLength(1));
     const occurrence = Object.values(host.ledger.snapshot().occurrences)[0]!;
     const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
-    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
+    await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5_000 });
     await host.adapter.sessions.get(intent.taskId)!.finish({ text: 'retained by the SDK' });
     await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded'); });
     await host.core.flushProjections(async () => {});

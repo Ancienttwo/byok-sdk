@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { AgentRefSchema, RuntimeIdSchema, type AgentRef, type RuntimeId } from '@byok-sdk/protocol';
+import { AgentRefSchema, RuntimeIdSchema, type AgentRef, type ExecutionTarget, type RuntimeId } from '@byok-sdk/protocol';
 
 export const SCOPES = ['tasks.dispatch', 'tasks.read', 'tasks.cancel', 'artifacts.read',
   'routines.read', 'routines.write', 'memory.read', 'memory.write'] as const;
@@ -132,6 +132,11 @@ export function taskArguments(value: unknown): TaskArguments {
     ...(input.toolsets === undefined ? {} : { toolsets: list(input.toolsets, item => text(item), true) }),
     ...(input.resultSchema === undefined ? {} : { resultSchema: object(input.resultSchema) as Record<string, Json> }),
     ...(requestId === undefined ? {} : { clientRequestId: requestId }) };
+}
+
+/** The offer target of a task argument `runtime`: the built-in runtime with the device's model. */
+export function runtimeTarget(runtimeId: RuntimeId): Extract<ExecutionTarget, { lane: 'runtime' }> {
+  return { lane: 'runtime', runtimeId };
 }
 
 /** Bounded, deterministic JSON. Reject lossy values before they become identity. */

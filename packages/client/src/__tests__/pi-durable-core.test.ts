@@ -64,6 +64,15 @@ describe('durable replica and tool boundaries', () => {
     expect(await sha256(file)).toBe(before);
     expect(await readdir(path.dirname(file))).toEqual(entries);
   });
+  // `_` is a LIKE wildcard: NOT LIKE 'sqlite_%' would count this replica as new and let pi-durable write to it (#2318).
+  it('refuses a replica whose only table is named like an SQLite one without writing to it', async () => {
+    const { root, binding } = await setup(); const file = await admitReplica(path.join(root, 'durable'), binding);
+    const fixture = new DatabaseSync(file); fixture.exec('CREATE TABLE sqliteX_notes (v TEXT)'); fixture.close();
+    const before = await sha256(file), entries = await readdir(path.dirname(file));
+    await expect(openLocalDurableStorage(file)).rejects.toBeInstanceOf(DurableReplicaFormatError);
+    expect(await sha256(file)).toBe(before);
+    expect(await readdir(path.dirname(file))).toEqual(entries);
+  });
   /** A copy of `source` whose schema and rows exist only in its WAL, as a replica that crashed before its first checkpoint leaves it. */
   async function walOnlyCopy(source: string, target: string, edit: string): Promise<void> {
     const original = `${target}.source`, scratch = `${target}.scratch`;

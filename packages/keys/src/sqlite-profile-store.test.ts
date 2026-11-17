@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ByokKeysError } from './errors';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import type { ModelProviderProfile } from './provider-profile';
+import { SQLITE_USER_OBJECT } from '@byok-sdk/core/sqlite-node';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable, openSqliteDatabase } from './sqlite-support';
 
@@ -361,11 +362,24 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     expect(tableNames(databasePath)).not.toContain('provider_custody_watermark');
   });
 
+  // `_` is a LIKE wildcard: a filter written as NOT LIKE 'sqlite_%' would count this file as new (#2318).
+  it('refuses a file whose only table is named like an SQLite one, without writing to it', () => {
+    mkdirSync(join(directory, 'nested'));
+    const raw = openSqliteDatabase(databasePath);
+    raw.exec('CREATE TABLE sqliteX_notes (v TEXT)');
+    raw.exec('PRAGMA journal_mode = DELETE');
+    raw.close();
+    const hash = sha256(databasePath);
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+    expect(sha256(databasePath)).toBe(hash);
+    expect(tableNames(databasePath)).toEqual(['sqliteX_notes']);
+  });
+
   it('refuses a stale schema held only in an un-checkpointed WAL before any DDL', async () => {
     const source = join(directory, 'source.sqlite');
     await new SqliteProviderProfileStore({ path: source }).close();
     const reader = openSqliteDatabase(source, { readOnly: true });
-    const ddl = (reader.prepare("SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND name NOT LIKE 'sqlite_%' AND name <> 'provider_custody_watermark' ORDER BY type DESC").all() as { sql: string }[]).map((row) => row.sql);
+    const ddl = (reader.prepare(`SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND ${SQLITE_USER_OBJECT} AND name <> 'provider_custody_watermark' ORDER BY type DESC`).all() as { sql: string }[]).map((row) => row.sql);
     reader.close();
     const walOnly = join(directory, 'wal-only.sqlite');
     const writer = openSqliteDatabase(walOnly);

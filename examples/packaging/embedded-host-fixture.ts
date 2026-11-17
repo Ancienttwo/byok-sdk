@@ -90,7 +90,7 @@ async function host(): Promise<void> {
   }));
   await profiles.close();
   const daemon = createDaemon({
-    localAgentRelease: { version: '0.0.0-packaging' }, productName: 'BYOK Packaging', productId: PRODUCT_ID, serverUrl,
+    localAgentRelease: { version: '0.0.0-packaging' }, productName: 'BYOK Packaging', productId: PRODUCT_ID, deviceName: 'packaging-host', serverUrl,
     storeDir: path.join(root, 'store'), storage: { scratchRoot: path.join(root, 'scratch') },
     agentHome: { hostStorageRoot: path.join(root, 'home') }, agentEgress: { policy: EGRESS_POLICY },
     runtimeAllowlist: ['pi'], ...hosting.daemon, runtimes: hosting.adapters.runtimes,
@@ -103,8 +103,8 @@ async function host(): Promise<void> {
     await daemon.whenOpen({ signal: AbortSignal.timeout(60_000) });
     const { taskId } = await byok.executions.submit({
       taskId: randomUUID(), deviceId,
-      payload: { instruction: 'reply once', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
-        terminalProjection: { mode: 'none' }, dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'packaging', modelId: 'packaging-model' } },
+      payload: { instruction: 'reply once', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
+        terminalProjection: { mode: 'none' }, target: { lane: 'byok', runtimeId: 'pi', providerId: 'packaging', modelId: 'packaging-model' } },
     });
     const task = await until(async () => {
       const snapshot = await byok.tasks.get(taskId);

@@ -57,7 +57,7 @@ import {
   type WithheldOfferRecord,
   type WithheldOfferTask,
 } from './journal.js';
-import { readSqliteFileUnchanged, SqliteReadOnlyOpenError } from '@byok-sdk/core/sqlite-node';
+import { readSqliteFileUnchanged, SQLITE_USER_OBJECT, SqliteReadOnlyOpenError } from '@byok-sdk/core/sqlite-node';
 import {
   isSqliteAvailable,
   JournalHandleCleanupError,
@@ -274,7 +274,7 @@ let currentJournalTables: ReadonlyMap<string, string> | undefined;
 /** `table -> sorted column names` for every user table in `db`. */
 function journalTables(db: DatabaseSync): Map<string, string> {
   const tables = new Map<string, string>();
-  const rows = db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'").all() as Array<{ name: string }>;
+  const rows = db.prepare(`SELECT name FROM sqlite_schema WHERE type = 'table' AND ${SQLITE_USER_OBJECT}`).all() as Array<{ name: string }>;
   for (const { name } of rows) {
     const columns = db.prepare('SELECT name FROM pragma_table_info(?)').all(name) as Array<{ name: string }>;
     tables.set(name, columns.map((column) => column.name).sort().join(','));
@@ -306,7 +306,7 @@ const PRESERVE = 'preserve/export this journal and resolve it before starting th
  * refused with {@link JournalUnavailableError} and left as it is.
  */
 function assertCurrentJournalFormat(db: DatabaseSync): 'empty' | 'current' {
-  const objects = db.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%'").get() as { n: number };
+  const objects = db.prepare(`SELECT count(*) AS n FROM sqlite_schema WHERE ${SQLITE_USER_OBJECT}`).get() as { n: number };
   if (Number(objects.n) === 0) return 'empty';
   const tables = journalTables(db);
   const terminal = tables.get('journal_terminal');

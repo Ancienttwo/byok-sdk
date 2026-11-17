@@ -13,7 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { ClaudeAdapter, CodexAdapter, GrokAdapter, PiAdapter, type RuntimeAdapter } from '@byok-sdk/client';
-import type { DispatchSelection } from '@byok-sdk/protocol';
+import type { ExecutionTarget } from '@byok-sdk/protocol';
 import { CORPUS } from './corpus.js';
 import { MEASURED_RUNTIMES, plannedManifest, RESERVED_CELL_KEYS, runCell, type MeasuredRuntime } from './harness.js';
 import type { RunManifest } from './records.js';
@@ -44,11 +44,13 @@ Options:
   --out <dir>               Output directory for the redacted dataset
 `;
 
-function selectionFor(runtime: MeasuredRuntime, model: string): DispatchSelection | undefined {
-  // Claude and Codex take the model through the subscription lane. Grok takes it as
-  // an adapter option. Pi BYOK needs a credential-custody launcher, so Pi uses the
-  // model of its own configuration, and the cell records the operator label.
-  return runtime === 'claude' || runtime === 'codex' ? { lane: 'subscription', runtimeId: runtime, providerId: null, modelId: model } : undefined;
+function targetFor(runtime: MeasuredRuntime, model: string): ExecutionTarget {
+  // Claude and Codex take the model through the subscription lane. Grok is a custom
+  // harness and takes the model as an adapter option. Pi BYOK needs a credential-custody
+  // launcher, so Pi uses the model of its own configuration, and the cell records the
+  // operator label.
+  if (runtime === 'claude' || runtime === 'codex') return { lane: 'subscription', runtimeId: runtime, modelId: model };
+  return runtime === 'grok' ? { lane: 'harness', harnessId: 'grok' } : { lane: 'runtime', runtimeId: 'pi' };
 }
 
 function builtinAdapters(runtime: MeasuredRuntime, model: string): () => RuntimeAdapter[] {
@@ -65,11 +67,11 @@ const positive = (name: string, value: string | undefined, fallback?: number): n
 
 class UsageError extends Error {}
 
-function describePlan(manifest: RunManifest, model: string, selection: DispatchSelection | undefined): string {
+function describePlan(manifest: RunManifest, model: string, target: ExecutionTarget): string {
   const roundBytes = CORPUS.filter(entry => manifest.plan.order.includes(entry.id)).reduce((sum, entry) => sum + entry.bytes.instruction, 0);
   return [
     `Cell: ${manifest.cellId}`,
-    `Runtime: ${String(manifest.cell.runtime)}; model ${model} ${selection ? '(sent as the subscription dispatch selection)' : manifest.cell.runtime === 'grok' ? '(set as the Grok adapter model)' : '(from the Pi configuration; recorded as a label)'}`,
+    `Runtime: ${String(manifest.cell.runtime)}; model ${model} ${target.lane === 'subscription' ? '(sent as the subscription target)' : target.lane === 'harness' ? '(set as the Grok adapter model)' : '(from the Pi configuration; recorded as a label)'}`,
     `Corpus: ${manifest.corpus.revision}; preflight ${manifest.corpus.preflight.ok ? 'ok' : 'FAILED: the run is void'}`,
     `Plan: ${manifest.plan.calibrationTrials} uncounted calibration trial + ${manifest.plan.rounds} rounds x ${manifest.plan.order.length} cases = ${manifest.plan.plannedTrials} counted trials`,
     `Runtime tasks: ${manifest.plan.runtimeTasks} (max-trials ${manifest.budget.maxTrials}). Each task makes at least two model requests; token counts are unknown until measured.`,
@@ -110,18 +112,18 @@ export async function main(argv: readonly string[], deps: CliDeps = {}): Promise
       if (RESERVED_CELL_KEYS.includes(fact.slice(0, eq))) throw new UsageError(`--cell ${fact.slice(0, eq)} is set by the runner`);
       cell[fact.slice(0, eq)] = fact.slice(eq + 1);
     }
-    const selection = selectionFor(runtime, model);
+    const target = targetFor(runtime, model);
     const cellId = `${runtime}.${model}.${process.platform}-${process.arch}`.replace(/[^A-Za-z0-9._-]/g, '_');
     const synthetic = deps.adapters !== undefined;
     const common = {
-      runId, cellId, runtime, ...(selection ? { dispatchSelection: selection } : {}), rounds, caseIds, maxTrials,
+      runId, cellId, runtime, target, rounds, caseIds, maxTrials,
       capacityReasons: values['capacity-reason'] ?? ['context_overflow'], calibrate: true, cell,
       authorization: values.authorization ?? null, maxSpend: values['max-spend'] ?? null,
     };
     if (!values.execute) {
       const manifest = plannedManifest({ ...common, mode: 'dry-run', deadlineMs: positive('deadline-ms', values['deadline-ms'], 600_000) });
       out('DRY RUN: no daemon, no runtime and no provider call.');
-      out(describePlan(manifest, model, selection));
+      out(describePlan(manifest, model, target));
       out('A real run needs --execute --authorization <ref> --deadline-ms <ms> --max-spend <label> --out <dir>.');
       if (values.json) out(JSON.stringify(manifest, null, 2));
       return 0;

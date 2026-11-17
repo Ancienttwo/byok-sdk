@@ -82,7 +82,9 @@ const configPath = path.join(workDir, 'config.json');
 // The OS credential provider is intentionally outside `workDir`. Give every
 // smoke run its own product authority so a prior interrupted run cannot make
 // this nominally-unpaired service start from a retained credential.
-const productId = `${name}-${randomUUID()}`;
+// A fixed short prefix: the service name plus a UUID can exceed the 64-character
+// productId bound that createPairingCode enforces.
+const productId = `ctlsocket-check-${randomUUID()}`;
 // Default long-poll hold: this façade serves the wire over HTTP only (WP3B
 // Step 2 removed the WS attachment), so the service-launched daemon runs the
 // protocol §8 long-poll transport. Stopping the daemon aborts its in-flight
@@ -125,6 +127,7 @@ try {
     configPath,
     JSON.stringify({
       productName: 'Control Socket Check',
+      deviceName: 'ci-smoke',
       productId,
       serverUrl,
       storeDir,

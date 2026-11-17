@@ -63,9 +63,8 @@ const RESULT_SCHEMA = Object.freeze({
   properties: { ok: { type: 'boolean' } },
 });
 const PI_SESSION_REF = /^[A-Za-z0-9-]{1,128}$/u;
-const ADVERTISED_CAPABILITIES = [...new Set(WIRE_ADDITIONS.flatMap(function (row) {
-  return row.kind === 'envelope' && row.rule === 'gated' && row.advertisedBy === 'device' ? [row.capability] : [];
-}))];
+// Every wire v7 row gates a server-to-daemon surface on a device flag.
+const ADVERTISED_CAPABILITIES = [...new Set(WIRE_ADDITIONS.map(function (row) { return row.capability; }))];
 
 const K4_PER_TASK_TABLES = ['intents', 'executions', 'occurrences', 'slots', 'outbox', 'applied', 'application'];
 const K4_TOMBSTONE_RETENTION_MS = Math.max(30 * DAY_MS, MIN_TOMBSTONE_RETENTION_MS);
@@ -74,7 +73,7 @@ const K4_TOMBSTONE_RETENTION_MS = Math.max(30 * DAY_MS, MIN_TOMBSTONE_RETENTION_
 function k4SettleTask(ledger, agentRef, egressPolicy, key, failed, now) {
   ledger.transaction(state => {
     const intent = enqueue(state, ledger.tenant, { key, source: 'user', waitUntil: now + DAY_MS, execution: { deviceId: 'soak-device', payload: {
-      session: { mode: 'fresh' }, instruction: 'retention soak task', runtime: 'pi', agentRef, egressPolicy,
+      session: { mode: 'fresh' }, instruction: 'retention soak task', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, egressPolicy,
       terminalProjection: { mode: 'result-document', contract: RESULT_CONTRACT, schema: RESULT_SCHEMA },
     } } });
     if (!failed) {
@@ -334,6 +333,8 @@ async function main() {
   const sent = [];
   const runner = new TaskRunner({
     getIngressBudget: () => ({ activityMaxEvents: 50, activityMaxBytes: 65_536 }),
+    // No cloud here: every claim is accepted, so the runtime starts (#2294).
+    awaitClaimSettlement: async () => ({ outcome: 'accepted' }),
     advertisedCapabilities: () => ADVERTISED_CAPABILITIES,
     agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }),
@@ -424,7 +425,7 @@ async function main() {
       const shouldFail = options.failEvery > 0 && taskNumber > 0 && taskNumber % options.failEvery === 0;
       adapter.startError = shouldFail ? new Error('soak deterministic runtime start failure') : undefined;
       const payload = {
-        agentRef, instruction: 'retention soak task', runtime: 'pi',
+        agentRef, instruction: 'retention soak task', target: { lane: 'runtime', runtimeId: 'pi' },
         session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         ...(shouldFail ? {} : { terminalProjection: { mode: 'result-document', contract: RESULT_CONTRACT, schema: RESULT_SCHEMA } }),
       };

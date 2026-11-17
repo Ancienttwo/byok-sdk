@@ -92,7 +92,7 @@ export type Host = Awaited<ReturnType<typeof openHost>>;
 export async function openDaemonHost() {
   const host = await openHost();
   const runtime = new FakeRuntime();
-  const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'B3 test', localAgentRelease: { version: '0.0.0-test' },
+  const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'B3 test', deviceName: 'ci-smoke', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: host.origin, storeDir: join(host.root, 'sdk'),
     agentHome: { hostStorageRoot: join(host.root, 'homes') }, agentEgress: { policy } },
   [runtime], { deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });

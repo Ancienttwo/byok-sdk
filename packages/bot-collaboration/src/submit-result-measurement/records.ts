@@ -70,7 +70,7 @@ export interface CalibrationResult {
 }
 
 export interface RunManifest {
-  readonly schema: 'byok.submit-result-measurement.manifest.v1';
+  readonly schema: 'byok.submit-result-measurement.manifest.v2';
   readonly runId: string;
   readonly cellId: string;
   readonly mode: 'dry-run' | 'execute' | 'synthetic';

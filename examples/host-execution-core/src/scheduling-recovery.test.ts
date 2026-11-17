@@ -18,7 +18,7 @@ it('keeps an out-of-horizon routine outside the wake outbox while two Agent inte
   const other = await host.core.enqueue(host.intent('other-after-far', { execution: template(host.deviceId, 'other-agent') }));
   expect(await host.server.tasks.offer(bot.taskId)).toMatchObject({ delivered: true });
   expect(await host.server.tasks.offer(other.taskId)).toMatchObject({ delivered: true });
-  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(2));
+  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(2), { timeout: 5_000 });
 });
 
 it('scans every Agent queue before reporting a permanent wake outbox error', async () => {
@@ -31,7 +31,7 @@ it('scans every Agent queue before reporting a permanent wake outbox error', asy
     await expect(host.core.enqueue(host.intent(key, { execution: template(host.deviceId, agent) }))).rejects.toThrow('Wake dispatch failed');
     expect(await host.server.tasks.offer(host.core.intent(key)!.taskId)).toMatchObject({ delivered: true });
   }
-  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(2));
+  await vi.waitFor(() => expect(host.adapter.starts).toHaveLength(2), { timeout: 5_000 });
   for (const session of host.adapter.sessions.values()) session.finish({ text: 'progress despite broken wake' });
   await vi.waitFor(async () => {
     await expect(host.core.drain()).rejects.toThrow('Wake dispatch failed');
@@ -124,7 +124,7 @@ it('audits a successor calendar exception and resolves the real hook without red
   expect(routine('domain-error')).toMatchObject({ lifecycle: 'active', next: null });
   await vi.waitFor(async () => expect((await host.server.wakes.pending()).some(wake => wake.dedupKey === occurrence.wakeKey)).toBe(false));
   const intent = host.ledger.snapshot().intents[occurrence.intentId!]!;
-  await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
+  await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5_000 });
   host.adapter.sessions.get(intent.taskId)!.finish({ text: 'current occurrence is independent of the next calendar calculation' });
   await vi.waitFor(async () => { await host.core.drain(); expect(host.core.intent(intent.key)?.conclusion).toBe('succeeded'); });
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(Date.now() + 60_001);

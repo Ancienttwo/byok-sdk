@@ -9,7 +9,7 @@ import { InMemoryDeviceCredentialBackend } from '../../../dist/testing/index.js'
 
 const [configPath, flag] = process.argv.slice(2);
 if (flag === '--service') await applyLoginShellEnvironment();
-const config = { ...JSON.parse(readFileSync(configPath, 'utf8')), localAgentRelease: { version: '0.0.0-test' } };
+const config = { deviceName: 'ci-smoke', ...JSON.parse(readFileSync(configPath, 'utf8')), localAgentRelease: { version: '0.0.0-test' } };
 const daemon = createDaemon(config, { deviceCredentials: new InMemoryDeviceCredentialBackend() });
 let detected = [];
 daemon.subscribe((event) => {

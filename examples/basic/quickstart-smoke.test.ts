@@ -87,6 +87,7 @@ describe('examples/basic quickstart with default settings', () => {
     daemon = createDaemonWithAdapters({
       localAgentRelease: { version: '0.0.0-example-stub' },
       productName: 'BYOK Example',
+      deviceName: 'ci-smoke',
       productId: PRODUCT_ID,
       serverUrl: server.url,
       storeDir: path.join(root, 'store'),
