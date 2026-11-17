@@ -23,7 +23,7 @@ interface Dependencies {
   agentHomeContractCapability: string;
 }
 
-/** The Host projection-receipt reads and completions, plus the store-bound completions the device routes call. */
+/** The Host projection-receipt reads, plus the store-bound completions the device routes call. */
 export function createProjectionReceiptsApi({
   root,
   controlPlane,
@@ -32,9 +32,7 @@ export function createProjectionReceiptsApi({
   agentHomeContractCapability,
 }: Dependencies): Pick<ByokCloud,
   | 'getAgentHomeProjectionStatus'
-  | 'completeAgentHomeProjection'
   | 'getInputPreparationStatus'
-  | 'completeInputPreparation'
 > & {
   completeAgentHomeProjectionFromStores: (stores: TenantStores, deviceId: string, receiptInput: AgentHomeProjectionCompletionRequest) => Promise<AgentHomeProjectionReadback>;
   completeInputPreparationFromStores: (stores: TenantStores, deviceId: string, receiptInput: InputPreparationCompletionRequest) => Promise<InputPreparationReadback>;
@@ -49,18 +47,6 @@ export function createProjectionReceiptsApi({
       tenant,
       deviceId,
       input,
-    );
-  }
-
-  async function completeAgentHomeProjection(
-    tenant: TenantId,
-    deviceId: string,
-    receiptInput: AgentHomeProjectionCompletionRequest,
-  ): Promise<AgentHomeProjectionReadback> {
-    return completeAgentHomeProjectionFromStores(
-      tenantStoresFor(controlPlane(tenant), root),
-      deviceId,
-      receiptInput,
     );
   }
 
@@ -94,18 +80,6 @@ export function createProjectionReceiptsApi({
       tenant,
       deviceId,
       input,
-    );
-  }
-
-  async function completeInputPreparation(
-    tenant: TenantId,
-    deviceId: string,
-    receiptInput: InputPreparationCompletionRequest,
-  ): Promise<InputPreparationReadback> {
-    return completeInputPreparationFromStores(
-      tenantStoresFor(controlPlane(tenant), root),
-      deviceId,
-      receiptInput,
     );
   }
 
@@ -150,10 +124,8 @@ export function createProjectionReceiptsApi({
 
   return {
     getAgentHomeProjectionStatus,
-    completeAgentHomeProjection,
     completeAgentHomeProjectionFromStores,
     getInputPreparationStatus,
-    completeInputPreparation,
     completeInputPreparationFromStores,
   };
 }

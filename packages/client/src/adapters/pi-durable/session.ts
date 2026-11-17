@@ -38,7 +38,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   const manifest = input.manifest;
   if (!context || !manifest.agentRef || !manifest.lease || runtimeLaunch.credentialSource !== 'keys-profile' || runtimeLaunch.kind !== 'pi-durable'
     || manifest.cwd !== manifest.lease.canonicalHome || input.signal?.aborted) throw startFailure('durable requires current Agent lease and credential custody');
-  const selection = manifest.dispatchSelection;
+  const selection = manifest.modelTarget;
   if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw startFailure('durable requires BYOK selection');
   const binding = { agentRef: { ...manifest.agentRef, tenantId: context.tenantId }, taskId: manifest.taskId, leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome };
   const configDir = input.scratch.sdkDir;

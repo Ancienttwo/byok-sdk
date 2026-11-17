@@ -32,7 +32,7 @@ function template(tenant: string, instruction = 'Check the watchlist.') {
     routineRef, agentRef, instruction });
 }
 async function sealedInput(taskId: string, deviceId: string, tenant = 'tenant-k4'): Promise<SealedAgentExecutionInput> {
-  return { taskId, deviceId, payload: { runtime: 'pi', session: { mode: 'fresh' }, agentRef, egressPolicy, terminalProjection, sealing, sealed: await template(tenant), routineRef } };
+  return { taskId, deviceId, payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef, egressPolicy, terminalProjection, sealing, sealed: await template(tenant), routineRef } };
 }
 function plain(input: SealedAgentExecutionInput): FrozenInput {
   const { sealing: _, sealed: __, routineRef: ___, ...payload } = input.payload;
@@ -121,7 +121,7 @@ describe('a sealed frozen input on the cloud (#953)', () => {
     const { code } = await cloud.createPairingCode(tenant, { productId: 'k4-sealed' });
     const publicKey = (generateKeyPairSync('ed25519').publicKey.export({ format: 'jwk' }) as { x: string }).x;
     const paired = await cloud.fetch(new Request('http://cloud.test/byok/pair', { method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ pairingCode: code, deviceName: 'k4-device', devicePublicKey: publicKey }) }));
+      body: JSON.stringify({ pairingCode: code, deviceName: 'k4-device', devicePublicKey: publicKey, expectedDeviceDigest: null }) }));
     const { deviceId } = await paired.json() as { deviceId: string };
     const probe = await sealedInput('probe', deviceId);
     await stores.devices.recordCapabilities(tenant, { deviceId,

@@ -11,10 +11,12 @@ import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { memoryClaude } from './fixtures/memory-claude';
 
+const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+
 const fixture = fileURLToPath(new URL('./fixtures/claude-native-interactions.mjs', import.meta.url));
 const sessions: Session[] = [];
 const directories: string[] = [];
-const task = { instruction: 'Offline native interaction test' };
+const task = { target: CLAUDE_TARGET, instruction: 'Offline native interaction test' };
 
 async function start(scenario: string, native: NativeInteractionHostOptions | undefined, sessionRef?: string) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-native-'));

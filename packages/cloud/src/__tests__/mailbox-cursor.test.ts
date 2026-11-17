@@ -40,14 +40,14 @@ describe('GET /byok/events cursor semantics', () => {
     const enqueued = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: {
         ...offerPayload('find qualified leads'),
-        runtime: 'claude',
+        target: { lane: 'runtime' as const, runtimeId: 'claude' as const },
         requiredToolsets: ['salesko'],
       },
     });
 
     const page = await poll(harness, device.authorization);
-    // Wire v3 folded the former `result-document` flag into the baseline.
-    expect(page.capabilities).not.toContain('result-document');
+    // Wire v7 removed the server capability channel from the events page.
+    expect(page).not.toHaveProperty('capabilities');
     expect(page.events).toHaveLength(1);
     expect(page.events[0]?.type).toBe('task.offer');
     expect(page.events[0]).toEqual(enqueued.envelope);
@@ -336,6 +336,7 @@ describe('enqueueAgentOffer', () => {
     await base.stores.devices.register(TENANT_A, {
       deviceId: 'dev_whoever', productId: 'probe', deviceName: 'fixture',
       devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1,
+      expectedDeviceDigest: null,
     });
     await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: 'dev_whoever', capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
     await expect(

@@ -47,9 +47,6 @@ import type { ByokServerStorage } from './types.js';
  * keep honest for every other deployment.
  */
 
-/** Per-product blob size ceiling (§7): 100MB unless overridden. */
-export const DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024;
-
 /**
  * Real time, deliberately — the same choice `@byok-sdk/cloud`'s in-memory
  * composition makes and for the same reason: a daemon compares the `expiresAt`
@@ -223,6 +220,7 @@ function observingMailbox(inner: MailboxStore, presence: LeasedPresence): Mailbo
     append: (tenant, input) => inner.append(tenant, input),
     readUsage: (tenant) => inner.readUsage(tenant),
     readAfter: (tenant, query) => inner.readAfter(tenant, query),
+    readMessage: (tenant, query) => inner.readMessage(tenant, query),
     recordDelivery: (tenant, input) => inner.recordDelivery(tenant, input),
     advanceCursor: (tenant, input) => inner.advanceCursor(tenant, input),
     readCursor: async (tenant, deviceId) => {

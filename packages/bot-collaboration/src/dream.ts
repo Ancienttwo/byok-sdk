@@ -1,4 +1,4 @@
-import { buildDreamInstruction, buildHandoffPack, checkRoutineSchedule } from '@byok-sdk/protocol';
+import { buildDreamInstruction, buildHandoffPack, checkRoutineSchedule, targetsPi } from '@byok-sdk/protocol';
 import { concludeOccurrence, hash, occurrenceIntentKey, occurrenceOfIntentKey, promoteOccurrence, routineCommands, setLifecycle, time,
   type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState, type Routine } from '@byok-sdk/server/execution-core';
 import { json, stateOf, type CollaborationState, type Turn } from './model.js';
@@ -28,7 +28,7 @@ export interface DreamingOptions {
   models?: readonly string[];
   /** Default `DEFAULT_DREAM_MAX_DURATION_MS`. */
   maxDurationMs?: number;
-  /** Request native session input when the device advertises it. Default true. This applies only to runtime templates: a harness template, like a device that does not advertise native sessions, receives no request and the dream runs without that input. */
+  /** Request native session input when the device advertises it. Default true. This applies only to templates whose target names Pi: any other template, like a device that does not advertise native sessions, receives no request and the dream runs without that input. */
   nativeSessions?: boolean;
 }
 export interface DreamPolicy { timeZone?: string; models: readonly string[]; maxDurationMs: number; nativeSessions: boolean }
@@ -121,11 +121,11 @@ function chooseModel(policy: DreamPolicy, models: Readonly<Record<string, Execut
   if (name !== undefined) return { template: name, fallback: false, base: models[name]! };
   return models[botModel] ? { template: botModel, fallback: true, base: undefined } : undefined;
 }
-/** The template's runtime and limits with the Bot's Agent, and none of what a Bot Turn offers. */
+/** The template's target with the Bot's Agent, the dream duration limit, and none of what a Bot Turn offers. */
 function dreamExecution(base: ExecutionTemplate, bot: ExecutionTemplate, instruction: string, maxDurationMs: number, window: { fromMs: number; toMs: number }, nativeSessions: boolean): ExecutionTemplate {
   const { messageEgress: _egress, requiredToolsets: _toolsets, agentMemoryCommit: _commit, homeAccess: _home, preparation: _preparation, nativeSessions: _nativeSessions, ...payload } = base.payload;
   return { deviceId: bot.deviceId, payload: { ...payload, instruction, session: { mode: 'fresh' }, agentRef: bot.payload.agentRef, agentMemory: 'none',
-    limits: { ...payload.limits, maxDurationMs }, terminalProjection: { mode: 'none' }, ...(nativeSessions && payload.harnessId === undefined ? { nativeSessions: { ...window, ifAdvertised: true } } : {}) } };
+    limits: { maxDurationMs }, terminalProjection: { mode: 'none' }, ...(nativeSessions && targetsPi(payload.target) ? { nativeSessions: { ...window, ifAdvertised: true } } : {}) } };
 }
 /** The pack fills what `instructionMaxBytes` leaves after the fixed text of the instruction. */
 function dreamInstruction(rows: readonly (Turn | ContextTurn)[], window: { fromMs: number; toMs: number }, maxDurationMs: number, instructionMaxBytes: number): string {

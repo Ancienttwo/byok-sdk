@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { isCloudError } from '@byok-sdk/cloud';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { createByokServer, StaleApprovalError, type ByokServer } from '../index';
-import { connectFakeDaemonLongPoll, sendOne, startServer, stopServer, type FakeLongPollDaemon } from './test-support';
+import { connectFakeDaemonLongPoll, sendOne, startServer, stopServer, type FakeLongPollDaemon, TEST_CLAIMED_EXECUTOR } from './test-support';
 
 const PRODUCT_ID = 'acme-approvals';
 const AGENT = { agentId: 'approval-agent', profileRevision: 'rev-1' };
@@ -48,9 +48,9 @@ describe('ByokServer.tasks.approve/reject', () => {
     await instance.executions.submit({
       taskId,
       deviceId: daemon.deviceId,
-      payload: { instruction: 'needs a human ok', runtime: 'pi', agentRef: AGENT, session: { mode: 'fresh' }, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      payload: { instruction: 'needs a human ok', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT, session: { mode: 'fresh' }, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
     });
-    expect(await sendOne(daemon, createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId })))
+    expect(await sendOne(daemon, createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef: AGENT }, { taskId })))
       .toMatchObject({ status: 200, body: { accepted: 1 } });
     expect(await sendOne(daemon, createEnvelope('task.started', {}, { taskId }))).toMatchObject({ status: 200, body: { accepted: 1 } });
     expect((await instance.tasks.get(taskId))?.state).toBe('Running');

@@ -8,30 +8,16 @@ import { HostOfferPlainPayloadSchema, HostOfferSealedPayloadSchema } from '@byok
 /** An execution is a fresh `task.offer`, never a prepared one. */
 const FRESH_EXECUTION = { session: SessionSelectionSchema.options[1], preparation: z.never().optional() };
 
-/** One execution target: a built-in `runtime` or a device-advertised `harnessId`, never both. */
-function executionTargetRule(
-  payload: { readonly runtime?: unknown; readonly harnessId?: unknown; readonly dispatchSelection?: unknown },
-  ctx: z.RefinementCtx,
-): void {
-  const hasRuntime = payload.runtime !== undefined;
-  const hasHarness = payload.harnessId !== undefined;
-  if (!hasRuntime && !hasHarness) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'runtime or harnessId is required', path: ['runtime'] });
-  }
-}
-
 /**
  * Persist this validated input before dispatch; the Host owns Turn/generation and outbox.
  *
- * `terminalProjection` is always required (#470). Execution targets either a built-in
- * `runtime` or a device-advertised `harnessId` (not both; harnessId also excludes
- * `dispatchSelection`), so corpus hosted entries that carry only `harnessId` stay
- * expressible through `submitAgentExecution`.
+ * `terminalProjection` is always required (#470). The execution target is the
+ * offer's required `target` (wire v7), validated by the protocol schema.
  */
 export const AgentExecutionInputSchema = z.object({
   taskId: z.string().min(1),
   deviceId: z.string().min(1),
-  payload: HostOfferPlainPayloadSchema.required({ terminalProjection: true }).safeExtend(FRESH_EXECUTION).superRefine(executionTargetRule),
+  payload: HostOfferPlainPayloadSchema.required({ terminalProjection: true }).safeExtend(FRESH_EXECUTION),
   agentMessageContext: AgentMessageServerContextSchema.optional(),
 }).strict();
 export type AgentExecutionInput = z.infer<typeof AgentExecutionInputSchema>;
@@ -45,8 +31,7 @@ export const SealedAgentExecutionInputSchema = z.object({
   deviceId: z.string().min(1),
   payload: HostOfferSealedPayloadSchema
     .required({ terminalProjection: true })
-    .safeExtend(FRESH_EXECUTION)
-    .superRefine(executionTargetRule),
+    .safeExtend(FRESH_EXECUTION),
   agentMessageContext: AgentMessageServerContextSchema.optional(),
 }).strict();
 export type SealedAgentExecutionInput = z.infer<typeof SealedAgentExecutionInputSchema>;

@@ -38,19 +38,19 @@ afterEach(async () => {
 /** The daemon's own ready fact: the server accepted this run's hello. */
 const ready = (daemon: Daemon) => daemon.whenOpen({ signal: AbortSignal.timeout(5000) });
 function newDaemon(fx: Pick<Fixture, 'root' | 'listener' | 'adapter' | 'deviceCredentials'>): Daemon {
-  return createDaemonWithAdapters({ productId, productName: 'Desktop K8 Test', localAgentRelease: { version: '0.0.0-test' },
+  return createDaemonWithAdapters({ productId, productName: 'Desktop K8 Test', deviceName: 'ci-smoke', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: fx.listener.serverUrl, storeDir: path.join(fx.root, 'sdk'),
     agentHome: { hostStorageRoot: fx.root, projection: createBotPersonaProjection() }, agentEgress: { policy },
   }, [fx.adapter], { deviceCredentials: fx.deviceCredentials });
 }
-const openConversation = (fx: Pick<Fixture, 'root' | 'server' | 'store' | 'execution'>, dreaming: { models: string[] } | false = { models: [] }) =>
+const openConversation = (fx: Pick<Fixture, 'root' | 'server' | 'store' | 'execution'>, dreaming: { models: string[] } | false = false) =>
   Conversation.open({ server: fx.server, productId, ledgerFile: path.join(fx.root, 'host', 'k8.sqlite'), store: fx.store, execution: fx.execution,
     models: { default: fx.execution }, dreaming });
 const openDreams = (fx: Fixture) => Object.values(fx.conversation.bot.ledger.snapshot().routines)
   .filter(row => row.definition.id.startsWith('dream:') && row.lifecycle !== 'completed');
 
 /** K8's synthetic adapter on a real embedded server, loopback listener and daemon; the store and K8 ledger are files. */
-async function open(): Promise<Fixture> {
+async function open(dreaming: { models: string[] } | false = false): Promise<Fixture> {
   const root = await mkdtemp(path.join(os.tmpdir(), 'desktop-k8-'));
   await mkdir(path.join(root, 'host'));
   let conversation: Conversation | undefined;
@@ -65,12 +65,12 @@ async function open(): Promise<Fixture> {
   const { deviceId } = await daemon.pair((await server.pairing.createPairingCode({ productId })).code);
   await daemon.start(); await ready(daemon);
   const execution: ExecutionTemplate = { deviceId, agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'desktop' }, payload: {
-    runtime: 'pi', session: { mode: 'fresh' }, instruction: 'Answer the user.', agentRef: { agentId: 'host', profileRevision: '1' }, egressPolicy: policy,
+    target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, instruction: 'Answer the user.', agentRef: { agentId: 'host', profileRevision: '1' }, egressPolicy: policy,
     messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
     terminalProjection: { mode: 'result-document', contract: 'desktop-test-v1', schema: { type: 'object' } },
   } };
   const store = HostStore.open(path.join(root, 'host', 'store.sqlite'));
-  conversation = await openConversation({ root, server, store, execution });
+  conversation = await openConversation({ root, server, store, execution }, dreaming);
   f = { root, server, listener, daemon, adapter, store, conversation, execution, deviceCredentials };
   return f;
 }
@@ -121,7 +121,7 @@ it('writes the reply after the outcome, carries it into the next history, and cl
 }, 30_000);
 
 it('finishes sends at reopen: inputRoot for one K8 committed, input for one it never saw', async () => {
-  const fx = await open();
+  const fx = await open({ models: [] });
   await fx.conversation.saveBot(WRITER);
   // A crash after the store write and before K8's input.
   fx.store.recordInput('unseen', WRITER.id, 'Never reached K8');

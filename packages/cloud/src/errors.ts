@@ -23,6 +23,8 @@ export const CLOUD_ERROR_CODES = {
   maintenance_result_invalid: 'maintenance_result_invalid',
   /** A pairing code that is unknown, expired, or already redeemed (§6.1). */
   pairing_code_invalid: 'pairing_code_invalid',
+  /** `createPairingCode` was given a `productId` longer than `PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`. Nothing was minted. */
+  pairing_product_id_invalid: 'pairing_product_id_invalid',
   /** The composition handed a device row whose tenant is not a mintable `TenantId`. */
   device_tenant_invalid: 'device_tenant_invalid',
   /**
@@ -108,12 +110,6 @@ export const CLOUD_ERROR_CODES = {
   agent_ref_mismatch: 'agent_ref_mismatch',
   /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
   agent_task_already_exists: 'agent_task_already_exists',
-  /**
-   * A stored task attempt has no Agent identity: the Postgres store has not run
-   * `retireAgentlessTasks` and migration 0039. The read fails closed; the
-   * operator runs them (docs/releases/host-upgrade-0.42.0.md).
-   */
-  task_attempt_agent_ref_missing: 'task_attempt_agent_ref_missing',
   /**
    * A task attempt was opened but the mailbox refused its offer append, so the
    * device never saw it. Raised as {@link TaskOfferAppendRefusedError}, which

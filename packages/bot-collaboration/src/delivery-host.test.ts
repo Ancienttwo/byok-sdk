@@ -58,7 +58,7 @@ async function openDeliveryHost(port: ChannelPort, rest: Partial<BotOptions> = {
   const options: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'delivery' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
-    connector: async () => null, now: () => now,
+    connector: async () => null, now: () => now, dreaming: false,
     channel: { port, self: { fake: ['own-bot'] }, sendTimeoutMs: 10 }, ...rest };
   let reopened: HostLedger | undefined;
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);

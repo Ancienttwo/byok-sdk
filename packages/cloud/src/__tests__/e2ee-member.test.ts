@@ -4,7 +4,7 @@
  */
 import { canonicalizeJson, createInMemoryCoreStores, createMutableClock, type JsonValue, type TenantId } from '@byok-sdk/core';
 import { generateScopeKey, type MemberChainEntryV1 } from '@byok-sdk/core/sealed-payload';
-import { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_SCOPE_ID_MAX_LENGTH } from '@byok-sdk/protocol';
+import { E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES, E2EE_SCOPE_ID_MAX_LENGTH, pairDeviceDigest } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { PAIRING_CODE_TTL_MS } from '../auth/plane';
 import { createHmacTokenSigner } from '../auth/tokens';
@@ -50,9 +50,9 @@ function setup(withStore = true, makeStore?: (receipts: RequestReceiptStore) => 
     clock,
     capabilities: fullCapabilityDeclaration(1, { includeE2eeMember: withStore }),
   });
-  const registerDevice = (tenant: TenantId, deviceId: string, machineId?: string) => base.stores.devices.register(tenant, {
+  const registerDevice = (tenant: TenantId, deviceId: string, machineId?: string, expectedDeviceDigest: string | null = null) => base.stores.devices.register(tenant, {
     productId: 'product', deviceId, deviceName: deviceId, devicePublicKey: `${deviceId}-key`, proofKeyId: 'identity', proofKeyEpoch: 0,
-    ...(machineId === undefined ? {} : { machineId }),
+    ...(machineId === undefined ? {} : { machineId }), expectedDeviceDigest,
   });
   return { cloud, store, clock, base, registerDevice };
 }
@@ -372,7 +372,8 @@ describe('E2EE member control plane', () => {
   const machineId = 'e'.repeat(64);
   const removals: ReadonlyArray<readonly [string, (env: ReturnType<typeof setup>) => Promise<unknown>]> = [
     ['revoke', env => env.base.stores.devices.revoke(TENANT_A, 'device-1')],
-    ['machine supersession', env => env.registerDevice(TENANT_A, 'device-2', machineId)],
+    ['machine supersession', async env => env.registerDevice(TENANT_A, 'device-2', machineId,
+      await pairDeviceDigest({ tenantId: TENANT_A, productId: 'product', deviceId: 'device-1' }))],
   ];
   for (const [event, remove] of removals) {
     it(`deletes the member state of a device removed by ${event} on the memory backend`, async () => {

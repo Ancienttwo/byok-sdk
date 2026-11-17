@@ -17,6 +17,7 @@ import { sealContent, type SealedContent } from '@byok-sdk/core/sealed-payload';
 import {
   createEnvelope,
   requiredReceiverCapabilities,
+  type ClaimedExecutor,
   type Envelope,
   type MessageType,
   type SealableMessageType,
@@ -37,7 +38,7 @@ import {
   type CiphertextRef,
 } from './support/sealed';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as {
@@ -118,12 +119,38 @@ const ECHOES_AGENT: readonly MessageType[] = [
   'task.claim', 'task.decline', 'task.complete', 'task.fail', 'task.cancelled',
 ];
 
+/** Wire v7: the terminals that echo the claimed executor once the task is claimed. */
+const ECHOES_EXECUTOR: readonly MessageType[] = ['task.complete', 'task.fail', 'task.cancelled'];
+const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+
+type OfferTarget = { lane: string; runtimeId?: string; harnessId?: string };
+
+/** The executor a device claims an offer `target` with: the harness or runtime it names, Pi for `auto`. */
+function executorOf(target: OfferTarget): ClaimedExecutor {
+  if (target.lane === 'harness') return { kind: 'harness', harnessId: target.harnessId! };
+  return target.lane === 'auto' ? PI_EXECUTOR : { kind: 'runtime', runtimeId: target.runtimeId as 'pi' };
+}
+
 /**
  * An Agent task of {@link TEST_AGENT_REF} offered to a sealed-capable device,
  * with `sealing` (or none), claimed unless told not to. A sealed offer names
  * its ciphertext blob when told to. Its `send` echoes the Agent on a claim or
  * terminal that names none.
  */
+/** The plaintext fields of a sealed fresh Agent execution. */
+const FRESH = {
+  agentRef: TEST_AGENT_REF,
+  session: { mode: 'fresh' },
+  target: { lane: 'runtime', runtimeId: 'pi' },
+  egressPolicy: {
+    policyRevision: 'policy',
+    activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
+    reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
+    transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+  },
+  terminalProjection: { mode: 'none' },
+} as const;
+
 async function offeredTask(
   sealing: typeof OUTPUT_SEALING | typeof INPUT_SEALING | undefined,
   claim = true,
@@ -131,43 +158,51 @@ async function offeredTask(
 ): Promise<Task> {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
-  const resume = { agentRef: TEST_AGENT_REF, session: offerPayload().session, runtime: 'pi' as const };
-  const capabilities = requiredReceiverCapabilities('task.offer', { ...resume, sealing: OUTPUT_SEALING, sealed: {} });
+  const capabilities = requiredReceiverCapabilities('task.offer', { ...FRESH, sealing: OUTPUT_SEALING, sealed: {} });
   await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
   taskCount += 1;
   const taskId = `sealed-output-${taskCount}`;
   let offerRef: CiphertextRef | undefined;
   if (sealing === undefined) {
-    await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: { ...offerPayload('plain'), runtime: 'pi' } });
+    await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: { ...offerPayload('plain'), target: { lane: 'runtime', runtimeId: 'pi' } } });
   } else {
     const content = await sealAgentInput(device.deviceId, 'task.offer', { taskId }, {
       instruction: offerByReference ? 'x'.repeat(BY_REFERENCE_TEXT_LENGTH) : 'sealed',
     });
     if (offerByReference) offerRef = await uploadCiphertext(harness, device, content.ciphertext);
-    await harness.cloud.enqueueSealedAgentOffer(TENANT_A, device.deviceId, {
+    await harness.cloud.submitSealedAgentExecution(TENANT_A, {
       taskId,
-      payload: { ...resume, sealing, sealed: offerRef === undefined ? inlineMember(content) : referenceMember(content, offerRef) } as never,
+      deviceId: device.deviceId,
+      payload: { ...FRESH, sealing, sealed: offerRef === undefined ? inlineMember(content) : referenceMember(content, offerRef) } as never,
     });
   }
   const stores = tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId: device.deviceId },
     { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
-  const send = (type: MessageType, payload: object) => {
-    const echoed = ECHOES_AGENT.includes(type) ? { agentRef: TEST_AGENT_REF, ...payload } : payload;
-    return handleInboundEnvelope(stores, device.deviceId, createEnvelope(type as Envelope['type'], echoed as never, { taskId }) as Envelope);
+  let claimed = false;
+  const send = async (type: MessageType, payload: object) => {
+    const echoed = {
+      ...(ECHOES_AGENT.includes(type) ? { agentRef: TEST_AGENT_REF } : {}),
+      ...(type === 'task.claim' || (claimed && ECHOES_EXECUTOR.includes(type)) ? { executor: PI_EXECUTOR } : {}),
+      ...payload,
+    };
+    const result = await handleInboundEnvelope(stores, device.deviceId, createEnvelope(type as Envelope['type'], echoed as never, { taskId }) as Envelope);
+    if (type === 'task.claim' && result.outcome === 'accepted') claimed = true;
+    return result;
   };
   if (claim) {
-    expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi' })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.claim', { deviceId: device.deviceId })).toEqual({ outcome: 'accepted' });
     expect(await send('task.started', {})).toEqual({ outcome: 'accepted' });
   }
   return { harness, device, taskId, ...(offerRef === undefined ? {} : { offerRef }), send };
 }
 
-/** An output-only sealed Agent offer from the corpus. */
+/** An output-only sealed fresh Agent execution from the corpus. */
 const AGENT_OFFER = corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined && line.payload.sealed === undefined
-  && line.payload.session?.mode === 'resume' && line.payload.egressPolicy === undefined)!
-  .payload as unknown as { agentRef: { agentId: string; profileRevision: string }; runtime: string; sealing: { categories: string[] } };
+  && line.payload.session?.mode === 'fresh' && (line.payload as { terminalProjection?: unknown }).terminalProjection !== undefined
+  && (line.payload as { messageEgress?: unknown }).messageEgress === undefined)!
+  .payload as unknown as { agentRef: { agentId: string; profileRevision: string }; target: OfferTarget; sealing: { categories: string[] } };
 
 /** An Agent task whose offer seals its output, claimed unless told not to. */
 async function agentTask(claim: boolean): Promise<Task> {
@@ -178,15 +213,18 @@ async function agentTask(claim: boolean): Promise<Task> {
   taskCount += 1;
   const taskId = `sealed-agent-output-${taskCount}`;
   expect(AGENT_OFFER.sealing.categories).toContain('task-output');
-  await harness.cloud.enqueueSealedAgentOffer(TENANT_A, device.deviceId, { taskId, payload: AGENT_OFFER as never });
+  await harness.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: device.deviceId, payload: AGENT_OFFER as never });
   const stores = tenantStoresFor(
     { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId: device.deviceId },
     { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
-  const send = (type: MessageType, payload: object) =>
-    handleInboundEnvelope(stores, device.deviceId, createEnvelope(type as Envelope['type'], payload as never, { taskId }) as Envelope);
+  const executor = executorOf(AGENT_OFFER.target);
+  const send = (type: MessageType, payload: object) => {
+    const echoed = claim && ECHOES_EXECUTOR.includes(type) ? { executor, ...payload } : payload;
+    return handleInboundEnvelope(stores, device.deviceId, createEnvelope(type as Envelope['type'], echoed as never, { taskId }) as Envelope);
+  };
   if (claim) {
-    expect(await send('task.claim', { deviceId: device.deviceId, runtime: AGENT_OFFER.runtime, agentRef: AGENT_OFFER.agentRef }))
+    expect(await send('task.claim', { deviceId: device.deviceId, executor, agentRef: AGENT_OFFER.agentRef }))
       .toEqual({ outcome: 'accepted' });
     expect(await send('task.started', {})).toEqual({ outcome: 'accepted' });
   }
@@ -213,7 +251,7 @@ describe('a sealed terminal of an output-sealed task (#654 E3b-2)', () => {
       type, task_id: task.taskId, payload: SEALED_OUTPUTS[type],
     });
     expect(await task.harness.cloud.readTaskResult(TENANT_A, task.taskId)).toEqual({
-      taskId: task.taskId, ...result, agentRef: TEST_AGENT_REF, recordedAt: expect.any(String),
+      taskId: task.taskId, ...result, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, recordedAt: expect.any(String),
     });
   });
 
@@ -406,7 +444,7 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
 
   it('a losing terminal that names a steer blob leaves the steer reference in place', async () => {
     const task = await offeredTask(OUTPUT_SEALING, false);
-    expect(await task.send('task.claim', { deviceId: task.device.deviceId, runtime: 'pi', capabilities: { steer: true } }))
+    expect(await task.send('task.claim', { deviceId: task.device.deviceId, capabilities: { steer: true } }))
       .toEqual({ outcome: 'accepted' });
     expect(await task.send('task.started', {})).toEqual({ outcome: 'accepted' });
     const steerId = '00000000-0000-4000-8000-000000000601';
@@ -500,35 +538,22 @@ describe('a sealed terminal or artifact by ciphertextRef (#654 §58a)', () => {
   });
 });
 
-describe('every sealed offer lane freezes the output sealing that the gate reads (#654 E3b-2)', () => {
+describe('the sealed offer lane freezes the output sealing that the gate reads (#654 E3b-2)', () => {
   const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
   const withContext = (payload: { messageEgress?: unknown }) => (payload.messageEgress === undefined ? {} : { agentMessageContext: CONTEXT });
-  type Lane = (harness: CloudHarness, deviceId: string, taskId: string, payload: never) => Promise<unknown>;
-  type Variant = 'sealed resume' | 'sealed egress' | 'sealed execution';
-  const variantOf = (payload: { session?: { mode?: string }; egressPolicy?: object }): Variant => (
-    payload.session?.mode === 'fresh' ? 'sealed execution' : payload.egressPolicy === undefined ? 'sealed resume' : 'sealed egress');
-  const lanes: Record<Variant, Lane> = {
-    'sealed resume': (h, d, taskId, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId, payload }),
-    'sealed egress': (h, d, taskId, payload) =>
-      h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId, payload, ...withContext(payload) }),
-    'sealed execution': (h, d, taskId, payload) =>
-      h.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: d, payload, ...withContext(payload) }),
-  };
-  const outputOnly = (Object.keys(lanes) as Variant[]).map((variant) => ({
-    variant,
-    line: corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined && line.payload.sealed === undefined
-      && variantOf(line.payload) === variant
-      && (variant !== 'sealed execution' || (line.payload as { terminalProjection?: unknown }).terminalProjection !== undefined))!,
-  }));
+  const line = corpus.find((entry) => entry.type === 'task.offer' && entry.payload.sealing !== undefined && entry.payload.sealed === undefined
+    && entry.payload.session?.mode === 'fresh' && (entry.payload as { terminalProjection?: unknown }).terminalProjection !== undefined)!;
 
-  it.each(outputOnly.map(({ variant, line }) => [variant, line] as const))('%s: a claimed task accepts a sealed completion', async (variant, line) => {
-    const payload = line.payload as { agentRef?: unknown; runtime?: string; harnessId?: string; sealing: { categories: string[] } };
+  it('sealed execution: a claimed task accepts a sealed completion', async () => {
+    const payload = line.payload as { agentRef?: unknown; target: OfferTarget; sealing: { categories: string[] } };
     expect(payload.sealing.categories).toContain('task-output');
     const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', payload) });
-    const taskId = `sealed-lane-${variant.replace(' ', '-')}`;
-    await lanes[variant](harness, device.deviceId, taskId, payload as never);
+    const taskId = 'sealed-lane-sealed-execution';
+    await harness.cloud.submitSealedAgentExecution(TENANT_A, {
+      taskId, deviceId: device.deviceId, payload: payload as never, ...withContext(payload as { messageEgress?: unknown }),
+    });
     const stores = tenantStoresFor(
       { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId: device.deviceId },
       { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
@@ -537,11 +562,9 @@ describe('every sealed offer lane freezes the output sealing that the gate reads
       handleInboundEnvelope(stores, device.deviceId, createEnvelope(envelopeType as Envelope['type'], body as never, { taskId }) as Envelope);
     const echo = {
       ...(payload.agentRef === undefined ? {} : { agentRef: payload.agentRef }),
-      ...(payload.harnessId === undefined ? {} : { harnessId: payload.harnessId }),
+      executor: executorOf(payload.target),
     };
-    expect(await send('task.claim', {
-      deviceId: device.deviceId, ...(payload.runtime === undefined ? {} : { runtime: payload.runtime }), ...echo,
-    })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.claim', { deviceId: device.deviceId, ...echo })).toEqual({ outcome: 'accepted' });
 
     expect(await send('task.complete', { summary: 'plain', sessionRef: 'session-plain', ...echo })).toEqual(refused('sealed_output_required'));
     expect(await send('task.complete', { ...SEALED_OUTPUTS['task.complete'], ...echo })).toEqual({ outcome: 'accepted' });
@@ -554,7 +577,8 @@ describe('a sealed terminal takes the gates of its type (#654 §8.5)', () => {
     '%s with a harness the claim did not name is refused',
     async (type) => {
       const task = await offeredTask(OUTPUT_SEALING);
-      expect(await task.send(type, { ...SEALED_OUTPUTS[type], harnessId: 'other-harness' })).toEqual(refused('terminal_harness_mismatch'));
+      expect(await task.send(type, { ...SEALED_OUTPUTS[type], executor: { kind: 'harness', harnessId: 'other-harness' } }))
+        .toEqual(refused('terminal_executor_mismatch'));
       expect(await task.harness.cloud.readTaskAttempt(TENANT_A, task.taskId)).toMatchObject({ status: 'running' });
     },
   );
@@ -659,8 +683,9 @@ describe('the sealed Agent message of a task that seals it (#1045 S3)', () => {
   const messageOffer = (maxBytes: number) => {
     const line = corpus.find((entry) => entry.type === 'task.offer'
       && (entry.payload.sealing as { categories?: string[] } | undefined)?.categories?.includes('agent-message'))!;
-    const payload = line.payload as { messageEgress: object; agentRef: object; runtime: string; dispatchSelection: { runtimeId: string } };
-    return { ...payload, runtime: payload.dispatchSelection.runtimeId, messageEgress: { ...payload.messageEgress, maxBytes } };
+    const payload = line.payload as { messageEgress: object; agentRef: object; target: OfferTarget };
+    // The corpus line resumes a session; the sealed lane is a fresh execution.
+    return { ...payload, session: { mode: 'fresh' }, messageEgress: { ...payload.messageEgress, maxBytes } };
   };
   const SEALED_MESSAGE = corpus.find((line) => line.type === 'agent.message.publish' && line.payload.sealed !== undefined)!
     .payload as { agentRef: object; sealed: { contentMac: string } } & Record<string, unknown>;
@@ -678,8 +703,8 @@ describe('the sealed Agent message of a task that seals it (#1045 S3)', () => {
     await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
     taskCount += 1;
     const taskId = `sealed-message-${taskCount}`;
-    const enqueue = () => harness.cloud.enqueueSealedAgentEgressOffer(TENANT_A, device.deviceId, {
-      taskId, payload: payload as never, agentMessageContext: { destinationBinding: 'conversation/1045/turn/1' },
+    const enqueue = () => harness.cloud.submitSealedAgentExecution(TENANT_A, {
+      taskId, deviceId: device.deviceId, payload: payload as never, agentMessageContext: { destinationBinding: 'conversation/1045/turn/1' },
     });
     const stores = tenantStoresFor(
       { kind: 'device', tenantId: TENANT_A as TenantId, productId: PRODUCT_ID, deviceId: device.deviceId },
@@ -690,7 +715,7 @@ describe('the sealed Agent message of a task that seals it (#1045 S3)', () => {
     const claim = async () => {
       await enqueue();
       expect(await handleInboundEnvelope(stores, device.deviceId, createEnvelope('task.claim', {
-        deviceId: device.deviceId, runtime: payload.runtime, agentRef: payload.agentRef,
+        deviceId: device.deviceId, executor: executorOf(payload.target), agentRef: payload.agentRef,
       } as never, { taskId }) as Envelope)).toEqual({ outcome: 'accepted' });
     };
     return { harness, device, taskId, enqueue, claim, publish };

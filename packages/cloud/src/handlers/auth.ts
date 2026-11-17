@@ -6,8 +6,8 @@
  * them. The behavior differences a hosted surface DOES make are two, both
  * narrowing:
  *
- * - a pairing code that is unknown, expired, or already used gets one 401 with
- *   one message (the reference server names the reason);
+ * - a pairing code that is unknown, expired, or already used gets one typed
+ *   401 body, and a stale registration fence one typed 409 body (§6.1);
  * - an unknown device and a revoked device were already indistinguishable on
  *   the reference server, and stay so here.
  */
@@ -15,12 +15,16 @@ import type { Context } from 'hono';
 import {
   ChallengeRequestSchema,
   DEVICE_NOT_REGISTERED_CODE,
+  PAIRING_CODE_INVALID_CODE,
+  PAIRING_SUPERSEDED_CODE,
   PairRequestSchema,
   PairResponseSchema,
   TokenRequestSchema,
   type ChallengeResponse,
   type DeviceNotRegisteredResponse,
+  type PairingCodeInvalidResponse,
   type PairResponse,
+  type PairSupersededResponse,
   type TokenResponse,
 } from '@byok-sdk/protocol';
 import type { AuthPlane } from '../auth/plane.js';
@@ -31,6 +35,11 @@ const AUTH_JSON_BODY_MAX_BYTES = 16 * 1024;
 const DEVICE_NOT_REGISTERED: DeviceNotRegisteredResponse = {
   error: 'unknown or revoked device',
   code: DEVICE_NOT_REGISTERED_CODE,
+};
+/** One body for an unknown, an expired and a used code alike. */
+const PAIRING_CODE_INVALID: PairingCodeInvalidResponse = {
+  error: 'invalid pairing code',
+  code: PAIRING_CODE_INVALID_CODE,
 };
 
 export interface AuthRouteDeps {
@@ -46,14 +55,23 @@ export function pairHandler(deps: AuthRouteDeps) {
       return c.json(
         {
           error:
-            'pairingCode, deviceName, and devicePublicKey are required strings; optional machineId must be 64 lowercase hex characters',
+            'pairingCode, deviceName, and devicePublicKey are required strings; optional machineId must be 64 lowercase hex characters; expectedDeviceDigest is required (a device digest or null)',
         },
         400,
       );
     }
 
-    const device = await deps.auth.redeemAndRegister(parsed.data);
-    if (device === undefined) return c.json({ error: 'invalid pairing code' }, 401);
+    const enrollment = await deps.auth.redeemAndRegister(parsed.data);
+    if (enrollment.outcome === 'code_invalid') return c.json(PAIRING_CODE_INVALID, 401);
+    if (enrollment.outcome === 'conflict') {
+      const superseded: PairSupersededResponse = {
+        error: 'pairing superseded',
+        code: PAIRING_SUPERSEDED_CODE,
+        currentDeviceDigest: enrollment.currentDeviceDigest,
+      };
+      return c.json(superseded, 409);
+    }
+    const { device } = enrollment;
 
     const { accessToken, expiresIn } = await deps.auth.mintAccessToken(device);
     // The authenticated device row is the only tenant authority after

@@ -17,7 +17,7 @@ async function open() {
   fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal),
     agentMessage: { consume: input => { received.push(input); return bot!.consumeMessage(input); } } });
   const base = template(fixture.deviceId);
-  bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, execution: { ...base,
+  bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, dreaming: false, execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'commit' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } } });
   return { fixture, bot, received };

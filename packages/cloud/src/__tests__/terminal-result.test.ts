@@ -29,6 +29,8 @@ function blobRef(): BlobRef {
   };
 }
 
+const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+
 const projectionEvidence = { profileRevision: '3', projectionHash: `sha256:${'3'.repeat(64)}` };
 
 const terminalUsage = {
@@ -61,11 +63,11 @@ describe('readTaskResult', () => {
   it('keeps host cancel separate from typed device terminal evidence', async () => {
     const taskId = 'cancel-before-terminal';
     await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { taskId, payload: offerPayload() });
-    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome);
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId })).then((result) => result.outcome);
     await harness.cloud.cancelTask(TENANT_A, taskId, 'host stop');
     expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toMatchObject({ state: 'cancelled' });
     expect(await harness.cloud.readDeviceTerminal(TENANT_A, taskId)).toBeUndefined();
-    const terminal = createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'already finished', sessionRef: 'native-session' }, { taskId });
+    const terminal = createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, executor: EXECUTOR, summary: 'already finished', sessionRef: 'native-session' }, { taskId });
     await handleInboundEnvelope(stores, deviceId, terminal).then((result) => result.outcome);
     expect(await harness.cloud.readDeviceTerminal(TENANT_A, taskId)).toMatchObject({ envelope: terminal });
     expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toMatchObject({ state: 'cancelled' });
@@ -73,7 +75,7 @@ describe('readTaskResult', () => {
 
   it('rejects a terminal stored under another task identity', async () => {
     await harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey('target'),
-      body: encodeEnvelope(createEnvelope('task.complete', { summary: 'wrong task', sessionRef: 'session' }, { taskId: 'other' })) });
+      body: encodeEnvelope(createEnvelope('task.complete', { summary: 'wrong task', sessionRef: 'session', executor: EXECUTOR }, { taskId: 'other' })) });
     await expect(harness.cloud.readDeviceTerminal(TENANT_A, 'target')).rejects.toThrow();
   });
 
@@ -94,7 +96,7 @@ describe('readTaskResult', () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, {
       payload: offerPayload(),
     });
-    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome);
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId })).then((result) => result.outcome);
     return taskId;
   }
 
@@ -108,7 +110,7 @@ describe('readTaskResult', () => {
       deviceId,
       createEnvelope(
         'task.complete',
-        { agentRef: TEST_AGENT_REF, summary: 'Working on it.did the thing', finalMessage: 'did the thing', sessionRef: 'session-1', artifactRefs, document, usage: terminalUsage, agentHomeProjection },
+        { agentRef: TEST_AGENT_REF, executor: EXECUTOR, summary: 'Working on it.did the thing', finalMessage: 'did the thing', sessionRef: 'session-1', artifactRefs, document, usage: terminalUsage, agentHomeProjection },
         { taskId },
       ),
     ).then((result) => result.outcome);
@@ -132,7 +134,7 @@ describe('readTaskResult', () => {
     const outcome = await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'runtime crashed', retryable: true, usage: terminalUsage, agentHomeProjection: projectionEvidence }, { taskId }),
+      createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, executor: EXECUTOR, reason: 'runtime crashed', retryable: true, usage: terminalUsage, agentHomeProjection: projectionEvidence }, { taskId }),
     ).then((result) => result.outcome);
     expect(outcome).toBe('accepted');
 
@@ -151,7 +153,7 @@ describe('readTaskResult', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 's', sessionRef: 'session-p', preparedObservation }, { taskId: completed }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, executor: EXECUTOR, summary: 's', sessionRef: 'session-p', preparedObservation }, { taskId: completed }),
     ).then((result) => result.outcome);
     expect((await harness.cloud.readTaskResult(TENANT_A, completed))?.preparedObservation).toEqual(preparedObservation);
 
@@ -161,7 +163,7 @@ describe('readTaskResult', () => {
       deviceId,
       createEnvelope(
         'task.fail',
-        { agentRef: TEST_AGENT_REF, reason: 'context_overflow: provider call 2', retryable: false, preparedObservation },
+        { agentRef: TEST_AGENT_REF, executor: EXECUTOR, reason: 'context_overflow: provider call 2', retryable: false, preparedObservation },
         { taskId: overflowed },
       ),
     ).then((result) => result.outcome);
@@ -175,7 +177,7 @@ describe('readTaskResult', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF, reason: 'user asked', usage: terminalUsage, agentHomeProjection: projectionEvidence }, { taskId: explained }),
+      createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF, executor: EXECUTOR, reason: 'user asked', usage: terminalUsage, agentHomeProjection: projectionEvidence }, { taskId: explained }),
     ).then((result) => result.outcome);
     const withReason = await harness.cloud.readTaskResult(TENANT_A, explained);
     expect(withReason?.state).toBe('cancelled');
@@ -187,7 +189,7 @@ describe('readTaskResult', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF }, { taskId: silent }),
+      createEnvelope('task.cancelled', { agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId: silent }),
     ).then((result) => result.outcome);
     const bare = await harness.cloud.readTaskResult(TENANT_A, silent);
     expect(bare?.state).toBe('cancelled');
@@ -200,7 +202,7 @@ describe('readTaskResult', () => {
     const residentMemoryOverLimit = { byteCount: 12288 };
     const completed = await readyTask();
     await handleInboundEnvelope(stores, deviceId, createEnvelope('task.complete', {
-      agentRef: TEST_AGENT_REF, summary: 's', sessionRef: 'reader-session', agentHomeMemoryChange: attributed, residentMemoryOverLimit,
+      agentRef: TEST_AGENT_REF, executor: EXECUTOR, summary: 's', sessionRef: 'reader-session', agentHomeMemoryChange: attributed, residentMemoryOverLimit,
     }, { taskId: completed })).then((result) => result.outcome);
     const completedResult = await harness.cloud.readTaskResult(TENANT_A, completed);
     expect(completedResult?.agentHomeMemoryChange).toEqual(attributed);
@@ -208,7 +210,7 @@ describe('readTaskResult', () => {
 
     const failed = await readyTask();
     await handleInboundEnvelope(stores, deviceId, createEnvelope('task.fail', {
-      agentRef: TEST_AGENT_REF, reason: 'runtime crashed', retryable: false, agentHomeMemoryChange: { outcome: 'unmeasured' }, residentMemoryOverLimit,
+      agentRef: TEST_AGENT_REF, executor: EXECUTOR, reason: 'runtime crashed', retryable: false, agentHomeMemoryChange: { outcome: 'unmeasured' }, residentMemoryOverLimit,
     }, { taskId: failed })).then((result) => result.outcome);
     const failedResult = await harness.cloud.readTaskResult(TENANT_A, failed);
     expect(failedResult?.agentHomeMemoryChange).toEqual({ outcome: 'unmeasured' });
@@ -216,7 +218,7 @@ describe('readTaskResult', () => {
 
     const cancelled = await readyTask();
     await handleInboundEnvelope(stores, deviceId, createEnvelope('task.cancelled', {
-      agentRef: TEST_AGENT_REF, agentHomeMemoryChange: { outcome: 'unattributed', paths: ['notes/a.md'] }, residentMemoryOverLimit,
+      agentRef: TEST_AGENT_REF, executor: EXECUTOR, agentHomeMemoryChange: { outcome: 'unattributed', paths: ['notes/a.md'] }, residentMemoryOverLimit,
     }, { taskId: cancelled })).then((result) => result.outcome);
     const cancelledResult = await harness.cloud.readTaskResult(TENANT_A, cancelled);
     expect(cancelledResult?.agentHomeMemoryChange).toEqual({ outcome: 'unattributed', paths: ['notes/a.md'] });
@@ -228,7 +230,7 @@ describe('readTaskResult', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'ok', sessionRef: 'session-1' }, { taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, executor: EXECUTOR, summary: 'ok', sessionRef: 'session-1' }, { taskId }),
     ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
@@ -249,12 +251,12 @@ describe('readTaskResult', () => {
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, reason: 'first terminal', retryable: false, usage: winningUsage }, { taskId }),
+      createEnvelope('task.fail', { agentRef: TEST_AGENT_REF, executor: EXECUTOR, reason: 'first terminal', retryable: false, usage: winningUsage }, { taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'late terminal', sessionRef: 'session-late', usage: losingUsage }, { taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, executor: EXECUTOR, summary: 'late terminal', sessionRef: 'session-late', usage: losingUsage }, { taskId }),
     ).then((result) => result.outcome);
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);

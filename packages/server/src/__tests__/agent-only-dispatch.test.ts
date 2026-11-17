@@ -49,6 +49,7 @@ describe('wire v4: every dispatch is Agent-bound', () => {
       capabilities: ['agent-home-contract'],
     });
     const agent = await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: strict.deviceId,
       instruction: 'Agent work',
       agentRef: { agentId: 'agent-1', profileRevision: 'r1' },

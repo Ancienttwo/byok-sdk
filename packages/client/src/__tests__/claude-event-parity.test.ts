@@ -7,6 +7,8 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
+const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 // Captured from the pre-OAR claude adapter (events.ts) before the stream-json session replaced it.
 const GOLDEN_PATH = fileURLToPath(new URL('./fixtures/claude-agent-events.golden.json', import.meta.url));
@@ -51,10 +53,10 @@ async function observe(parity: ParityCase): Promise<Observed[][]> {
   let session: Session | undefined;
   try {
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), runtimeEnvironment: { base: 'allowlist', allow: ['FAKE_CLAUDE_*'] } });
-    session = await startPreparedOperation(adapter, { instruction: 'say hi' }, { workspaceDir, env: process.env });
+    session = await startPreparedOperation(adapter, { target: CLAUDE_TARGET, instruction: 'say hi' }, { workspaceDir, env: process.env });
     const turns = [await turn(session, workspaceDir)];
     for (let index = 1; index < parity.turns; index += 1) {
-      await session.followUp({ instruction: `turn ${index + 1}` });
+      await session.followUp({ target: CLAUDE_TARGET, instruction: `turn ${index + 1}` });
       turns.push(await turn(session, workspaceDir));
     }
     return turns;

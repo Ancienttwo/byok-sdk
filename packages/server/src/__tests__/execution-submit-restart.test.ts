@@ -2,12 +2,24 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it, vi } from 'vitest';
 import { AgentExecutionInputSchema } from '@byok-sdk/cloud';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createByokServer, createHmacTokenSigner } from '../index';
 import { connectFakeDaemonLongPoll, startServer, stopServer } from './test-support';
+
+// Faults run as TEMP triggers on the store's own connection: a trigger written
+// into the file is an object schema 10 does not know, and the open refuses it.
+const faults = vi.hoisted((): string[] => []);
+afterEach(() => { faults.length = 0; });
+vi.mock('../sqlite-support.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../sqlite-support.js')>();
+  return { ...actual, openSqliteDatabase: (...args: Parameters<typeof actual.openSqliteDatabase>) => {
+    const db = actual.openSqliteDatabase(...args);
+    for (const fault of faults) db.exec(fault);
+    return db;
+  } };
+});
 
 it('recovers recurring admission and independent observations through a recreated SQLite facade', async () => {
   const root = mkdtempSync(join(tmpdir(), 'byok-execution-submit-restart-'));
@@ -31,7 +43,7 @@ it('recovers recurring admission and independent observations through a recreate
       'terminal-projection-selection', 'agent-egress-fresh-session',
     ] });
     const input = AgentExecutionInputSchema.parse({ taskId: 'persisted-execution', deviceId: device.deviceId,
-      payload: { instruction: '历史与当前输入', runtime: 'codex',
+      payload: { instruction: '历史与当前输入', target: { lane: 'runtime', runtimeId: 'codex' },
         agentRef: { agentId: 'recurring-agent', profileRevision: '1' }, session: { mode: 'fresh' },
         egressPolicy: { policyRevision: '1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -42,15 +54,13 @@ it('recovers recurring admission and independent observations through a recreate
     });
     writeFileSync(inputPath, JSON.stringify(input));
     await stopServer(http.server); await instance.close();
-    const fault = new DatabaseSync(path);
-    fault.exec("CREATE TRIGGER fail_append BEFORE INSERT ON mailbox_message BEGIN SELECT RAISE(ABORT, 'restart append fault'); END;");
-    fault.close();
+    faults.push("CREATE TEMP TRIGGER fail_append BEFORE INSERT ON main.mailbox_message BEGIN SELECT RAISE(ABORT, 'restart append fault'); END;");
     instance = createByokServer(options); http = await startServer(instance);
     await expect(instance.executions.submit(input)).rejects.toThrow('restart append fault');
     expect(await instance.tasks.attempt(input.taskId)).toBeDefined();
     expect(await instance.tasks.offer(input.taskId)).toMatchObject({ delivered: false });
     await stopServer(http.server); await instance.close();
-    const repair = new DatabaseSync(path); repair.exec('DROP TRIGGER fail_append'); repair.close();
+    faults.length = 0;
     instance = createByokServer(options); http = await startServer(instance);
     const restored = AgentExecutionInputSchema.parse(JSON.parse(readFileSync(inputPath, 'utf8')));
     await instance.executions.submit(restored);

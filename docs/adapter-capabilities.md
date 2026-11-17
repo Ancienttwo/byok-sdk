@@ -1437,8 +1437,9 @@ falls back to text classification and can be less specific than
 ## Selection and platforms
 
 A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descriptor)`
-from `@byok-sdk/client/adapters` returns `{ runtime }` for a frozen wire runtime
-id (`RUNTIME_IDS` in `@byok-sdk/protocol/constants`) and `{ harnessId }` for any
+from `@byok-sdk/client/adapters` returns the offer `target`
+`{ lane: 'runtime', runtimeId }` for a frozen wire runtime id (`RUNTIME_IDS` in
+`@byok-sdk/protocol/constants`) and `{ lane: 'harness', harnessId }` for any
 other id. `descriptor.platforms` lists the supported `process.platform` values:
 Claude, Codex, Pi and agy declare macOS, Linux and Windows; Grok, dsh
 and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform

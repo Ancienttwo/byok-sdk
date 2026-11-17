@@ -30,8 +30,8 @@ describe('durable parent recovery authority', () => {
     expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities).isolation?.userInstructions).toBe(false);
     expect(new PiAdapter({ agentUserContext: 'excluded' }).descriptor.capabilities.isolation?.userInstructions).toBe(true);
     expect(Object.isFrozen(adapter.descriptor.capabilities.isolation)).toBe(true);
-    expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
-    expect((await adapter.prepare({ offer: {} } as never)).kind).toBe('reject');
+    expect((await adapter.prepare({ offer: { target: { lane: 'runtime', runtimeId: 'pi' } } } as never)).kind).toBe('reject');
+    expect((await adapter.prepare({ offer: { target: { lane: 'auto' } } } as never)).kind).toBe('reject');
   });
 
   it.skipIf(process.platform === 'win32')('refuses excluded user context on the durable lane before spawning', async () => {
@@ -47,7 +47,7 @@ describe('durable parent recovery authority', () => {
     // Real prepare, sealed Agent manifest and runtime-launch resources. The
     // lane restriction must reject before the custody launcher can be invoked.
     await expect(startPreparedOperation(adapter, {
-      instruction: 'unused', dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'unused' },
+      instruction: 'unused', target: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'unused' },
     }, { workspaceDir: home, agentHome: home, env: {} }))
       .rejects.toThrow('Pi Agent resources are supported only by the ordinary RPC lane');
     expect(spawnFn).not.toHaveBeenCalled();

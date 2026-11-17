@@ -32,7 +32,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
   let fixtureUrl: string; let closeHttp: () => Promise<void>; let store: SqliteClarificationStore; let host: ClarificationHost;
   let extraStores: SqliteClarificationStore[];
   const principal = { tenantId: 'tenant-a',userId: 'user-a' };
-  const target = (agentId = 'agent-a'): BotTarget => ({ deviceId,agentRef: { agentId,profileRevision: '1' },runtime: 'pi',egressPolicy: policy });
+  const target = (agentId = 'agent-a'): BotTarget => ({ deviceId,agentRef: { agentId,profileRevision: '1' },target: { lane: 'runtime', runtimeId: 'pi' },egressPolicy: policy });
   const start = (id = 'run', taskId = 'step-1', agentId = 'agent-a', budget = 3) => host.start({ id,sessionId: 'conversation-a',respondentId: 'user-a',destination: 'thread-a',target: target(agentId),
     contextRevision: 'context-1',context: 'Frozen product context',objective: 'Export approved scope',maxExecutions: budget,deadline: now + 10_000,questionTtlMs: 1000 },taskId);
   const row = () => host.run('run');
@@ -60,7 +60,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
         close: () => new Promise<void>(done => { http.close(() => done()); if ('closeAllConnections' in http) http.closeAllConnections(); }) }));
     }); closeHttp = listening.close; fixtureUrl = listening.url;
     adapter = new BotStubAdapter();
-    daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: listening.url,
+    daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',deviceName: 'ci-smoke',productId: 'clarification-test',serverUrl: listening.url,
       storeDir: path.join(root,'sdk'),agentHome: { hostStorageRoot: path.join(root,'homes') },agentEgress: { policy },
     },[adapter],{ deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });
     const pair = await byok.pairing.createPairingCode({ productId: 'clarification-test' }); deviceId = (await daemon.pair(pair.code)).deviceId;
@@ -275,7 +275,7 @@ describe('Host clarification: real HTTP daemon, SQLite CAS, injected clock', () 
   });
   it.each(['empty','unchecked','capability'] as const)('result channel %s fails closed with zero tickets', async mode => {
     await daemon.stop();
-    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',productId: 'clarification-test',serverUrl: fixtureUrl,
+    const config: DaemonConfig = { localAgentRelease: { version: '0.0.0-example-stub' },productName: 'Example Bot',deviceName: 'ci-smoke',productId: 'clarification-test',serverUrl: fixtureUrl,
       storeDir: path.join(root,'second-sdk'),...(mode !== 'capability' ? { agentHome: { hostStorageRoot: path.join(root,'second-homes') },agentEgress: { policy } } : {}),
     };
     daemon = createDaemonWithAdapters(config,[adapter],{ deviceCredentials: new InMemoryDeviceCredentialBackend(), longPoll: { retryDelayMs: 10,idleDelayMs: 10 } });

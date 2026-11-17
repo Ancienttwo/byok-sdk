@@ -84,7 +84,7 @@ export function runAdapterCapabilityConformance(qualification: AdapterCapability
       const session = await fixture.start();
       const firstRef = session.sessionRef;
       await collectAdapterTurn(session);
-      await session.followUp({ instruction: 'second turn' });
+      await session.followUp({ instruction: 'second turn', target: { lane: 'auto' } });
       expect((await collectAdapterTurn(session)).at(-1)).toEqual({ type: 'turn_end' });
       expect(session.sessionRef).toBe(firstRef);
     });

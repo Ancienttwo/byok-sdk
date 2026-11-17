@@ -4,7 +4,7 @@ import { AGENT_MEMORY_INTENT_CAPABILITY, decodeEnvelope } from '@byok-sdk/protoc
 import { describe, expect, it } from 'vitest';
 import { ZodError } from 'zod';
 import type { AgentMemoryIntentNoticeInput } from '../index';
-import { uuidFromSha256 } from '../offer-identity';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
 import { TENANT_A, TENANT_B, createHarness } from './support/harness';
 
 const INTENT_A = '50000000-0000-4000-8000-000000000001';

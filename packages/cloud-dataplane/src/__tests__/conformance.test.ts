@@ -47,7 +47,7 @@ import { PostgresDeviceAssertionReplayAuthority } from '../stores/device-asserti
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 const OFFER_TENANT = tenantId('tenant-offer-sequence');
-const OFFER_AGENT = { agentRef: { agentId: 'offer-sequence-agent', profileRevision: 'rev-1' }, session: { mode: 'resume' as const, sessionRef: 'offer-sequence-session' } };
+const OFFER_AGENT = { agentRef: { agentId: 'offer-sequence-agent', profileRevision: 'rev-1' }, session: { mode: 'resume' as const, sessionRef: 'offer-sequence-session' }, target: { lane: 'auto' as const } };
 
 const postgresFactory: CloudCompositionFactory = {
   async create() {
@@ -199,6 +199,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres offer delivery composition', () => {
         devicePublicKey: 'fixture-public-key',
         proofKeyId: 'fixture-proof',
         proofKeyEpoch: 1,
+        expectedDeviceDigest: null,
       });
       await stores.devices.recordCapabilities(OFFER_TENANT, {
         deviceId: 'device-offer-sequence',

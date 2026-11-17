@@ -347,7 +347,9 @@ export async function until<T>(check: () => Promise<T | undefined>, timeoutMs = 
  * instance that a test may kill and restart on the same port and storage dir, so the device reconnects to the new instance
  * and the clock keeps its alarm.
  */
-export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}, dreaming?: HostConfig['dreaming']) {
+// Dreaming is off unless a test asks for it: the daily dream slot follows the wall clock, so a default-on home would
+// receive a dream task whenever a run crossed 03:00 in its zone.
+export async function openHome(options: Omit<WorkerOptions, 'persist'> = {}, dreaming: HostConfig['dreaming'] = false) {
   const substrate = await openSubstrate();
   const home = `worker-tenant-${randomUUID()}`;
   const persist = mkdtempSync(path.join(tmpdir(), 'hw-persist-'));

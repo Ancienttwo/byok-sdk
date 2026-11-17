@@ -12,7 +12,7 @@
 import { contentHash, tenantId } from '@byok-sdk/core';
 import type { ActivityAppendInput, ApprovalTimelineAppendInput } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
-import { registration } from './fixtures';
+import { registration, PI_EXECUTOR } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory, type CloudConformanceStores } from './harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
@@ -38,7 +38,7 @@ function deadline(at: string): string {
 
 async function claimed(stores: CloudConformanceStores, taskId: string, deviceId = 'device-1'): Promise<void> {
   await stores.tasks.reserveAgentOffer(TENANT, { taskId, deviceId, agentRef: AGENT_REF });
-  await stores.tasks.claim(TENANT, { taskId, deviceId });
+  await stores.tasks.claim(TENANT, { taskId, deviceId, executor: PI_EXECUTOR });
 }
 
 /**

@@ -20,7 +20,7 @@ async function ledgerSubject(): Promise<RoutineSubject> {
   const fixture = await openLTestHost({ deviceCredentials: new InMemoryDeviceCredentialBackend(),
     ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
   bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', execution: template(fixture.deviceId), connector: async () => null,
-    now: () => clock });
+    now: () => clock, dreaming: false });
   opened.push({ fixture, bot });
   // Test fixture: the cases create routines through the Main Bot's outcomes (#1229).
   fixture.ledger.transaction(s => { stateOf(s.application).team.bots.main!.autonomy = 'auto'; });

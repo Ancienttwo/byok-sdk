@@ -31,6 +31,7 @@ import {
   CoreConflictError,
   MailboxStreamClosedError,
   assertCanonicalTimestamp,
+  tenantId,
   type Clock,
   type ContentHash,
   type MailboxAdvanceCursorInput,
@@ -94,7 +95,7 @@ interface RetentionRow {
 
 export function toMailboxMessage(row: OutboxRow): MailboxMessage {
   return {
-    tenantId: row.tenant_id as TenantId,
+    tenantId: tenantId(row.tenant_id),
     deviceId: row.device_id,
     // `seq` is bigint in the column and `number` on the port, because it is the
     // envelope `seq` on the wire. The column is wide so the counter cannot wrap
@@ -185,6 +186,18 @@ export class PostgresMailboxStore implements MailboxStore {
       hasMore: result.rows.length > page.length,
       recoverableFrom: await this.#recoverableFrom(tenant, query.deviceId),
     };
+  }
+
+  async readMessage(
+    tenant: TenantId,
+    input: { readonly deviceId: string; readonly messageId: string },
+  ): Promise<MailboxMessage | undefined> {
+    const result = await this.#pool.query<OutboxRow>(
+      `SELECT ${OUTBOX_COLUMNS} FROM outbox WHERE tenant_id = $1 AND device_id = $2 AND message_id = $3`,
+      [tenant, input.deviceId, input.messageId],
+    );
+    const row = result.rows[0];
+    return row === undefined ? undefined : toMailboxMessage(row);
   }
 
   /**

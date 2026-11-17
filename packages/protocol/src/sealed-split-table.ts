@@ -111,8 +111,8 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
     digests: {
       'instruction.blobRef.contentHash': 'sealed',
       'agentRef.profileRevision': 'plain',
-      'dispatchSelection.providerProfile.profileRevision': 'plain',
-      'dispatchSelection.providerProfile.profileHash': 'plain',
+      'target.providerProfile.profileRevision': 'plain',
+      'target.providerProfile.profileHash': 'plain',
       'egressPolicy.policyRevision': 'plain',
       'preparation.requestDigest': 'forbidden',
       'preparation.artifactDigest': 'forbidden',

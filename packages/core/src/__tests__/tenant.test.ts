@@ -22,7 +22,7 @@ describe('tenantId', () => {
     expect(typeof tenant).toBe('string');
   });
 
-  it('rejects empty, padded, over-long, and NUL-bearing ids', () => {
+  it('rejects empty, padded, over-long, and control-character-bearing ids', () => {
     const rejected = [
       '',
       ' ',
@@ -30,7 +30,11 @@ describe('tenantId', () => {
       'tenant-a ',
       '\ttenant-a',
       'a'.repeat(TENANT_ID_MAX_LENGTH + 1),
+      // The bound counts UTF-16 code units: 101 astral characters are 202.
+      '\u{1F600}'.repeat(TENANT_ID_MAX_LENGTH / 2 + 1),
       `tenant${TENANT_KEY_SEPARATOR}a`,
+      'tenant\u0085a',
+      'tenant\ud800a',
     ];
     for (const value of rejected) {
       const error = (() => {

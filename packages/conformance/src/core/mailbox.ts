@@ -178,6 +178,24 @@ export function runMailboxConformance(factory: CoreCompositionFactory): void {
       });
     });
 
+    it('reads one retained row by messageId on its device stream, in any state, without acking (wire v7)', async () => {
+      await withMailbox(factory, async ({ stores }) => {
+        const appended = await stores.mailbox.append(TENANT_A, offer(1));
+        await stores.mailbox.append(TENANT_A, { ...offer(1), deviceId: 'device-2', messageId: 'msg-other-device' });
+
+        expect(await stores.mailbox.readMessage(TENANT_A, { deviceId: DEVICE, messageId: 'msg-1' })).toEqual(appended);
+        // Exact on device and tenant: no cross-stream or cross-tenant hit.
+        expect(await stores.mailbox.readMessage(TENANT_A, { deviceId: 'device-2', messageId: 'msg-1' })).toBeUndefined();
+        expect(await stores.mailbox.readMessage(TENANT_B, { deviceId: DEVICE, messageId: 'msg-1' })).toBeUndefined();
+        expect(await stores.mailbox.readMessage(TENANT_A, { deviceId: DEVICE, messageId: 'msg-never' })).toBeUndefined();
+        // Still pending: the read neither acked nor moved the cursor.
+        expect((await stores.mailbox.readCursor(TENANT_A, DEVICE)).ackedSeq).toBe(0);
+
+        await stores.mailbox.expirePending(TENANT_A, { deviceId: DEVICE, seqs: [appended.seq] });
+        expect(await stores.mailbox.readMessage(TENANT_A, { deviceId: DEVICE, messageId: 'msg-1' })).toMatchObject({ seq: appended.seq, state: 'expired' });
+      });
+    });
+
     it('does not ack on read', async () => {
       await withMailbox(factory, async ({ stores }) => {
         await stores.mailbox.append(TENANT_A, offer(1));

@@ -32,7 +32,7 @@ CREATE INDEX IF NOT EXISTS proof_request_receipt_recorded_idx
   ON proof_request_receipt (tenant_id, recorded_at);
 `;
 
-export const PROOF_REQUEST_RECEIPT_PROJECTION =
+const PROOF_REQUEST_RECEIPT_PROJECTION =
   'tenant_id, device_id, request_id, operation, resource, body_sha256, body_size, response_status, response_body, recorded_at FROM proof_request_receipt';
 
 interface Coordinator {

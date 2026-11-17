@@ -4,11 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager, type ConnectionManagerOptions, type OutboundSettlement } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
-import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { seedAuthHoldingToken } from './fixtures/device-enrollment';
 import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 
 type Scenario = 'handshake-route-failure' | 'handshake-settlement-failure' | 'poll-success' | 'poll-failure'
@@ -32,13 +31,7 @@ async function setup(scenario: Scenario, onOperationalOutcome: ConnectionManager
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-operational-observer-'));
   roots.push(root);
   const store = createTestDeviceStore(root);
-  await seedDeviceEnrollment(store, {
-    deviceId, tenantId: 'observer-tenant', accessToken: 'fixture-token',
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    devicePrivateKeyPem: 'fixture-private-key', devicePublicKey: 'fixture-public-key',
-  });
-  const auth = new AuthManager({ serverUrl, store });
-  await auth.loadExisting();
+  const auth = await seedAuthHoldingToken(store, serverUrl, { deviceId, tenantId: 'observer-tenant' });
   const cursorStore = new CursorStore(root);
   await cursorStore.save(serverUrl, deviceId, 7);
 
@@ -53,14 +46,13 @@ async function setup(scenario: Scenario, onOperationalOutcome: ConnectionManager
       return Response.json({
         accepted: messages.length,
         outcomes: messages.map((envelope) => ({ id: envelope.id, outcome: 'accepted' })),
-        capabilities: ['result-document'],
         ...(hello ? { ingress: TEST_ACTIVITY_INGRESS } : {}),
       });
     }
     expect(url.pathname).toBe('/byok/events');
     expect(url.searchParams.get('cursor')).toBe('7');
     if (scenario === 'poll-failure') return new Response('', { status: 503 });
-    return Response.json({ events: [], cursor: 7, capabilities: ['result-document'], ingress: TEST_ACTIVITY_INGRESS });
+    return Response.json({ events: [], cursor: 7, ingress: TEST_ACTIVITY_INGRESS });
   });
   vi.stubGlobal('fetch', fetch);
   const post = vi.spyOn(LongPollClient.prototype, 'postBatch');
@@ -116,7 +108,6 @@ describe('ConnectionManager operational observer exception boundary (#384)', () 
       expect(observer.mock.calls.filter(([, channel]) => channel === source)).toEqual([[outcome, source]]);
       expect(onHalted).not.toHaveBeenCalled();
       expect(manager.isOpen()).toBe(false);
-      expect(manager.getServerCapabilities()).toEqual([]);
       expect(await cursorStore.load(serverUrl, deviceId)).toBe(7);
 
       const retained = source === 'upload' && outcome === 'failure';

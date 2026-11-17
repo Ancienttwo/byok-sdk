@@ -73,6 +73,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         {
           agentRef: { agentId: 'agent-1', profileRevision: 'rev-1' },
           session: { mode: 'resume', sessionRef: 'session-blob-1' },
+          target: { lane: 'auto' },
           instruction: {
             blobRef: {
               blobId: 'blob-1',
@@ -96,7 +97,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'continue durable Agent work',
-          runtime: 'pi',
+          target: { lane: 'runtime', runtimeId: 'pi' },
           agentRef: { agentId: 'agent-1', profileRevision: 'profile-r7' },
           session: { mode: 'resume', sessionRef: 'session-agent-1' },
         },
@@ -114,7 +115,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'continue typed egress Agent work',
-          runtime: 'pi',
+          target: { lane: 'subscription', runtimeId: 'claude', modelId: 'opus' },
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
           session: { mode: 'resume', sessionRef: 'session-egress-1' },
           egressPolicy: {
@@ -146,7 +147,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'start typed egress Agent work',
-          runtime: 'pi',
+          target: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' },
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
           session: { mode: 'fresh' },
           egressPolicy: {
@@ -179,7 +180,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         {
           agentMemory: 'none',
           egressPolicy: { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
-          runtime: 'pi',
+          target: { lane: 'harness', harnessId: 'grok' },
           agentRef: { agentId: 'agent-prepared', profileRevision: 'profile-prepared-r1' },
           session: { mode: 'fresh' },
           requiredToolsets: ['team'],
@@ -412,7 +413,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     testedTypes.push(type);
     roundTrip(
       type,
-      createEnvelope(type, { deviceId: 'device-1', agentId: 'agent-1' }, { taskId: 'task-1' }),
+      createEnvelope(type, { deviceId: 'device-1', executor: { kind: 'harness', harnessId: 'grok' } }, { taskId: 'task-1' }),
     );
   });
 
@@ -516,6 +517,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       createEnvelope(
         type,
         {
+          executor: { kind: 'runtime', runtimeId: 'codex' },
           summary: 'refactor complete, all tests passing',
           sessionRef: 'sess-1',
           artifactRefs: [
@@ -545,6 +547,15 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     const type = 'task.cancelled' as const;
     testedTypes.push(type);
     roundTrip(type, createEnvelope(type, { reason: 'user cancelled' }, { taskId: 'task-1' }));
+  });
+
+  it('task.steer_refused', () => {
+    const type = 'task.steer_refused' as const;
+    testedTypes.push(type);
+    roundTrip(
+      type,
+      createEnvelope(type, { steerMessageId: '11111111-1111-4111-8111-111111111111', reason: 'input_too_large' }, { taskId: 'task-1' }),
+    );
   });
 
   it('task.approval_resolved', () => {
@@ -592,7 +603,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 
   // #654: each sealable type round-trips its first sealed-branch golden line,
   // which carries real ciphertext under a fixed test scope key.
-  const goldenLines = readFileSync(new URL('./golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+  const goldenLines = readFileSync(new URL('./golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
     .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope);
   it.each(Object.keys(SEALED_SPLIT_TABLE) as Array<keyof typeof SEALED_SPLIT_TABLE>)('sealed branch of %s', (type) => {
     testedTypes.push(type);
@@ -603,7 +614,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 
   it('sealed task.decline with an offer selection code', () => {
     const line = goldenLines.find((envelope) => envelope.type === 'task.decline' && isSealedPayload('task.decline', envelope.payload)
-      && (envelope.payload as { code?: string }).code === 'runtime_selection_mismatch');
+      && (envelope.payload as { code?: string }).code === 'agent_memory_selection_invalid');
     expect(line).toBeDefined();
     roundTrip('task.decline', createEnvelope('task.decline', line!.payload as never, { id: line!.id, ts: line!.ts, taskId: line!.task_id! }));
   });
@@ -616,7 +627,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 describe('createEnvelope defaults', () => {
   it('fills v, id, ts when not supplied', () => {
     const envelope = createEnvelope('task.steer', { text: 'hi' }, { taskId: 'task-1', seq: 1 });
-    expect(envelope.v).toBe(6);
+    expect(envelope.v).toBe(7);
     expect(envelope.id).toMatch(UUID_RE);
     expect(() => new Date(envelope.ts).toISOString()).not.toThrow();
     expect(Number.isNaN(new Date(envelope.ts).getTime())).toBe(false);
@@ -626,7 +637,7 @@ describe('createEnvelope defaults', () => {
     const envelope = createEnvelope(
       'task.steer',
       { text: 'hi' },
-      { v: 6, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
+      { v: 7, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
     );
     expect(envelope.id).toBe('11111111-1111-4111-8111-111111111111');
     expect(envelope.ts).toBe('2026-07-16T00:00:00.000Z');

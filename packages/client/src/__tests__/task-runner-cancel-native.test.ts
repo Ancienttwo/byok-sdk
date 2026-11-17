@@ -21,7 +21,7 @@ import { TestServer } from './fixtures/test-server';
 import { until } from './fixtures/until';
 import { readyGate } from './fixtures/start-ready';
 import { cancellationTiming } from './fixtures/task-runner-cancel-timing';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -140,7 +140,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const sent: Envelope[] = [];
   const terminalPublished = deferred();
-  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter], deviceId: 't1-native-device', storeDir: dir, productId: 't1-cancel',
     send: event => {
       timing.observeTerminal(event); sent.push(event);
@@ -157,7 +157,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const taskId = 'native-task';
   const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
-    instruction: 'observe native cancellation', runtime, limits,
+    instruction: 'observe native cancellation', target: { lane: 'runtime', runtimeId: runtime }, limits,
   }, { taskId, seq: 1 }));
   const cancel = () => {
     timing.record('cancel.request');
@@ -362,7 +362,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     }, [c.adapter]);
     c.cleanup = async () => { await daemon.stop(); await server.close(); };
     await daemon.pair('pairing-code'); await daemon.start();
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'Host cancellation', runtime },
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'Host cancellation', target: { lane: 'runtime', runtimeId: runtime } },
       { taskId: 'host-task', seq: server.nextSeq() }));
     await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
       && event.payload.sealed === undefined && event.payload.events.some(event => event.type === 'tool_use'));

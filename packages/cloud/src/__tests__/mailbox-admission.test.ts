@@ -209,7 +209,7 @@ describe('mailbox admission at the cloud surface', () => {
       payload: {
         instruction: 'emit one reliable event',
         agentRef: AGENT_REF,
-        session: { mode: 'resume', sessionRef: 'session-admission' },
+        session: { mode: 'resume', sessionRef: 'session-admission' }, target: { lane: 'auto' as const },
         egressPolicy: POLICY,
       },
     });
@@ -286,7 +286,7 @@ describe('mailbox admission at the cloud surface', () => {
       payload: {
         instruction: 'emit one reliable event',
         agentRef: AGENT_REF,
-        session: { mode: 'resume', sessionRef: 'session-no-entitlement' },
+        session: { mode: 'resume', sessionRef: 'session-no-entitlement' }, target: { lane: 'auto' as const },
         egressPolicy: POLICY,
       },
     });
@@ -359,7 +359,7 @@ describe('mailbox admission at the cloud surface', () => {
       payload: {
         instruction: 'emit one reliable event',
         agentRef: AGENT_REF,
-        session: { mode: 'resume', sessionRef: 'session-admission' },
+        session: { mode: 'resume', sessionRef: 'session-admission' }, target: { lane: 'auto' as const },
         egressPolicy: POLICY,
       },
     });

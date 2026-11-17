@@ -18,7 +18,6 @@ import type { TenantId } from './tenant.js';
 
 /** Principal kinds. A composition may not invent a third without a contract change. */
 export const PRINCIPAL_KINDS = ['device', 'control-plane'] as const;
-export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 
 /**
  * A paired device acting inside one tenant/product.
@@ -46,16 +45,6 @@ export interface ControlPlanePrincipal {
 
 /** Anything that can address a tenant-scoped store. */
 export type Principal = DevicePrincipal | ControlPlanePrincipal;
-
-export function isDevicePrincipal(principal: Principal): principal is DevicePrincipal {
-  return principal.kind === 'device';
-}
-
-export function isControlPlanePrincipal(
-  principal: Principal,
-): principal is ControlPlanePrincipal {
-  return principal.kind === 'control-plane';
-}
 
 /**
  * The tenant every store call must be scoped to.

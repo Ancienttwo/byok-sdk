@@ -34,7 +34,7 @@ import {
   type TaskRedactionCodec,
 } from '@byok-sdk/cloud';
 import { describe, expect, it } from 'vitest';
-import { registration } from './fixtures';
+import { deviceDigest, registration, PI_EXECUTOR } from './fixtures';
 import {
   withCloudComposition,
   type CloudCompositionFactory,
@@ -81,7 +81,7 @@ async function seedDevice(
   await mailbox.append(TENANT, { deviceId, messageId: id('offer'), body: envelope(id('offered')) });
   for (const suffix of ['claimed', 'running', 'cancel-requested', 'complete']) {
     await stores.tasks.reserveAgentOffer(TENANT, { taskId: id(suffix), deviceId, agentRef: AGENT_REF });
-    await stores.tasks.claim(TENANT, { taskId: id(suffix), deviceId });
+    await stores.tasks.claim(TENANT, { taskId: id(suffix), deviceId, executor: PI_EXECUTOR });
   }
   await stores.tasks.recordStatus(TENANT, { taskId: id('running'), status: 'running', agentRef: AGENT_REF });
   await stores.tasks.recordStatus(TENANT, { taskId: id('complete'), status: 'complete', agentRef: AGENT_REF });
@@ -250,7 +250,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const before = await seedDevice(handle, 'first');
         const pendingBefore = (await mailbox.inspect(TENANT, 'first')).pending;
 
-        await stores.devices.register(TENANT, registration('second', { machineId: MACHINE }));
+        await stores.devices.register(TENANT, registration('second', { machineId: MACHINE, expectedDeviceDigest: await deviceDigest(TENANT, 'first') }));
 
         await expect(stores.devices.get(TENANT, 'first')).resolves.toBeUndefined();
         await expectRetired(handle, 'first', before, pendingBefore, 'device_superseded');
@@ -275,10 +275,51 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
           proofKeyId: 'identity',
           proofKeyEpoch: 0,
           machineId: MACHINE,
+          expectedDeviceDigest: await deviceDigest(TENANT, 'paired-first'),
         });
 
-        expect(device?.deviceId).toBe('paired-second');
+        expect(device).toMatchObject({ outcome: 'registered', device: { deviceId: 'paired-second' } });
         await expectRetired(handle, 'paired-first', before, pendingBefore, 'device_superseded');
+      });
+    });
+
+    it('a fence conflict retires nothing: the current device keeps its row, tasks, mailbox and device-scoped state (#2045)', async () => {
+      // A conflict must be decided before any retirement work. A composition
+      // that cleans up the current device first and then refuses the
+      // registration passes a device-id check, and fails here.
+      await withCloudComposition(factory, async (handle) => {
+        const { stores, mailbox } = handle;
+        await mailbox.limit(TENANT, 1_000_000n);
+        await stores.devices.register(TENANT, registration('fenced-current', { machineId: MACHINE }));
+        const tasksBefore = await seedDevice(handle, 'fenced-current');
+        const [nonce] = await seedDeviceState(handle, 'fenced-current');
+        const rowBefore = await stores.devices.get(TENANT, 'fenced-current');
+        const mailboxBefore = await mailbox.inspect(TENANT, 'fenced-current');
+        const currentDeviceDigest = await deviceDigest(TENANT, 'fenced-current');
+        const expiresAt = new Date(Date.parse(handle.now()) + CODE_TTL_MS).toISOString();
+        await stores.pairingCodes.issue(TENANT, { code: 'fenced-code', productId: 'product-1', expiresAt });
+
+        const stale = await deviceDigest(TENANT, 'fenced-gone');
+        await expect(stores.devices.register(TENANT, registration('fenced-direct', { machineId: MACHINE, expectedDeviceDigest: stale })))
+          .resolves.toEqual({ outcome: 'conflict', currentDeviceDigest });
+        await expect(stores.pairing.redeemAndRegister({
+          pairingCode: 'fenced-code',
+          deviceId: 'fenced-paired',
+          deviceName: 'name-fenced-paired',
+          devicePublicKey: 'pk-fenced-paired',
+          proofKeyId: 'identity',
+          proofKeyEpoch: 0,
+          machineId: MACHINE,
+          expectedDeviceDigest: null,
+        })).resolves.toEqual({ outcome: 'conflict', currentDeviceDigest });
+
+        await expect(stores.devices.get(TENANT, 'fenced-current')).resolves.toEqual(rowBefore);
+        expect((await stores.devices.list(TENANT)).map((device) => device.deviceId)).toEqual(['fenced-current']);
+        for (const position of [...UNFINISHED, 'complete'] as const) {
+          await expect(stores.tasks.get(TENANT, `fenced-current-${position}`), position).resolves.toEqual(tasksBefore[position]);
+        }
+        await expect(mailbox.inspect(TENANT, 'fenced-current')).resolves.toEqual(mailboxBefore);
+        await expectDeviceStateKept(handle, 'fenced-current', nonce);
       });
     });
 
@@ -329,9 +370,11 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
           const { stores, replay } = handle;
           const keys = generateKeyPairSync('ed25519');
           const publicKey = keys.publicKey.export({ format: 'jwk' }).x!;
-          const register = (deviceId: string) => stores.devices.register(TENANT, registration(deviceId, {
+          const register = async (deviceId: string, current: string | null = null) => stores.devices.register(TENANT, registration(deviceId, {
             devicePublicKey: publicKey,
-            ...(retire === 'supersession' ? { machineId: MACHINE } : {}),
+            ...(retire === 'supersession'
+              ? { machineId: MACHINE, expectedDeviceDigest: current === null ? null : await deviceDigest(TENANT, current) }
+              : {}),
           }));
           const claims: DeviceAssertionClaims = {
             version: 1,
@@ -370,9 +413,9 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
           await register('replayed');
           await expect(present()).resolves.toBeDefined();
           if (retire === 'revoke') await stores.devices.revoke(TENANT, 'replayed');
-          else await register('successor');
+          else await register('successor', 'replayed');
           await expect(stores.devices.get(TENANT, 'replayed')).resolves.toBeUndefined();
-          await register('replayed');
+          await register('replayed', retire === 'supersession' ? 'successor' : null);
 
           await expect(present()).resolves.toBeUndefined();
         });
@@ -388,7 +431,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
           const [kept] = await seedDeviceState(handle, 'sibling');
 
           if (retire === 'revoke') await stores.devices.revoke(TENANT, 'stateful');
-          else await stores.devices.register(TENANT, registration('successor', { machineId: MACHINE }));
+          else await stores.devices.register(TENANT, registration('successor', { machineId: MACHINE, expectedDeviceDigest: await deviceDigest(TENANT, 'stateful') }));
 
           await expectDeviceStateDeleted(handle, 'stateful', retired);
           await expectDeviceStateKept(handle, 'sibling', kept);
@@ -459,7 +502,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await stores.devices.register(TENANT, registration('busy'));
         for (const taskId of ['busy-a', 'busy-b']) {
           await stores.tasks.reserveAgentOffer(TENANT, { taskId, deviceId: 'busy', agentRef: AGENT_REF });
-          await stores.tasks.claim(TENANT, { taskId, deviceId: 'busy' });
+          await stores.tasks.claim(TENANT, { taskId, deviceId: 'busy', executor: PI_EXECUTOR });
         }
         // Hold task a inside its own cancellation, the way any in-flight task mutation would.
         let entered!: () => void;
@@ -505,7 +548,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, registration('late'));
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'late-task', deviceId: 'late', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'late-task', deviceId: 'late' });
+        await stores.tasks.claim(TENANT, { taskId: 'late-task', deviceId: 'late', executor: PI_EXECUTOR });
         await mailbox.append(TENANT, { deviceId: 'late', messageId: 'late-offer', body: envelope('late-task') });
 
         const release = await handle.holdMailboxExpiry();
@@ -610,7 +653,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.devices.register(TENANT, { ...registration('first-pairing'), machineId: MACHINE });
-        await stores.devices.register(TENANT, { ...registration('second-pairing'), machineId: MACHINE });
+        await stores.devices.register(TENANT, { ...registration('second-pairing'), machineId: MACHINE, expectedDeviceDigest: await deviceDigest(TENANT, 'first-pairing') });
         const refused = await refusal(mailbox.append(TENANT, { deviceId: 'first-pairing', messageId: 'stale', body: envelope('stale') }));
         expect(refused).toMatchObject({ code: 'mailbox_stream_closed', closeCause: 'device_superseded' });
         await expect(mailbox.append(TENANT, { deviceId: 'second-pairing', messageId: 'fresh', body: envelope('fresh') }))
@@ -680,7 +723,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         const { stores, mailbox } = handle;
         await mailbox.limit(TENANT, 1_000_000n);
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'done', deviceId: 'device-b', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'done', deviceId: 'device-b' });
+        await stores.tasks.claim(TENANT, { taskId: 'done', deviceId: 'device-b', executor: PI_EXECUTOR });
         const done = await stores.tasks.recordStatus(TENANT, { taskId: 'done', status: 'complete', agentRef: AGENT_REF });
         const row = await mailbox.append(TENANT, { deviceId: 'device-b', messageId: 'late', body: envelope('done', 'steer') });
 
@@ -694,7 +737,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
       await withCloudComposition(factory, async (handle) => {
         const { stores, mailbox } = handle;
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'stopping', deviceId: 'device-c', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'stopping', deviceId: 'device-c' });
+        await stores.tasks.claim(TENANT, { taskId: 'stopping', deviceId: 'device-c', executor: PI_EXECUTOR });
         const requested = await stores.cancellations.request(TENANT, {
           taskId: 'stopping',
           proposedMessageId: 'stopping-cancel',
@@ -756,7 +799,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'revoke-offered', deviceId: 'archived-revoke', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'archived-revoke', messageId: 'revoke-offer', body: envelope('revoke-offered') });
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke', agentRef: AGENT_REF });
-        await stores.tasks.claim(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke' });
+        await stores.tasks.claim(TENANT, { taskId: 'revoke-claimed', deviceId: 'archived-revoke', executor: PI_EXECUTOR });
 
         await stores.devices.revoke(TENANT, 'archived-revoke');
 
@@ -777,7 +820,7 @@ export function runDeviceRetirementConformance(factory: CloudCompositionFactory)
         await stores.tasks.reserveAgentOffer(TENANT, { taskId: 'supersede-offered', deviceId: 'archived-first', agentRef: AGENT_REF });
         await mailbox.append(TENANT, { deviceId: 'archived-first', messageId: 'supersede-offer', body: envelope('supersede-offered') });
 
-        await stores.devices.register(TENANT, { ...registration('archived-second'), machineId: MACHINE });
+        await stores.devices.register(TENANT, { ...registration('archived-second'), machineId: MACHINE, expectedDeviceDigest: await deviceDigest(TENANT, 'archived-first') });
 
         await expect(stores.tasks.get(TENANT, 'supersede-offered')).resolves.toMatchObject({ terminalCause: 'device_superseded' });
         const terminalAt = await expectArchiveWorkAt(handle, 'supersede-offered');

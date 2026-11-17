@@ -189,6 +189,10 @@ Sources: [#2297]. Manifest entries: `cloud-unused-exports-removed`, `cloud-host-
     `CapabilityDeclarationSchema` and `CapabilityDeclaration` from
     `@byok-sdk/core`.
   - `receiptRetentionClass`.
+- **Auth plane.** `createAuthPlane`, `AuthPlane`, `AuthPlaneDeps`,
+  `MintedAccessToken` and `PairInput` are removed. `createCloud` composes the
+  auth plane; `ByokCloud.createPairingCode` is the only way to mint a pairing
+  code and enforces `PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`.
 - **In-memory projection adapters.** `InMemoryAgentMemoryProjectionStore`
   and `InMemoryAgentMemoryProjectionAuthorizer` are no longer exported. A
   hosted composition supplies its own projection ports.
@@ -244,7 +248,7 @@ No new manifest entry: this carries forward the
 
 ### SQLite stores decide their format before any write (#2286)
 
-Sources: [#2295], [#2309], [#2318]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`.
+Sources: [#2295], [#2309], [#2316], [#2318]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`, `server-sqlite-format-before-write`.
 
 SQLite stores check the unchanged main file before writable open, pragmas or
 DDL. Refusal preserves bytes and creates no sidecars, except for
@@ -267,9 +271,20 @@ objects named `sqliteX…` because `_` matches any character in `LIKE`.
   refusals and read-only open failures stay in place. Unreadable SQLite files
   are still quarantined; other stores report `SqliteReadOnlyOpenError` for
   read-only open failures.
+- The embedded server's SQLite store must hold exactly schema 10's tables,
+  indexes and triggers with this build's definitions. A missing or changed
+  object is refused with `SqliteSchemaError` `SQLITE_SCHEMA_INVALID` instead of
+  being recreated, and an unknown one with `SQLITE_SCHEMA_UNSUPPORTED`. The
+  `migration` option is no longer checked; the store has none. Receipt
+  maintenance deletes no request receipt, as before: every SDK receipt is an
+  identity fence.
 - A durable replica with a different pi-durable schema is refused with
   `DurableReplicaFormatError`, without migration. A replica lock path holding
   another database is also refused without writing it.
+- The server store file and the local task journal hold only the SDK's
+  objects. A Host table, index or trigger in the server store, or a Host
+  table in the journal, is refused as above. Keep Host objects in a separate
+  file; `ATTACH DATABASE` can mount it on the same connection.
 - Released journals and replicas are current. Export or preserve refused
   stores before starting the candidate.
 - Copy-and-own Desktop `HostStore`, basic Clarification and goal/btw stores,
@@ -338,8 +353,22 @@ cannot talk to each other.
 #### New store
 
 v7 requires new stores; v6 receipts, history and attempts are not migrated.
-Export needed history with the old build. Rotate K4 frozen work and outbox
-snapshots, and follow [credential handling](#credentials-and-provider-keys).
+Export needed history with the old build, and follow
+[credential handling](#credentials-and-provider-keys).
+
+Rotate the Host's frozen work as well. A K4 or K8 ledger freezes each
+intent's complete execution template and keeps outbox rows that dispatch it. A
+v6 template names `runtime` or `dispatchSelection` where v7 requires `target`,
+and the candidate refuses every previously released ledger
+([Host ledgers record their format](#host-ledgers-record-their-format-2286)).
+
+1. With the old build, let pending intents and outbox rows settle, or abandon
+   them. Record the work that must run again.
+2. With the candidate, open a new ledger at a new path, and enqueue that work
+   again with v7 execution templates.
+
+Archive or remove an Agent home's version 2 memory outbox before deployment
+([outbox version 2](#agent-memory-outbox-version-2-is-refused)).
 
 - Postgres: run migrations on a **new database**, then write storage
   entitlements and retention policy. Use the same role, database and
@@ -354,9 +383,13 @@ snapshots, and follow [credential handling](#credentials-and-provider-keys).
 
 #### What a v6 daemon sees
 
-- **Not paired again:** expected to stop at authentication with
-  `device_revoked`. Verify with the deployed v6 daemon that it halts without
-  reconnecting forever.
+- **Not paired again:** stops at authentication with `device_revoked`.
+  Cloud side, tested in cloud `protocol-version-admission.test.ts` › stops a v6 daemon that was not paired again at authentication, before its hello is read: its challenge and token requests
+  get the typed `device_not_registered` 401, and a bearer it still holds
+  gets a 401 before its hello is read, which sends it to that renewal.
+  Daemon side, confirmed by reading `AuthManager.readUnauthorized` and `markRevoked` in `packages/client/src/daemon/auth-manager.ts` at `v0.43.0` and not by running a v6
+  binary: on that typed 401 it marks the device revoked and halts with
+  `device_revoked` without retrying.
 - **Paired again into the v7 store:** its lone `conn.hello` gets
   `rejected` with `protocol_version_unsupported`. It reads that as a refused
   handshake and halts with `handshake_rejected`.
@@ -620,12 +653,21 @@ machine's current device.
   `isPairingText(value, maxUnits)` enforces this alongside
   `PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH` / `PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH`.
   `tenantId` / `isTenantId` now reject all controls and unpaired surrogates.
-  Fix invalid tenant ids and set `deviceName` when a hostname exceeds the bound;
-  config check and pairing reject it (`PairingInputInvalidError`, field
-  `deviceName`). A `machineId` resolver must return lowercase hex SHA-256 or
-  raises the same error with field `machineId`. An invalid response device id
-  raises `AuthResponseInvalidError` without writes. Pairing validates all
-  writes before `device.json`, including the encoded OS entry's 2,400-byte fit.
+  Fix invalid tenant ids. A `machineId` resolver must return lowercase hex
+  SHA-256, or pairing raises `PairingInputInvalidError` with field
+  `machineId`. An invalid response device id raises `AuthResponseInvalidError`
+  without writes. Pairing validates all writes before `device.json`, including
+  the encoded OS entry's 2,400-byte fit.
+- **Device name.** When the daemon config sets no `deviceName`, pairing uses
+  `os.hostname()`. If that name, or a configured one, is longer than 64 UTF-16
+  code units or holds a control character, `Daemon.pair()` and
+  `byok-agent pair` reject with `PairingInputInvalidError` (field
+  `deviceName`) before they stage an attempt or send a request. The SDK
+  does not truncate or replace the name. A configured `deviceName` also fails
+  the config check. Set `deviceName` to a name the Host controls, such as its
+  own naming rule, a user-editable setting or a label that fits in 64 units.
+  Do not rely on the hostname: some machines, including GitHub's macOS
+  runners, have longer hostnames.
 - **Access tokens stay in memory.** Remove `accessToken` and `expiresAt` from
   injected `DeviceCredentialBackend` read/replace records (`DeviceRecord`).
   `replace` always discards a staged attempt. First request after start and
@@ -1013,5 +1055,6 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2309]: https://github.com/Ancienttwo/byok-sdk/pull/2309
 [#2311]: https://github.com/Ancienttwo/byok-sdk/pull/2311
 [#2313]: https://github.com/Ancienttwo/byok-sdk/pull/2313
+[#2316]: https://github.com/Ancienttwo/byok-sdk/pull/2316
 [#2318]: https://github.com/Ancienttwo/byok-sdk/issues/2318
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384

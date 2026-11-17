@@ -1,5 +1,5 @@
 import type { InboundCommitted, ByokCloudObserver } from '@byok-sdk/cloud';
-import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, TaskState } from '@byok-sdk/protocol';
 import { AsyncEventQueue } from './event-queue.js';
 import type { ByokServerEvent } from './types.js';
 
@@ -9,15 +9,13 @@ const SERVER_EVENT_BUFFER_LIMIT = 1000;
 /**
  * Server-event bookkeeping for one task this instance dispatched. Until the
  * kernel accepts the offer, deliveries wait in `early`, so `task.created`
- * precedes the task's first `task.state`. `claimedRuntime` and
- * `claimedHarnessId` are echoed onto `task.state`; the authoritative copies are
- * on `TaskAttempt`. The entry is dropped at the first terminal.
+ * precedes the task's first `task.state`. `claimedExecutor` is echoed onto
+ * `task.state`; the authoritative copy is on `TaskAttempt`. The entry is dropped at the first terminal.
  */
 interface DispatchedTask {
   dispatched: boolean;
   terminalSettled: boolean;
-  claimedRuntime?: RuntimeId;
-  claimedHarnessId?: string;
+  claimedExecutor?: ClaimedExecutor;
   readonly early: Array<() => void>;
 }
 
@@ -121,8 +119,7 @@ export class TaskEventRelay implements ByokCloudObserver {
   #handleTaskEnvelope(task: DispatchedTask, taskId: string, envelope: InboundCommitted['envelope'], at: string): void {
     switch (envelope.type) {
       case 'task.claim':
-        if (envelope.payload.runtime !== undefined) task.claimedRuntime = envelope.payload.runtime;
-        if (envelope.payload.harnessId !== undefined) task.claimedHarnessId = envelope.payload.harnessId;
+        task.claimedExecutor = envelope.payload.executor;
         this.#transition(task, taskId, 'Claimed', at);
         return;
       case 'task.started':
@@ -165,8 +162,7 @@ export class TaskEventRelay implements ByokCloudObserver {
       taskId,
       state: next,
       at,
-      ...(task.claimedHarnessId === undefined ? {} : { claimedHarnessId: task.claimedHarnessId }),
-      ...(task.claimedRuntime === undefined ? {} : { claimedRuntime: task.claimedRuntime }),
+      ...(task.claimedExecutor === undefined ? {} : { claimedExecutor: task.claimedExecutor }),
     });
     if (next !== 'Complete' && next !== 'Failed' && next !== 'Cancelled') return;
     task.terminalSettled = true;

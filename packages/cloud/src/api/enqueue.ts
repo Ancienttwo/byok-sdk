@@ -23,7 +23,8 @@ import {
 } from '@byok-sdk/protocol';
 import { sameAgentRef } from '../agent-message-disposition.js';
 import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors.js';
-import { taskOfferMessageId, uuidFromSha256 } from '../offer-identity.js';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
+import { taskOfferMessageId } from '../offer-identity.js';
 import { firstSealedPayload } from '../sealed-comparison.js';
 import { retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from '../sealed-ciphertext.js';
 import type { AgentEgressRecord, TaskAttemptStatus } from '../stores/ports.js';
@@ -58,13 +59,17 @@ function sameOfferEnvelope(expected: Envelope, actual: Envelope): boolean {
 
 /**
  * A plaintext lane refuses the sealed fields (#654), before any device read,
- * attempt, receipt or mailbox write, with a message that names the sealed lane.
+ * attempt, receipt or mailbox write. The message names the sealed lane when the
+ * plaintext lane has one; a resume lane has no sealed counterpart.
  */
-export function refuseSealedFields(payload: unknown, fields: readonly string[], sealedEntry: string): void {
+export function refuseSealedFields(payload: unknown, fields: readonly string[], sealedEntry?: string): void {
   if (payload === null || typeof payload !== 'object') return;
   const present = fields.filter((field) => field in payload);
   if (present.length > 0) {
-    throw new ByokCloudError('coordination_input_invalid', `${present.join(', ')} belongs to the sealed lane; use ${sealedEntry}`);
+    const message = sealedEntry === undefined
+      ? `${present.join(', ')} belongs to a sealed lane; this lane has no sealed counterpart`
+      : `${present.join(', ')} belongs to the sealed lane; use ${sealedEntry}`;
+    throw new ByokCloudError('coordination_input_invalid', message);
   }
 }
 
@@ -115,9 +120,10 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       ...(window === undefined ? {} : { nativeSessions: window }) };
     if (recorded === undefined) {
       await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', resolved));
-      if (resolved.harnessId !== undefined) {
+      if (resolved.target.lane === 'harness') {
+        const harnessId = resolved.target.harnessId;
         const target = await options.cloud.devices.get(tenant, deviceId);
-        if (!target?.harnesses?.some(harness => harness.id === resolved.harnessId)) throw new ByokCloudError('agent_capability_missing', 'requested custom harness is not advertised by this device');
+        if (!target?.harnesses?.some(harness => harness.id === harnessId)) throw new ByokCloudError('agent_capability_missing', 'requested custom harness is not advertised by this device');
       }
     }
     return resolved;

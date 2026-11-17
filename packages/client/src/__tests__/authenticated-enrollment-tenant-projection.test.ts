@@ -195,7 +195,7 @@ describe('authenticated enrollment tenant projection', () => {
     const store = createTestDeviceStore(await tmpDir('byok-enrollment-renew-'));
     const auth = new AuthManager({ serverUrl: server.url, store });
     const paired = await auth.pair('renew-code');
-    expect(paired.accessToken.split('.')).toHaveLength(1);
+    expect((await auth.getValidAccessToken()).split('.')).toHaveLength(1);
 
     server.rotateDeviceToken(paired.deviceId);
     await auth.handleUnauthorized();
@@ -220,7 +220,7 @@ describe('authenticated enrollment tenant projection', () => {
       tenantId: replacement.tenantId,
       devicePublicKey: replacement.devicePublicKey,
     });
-    expect(await store.credentials.read()).toMatchObject({ accessToken: replacement.accessToken });
+    expect(await store.credentials.read()).toEqual(replacement);
     await auth.stop();
   });
 
@@ -324,7 +324,6 @@ describe('authenticated enrollment tenant projection', () => {
   it('binds final egress and journal composition to the loaded enrollment record, not host config', async () => {
     server = await TestServer.start();
     server.setPairingTenantId('daemon-code', 'tenant-daemon');
-    server.setAckCapabilities(['agent-egress-reliable-ack']);
     const storeDir = await tmpDir('byok-enrollment-store-');
     const hostStorageRoot = await tmpDir('byok-enrollment-agent-home-');
     const agentRef = { agentId: 'enrollment-agent', profileRevision: 'r1' };
@@ -365,7 +364,7 @@ describe('authenticated enrollment tenant projection', () => {
     expect(appended).toMatchObject({ ok: true, record: { tenantId: 'tenant-daemon' } });
 
     const sequence = server.nextSeq();
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'journal identity' }, {
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'journal identity' }, {
       taskId: 'enrollment-journal-task',
       seq: sequence,
     }));
@@ -378,7 +377,10 @@ describe('authenticated enrollment tenant projection', () => {
     const observableEgress = JSON.stringify({ appended, journal: journal.appended, wire: server.received });
     const credentials = await createTestDeviceStore(storeDir, undefined, 'enrollment-test').credentials.read();
     expect(credentials).toBeDefined();
-    expect(observableEgress).not.toContain(credentials!.accessToken);
+    // The access token lives only in the daemon's memory (#2045); the cloud names the one it holds.
+    const accessToken = server.currentAccessToken(record.deviceId);
+    expect(accessToken).toBeDefined();
+    expect(observableEgress).not.toContain(accessToken);
     expect(observableEgress).not.toContain(credentials!.devicePrivateKeyPem);
   });
 });

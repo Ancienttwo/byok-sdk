@@ -4,15 +4,9 @@
 // `// support` marks a declaration no entry exports; it is listed because an exported
 // signature reaches it, so changing it still changes the public surface.
 // entry @byok-sdk/core
-//   AGENT_MEMORY_INTENT_DIGEST_VERSION -> dist/agent-memory-intent.d.ts
-//   AgentMemoryIntentDigestInput -> dist/agent-memory-intent.d.ts
-//   AuthenticateDeviceAssertionDeps -> dist/device-assertion.d.ts
-//   AuthenticatedAssertion -> dist/device-assertion.d.ts
 //   AuthenticatedDeviceAssertion -> dist/device-assertion.d.ts
 //   AuthenticatedTaskAssertion -> dist/device-assertion.d.ts
 //   BOARD_STATUSES -> dist/board.d.ts
-//   BOARD_TRANSITIONS -> dist/board.d.ts
-//   BoardAssignee -> dist/board.d.ts
 //   BoardClaimInput -> dist/board.d.ts
 //   BoardItem -> dist/board.d.ts
 //   BoardItemInput -> dist/board.d.ts
@@ -23,13 +17,8 @@
 //   BoardStore -> dist/board.d.ts
 //   BoardUnclaimInput -> dist/board.d.ts
 //   ByokCoreError -> dist/errors.d.ts
-//   CANONICAL_TIMESTAMP_PATTERN -> dist/time.d.ts
-//   CAPABILITY_DECLARATION_SCHEMA_ID -> dist/capabilities.d.ts
 //   CAPABILITY_NAME_PATTERN -> dist/capabilities.d.ts
 //   CONTENT_HASH_PATTERN -> dist/blob.d.ts
-//   CORE_ERROR_CODES -> dist/errors.d.ts
-//   CORE_NON_COMPOSITION_PORT_NAMES -> dist/ports-contract.d.ts
-//   CORE_PORT_INTERFACES -> dist/ports-contract.d.ts
 //   CORE_PORT_METHODS -> dist/ports-contract.d.ts
 //   CORE_STORE_NAMES -> dist/stores.d.ts
 //   CapabilityDeclaration -> dist/capabilities.d.ts
@@ -45,40 +34,28 @@
 //   CoreErrorCode -> dist/errors.d.ts
 //   CoreStoreName -> dist/stores.d.ts
 //   CoreStores -> dist/stores.d.ts
-//   DEVICE_ASSERTION_ALGORITHMS -> dist/device-assertion.d.ts
 //   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES -> dist/device-assertion.d.ts
 //   DEVICE_ASSERTION_DEFAULT_TTL_MS -> dist/device-assertion.d.ts
 //   DEVICE_ASSERTION_DOMAIN_PREFIX -> dist/device-assertion.d.ts
 //   DEVICE_ASSERTION_MAX_TTL_MS -> dist/device-assertion.d.ts
 //   DEVICE_ASSERTION_SCHEMA_ID -> dist/device-assertion.d.ts
 //   DEVICE_ASSERTION_VERSION -> dist/device-assertion.d.ts
-//   DEVICE_PROOF_ALGORITHMS -> dist/attestation.d.ts
 //   DEVICE_PROOF_DOMAIN_PREFIX -> dist/attestation.d.ts
 //   DEVICE_PROOF_HEADER -> dist/attestation.d.ts
 //   DEVICE_PROOF_SCHEMA_ID -> dist/attestation.d.ts
-//   DEVICE_PROOF_VERSION -> dist/attestation.d.ts
-//   DeviceAssertionAlgorithm -> dist/device-assertion.d.ts
-//   DeviceAssertionAuthorityRow -> dist/device-assertion.d.ts
 //   DeviceAssertionClaims -> dist/device-assertion.d.ts
 //   DeviceAssertionClaimsSchema -> dist/device-assertion.d.ts
 //   DeviceAssertionDeviceRow -> dist/device-assertion.d.ts
 //   DeviceAssertionEnvelopeV1 -> dist/device-assertion.d.ts
-//   DeviceAssertionEnvelopeV1Schema -> dist/device-assertion.d.ts
 //   DeviceAssertionExpectedBinding -> dist/device-assertion.d.ts
 //   DeviceAssertionReplayAuthority -> dist/device-assertion.d.ts
 //   DeviceAssertionReplayConsumeInput -> dist/device-assertion.d.ts
-//   DeviceAssertionReplaySchemaId -> dist/device-assertion.d.ts
 //   DeviceAssertionVerifier -> dist/device-assertion.d.ts
-//   DeviceAssertionVerifyDeps -> dist/device-assertion.d.ts
-//   DeviceAssertionVerifyInput -> dist/device-assertion.d.ts
 //   DevicePrincipal -> dist/principals.d.ts
-//   DeviceProofAlgorithm -> dist/attestation.d.ts
 //   DeviceProofEnvelopeV1 -> dist/attestation.d.ts
-//   DeviceProofEnvelopeV1Schema -> dist/attestation.d.ts
 //   DeviceProofProtectedClaims -> dist/attestation.d.ts
 //   DeviceProofProtectedClaimsSchema -> dist/attestation.d.ts
 //   DeviceProofVerifier -> dist/attestation.d.ts
-//   DeviceProofVerifyInput -> dist/attestation.d.ts
 //   IN_MEMORY_CLOCK_EPOCH -> dist/in-memory/clock.d.ts
 //   InMemoryBoardStore -> dist/in-memory/board.d.ts
 //   InMemoryCoreComposition -> dist/in-memory/index.d.ts
@@ -93,10 +70,8 @@
 //   InMemoryStorageLedger -> dist/in-memory/storage-ledger.d.ts
 //   InMemoryTruthStore -> dist/in-memory/truth.d.ts
 //   JsonObject -> dist/attestation.d.ts
-//   JsonPrimitive -> dist/attestation.d.ts
 //   JsonValue -> dist/attestation.d.ts
 //   LocalStoreId -> dist/store-compatibility.d.ts
-//   MAILBOX_MESSAGE_STATES -> dist/mailbox.d.ts
 //   MAILBOX_STREAM_CLOSE_CAUSES -> dist/mailbox.d.ts
 //   MailboxAdmission -> dist/mailbox.d.ts
 //   MailboxAdvanceCursorInput -> dist/mailbox.d.ts
@@ -119,8 +94,6 @@
 //   MutableClock -> dist/stores.d.ts
 //   NONCE_SIGNING_DOMAIN -> dist/pairing.d.ts
 //   OBJECT_KEY_PREFIX_PATTERN -> dist/blob.d.ts
-//   OBJECT_STATES -> dist/blob.d.ts
-//   OBJECT_STATE_TRANSITIONS -> dist/blob.d.ts
 //   ObjectCollectExpiredInput -> dist/blob.d.ts
 //   ObjectCommitInput -> dist/blob.d.ts
 //   ObjectKeyPrefix -> dist/blob.d.ts
@@ -131,18 +104,9 @@
 //   ObjectReferenceInput -> dist/blob.d.ts
 //   ObjectState -> dist/blob.d.ts
 //   ObjectStore -> dist/blob.d.ts
-//   ObservedSkillPackFile -> dist/skill-pack.d.ts
 //   PRESENCE_LEVELS -> dist/presence.d.ts
-//   PRINCIPAL_KINDS -> dist/principals.d.ts
 //   PROVIDER_PROVISIONING_MAX_TTL_MS -> dist/sealed-provider-secret.d.ts
 //   PROVIDER_PROVISIONING_OPERATIONS -> dist/sealed-provider-secret.d.ts
-//   PROVIDER_PROVISIONING_REQUEST_VERSION -> dist/sealed-provider-secret.d.ts
-//   PROVIDER_PROVISIONING_SECRET_OPERATIONS -> dist/sealed-provider-secret.d.ts
-//   PROVIDER_SECRET_HPKE_INFO -> dist/sealed-provider-secret.d.ts
-//   PROVIDER_SECRET_HPKE_SUITE -> dist/sealed-provider-secret.d.ts
-//   PROVIDER_SECRET_MAX_BYTES -> dist/sealed-provider-secret.d.ts
-//   PROVIDER_SECRET_MAX_PADDED_BYTES -> dist/sealed-provider-secret.d.ts
-//   PROVIDER_SECRET_PAD_BLOCK_BYTES -> dist/sealed-provider-secret.d.ts
 //   PresenceHint -> dist/presence.d.ts
 //   PresenceHintInput -> dist/presence.d.ts
 //   PresenceLevel -> dist/presence.d.ts
@@ -150,58 +114,27 @@
 //   PresenceRuntimeFact -> dist/presence.d.ts
 //   PresenceStore -> dist/presence.d.ts
 //   Principal -> dist/principals.d.ts
-//   PrincipalKind -> dist/principals.d.ts
-//   ProviderProvisioningConfigV1 -> dist/sealed-provider-secret.d.ts
-//   ProviderProvisioningConfigV1Schema -> dist/sealed-provider-secret.d.ts
 //   ProviderProvisioningExpectedProfile -> dist/sealed-provider-secret.d.ts
-//   ProviderProvisioningExpectedProfileSchema -> dist/sealed-provider-secret.d.ts
-//   ProviderProvisioningHeaderV1 -> dist/sealed-provider-secret.d.ts
-//   ProviderProvisioningHeaderV1Schema -> dist/sealed-provider-secret.d.ts
-//   ProviderProvisioningIdentityRevisionSchema -> dist/sealed-provider-secret.d.ts
 //   ProviderProvisioningOperation -> dist/sealed-provider-secret.d.ts
 //   ProviderProvisioningRequestV1 -> dist/sealed-provider-secret.d.ts
-//   ProviderProvisioningRequestV1Schema -> dist/sealed-provider-secret.d.ts
-//   ProviderSecretRecipient -> dist/sealed-provider-secret.d.ts
 //   QuotaCollectExpiredInput -> dist/quota.d.ts
 //   QuotaStore -> dist/quota.d.ts
-//   SEALING_KEY_ID_LENGTH -> dist/sealed-provider-secret.d.ts
-//   SKILL_FRONTMATTER_FIELDS -> dist/skill-pack.d.ts
-//   SKILL_PACK_DESCRIPTION_MAX_LENGTH -> dist/skill-pack.d.ts
 //   SKILL_PACK_ENTRY_PATH -> dist/skill-pack.d.ts
 //   SKILL_PACK_FILE_MAX_BYTES -> dist/skill-pack.d.ts
-//   SKILL_PACK_FILE_PATH_MAX_LENGTH -> dist/skill-pack.d.ts
 //   SKILL_PACK_FILE_PATH_PATTERN -> dist/skill-pack.d.ts
 //   SKILL_PACK_FORBIDDEN_FIELDS -> dist/skill-pack.d.ts
 //   SKILL_PACK_MANIFEST_SCHEMA_ID -> dist/skill-pack.d.ts
 //   SKILL_PACK_MAX_BYTES -> dist/skill-pack.d.ts
-//   SKILL_PACK_MAX_FILES -> dist/skill-pack.d.ts
-//   SKILL_PACK_NAME_MAX_LENGTH -> dist/skill-pack.d.ts
-//   SKILL_PACK_NAME_PATTERN -> dist/skill-pack.d.ts
-//   SKILL_PACK_REJECTIONS -> dist/skill-pack.d.ts
-//   SKILL_PACK_VERSION_PATTERN -> dist/skill-pack.d.ts
 //   STORAGE_ERROR_CODES -> dist/quota.d.ts
 //   STORAGE_ERROR_HTTP_STATUS -> dist/quota.d.ts
-//   STORAGE_RESERVATION_STATES -> dist/quota.d.ts
-//   STORAGE_WRITE_KINDS -> dist/quota.d.ts
-//   STORAGE_WRITE_POSTURES -> dist/quota.d.ts
-//   SealProviderProvisioningRequestInput -> dist/sealed-provider-secret.d.ts
-//   SealedProviderSecretV1 -> dist/sealed-provider-secret.d.ts
-//   SealedProviderSecretV1Schema -> dist/sealed-provider-secret.d.ts
-//   SealingKeyClaimV1 -> dist/sealed-provider-secret.d.ts
-//   SealingKeyClaimV1Schema -> dist/sealed-provider-secret.d.ts
-//   SealingKeyIdSchema -> dist/sealed-provider-secret.d.ts
 //   SealingPublicJwk -> dist/sealed-provider-secret.d.ts
 //   SealingPublicJwkSchema -> dist/sealed-provider-secret.d.ts
-//   SkillFrontmatter -> dist/skill-pack.d.ts
 //   SkillPackCheck -> dist/skill-pack.d.ts
 //   SkillPackFile -> dist/skill-pack.d.ts
 //   SkillPackFileContent -> dist/skill-pack.d.ts
-//   SkillPackFileSchema -> dist/skill-pack.d.ts
 //   SkillPackListQuery -> dist/skill-pack.d.ts
 //   SkillPackManifest -> dist/skill-pack.d.ts
-//   SkillPackManifestSchema -> dist/skill-pack.d.ts
 //   SkillPackPublishInput -> dist/skill-pack.d.ts
-//   SkillPackRejection -> dist/skill-pack.d.ts
 //   SkillPackStore -> dist/skill-pack.d.ts
 //   SnapshotWriteInput -> dist/truth.d.ts
 //   StorageErrorCode -> dist/quota.d.ts
@@ -215,20 +148,15 @@
 //   StorageWritePosture -> dist/quota.d.ts
 //   StoreCompatibility -> dist/store-compatibility.d.ts
 //   StoreCompatibilityVerdict -> dist/store-compatibility.d.ts
-//   TASK_ASSERTION_AGENT_REF_MAX_BYTES -> dist/device-assertion.d.ts
 //   TASK_ASSERTION_DOMAIN_PREFIX -> dist/device-assertion.d.ts
 //   TASK_ASSERTION_SCHEMA_ID -> dist/device-assertion.d.ts
-//   TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH -> dist/device-assertion.d.ts
-//   TASK_ASSERTION_VERSION -> dist/device-assertion.d.ts
 //   TENANT_ID_MAX_LENGTH -> dist/tenant.d.ts
-//   TENANT_KEY_SEPARATOR -> dist/tenant.d.ts
 //   TRUTH_RECORD_KINDS -> dist/truth.d.ts
 //   TaskAssertionAgentRef -> dist/device-assertion.d.ts
 //   TaskAssertionAgentRefSchema -> dist/device-assertion.d.ts
 //   TaskAssertionClaims -> dist/device-assertion.d.ts
 //   TaskAssertionClaimsSchema -> dist/device-assertion.d.ts
 //   TaskAssertionEnvelopeV1 -> dist/device-assertion.d.ts
-//   TaskAssertionEnvelopeV1Schema -> dist/device-assertion.d.ts
 //   TenantId -> dist/tenant.d.ts
 //   TenantReadiness -> dist/presence.d.ts
 //   TenantReadinessDevice -> dist/presence.d.ts
@@ -262,20 +190,15 @@
 //   createInMemoryCoreStores -> dist/in-memory/index.d.ts
 //   createMutableClock -> dist/in-memory/clock.d.ts
 //   deriveSealingKeyId -> dist/sealed-provider-secret.d.ts
-//   deviceAssertionCanonicalClaims -> dist/device-assertion.d.ts
-//   deviceAssertionCanonicalJson -> dist/device-assertion.d.ts
 //   deviceAssertionSigningInput -> dist/device-assertion.d.ts
 //   deviceProofCanonicalClaims -> dist/attestation.d.ts
-//   deviceProofCanonicalJson -> dist/attestation.d.ts
 //   deviceProofSigningInput -> dist/attestation.d.ts
 //   freezePresenceRuntimeFact -> dist/presence.d.ts
 //   hasCapability -> dist/capabilities.d.ts
 //   isCanonicalTimestamp -> dist/time.d.ts
 //   isContentHash -> dist/blob.d.ts
-//   isControlPlanePrincipal -> dist/principals.d.ts
 //   isCoreConflictError -> dist/errors.d.ts
 //   isCoreError -> dist/errors.d.ts
-//   isDevicePrincipal -> dist/principals.d.ts
 //   isLegalBoardTransition -> dist/board.d.ts
 //   isLegalObjectTransition -> dist/blob.d.ts
 //   isSkillPackPathSafe -> dist/skill-pack.d.ts
@@ -291,14 +214,10 @@
 //   parseSkillPackManifest -> dist/skill-pack.d.ts
 //   parseTaskAssertionEnvelope -> dist/device-assertion.d.ts
 //   principalTenant -> dist/principals.d.ts
-//   providerProvisioningConfigDigest -> dist/sealed-provider-secret.d.ts
 //   providerProvisioningRequestDigest -> dist/sealed-provider-secret.d.ts
-//   providerSecretAadBytes -> dist/sealed-provider-secret.d.ts
 //   sealProviderProvisioningRequest -> dist/sealed-provider-secret.d.ts
 //   sealingKeyClaimCanonicalBytes -> dist/sealed-provider-secret.d.ts
 //   skillPackContentHashInput -> dist/skill-pack.d.ts
-//   taskAssertionCanonicalClaims -> dist/device-assertion.d.ts
-//   taskAssertionCanonicalJson -> dist/device-assertion.d.ts
 //   taskAssertionSigningInput -> dist/device-assertion.d.ts
 //   tenantId -> dist/tenant.d.ts
 //   tenantKey -> dist/tenant.d.ts
@@ -306,53 +225,28 @@
 //   verifyDeviceAssertion -> dist/device-assertion.d.ts
 //   verifyTaskAssertion -> dist/device-assertion.d.ts
 // entry @byok-sdk/core/sealed-payload
-//   CLIENT_PAIRING_MAC_DOMAIN -> dist/sealed-payload/pairing-verification.d.ts
-//   ClientPairingMacInput -> dist/sealed-payload/pairing-verification.d.ts
-//   CreateMemberKeyBundleInput -> dist/sealed-payload/member-bundle.d.ts
-//   DEVICE_PAIRING_MAC_DOMAIN -> dist/sealed-payload/pairing-verification.d.ts
-//   DevicePairingMacInput -> dist/sealed-payload/pairing-verification.d.ts
 //   MEMBER_CHAIN_OPS -> dist/sealed-payload/member-chain.d.ts
-//   MEMBER_FINGERPRINT_DOMAIN -> dist/sealed-payload/member-fingerprint.d.ts
-//   MEMBER_KEY_BUNDLE_VERSION -> dist/sealed-payload/member-bundle.d.ts
-//   MemberChainAnchorFailure -> dist/sealed-payload/member-chain-walk.d.ts
-//   MemberChainAnchorResult -> dist/sealed-payload/member-chain-walk.d.ts
 //   MemberChainEntryV1 -> dist/sealed-payload/member-chain.d.ts
-//   MemberChainEntryVerifyResult -> dist/sealed-payload/member-chain.d.ts
-//   MemberChainHead -> dist/sealed-payload/member-chain-walk.d.ts
 //   MemberChainOp -> dist/sealed-payload/member-chain.d.ts
 //   MemberChainScope -> dist/sealed-payload/member-chain-walk.d.ts
 //   MemberChainState -> dist/sealed-payload/member-chain-walk.d.ts
-//   MemberChainWalkFailure -> dist/sealed-payload/member-chain-walk.d.ts
-//   MemberChainWalkResult -> dist/sealed-payload/member-chain-walk.d.ts
-//   MemberFingerprintInput -> dist/sealed-payload/member-fingerprint.d.ts
 //   MemberKemKey -> dist/sealed-payload/member-key-record.d.ts
 //   MemberKeyBinding -> dist/sealed-payload/member-key-record.d.ts
 //   MemberKeyBundleV1 -> dist/sealed-payload/member-bundle.d.ts
 //   MemberKeyStore -> dist/sealed-payload/member-key-record.d.ts
 //   MemberKeys -> dist/sealed-payload/member-key-record.d.ts
-//   OpenScopeKeyPackageInput -> dist/sealed-payload/scope-key.d.ts
-//   OpenSealedContentInput -> dist/sealed-payload/sealed-content.d.ts
-//   PAIRING_VERIFICATION_SECRET_BYTES -> dist/sealed-payload/pairing-verification.d.ts
-//   PairingInput -> dist/sealed-payload/pairing-verification.d.ts
 //   SEALED_CATEGORIES -> dist/sealed-payload/sealed-content.d.ts
 //   SEALED_CONTENT_SUITE -> dist/sealed-payload/sealed-content.d.ts
 //   SEALED_CONTENT_VERSION -> dist/sealed-payload/sealed-content.d.ts
-//   SEALED_DIRECTIONS -> dist/sealed-payload/sealed-content.d.ts
 //   ScopeKeyPackage -> dist/sealed-payload/scope-key.d.ts
 //   ScopeKeyPackageOpenResult -> dist/sealed-payload/scope-key.d.ts
-//   SealContentInput -> dist/sealed-payload/sealed-content.d.ts
-//   SealScopeKeyPackageInput -> dist/sealed-payload/scope-key.d.ts
 //   SealedBinding -> dist/sealed-payload/sealed-content.d.ts
 //   SealedCategory -> dist/sealed-payload/sealed-content.d.ts
 //   SealedContent -> dist/sealed-payload/sealed-content.d.ts
 //   SealedContentHeaderV1 -> dist/sealed-payload/sealed-content.d.ts
 //   SealedContentHeaderV1Schema -> dist/sealed-payload/sealed-content.d.ts
 //   SealedContentOpenFailure -> dist/sealed-payload/sealed-content.d.ts
-//   SealedContentOpenResult -> dist/sealed-payload/sealed-content.d.ts
-//   SealedDirection -> dist/sealed-payload/sealed-content.d.ts
-//   SealedScopePolicy -> dist/sealed-payload/sealed-content.d.ts
 //   UnsignedMemberChainEntryV1 -> dist/sealed-payload/member-chain.d.ts
-//   VerifyMemberChainFromAnchorInput -> dist/sealed-payload/member-chain-walk.d.ts
 //   applyMemberChainEntries -> dist/sealed-payload/member-chain-walk.d.ts
 //   beginMemberKemRotation -> dist/sealed-payload/member-key-record.d.ts
 //   computeClientPairingMac -> dist/sealed-payload/pairing-verification.d.ts
@@ -371,7 +265,6 @@
 //   memberApprovalCode -> dist/sealed-payload/member-fingerprint.d.ts
 //   memberChainEntryHash -> dist/sealed-payload/member-chain.d.ts
 //   memberChainScopeRecipients -> dist/sealed-payload/member-chain-walk.d.ts
-//   memberFingerprint -> dist/sealed-payload/member-fingerprint.d.ts
 //   openMemberKeyRecord -> dist/sealed-payload/member-key-record.d.ts
 //   openScopeKeyPackage -> dist/sealed-payload/scope-key.d.ts
 //   openSealedContent -> dist/sealed-payload/sealed-content.d.ts
@@ -399,7 +292,7 @@
 //   spawnStartError -> dist/system-tool.d.ts
 //   systemExecutable -> dist/system-tool.d.ts
 // ==== @byok-sdk/core dist/agent-memory-intent.d.ts ====
-export declare const AGENT_MEMORY_INTENT_DIGEST_VERSION: 'byok-agent-memory-intent-v1';
+// support
 export interface AgentMemoryIntentDigestInput {
     readonly tenantId: string;
     readonly deviceId: string;
@@ -419,10 +312,12 @@ export declare function agentMemoryIntentOperationDigest(input: AgentMemoryInten
 import { z } from 'zod';
 export declare const DEVICE_PROOF_SCHEMA_ID = "byok-device-proof-v1";
 export declare const DEVICE_PROOF_DOMAIN_PREFIX = "byok-device-proof-v1\n";
-export declare const DEVICE_PROOF_VERSION = 1;
+// support
 export declare const DEVICE_PROOF_ALGORITHMS: readonly ['ed25519'];
+// support
 export type DeviceProofAlgorithm = (typeof DEVICE_PROOF_ALGORITHMS)[number];
 export declare const DEVICE_PROOF_HEADER = "x-byok-device-proof";
+// support
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | readonly JsonValue[] | {
     readonly [key: string]: JsonValue;
@@ -452,6 +347,7 @@ export declare const DeviceProofProtectedClaimsSchema: z.ZodObject<{
     nonce: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>;
 export type DeviceProofProtectedClaims = z.infer<typeof DeviceProofProtectedClaimsSchema>;
+// support
 export declare const DeviceProofEnvelopeV1Schema: z.ZodObject<{
     schema: z.ZodLiteral<"byok-device-proof-v1">;
     algorithm: z.ZodEnum<{
@@ -481,8 +377,8 @@ export declare const DeviceProofEnvelopeV1Schema: z.ZodObject<{
 export type DeviceProofEnvelopeV1 = z.infer<typeof DeviceProofEnvelopeV1Schema>;
 export declare function parseDeviceProofEnvelope(input: unknown): DeviceProofEnvelopeV1;
 export declare function deviceProofCanonicalClaims(claims: DeviceProofProtectedClaims): JsonObject;
-export declare function deviceProofCanonicalJson(claims: DeviceProofProtectedClaims): string;
 export declare function deviceProofSigningInput(claims: DeviceProofProtectedClaims): Uint8Array;
+// support
 export interface DeviceProofVerifyInput {
     readonly algorithm: DeviceProofAlgorithm;
     readonly publicKey: string;
@@ -507,9 +403,9 @@ export type ObjectKeyPrefix = string & {
 };
 export declare function objectKeyPrefix(value: string): ObjectKeyPrefix;
 export declare function tenantObjectKey(tenant: TenantId, hash: ContentHash, prefix?: ObjectKeyPrefix): string;
+// support
 export declare const OBJECT_STATES: readonly ['pending', 'committed', 'delete_pending', 'deleted'];
 export type ObjectState = (typeof OBJECT_STATES)[number];
-export declare const OBJECT_STATE_TRANSITIONS: Readonly<Record<ObjectState, readonly ObjectState[]>>;
 export declare function isLegalObjectTransition(from: ObjectState, to: ObjectState): boolean;
 export interface ObjectManifestEntry {
     readonly tenantId: TenantId;
@@ -567,8 +463,8 @@ export interface ObjectCollectExpiredInput extends CollectExpiredInput {
 import type { TenantId } from './tenant.js';
 export declare const BOARD_STATUSES: readonly ['todo', 'in_progress', 'in_review', 'done', 'closed'];
 export type BoardStatus = (typeof BOARD_STATUSES)[number];
-export declare const BOARD_TRANSITIONS: Readonly<Record<BoardStatus, readonly BoardStatus[]>>;
 export declare function isLegalBoardTransition(from: BoardStatus, to: BoardStatus): boolean;
+// support
 export interface BoardAssignee {
     readonly holderId: string;
     readonly heldSince: string;
@@ -627,7 +523,6 @@ export interface BoardStore {
 }
 // ==== @byok-sdk/core dist/capabilities.d.ts ====
 import { z } from 'zod';
-export declare const CAPABILITY_DECLARATION_SCHEMA_ID = "byok-capabilities-v1";
 export declare const CAPABILITY_NAME_PATTERN: RegExp;
 export declare const CapabilityDeclarationSchema: z.ZodObject<{
     schema: z.ZodLiteral<"byok-capabilities-v1">;
@@ -641,7 +536,6 @@ export declare function assertCapability(declaration: CapabilityDeclaration, cap
 // ==== @byok-sdk/core dist/device-assertion.d.ts ====
 import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 import { z } from 'zod';
-import { type JsonObject } from './attestation.js';
 import type { DevicePrincipal } from './principals.js';
 import { type TenantId } from './tenant.js';
 export declare const DEVICE_ASSERTION_SCHEMA_ID = "byok-device-assertion-v1";
@@ -649,8 +543,9 @@ export declare const DEVICE_ASSERTION_DOMAIN_PREFIX = "byok-device-assertion-v1\
 export declare const DEVICE_ASSERTION_VERSION = 1;
 export declare const TASK_ASSERTION_SCHEMA_ID = "byok-task-assertion-v1";
 export declare const TASK_ASSERTION_DOMAIN_PREFIX = "byok-task-assertion-v1\n";
-export declare const TASK_ASSERTION_VERSION = 1;
+// support
 export declare const DEVICE_ASSERTION_ALGORITHMS: readonly ['ed25519'];
+// support
 export type DeviceAssertionAlgorithm = (typeof DEVICE_ASSERTION_ALGORITHMS)[number];
 export declare const DEVICE_ASSERTION_DEFAULT_TTL_MS = 120000;
 export declare const DEVICE_ASSERTION_MAX_TTL_MS = 300000;
@@ -666,6 +561,7 @@ export declare const DeviceAssertionClaimsSchema: z.ZodObject<{
     expiresAt: z.ZodISODateTime;
 }, z.core.$strict>;
 export type DeviceAssertionClaims = z.infer<typeof DeviceAssertionClaimsSchema>;
+// support
 export declare const DeviceAssertionEnvelopeV1Schema: z.ZodObject<{
     schema: z.ZodLiteral<"byok-device-assertion-v1">;
     algorithm: z.ZodEnum<{
@@ -685,9 +581,8 @@ export declare const DeviceAssertionEnvelopeV1Schema: z.ZodObject<{
 }, z.core.$strict>;
 export type DeviceAssertionEnvelopeV1 = z.infer<typeof DeviceAssertionEnvelopeV1Schema>;
 export declare function parseDeviceAssertionEnvelope(input: unknown): DeviceAssertionEnvelopeV1;
-export declare function deviceAssertionCanonicalClaims(claims: DeviceAssertionClaims): JsonObject;
-export declare function deviceAssertionCanonicalJson(claims: DeviceAssertionClaims): string;
 export declare function deviceAssertionSigningInput(claims: DeviceAssertionClaims): Uint8Array;
+// support
 export interface DeviceAssertionVerifyInput {
     readonly algorithm: DeviceAssertionAlgorithm;
     readonly publicKey: string;
@@ -701,6 +596,7 @@ export interface DeviceAssertionDeviceRow {
     readonly publicKeyJwkX: string;
     readonly revoked: boolean;
 }
+// support
 export interface DeviceAssertionVerifyDeps {
     readonly verifier: DeviceAssertionVerifier;
     readonly lookupDevice: (deviceId: string) => Promise<DeviceAssertionDeviceRow | undefined> | DeviceAssertionDeviceRow | undefined;
@@ -708,6 +604,7 @@ export interface DeviceAssertionVerifyDeps {
     readonly maxLifetimeMs?: number;
 }
 export declare function verifyDeviceAssertion(input: unknown, deps: DeviceAssertionVerifyDeps): Promise<DeviceAssertionClaims | undefined>;
+// support
 export interface DeviceAssertionAuthorityRow extends DeviceAssertionDeviceRow {
     readonly tenantId: TenantId;
     readonly productId: string;
@@ -718,6 +615,7 @@ export interface DeviceAssertionExpectedBinding {
     readonly productId: string;
     readonly audience: string;
 }
+// support
 export type DeviceAssertionReplaySchemaId = typeof DEVICE_ASSERTION_SCHEMA_ID | typeof TASK_ASSERTION_SCHEMA_ID;
 export interface DeviceAssertionReplayConsumeInput {
     readonly schema: DeviceAssertionReplaySchemaId;
@@ -733,6 +631,7 @@ export interface DeviceAssertionReplayAuthority {
     collectExpired(tenant: TenantId, input: CollectExpiredInput): Promise<CollectExpiredResult>;
     consume(input: DeviceAssertionReplayConsumeInput): Promise<boolean>;
 }
+// support
 export interface AuthenticateDeviceAssertionDeps {
     readonly verifier: DeviceAssertionVerifier;
     readonly lookupDevice: (deviceId: string) => Promise<DeviceAssertionAuthorityRow | undefined> | DeviceAssertionAuthorityRow | undefined;
@@ -754,8 +653,6 @@ export interface AuthenticatedDeviceAssertion extends AuthenticatedAssertionBase
     readonly lane: 'device';
 }
 export declare function authenticateDeviceAssertion(input: unknown, deps: AuthenticateDeviceAssertionDeps): Promise<AuthenticatedDeviceAssertion | undefined>;
-export declare const TASK_ASSERTION_AGENT_REF_MAX_BYTES = 160;
-export declare const TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH = 128;
 export declare const TaskAssertionAgentRefSchema: z.ZodObject<{
     agentId: z.ZodString;
     profileRevision: z.ZodString;
@@ -778,6 +675,7 @@ export declare const TaskAssertionClaimsSchema: z.ZodObject<{
     toolsetId: z.ZodString;
 }, z.core.$strict>;
 export type TaskAssertionClaims = z.infer<typeof TaskAssertionClaimsSchema>;
+// support
 export declare const TaskAssertionEnvelopeV1Schema: z.ZodObject<{
     schema: z.ZodLiteral<"byok-task-assertion-v1">;
     algorithm: z.ZodEnum<{
@@ -803,8 +701,6 @@ export declare const TaskAssertionEnvelopeV1Schema: z.ZodObject<{
 }, z.core.$strict>;
 export type TaskAssertionEnvelopeV1 = z.infer<typeof TaskAssertionEnvelopeV1Schema>;
 export declare function parseTaskAssertionEnvelope(input: unknown): TaskAssertionEnvelopeV1;
-export declare function taskAssertionCanonicalClaims(claims: TaskAssertionClaims): JsonObject;
-export declare function taskAssertionCanonicalJson(claims: TaskAssertionClaims): string;
 export declare function taskAssertionSigningInput(claims: TaskAssertionClaims): Uint8Array;
 export declare function verifyTaskAssertion(input: unknown, deps: DeviceAssertionVerifyDeps): Promise<TaskAssertionClaims | undefined>;
 export interface AuthenticatedTaskAssertion extends AuthenticatedAssertionBase {
@@ -813,9 +709,9 @@ export interface AuthenticatedTaskAssertion extends AuthenticatedAssertionBase {
     readonly agentRef: TaskAssertionAgentRef;
     readonly toolsetId: string;
 }
-export type AuthenticatedAssertion = AuthenticatedDeviceAssertion | AuthenticatedTaskAssertion;
 export declare function authenticateTaskAssertion(input: unknown, deps: AuthenticateDeviceAssertionDeps): Promise<AuthenticatedTaskAssertion | undefined>;
 // ==== @byok-sdk/core dist/errors.d.ts ====
+// support
 export declare const CORE_ERROR_CODES: {
     readonly retention_input_invalid: 'retention_input_invalid';
     readonly retention_collect_failed: 'retention_collect_failed';
@@ -966,6 +862,10 @@ export declare class InMemoryMailboxStore implements MailboxStore {
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
     readUsage(tenant: TenantId): Promise<MailboxUsage>;
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
+    readMessage(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly messageId: string;
+    }): Promise<MailboxMessage | undefined>;
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
@@ -1067,41 +967,40 @@ export declare class InMemoryTruthStore implements TruthStore {
     listManifest(tenant: TenantId, query: TruthManifestQuery): Promise<readonly TruthManifestEntry[]>;
 }
 // ==== @byok-sdk/core dist/index.d.ts ====
-export { tenantId, isTenantId, tenantKey, TENANT_ID_MAX_LENGTH, TENANT_KEY_SEPARATOR, } from './tenant.js';
+export { tenantId, isTenantId, tenantKey, TENANT_ID_MAX_LENGTH, } from './tenant.js';
 export type { TenantId } from './tenant.js';
-export { PRINCIPAL_KINDS, isDevicePrincipal, isControlPlanePrincipal, principalTenant, } from './principals.js';
-export type { ControlPlanePrincipal, DevicePrincipal, Principal, PrincipalKind, } from './principals.js';
-export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors.js';
+export { principalTenant, } from './principals.js';
+export type { ControlPlanePrincipal, DevicePrincipal, Principal, } from './principals.js';
+export { ByokCoreError, CoreConflictError, isCoreError, isCoreConflictError, } from './errors.js';
 export type { CoreErrorCode } from './errors.js';
-export { CANONICAL_TIMESTAMP_PATTERN, assertCanonicalTimestamp, isCanonicalTimestamp, } from './time.js';
-export { MAILBOX_MESSAGE_STATES, MAILBOX_STREAM_CLOSE_CAUSES, MailboxStreamClosedError } from './mailbox.js';
+export { assertCanonicalTimestamp, isCanonicalTimestamp, } from './time.js';
+export { MAILBOX_STREAM_CLOSE_CAUSES, MailboxStreamClosedError, } from './mailbox.js';
 export type { MailboxAdmission, MailboxAdvanceCursorInput, MailboxAppendInput, MailboxBody, MailboxCursorState, MailboxMessage, MailboxMessageState, MailboxPage, MailboxReadQuery, MailboxRecordDeliveryInput, MailboxCloseStreamInput, MailboxCollectExpiredInput, MailboxExpirePendingInput, MailboxReopenStreamInput, MailboxStreamCloseCause, MailboxStore, MailboxUsage, } from './mailbox.js';
-export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board.js';
-export type { BoardAssignee, BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board.js';
+export { BOARD_STATUSES, isLegalBoardTransition, } from './board.js';
+export type { BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board.js';
 export { TRUTH_RECORD_KINDS } from './truth.js';
 export type { SnapshotWriteInput, TerminalWriteInput, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector, TruthStore, } from './truth.js';
 export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence.js';
 export type { PresenceHint, PresenceHintInput, PresenceLevel, PresenceRuntimeCapabilities, PresenceRuntimeFact, PresenceStore, TenantReadinessDevice, TenantReadinessPresence, TenantReadiness, } from './presence.js';
-export { CONTENT_HASH_PATTERN, OBJECT_KEY_PREFIX_PATTERN, OBJECT_STATES, OBJECT_STATE_TRANSITIONS, contentHash, isContentHash, isLegalObjectTransition, objectKeyPrefix, tenantObjectKey, } from './blob.js';
+export { CONTENT_HASH_PATTERN, OBJECT_KEY_PREFIX_PATTERN, contentHash, isContentHash, isLegalObjectTransition, objectKeyPrefix, tenantObjectKey, } from './blob.js';
 export type { ContentHash, ObjectCommitInput, ObjectKeyPrefix, ObjectListQuery, ObjectManifestEntry, ObjectManifestInput, ObjectReference, ObjectReferenceInput, ObjectState, ObjectStore, } from './blob.js';
-export { STORAGE_ERROR_CODES, STORAGE_ERROR_HTTP_STATUS, STORAGE_RESERVATION_STATES, STORAGE_WRITE_KINDS, STORAGE_WRITE_POSTURES, } from './quota.js';
+export { STORAGE_ERROR_CODES, STORAGE_ERROR_HTTP_STATUS, } from './quota.js';
 export type { QuotaStore, StorageErrorCode, StorageFinalizeInput, StorageFinalizeResult, StorageReservation, StorageReservationInput, StorageReservationState, StorageStatus, StorageWriteKind, StorageWritePosture, TenantStorageEntitlement, TenantStorageEntitlementInput, TenantStorageUsage, } from './quota.js';
-export { CAPABILITY_DECLARATION_SCHEMA_ID, CAPABILITY_NAME_PATTERN, CapabilityDeclarationSchema, assertCapability, hasCapability, parseCapabilityDeclaration, } from './capabilities.js';
+export { CAPABILITY_NAME_PATTERN, CapabilityDeclarationSchema, assertCapability, hasCapability, parseCapabilityDeclaration, } from './capabilities.js';
 export type { CapabilityDeclaration } from './capabilities.js';
-export { SKILL_FRONTMATTER_FIELDS, SKILL_PACK_DESCRIPTION_MAX_LENGTH, SKILL_PACK_ENTRY_PATH, SKILL_PACK_FILE_MAX_BYTES, SKILL_PACK_FILE_PATH_MAX_LENGTH, SKILL_PACK_FILE_PATH_PATTERN, SKILL_PACK_FORBIDDEN_FIELDS, SKILL_PACK_MANIFEST_SCHEMA_ID, SKILL_PACK_MAX_BYTES, SKILL_PACK_MAX_FILES, SKILL_PACK_NAME_MAX_LENGTH, SKILL_PACK_NAME_PATTERN, SKILL_PACK_REJECTIONS, SKILL_PACK_VERSION_PATTERN, SkillPackFileSchema, SkillPackManifestSchema, checkSkillPackEntry, checkSkillPackFileContent, checkSkillPackManifest, isSkillPackPathSafe, parseSkillFrontmatter, parseSkillPackManifest, skillPackContentHashInput, } from './skill-pack.js';
-export type { ObservedSkillPackFile, SkillFrontmatter, SkillPackCheck, SkillPackFile, SkillPackFileContent, SkillPackListQuery, SkillPackManifest, SkillPackPublishInput, SkillPackRejection, SkillPackStore, } from './skill-pack.js';
+export { SKILL_PACK_ENTRY_PATH, SKILL_PACK_FILE_MAX_BYTES, SKILL_PACK_FILE_PATH_PATTERN, SKILL_PACK_FORBIDDEN_FIELDS, SKILL_PACK_MANIFEST_SCHEMA_ID, SKILL_PACK_MAX_BYTES, checkSkillPackEntry, checkSkillPackFileContent, checkSkillPackManifest, isSkillPackPathSafe, parseSkillFrontmatter, parseSkillPackManifest, skillPackContentHashInput, } from './skill-pack.js';
+export type { SkillPackCheck, SkillPackFile, SkillPackFileContent, SkillPackListQuery, SkillPackManifest, SkillPackPublishInput, SkillPackStore, } from './skill-pack.js';
 export { CORE_STORE_NAMES } from './stores.js';
 export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores.js';
-export { CORE_NON_COMPOSITION_PORT_NAMES, CORE_PORT_INTERFACES, CORE_PORT_METHODS, } from './ports-contract.js';
-export { DEVICE_PROOF_ALGORITHMS, DEVICE_PROOF_DOMAIN_PREFIX, DEVICE_PROOF_HEADER, DEVICE_PROOF_SCHEMA_ID, DEVICE_PROOF_VERSION, DeviceProofEnvelopeV1Schema, DeviceProofProtectedClaimsSchema, canonicalizeJson, canonicalizeJsonBytes, deviceProofCanonicalClaims, deviceProofCanonicalJson, deviceProofSigningInput, parseDeviceProofEnvelope, } from './attestation.js';
-export type { DeviceProofAlgorithm, DeviceProofEnvelopeV1, DeviceProofProtectedClaims, DeviceProofVerifier, DeviceProofVerifyInput, JsonObject, JsonPrimitive, JsonValue, } from './attestation.js';
-export { authenticateDeviceAssertion, DEVICE_ASSERTION_ALGORITHMS, DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_DOMAIN_PREFIX, DEVICE_ASSERTION_MAX_TTL_MS, DEVICE_ASSERTION_SCHEMA_ID, DEVICE_ASSERTION_VERSION, DeviceAssertionClaimsSchema, DeviceAssertionEnvelopeV1Schema, deviceAssertionCanonicalClaims, deviceAssertionCanonicalJson, deviceAssertionSigningInput, parseDeviceAssertionEnvelope, verifyDeviceAssertion, } from './device-assertion.js';
-export { authenticateTaskAssertion, TASK_ASSERTION_AGENT_REF_MAX_BYTES, TASK_ASSERTION_DOMAIN_PREFIX, TASK_ASSERTION_SCHEMA_ID, TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH, TASK_ASSERTION_VERSION, TaskAssertionAgentRefSchema, TaskAssertionClaimsSchema, TaskAssertionEnvelopeV1Schema, parseTaskAssertionEnvelope, taskAssertionCanonicalClaims, taskAssertionCanonicalJson, taskAssertionSigningInput, verifyTaskAssertion, } from './device-assertion.js';
-export type { AuthenticateDeviceAssertionDeps, AuthenticatedAssertion, AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionAlgorithm, DeviceAssertionAuthorityRow, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionReplaySchemaId, DeviceAssertionVerifier, DeviceAssertionVerifyDeps, DeviceAssertionVerifyInput, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion.js';
-export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, PROVIDER_PROVISIONING_REQUEST_VERSION, PROVIDER_PROVISIONING_SECRET_OPERATIONS, PROVIDER_SECRET_HPKE_INFO, PROVIDER_SECRET_HPKE_SUITE, PROVIDER_SECRET_MAX_BYTES, PROVIDER_SECRET_MAX_PADDED_BYTES, PROVIDER_SECRET_PAD_BLOCK_BYTES, ProviderProvisioningConfigV1Schema, ProviderProvisioningExpectedProfileSchema, ProviderProvisioningHeaderV1Schema, ProviderProvisioningIdentityRevisionSchema, ProviderProvisioningRequestV1Schema, SEALING_KEY_ID_LENGTH, SealedProviderSecretV1Schema, SealingKeyClaimV1Schema, SealingKeyIdSchema, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningConfigDigest, providerProvisioningRequestDigest, providerSecretAadBytes, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret.js';
-export type { ProviderProvisioningConfigV1, ProviderProvisioningExpectedProfile, ProviderProvisioningHeaderV1, ProviderProvisioningOperation, ProviderProvisioningRequestV1, ProviderSecretRecipient, SealProviderProvisioningRequestInput, SealedProviderSecretV1, SealingKeyClaimV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret.js';
-export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent.js';
-export type { AgentMemoryIntentDigestInput } from './agent-memory-intent.js';
+export { CORE_PORT_METHODS, } from './ports-contract.js';
+export { DEVICE_PROOF_DOMAIN_PREFIX, DEVICE_PROOF_HEADER, DEVICE_PROOF_SCHEMA_ID, DeviceProofProtectedClaimsSchema, canonicalizeJson, canonicalizeJsonBytes, deviceProofCanonicalClaims, deviceProofSigningInput, parseDeviceProofEnvelope, } from './attestation.js';
+export type { DeviceProofEnvelopeV1, DeviceProofProtectedClaims, DeviceProofVerifier, JsonObject, JsonValue, } from './attestation.js';
+export { authenticateDeviceAssertion, DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_DOMAIN_PREFIX, DEVICE_ASSERTION_MAX_TTL_MS, DEVICE_ASSERTION_SCHEMA_ID, DEVICE_ASSERTION_VERSION, DeviceAssertionClaimsSchema, deviceAssertionSigningInput, parseDeviceAssertionEnvelope, verifyDeviceAssertion, } from './device-assertion.js';
+export { authenticateTaskAssertion, TASK_ASSERTION_DOMAIN_PREFIX, TASK_ASSERTION_SCHEMA_ID, TaskAssertionAgentRefSchema, TaskAssertionClaimsSchema, parseTaskAssertionEnvelope, taskAssertionSigningInput, verifyTaskAssertion, } from './device-assertion.js';
+export type { AuthenticatedDeviceAssertion, AuthenticatedTaskAssertion, DeviceAssertionClaims, DeviceAssertionDeviceRow, DeviceAssertionEnvelopeV1, DeviceAssertionExpectedBinding, DeviceAssertionReplayConsumeInput, DeviceAssertionReplayAuthority, DeviceAssertionVerifier, TaskAssertionAgentRef, TaskAssertionClaims, TaskAssertionEnvelopeV1, } from './device-assertion.js';
+export { PROVIDER_PROVISIONING_MAX_TTL_MS, PROVIDER_PROVISIONING_OPERATIONS, SealingPublicJwkSchema, assertProviderProvisioningConfigDigest, deriveSealingKeyId, openProviderProvisioningSecret, parseProviderProvisioningRequest, providerProvisioningRequestDigest, sealProviderProvisioningRequest, sealingKeyClaimCanonicalBytes, } from './sealed-provider-secret.js';
+export type { ProviderProvisioningExpectedProfile, ProviderProvisioningOperation, ProviderProvisioningRequestV1, SealingPublicJwk, WebCryptoKey, } from './sealed-provider-secret.js';
+export { agentMemoryIntentOperationDigest, } from './agent-memory-intent.js';
 export { NONCE_SIGNING_DOMAIN, nonceSigningBytes } from './pairing.js';
 export { IN_MEMORY_CLOCK_EPOCH, InMemoryBoardStore, InMemoryMailboxStore, InMemoryDeviceAssertionReplayAuthority, InMemoryObjectStore, InMemoryPresenceStore, InMemoryQuotaStore, InMemorySkillPackStore, InMemoryTruthStore, createInMemoryCoreStores, createInMemoryCoreCompositionWithClock, createMutableClock, } from './in-memory/index.js';
 export type { InMemoryCoreComposition, InMemoryCoreOptions } from './in-memory/index.js';
@@ -1117,6 +1016,7 @@ import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 import type { ContentHash } from './blob.js';
 import { ByokCoreError } from './errors.js';
 import type { TenantId } from './tenant.js';
+// support
 export declare const MAILBOX_MESSAGE_STATES: readonly ['pending', 'acked', 'expired'];
 export type MailboxMessageState = (typeof MAILBOX_MESSAGE_STATES)[number];
 export interface MailboxMessage {
@@ -1198,6 +1098,10 @@ export interface MailboxStore {
     append(tenant: TenantId, input: MailboxAppendInput): Promise<MailboxMessage>;
     readUsage(tenant: TenantId): Promise<MailboxUsage>;
     readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
+    readMessage(tenant: TenantId, input: {
+        readonly deviceId: string;
+        readonly messageId: string;
+    }): Promise<MailboxMessage | undefined>;
     recordDelivery(tenant: TenantId, input: MailboxRecordDeliveryInput): Promise<MailboxCursorState>;
     advanceCursor(tenant: TenantId, input: MailboxAdvanceCursorInput): Promise<MailboxCursorState>;
     readCursor(tenant: TenantId, deviceId: string): Promise<MailboxCursorState>;
@@ -1214,10 +1118,8 @@ export interface MailboxStore {
 export declare const NONCE_SIGNING_DOMAIN = "byok-nonce-v1\n";
 export declare function nonceSigningBytes(nonce: string): Uint8Array;
 // ==== @byok-sdk/core dist/ports-contract.d.ts ====
-import { type CoreStoreName } from './stores.js';
-export declare const CORE_NON_COMPOSITION_PORT_NAMES: readonly [];
+import type { CoreStoreName } from './stores.js';
 export declare const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]>>;
-export declare const CORE_PORT_INTERFACES: Readonly<Record<CoreStoreName, string>>;
 // ==== @byok-sdk/core dist/presence.d.ts ====
 import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 import type { TenantId } from './tenant.js';
@@ -1306,8 +1208,6 @@ export interface PresenceStore {
 }
 // ==== @byok-sdk/core dist/principals.d.ts ====
 import type { TenantId } from './tenant.js';
-export declare const PRINCIPAL_KINDS: readonly ['device', 'control-plane'];
-export type PrincipalKind = (typeof PRINCIPAL_KINDS)[number];
 export interface DevicePrincipal {
     readonly kind: 'device';
     readonly tenantId: TenantId;
@@ -1320,8 +1220,6 @@ export interface ControlPlanePrincipal {
     readonly operatorId: string;
 }
 export type Principal = DevicePrincipal | ControlPlanePrincipal;
-export declare function isDevicePrincipal(principal: Principal): principal is DevicePrincipal;
-export declare function isControlPlanePrincipal(principal: Principal): principal is ControlPlanePrincipal;
 export declare function principalTenant(principal: Principal): TenantId;
 // ==== @byok-sdk/core dist/quota.d.ts ====
 import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
@@ -1353,8 +1251,10 @@ export interface TenantStorageEntitlementInput {
     readonly retentionPolicyId: string;
     readonly downgradeGraceUntil?: string;
 }
+// support
 export declare const STORAGE_WRITE_KINDS: readonly ['object', 'inline'];
 export type StorageWriteKind = (typeof STORAGE_WRITE_KINDS)[number];
+// support
 export declare const STORAGE_RESERVATION_STATES: readonly ['reserved', 'committed', 'aborted', 'expired'];
 export type StorageReservationState = (typeof STORAGE_RESERVATION_STATES)[number];
 export interface StorageReservation {
@@ -1387,6 +1287,7 @@ export interface StorageFinalizeResult {
     readonly usage: TenantStorageUsage;
     readonly deduplicated: boolean;
 }
+// support
 export declare const STORAGE_WRITE_POSTURES: readonly ['normal', 'warning', 'blocked', 'suspended'];
 export type StorageWritePosture = (typeof STORAGE_WRITE_POSTURES)[number];
 export interface StorageStatus {
@@ -1441,25 +1342,24 @@ export declare class CollectExpiredFailure extends ByokCoreError {
     constructor(committed: CollectExpiredCounts, failedRows: number, more?: boolean | undefined, options?: ErrorOptions);
 }
 // ==== @byok-sdk/core dist/sealed-payload/index.d.ts ====
-export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SEALED_DIRECTIONS, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content.js';
-export type { OpenSealedContentInput, SealContentInput, SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, SealedContentOpenResult, SealedDirection, SealedScopePolicy, } from './sealed-content.js';
+export { SEALED_CATEGORIES, SEALED_CONTENT_SUITE, SEALED_CONTENT_VERSION, SealedContentHeaderV1Schema, openSealedContent, sealContent, } from './sealed-content.js';
+export type { SealedBinding, SealedCategory, SealedContent, SealedContentHeaderV1, SealedContentOpenFailure, } from './sealed-content.js';
 export { deriveScopeKeyId, generateScopeKey, openScopeKeyPackage, sealScopeKeyPackage } from './scope-key.js';
-export type { OpenScopeKeyPackageInput, ScopeKeyPackage, ScopeKeyPackageOpenResult, SealScopeKeyPackageInput, } from './scope-key.js';
+export type { ScopeKeyPackage, ScopeKeyPackageOpenResult, } from './scope-key.js';
 export { MEMBER_CHAIN_OPS, deriveMemberId, memberChainEntryHash, signMemberChainEntry, verifyMemberChainEntry, } from './member-chain.js';
-export type { MemberChainEntryV1, MemberChainEntryVerifyResult, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain.js';
-export { MEMBER_KEY_BUNDLE_VERSION, createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem } from './member-bundle.js';
-export type { CreateMemberKeyBundleInput, MemberKeyBundleV1 } from './member-bundle.js';
+export type { MemberChainEntryV1, MemberChainOp, UnsignedMemberChainEntryV1, } from './member-chain.js';
+export { createMemberKeyBundle, parseMemberKeyBundle, verifyMemberKem, } from './member-bundle.js';
+export type { MemberKeyBundleV1, } from './member-bundle.js';
 export { beginMemberKemRotation, finishMemberKemRotation, generateMemberKeyRecord, openMemberKeyRecord, } from './member-key-record.js';
 export type { MemberKemKey, MemberKeyBinding, MemberKeyStore, MemberKeys } from './member-key-record.js';
-export { MEMBER_FINGERPRINT_DOMAIN, memberApprovalCode, memberFingerprint } from './member-fingerprint.js';
-export type { MemberFingerprintInput } from './member-fingerprint.js';
-export { CLIENT_PAIRING_MAC_DOMAIN, DEVICE_PAIRING_MAC_DOMAIN, PAIRING_VERIFICATION_SECRET_BYTES, computeClientPairingMac, computeDevicePairingMac, decodePairingVerificationSecret, encodePairingVerificationSecret, formatPairingInput, generatePairingVerificationSecret, parsePairingInput, verifyClientPairingMac, verifyDevicePairingMac, } from './pairing-verification.js';
-export type { ClientPairingMacInput, DevicePairingMacInput, PairingInput } from './pairing-verification.js';
+export { memberApprovalCode, } from './member-fingerprint.js';
+export { computeClientPairingMac, computeDevicePairingMac, decodePairingVerificationSecret, encodePairingVerificationSecret, formatPairingInput, generatePairingVerificationSecret, parsePairingInput, verifyClientPairingMac, verifyDevicePairingMac, } from './pairing-verification.js';
 export { applyMemberChainEntries, emptyMemberChainState, memberChainScopeRecipients, verifyMemberChainFromAnchor } from './member-chain-walk.js';
-export type { MemberChainAnchorFailure, MemberChainAnchorResult, MemberChainHead, MemberChainScope, MemberChainState, MemberChainWalkFailure, MemberChainWalkResult, VerifyMemberChainFromAnchorInput, } from './member-chain-walk.js';
+export type { MemberChainScope, MemberChainState, } from './member-chain-walk.js';
 // ==== @byok-sdk/core dist/sealed-payload/member-bundle.d.ts ====
 import type { WebCryptoKey } from '../webcrypto.js';
 import { type P256PublicJwk } from './primitives.js';
+// support
 export declare const MEMBER_KEY_BUNDLE_VERSION = 1;
 export interface MemberKeyBundleV1 {
     readonly v: typeof MEMBER_KEY_BUNDLE_VERSION;
@@ -1470,6 +1370,7 @@ export interface MemberKeyBundleV1 {
     readonly kemSig: string;
     readonly deviceId?: string;
 }
+// support
 export interface CreateMemberKeyBundleInput {
     readonly signingPublicJwk: P256PublicJwk;
     readonly signingPrivateKey: WebCryptoKey;
@@ -1496,6 +1397,7 @@ export interface MemberChainScope {
     readonly members: readonly string[];
     readonly policySeq: number;
 }
+// support
 export interface MemberChainHead {
     readonly seq: number;
     readonly hash: string;
@@ -1508,7 +1410,9 @@ export interface MemberChainState {
     readonly scopes: ReadonlyMap<string, MemberChainScope>;
     readonly shredded: ReadonlySet<string>;
 }
+// support
 export type MemberChainWalkFailure = 'member_chain_entry_invalid' | 'member_chain_link_invalid' | 'member_chain_signer_invalid' | 'member_chain_signature_invalid' | 'member_chain_subject_invalid';
+// support
 export type MemberChainWalkResult = {
     readonly ok: true;
     readonly state: MemberChainState;
@@ -1520,7 +1424,9 @@ export type MemberChainWalkResult = {
 export declare function emptyMemberChainState(tenantId: string): MemberChainState;
 export declare function memberChainScopeRecipients(state: MemberChainState, scopeId: string): readonly MemberKeyBundleV1[];
 export declare function applyMemberChainEntries(state: MemberChainState, entries: readonly unknown[]): Promise<MemberChainWalkResult>;
+// support
 export type MemberChainAnchorFailure = MemberChainWalkFailure | 'member_chain_anchor_missing' | 'member_chain_head_mismatch';
+// support
 export type MemberChainAnchorResult = {
     readonly ok: true;
     readonly state: MemberChainState;
@@ -1530,6 +1436,7 @@ export type MemberChainAnchorResult = {
     readonly reason: MemberChainAnchorFailure;
     readonly index?: number;
 };
+// support
 export interface VerifyMemberChainFromAnchorInput {
     readonly tenantId: string;
     readonly entries: readonly unknown[];
@@ -1564,6 +1471,7 @@ export declare function signMemberChainEntry(entry: UnsignedMemberChainEntryV1, 
     readonly publicJwk: P256PublicJwk;
     readonly privateKey: WebCryptoKey;
 }): Promise<MemberChainEntryV1>;
+// support
 export type MemberChainEntryVerifyResult = {
     readonly ok: true;
     readonly entry: MemberChainEntryV1;
@@ -1575,12 +1483,6 @@ export type MemberChainEntryVerifyResult = {
 export declare function verifyMemberChainEntry(entry: unknown, signerPublicJwk: P256PublicJwk): Promise<MemberChainEntryVerifyResult>;
 // ==== @byok-sdk/core dist/sealed-payload/member-fingerprint.d.ts ====
 import { type P256PublicJwk } from './primitives.js';
-export declare const MEMBER_FINGERPRINT_DOMAIN = "byok-member-fingerprint-v1\n";
-export interface MemberFingerprintInput {
-    readonly tenantId: string;
-    readonly signingPublicJwk: P256PublicJwk;
-}
-export declare function memberFingerprint(input: MemberFingerprintInput): Promise<string>;
 export declare function memberApprovalCode(tenantId: string, first: P256PublicJwk, second: P256PublicJwk): Promise<string>;
 // ==== @byok-sdk/core dist/sealed-payload/member-key-record.d.ts ====
 import { type WebCryptoKey } from '../webcrypto.js';
@@ -1614,23 +1516,23 @@ export declare function finishMemberKemRotation(text: string, epoch: number): st
 // ==== @byok-sdk/core dist/sealed-payload/pairing-verification.d.ts ====
 import type { MemberKeyBundleV1 } from './member-bundle.js';
 import { type Bytes } from './primitives.js';
-export declare const PAIRING_VERIFICATION_SECRET_BYTES = 16;
 export declare function generatePairingVerificationSecret(): Bytes;
 export declare function encodePairingVerificationSecret(pv: Uint8Array): string;
 export declare function decodePairingVerificationSecret(text: string): Bytes;
 export declare function formatPairingInput(pairingCode: string, pv: Uint8Array): string;
+// support
 export interface PairingInput {
     readonly pairingCode: string;
     readonly pv: Bytes;
 }
 export declare function parsePairingInput(text: string): PairingInput;
-export declare const DEVICE_PAIRING_MAC_DOMAIN = "byok-pairing-device-mac-v1\n";
-export declare const CLIENT_PAIRING_MAC_DOMAIN = "byok-pairing-client-mac-v1\n";
+// support
 export interface DevicePairingMacInput {
     readonly tenantId: string;
     readonly deviceId: string;
     readonly member: MemberKeyBundleV1;
 }
+// support
 export interface ClientPairingMacInput {
     readonly member: MemberKeyBundleV1;
     readonly chainHead: {
@@ -1668,6 +1570,7 @@ export interface ScopeKeyPackage {
     readonly sig: string;
     readonly recipientKemEpoch: number;
 }
+// support
 export interface SealScopeKeyPackageInput {
     readonly scopeKey: Uint8Array;
     readonly tenantId: string;
@@ -1684,6 +1587,7 @@ export interface SealScopeKeyPackageInput {
     };
 }
 export declare function sealScopeKeyPackage(input: SealScopeKeyPackageInput): Promise<ScopeKeyPackage>;
+// support
 export interface OpenScopeKeyPackageInput {
     readonly package: unknown;
     readonly expected: {
@@ -1715,7 +1619,9 @@ export declare const SEALED_CONTENT_VERSION = 1;
 export declare const SEALED_CONTENT_SUITE = "byok-sealed-v1.hkdf-sha256.aes-256-gcm";
 export declare const SEALED_CATEGORIES: readonly ['task-input', 'agent-message', 'task-output', 'memory-projection'];
 export type SealedCategory = (typeof SEALED_CATEGORIES)[number];
+// support
 export declare const SEALED_DIRECTIONS: readonly ['server-to-daemon', 'daemon-to-server'];
+// support
 export type SealedDirection = (typeof SEALED_DIRECTIONS)[number];
 export declare const SealedContentHeaderV1Schema: z.ZodObject<{
     v: z.ZodLiteral<1>;
@@ -1757,6 +1663,7 @@ export interface SealedBinding {
     readonly categories: readonly SealedCategory[];
     readonly notAfter: string | null;
 }
+// support
 export interface SealContentInput {
     readonly scopeKey: Uint8Array;
     readonly scope: {
@@ -1779,6 +1686,7 @@ export interface SealedContent {
 }
 export declare function sealContent(input: SealContentInput): Promise<SealedContent>;
 export type SealedContentOpenFailure = 'sealed_key_unavailable' | 'sealed_open_failed' | 'sealed_content_mac_mismatch' | 'sealing_policy_mismatch';
+// support
 export type SealedContentOpenResult = {
     readonly ok: true;
     readonly plaintext: JsonObject;
@@ -1787,10 +1695,12 @@ export type SealedContentOpenResult = {
     readonly ok: false;
     readonly reason: SealedContentOpenFailure;
 };
+// support
 export interface SealedScopePolicy {
     readonly scopeId: string;
     readonly epoch: number;
 }
+// support
 export interface OpenSealedContentInput {
     readonly header: unknown;
     readonly ciphertext: Uint8Array;
@@ -1805,17 +1715,9 @@ import { z } from 'zod';
 import { type JsonObject } from './attestation.js';
 import { type WebCryptoKey } from './webcrypto.js';
 export type { WebCryptoKey } from './webcrypto.js';
-export declare const PROVIDER_SECRET_HPKE_SUITE = "hpke-base.dhkem-p256-hkdf-sha256.hkdf-sha256.aes-128-gcm";
-export declare const PROVIDER_SECRET_HPKE_INFO = "byok-sdk.provider-secret.v1";
-export declare const PROVIDER_PROVISIONING_REQUEST_VERSION = 1;
 export declare const PROVIDER_PROVISIONING_OPERATIONS: readonly ['configure', 'update_model', 'replace_secret', 'delete'];
 export type ProviderProvisioningOperation = (typeof PROVIDER_PROVISIONING_OPERATIONS)[number];
-export declare const PROVIDER_PROVISIONING_SECRET_OPERATIONS: readonly ['configure', 'replace_secret'];
 export declare const PROVIDER_PROVISIONING_MAX_TTL_MS: number;
-export declare const PROVIDER_SECRET_PAD_BLOCK_BYTES = 256;
-export declare const PROVIDER_SECRET_MAX_PADDED_BYTES = 4096;
-export declare const PROVIDER_SECRET_MAX_BYTES: number;
-export declare const SEALING_KEY_ID_LENGTH = 22;
 export declare const SealingPublicJwkSchema: z.ZodObject<{
     kty: z.ZodLiteral<"EC">;
     crv: z.ZodLiteral<"P-256">;
@@ -1823,8 +1725,8 @@ export declare const SealingPublicJwkSchema: z.ZodObject<{
     y: z.ZodString;
 }, z.core.$strict>;
 export type SealingPublicJwk = z.infer<typeof SealingPublicJwkSchema>;
-export declare const SealingKeyIdSchema: z.ZodString;
 export declare function deriveSealingKeyId(publicJwk: SealingPublicJwk): Promise<string>;
+// support
 export declare const SealingKeyClaimV1Schema: z.ZodObject<{
     version: z.ZodLiteral<1>;
     keyId: z.ZodString;
@@ -1836,8 +1738,10 @@ export declare const SealingKeyClaimV1Schema: z.ZodObject<{
         y: z.ZodString;
     }, z.core.$strict>;
 }, z.core.$strict>;
+// support
 export type SealingKeyClaimV1 = z.infer<typeof SealingKeyClaimV1Schema>;
 export declare function sealingKeyClaimCanonicalBytes(claim: SealingKeyClaimV1): Uint8Array;
+// support
 export declare const ProviderProvisioningConfigV1Schema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     agentId: z.ZodString;
     providerKind: z.ZodString;
@@ -1860,14 +1764,16 @@ export declare const ProviderProvisioningConfigV1Schema: z.ZodDiscriminatedUnion
     operation: z.ZodLiteral<"delete">;
     agentId: z.ZodString;
 }, z.core.$strict>], "operation">;
+// support
 export type ProviderProvisioningConfigV1 = z.infer<typeof ProviderProvisioningConfigV1Schema>;
+// support
 export declare const ProviderProvisioningExpectedProfileSchema: z.ZodUnion<readonly [z.ZodNull, z.ZodObject<{
     profileRef: z.ZodString;
     profileRevision: z.ZodString;
     profileHash: z.ZodString;
 }, z.core.$strict>]>;
 export type ProviderProvisioningExpectedProfile = z.infer<typeof ProviderProvisioningExpectedProfileSchema>;
-export declare const ProviderProvisioningIdentityRevisionSchema: z.ZodString;
+// support
 export declare const ProviderProvisioningHeaderV1Schema: z.ZodObject<{
     tenantId: z.ZodString;
     deviceId: z.ZodString;
@@ -1891,14 +1797,9 @@ export declare const ProviderProvisioningHeaderV1Schema: z.ZodObject<{
     issuedAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
     expiresAt: z.ZodString & z.ZodType<string, string, z.core.$ZodTypeInternals<string, string>>;
 }, z.core.$strict>;
+// support
 export type ProviderProvisioningHeaderV1 = z.infer<typeof ProviderProvisioningHeaderV1Schema>;
-export declare const SealedProviderSecretV1Schema: z.ZodObject<{
-    suite: z.ZodLiteral<"hpke-base.dhkem-p256-hkdf-sha256.hkdf-sha256.aes-128-gcm">;
-    keyId: z.ZodString;
-    enc: z.ZodString;
-    ciphertext: z.ZodString;
-}, z.core.$strict>;
-export type SealedProviderSecretV1 = z.infer<typeof SealedProviderSecretV1Schema>;
+// support
 export declare const ProviderProvisioningRequestV1Schema: z.ZodObject<{
     version: z.ZodLiteral<1>;
     header: z.ZodObject<{
@@ -1955,10 +1856,9 @@ export declare const ProviderProvisioningRequestV1Schema: z.ZodObject<{
 }, z.core.$strict>;
 export type ProviderProvisioningRequestV1 = z.infer<typeof ProviderProvisioningRequestV1Schema>;
 export declare function parseProviderProvisioningRequest(input: unknown): ProviderProvisioningRequestV1;
-export declare function providerProvisioningConfigDigest(config: ProviderProvisioningConfigV1): Promise<string>;
-export declare function providerSecretAadBytes(header: ProviderProvisioningHeaderV1, keyId: string): Uint8Array;
 export declare function providerProvisioningRequestDigest(request: ProviderProvisioningRequestV1): Promise<string>;
 export declare function assertProviderProvisioningConfigDigest(request: ProviderProvisioningRequestV1): Promise<void>;
+// support
 export interface SealProviderProvisioningRequestInput {
     readonly header: Omit<ProviderProvisioningHeaderV1, 'configDigest'>;
     readonly config: ProviderProvisioningConfigV1;
@@ -1969,6 +1869,7 @@ export interface SealProviderProvisioningRequestInput {
     readonly secret?: string;
 }
 export declare function sealProviderProvisioningRequest(input: SealProviderProvisioningRequestInput): Promise<ProviderProvisioningRequestV1>;
+// support
 export interface ProviderSecretRecipient {
     readonly keyId: string;
     readonly publicJwk: SealingPublicJwk;
@@ -1983,23 +1884,19 @@ import { z } from 'zod';
 import { type ContentHash } from './blob.js';
 import type { TenantId } from './tenant.js';
 export declare const SKILL_PACK_MANIFEST_SCHEMA_ID = "byok-skill-pack-v1";
-export declare const SKILL_PACK_NAME_PATTERN: RegExp;
-export declare const SKILL_PACK_NAME_MAX_LENGTH = 64;
-export declare const SKILL_PACK_DESCRIPTION_MAX_LENGTH = 1024;
-export declare const SKILL_PACK_VERSION_PATTERN: RegExp;
 export declare const SKILL_PACK_FILE_PATH_PATTERN: RegExp;
-export declare const SKILL_PACK_FILE_PATH_MAX_LENGTH = 200;
 export declare const SKILL_PACK_ENTRY_PATH = "SKILL.md";
 export declare const SKILL_PACK_FILE_MAX_BYTES = 262144;
 export declare const SKILL_PACK_MAX_BYTES = 1048576;
-export declare const SKILL_PACK_MAX_FILES = 64;
 export declare const SKILL_PACK_FORBIDDEN_FIELDS: readonly ['exec', 'command', 'entrypoint', 'run', 'script', 'shell', 'env', 'environment', 'credential', 'credentials', 'secret', 'secrets', 'token', 'apiKey', 'api_key', 'allowedTools', 'allowed-tools', 'hooks', 'preinstall', 'postinstall'];
+// support
 export declare const SkillPackFileSchema: z.ZodObject<{
     path: z.ZodString;
     contentHash: z.ZodPipe<z.ZodString, z.ZodTransform<ContentHash, string>>;
     byteSize: z.ZodNumber;
 }, z.core.$strict>;
 export type SkillPackFile = z.infer<typeof SkillPackFileSchema>;
+// support
 export declare const SkillPackManifestSchema: z.ZodObject<{
     schema: z.ZodLiteral<"byok-skill-pack-v1">;
     name: z.ZodString;
@@ -2020,7 +1917,9 @@ export declare function skillPackContentHashInput(manifest: {
     readonly description: string;
     readonly files: readonly SkillPackFile[];
 }): string;
+// support
 export declare const SKILL_PACK_REJECTIONS: readonly ['path-unsafe', 'duplicate-path', 'entry-missing', 'file-count-over-cap', 'file-over-cap', 'pack-over-cap', 'size-mismatch', 'hash-mismatch', 'name-mismatch'];
+// support
 export type SkillPackRejection = (typeof SKILL_PACK_REJECTIONS)[number];
 export type SkillPackCheck = {
     readonly ok: true;
@@ -2032,16 +1931,17 @@ export type SkillPackCheck = {
 };
 export declare function isSkillPackPathSafe(path: string): boolean;
 export declare function checkSkillPackManifest(manifest: SkillPackManifest): SkillPackCheck;
+// support
 export interface ObservedSkillPackFile {
     readonly byteSize: number;
     readonly contentHash: ContentHash;
 }
 export declare function checkSkillPackFileContent(declared: SkillPackFile, observed: ObservedSkillPackFile): SkillPackCheck;
+// support
 export interface SkillFrontmatter {
     readonly name: string;
     readonly description: string;
 }
-export declare const SKILL_FRONTMATTER_FIELDS: readonly ['name', 'description'];
 export declare function parseSkillFrontmatter(text: string): SkillFrontmatter;
 export declare function checkSkillPackEntry(manifest: SkillPackManifest, entryText: string): SkillPackCheck;
 export interface SkillPackFileContent {
@@ -2135,12 +2035,10 @@ export type TenantId = string & {
     readonly __byokTenantId: unique symbol;
 };
 export declare const TENANT_ID_MAX_LENGTH = 200;
-export declare const TENANT_KEY_SEPARATOR = "\0";
 export declare function tenantId(value: string): TenantId;
 export declare function isTenantId(value: unknown): value is TenantId;
 export declare function tenantKey(tenant: TenantId, ...parts: readonly string[]): string;
 // ==== @byok-sdk/core dist/time.d.ts ====
-export declare const CANONICAL_TIMESTAMP_PATTERN: RegExp;
 export declare function isCanonicalTimestamp(value: unknown): value is string;
 export declare function assertCanonicalTimestamp(value: string, field: string): string;
 // ==== @byok-sdk/core dist/truth.d.ts ====

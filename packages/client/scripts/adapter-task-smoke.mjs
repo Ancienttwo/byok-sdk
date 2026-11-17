@@ -348,6 +348,7 @@ try {
     {
       localAgentRelease: { version: '0.0.0-adapter-smoke' },
       productName: 'Adapter Task Smoke',
+      deviceName: 'ci-smoke',
       productId,
       serverUrl,
       storeDir,
@@ -414,8 +415,7 @@ try {
   const rejected = await withTimeout(
     submit('adapter-smoke-pi-byok', {
       instruction: 'adapter task smoke: missing Pi BYOK launcher',
-      runtime: 'pi',
-      dispatchSelection: {
+      target: {
         lane: 'byok',
         runtimeId: 'pi',
         providerId: 'openai',
@@ -445,7 +445,7 @@ try {
 
   for (const runtime of runtimes) {
     const handle = await withTimeout(
-      submit(`adapter-smoke-${runtime}`, { instruction: `adapter task smoke: ${runtime}`, runtime }),
+      submit(`adapter-smoke-${runtime}`, { instruction: `adapter task smoke: ${runtime}`, target: { lane: 'runtime', runtimeId: runtime } }),
       `${runtime} submit`,
     );
     const result = await terminalResult(handle.taskId, `${runtime} task lifecycle`);
@@ -463,7 +463,7 @@ try {
 
     assert(result.state === 'Complete', `${runtime} result was not Complete: ${JSON.stringify(result)}`);
     assert(snapshot?.state === 'Complete', `${runtime} server task was not Complete: ${JSON.stringify(snapshot)}`);
-    assert(snapshot.claimedRuntime === runtime, `${runtime} server claimedRuntime mismatch: ${JSON.stringify(snapshot)}`);
+    assert(snapshot.claimedExecutor?.kind === 'runtime' && snapshot.claimedExecutor.runtimeId === runtime, `${runtime} server claimedExecutor mismatch: ${JSON.stringify(snapshot)}`);
     assert(localTask?.state === 'Complete', `${runtime} local observer task was not Complete: ${JSON.stringify(localTask)}`);
     assert(localClaim?.claimedRuntime === runtime, `${runtime} local claimed event runtime mismatch: ${JSON.stringify(localClaim)}`);
     assert(localTask?.claimedRuntime === runtime, `${runtime} local observer claimedRuntime mismatch: ${JSON.stringify(localTask)}`);
@@ -479,12 +479,12 @@ try {
 
     console.log(
       `PASS ${runtime}: offer -> claim(${runtime}) -> started -> complete; ` +
-        `server claimedRuntime=${snapshot.claimedRuntime}; local observer claimedRuntime=${localTask.claimedRuntime}`,
+        `server claimedExecutor=${JSON.stringify(snapshot.claimedExecutor)}; local observer claimedRuntime=${localTask.claimedRuntime}`,
     );
   }
 
   if (runsAgy) {
-    const handle = await withTimeout(submit('adapter-smoke-agy', { instruction: 'adapter task smoke: agy', harnessId: 'agy' }), 'agy submit');
+    const handle = await withTimeout(submit('adapter-smoke-agy', { instruction: 'adapter task smoke: agy', target: { lane: 'harness', harnessId: 'agy' } }), 'agy submit');
     const result = await terminalResult(handle.taskId, 'agy task lifecycle');
     assert(result.state === 'Complete', `agy result was not Complete: ${JSON.stringify(result)}`);
     const started = (await fs.readFile(agyLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line)).find((fact) => fact.kind === 'start');
@@ -509,7 +509,7 @@ try {
     process.env[envNames.hang] = '1';
     try {
       const handle = await withTimeout(
-        submit(`adapter-lifecycle-${runtime}`, { instruction: `adapter lifecycle smoke: ${runtime}`, runtime }),
+        submit(`adapter-lifecycle-${runtime}`, { instruction: `adapter lifecycle smoke: ${runtime}`, target: { lane: 'runtime', runtimeId: runtime } }),
         `${runtime} lifecycle submit`,
       );
       await waitFor(

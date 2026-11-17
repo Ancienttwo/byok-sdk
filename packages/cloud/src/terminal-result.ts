@@ -2,6 +2,7 @@ import {
   decodeEnvelope,
   type AgentRef,
   type BlobRef,
+  type ClaimedExecutor,
   type Envelope,
   type TerminalInferenceUsage,
   type TerminalPreparedObservation,
@@ -46,13 +47,20 @@ export function readDeviceTerminalReceipt(taskId: string, receipt: RequestReceip
 /**
  * The typed terminal read model — the hosted counterpart of the embedded
  * coordinator's `TaskResult`, projected off the receipt the inbound gate
- * stores. Every field is copied verbatim from the payload the gate already
- * zod-parsed before storing (`recordTerminal`, `inbound.ts`); this projection
- * neither re-validates nor synthesizes one.
+ * stores. Every field but `executor`, which is the attempt's claimed one, is
+ * copied verbatim from the payload the gate already zod-parsed before storing
+ * (`recordTerminal`, `inbound.ts`); this projection neither re-validates nor
+ * synthesizes one.
  */
 export interface TerminalResult {
   readonly taskId: string;
-  readonly harnessId?: string;
+  /**
+   * The claimed executor (wire v7, `TaskAttempt.claimedExecutor`), the one
+   * authority for what ran. Absent when the task was never claimed: a decline,
+   * an unclaimed cancel, or an unclaimed interruption, whose reported executor
+   * is only checked against the offer.
+   */
+  readonly executor?: ClaimedExecutor;
   /** Local interruption observation; claimed ownership remains on TaskAttempt. */
   readonly recovery?: TaskFailPayload['recovery'];
   readonly state: 'complete' | 'failed' | 'cancelled';
@@ -137,14 +145,15 @@ export interface TerminalResult {
  * terminal projects only its plaintext fields; its moved fields stay in the
  * sealed member, which {@link DeviceTerminal} carries. `taskId`
  * names the task the receipt was read for (the receipt's key carries it, its
- * body does not); `recordedAt` is the receipt store's write time.
+ * body does not); `recordedAt` is the receipt store's write time;
+ * `claimedExecutor` is the attempt's, projected as `executor`.
  *
  * Fail closed on anything but a terminal envelope: the stored body is
  * `encodeEnvelope` of what the inbound gate accepted, so an undecodable body
  * or a non-terminal type means the receipt-store contract itself broke — an
  * error, never a best-effort shape.
  */
-export function projectTerminalResult(taskId: string, receipt: RequestReceipt): TerminalResult {
+export function projectTerminalResult(taskId: string, receipt: RequestReceipt, claimedExecutor: ClaimedExecutor | undefined): TerminalResult {
   assertTaskContentPresent(taskId, receipt.body);
   let envelope: Envelope;
   try {
@@ -167,7 +176,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
           ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
           sessionRef: envelope.payload.sessionRef,
-          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(claimedExecutor === undefined ? {} : { executor: claimedExecutor }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
           recordedAt: receipt.recordedAt,
         };
@@ -186,7 +195,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ? { artifactRefs: envelope.payload.artifactRefs }
           : {}),
         ...(envelope.payload.document !== undefined ? { document: envelope.payload.document } : {}),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(claimedExecutor === undefined ? {} : { executor: claimedExecutor }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         ...(envelope.payload.preparedObservation === undefined
           ? {}
@@ -204,7 +213,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
           ...(envelope.payload.retryable !== undefined ? { retryable: envelope.payload.retryable } : {}),
           ...(envelope.payload.failure === undefined ? {} : { failure: readTaskFailure(envelope.payload.failure) }),
-          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(claimedExecutor === undefined ? {} : { executor: claimedExecutor }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
           recordedAt: receipt.recordedAt,
         };
@@ -223,7 +232,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ? { retryable: envelope.payload.retryable }
           : {}),
         ...(envelope.payload.failure === undefined ? {} : { failure: readTaskFailure(envelope.payload.failure) }),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(claimedExecutor === undefined ? {} : { executor: claimedExecutor }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         ...(envelope.payload.preparedObservation === undefined
           ? {}
@@ -267,7 +276,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
           ...(envelope.payload.agentHomeProjection === undefined ? {} : { agentHomeProjection: envelope.payload.agentHomeProjection }),
           ...(envelope.payload.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: envelope.payload.agentHomeMemoryChange }),
           ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
-          ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+          ...(claimedExecutor === undefined ? {} : { executor: claimedExecutor }),
           ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
           recordedAt: receipt.recordedAt,
         };
@@ -281,7 +290,7 @@ export function projectTerminalResult(taskId: string, receipt: RequestReceipt): 
         ...(envelope.payload.residentMemoryOverLimit === undefined ? {} : { residentMemoryOverLimit: envelope.payload.residentMemoryOverLimit }),
         ...(envelope.payload.reason !== undefined ? { reason: envelope.payload.reason } : {}),
         ...(envelope.payload.reason === undefined ? {} : { terminalCause: envelope.payload.reason }),
-        ...(envelope.payload.harnessId === undefined ? {} : { harnessId: envelope.payload.harnessId }),
+        ...(claimedExecutor === undefined ? {} : { executor: claimedExecutor }),
         ...(envelope.payload.usage !== undefined ? { usage: envelope.payload.usage } : {}),
         recordedAt: receipt.recordedAt,
       };

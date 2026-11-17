@@ -29,6 +29,8 @@ import { sealContent, type SealedContent } from '@byok-sdk/core/sealed-payload';
 import {
   PROTOCOL_VERSION,
   createEnvelope,
+  steerRefusalEnvelopeId,
+  type MessagesSendResponse,
   type RuntimeCapabilities,
   type RuntimeId,
   type TaskSteerSealedPayload,
@@ -36,6 +38,7 @@ import {
 import { describe, expect, it } from 'vitest';
 import { isCloudError } from '../errors';
 import { handleInboundEnvelope } from '../inbound';
+import { DEDUP_RING_CAPACITY } from '../stores/in-memory';
 import { SteerRejectedError } from '../steer-control';
 import { tenantStoresFor } from '../tenant-stores';
 import {
@@ -136,7 +139,7 @@ async function claim(
         {
           deviceId: device.deviceId,
           agentRef: TEST_AGENT_REF,
-          ...(report.runtime === undefined ? {} : { runtime: report.runtime }),
+          executor: { kind: 'runtime', runtimeId: report.runtime ?? 'pi' },
           ...(report.capabilities === undefined ? {} : { capabilities: report.capabilities }),
         },
         { taskId },
@@ -179,7 +182,7 @@ async function helloAdvertisingSteer(harness: CloudHarness, device: PairedDevice
       device.deviceId,
       createEnvelope('conn.hello', {
         protocolVersions: [PROTOCOL_VERSION],
-        capabilities: ['steer', 'agent-home-contract'],
+        capabilities: ['agent-home-contract'],
         deviceId: device.deviceId,
         productId: PRODUCT_ID,
         runtimes: [{ id: 'pi', capabilities: { steer: true } }],
@@ -217,7 +220,7 @@ describe('steerTask (GAP-2)', () => {
   });
 
   it('steerSealedTask delivers the sealed task.steer only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
-    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8');
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8');
     const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload;
     const harness = createHarness();
@@ -245,7 +248,7 @@ describe('steerTask (GAP-2)', () => {
   });
 
   it('steerSealedTask refuses a sealed steer by ciphertextRef to a blob that is not committed, and writes no mailbox row (#654)', async () => {
-    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8');
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8');
     const byReference = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined && 'ciphertextRef' in line.payload.sealed)!.payload;
     const harness = createHarness();
@@ -337,7 +340,7 @@ describe('steerTask (GAP-2)', () => {
 
     const error = await steerRejection(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' }));
     expect(error.code).toBe('steer_unsupported_runtime');
-    expect(error.runtime).toBe('claude');
+    expect(error.executor).toEqual({ kind: 'runtime', runtimeId: 'claude' });
     expect(error.status).toBe('running');
 
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
@@ -350,7 +353,7 @@ describe('steerTask (GAP-2)', () => {
 
     const error = await steerRejection(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' }));
     expect(error.code).toBe('steer_unsupported_runtime');
-    expect(error.runtime).toBe('pi');
+    expect(error.executor).toEqual({ kind: 'runtime', runtimeId: 'pi' });
 
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
   });
@@ -364,8 +367,8 @@ describe('steerTask (GAP-2)', () => {
       capabilities: { steer: false },
     });
 
-    // The connection layer really is offering a `true` to fall back to...
-    expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual(['steer', 'agent-home-contract']);
+    // The connection layer recorded a hello whose runtime said `steer: true`...
+    expect((await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities).toEqual(['agent-home-contract']);
     // ...and the claim still decides.
     const error = await steerRejection(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' }));
     expect(error.code).toBe('steer_unsupported_runtime');
@@ -394,7 +397,7 @@ describe('steerTask (GAP-2)', () => {
     const error = await steerRejection(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' }));
     expect(error.code).toBe('task_not_running');
     expect(error.status).toBe('offered');
-    expect(error.runtime).toBeUndefined();
+    expect(error.executor).toBeUndefined();
 
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
   });
@@ -422,7 +425,7 @@ describe('steerTask (GAP-2)', () => {
         device.deviceId,
         createEnvelope(
           'task.complete',
-          { agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'session-1' },
+          { agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'session-1' },
           { taskId: task.taskId },
         ),
       ).then((result) => result.outcome),
@@ -444,5 +447,91 @@ describe('steerTask (GAP-2)', () => {
       (error: unknown) => error,
     );
     expect(isCloudError(caught, 'task_not_found')).toBe(true);
+  });
+
+  it('refuses a plaintext text over 65,536 UTF-8 bytes before a mailbox row exists (#1757 C1)', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+
+    await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'é'.repeat(32_769) }))
+      .rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    expect((await poll(harness, device, task.seq)).events).toEqual([]);
+    await harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'é'.repeat(32_768) });
+    expect((await poll(harness, device, task.seq)).events).toHaveLength(1);
+  });
+});
+
+describe('task.steer_refused (wire v7, #2009)', () => {
+  const PI = { kind: 'runtime', runtimeId: 'pi' } as const;
+  const refusal = async (steerMessageId: string, reason: string, taskId: string) =>
+    createEnvelope('task.steer_refused', { steerMessageId, reason }, { id: await steerRefusalEnvelopeId(steerMessageId), taskId });
+
+  it('records the first refusal of a steer it sent, in any task state, and answers a replay duplicate', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    const steer = await harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' });
+    expect(await handleInboundEnvelope(deviceStores(harness, device), device.deviceId, createEnvelope('task.complete',
+      { agentRef: TEST_AGENT_REF, executor: PI, summary: 'done', sessionRef: 'session-1' }, { taskId: task.taskId })))
+      .toEqual({ outcome: 'accepted' });
+
+    const inbound = async (reason: string) => handleInboundEnvelope(deviceStores(harness, device), device.deviceId,
+      await refusal(steer.envelope.id, reason, task.taskId));
+    expect(await inbound('task_not_active')).toEqual({ outcome: 'accepted' });
+    expect(await inbound('input_too_large')).toEqual({ outcome: 'duplicate' });
+
+    const recorded = await harness.cloud.readSteerRefusal(TENANT_A, task.taskId, steer.envelope.id);
+    expect(recorded).toMatchObject({ steerMessageId: steer.envelope.id, reason: 'task_not_active', deviceId: device.deviceId, revision: 1 });
+    expect(await harness.cloud.listSteerRefusals(TENANT_A, { taskId: task.taskId, afterRevision: 0, limit: 10 })).toEqual([recorded]);
+    expect((await harness.cloud.readTaskAttempt(TENANT_A, task.taskId))?.status).toBe('complete');
+  });
+
+  it('answers duplicate from the recorded refusal, not the bounded dedup ring, and commits once', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    const [evicted, unacked] = await Promise.all([1, 2].map(() => harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' })));
+    let commits = 0;
+    const observer = { onInboundCommitted() { commits += 1; } };
+    const inbound = async (steerMessageId: string) => (await handleInboundEnvelope(deviceStores(harness, device), device.deviceId,
+      await refusal(steerMessageId, 'steer_unsupported', task.taskId), undefined, undefined, observer)).outcome;
+
+    // The ring forgot the first refusal's envelope.
+    expect(await inbound(evicted!.envelope.id)).toBe('accepted');
+    for (let index = 0; index < DEDUP_RING_CAPACITY; index += 1) {
+      await harness.stores.dedup.checkAndRecordAgent(TENANT_A, device.deviceId, TEST_AGENT_REF, randomUUID());
+    }
+    expect(await inbound(evicted!.envelope.id)).toBe('duplicate');
+    // The refusal committed and the dedup write never happened.
+    await harness.stores.steerRefusals.record(TENANT_A,
+      { taskId: task.taskId, steerMessageId: unacked!.envelope.id, reason: 'task_not_active', deviceId: device.deviceId });
+    expect(await inbound(unacked!.envelope.id)).toBe('duplicate');
+
+    expect(commits).toBe(1);
+    expect((await harness.cloud.readSteerRefusal(TENANT_A, task.taskId, unacked!.envelope.id))?.reason).toBe('task_not_active');
+  });
+
+  it('rejects a refusal whose id is not derived from the steer, or that names no steer sent to this task', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
+    const steer = await harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' });
+    const wrongId = createEnvelope('task.steer_refused', { steerMessageId: steer.envelope.id, reason: 'steer_unsupported' }, { taskId: task.taskId });
+    const unknownSteer = await refusal(randomUUID(), 'steer_unsupported', task.taskId);
+    // The offer is a row on this device's stream, but not a task.steer.
+    const notASteer = await refusal((await harness.cloud.readTaskOffer(TENANT_A, task.taskId))!.messageId, 'steer_unsupported', task.taskId);
+
+    const response = await harness.json('/byok/messages', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [wrongId, unknownSteer, notASteer] }),
+    });
+    expect((response.body as MessagesSendResponse).outcomes).toEqual([
+      { id: wrongId.id, outcome: 'rejected', reason: 'payload_invalid' },
+      { id: unknownSteer.id, outcome: 'rejected', reason: 'not_permitted' },
+      { id: notASteer.id, outcome: 'rejected', reason: 'not_permitted' },
+    ]);
+    expect(await harness.cloud.listSteerRefusals(TENANT_A, { taskId: task.taskId, afterRevision: 0, limit: 10 })).toEqual([]);
   });
 });

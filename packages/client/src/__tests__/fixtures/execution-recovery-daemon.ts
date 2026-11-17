@@ -258,6 +258,7 @@ const daemon = createDaemonWithAdapters(
   {
     localAgentRelease: { version: '0.0.0-execution-recovery-fixture' },
     productName: 'Execution recovery fixture',
+    deviceName: 'ci-smoke',
     productId: config.productId,
     serverUrl: config.serverUrl,
     storage: { scratchRoot: config.scratchRoot }, storeDir: config.storeDir,

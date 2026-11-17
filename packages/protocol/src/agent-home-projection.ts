@@ -24,7 +24,6 @@ export const AgentHomeProjectionProfileRevisionSchema = z
       value <= AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM,
     `profileRevision must not exceed PostgreSQL BIGINT maximum ${AGENT_HOME_PROJECTION_PROFILE_REVISION_MAXIMUM}`,
   );
-export type AgentHomeProjectionProfileRevision = z.infer<typeof AgentHomeProjectionProfileRevisionSchema>;
 
 /**
  * Optional Host-owned revision of the projection rendering, compared after an
@@ -32,11 +31,9 @@ export type AgentHomeProjectionProfileRevision = z.infer<typeof AgentHomeProject
  * `(profileRevision, hostRevision)` orders projections.
  */
 export const AgentHomeProjectionHostRevisionSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-export type AgentHomeProjectionHostRevision = z.infer<typeof AgentHomeProjectionHostRevisionSchema>;
 
 /** The projection hash uses the package-wide lowercase SHA-256 transport form. */
 export const AgentHomeProjectionHashSchema = AgentEgressContentHashSchema;
-export type AgentHomeProjectionHash = z.infer<typeof AgentHomeProjectionHashSchema>;
 
 /** Terminal local-apply outcome carried by the exact completion request. */
 export const AgentHomeProjectionOutcomeSchema = z.enum(['applied', 'idempotent', 'stale', 'conflict']);

@@ -18,6 +18,7 @@ const PROVIDER = 'bootstrap-loopback';
 const BOOT = 'BYOK-BOOT-2299';
 const TASK = 'BYOK-TASK-2299';
 const LATER = 'BYOK-LATER-2299';
+const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
 type SessionEvent = Session['events'] extends AsyncIterable<infer Event> ? Event : never;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -92,7 +93,7 @@ async function turnText(session: Session): Promise<string> {
 async function startTask(extension: string, loopback: LoopbackProvider, instruction = `${TASK} reply briefly.`) {
   const { box, env } = await piHome(extension, loopback);
   const adapter = new PiAdapter({ resolveBin: () => ({ command: rpcHost, source: 'package' }), agentUserContext: 'inherit' });
-  return { box, session: await startPreparedOperation(adapter, { instruction }, { workspaceDir: box.workspace, env }) };
+  return { box, session: await startPreparedOperation(adapter, { target: PI_TARGET, instruction }, { workspaceDir: box.workspace, env }) };
 }
 
 async function firstTurn(extension: string, loopback: LoopbackProvider, instruction?: string): Promise<string> {
@@ -185,7 +186,7 @@ ${PROMPT_WATCH}export default function(pi) {
       try {
         expect(await turnText(session)).toContain(`${TASK} reply`);
         await expect.poll(() => existsSync(path.join(box.home, 'later-settled')), { timeout: 10_000 }).toBe(true);
-        await session.followUp!({ instruction: `${TASK}-2 reply briefly.` });
+        await session.followUp!({ target: PI_TARGET, instruction: `${TASK}-2 reply briefly.` });
         const second = await turnText(session);
         expect(second).toContain(`${TASK}-2 reply`);
         expect(second).not.toContain('extension reply');
@@ -221,7 +222,7 @@ ${PROMPT_WATCH}export default function(pi) {
       const spawnFn = ((...args: Parameters<SpawnFn>) => (child = spawn(...args))) as SpawnFn;
       const adapter = new PiAdapter({ resolveBin: () => ({ command: rpcHost, source: 'package' }), agentUserContext: 'inherit', spawnFn });
       const deadline = new AbortController();
-      const refused = startPreparedOperation(adapter, { instruction: `${TASK} reply briefly.` },
+      const refused = startPreparedOperation(adapter, { target: PI_TARGET, instruction: `${TASK} reply briefly.` },
         { workspaceDir: box.workspace, env, signal: deadline.signal });
       // The abort stands in for the daemon's startup deadline. Once compaction
       // holds, the deferred prompt is refused and no response will ever come.

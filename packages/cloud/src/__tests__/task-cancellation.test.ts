@@ -76,7 +76,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
@@ -95,7 +95,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.cancelled', { reason: 'stop runtime', agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
+      createEnvelope('task.cancelled', { reason: 'stop runtime', agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
     await expect(harness.cloud.readTaskAttempt(TENANT_A, offer.taskId)).resolves.toMatchObject({
       status: 'cancelled',
@@ -129,7 +129,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
@@ -141,7 +141,7 @@ describe('host task cancellation', () => {
       device.deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'success won', sessionRef: 'successful-session', agentRef: TEST_AGENT_REF },
+        { summary: 'success won', sessionRef: 'successful-session', agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } },
         { taskId: offer.taskId },
       ),
     ).then((result) => result.outcome);
@@ -155,7 +155,7 @@ describe('host task cancellation', () => {
       summary: 'success won',
       sessionRef: 'successful-session',
     });
-    await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolves.toMatchObject({
+    await expect(harness.core.board.list(TENANT_A, {})).resolves.toMatchObject({
       items: [{ itemId: offer.taskId, status: 'in_review' }],
     });
 
@@ -181,7 +181,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
     const cancellation = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'cancel wins');
 
@@ -190,7 +190,7 @@ describe('host task cancellation', () => {
       device.deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'late success', sessionRef: 'late-session', agentRef: TEST_AGENT_REF },
+        { summary: 'late success', sessionRef: 'late-session', agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } },
         { taskId: offer.taskId },
       ),
     ).then((result) => result.outcome);
@@ -202,7 +202,7 @@ describe('host task cancellation', () => {
       reason: 'cancel wins',
       recordedAt: cancellation.cancellation?.requestedAt,
     });
-    await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolves.toMatchObject({ items: [] });
+    await expect(harness.core.board.list(TENANT_A, {})).resolves.toMatchObject({ items: [] });
   });
 
   it('does not project a racing success when cancellation lands between its read and status CAS', async () => {
@@ -226,7 +226,7 @@ describe('host task cancellation', () => {
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: offer.taskId }),
     ).then((result) => result.outcome);
 
     let releaseStatusMutation!: () => void;
@@ -257,7 +257,7 @@ describe('host task cancellation', () => {
       device.deviceId,
       createEnvelope(
         'task.complete',
-        { summary: 'late success', sessionRef: 'late-session', agentRef: TEST_AGENT_REF },
+        { summary: 'late success', sessionRef: 'late-session', agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } },
         { taskId: offer.taskId },
       ),
     ).then((result) => result.outcome);
@@ -276,7 +276,7 @@ describe('host task cancellation', () => {
       state: 'cancelled',
       reason: 'cancel wins the CAS',
     });
-    await expect(harness.cloud.listBoardItems(TENANT_A, {})).resolves.toMatchObject({
+    await expect(harness.core.board.list(TENANT_A, {})).resolves.toMatchObject({
       items: [{ itemId: offer.taskId, status: 'in_progress' }],
     });
   });
@@ -320,7 +320,7 @@ describe('host task cancellation', () => {
     await expect(handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: offer.taskId }),
     ).then((result) => result.outcome)).resolves.toBe('accepted');
     const first = await harness.cloud.cancelTask(TENANT_A, offer.taskId, 'stuck runtime');
     expect(first.status).toBe('cancel_requested');

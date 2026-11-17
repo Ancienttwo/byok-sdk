@@ -148,6 +148,9 @@ export const ROW_FIXTURES: ReadonlyMap<string, RowFixture> = new Map<string, Row
   ['C3', fixture(makeEvent('claim.sent'), {
     task: { phase: 'claiming', claim: { journaled: true, sent: false } },
   })],
+  ['C10', fixture(makeEvent('claim.refused', { reason: 'claim refused: task_owned_by_other_device' }), {
+    task: { phase: 'claimed', claim: { journaled: true, sent: true } },
+  })],
   ['C0', fixture(makeEvent('startup.registered'), { task: { phase: 'claimed' } })],
   ['C0b', fixture(makeEvent('startup.transferred'), {
     task: { phase: 'claimed', startup: { owner: 'startup', registered: true } },

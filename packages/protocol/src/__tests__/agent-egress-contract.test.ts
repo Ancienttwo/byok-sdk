@@ -81,6 +81,7 @@ describe('Agent egress typed wire contract', () => {
       {
         instruction: 'strict Agent egress offer',
         agentRef: AGENT_REF,
+        target: { lane: 'auto' },
         session: { mode: 'resume', sessionRef: 'session-protocol' },
         egressPolicy: POLICY,
       },
@@ -94,6 +95,7 @@ describe('Agent egress typed wire contract', () => {
     expect(() =>
       createEnvelope('agent.egress.reliable', {
         agentRef: AGENT_REF,
+        target: { lane: 'auto' },
         sessionRef: 'session-protocol',
         policyRevision: POLICY.policyRevision,
         eventId: '10000000-0000-4000-8000-000000000052',
@@ -112,6 +114,7 @@ describe('Agent egress typed wire contract', () => {
       {
         instruction: 'start typed egress Agent work',
         agentRef: AGENT_REF,
+        target: { lane: 'auto' },
         session: { mode: 'fresh' },
         egressPolicy: POLICY,
       },
@@ -126,6 +129,7 @@ describe('Agent egress typed wire contract', () => {
         {
           instruction: 'resume typed egress Agent work',
           agentRef: AGENT_REF,
+          target: { lane: 'auto' },
           egressPolicy: POLICY,
         } as never,
         { taskId: 'task-egress-resume-missing-session', seq: 34 },
@@ -137,6 +141,7 @@ describe('Agent egress typed wire contract', () => {
         {
           instruction: 'resume typed egress Agent work',
           agentRef: AGENT_REF,
+          target: { lane: 'auto' },
           session: { mode: 'resume' },
           egressPolicy: POLICY,
         } as never,
@@ -149,6 +154,7 @@ describe('Agent egress typed wire contract', () => {
         {
           instruction: 'fresh typed egress Agent work',
           agentRef: AGENT_REF,
+          target: { lane: 'auto' },
           session: { mode: 'fresh', sessionRef: 'forbidden-prestart-session' },
           egressPolicy: POLICY,
         } as never,
@@ -161,6 +167,7 @@ describe('Agent egress typed wire contract', () => {
         {
           instruction: 'fresh Agent work without a policy',
           agentRef: AGENT_REF,
+          target: { lane: 'auto' },
           session: { mode: 'fresh' },
         } as never,
         { taskId: 'task-egress-fresh-missing-policy', seq: 36 },

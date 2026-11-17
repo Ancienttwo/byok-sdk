@@ -15,7 +15,7 @@ export const TENANT_TABLES_SQL = `SELECT t.relname
          JOIN pg_namespace n ON n.oid = t.relnamespace
         WHERE n.nspname = current_schema()
           AND t.relkind = 'r'
-          AND t.relname NOT IN ('byok_schema_migration', 'tenant_erasure_operation')
+          AND t.relname NOT IN ('byok_schema_migration', 'byok_wire_epoch', 'tenant_erasure_operation')
         ORDER BY t.relname`;
 
 export interface Needle {

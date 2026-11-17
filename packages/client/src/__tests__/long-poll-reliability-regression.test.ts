@@ -6,7 +6,7 @@ import { AuthManager } from '../daemon/auth-manager';
 import { ConnectionManager } from '../daemon/connection-manager';
 import type { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient, type CorrelatedOutcome } from '../daemon/long-poll-transport';
-import { seedDeviceEnrollment } from './fixtures/device-enrollment';
+import { seedAuthHoldingToken } from './fixtures/device-enrollment';
 import { TestServer } from './fixtures/test-server';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -16,7 +16,7 @@ import { TEST_ACTIVITY_INGRESS } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
-const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, target: { lane: 'auto' as const } };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -41,17 +41,7 @@ function offer(taskId: string, seq: number): Envelope {
 async function seededAuth(): Promise<AuthManager> {
   const storeDir = await tmpDir('byok-long-poll-reliability-auth-');
   const store = createTestDeviceStore(storeDir);
-  await seedDeviceEnrollment(store, {
-    deviceId: 'device-reliability',
-    tenantId: 'tenant-reliability',
-    accessToken: 'token-reliability',
-    expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
-    devicePrivateKeyPem: 'unused-in-test',
-    devicePublicKey: 'unused-in-test',
-  });
-  const auth = new AuthManager({ serverUrl: 'http://example.invalid', store });
-  await auth.loadExisting();
-  return auth;
+  return seedAuthHoldingToken(store, 'http://example.invalid', { deviceId: 'device-reliability', tenantId: 'tenant-reliability' });
 }
 
 describe('long-poll reliability regressions (#135, #136, #137)', () => {
@@ -184,7 +174,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const auth = await seededAuth();
-    const accepted = createEnvelope('task.claim', { deviceId: 'device-reliability' }, { taskId: 'accepted-task' });
+    const accepted = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'accepted-task' });
     const rejected = createEnvelope('task.started', {}, { taskId: 'rejected-task' });
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -208,8 +198,8 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     const cursorStore = { load: async () => undefined, save: async () => undefined } as unknown as CursorStore;
     const poisonFirst = createEnvelope('task.started', {}, { taskId: 'poison-first' });
     const poisonSecond = createEnvelope('task.started', {}, { taskId: 'poison-second' });
-    const acceptedBeforePoison = createEnvelope('task.claim', { deviceId: 'device-reliability' }, { taskId: 'accepted-before-poison' });
-    const laterValid = createEnvelope('task.claim', { deviceId: 'device-reliability' }, { taskId: 'later-valid' });
+    const acceptedBeforePoison = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'accepted-before-poison' });
+    const laterValid = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'later-valid' });
     const poisonIds = new Set([poisonFirst.id, poisonSecond.id]);
     const businessExecutions: string[] = [];
     const businessDedup = new Set<string>();
@@ -304,21 +294,19 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     }],
   ])('#137 rejects an invalid trusted page: %s', async (_label, body) => {
     const auth = await seededAuth();
-    // Each page carries the required advertisements, so it fails for its labelled reason.
-    const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify({ ...body, capabilities: [], ingress: TEST_ACTIVITY_INGRESS }), { status: 200 }));
+    // Each page carries the required ingress, so it fails for its labelled reason.
+    const fetchMock = vi.fn().mockImplementation(() => new Response(JSON.stringify({ ...body, ingress: TEST_ACTIVITY_INGRESS }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     let cursor = 0;
     const skipped = vi.fn((seq: number) => {
       cursor = seq;
     });
-    const capabilities = vi.fn();
     const client = new LongPollClient({
       serverUrl: 'http://example.invalid',
       auth,
       getCursor: () => cursor,
       onEnvelope: () => {},
       onValidationFailedSeq: skipped,
-      onServerCapabilities: capabilities,
       // #391: a failed poll ends this loop generation; the reconnect loop
       // (here, this stand-in) starts the next one from the durable cursor.
       onLoopFailure: () => {
@@ -330,7 +318,6 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     client.start();
     await vi.waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2), { timeout: 600 });
     expect(skipped).not.toHaveBeenCalled();
-    expect(capabilities).not.toHaveBeenCalled();
     expect(cursor).toBe(0);
     for (const [input] of fetchMock.mock.calls) {
       expect(new URL(String(input)).searchParams.get('cursor')).toBe('0');
@@ -340,7 +327,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
 
   it('unknown executable work keeps the durable cursor unchanged', async () => {
     const auth = await seededAuth();
-    const body = { events: [{ type: 'task.future', seq: 1 }], cursor: 1, capabilities: [], ingress: TEST_ACTIVITY_INGRESS };
+    const body = { events: [{ type: 'task.future', seq: 1 }], cursor: 1, ingress: TEST_ACTIVITY_INGRESS };
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     let cursor = 0;

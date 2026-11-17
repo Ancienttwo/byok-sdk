@@ -16,7 +16,7 @@ import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
-import { EventsPollResponseSchema, parseMessage, type Envelope, type EventsPollResponse, type PairResponse } from '@byok-sdk/protocol';
+import { EventsPollResponseSchema, pairDeviceDigest, parseMessage, type Envelope, type EventsPollResponse, type PairResponse } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../auth/verify';
 import { AGENT_HOME_CONTRACT_CAPABILITY } from '../../cloud';
 import { createInMemoryByokCloud, type InMemoryByokCloud, type InMemoryByokCloudOptions } from '../../composition/in-memory';
@@ -60,7 +60,12 @@ export interface CloudHarness extends InMemoryByokCloud {
   readonly clock: Clock;
   request(path: string, init?: RequestInit): Promise<Response>;
   json(path: string, init?: RequestInit): Promise<{ readonly status: number; readonly body: unknown }>;
-  /** `machineId` is the optional client-hashed physical machine identity (protocol §6.1) — omitted from the body entirely when not supplied. */
+  /**
+   * `machineId` is the optional client-hashed physical machine identity
+   * (protocol §6.1) — omitted from the body entirely when not supplied. The
+   * fence names the machine's current device, as a client holding that
+   * enrollment would, so a re-pair supersedes it.
+   */
   pairDevice(tenant: TenantId, productId?: string, machineId?: string): Promise<PairedDevice>;
 }
 
@@ -91,6 +96,13 @@ export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarn
       }
       const keys = createDeviceKeys();
       const pairing = await composition.cloud.createPairingCode(tenant, { productId });
+      const current = machineId === undefined
+        ? undefined
+        : (await composition.stores.devices.list(tenant))
+          .find((device) => device.productId === productId && device.machineId === machineId);
+      const expectedDeviceDigest = current === undefined
+        ? null
+        : await pairDeviceDigest({ tenantId: tenant, productId, deviceId: current.deviceId });
       const response = await request('/byok/pair', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -99,6 +111,7 @@ export function createHarness(options: InMemoryByokCloudOptions = {}): CloudHarn
           deviceName: 'test-device',
           devicePublicKey: keys.publicKeyBase64Url,
           ...(machineId === undefined ? {} : { machineId }),
+          expectedDeviceDigest,
         }),
       });
       if (response.status !== 200) throw new Error(`pairing failed: HTTP ${response.status}`);
@@ -122,7 +135,7 @@ export const TEST_AGENT_REF = { agentId: 'test-agent', profileRevision: 'rev-1' 
  * any `sessionRef`; only a daemon checks that the session exists.
  */
 export function offerPayload(instruction = 'do the thing') {
-  return { instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: 'test-session' } } as const;
+  return { instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: 'test-session' }, target: { lane: 'auto' } } as const;
 }
 
 /** Adds the Agent-home capability to the device's recorded capabilities, which `enqueueAgentOffer` admits on. */

@@ -13,6 +13,7 @@ const offer = {
   instruction: 'continue the durable agent task',
   agentRef,
   session: { mode: 'resume', sessionRef: 'session-agent-1' },
+  target: { lane: 'auto' },
 } as const;
 
 describe('agent-home-contract protocol', () => {

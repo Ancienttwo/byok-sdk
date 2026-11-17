@@ -238,6 +238,14 @@ export interface MailboxStore {
   readUsage(tenant: TenantId): Promise<MailboxUsage>;
   /** Pure read. Never advances the cursor, never deletes, never marks acked. */
   readAfter(tenant: TenantId, query: MailboxReadQuery): Promise<MailboxPage>;
+  /**
+   * Pure read of one retained row by its message id on this device's stream,
+   * in any state, or `undefined` when no such row is retained (never
+   * appended, or already removed by retention). Exact lookup, no scan. The
+   * cloud proves a `task.steer_refused` names a steer it sent this device
+   * (wire v7, #2009).
+   */
+  readMessage(tenant: TenantId, input: { readonly deviceId: string; readonly messageId: string }): Promise<MailboxMessage | undefined>;
   /** Records the highest cursor a device-facing response is about to return. */
   recordDelivery(
     tenant: TenantId,

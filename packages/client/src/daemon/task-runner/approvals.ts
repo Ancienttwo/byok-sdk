@@ -18,7 +18,7 @@ import {
   type ApprovalOrigin as ReducerApprovalOrigin,
 } from './state.js';
 import { hostFor, type HostApprovalRequest, type TaskRunnerHost } from './host.js';
-import { taskTearingDown } from './support.js';
+import { taskTearingDown, taskTerminalSelected } from './support.js';
 import { beginTerminal, drainApprovals } from './finish.js';
 
 const WITHDRAWN = 'approval request was withdrawn by its requester';
@@ -331,7 +331,7 @@ export async function handleReject(this: TaskRunner, taskId: string, reason: str
   }
   const host = hostFor(this);
   const current = host.current(taskId);
-  if (current?.terminal !== undefined || current?.phase === 'terminalizing' || current?.phase === 'retiring') {
+  if (taskTerminalSelected(this, taskId)) {
     // The task already selected its terminal; this reject is audit-only and
     // never interrupts or fails it a second time.
     void host.dispatchOrReject({ type: 'approval.stale', taskId, atMs: Date.now(), approvalId });

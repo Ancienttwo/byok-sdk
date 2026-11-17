@@ -23,21 +23,23 @@ import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, type CloudHarness 
 import { SEALING, inlineMember } from './support/sealed';
 
 type CorpusLine = { type: MessageType; payload: Record<string, unknown> };
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as CorpusLine);
 const lines = corpus.map((line, index) => ({ ...line, index }));
 const isFreshOffer = (payload: Record<string, unknown>) => (payload.session as { mode?: unknown } | undefined)?.mode === 'fresh';
-const egressLine = (lane: 'sealed' | 'fresh', categories: readonly string[]) => lines.find((line) => line.type === 'task.offer'
+const freshEgressLine = (categories: readonly string[]) => lines.find((line) => line.type === 'task.offer'
   && line.payload.messageEgress !== undefined
-  && isFreshOffer(line.payload) === (lane === 'fresh')
+  && isFreshOffer(line.payload)
   && JSON.stringify((line.payload.sealing as { categories?: unknown } | undefined)?.categories) === JSON.stringify(categories))!;
 
 const OUTPUT_MEMBER = corpus.find((line) => line.type === 'task.complete' && line.payload.sealed !== undefined)!.payload.sealed!;
 const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
 
 let taskCount = 0;
+
+const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
 
 const SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 
@@ -77,9 +79,22 @@ async function sealAgentInstruction(
   return inlineMember(content);
 }
 
-/** A sealed Agent resume offer payload with both categories sealed. */
+/** A sealed fresh Agent execution payload with both categories sealed. */
 function sealedAgentOffer(sealed: Awaited<ReturnType<typeof sealAgentInstruction>>) {
-  return { runtime: 'pi' as const, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' }, sealing: SEALING, sealed };
+  return {
+    target: { lane: 'runtime', runtimeId: 'pi' } as const,
+    agentRef: TEST_AGENT_REF,
+    session: { mode: 'fresh' as const },
+    egressPolicy: {
+      policyRevision: 'policy',
+      activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
+      reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
+      transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+    },
+    terminalProjection: { mode: 'none' },
+    sealing: SEALING,
+    sealed,
+  } as const;
 }
 
 function deviceStores(harness: CloudHarness, deviceId: string) {
@@ -102,7 +117,7 @@ type EgressPayload = Record<string, unknown>;
  * A payload that seals its instruction is built for the device and task id.
  */
 async function egressTask(
-  lane: 'plain' | 'sealed' | 'fresh',
+  lane: 'plain' | 'fresh',
   build: EgressPayload | ((deviceId: string, taskId: string) => Promise<EgressPayload>),
   type: MessageType,
 ) {
@@ -111,14 +126,11 @@ async function egressTask(
   taskCount += 1;
   const taskId = `sealed-surface-${taskCount}`;
   const fixture = typeof build === 'function' ? await build(device.deviceId, taskId) : build;
-  const payload: EgressPayload = { ...fixture,
-    runtime: (fixture.dispatchSelection as { runtimeId: string } | undefined)?.runtimeId ?? fixture.runtime,
-  };
+  const payload: EgressPayload = fixture;
   await harness.stores.devices.recordCapabilities(TENANT_A, {
     deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, payload as never),
   });
   if (lane === 'plain') await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, { taskId, payload: payload as never, agentMessageContext: CONTEXT });
-  if (lane === 'sealed') await harness.cloud.enqueueSealedAgentEgressOffer(TENANT_A, device.deviceId, { taskId, payload: payload as never, agentMessageContext: CONTEXT });
   if (lane === 'fresh') await harness.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: device.deviceId, payload: payload as never, agentMessageContext: CONTEXT });
   const agentRef = payload.agentRef as { agentId: string; profileRevision: string };
   const stores = deviceStores(harness, device.deviceId);
@@ -141,12 +153,9 @@ describe('a sealed task streams no draft (#654 E4a)', () => {
     expect(await task.harness.stores.agentMessageDraft.read(TENANT_A, task.taskId)).toBeDefined();
   });
 
-  it.each([
-    ['sealed egress offer', 'sealed'],
-    ['sealed execution offer', 'fresh'],
-  ] as const)('a %s with output sealing refuses a draft before the envelope identity is reserved', async (_variant, lane) => {
-    const line = egressLine(lane, ['task-output']);
-    const task = await egressTask(lane, line.payload, line.type);
+  it('a sealed execution offer with output sealing refuses a draft before the envelope identity is reserved', async () => {
+    const line = freshEgressLine(['task-output']);
+    const task = await egressTask('fresh', line.payload, line.type);
     const draft = createEnvelope('agent.message.draft', { agentRef: task.agentRef, revision: 1, offset: 0, text: 'hello' }, { taskId: task.taskId });
     // The same envelope twice: a reserved identity would answer the replay as a duplicate.
     expect(await task.deliver(draft)).toEqual(refused);
@@ -155,9 +164,9 @@ describe('a sealed task streams no draft (#654 E4a)', () => {
   });
 
   it('a task with input sealing only also refuses a draft', async () => {
-    const line = egressLine('sealed', ['task-output']);
+    const line = freshEgressLine(['task-output']);
     const { instruction: _instruction, ...payload } = line.payload;
-    const task = await egressTask('sealed', async (deviceId, taskId) => ({
+    const task = await egressTask('fresh', async (deviceId, taskId) => ({
       ...payload,
       sealing: { ...SEALING, categories: ['task-input'] },
       sealed: await sealAgentInstruction(deviceId, taskId, 'sealed', payload.agentRef as AgentRef, 'task.offer'),
@@ -176,15 +185,15 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', sealedAgentOffer(instruction) as never),
     });
-    await harness.cloud.enqueueSealedAgentOffer(TENANT_A, device.deviceId, { taskId, payload: sealedAgentOffer(instruction) as never });
+    await harness.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: device.deviceId, payload: sealedAgentOffer(instruction) as never });
     const send = deviceSender(harness, device.deviceId, taskId);
     for (const [type, payload] of [
-      ['task.claim', { deviceId: device.deviceId, runtime: 'pi', agentRef: TEST_AGENT_REF }],
+      ['task.claim', { deviceId: device.deviceId, executor: PI_EXECUTOR, agentRef: TEST_AGENT_REF }],
       ['task.started', {}],
       ['task.progress', { seq: 1, sealed: OUTPUT_MEMBER }],
       ['task.await_approval', { approvalId: 'approval-1', sealed: OUTPUT_MEMBER }],
       ['task.approval_resolved', { approvalId: 'approval-1', decision: 'approve', resolvedBy: 'local', at: '2026-10-24T00:00:00.000Z' }],
-      ['task.complete', { sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, sealed: OUTPUT_MEMBER }],
+      ['task.complete', { sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, sealed: OUTPUT_MEMBER }],
     ] as const) {
       expect(await send(type, payload), type).toEqual({ outcome: 'accepted' });
     }
@@ -194,15 +203,15 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     expect(offer?.payload).toEqual(sealedAgentOffer(instruction));
 
     expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toEqual({
-      tenantId: TENANT_A, taskId, deviceId: device.deviceId, agentRef: TEST_AGENT_REF, ownerDeviceId: device.deviceId, claimedRuntime: 'pi',
+      tenantId: TENANT_A, taskId, deviceId: device.deviceId, agentRef: TEST_AGENT_REF, ownerDeviceId: device.deviceId, claimedExecutor: PI_EXECUTOR,
       status: 'complete', offeredAt: expect.any(String), claimedAt: expect.any(String), terminalAt: expect.any(String),
       updatedAt: expect.any(String),
     });
 
     expect((await harness.cloud.readDeviceTerminal(TENANT_A, taskId))?.envelope.payload)
-      .toEqual({ sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, sealed: OUTPUT_MEMBER });
+      .toEqual({ sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, sealed: OUTPUT_MEMBER });
     expect(await harness.cloud.readTaskResult(TENANT_A, taskId))
-      .toEqual({ taskId, state: 'complete', sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, recordedAt: expect.any(String) });
+      .toEqual({ taskId, state: 'complete', sessionRef: 'session-sealed', agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, recordedAt: expect.any(String) });
 
     expect((await harness.cloud.readActivity(TENANT_A, taskId))?.entries).toEqual([{
       taskId, sourceEnvelopeId: expect.any(String), batchSeq: 1, kind: 'sealed-progress', revision: 1, sourceDropped: 0,
@@ -224,14 +233,14 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', sealedAgentOffer(instruction) as never),
     });
-    await harness.cloud.enqueueSealedAgentOffer(TENANT_A, device.deviceId, { taskId, payload: sealedAgentOffer(instruction) as never });
+    await harness.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: device.deviceId, payload: sealedAgentOffer(instruction) as never });
     const send = deviceSender(harness, device.deviceId, taskId);
-    expect(await send('task.claim', { deviceId: device.deviceId, runtime: 'pi', agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
-    expect(await send('task.fail', { reason: 'sealed_key_unavailable', retryable: false, agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.claim', { deviceId: device.deviceId, executor: PI_EXECUTOR, agentRef: TEST_AGENT_REF })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.fail', { reason: 'sealed_key_unavailable', retryable: false, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR })).toEqual({ outcome: 'accepted' });
     expect(await harness.cloud.readTaskAttempt(TENANT_A, taskId)).toMatchObject({ status: 'failed', terminalCause: 'sealed_key_unavailable' });
     expect(await harness.cloud.readTaskResult(TENANT_A, taskId)).toEqual({
       taskId, state: 'failed', reason: 'sealed_key_unavailable', terminalCause: 'sealed_key_unavailable', retryable: false,
-      agentRef: TEST_AGENT_REF, recordedAt: expect.any(String),
+      agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR, recordedAt: expect.any(String),
     });
   });
 });

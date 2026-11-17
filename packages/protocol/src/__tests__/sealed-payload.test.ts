@@ -17,25 +17,28 @@ import {
   SEALED_DECLINE_CODES,
   SEALED_INLINE_MAX_PADDED_LENGTH,
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
-  SEALED_PAYLOAD_MAX_PADDED_LENGTH,
   SEALED_SPLIT_TABLE,
   SealedPayloadSchema,
+  TASK_STEER_TEXT_MAX_BYTES,
   TaskOfferPlainPayloadSchema,
   WIRE_ADDITIONS,
   isSealedPayload,
   isServerToDaemonType,
   requiredReceiverCapabilities,
   sealedAgentMessageMaxContentLength,
-  sealedBase64UrlByteLength,
   sealedPayloadPaddedLength,
   type MessageType,
   type SealableMessageType,
   type SealedSplitEntry,
 } from '../index';
+import { SEALED_PAYLOAD_MAX_PADDED_LENGTH } from '../sealed-payload';
+import { canonicalBase64UrlByteLength as sealedBase64UrlByteLength } from '../base64url';
+import { E2eeMemberKeyBundleSchema } from '../e2ee-member';
+import { agentMemoryProjectionBase64UrlByteLength } from '../agent-memory-projection';
 
 type Json = { [key: string]: unknown };
 
-const corpus = readFileSync(new URL('golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Json });
@@ -114,6 +117,24 @@ describe('sealed payload v1: padded length (§8.6)', () => {
 });
 
 describe('sealed payload v1: canonical base64url', () => {
+  it('agrees with byte round-trips for every tail character in E2EE keys and signatures', () => {
+    const fields = [
+      [32, E2eeMemberKeyBundleSchema.shape.kemPublicJwk.shape.x],
+      [64, E2eeMemberKeyBundleSchema.shape.kemSig],
+    ] as const;
+    for (const [bytes, schema] of fields) {
+      for (const last of 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_') {
+        const value = 'A'.repeat(Math.ceil(bytes * 4 / 3) - 1) + last;
+        const canonical = Buffer.from(value, 'base64url').toString('base64url') === value;
+        expect(schema.safeParse(value).success, value).toBe(canonical);
+        expect(sealedBase64UrlByteLength(value), value).toBe(canonical ? bytes : undefined);
+      }
+    }
+    // Projection snapshots deliberately accept noncanonical unused tail bits.
+    expect(agentMemoryProjectionBase64UrlByteLength('AB')).toBe(1);
+    expect(agentMemoryProjectionBase64UrlByteLength('AAB')).toBe(2);
+  });
+
   it('reads canonical unpadded base64url only', () => {
     expect(sealedBase64UrlByteLength('')).toBe(0);
     expect(sealedBase64UrlByteLength('AA')).toBe(1);
@@ -131,6 +152,13 @@ describe('sealed payload v1: the sealed member', () => {
   it('accepts the corpus members, inline and by reference', () => {
     expect(SealedPayloadSchema.safeParse(sealedMember('task.offer', true)).success).toBe(true);
     expect(SealedPayloadSchema.safeParse(sealedMember('task.complete', false)).success).toBe(true);
+  });
+
+  it('leaves a sealed task.steer outside the plaintext steer text bound (wire v7): its text is opened after delivery', () => {
+    const steer = sealedLine('task.steer');
+    const paddedLength = sealedPayloadPaddedLength(TASK_STEER_TEXT_MAX_BYTES + 1);
+    const large = { ...steer, sealed: { ...(steer.sealed as Json), paddedLength, ciphertext: zeros(paddedLength + 16) } };
+    expect(MESSAGE_PAYLOAD_SCHEMAS['task.steer'].safeParse(large).success).toBe(true);
   });
 
   it('carries inline ciphertext exactly up to 256 KiB, and a ciphertext blob above', () => {
@@ -415,7 +443,7 @@ describe('sealed payload v1: capability gates (§8.4)', () => {
       const toDevice = isServerToDaemonType(type);
       const capability = markerFlag(type);
       expect(WIRE_ADDITIONS.filter((entry) => entry.surface === type && entry.capability === capability), type)
-        .toEqual(toDevice ? [{ kind: 'envelope', rule: 'gated', surface: type, field: marker, capability, advertisedBy: 'device' }] : []);
+        .toEqual(toDevice ? [{ surface: type, field: marker, capability }] : []);
       for (const line of corpus.filter((candidate) => candidate.type === type && isSealedPayload(type, candidate.payload))) {
         if (toDevice) expect(requiredReceiverCapabilities(type, line.payload), type).toContain(capability);
         else expect(requiredReceiverCapabilities(type, line.payload), type).toEqual([]);

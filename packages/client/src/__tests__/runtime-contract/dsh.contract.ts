@@ -17,6 +17,8 @@ import {
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 
+const DSH_TARGET = { lane: 'harness', harnessId: 'dsh' } as const;
+
 const target = contractTarget('dsh', QUALIFIED_DSH_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
@@ -180,7 +182,7 @@ async function toolTreeTurn(stop: 'close' | 'sigkill') {
   try {
     const runtime = await adapter(loopbackModel(provider.baseUrl), { spawnFn });
     const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
-    const session = await startPreparedOperation(runtime, { instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, env });
+    const session = await startPreparedOperation(runtime, { target: DSH_TARGET, instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, env });
     const tools = await waitFor(async () => {
       const found = (await fs.readFile(pidFile, 'utf8').catch(() => '')).trim().split(/\s+/).map(Number).filter(pid => Number.isSafeInteger(pid) && pid > 0);
       return found.length === 2 ? found : undefined;
@@ -220,7 +222,7 @@ async function steerTurn() {
   try {
     const runtime = await adapter(loopbackModel(provider.baseUrl));
     const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
-    const session = await startPreparedOperation(runtime, { instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, env });
+    const session = await startPreparedOperation(runtime, { target: DSH_TARGET, instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, env });
     try {
       await waitFor(async () => fs.access(started).then(() => true, () => undefined), 120_000, 'the shell tool');
       await session.steer(STEER_MARKER);
@@ -265,7 +267,7 @@ async function backgroundTurn() {
   try {
     const runtime = await adapter(loopbackModel(provider.baseUrl));
     const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env } };
-    const opened = await startPreparedOperation(runtime, { instruction: `Start the work. ${ROOT_MARKER}` }, resources);
+    const opened = await startPreparedOperation(runtime, { target: DSH_TARGET, instruction: `Start the work. ${ROOT_MARKER}` }, resources);
     const usage = [];
     for await (const event of opened.events) {
       if (event.type === 'usage') usage.push(event);
@@ -280,7 +282,7 @@ async function backgroundTurn() {
     await opened.close();
     const requests = provider.requests.length;
     const modelRequests = provider.requests.filter(request => request.model);
-    const again = await startPreparedOperation(runtime, { instruction: `Continue. ${RESUME_MARKER}`, sessionRef }, resources);
+    const again = await startPreparedOperation(runtime, { target: DSH_TARGET, instruction: `Continue. ${RESUME_MARKER}`, sessionRef }, resources);
     const events = [];
     for await (const event of again.events) {
       events.push(event);

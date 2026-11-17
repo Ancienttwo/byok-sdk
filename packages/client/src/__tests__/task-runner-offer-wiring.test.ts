@@ -11,7 +11,7 @@ import { hostFor, forgetHost } from '../daemon/task-runner/host';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import type { BlobResolver } from '../daemon/blob-client';
 
@@ -23,7 +23,7 @@ const unusedBlobClient: BlobResolver = {
 function makeRunner(sent: Envelope[], overrides: Partial<TaskRunnerDeps> = {}): TaskRunner {
   return new TaskRunner({
     ...freshOfferRunnerDeps(),
-    getIngressBudget: testIngressBudget,
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),
     adapters: [new StubRuntimeAdapter()],
     ...testAgentHomeDeps(),
@@ -40,7 +40,7 @@ function makeRunner(sent: Envelope[], overrides: Partial<TaskRunnerDeps> = {}): 
 async function offer(runner: TaskRunner, taskId: string, payload: Record<string, unknown> = {}): Promise<void> {
   await runner.handleEnvelope(createEnvelope(
     'task.offer',
-    { agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER, ...payload },
+    { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER, ...payload },
     { taskId, seq: 1 },
   ));
 }
@@ -48,9 +48,9 @@ async function offer(runner: TaskRunner, taskId: string, payload: Record<string,
 describe('TaskRunner offer/admission host wiring (S3)', () => {
   it('records a limits decline and sends exactly one task.decline', async () => {
     const sent: Envelope[] = [];
-    const runner = makeRunner(sent);
+    const runner = makeRunner(sent, { admissionGuard: () => ({ admit: false, reason: 'admission guard veto', retryable: true }) });
     const taskId = 'task-s3-limits-1';
-    await offer(runner, taskId, { limits: { maxTokens: 4000 } });
+    await offer(runner, taskId);
 
     const declines = sent.filter(envelope => envelope.type === 'task.decline');
     expect(declines).toHaveLength(1);
@@ -143,7 +143,7 @@ function memoryAdapter(): { adapter: RuntimeAdapter; stub: StubRuntimeAdapter; s
   } };
 }
 
-const nativeOffer = { agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 } };
+const nativeOffer = { target: { lane: 'runtime', runtimeId: 'pi' }, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 } };
 const rendered = { jsonLine: '{"calls":[],"omittedCalls":0}', counts: {} };
 
 describe('native session dream wiring', () => {
@@ -180,12 +180,32 @@ describe('native session dream wiring', () => {
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
   });
 
-  it('refuses an explicitly selected non-Pi runtime', async () => {
+  it('refuses an explicitly selected non-Pi runtime with the selection rule', async () => {
     const sent: Envelope[] = [];
     const runner = makeRunner(sent, { adapters: [new StubRuntimeAdapter('codex')], nativeSessions: { sessionDir: '/sessions' } });
-    await offer(runner, 'native-non-pi', { ...nativeOffer, runtime: 'codex' });
-    expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({ reason: 'native_sessions_unsupported', code: 'native_sessions_unsupported', retryable: false });
+    await offer(runner, 'native-non-pi', { ...nativeOffer, target: { lane: 'runtime', runtimeId: 'codex' } });
+    expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({ code: 'native_sessions_selection_invalid', retryable: false });
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
+  });
+
+  // docs/protocol.md §3.2 "Order on the device": a selection rule outranks native-sessions support.
+  const withoutNativeFlag = () => freshOfferRunnerDeps().advertisedCapabilities().filter(flag => flag !== 'native-sessions');
+  it.each([
+    ['the missing-capability check', { advertisedCapabilities: withoutNativeFlag }],
+    ['handleOffer', {}],
+  ] as const)('declines a rule-breaking native offer on a device without native sessions with the rule code (%s)', async (_path, deps) => {
+    const sent: Envelope[] = [];
+    const runner = makeRunner(sent, deps);
+    await offer(runner, 'native-rule-first', { ...nativeOffer, target: { lane: 'auto' } });
+    expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({ code: 'native_sessions_selection_invalid', retryable: false });
+    expect(sent.some(e => e.type === 'task.claim')).toBe(false);
+  });
+
+  it('declines a valid Pi-target native offer in handleOffer when the device runs no native sessions', async () => {
+    const sent: Envelope[] = [];
+    const runner = makeRunner(sent);
+    await offer(runner, 'native-unsupported-handle-offer', nativeOffer);
+    expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({ code: 'native_sessions_unsupported', retryable: false });
   });
 
   it('fails a claimed task when rendering fails and never starts it', async () => {

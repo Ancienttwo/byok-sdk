@@ -19,7 +19,7 @@ const PACKED = INJECTED.map(({ id, root, source, request, hop, status, conclusio
   meta: { id, root, hop, status, ...(conclusion === undefined ? {} : { conclusion }), outcomeSummary } }));
 async function open(history: (input: { botId: string; turnId: string }) => Promise<readonly ContextTurn[]>, historyTimeoutMs?: number) {
   fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
-  bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, execution: template(fixture.deviceId), history, historyTimeoutMs });
+  bot = new BotCollaboration(fixture.server, fixture.ledger, { botId: 'main', connector: async () => null, execution: template(fixture.deviceId), history, historyTimeoutMs, dreaming: false });
   return { fixture, bot };
 }
 function contextOf(host: BotCollaboration, turnId: string): { history: { recent: unknown[] } } {

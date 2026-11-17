@@ -58,6 +58,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       await expect(tasks.claim(TENANT, {
         taskId: 'task-target-fence',
         deviceId: 'device-intruder',
+        executor: { kind: 'runtime', runtimeId: 'pi' },
       })).resolves.toMatchObject({
         deviceId: 'device-target',
         status: 'offered',
@@ -240,7 +241,7 @@ describe.skipIf(SKIP_DATAPLANE)(`Postgres task cancellation — ${SKIP_REASON}`,
       const tasks = new PostgresTaskAttemptStore(scope.pool, clock);
       const cancellations = new PostgresTaskCancellationStore(scope.pool, clock);
       await tasks.reserveAgentOffer(TENANT, { taskId: 'task-succeeded', deviceId: 'device-succeeded', agentRef: AGENT_REF });
-      await tasks.claim(TENANT, { taskId: 'task-succeeded', deviceId: 'device-succeeded' });
+      await tasks.claim(TENANT, { taskId: 'task-succeeded', deviceId: 'device-succeeded', executor: { kind: 'runtime', runtimeId: 'pi' } });
       await tasks.recordStatus(TENANT, { taskId: 'task-succeeded', status: 'running', agentRef: AGENT_REF });
       await tasks.recordStatus(TENANT, { taskId: 'task-succeeded', status: 'complete', agentRef: AGENT_REF });
 

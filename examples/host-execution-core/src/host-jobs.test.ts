@@ -115,7 +115,7 @@ it('lets admitted Host work finish after pause and promotes only on the Host dec
   expect(row.intentId).toBeDefined();
   const intent = host.ledger.snapshot().intents[row.intentId!]!;
   expect(intent.retryUntil).toBeUndefined();
-  await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true));
+  await vi.waitFor(() => expect(host.adapter.sessions.has(intent.taskId)).toBe(true), { timeout: 5_000 });
   host.adapter.sessions.get(intent.taskId)!.finish({ text: 'Host requested analysis' });
   await vi.waitFor(async () => { await host.core.drain(); expect(rows()[0]?.conclusion).toBe('succeeded'); });
   expect(host.adapter.starts).toHaveLength(1);

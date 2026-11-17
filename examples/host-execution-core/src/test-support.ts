@@ -25,7 +25,7 @@ export const policy: AgentEgressPolicy = {
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 };
 export function template(deviceId: string, agentId = 'main'): ExecutionTemplate {
-  return { deviceId, payload: { runtime: 'pi', session: { mode: 'fresh' }, instruction: 'Return the test result through submit_result.',
+  return { deviceId, payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, instruction: 'Return the test result through submit_result.',
     agentRef: { agentId, profileRevision: '1' }, egressPolicy: policy,
     terminalProjection: { mode: 'result-document', contract: 'host-core-test-v1', schema: {
       type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string' } },
@@ -67,7 +67,7 @@ export async function openHost(options: HostOptions & {
   if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
   const adapter = options.adapter ?? new BotStubAdapter();
   const credentials = new InMemoryDeviceCredentialBackend();
-  const config = { productId, productName: 'Host Core', localAgentRelease: { version: '0.0.0-test' },
+  const config = { productId, productName: 'Host Core', deviceName: 'ci-smoke', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: `http://127.0.0.1:${address.port}`, storeDir: path.join(root, 'sdk'),
     agentHome: { hostStorageRoot: path.join(root, 'homes') }, agentEgress: { policy },
   };

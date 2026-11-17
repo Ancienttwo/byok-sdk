@@ -376,8 +376,12 @@ export class DaemonObserver {
     // regress a finished task back to `Offered`.
     if (this.taskInfo.has(taskId)) return;
 
-    this.upsertTask(taskId, { state: 'Offered', runtime: offer.payload.runtime });
-    this.emit({ kind: 'offered', ts: nowIso(), taskId, runtime: offer.payload.runtime });
+    // The requested runtime: a target that names one (the runtime and model
+    // lanes); `auto` and `harness` request none.
+    const { target } = offer.payload;
+    const runtime = target.lane === 'auto' || target.lane === 'harness' ? undefined : target.runtimeId;
+    this.upsertTask(taskId, { state: 'Offered', runtime });
+    this.emit({ kind: 'offered', ts: nowIso(), taskId, runtime });
   }
 
   /**
@@ -402,7 +406,8 @@ export class DaemonObserver {
     switch (envelope.type) {
       case 'task.claim': {
         const taskId = envelope.task_id;
-        const { runtime: claimedRuntime, admission } = envelope.payload;
+        const { executor, admission } = envelope.payload;
+        const claimedRuntime = executor.kind === 'runtime' ? executor.runtimeId : undefined;
         this.upsertTask(taskId, {
           state: 'Claimed',
           ...(claimedRuntime !== undefined ? { claimedRuntime } : {}),

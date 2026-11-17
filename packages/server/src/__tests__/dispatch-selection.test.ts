@@ -23,7 +23,7 @@ const POLICY = {
 } as const;
 const TENANT = storeModule.serverTenantId(PRODUCT_ID);
 
-describe('dispatchSelection authority', () => {
+describe('dispatch target authority', () => {
   let server: HttpServer | undefined;
   let byok: ByokServer | undefined;
 
@@ -58,44 +58,20 @@ describe('dispatchSelection authority', () => {
     const started = await start();
     const daemon = await connect(started, ['dispatch-selection']);
 
-    const dispatchSelection = {
-      lane: 'byok' as const,
-      runtimeId: 'pi' as const,
-      providerId: 'openai',
-      modelId: 'gpt-5.2',
-    };
-    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'use exact target', dispatchSelection });
+    const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'use exact target', target: SELECTION });
     const offer = await nextEnvelope(daemon);
 
     expect(offer.type).toBe('task.offer');
     if (offer.type !== 'task.offer') throw new Error('unreachable');
     expect(offer.task_id).toBe(handle.taskId);
     expect(offer.payload).not.toHaveProperty('runtime');
-    expect(offer.payload.dispatchSelection).toEqual(dispatchSelection);
+    expect(offer.payload.target).toEqual(SELECTION);
     expect((await started.byok.tasks.offer(handle.taskId))?.payload).toEqual(offer.payload);
     const direct = await started.kernel.enqueueAgentOffer(TENANT, daemon.deviceId, {
       taskId: 'direct-selection', payload: { instruction: 'use exact target', agentRef: TEST_AGENT_DISPATCH.agentRef,
-        session: { mode: 'resume', sessionRef: TEST_AGENT_DISPATCH.sessionRef }, dispatchSelection },
+        session: { mode: 'resume', sessionRef: TEST_AGENT_DISPATCH.sessionRef }, target: SELECTION },
     });
     expect(JSON.stringify(offer.payload)).toBe(JSON.stringify(direct.envelope.payload));
-  });
-
-  it('rejects a contradictory legacy runtime before creating or offering a task', async () => {
-    const started = await start();
-    const daemon = await connect(started, ['dispatch-selection']);
-
-    await expect(
-      started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
-        instruction: 'contradictory target',
-        runtime: 'claude',
-        dispatchSelection: {
-          lane: 'byok',
-          runtimeId: 'pi',
-          providerId: 'openai',
-          modelId: 'gpt-5.2',
-        },
-      }),
-    ).rejects.toThrow(/does not match dispatchSelection\.runtimeId pi/);
   });
 
   it('runtime-validates a JavaScript caller selection before any task is created', async () => {
@@ -105,10 +81,9 @@ describe('dispatchSelection authority', () => {
     await expect(
       started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
         instruction: 'malformed target',
-        dispatchSelection: {
+        target: {
           lane: 'subscription',
           runtimeId: 'pi',
-          providerId: null,
           modelId: 'gpt-5.2',
         } as never,
       }),
@@ -122,10 +97,9 @@ describe('dispatchSelection authority', () => {
     await expect(
       started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
         instruction: 'must not degrade to runtime-only dispatch',
-        dispatchSelection: {
+        target: {
           lane: 'subscription',
           runtimeId: 'codex',
-          providerId: null,
           modelId: 'gpt-5.6-sol',
         },
       }),
@@ -137,10 +111,9 @@ describe('dispatchSelection authority', () => {
     const started = await start();
     const daemon = await connect(started, []);
     const cases = [
-      { fields: { runtime: 'claude', dispatchSelection: SELECTION }, path: 'runtime' },
       { fields: { homeAccess: 'memory-reader', agentMemory: 'read-write' }, path: 'agentMemory' },
       { fields: { homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted' }, path: 'agentMemory' },
-      { fields: { dispatchSelection: SELECTION }, code: 'agent_capability_missing' },
+      { fields: { target: SELECTION }, code: 'agent_capability_missing' },
       { fields: { requiredToolsets: ['crm.readonly'] }, code: 'agent_capability_missing' },
       ...(lane === 'submit'
         ? [{ fields: { sealing: {} }, code: 'coordination_input_invalid' }, { fields: { sealed: {} }, code: 'coordination_input_invalid' }]
@@ -151,7 +124,7 @@ describe('dispatchSelection authority', () => {
       const taskId = `parity-${index}`;
       const payload = { instruction: 'same admission', agentRef: TEST_AGENT_DISPATCH.agentRef,
         session: lane === 'submit' ? { mode: 'fresh' } : { mode: 'resume', sessionRef: TEST_AGENT_DISPATCH.sessionRef },
-        ...(lane === 'dispatch' ? {} : { egressPolicy: POLICY, runtime: 'pi', terminalProjection: { mode: 'none' } }),
+        ...(lane === 'dispatch' ? { target: { lane: 'auto' } } : { egressPolicy: POLICY, target: { lane: 'runtime', runtimeId: 'pi' }, terminalProjection: { mode: 'none' } }),
         ...test.fields };
       const input = { taskId, deviceId: daemon.deviceId, payload };
       const { session, ...fields } = payload;
@@ -200,7 +173,7 @@ describe('dispatchSelection authority', () => {
     const taskId = 'in-flight';
     const dispatch = { ...TEST_AGENT_DISPATCH, taskId, deviceId: daemon.deviceId, instruction: 'resume' };
     const execution = { taskId, deviceId: daemon.deviceId, payload: { instruction: 'fresh', agentRef: TEST_AGENT_DISPATCH.agentRef,
-      session: { mode: 'fresh' as const }, runtime: 'pi' as const, egressPolicy: POLICY, terminalProjection: { mode: 'none' as const } } };
+      session: { mode: 'fresh' as const }, target: { lane: 'runtime', runtimeId: 'pi' } as const, egressPolicy: POLICY, terminalProjection: { mode: 'none' as const } } };
     let release!: () => void;
     let entered!: () => void;
     const pendingAppend = new Promise<void>(resolve => { release = resolve; });
@@ -227,7 +200,7 @@ describe('dispatchSelection authority', () => {
     const started = await start();
     const daemon = await connect(started, ['dispatch-selection', 'toolset-selection']);
     const input = { ...TEST_AGENT_DISPATCH, taskId: 'append-retry', deviceId: daemon.deviceId,
-      instruction: 'retry exact bytes', dispatchSelection: SELECTION, requiredToolsets: ['crm.readonly'] };
+      instruction: 'retry exact bytes', target: SELECTION, requiredToolsets: ['crm.readonly'] };
     const append = vi.spyOn(started.stores.core.mailbox, 'append').mockRejectedValueOnce(new Error('append fault'));
     await expect(started.byok.dispatch(input)).rejects.toMatchObject({ code: 'task_offer_append_refused' });
     const recorded = await started.byok.tasks.offer(input.taskId);

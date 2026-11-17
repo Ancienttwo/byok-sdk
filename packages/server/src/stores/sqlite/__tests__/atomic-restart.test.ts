@@ -12,9 +12,22 @@ import {
 } from '@byok-sdk/core';
 import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { createWebCrypto } from '@byok-sdk/cloud';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSqliteEmbeddedStores } from '..';
 import { isSqliteAvailable, SqliteSchemaError } from '../../../sqlite-support';
+
+// Faults run as TEMP triggers on the store's own connection: a trigger written
+// into the file is an object schema 10 does not know, and the open refuses it.
+const faults = vi.hoisted((): string[] => []);
+afterEach(() => { faults.length = 0; });
+vi.mock('../../../sqlite-support.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../sqlite-support.js')>();
+  return { ...actual, openSqliteDatabase: (...args: Parameters<typeof actual.openSqliteDatabase>) => {
+    const db = actual.openSqliteDatabase(...args);
+    for (const fault of faults) db.exec(fault);
+    return db;
+  } };
+});
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
 
@@ -44,15 +57,13 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     await composition.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'task-rollback', deviceId: 'device-1', agentRef: AGENT_REF });
 
     await composition.close();
-    const fault = new DatabaseSync(path);
-    fault.exec(`
-      CREATE TRIGGER fail_cancel_update
-      BEFORE UPDATE OF cancellation_requested_at ON task_attempt
+    faults.push(`
+      CREATE TEMP TRIGGER fail_cancel_update
+      BEFORE UPDATE OF cancellation_requested_at ON main.task_attempt
       BEGIN
         SELECT RAISE(ABORT, 'injected cancellation update failure');
       END;
     `);
-    fault.close();
     composition = createSqliteEmbeddedStores({ path }, { clock, crypto });
 
     await expect(
@@ -82,20 +93,18 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     const clock = createMutableClock();
     const crypto = createWebCrypto();
     await createSqliteEmbeddedStores({ path }, { clock, crypto }).close();
-    const fault = new DatabaseSync(path);
-    fault.exec(`
-      CREATE TRIGGER fail_retirement
-      BEFORE UPDATE ON task_attempt
+    faults.push(`
+      CREATE TEMP TRIGGER fail_retirement
+      BEFORE UPDATE ON main.task_attempt
       BEGIN
         SELECT RAISE(ABORT, 'injected retirement failure');
       END;
     `);
-    fault.close();
     const composition = createSqliteEmbeddedStores({ path }, { clock, crypto });
     try {
       await composition.cloud.devices.register(TENANT, {
         productId: 'product-1', deviceId: 'device-1', deviceName: 'device-1',
-        devicePublicKey: 'pk-device-1', proofKeyId: 'identity', proofKeyEpoch: 0,
+        devicePublicKey: 'pk-device-1', proofKeyId: 'identity', proofKeyEpoch: 0, expectedDeviceDigest: null,
       });
       await composition.cloud.tasks.reserveAgentOffer(TENANT, { taskId: 'task-retire', deviceId: 'device-1', agentRef: AGENT_REF });
       await composition.core.presence.publish(TENANT, { deviceId: 'device-1', level: 'online', ttlMs: 60_000, minimumIntervalMs: 0 });
@@ -125,7 +134,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     expect(open).toThrow('Unsupported BYOK SQLite schema version');
     expect(open).toThrow(SqliteSchemaError);
     expect(open).toThrow(expect.objectContaining({
-      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '9',
+      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '10',
     }));
   });
 
@@ -141,6 +150,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     await expect(reopened.cloud.tasks.claim(TENANT, {
       taskId: 'task-target-fence',
       deviceId: 'device-intruder',
+      executor: { kind: 'runtime', runtimeId: 'pi' },
     })).resolves.toMatchObject({
       deviceId: 'device-target',
       status: 'offered',

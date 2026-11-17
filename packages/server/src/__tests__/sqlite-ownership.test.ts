@@ -30,7 +30,7 @@ async function ownInChild(path: string, then: 'hold' | 'exit-without-release' | 
     const { openSqliteDatabase } = await import(${JSON.stringify(SQLITE_SUPPORT)});
     // Held in a global: an unreachable lock handle may be finalized and closed by GC.
     globalThis.database = openSqliteDatabase(${JSON.stringify(path)});
-    globalThis.database.exec('CREATE TABLE durable_marker (value INTEGER); INSERT INTO durable_marker VALUES (42); BEGIN; INSERT INTO durable_marker VALUES (99);');
+    globalThis.database.exec("INSERT INTO byok_sqlite_meta VALUES ('durable_marker', '42'); BEGIN; INSERT INTO byok_sqlite_meta VALUES ('uncommitted_marker', '99');");
     process.stdout.write('owned\\n');
     ${then === 'hold' ? 'setInterval(() => {}, 1_000);' : then === 'exit-during-grace' ? 'setTimeout(() => process.exit(0), 600);' : "process.stdin.once('data', () => process.exit(0));"}
   `;
@@ -116,7 +116,7 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
     const exited = once(owner, 'exit');
     const database = openSqliteDatabase(path);
     try {
-      expect(database.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+      expect(database.prepare("SELECT key, value FROM byok_sqlite_meta WHERE key LIKE '%_marker'").all()).toEqual([{ key: 'durable_marker', value: '42' }]);
       expect(database.prepare('PRAGMA locking_mode').get()).toEqual({ locking_mode: 'exclusive' });
     } finally { database.close(); }
     expect((await exited)[0]).toBe(0);
@@ -160,7 +160,7 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
 
     const next = openSqliteDatabase(path);
     try {
-      expect(next.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+      expect(next.prepare("SELECT key, value FROM byok_sqlite_meta WHERE key LIKE '%_marker'").all()).toEqual([{ key: 'durable_marker', value: '42' }]);
       expect(next.prepare('PRAGMA integrity_check').get()).toEqual({ integrity_check: 'ok' });
     } finally { next.close(); }
     const server = open(path);
@@ -179,7 +179,7 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
 
     const next = openSqliteDatabase(path);
     try {
-      expect(next.prepare('SELECT value FROM durable_marker').all()).toEqual([{ value: 42 }]);
+      expect(next.prepare("SELECT key, value FROM byok_sqlite_meta WHERE key LIKE '%_marker'").all()).toEqual([{ key: 'durable_marker', value: '42' }]);
     } finally { next.close(); }
     const server = open(path);
     await server.close();
@@ -208,25 +208,6 @@ describeSqlite('SQLite single-process ownership', { timeout: 20_000 }, () => {
     const reopened = open(path);
     try { await expect(reopened.tasks.get('bad-task')).rejects.toThrow(SyntaxError); }
     finally { await reopened.close(); }
-  });
-
-  it('adds the active-task covering index to existing v7 files without a schema bump', async () => {
-    const path = databasePath();
-    const first = open(path);
-    await first.close();
-    const old = new DatabaseSync(path);
-    old.exec('DROP INDEX task_attempt_status_idx');
-    old.close();
-    const reopened = open(path);
-    try { expect((await reopened.stats()).taskCountsByState.Offered).toBe(0); }
-    finally { await reopened.close(); }
-    // External reads require the EXCLUSIVE owner to release its handle first.
-    const inspect = new DatabaseSync(path, { readOnly: true });
-    try {
-      expect(inspect.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'task_attempt_status_idx'").get())
-        .toEqual({ name: 'task_attempt_status_idx' });
-      expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()).toEqual({ value: '9' });
-    } finally { inspect.close(); }
   });
 
   it('uses the actual exclusive WAL handle with the default grace and no lock sibling or SHM', () => {

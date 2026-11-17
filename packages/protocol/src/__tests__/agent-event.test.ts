@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH } from '../constants';
 import {
   AgentEventOrUnknownSchema,
-  KNOWN_AGENT_EVENT_TYPES,
   AgentEventSchema,
   TaskProgressPayloadSchema,
-  UnknownAgentEventSchema,
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
@@ -14,6 +12,7 @@ import {
   partitionAgentEvents,
   type AgentEventOrUnknown,
 } from '../index';
+import { KNOWN_AGENT_EVENT_TYPES, UnknownAgentEventSchema } from '../agent-event';
 
 // ---------------------------------------------------------------------------
 // Unknown AgentEvent variant tolerance — the pre-freeze blocker fix.
@@ -43,7 +42,7 @@ describe('unknown AgentEvent variant tolerance', () => {
 
   it('a full task.progress envelope with an unknown event type parses via parseMessage without throwing', () => {
     const raw = {
-      v: 6,
+      v: 7,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.progress',

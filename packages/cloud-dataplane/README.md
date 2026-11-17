@@ -5,16 +5,15 @@ implementations of **all ten cloud-local store ports and all seven `@byok-sdk/co
 ports**, the R2/S3 object adapter that backs the blob port, and the forward-only
 migration runner that creates the tables they read.
 
-Four store/maintenance compositions plus one transaction authority ship from here. `createPostgresCloudStores` supplies the full
+Two store compositions, two maintenance classes and one transaction authority ship from here. `createPostgresCloudStores` supplies the full
 `CloudStores` bundle (`activity`, `devices`, `pairingCodes`, `nonces`, `dedup`, `tasks`,
 `receipts`, `proofReceipts`, `blobs`, `rateLimiter`); `createPostgresCoreStores`
 supplies the full `CoreStores` bundle (`mailbox`, `board`, `truth`, `presence`,
 `objects`, `quota`, `skillPacks`). Both return every port rather than a subset,
 because the conformance suites certify a composition as a whole — there is no
-partial bundle for them to run. `createPostgresCloudMaintenance` is the third,
-host-only operational composition; `createPostgresTenantErasure` is the fourth,
-Node-only destructive operator composition. Both deliberately sit outside port
-inventories.
+partial bundle for them to run. `PostgresCloudCleanup` is the host-only
+operational class and `PostgresTenantErasure` the Node-only destructive operator
+class. Both deliberately sit outside port inventories.
 
 `PostgresDeviceAssertionReplayAuthority` is a separate online security
 authority for connector-binding exchanges. Its unique key makes consumption an
@@ -35,7 +34,7 @@ satisfies that contract directly.
 ```ts
 const stores = await createPostgresCloudStores(options);
 const truthCommitter = new PostgresTruthCommitter({ pool, clock, crypto });
-const mailboxWake = createPostgresMailboxWake({ connectionString: sessionDsn, onError: reportWakeError });
+const mailboxWake = createInProcessMailboxWake({ fallbackMs: 1_000 }); // from '@byok-sdk/cloud'
 
 createByokCloud({
   mailboxWake,
@@ -57,32 +56,29 @@ and token routes reach Postgres on every request and need an edge limit (or
 `deploy/runbooks/hosted-operations.md`, "Public routes and edge rate limits".
 `blobs` is the R2 adapter described below.
 
-### Wire-major startup fence
+### Store wire-epoch fence
 
-`createPostgresCloudStores` is async. Before it returns any store it reads every
-pending mailbox (`outbox`) row and rejects with
-`PostgresMailboxProtocolUnsupportedError` (`code`
-`POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED`, plus `requiredVersion`, `tenantId`,
-`deviceId` and `seq` of the first offending row) if any body is not a wire
-envelope of the build's `PROTOCOL_VERSION` (6). Acked and expired rows are
-history and are not inspected. The check is read-only: no row is rewritten,
-reclassified or deleted, and there is no synchronous variant that skips it.
+Each wire major starts on a new database. The migration that opens a major
+(`0040_wire_v7.sql` for v7) refuses a database where any table other than the
+migration ledger and the erasure operation log holds a row, Host
+configuration included, and changes nothing. Otherwise it writes the
+database's wire epoch to `byok_wire_epoch`. Write storage entitlements and
+retention policy after the migrations.
 
-When it fails, keep the database and drain the mailbox with the previous SDK
-(stop new submissions, let every pending row be delivered and acked), then
-upgrade; or start a new database and re-enroll devices, with the Host
-resubmitting unfinished work from its own intent. `createPostgresCoreStores`
-carries no fence: the core `MailboxStore` port treats bodies as opaque, and only
-the cloud composition gives them wire-envelope meaning.
-
-The scan walks the pending rows of every tenant in primary-key pages, so it
-costs one read of the pending mailbox per composition. On Workers the
-composition is built per invocation (see below), so that read happens on every
-invocation.
+`createPostgresCloudStores` is async. Before it returns any store it reads that
+epoch and rejects with `PostgresStoreEpochUnsupportedError` (`code`
+`POSTGRES_STORE_EPOCH_UNSUPPORTED`, `requiredEpoch`, and `foundEpoch` when the
+database has one) unless it equals the build's `PROTOCOL_VERSION` (7). The
+check reads one row and changes nothing, and there is no synchronous variant
+that skips it. When it fails, run the migrations on a new database and pair the
+devices again; the SDK keeps no history across the cut.
+`createPostgresCoreStores` carries no fence: the core `MailboxStore` port treats
+bodies as opaque, and only the cloud composition gives them wire-envelope
+meaning.
 
 ### Wire v3 stores
 
-The fence covers pending mailbox rows only. Offer receipts
+Offer receipts
 (`task-offer:<messageId>`) and terminal receipts (`task:<taskId>:terminal`) in
 `device_request_receipts` hold wire bytes that never expire, and a wire v4
 cloud reads only v4 bytes. There is no migration: a database a wire v3 build
@@ -191,16 +187,17 @@ observes existence, size and content type; it never verifies SHA-256.
 
 ## Cleanup maintenance
 
-`createPostgresCloudMaintenance` builds the separate host-operations
-composition. It intentionally does not add methods to the conformance-certified
+`PostgresCloudCleanup` is the separate host-operations class:
+`new PostgresCloudCleanup({ pool, clock, objectStorage: new R2ObjectMaintenanceStore(r2Options) })`.
+It intentionally does not add methods to the conformance-certified
 `CloudBlobStore`: LIST/HEAD/DELETE, dead-letter replay and
 usage rebuild are host operations, not device blob capabilities.
 
-The Host scheduler calls `cloud.runMaintenance({ tenant, now, policy, limit })`.
-Read the existing policy with
-`new PostgresRetentionPolicyStore(pool, clock).readRetentionPolicy(tenant)`
-from `@byok-sdk/cloud-dataplane/runtime` and pass it directly: its six fields
-use the kernel's bigint milliseconds. `mailboxDeadLetterRetentionMs` (stored by
+The Host scheduler calls `cloud.runMaintenance({ tenant, now, policy, limit })`
+with the tenant's `RetentionPolicy` (from `@byok-sdk/cloud`): its six fields use
+the kernel's bigint milliseconds. The Host owns where that policy is stored;
+`tenant_retention_policy` is the table the migrations keep for it, written and
+read by the Host with SQL. `mailboxDeadLetterRetentionMs` (stored by
 `0031_mailbox_dead_letter_retention.sql`, 30 days for existing policies) is how
 long a dead letter stays listable after it expired; the sweep then reaps it,
 except each device's highest-seq dead letter, which stays as the
@@ -208,8 +205,7 @@ except each device's highest-seq dead letter, which stays as the
 `0032_terminal_task_archive.sql`, 90 days for existing policies, at least the
 unacked plus dead-letter windows) is how long a terminal task keeps its
 bodies; the `tasks` step then archives it, keeping the task row and tombstoned
-receipts as its identity fence and removing its board item. Policy writes use
-the same store; a missing entitlement-selected policy fails closed.
+receipts as its identity fence and removing its board item.
 `createPostgresCoreStores` requires the real `objectStorage` configuration;
 standalone `PostgresObjectStore` requires a physical deletion authority.
 Each port has one bounded `collectExpired`, and each object consumes one
@@ -232,7 +228,7 @@ their dependency graph.
 
 ## Tenant erasure
 
-`createPostgresTenantErasure` is a separate Node-only operator primitive, not a
+`PostgresTenantErasure` is a separate Node-only operator primitive, not a
 zero-retention shortcut and not `PostgresCloudCleanup` with a different cursor.
 It owns the product-table inventory, FK-safe deletion order, one operation id,
 CAS lease, bounded R2/SQL pages, and completed receipt. The
@@ -248,15 +244,16 @@ by the serving blob composition.
 ```ts
 import {
   createByokPool,
-  createPostgresTenantErasure,
+  PostgresTenantErasure,
+  R2ObjectMaintenanceStore,
   type TenantErasureResult,
 } from '@byok-sdk/cloud-dataplane';
 
 const pool = createByokPool({ connectionString: env.BYOK_DIRECT_DATABASE_URL });
-const erasure = createPostgresTenantErasure({
+const erasure = new PostgresTenantErasure({
   pool,
   clock: { now: () => new Date() },
-  objectStorage: {
+  objectStorage: new R2ObjectMaintenanceStore({
     endpoint: env.R2_ENDPOINT,
     bucket: env.R2_BUCKET,
     accessKeyId: env.R2_ACCESS_KEY_ID,
@@ -264,7 +261,7 @@ const erasure = createPostgresTenantErasure({
     region: 'auto',
     keyPrefix: 'production', // omit only when the deployment has always been unprefixed
     signingClock: { now: () => new Date() },
-  },
+  }),
 });
 
 const result: TenantErasureResult = await erasure.eraseTenant(tenantId, operationId);
@@ -334,17 +331,17 @@ packages. Tenant erasure deletes the floor table too.
 
 ## Task redaction
 
-`createPostgresTaskRedactionStore` is the store behind `ByokCloud.redactTasks`
+`PostgresTaskRedactionStore` is the store behind `ByokCloud.redactTasks`
 (#654 E5a). It ships from `./runtime`, so a Worker can run it over Hyperdrive.
 Pass it as the `taskRedactionStore` option; without it, `redactTasks` throws
 `task_redaction_unavailable`.
 
 ```ts
-import { createPostgresTaskRedactionStore } from '@byok-sdk/cloud-dataplane/runtime';
+import { PostgresTaskRedactionStore } from '@byok-sdk/cloud-dataplane/runtime';
 
 const cloud = createByokCloud({
   // ...the usual stores...
-  taskRedactionStore: createPostgresTaskRedactionStore({ pool, clock, objectStorage }),
+  taskRedactionStore: new PostgresTaskRedactionStore({ pool, clock, objectStorage }),
 });
 const { tasks } = await cloud.redactTasks(tenantId, { taskIds: ['task-1'] });
 // Per task: `redacted`, `already_redacted`, `not_found`, or `refused` with
@@ -504,33 +501,13 @@ append, atomic cancellation and dead-letter replay. Rollback does not notify.
 The fixed-size `md5(tenant_id || '\n' || device_id)` payload contains no ids or
 message contents. Hash collisions cause extra reads, never a lost delivery.
 
-On Node, import `createPostgresMailboxWake` from the package root, create one
-instance per process with a **session-mode DSN**, and inject it into
-`createByokCloud({ mailboxWake, ... })`. It owns one dedicated `pg.Client` and
-never takes a pool slot, even with many simultaneous holds. Add one connection
-per process to the `max_connections` budget. At shutdown await
-`mailboxWake.close()` as well as `pool.end()`.
+This package ships no LISTEN client for that channel. Hosts inject
+`createInProcessMailboxWake({ fallbackMs })` from `@byok-sdk/cloud`; a Workers
+Host creates a new one per invocation, so cross-isolate writes are observed
+within `fallbackMs`. Hyperdrive cannot carry LISTEN/NOTIFY. A low-latency
+Durable Object wake is outside this package's current scope. The trigger
+without listeners only emits unused hints.
 
-The listener reconnects with bounded exponential backoff and wakes every local
-subscription after each successful LISTEN. A self-NOTIFY probe checks each new
-connection and repeats every `probeIntervalMs` (default 30 seconds) so a
-half-open path, such as an idle NAT or load balancer dropping the flow without
-closing it, is retired and reconnected instead of silently losing
-notifications. Missing notifications and connection failures go to `onError`,
-or to the default labelled console error; a missed probe is a
-`MailboxWakeProbeMissedError`. `probeTimeoutMs` defaults to 5 seconds, and TCP
-keepalive is enabled on the listener socket. `onError` must not throw. A transaction-mode PgBouncer DSN cannot keep a LISTEN
-session; the probe reports this configuration failure. Hints may be lost or
-repeated, so `fallbackMs` (default 5 seconds) still bounds delivery latency.
-
-The listener is Node-only and absent from `./runtime`. Hyperdrive cannot carry
-LISTEN/NOTIFY. Workers Hosts import the portable runtime stores and inject a
-new `createInProcessMailboxWake({ fallbackMs: 1_000 })` from `@byok-sdk/cloud`
-per invocation; cross-isolate writes are observed within that interval.
-A low-latency Durable Object wake is outside this package's current scope.
-
-Deployment order is independent of correctness: new code without the trigger
-uses fallback reads; the trigger without listeners only emits unused hints.
 `longPollIntervalMs` and `DEFAULT_LONG_POLL_INTERVAL_MS` are deleted. Do not
 carry the old hold loop alongside the wake port.
 

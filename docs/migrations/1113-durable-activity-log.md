@@ -212,33 +212,22 @@ Which wake a composition uses:
   reported after the commit and dropped on rollback. Nothing is written to the
   file. The file has one owner process, so this in-process wake hears every
   writer.
-- **Postgres:** `createPostgresTaskEventsWake({ connectionString })`. Migration
-  0036 adds triggers on `task`, `activity_log_head` and
-  `approval_timeline_tail` that `pg_notify` the channel `byok_task_events_wake`
+- **Postgres:** `createInProcessTaskEventsWake`; the SDK ships no listener for
+  the Postgres channel. Migration 0036 adds triggers on `task`,
+  `activity_log_head` and `approval_timeline_tail` that `pg_notify` the channel `byok_task_events_wake`
   with `md5(tenant || '\n' || task)` at commit. Every writer signals through
   them: any instance, any process, maintenance included. There is no
   application NOTIFY.
 
-`createInProcessTaskEventsWake` covers writers in one process only. Do not
-hand it to readers of a store whose writers run elsewhere.
-
-The Postgres wake keeps one resident listener per process, apart from the
-request pool, and shares the mailbox wake's listener machinery:
-- It needs a session-mode DSN. Hyperdrive and transaction-mode poolers cannot
-  carry LISTEN, and the self-NOTIFY probe reports that through `onError` as
-  `TaskEventsWakeProbeMissedError`.
-- A periodic probe retires a half-open connection. The listener reconnects
-  with backoff, and a reconnect wakes every subscription so its reader rescans.
-- `close()` is the Host's, like `pool.end()`, and closes every subscription.
-  Aborting a subscription's signal or calling its `close()` releases it.
+`createInProcessTaskEventsWake` covers writers in one process only. A reader
+whose writers run elsewhere sees their commits through the liveness bound.
 
 Liveness bound: a reader no hint reaches re-reads within `fallbackMs`
 (`DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS`, 5 seconds). The bound covers a lost
-notification, a listener outage and code deployed before 0036.
+notification and every write from another process.
 
 Each commit that notifies takes PostgreSQL's notification queue lock, so at
 high write rates these commits serialize on it, alongside the mailbox wake's.
 That lock is the first thing to watch under load.
 
-Upgrade: 0036 is additive, and either deployment order is safe. Before it
-runs, the Postgres wake hears nothing and readers fall back to `fallbackMs`.
+Upgrade: 0036 is additive, and either deployment order is safe.

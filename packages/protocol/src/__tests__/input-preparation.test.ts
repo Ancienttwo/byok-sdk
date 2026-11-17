@@ -16,7 +16,6 @@ import {
   SERVER_TO_DAEMON_TYPES,
   TaskCompletePayloadSchema,
   TaskFailPayloadSchema,
-  TerminalPreparedObservationSchema,
   UnknownMessageTypeError,
   byokInputPreparationCompletionPath,
   byokInputPreparationStatusPath,
@@ -25,6 +24,7 @@ import {
   parseMessage,
   type MessageType,
 } from '../index';
+import { TerminalPreparedObservationSchema } from '../messages';
 
 const SOURCE = { revision: 'source-r42', digest: `sha256:${'c'.repeat(64)}` } as const;
 
@@ -522,7 +522,7 @@ describe('terminal prepared observation', () => {
   it('rides on task.complete and task.fail, strictly', () => {
     expect(TerminalPreparedObservationSchema.safeParse(OBSERVATION).success).toBe(true);
     expect(
-      TaskCompletePayloadSchema.safeParse({ summary: 's', sessionRef: 'r', preparedObservation: OBSERVATION }).success,
+      TaskCompletePayloadSchema.safeParse({ executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 's', sessionRef: 'r', preparedObservation: OBSERVATION }).success,
     ).toBe(true);
     expect(TaskFailPayloadSchema.safeParse({ reason: 'context_overflow: x', preparedObservation: OBSERVATION }).success)
       .toBe(true);

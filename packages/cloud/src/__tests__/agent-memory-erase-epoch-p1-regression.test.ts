@@ -7,11 +7,10 @@ import {
 import { describe, expect, it } from 'vitest';
 import {
   AGENT_HOME_CONTRACT_CAPABILITY,
-  InMemoryAgentMemoryProjectionAuthorizer,
-  InMemoryAgentMemoryProjectionStore,
   createWebCrypto,
 } from '..';
 import { base64UrlEncode } from '../crypto/web-crypto';
+import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from './support/agent-memory-projection';
 import { TENANT_A, createHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-memory-erase-p1', profileRevision: 'profile-r1' } as const;
@@ -77,7 +76,7 @@ async function setup() {
     payload: {
       instruction: 'run an Agent memory erase epoch regression task',
       agentRef: AGENT_REF,
-      session: { mode: 'resume', sessionRef: 'session-resume-1' },
+      session: { mode: 'resume', sessionRef: 'session-resume-1' }, target: { lane: 'auto' as const },
     },
   });
   return { authorizer, crypto, device, harness };
@@ -104,7 +103,7 @@ describe('Agent-memory erase epoch P1 regression', () => {
       payload: {
         instruction: 'run the second historical Agent memory task',
         agentRef: AGENT_REF,
-        session: { mode: 'resume', sessionRef: 'session-resume-2' },
+        session: { mode: 'resume', sessionRef: 'session-resume-2' }, target: { lane: 'auto' as const },
       },
     });
     const grantA = grant(device.deviceId, 1);

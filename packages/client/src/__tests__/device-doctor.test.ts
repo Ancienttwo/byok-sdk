@@ -20,7 +20,7 @@ let store: DeviceStore;
 const target = { confirmed: true as const, expectedDeviceId: 'device-a', expectedTenantId: 'tenant-a' };
 const authority: DeviceRecord = {
   deviceId: 'device-a', tenantId: 'tenant-a', devicePublicKey: 'public-key-a',
-  accessToken: 'secret-token-marker', expiresAt: '2099-01-01T00:00:00.000Z', devicePrivateKeyPem: 'secret-private-key-marker',
+  devicePrivateKeyPem: 'secret-private-key-marker',
 };
 
 beforeEach(async () => {
@@ -59,7 +59,7 @@ describe('public enrollment metadata repair', () => {
     expect(after.ino).toBe(before.ino);
     expect(writeSecret).not.toHaveBeenCalled();
     expect(fetch).not.toHaveBeenCalled();
-    expect(JSON.stringify(result) + await bytes()).not.toMatch(/secret-token-marker|secret-private-key-marker/);
+    expect(JSON.stringify(result) + await bytes()).not.toMatch(/secret-private-key-marker/);
   });
 
   it('restores valid stale metadata that startup refuses to adopt (#1094)', async () => {

@@ -16,7 +16,7 @@ async function setup(rest: Partial<BotOptions> = {}) {
   bot = new BotCollaboration(host.server, host.ledger, { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'coalesce' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
-    connector: async id => ({ ok: true, externalId: id }), coalesce: {}, ...rest });
+    connector: async id => ({ ok: true, externalId: id }), coalesce: {}, dreaming: false, ...rest });
   return host;
 }
 const idOf = (key: string) => hash(['user', 'main', key]);

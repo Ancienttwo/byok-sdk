@@ -52,7 +52,7 @@ it('settles a cancelled intent in backoff before its retry time', async () => {
   }, wakes: { schedule: vi.fn(), cancel: vi.fn(), pending: async () => [] } } as unknown as ExecutionServer;
   const core = new HostExecutionCore(server, ledger, { now: () => 1000 });
   const input = { key: 'turn', source: 'user', waitUntil: 60_000, retry: { maxAttempts: 2, delaysMs: [10_000], retryFailures: false },
-    execution: { deviceId: 'device', payload: { runtime: 'pi', session: { mode: 'fresh' }, instruction: 'Reply.', agentRef,
+    execution: { deviceId: 'device', payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, instruction: 'Reply.', agentRef,
       egressPolicy: { policyRevision: 'v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 4096 },
         reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
         transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },

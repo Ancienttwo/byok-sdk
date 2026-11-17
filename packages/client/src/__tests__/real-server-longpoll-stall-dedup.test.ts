@@ -166,7 +166,7 @@ describe('long-poll stalled-cursor backlog re-pull: backoff + dedup (finding P2,
       deviceId: record.deviceId,
       payload: {
         instruction: 'task B (redelivered while in flight)',
-        runtime: 'pi',
+        target: { lane: 'runtime', runtimeId: 'pi' },
         agentRef: { agentId: 'agent-task-b', profileRevision: 'rev-1' },
         session: { mode: 'fresh' },
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

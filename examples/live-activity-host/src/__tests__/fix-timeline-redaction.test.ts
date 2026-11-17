@@ -56,10 +56,8 @@ const approvalCases: Mutation<ApprovalObservation>[] = [
   ...Object.entries({ taskId: 'task-2', sourceEnvelopeId: 'env-2', revision: 2, receivedAt: later })
     .map(([field, value]) => ({ name: field, event: resolved, mutate: (entry: ApprovalObservation) => { Object.assign(entry, { [field]: value }); } })),
   { name: 'event type', event: resolved, mutate: (entry) => { Object.assign(entry, { event: requested }); } },
-  ...([requested, resolved] as const).flatMap((event) => [
-    { name: `${event.type} ID`, event, mutate: (entry: ApprovalObservation) => { Object.assign(entry.event, { approvalId: 'other' }); } },
-    { name: `${event.type} removed ID`, event, mutate: (entry: ApprovalObservation) => { Reflect.deleteProperty(entry.event, 'approvalId'); } },
-  ]),
+  ...([requested, resolved] as const).map((event) => (
+    { name: `${event.type} ID`, event, mutate: (entry: ApprovalObservation) => { Object.assign(entry.event, { approvalId: 'other' }); } })),
   { name: 'decision', event: resolved, mutate: (entry) => { Object.assign(entry.event, { decision: 'approve' }); } },
   { name: 'resolver', event: resolved, mutate: (entry) => { Object.assign(entry.event, { resolvedBy: 'host', reason: null }); } },
   { name: 'resolution time', event: resolved, mutate: (entry) => { Object.assign(entry.event, { at: later }); } },

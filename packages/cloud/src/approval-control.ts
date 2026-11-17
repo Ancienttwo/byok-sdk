@@ -19,11 +19,9 @@
  *     daemon that dispatched a fresh approval without this cloud ever seeing
  *     the previous one resolved has moved on, and the newest request is what
  *     an operator is being asked about (`hub.ts:1399`).
- *   - `approval_resolved(X)` CLEARS the slot when the slot's own id is `X`, or
- *     when the slot has no id at all (a request recorded before wire v4 named
- *     none, so the resolution can only be about the single outstanding
- *     request). A resolution naming some OTHER id is about an approval already
- *     superseded and leaves the current slot standing (`hub.ts:1569`).
+ *   - `approval_resolved(X)` CLEARS the slot when the slot's own id is `X`. A
+ *     resolution naming some OTHER id is about an approval already superseded
+ *     and leaves the current slot standing (`hub.ts:1569`).
  *
  * Two ways there is legitimately nothing pending: the tail has no unresolved
  * request, or the tail is gone entirely — it is a bounded, TTL'd observation
@@ -67,12 +65,8 @@ export class StaleApprovalError extends Error {
 
 /** The one approval a task currently has outstanding. */
 export interface PendingApproval {
-  /**
-   * The daemon's own id for this approval. Wire v4 requires one; it is ABSENT
-   * only on a request recorded before v4. A host decision refuses such a
-   * request, because a v4 `task.approve`/`task.reject` must name it.
-   */
-  readonly approvalId?: string;
+  /** The daemon's own id for this approval. */
+  readonly approvalId: string;
   /** Immutable daemon envelope identity for this exact request observation. */
   readonly sourceEnvelopeId: string;
   /** Monotonic timeline revision for this exact request observation. */
@@ -87,10 +81,6 @@ export function pendingApproval(
   tail: ApprovalTimelineTail | undefined,
 ): PendingApproval | undefined {
   const entry = tail === undefined ? undefined : pendingApprovalObservation(tail.entries);
-  if (entry === undefined) return undefined;
-  return {
-    sourceEnvelopeId: entry.sourceEnvelopeId,
-    revision: entry.revision,
-    ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
-  };
+  if (entry === undefined || entry.event.type !== 'approval_requested') return undefined;
+  return { approvalId: entry.event.approvalId, sourceEnvelopeId: entry.sourceEnvelopeId, revision: entry.revision };
 }

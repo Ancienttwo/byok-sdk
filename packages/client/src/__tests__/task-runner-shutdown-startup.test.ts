@@ -9,7 +9,7 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 describe('TaskRunner shutdown admission/start ownership barrier', () => {
   it('cannot report successful shutdown before a claimed startup owner has been registered', async () => {
@@ -17,7 +17,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
     const sent: Envelope[] = [];
     const adapter = new StubRuntimeAdapter();
     const release = adapter.blockStart();
-    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
+    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
       adapters: [adapter], deviceId: 'shutdown-device',
       send: event => { sent.push(event); },
       blobClient: {
@@ -26,11 +26,12 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
       },
       approvalRegistry: new ApprovalRegistry(), storeDir: dir, productId: 'shutdown-start',
     });
-    const offered = runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),
+    const offered = runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),
       instruction: 'blocked startup', ...FRESH_OFFER
     }, { taskId: 'starting-task', seq: 1 }));
     try {
-      await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));
+      // The start follows the claim's settlement (#2294).
+      await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1), { timeout: 5_000 });
       runner.stopAcceptingOffers();
       const shutdown = runner.shutdownActiveTasks('operator');
       // This runtime deliberately has not returned a receipt yet. Shutdown

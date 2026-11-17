@@ -3,17 +3,21 @@ import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpire
  * Postgres {@link PairingCodeStore}: single-use codes bound to the tenant and
  * product they were minted for.
  *
- * Enrollment is one transaction. `UPDATE ... WHERE redeemed_at IS NULL AND
- * expires_at >= $now RETURNING ...` claims the code only inside the same client
- * transaction that applies machine supersession/state cleanup and inserts the
- * device. A read-then-write would let two callers observe an unused code; an
- * autocommitted redemption would strand a code when registration fails.
+ * Enrollment is one transaction. The code row is locked (`SELECT ... FOR
+ * UPDATE`) and marked redeemed only inside the same client transaction that
+ * applies the registration fence, machine supersession/state cleanup and the
+ * device insert. A read-then-write without the lock would let two callers
+ * observe an unused code; an autocommitted redemption would strand a code when
+ * registration fails.
  *
- * Unknown, expired, and already-used all answer `undefined`. The reference
- * server distinguishes them in its 401 text; a hosted multi-tenant surface
- * deliberately does not — the code is a bearer credential addressable across
- * every tenant, and "already used" versus "never existed" is precisely the
- * difference an attacker enumerating codes would pay for.
+ * Decision order (#2045): a replay of a consumed code answers before the
+ * fence is read; the fence runs before the code is marked redeemed, so a
+ * `conflict` rolls back and leaves the code redeemable.
+ *
+ * Unknown, expired, and already-used all answer `code_invalid`: the code is a
+ * bearer credential addressable across every tenant, and "already used"
+ * versus "never existed" is precisely the difference an attacker enumerating
+ * codes would pay for.
  */
 import type { Clock, TenantId } from '@byok-sdk/core';
 import type {
@@ -22,6 +26,7 @@ import type {
   PairingCodeIssueInput,
   PairingCodeStore,
   PairingEnrollmentInput,
+  PairingEnrollmentResult,
 } from '@byok-sdk/cloud';
 import type { Pool } from 'pg';
 import type { ByokPool } from '../pool.js';
@@ -35,7 +40,10 @@ interface PairingCodeRow {
   readonly redeemed_at: Date | null;
 }
 
-type PairingBinding = Omit<PairingEnrollmentInput, 'pairingCode' | 'deviceId'>;
+/** The completion binding: every input field except the code, the route-minted id and the fence. */
+type PairingBinding = Omit<PairingEnrollmentInput, 'pairingCode' | 'deviceId' | 'expectedDeviceDigest'>;
+
+const CODE_INVALID: PairingEnrollmentResult = { outcome: 'code_invalid' };
 
 interface PairingCompletion {
   readonly deviceId: string;
@@ -175,15 +183,7 @@ export class PostgresPairingCodeStore implements PairingCodeStore {
     return { code: input.code, expiresAt: input.expiresAt };
   }
 
-  async redeemAndRegister(input: {
-    readonly pairingCode: string;
-    readonly deviceId: string;
-    readonly deviceName: string;
-    readonly devicePublicKey: string;
-    readonly proofKeyId: string;
-    readonly proofKeyEpoch: number;
-    readonly machineId?: string;
-  }): Promise<DeviceRecord | undefined> {
+  async redeemAndRegister(input: PairingEnrollmentInput): Promise<PairingEnrollmentResult> {
     const now = this.#clock.now();
     const client = await this.#pool.connect();
     try {
@@ -196,7 +196,7 @@ export class PostgresPairingCodeStore implements PairingCodeStore {
       const claims = selected.rows[0];
       if (claims === undefined) {
         await client.query('COMMIT');
-        return undefined;
+        return CODE_INVALID;
       }
       const tenant = claims.tenant_id as TenantId;
       const binding = bindingOf(input);
@@ -208,29 +208,37 @@ export class PostgresPairingCodeStore implements PairingCodeStore {
         const completion = stored.rows[0] === undefined ? undefined : parseCompletion(stored.rows[0].body);
         if (completion === undefined || !sameBinding(completion.binding, binding)) {
           await client.query('COMMIT');
-          return undefined;
+          return CODE_INVALID;
         }
         const device = await getDeviceOnClient(client, tenant, completion.deviceId);
         await client.query('COMMIT');
-        return device === undefined || !sameDevice(device, claims, binding) ? undefined : device;
+        return device === undefined || !sameDevice(device, claims, binding)
+          ? CODE_INVALID
+          : { outcome: 'registered', device };
       }
       if (claims.expires_at.getTime() < now.getTime()) {
         await client.query('COMMIT');
-        return undefined;
+        return CODE_INVALID;
       }
-      await client.query(
-        'UPDATE pairing_code SET redeemed_at = $2 WHERE code = $1 AND redeemed_at IS NULL',
-        [input.pairingCode, now.toISOString()],
-      );
-      const device = await registerDeviceOnClient(client, tenant, {
+      const registered = await registerDeviceOnClient(client, tenant, {
         productId: claims.product_id,
         deviceId: input.deviceId,
         deviceName: input.deviceName,
         devicePublicKey: input.devicePublicKey,
         proofKeyId: input.proofKeyId,
         proofKeyEpoch: input.proofKeyEpoch,
+        expectedDeviceDigest: input.expectedDeviceDigest,
         ...(input.machineId === undefined ? {} : { machineId: input.machineId }),
       }, now.toISOString());
+      if (registered.outcome === 'conflict') {
+        await client.query('ROLLBACK');
+        return registered;
+      }
+      const { device } = registered;
+      await client.query(
+        'UPDATE pairing_code SET redeemed_at = $2 WHERE code = $1 AND redeemed_at IS NULL',
+        [input.pairingCode, now.toISOString()],
+      );
       const completion: PairingCompletion = { deviceId: device.deviceId, binding };
       await client.query(
         `INSERT INTO device_request_receipts (tenant_id, key, body, recorded_at)
@@ -238,7 +246,7 @@ export class PostgresPairingCodeStore implements PairingCodeStore {
         [tenant, await completionKey(input.pairingCode), JSON.stringify(completion), now.toISOString()],
       );
       await client.query('COMMIT');
-      return device;
+      return registered;
     } catch (cause) {
       await rollback(client);
       throw cause;

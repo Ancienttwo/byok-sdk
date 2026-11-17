@@ -57,7 +57,7 @@ try {
     const keychain = process.platform === 'darwin' ? await createTestKeychain() : undefined;
     const storeDir = path.join(root, entry);
     const audit = path.join(root, `${entry}-mcp.jsonl`);
-    const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', serverUrl, storeDir,
+    const config = { productId: `packed-${entry}-${randomUUID()}`, productName: 'Packed MCP', deviceName: 'ci-smoke', serverUrl, storeDir,
       ...(keychain === undefined ? {} : { deviceCredentials: { macosKeychainPath: keychain.path } }),
       agentHome: { hostStorageRoot: path.join(storeDir, 'homes') }, agentEgress: { policy },
       runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },
@@ -80,7 +80,7 @@ try {
       }
       const device = await wait(async () => (await cloud.listDevices(tenant)).find(device => device.productId === config.productId && device.capabilities?.includes('toolset-selection')), `${entry} discovery`);
       const offer = await cloud.submitAgentExecution(tenant, { taskId: `packed-${entry}-result`, deviceId: device.deviceId, payload: {
-        instruction: 'call echo', runtime: 'codex', session: { mode: 'fresh' }, requiredToolsets: ['probe'],
+        instruction: 'call echo', target: { lane: 'runtime', runtimeId: 'codex' }, session: { mode: 'fresh' }, requiredToolsets: ['probe'],
         agentRef: { agentId: `packed-${entry}-agent`, profileRevision: '1' }, egressPolicy: policy,
         terminalProjection: entry === 'cli' ? resultSelection : { mode: 'none' },
       } });

@@ -264,6 +264,21 @@ describe('diagnostics/format: formatStatusLines', () => {
     expect(lines.some((l) => l.startsWith('lifecycle-remedy: device revoked — re-pair needed'))).toBe(true);
   });
 
+  it('a refused wire major shows the hello HTTP status, and a 404 remedy names the base URL and the messages route', () => {
+    const at = '2026-01-01T00:00:00.000Z';
+    const halted = (httpStatus: number) => formatStatusLines(baseView({
+      lifecycle: { lifecycle: { phase: 'halted', reason: 'protocol_negotiation_failed', httpStatus, at }, ts: at },
+    }));
+    const missingRoute = halted(404);
+    expect(missingRoute).toContain(`lifecycle: last-known phase=halted reason=protocol_negotiation_failed httpStatus=404 at=${at}`);
+    const remedy = missingRoute.find((l) => l.startsWith('lifecycle-remedy: '));
+    expect(remedy).toMatch(/server base URL/);
+    expect(remedy).toMatch(/messages route/);
+    const otherMajor = halted(400);
+    expect(otherMajor).toContain(`lifecycle: last-known phase=halted reason=protocol_negotiation_failed httpStatus=400 at=${at}`);
+    expect(otherMajor.find((l) => l.startsWith('lifecycle-remedy: '))).toMatch(/HTTP 400.*wire protocol major/);
+  });
+
   it('summarizes runtimes as presence and failure outcomes', () => {
     const lines = formatStatusLines(
       baseView({

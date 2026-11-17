@@ -50,7 +50,7 @@ async function start(plan: WorkerPlan[], options: { blockConfigWrite?: boolean; 
       manifest: { taskId: 'task', cwd: home,
         agentRef: { agentId: 'agent', profileRevision: 'revision' },
         lease: { leaseId: 'lease', canonicalHome: home },
-        dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'test' } },
+        modelTarget: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'test' } },
       durableContext: { tenantId: 'tenant', lifecycle: { ownsLease: () => true,
         record: async (kind: string, count: number) => { journal.push(`${kind}:${count}`); } } },
     } as DurableStart['input'],

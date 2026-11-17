@@ -1,5 +1,4 @@
 import { z } from 'zod';
-import { PROTOCOL_VERSION } from './version.js';
 import { CONTENT_HASH_RE } from './blob.js';
 import {
   AgentRefSchema,
@@ -25,6 +24,7 @@ import {
   AgentMemoryProjectionMutationSchema,
   AgentMemoryProjectionReceiptSchema,
 } from './agent-memory-projection.js';
+import { PairDeviceDigestSchema } from './pair-device-digest.js';
 
 /**
  * HTTP-side request/response shapes for the reference server's auth and blob
@@ -45,9 +45,35 @@ import {
 // register the device and mint its first access token.
 // ---------------------------------------------------------------------------
 
+/**
+ * Every field a device stores from a pairing has a bound (#2045). 64 is the
+ * longest Linux hostname (`HOST_NAME_MAX`) and holds the reference
+ * `dev_<uuid>` device id. Bounds count UTF-16 code units, checked only by
+ * {@link isPairingText}.
+ */
+export const PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH = 64;
+export const PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH = 64;
+
+/**
+ * The pairing text rule for every field a pairing stores (`deviceName`,
+ * `deviceId`, `tenantId`): 1 to `maxUnits` UTF-16 code units (`length`, not
+ * code points), well-formed (no unpaired surrogate) and with no control
+ * character (C0, DEL, C1). Each code unit then costs at most three UTF-8
+ * bytes as JSON. Every boundary that checks one of these fields calls this;
+ * `@byok-sdk/core`'s tenant id mint (`tenantId`, `isTenantId` in
+ * `core/src/tenant.ts`) restates it, because core depends on no other package;
+ * the client's `device-credential-store.test.ts` asserts the two accept and
+ * refuse the same tenant ids.
+ */
+export function isPairingText(value: string, maxUnits: number): boolean {
+  return value.length > 0 && value.length <= maxUnits && !/[\p{Cc}\p{Cs}]/u.test(value);
+}
+
 export const PairRequestSchema = z.object({
   pairingCode: z.string(),
-  deviceName: z.string(),
+  deviceName: z.string().refine((value) => isPairingText(value, PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH), {
+    message: `deviceName must be 1 to ${PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
+  }),
   /** Ed25519 public key, base64url-encoded. Private key stays device-local (OS keychain or 0600 file). */
   devicePublicKey: z.string(),
   /**
@@ -59,8 +85,52 @@ export const PairRequestSchema = z.object({
    * exact digest. A client that cannot resolve one omits the field entirely.
    */
   machineId: z.string().regex(/^[0-9a-f]{64}$/u).optional(),
+  /**
+   * Registration fence (#2045): the `pairDeviceDigest` of the device this
+   * client last knew as current for its slot, or `null` when it knew none.
+   * With `machineId`, the server registers only when this equals the digest
+   * of the current device of (tenant, product, machineId) — `null` for none —
+   * and otherwise answers `409` {@link PairSupersededResponseSchema} without
+   * consuming the code. Without `machineId` nothing is superseded, so the
+   * server ignores it. Required, never omitted: a request without it is a
+   * pre-v7 client and gets `400`.
+   */
+  expectedDeviceDigest: PairDeviceDigestSchema.nullable(),
 });
 export type PairRequest = z.infer<typeof PairRequestSchema>;
+
+/**
+ * The typed rejections of `POST /byok/pair` (§6.1). Each body carries a fixed
+ * `error` text and its `code`, and nothing else the server knows, except the
+ * one field the `409` carries. The texts are literals so no server can tell
+ * one cause of a rejection from another, or leak a detail, through them.
+ */
+export const PAIRING_CODE_INVALID_CODE = 'pairing_code_invalid';
+export const PAIRING_SUPERSEDED_CODE = 'pairing_superseded';
+
+/**
+ * `401`: the code is unknown, expired or already used. The three answer with
+ * this one body, so a code holder learns nothing more than that it failed.
+ */
+export const PairingCodeInvalidResponseSchema = z.object({
+  error: z.literal('invalid pairing code'),
+  code: z.literal(PAIRING_CODE_INVALID_CODE),
+});
+export type PairingCodeInvalidResponse = z.infer<typeof PairingCodeInvalidResponseSchema>;
+
+/**
+ * `409`: `expectedDeviceDigest` is not the digest of the machine's current
+ * device. Nothing changed and the code is not consumed. `currentDeviceDigest`
+ * is that device's digest, or `null` when the machine has none; only the
+ * pairing invocation that still owns its local attempt may resend once with
+ * it (§6.1).
+ */
+export const PairSupersededResponseSchema = z.object({
+  error: z.literal('pairing superseded'),
+  code: z.literal(PAIRING_SUPERSEDED_CODE),
+  currentDeviceDigest: PairDeviceDigestSchema.nullable(),
+});
+export type PairSupersededResponse = z.infer<typeof PairSupersededResponseSchema>;
 
 /**
  * The authenticated tenant projection is opaque to the wire protocol. It is
@@ -74,17 +144,17 @@ export type PairRequest = z.infer<typeof PairRequestSchema>;
 export const PAIR_RESPONSE_TENANT_ID_MAX_LENGTH = 200;
 export const PairResponseTenantIdSchema = z
   .string()
-  .min(1)
-  .max(PAIR_RESPONSE_TENANT_ID_MAX_LENGTH)
+  .refine((value) => isPairingText(value, PAIR_RESPONSE_TENANT_ID_MAX_LENGTH), {
+    message: `tenantId must be 1 to ${PAIR_RESPONSE_TENANT_ID_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
+  })
   .refine((value) => value.trim() === value, {
     message: 'tenantId must not have leading or trailing whitespace',
-  })
-  .refine((value) => !value.includes('\u0000'), {
-    message: 'tenantId must not contain a NUL character',
   });
 
 export const PairResponseSchema = z.object({
-  deviceId: z.string(),
+  deviceId: z.string().refine((value) => isPairingText(value, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), {
+    message: `deviceId must be 1 to ${PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH} UTF-16 code units of well-formed text without control characters`,
+  }),
   /** JWT, ~1h lifetime. */
   accessToken: z.string(),
   /** Opaque hint for when/how to renew (e.g. an ISO timestamp); not itself a credential. */
@@ -125,7 +195,6 @@ export const TokenRequestSchema = z.object({
   /** Ed25519 signature over `nonce`, base64url-encoded. */
   signature: z.string(),
 });
-export type TokenRequest = z.infer<typeof TokenRequestSchema>;
 
 export const TokenResponseSchema = z.object({
   accessToken: z.string(),
@@ -189,7 +258,6 @@ export const PresencePublishRequestSchema = z.object({
   /** The `conn.hello` list: built-in runtime and custom harness ids (#1103 D8); absent means unknown. */
   runtimeUnavailable: RuntimeUnavailableListSchema.optional(),
 });
-export type PresencePublishRequest = z.infer<typeof PresencePublishRequestSchema>;
 
 /**
  * Revocation is server-side only (dashboard/API call on the SaaS's own
@@ -210,7 +278,6 @@ export const CreateBlobRequestSchema = z.object({
   contentType: z.string(),
   contentHash: z.string().regex(CONTENT_HASH_RE, 'contentHash must be "sha256:<64 lowercase hex>"'),
 });
-export type CreateBlobRequest = z.infer<typeof CreateBlobRequestSchema>;
 
 /** POST /byok/blobs response: presigned PUT target for the declared blob. */
 export const CreateBlobResponseSchema = z.object({
@@ -237,7 +304,6 @@ export const EventsPollQuerySchema = z.object({
   /** Last reliably processed seq; the only acknowledgement. Omitted on the first poll. */
   cursor: z.number().int().nonnegative().optional(),
 });
-export type EventsPollQuery = z.infer<typeof EventsPollQuerySchema>;
 
 /**
  * Deployment-owned activity limits. A v3 responder advertises them on every
@@ -249,7 +315,18 @@ export const ActivityIngressSchema = z.object({
   activityMaxBytes: z.number().int().min(2),
 });
 export type ActivityIngress = z.infer<typeof ActivityIngressSchema>;
-export const OUTBOUND_REFUSAL_REASONS = ['payload_invalid', 'not_permitted', 'limit_exceeded', 'state_conflict', 'unsupported'] as const;
+/**
+ * Why one posted envelope was rejected. `protocol_version_unsupported` (wire
+ * v7) answers an entry whose `v` is another wire major; `type_unsupported`
+ * answers a daemon-to-server type this server does not know, and the sender
+ * does not retry that envelope. The shape of such an answer is frozen from v7
+ * on, so a peer of another major reads it (docs/protocol.md "Cross-version
+ * refusal").
+ */
+export const OUTBOUND_REFUSAL_REASONS = [
+  'payload_invalid', 'not_permitted', 'limit_exceeded', 'state_conflict', 'unsupported',
+  'protocol_version_unsupported', 'type_unsupported',
+] as const;
 /** `unknown` is an unrecognized wire reason string, kept as an observation. */
 export type OutboundRefusalReason = typeof OUTBOUND_REFUSAL_REASONS[number] | 'unknown';
 function isOutboundRefusalCode(value: string): value is typeof OUTBOUND_REFUSAL_REASONS[number] {
@@ -261,7 +338,6 @@ export const MessageSendOutcomeSchema = z.object({
   /** Decodes to an {@link OutboundRefusalReason}; an unrecognized string becomes `unknown`. */
   reason: z.string().max(64).transform((value): OutboundRefusalReason => (isOutboundRefusalCode(value) ? value : 'unknown')).optional(),
 });
-export type MessageSendOutcome = z.infer<typeof MessageSendOutcomeSchema>;
 
 export const EventsPollResponseSchema = z.object({
   /**
@@ -271,11 +347,6 @@ export const EventsPollResponseSchema = z.object({
    */
   events: z.array(z.unknown()),
   cursor: z.number().int(),
-  /**
-   * Required: the server capabilities for THIS long-poll response. Each page
-   * replaces the daemon's advertisement; an empty list advertises nothing.
-   */
-  capabilities: z.array(z.string()),
   /** Required in v3: the activity limits that apply to new progress pushes. */
   ingress: ActivityIngressSchema,
 });
@@ -305,18 +376,19 @@ export const MAX_MESSAGES_PER_BATCH = 256;
 export const MESSAGES_SEND_MAX_BODY_BYTES = 2 * 1024 * 1024;
 
 /**
- * The batch frame only (#1121). Each entry must speak this wire major and
- * carry the UUID its outcome is correlated by; everything else is decoded per
- * entry with `parseMessage`, so one invalid envelope is answered
+ * The batch frame only (#1121). Each entry carries a positive wire major and
+ * the UUID its outcome is correlated by; everything else is decoded per entry
+ * with `parseMessage`, so one invalid envelope is answered
  * `rejected: payload_invalid` on its own instead of failing every envelope in
  * the batch — the same split as `EventsPollResponseSchema.events` (#386) on
- * the receive side. A different `v` still fails the whole request: the wire
- * major belongs to the sender, which could not read this version's outcomes.
+ * the receive side. An entry of another major is answered `rejected:
+ * protocol_version_unsupported` on its own (wire v7): a peer of any major
+ * reads that answer, so a mismatched daemon stops at its handshake instead of
+ * retrying a request this server cannot read.
  */
 export const MessagesSendRequestSchema = z.object({
-  messages: z.array(z.looseObject({ v: z.literal(PROTOCOL_VERSION), id: z.uuid() })).max(MAX_MESSAGES_PER_BATCH),
+  messages: z.array(z.looseObject({ v: z.number().int().positive(), id: z.uuid() })).max(MAX_MESSAGES_PER_BATCH),
 });
-export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
 
 /**
  * `accepted` counts every envelope the inbound gate (`@byok-sdk/cloud`'s
@@ -328,17 +400,13 @@ export type MessagesSendRequest = z.infer<typeof MessagesSendRequestSchema>;
  * (or deduplicated). The client enforces the per-envelope rules against the
  * posted batch and treats a violation as an unusable response.
  *
- * `capabilities` (additive) is the same server capability advertisement a
- * `GET /byok/events` response carries. A server includes it when the batch
- * carries `conn.hello`: the daemon's handshake is a lone `conn.hello` POST,
- * so its answer carries readiness and capabilities in one round trip.
- * Absence means "no update" — the daemon keeps the advertisement it already
- * holds — never an empty list.
+ * The cross-version refusal `{ accepted, rejected, outcomes }` with a
+ * `protocol_version_unsupported` outcome is frozen from v7 on: a v6 daemon
+ * reads `rejected > 0` on its lone hello as a refused handshake and halts.
  */
 export const MessagesSendResponseSchema = z.object({
   accepted: z.number().int().nonnegative(),
   rejected: z.number().int().nonnegative().optional(),
-  capabilities: z.array(z.string()).optional(),
   ingress: ActivityIngressSchema.optional(),
   outcomes: z.array(MessageSendOutcomeSchema).max(MAX_MESSAGES_PER_BATCH),
 });
@@ -369,7 +437,6 @@ export const AgentHomeProjectionStatusSchema = z.enum([
   'stale',
   'conflict',
 ]);
-export type AgentHomeProjectionStatus = z.infer<typeof AgentHomeProjectionStatusSchema>;
 
 export const AgentHomeProjectionReadbackSchema = z
   .object({
@@ -423,7 +490,6 @@ export type InputPreparationCompletionRequest = z.infer<typeof InputPreparationC
 
 /** `pending` until the device records a terminal fact; the other two are terminal. */
 export const InputPreparationStatusSchema = z.enum(['pending', 'prepared', 'rejected']);
-export type InputPreparationStatus = z.infer<typeof InputPreparationStatusSchema>;
 
 /**
  * Tenant/device/request-bound durable readback. `receipt` and `reason` are
@@ -471,7 +537,6 @@ export const InputPreparationStatusQuerySchema = z
     profileRevision: z.string().min(1),
   })
   .strict();
-export type InputPreparationStatusQuery = z.infer<typeof InputPreparationStatusQuerySchema>;
 
 // ---------------------------------------------------------------------------
 // POST /byok/agent-memory-projections — optional hosted, redacted, one-way

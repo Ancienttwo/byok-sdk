@@ -30,7 +30,7 @@ import { openJournalDatabase } from '../util/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
@@ -138,7 +138,7 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
     expect(rows(storeDir, 'SELECT task_id, terminal_type FROM journal_terminal')).toEqual([{ task_id: 'sealed-large-offer', terminal_type: 'declined' }]);
   });
 
-  it('journals a sealed steer, drops it, and moves the cursor', async () => {
+  it('journals a sealed steer, refuses it for a task that is not active, and moves the cursor', async () => {
     const { storeDir, device, server } = await start();
     const steer = envelopeOf('task.steer', 'sealed-large-steer', server.nextSeq());
     server.send(steer);
@@ -146,6 +146,7 @@ describe('a sealed envelope at the inline maximum, on a daemon with the default 
     await vi.waitFor(async () => expect(await new CursorStore(storeDir).load(server.url, device.deviceId)).toBe(steer.seq), EVENTUAL_STATE_BUDGET_MS);
     expect(rows(storeDir, 'SELECT envelope_id FROM journal_envelope')).toEqual([{ envelope_id: steer.id }]);
     expect(rows(storeDir, 'SELECT task_id FROM journal_task')).toEqual([]);
-    expect(server.received.filter((event) => event.task_id === 'sealed-large-steer')).toEqual([]);
+    await server.waitFor((event) => event.type === 'task.steer_refused' && event.task_id === 'sealed-large-steer');
+    expect(server.received.filter((event) => event.task_id === 'sealed-large-steer').map((event) => event.type)).toEqual(['task.steer_refused']);
   });
 });

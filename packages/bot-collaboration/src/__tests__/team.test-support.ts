@@ -74,10 +74,11 @@ export async function openTeam(options: { now?: () => number; holdProjection?: (
   const secondDevice = options.secondDevice ? await enrollSecondDevice(`http://127.0.0.1:${address.port}`,
     (await server.pairing.createPairingCode({ productId })).code, join(root, 'second-device'), policy) : undefined;
   const base = template(deviceId);
+  // The daily dream slot follows the wall clock, so tests opt in to dreaming explicitly.
   const botOptions: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'k8b' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
-    } }, connector: async id => ({ id }), now: options.now, instructionMaxBytes: options.instructionMaxBytes, ...options.bot };
+    } }, connector: async id => ({ id }), now: options.now, instructionMaxBytes: options.instructionMaxBytes, dreaming: false, ...options.bot };
   if (secondDevice) botOptions.models = { local: botOptions.execution, remote: { ...botOptions.execution, deviceId: secondDevice.deviceId } };
   const port = options.wrapServer?.(server) ?? server;
   host = new BotCollaboration(port, ledger, botOptions);

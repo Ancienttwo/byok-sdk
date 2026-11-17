@@ -1,7 +1,8 @@
 // #1014: device-measured admission phase durations on the message that ends admission.
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { OFFER_ADMISSION_MAX_DURATION_MS, OfferAdmissionTimingsSchema, TaskClaimPayloadSchema, TaskDeclinePayloadSchema } from '../index';
+import { OFFER_ADMISSION_MAX_DURATION_MS, TaskClaimPayloadSchema } from '../index';
+import { OfferAdmissionTimingsSchema, TaskDeclinePayloadSchema } from '../messages';
 
 const ALL_PHASES = {
   totalMs: 812,
@@ -11,13 +12,14 @@ const ALL_PHASES = {
   toolsetProbeMs: 120,
   runtimeLaunchMs: 9,
 };
-const sealedDecline = readFileSync(new URL('./golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const sealedDecline = readFileSync(new URL('./golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> })
   .find((line) => line.type === 'task.decline' && line.payload.sealed !== undefined)!.payload;
+const CLAIM = { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } } as const;
 
 describe('offer admission timings (#1014)', () => {
   it.each([{ totalMs: 0 }, ALL_PHASES])('rides on task.claim and on both task.decline branches: %j', (admission) => {
-    expect(TaskClaimPayloadSchema.parse({ deviceId: 'device-1', admission })).toEqual({ deviceId: 'device-1', admission });
+    expect(TaskClaimPayloadSchema.parse({ ...CLAIM, admission })).toEqual({ ...CLAIM, admission });
     expect(TaskDeclinePayloadSchema.parse({ reason: 'busy', retryable: true, admission })).toEqual({ reason: 'busy', retryable: true, admission });
     expect(TaskDeclinePayloadSchema.parse({ ...sealedDecline, admission })).toEqual({ ...sealedDecline, admission });
   });
@@ -36,7 +38,7 @@ describe('offer admission timings (#1014)', () => {
     ['an unknown phase', { totalMs: 1, sealedOpenMs: 1 }],
   ])('rejects %s', (_label, admission) => {
     expect(OfferAdmissionTimingsSchema.safeParse(admission).success).toBe(false);
-    expect(TaskClaimPayloadSchema.safeParse({ deviceId: 'device-1', admission }).success).toBe(false);
+    expect(TaskClaimPayloadSchema.safeParse({ ...CLAIM, admission }).success).toBe(false);
     expect(TaskDeclinePayloadSchema.safeParse({ reason: 'busy', admission }).success).toBe(false);
   });
 });

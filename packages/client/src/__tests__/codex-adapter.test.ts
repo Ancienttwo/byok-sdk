@@ -25,12 +25,14 @@ import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
 import * as vendoredProjection from '../../vendor/oar/552a4f9/runtimes/codex/projection';
+
+const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codex.mjs', import.meta.url),
 );
 const sessions: Session[] = [];
 const dirs: string[] = [];
-const task: RuntimeTaskInput = {
+const task: RuntimeTaskInput = { target: CODEX_TARGET,
   instruction: 'hello',
 };
 function adapter(options: ConstructorParameters<typeof CodexAdapter>[0] = {}) {
@@ -363,10 +365,9 @@ describe('Codex persistent app-server adapter', () => {
       adapter(),
       {
         ...task,
-        dispatchSelection: {
+        target: {
           lane: 'subscription',
           runtimeId: 'codex',
-          providerId: null,
           modelId: 'wanted',
         },
       },

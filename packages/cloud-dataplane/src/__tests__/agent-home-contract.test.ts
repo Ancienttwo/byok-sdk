@@ -38,6 +38,7 @@ if (POSTGRES_URL === undefined) {
           devicePublicKey: 'agent-home-public-key',
           proofKeyId: 'agent-home-proof-key',
           proofKeyEpoch: 0,
+          expectedDeviceDigest: null,
         });
         await devices.recordCapabilities(TENANT, {
           deviceId: 'agent-home-device',
@@ -93,6 +94,7 @@ if (POSTGRES_URL === undefined) {
         await tasks.claim(TENANT, {
           taskId: 'agent-home-task',
           deviceId: 'agent-home-device',
+          executor: { kind: 'runtime', runtimeId: 'pi' },
         });
         await tasks.recordStatus(TENANT, {
           taskId: 'agent-home-task',

@@ -63,11 +63,10 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     });
 
     it('with dangerouslyAllowInsecureRemote: true, proceeds past the gate (reaches the network) and logs a warning', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        headers: new Headers(),
-        json: async () => ({ deviceId: 'dev-1', tenantId: 'tenant-url-gate', accessToken: 'tok-1', expiresIn: 3600 }),
-      });
+      fetchMock.mockResolvedValue(new Response(
+        JSON.stringify({ deviceId: 'dev-1', tenantId: 'tenant-url-gate', accessToken: 'tok-1', expiresIn: 3600 }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ));
 
       const daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',
@@ -89,11 +88,10 @@ describe('create-daemon.ts: server-URL transport-security gate', () => {
     });
 
     it('with dangerouslyAllowInsecureRemote: true against an ALREADY-loopback URL, proceeds normally and logs NO warning (the hatch was inert, never exercised)', async () => {
-      fetchMock.mockResolvedValue({
-        ok: true,
-        headers: new Headers(),
-        json: async () => ({ deviceId: 'dev-2', tenantId: 'tenant-url-gate', accessToken: 'tok-2', expiresIn: 3600 }),
-      });
+      fetchMock.mockResolvedValue(new Response(
+        JSON.stringify({ deviceId: 'dev-2', tenantId: 'tenant-url-gate', accessToken: 'tok-2', expiresIn: 3600 }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ));
 
       const daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Acme',

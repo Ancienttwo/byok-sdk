@@ -704,7 +704,7 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
 
   beforeAll(async () => {
     substrate = await openSubstrate();
-    await substrate.provision(scope, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [] });
+    await substrate.provision(scope, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [], dreaming: false });
     worker = await startWorker(substrate);
     for (let i = 0; i < 2; i++) {
       const { code } = await worker.admin<{ code: string }>('/host/pairing-code', { scope });
@@ -712,7 +712,7 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
     }
     const [one, two] = devices as [DeviceProcess, DeviceProcess];
     const a = replying(one.deviceId, 'agent-a'), b = replying(two.deviceId, 'agent-b');
-    token = await substrate.provision(scope, OWNER, { models: { local: a, remote: b }, readOnlyToolsets: [] });
+    token = await substrate.provision(scope, OWNER, { models: { local: a, remote: b }, readOnlyToolsets: [], dreaming: false });
     await substrate.store.seed(scope, state => {
       seedCollaboration(state);
       Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });
@@ -810,7 +810,7 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
     const events = () => printed.trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as DeviceEvent & { runtime: string });
     const runnerScope = `runner-${randomUUID()}`;
     const args = ['--server-url', worker!.base, '--root', root, '--runtime', 'stub'];
-    await substrate.provision(runnerScope, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [] });
+    await substrate.provision(runnerScope, OWNER, { models: { default: template('pending', 'main') }, readOnlyToolsets: [], dreaming: false });
     const { code } = await worker!.admin<{ code: string }>('/host/pairing-code', { scope: runnerScope });
     const running = runDeviceRunner([...args, '--pairing-code', code], input, output, new AbortController().signal,
       (config, runtime, send) => {
@@ -833,7 +833,7 @@ describe.skipIf(!RUN)('two device processes against one Worker H Host (#794 D3)'
         .toMatch(/^[a-f0-9]{64}$/u);
       await substrate.store.bindDevice(runnerScope, deviceId);
       const execution = replying(deviceId, 'main');
-      const runnerToken = await substrate.provision(runnerScope, OWNER, { models: { default: execution }, readOnlyToolsets: [] });
+      const runnerToken = await substrate.provision(runnerScope, OWNER, { models: { default: execution }, readOnlyToolsets: [], dreaming: false });
       await substrate.store.seed(runnerScope, state => {
         seedCollaboration(state);
         Object.assign(state.turns.t1!, { status: 'succeeded', conclusion: 'succeeded', reported: true });

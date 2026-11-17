@@ -27,7 +27,7 @@
  * in this file becomes conditional on it not having been called.
  */
 import { describe, expect, it } from 'vitest';
-import { registration, TENANT_A, TENANT_B } from './fixtures';
+import { deviceDigest, registration, TENANT_A, TENANT_B, PI_EXECUTOR } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
@@ -94,7 +94,7 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
       await withCloudComposition(factory, async ({ stores }) => {
         await stores.devices.register(TENANT_A, registration('device-1', { machineId }));
         await stores.devices.register(TENANT_B, registration('device-2', { machineId }));
-        await stores.devices.register(TENANT_B, registration('device-3', { machineId }));
+        await stores.devices.register(TENANT_B, registration('device-3', { machineId, expectedDeviceDigest: await deviceDigest(TENANT_B, 'device-2') }));
 
         expect(await stores.devices.get(TENANT_A, 'device-1')).toBeDefined();
         expect(await stores.devices.list(TENANT_A)).toHaveLength(1);
@@ -157,9 +157,10 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
           devicePublicKey: 'pk-a',
           proofKeyId: 'identity',
           proofKeyEpoch: 0,
+          expectedDeviceDigest: null,
         })).toMatchObject({
-          tenantId: TENANT_A,
-          productId: 'product-a',
+          outcome: 'registered',
+          device: { tenantId: TENANT_A, productId: 'product-a' },
         });
         expect(await stores.pairing.redeemAndRegister({
           pairingCode: 'code-b',
@@ -168,9 +169,10 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
           devicePublicKey: 'pk-b',
           proofKeyId: 'identity',
           proofKeyEpoch: 0,
+          expectedDeviceDigest: null,
         })).toMatchObject({
-          tenantId: TENANT_B,
-          productId: 'product-b',
+          outcome: 'registered',
+          device: { tenantId: TENANT_B, productId: 'product-b' },
         });
       });
     });
@@ -208,7 +210,7 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
 
         expect(await stores.tasks.get(TENANT_B, 'task-1')).toBeUndefined();
         expect(
-          await stores.tasks.claim(TENANT_B, { taskId: 'task-1', deviceId: 'device-9' }),
+          await stores.tasks.claim(TENANT_B, { taskId: 'task-1', deviceId: 'device-9', executor: PI_EXECUTOR }),
         ).toBeUndefined();
         expect(
           await stores.tasks.recordStatus(TENANT_B, { taskId: 'task-1', status: 'failed', agentRef: AGENT_REF }),
@@ -219,6 +221,7 @@ export function runCloudTenantIsolationConformance(factory: CloudCompositionFact
           status: 'offered',
           deviceId: 'device-1',
         });
+        expect(await stores.tasks.get(TENANT_A, 'task-1')).not.toHaveProperty('claimedExecutor');
         expect(await stores.tasks.get(TENANT_B, 'task-1')).toBeUndefined();
       });
     });

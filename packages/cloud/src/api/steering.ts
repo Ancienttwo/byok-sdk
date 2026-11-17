@@ -1,16 +1,18 @@
 import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
+  TASK_STEER_TEXT_MAX_BYTES,
   TaskSteerSealedPayloadSchema,
   createEnvelope,
   requiredReceiverCapabilities,
   type TaskSteerSealedPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from '../errors.js';
-import { uuidFromSha256 } from '../offer-identity.js';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
 import { releaseSealedCiphertext, sealedCiphertextRef } from '../sealed-ciphertext.js';
 import { sameSealedProjection } from '../sealed-comparison.js';
 import { SteerRejectedError } from '../steer-control.js';
+import type { SteerRefusalRecord } from '../stores/ports.js';
 import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 import { isTerminalAttemptStatus, refuseSealedFields, type EnqueuePaths } from './enqueue.js';
 
@@ -35,6 +37,8 @@ export function createSteeringApi({
 }: Dependencies): Pick<ByokCloud,
   | 'steerTask'
   | 'steerSealedTask'
+  | 'readSteerRefusal'
+  | 'listSteerRefusals'
 > {
   /**
    * The steer gate. See {@link ByokCloud.steerTask} for the order and
@@ -46,6 +50,11 @@ export function createSteeringApi({
     payload: { readonly text: string },
   ): Promise<EnqueuedAgentControl> {
     refuseSealedFields(payload, ['sealing', 'sealed', 'steerId'], 'steerSealedTask');
+    // C1 (wire v7): refuse an oversized text here, before a mailbox row
+    // exists, rather than as an envelope the device could never accept.
+    if (new TextEncoder().encode(payload.text).length > TASK_STEER_TEXT_MAX_BYTES) {
+      throw new ByokCloudError('coordination_input_invalid', `Steer text exceeds ${TASK_STEER_TEXT_MAX_BYTES} UTF-8 bytes.`);
+    }
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     const messageId = options.crypto.randomUuid();
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
@@ -95,7 +104,7 @@ export function createSteeringApi({
       throw new ByokCloudError('task_not_found', `Task ${taskId} was not found for this tenant.`);
     }
     if (isTerminalAttemptStatus(attempt.status)) {
-      throw new SteerRejectedError(taskId, 'task_terminal', attempt.status, attempt.claimedRuntime);
+      throw new SteerRejectedError(taskId, 'task_terminal', attempt.status, attempt.claimedExecutor);
     }
     // The owner check rides the same gate as the status check rather than
     // getting a fourth code: an attempt with no owning device has no runtime
@@ -104,18 +113,35 @@ export function createSteeringApi({
     // narrowing, not a second contract.
     const ownerDeviceId = attempt.ownerDeviceId;
     if (attempt.status !== 'running' || ownerDeviceId === undefined) {
-      throw new SteerRejectedError(taskId, 'task_not_running', attempt.status, attempt.claimedRuntime);
+      throw new SteerRejectedError(taskId, 'task_not_running', attempt.status, attempt.claimedExecutor);
     }
     if (attempt.claimedRuntimeCapabilities?.steer !== true) {
       throw new SteerRejectedError(
         taskId,
         'steer_unsupported_runtime',
         attempt.status,
-        attempt.claimedRuntime,
+        attempt.claimedExecutor,
       );
     }
     return ownerDeviceId;
   }
 
-  return { steerTask, steerSealedTask };
+  async function readSteerRefusal(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined> {
+    return tenantStoresFor(controlPlane(tenant), root).steerRefusals.get(taskId, steerMessageId);
+  }
+
+  async function listSteerRefusals(
+    tenant: TenantId,
+    query: { readonly taskId: string; readonly afterRevision: number; readonly limit: number },
+  ): Promise<readonly SteerRefusalRecord[]> {
+    if (!Number.isSafeInteger(query.afterRevision) || query.afterRevision < 0) {
+      throw new ByokCloudError('coordination_input_invalid', `Steer refusal afterRevision must be a non-negative integer; received ${String(query.afterRevision)}.`);
+    }
+    if (!Number.isSafeInteger(query.limit) || query.limit <= 0) {
+      throw new ByokCloudError('coordination_input_invalid', `Steer refusal list limit must be a positive integer; received ${String(query.limit)}.`);
+    }
+    return tenantStoresFor(controlPlane(tenant), root).steerRefusals.list(query);
+  }
+
+  return { steerTask, steerSealedTask, readSteerRefusal, listSteerRefusals };
 }

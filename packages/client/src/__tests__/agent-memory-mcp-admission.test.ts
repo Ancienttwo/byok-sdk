@@ -60,7 +60,7 @@ it.skipIf(process.platform !== 'linux' && !isAgentMemoryFilesystemHelperSupporte
     await daemon.pair('pairing-code'); await daemon.start();
     await server.waitFor(envelope => envelope.type === 'conn.hello');
     server.pushLongPollEvent(createEnvelope('task.offer', {
-      instruction: 'No external action', runtime: 'pi', agentRef: { agentId: 'agent', profileRevision: '1' }, ...FRESH_OFFER,
+      instruction: 'No external action', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'agent', profileRevision: '1' }, ...FRESH_OFFER,
     }, { taskId: 'memory-admission-task', seq: server.nextSeq() }));
     const result = await server.waitFor(envelope => envelope.task_id === 'memory-admission-task'
       && (envelope.type === 'task.started' || envelope.type === 'task.decline'));

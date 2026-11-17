@@ -8,6 +8,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope, decodeEnvelope, encodeEnvelope, PROTOCOL_VERSION, type Envelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
+import { AuthManager } from '../daemon/auth-manager';
 import { SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { journalHash, type LocalTerminalRecord } from '../daemon/journal/journal';
 import { CursorStore } from '../daemon/cursor-store';
@@ -24,6 +25,16 @@ async function config(serverUrl: string): Promise<DaemonConfig> {
   return { serverUrl, productId: 'terminal-boundaries', productName: 'Terminal boundaries',
     localAgentRelease: { version: '0.0.0-test' },
     storeDir: path.join(root, 'store'), storage: { journal: { maxRecordBytes: 2048 } } };
+}
+/** Access tokens live only in the daemon's memory (#2045): the test exchanges its own from the stored enrollment. */
+async function deviceToken(cfg: DaemonConfig): Promise<string> {
+  const auth = new AuthManager({ serverUrl: cfg.serverUrl, store: createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId) });
+  await auth.loadExisting();
+  try {
+    return await auth.getValidAccessToken();
+  } finally {
+    await auth.stop();
+  }
 }
 async function post(url: string, token: string, envelope: Envelope) {
   const response = await fetch(`${url}/byok/messages`, { method: 'POST',
@@ -56,7 +67,7 @@ describe('terminal durability and actual harness boundaries', () => {
     await daemon.start();
     const identity = { tenantId: record.tenantId, deviceId: record.deviceId, productId: cfg.productId };
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId: 'pending-decline', seq });
+    const offer = createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId: 'pending-decline', seq });
     server.send(offer);
     await vi.waitFor(() => expect(candidates.length).toBeGreaterThan(0));
     expect((await journal.readTask('pending-decline', identity))?.localState).toBe('received');
@@ -95,7 +106,7 @@ describe('terminal durability and actual harness boundaries', () => {
     await daemon.pair('pairing-code');
     await daemon.start();
     const taskId = 'queued-past-stop';
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(),  instruction: 'run once', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
     await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
     fail = true;
     adapter.sessions[0]!.emit({ type: 'progress', text: 'the real result' });
@@ -124,15 +135,16 @@ describe('terminal durability and actual harness boundaries', () => {
         const pairing = await cloud.createPairingCode();
         await daemon.pair(pairing.code);
         const device = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
-        await post(cloud.url, device.accessToken, createEnvelope('conn.hello', {
+        const accessToken = await deviceToken(cfg);
+        await post(cloud.url, accessToken, createEnvelope('conn.hello', {
           deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [PROTOCOL_VERSION],
           capabilities: ['custom-harness', 'agent-home-contract'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],
         }));
-        // Never run, only recovered from the crash image: the resume lane carries an offer that may name no target.
+        // Never run, only recovered from the crash image: the offer names the harness or lets the device pick.
         const agentRef = freshTestAgentRef();
         const offer = await cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: {
           instruction: 'interrupted', agentRef, session: { mode: 'resume', sessionRef: 'interrupted-session' },
-          ...(explicit ? { harnessId: 'acme-harness' } : {}),
+          target: explicit ? { lane: 'harness', harnessId: 'acme-harness' } : { lane: 'auto' },
         } });
         const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir! });
         const bytes = encodeEnvelope(offer.envelope);
@@ -140,14 +152,17 @@ describe('terminal durability and actual harness boundaries', () => {
           taskId: offer.taskId, envelopeId: offer.envelope.id, seq: offer.seq, bytes, bytesHash: journalHash(bytes),
           opensTask: true, receivedAt: new Date().toISOString() });
         await journal.recordAdmission({ taskId: offer.taskId, admitted: true, claimedRuntime: 'acme-harness', decidedAt: new Date().toISOString() });
-        if (claimed) await post(cloud.url, device.accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, harnessId: 'acme-harness', agentRef }, { taskId: offer.taskId }));
+        if (claimed) await post(cloud.url, accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, executor: { kind: 'harness', harnessId: 'acme-harness' }, agentRef }, { taskId: offer.taskId }));
         await journal.close(); // Persisted crash image; no graceful task finalization.
         await daemon.start();
         await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
         const terminal = decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!);
-        expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', harnessId: 'acme-harness', retryable: false,
+        expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', executor: { kind: 'harness', harnessId: 'acme-harness' }, retryable: false,
           recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } });
-        expect((await cloud.readTaskAttempt(offer.taskId))?.claimedHarnessId).toBe(claimed ? 'acme-harness' : undefined);
+        // An unclaimed recovery settles the attempt without making the device its owner.
+        const attempt = await cloud.readTaskAttempt(offer.taskId);
+        expect(attempt?.claimedExecutor).toEqual(claimed ? { kind: 'harness', harnessId: 'acme-harness' } : undefined);
+        expect(attempt?.ownerDeviceId).toBe(claimed ? device.deviceId : undefined);
         expect(adapter.startCalls).toHaveLength(0);
       });
     }
@@ -165,7 +180,7 @@ describe('terminal durability and actual harness boundaries', () => {
     adapter.sessions[0]!.emit({ type: 'progress', text: 'x'.repeat(8192) });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
-    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, harnessId: 'acme-harness' });
+    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, executor: { kind: 'harness', harnessId: 'acme-harness' } });
     expect(adapter.startCalls).toHaveLength(1);
   });
 });
@@ -187,8 +202,7 @@ it('R1/R6: committed decline settles its failed receipt after cancellation filte
   cleanup.push(async () => { fail = false; await daemon.stop(); await journal.close(); });
   const device = await daemon.pair((await cloud.createPairingCode()).code);
   // Both offers precede the daemon's first poll, so the capability snapshot fresh Agent admission reads is posted by hand.
-  const credentials = (await createTestDeviceStore(cfg.storeDir!, undefined, cfg.productId).credentials.read())!;
-  await post(cloud.url, credentials.accessToken, createEnvelope('conn.hello', {
+  await post(cloud.url, await deviceToken(cfg), createEnvelope('conn.hello', {
     deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [PROTOCOL_VERSION],
     capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection'],
   }));

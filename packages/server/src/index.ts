@@ -8,7 +8,14 @@ import type { WakeRecord, WakeScheduleInput, WakeScheduleResult } from './wakes/
 export { WakeHookMissingError, WakeConflictError, WakeInputError, WakeClosedError, WAKE_MAX_FUTURE_MS } from './wakes/types.js';
 export type { DueWake, WakeRecord, WakeScheduleInput, WakeScheduleResult, WakeConsumer, WakeInputErrorCode } from './wakes/types.js';
 import { MaintenanceScheduler, assertMaintenanceInterval, DEFAULT_MAINTENANCE_INTERVAL_MS } from './maintenance-scheduler.js';
-import { resolveRetentionPolicy, DEFAULT_MAINTENANCE_LIMIT, ByokCloudError, type MaintenanceReport } from '@byok-sdk/cloud';
+import {
+  resolveRetentionPolicy,
+  DEFAULT_LONG_POLL_HOLD_MS,
+  DEFAULT_MAINTENANCE_LIMIT,
+  DEFAULT_MAX_BLOB_SIZE_BYTES,
+  ByokCloudError,
+  type MaintenanceReport,
+} from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import {
@@ -31,6 +38,7 @@ import {
   type InboundRefusalReason,
   type PairingCodeInfo,
   type PendingApproval,
+  type SteerRefusalRecord,
   type TaskAttempt,
   type TenantId,
   type TerminalResult,
@@ -44,11 +52,13 @@ import {
   type AgentRef,
   type AgentMessagePublishPayload,
   type AgentMessageDispositionPayload,
+  type ClaimedExecutor,
+  readSteerRefusalReason,
   type TaskState,
 } from '@byok-sdk/protocol';
 import { TaskEventRelay } from './relay.js';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot.js';
-import { composeFacadeStores, serverTenantId, DEFAULT_MAX_BLOB_SIZE_BYTES } from './stores.js';
+import { composeFacadeStores, serverTenantId } from './stores.js';
 import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle.js';
 import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events.js';
 import type {
@@ -64,6 +74,7 @@ import type {
   HubStats,
   MachineInfo,
   ServerTaskEvent,
+  SteerRefusal,
   TaskEventEntry,
   TaskHandle,
   TaskResult,
@@ -83,6 +94,7 @@ export type {
   HubStats,
   MachineInfo,
   ServerTaskEvent,
+  SteerRefusal,
   TaskEventEntry,
   TaskHandle,
   TaskResult,
@@ -123,8 +135,13 @@ export type { SqliteSchemaErrorCode } from './sqlite-support.js';
 export { inspectSqliteStore } from './store-compatibility.js';
 export type { RateLimiterOptions } from './rate-limiter.js';
 
-/** `GET /byok/events` hold duration (§8): ~50s unless overridden (e.g. for tests). */
-const DEFAULT_LONG_POLL_HOLD_MS = 50_000;
+/** Default page of `tasks.listSteerRefusals`. */
+const DEFAULT_STEER_REFUSAL_PAGE = 100;
+
+function toSteerRefusal(record: SteerRefusalRecord): SteerRefusal {
+  return { messageId: record.steerMessageId, reason: readSteerRefusalReason(record.reason), at: record.recordedAt, revision: record.revision };
+}
+
 /**
  * Default presence lease beyond one long-poll hold: a poll renews presence once,
  * when it starts, so a device must re-poll within this slack after a full hold
@@ -255,10 +272,13 @@ export interface ByokServer {
      * this instance. A cursor survives a server restart on SQLite storage.
      *
      * Each read window yields the pending approval request when it is new, the
-     * state when it changed, then the activity log in revision order. State is
+     * steer refusals not yet yielded, the state when it changed, then the
+     * activity log in revision order. Every read, `from: 'state'` included,
+     * starts with all of the task's recorded steer refusals. State is
      * the current fact, coalesced: a reader that was not reading while a task
      * moved through several states sees only where it is now. A terminal state
-     * comes last, after the log was read past it, and ends the feed.
+     * comes last, after the refusals and the log were read past it, and ends
+     * the feed; a refusal recorded later reads from {@link tasks.readSteerRefusal}.
      *
      * The read starts after `after`; with `from: 'state'`, at the pending
      * request and current state, followed only by activity logged from then
@@ -274,6 +294,18 @@ export interface ByokServer {
      * a cursor this server did not hand out for this task.
      */
     events(taskId: string, options?: { after?: string; from?: 'state'; signal?: AbortSignal }): AsyncIterable<TaskEventEntry>;
+    /**
+     * The device's refusal of the steer `messageId` (the id
+     * {@link TaskHandle.steer} resolved with), or `undefined` when none was
+     * recorded. The first report is the fact; a replay does not change it.
+     */
+    readSteerRefusal(taskId: string, messageId: string): Promise<SteerRefusal | undefined>;
+    /**
+     * The task's steer refusals with `revision > afterRevision` (default 0),
+     * ascending, at most `limit` (default 100). Reads the refusals a device
+     * reported after the task's event feed ended.
+     */
+    listSteerRefusals(taskId: string, options?: { afterRevision?: number; limit?: number }): Promise<readonly SteerRefusal[]>;
     /**
      * One bounded page, keyset-paged by task id. Paged rather than "all of
      * them" because the underlying store is: an unbounded `list()` would have
@@ -472,11 +504,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
    * refused steer reports the same `TaskState` the snapshot does, because it is
    * literally the snapshot's, read at the moment of the refusal.
    */
-  async function readTaskState(taskId: string): Promise<{ state: TaskState; at: string } | undefined> {
+  async function readTaskState(taskId: string): Promise<{ state: TaskState; at: string; executor?: ClaimedExecutor } | undefined> {
     const attempt = await cloud.readTaskAttempt(tenant, taskId);
     if (attempt === undefined) return undefined;
-    const { state, updatedAt } = await projectTask(attempt);
-    return { state, at: updatedAt };
+    const { state, updatedAt, claimedExecutor } = await projectTask(attempt);
+    return { state, at: updatedAt, ...(claimedExecutor === undefined ? {} : { executor: claimedExecutor }) };
   }
 
   /**
@@ -490,7 +522,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     const { snapshot, timeline, pending } = await projectTaskReads(attempt);
     if (pending === undefined) return { state: snapshot.state, at: snapshot.updatedAt };
     const event = timeline?.entries.find((entry) => entry.revision === pending.revision)?.event;
-    const request: ServerTaskEvent | undefined = event?.type === 'approval_requested' && 'summary' in event && event.approvalId !== undefined
+    const request: ServerTaskEvent | undefined = event?.type === 'approval_requested' && 'summary' in event
       ? { kind: 'await_approval', summary: event.summary, approvalId: event.approvalId }
       : undefined;
     return { state: snapshot.state, at: snapshot.updatedAt, approval: { revision: pending.revision, ...(request === undefined ? {} : { request }) } };
@@ -525,7 +557,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     input: DispatchInput,
   ): Promise<TaskHandle> {
     const { sessionRef, agentRef, egressPolicy, messageEgress, terminalProjection,
-      homeAccess, agentMemory, agentMessageContext, dispatchSelection, requiredToolsets } = input;
+      homeAccess, agentMemory, agentMessageContext, target, requiredToolsets } = input;
     if (messageEgress === undefined && agentMessageContext !== undefined) {
       throw new ByokCloudError('coordination_input_invalid', 'agentMessageContext requires messageEgress');
     }
@@ -539,12 +571,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       throw new ByokCloudError('coordination_input_invalid', 'dispatch requires an explicit deviceId (non-empty string)');
     }
 
-    const common = {
-      ...(input.harnessId === undefined ? {} : { harnessId: input.harnessId }),
-      instruction: input.instruction,
-      ...(input.runtime === undefined ? {} : { runtime: input.runtime }),
-      ...(dispatchSelection === undefined ? {} : { dispatchSelection }),
-    };
+    const common = { instruction: input.instruction, target };
 
     // A known id lets the relay exist before enqueue can make the offer
     // observable. Inbound claim/terminal traffic racing append is buffered by
@@ -604,11 +631,17 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     liveReads.add(reading);
     return reading.finally(() => { liveReads.delete(reading); });
   }
+  async function listSteerRefusals(taskId: string, afterRevision: number, limit: number): Promise<readonly SteerRefusal[]> {
+    const records = await cloud.listSteerRefusals(tenant, { taskId, afterRevision, limit });
+    return records.map(toSteerRefusal);
+  }
+
   const eventSources: TaskEventSources = {
     readFacts: (taskId) => track(readEventFacts(taskId)),
     readActivity: (taskId, after) => track(cloud.readActivity(tenant, taskId, after === undefined ? {} : {
       after: { version: 1, tenantId: tenant, taskId, generation: after.generation, revision: after.revision },
     })),
+    readSteerRefusals: (taskId, afterRevision, limit) => track(listSteerRefusals(taskId, afterRevision, limit)),
   };
   const eventDeps: TaskEventDeps = { relay, tenant, sources: eventSources, wake: composition.taskEventsWake, shutdown: readShutdown.signal };
 
@@ -793,6 +826,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       activity(taskId, options) { return cloud.readActivity(tenant, taskId, options); },
       approvalTimeline(taskId) { return cloud.readApprovalTimeline(tenant, taskId); },
       events(taskId, options) { return readTaskEvents(eventDeps, taskId, options); },
+      async readSteerRefusal(taskId, messageId) {
+        const record = await cloud.readSteerRefusal(tenant, taskId, messageId);
+        return record === undefined ? undefined : toSteerRefusal(record);
+      },
+      listSteerRefusals(taskId, options = {}) {
+        return listSteerRefusals(taskId, options.afterRevision ?? 0, options.limit ?? DEFAULT_STEER_REFUSAL_PAGE);
+      },
       async get(taskId: string): Promise<TaskSnapshot | undefined> {
         const attempt = await cloud.readTaskAttempt(tenant, taskId);
         return attempt === undefined ? undefined : projectTask(attempt);

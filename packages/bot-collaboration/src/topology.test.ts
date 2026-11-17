@@ -28,7 +28,7 @@ function options(): BotOptions {
   const base = template(fixture!.deviceId);
   return { botId: 'main', execution: { ...base, agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'topology' },
     payload: { ...base.payload, messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 } } },
-  connector: async () => null, now, hostIntents: { research: () => {} }, ...extra };
+  connector: async () => null, now, hostIntents: { research: () => {} }, dreaming: false, ...extra };
 }
 async function setup(rest: Partial<BotOptions> = {}): Promise<BotCollaboration> {
   offset = 0; extra = rest;

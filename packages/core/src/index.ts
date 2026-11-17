@@ -19,36 +19,38 @@ export {
   isTenantId,
   tenantKey,
   TENANT_ID_MAX_LENGTH,
-  TENANT_KEY_SEPARATOR,
 } from './tenant.js';
 export type { TenantId } from './tenant.js';
 
 export {
-  PRINCIPAL_KINDS,
-  isDevicePrincipal,
-  isControlPlanePrincipal,
   principalTenant,
 } from './principals.js';
 export type {
   ControlPlanePrincipal,
   DevicePrincipal,
   Principal,
-  PrincipalKind,
 } from './principals.js';
 
 // Errors (single taxonomy)
-export { ByokCoreError, CoreConflictError, CORE_ERROR_CODES, isCoreError, isCoreConflictError } from './errors.js';
+export {
+  ByokCoreError,
+  CoreConflictError,
+  isCoreError,
+  isCoreConflictError,
+} from './errors.js';
 export type { CoreErrorCode } from './errors.js';
 
 // Canonical instants (the format every caller-supplied timestamp must be in)
 export {
-  CANONICAL_TIMESTAMP_PATTERN,
   assertCanonicalTimestamp,
   isCanonicalTimestamp,
 } from './time.js';
 
 // Mailbox (§12.7.3)
-export { MAILBOX_MESSAGE_STATES, MAILBOX_STREAM_CLOSE_CAUSES, MailboxStreamClosedError } from './mailbox.js';
+export {
+  MAILBOX_STREAM_CLOSE_CAUSES,
+  MailboxStreamClosedError,
+} from './mailbox.js';
 export type {
   MailboxAdmission,
   MailboxAdvanceCursorInput,
@@ -70,9 +72,11 @@ export type {
 } from './mailbox.js';
 
 // Board coordination (§12.3)
-export { BOARD_STATUSES, BOARD_TRANSITIONS, isLegalBoardTransition } from './board.js';
+export {
+  BOARD_STATUSES,
+  isLegalBoardTransition,
+} from './board.js';
 export type {
-  BoardAssignee,
   BoardClaimInput,
   BoardItem,
   BoardItemInput,
@@ -116,8 +120,6 @@ export type {
 export {
   CONTENT_HASH_PATTERN,
   OBJECT_KEY_PREFIX_PATTERN,
-  OBJECT_STATES,
-  OBJECT_STATE_TRANSITIONS,
   contentHash,
   isContentHash,
   isLegalObjectTransition,
@@ -141,9 +143,6 @@ export type {
 export {
   STORAGE_ERROR_CODES,
   STORAGE_ERROR_HTTP_STATUS,
-  STORAGE_RESERVATION_STATES,
-  STORAGE_WRITE_KINDS,
-  STORAGE_WRITE_POSTURES,
 } from './quota.js';
 export type {
   QuotaStore,
@@ -163,7 +162,6 @@ export type {
 
 // Capability declaration (ADR-010)
 export {
-  CAPABILITY_DECLARATION_SCHEMA_ID,
   CAPABILITY_NAME_PATTERN,
   CapabilityDeclarationSchema,
   assertCapability,
@@ -176,22 +174,12 @@ export type { CapabilityDeclaration } from './capabilities.js';
 // channel a deployment declares as `skills.pack` (ADR-010) and a paired device
 // installs. Schema, limits, and the evaluation point for every one of them.
 export {
-  SKILL_FRONTMATTER_FIELDS,
-  SKILL_PACK_DESCRIPTION_MAX_LENGTH,
   SKILL_PACK_ENTRY_PATH,
   SKILL_PACK_FILE_MAX_BYTES,
-  SKILL_PACK_FILE_PATH_MAX_LENGTH,
   SKILL_PACK_FILE_PATH_PATTERN,
   SKILL_PACK_FORBIDDEN_FIELDS,
   SKILL_PACK_MANIFEST_SCHEMA_ID,
   SKILL_PACK_MAX_BYTES,
-  SKILL_PACK_MAX_FILES,
-  SKILL_PACK_NAME_MAX_LENGTH,
-  SKILL_PACK_NAME_PATTERN,
-  SKILL_PACK_REJECTIONS,
-  SKILL_PACK_VERSION_PATTERN,
-  SkillPackFileSchema,
-  SkillPackManifestSchema,
   checkSkillPackEntry,
   checkSkillPackFileContent,
   checkSkillPackManifest,
@@ -201,15 +189,12 @@ export {
   skillPackContentHashInput,
 } from './skill-pack.js';
 export type {
-  ObservedSkillPackFile,
-  SkillFrontmatter,
   SkillPackCheck,
   SkillPackFile,
   SkillPackFileContent,
   SkillPackListQuery,
   SkillPackManifest,
   SkillPackPublishInput,
-  SkillPackRejection,
   SkillPackStore,
 } from './skill-pack.js';
 
@@ -217,40 +202,29 @@ export type {
 export { CORE_STORE_NAMES } from './stores.js';
 export type { Clock, CoreStoreName, CoreStores, MutableClock } from './stores.js';
 
-// The port method inventory (I7). Contract data, shipped rather than test-only,
-// so `@byok-sdk/conformance` can assert compositions against the same table
-// `__tests__/constraints.test.ts` asserts the source interfaces against —
-// without a `core → conformance` cycle.
+// The port method inventory is shared by source constraints and composition
+// conformance. Source interface names belong to the constraints test.
 export {
-  CORE_NON_COMPOSITION_PORT_NAMES,
-  CORE_PORT_INTERFACES,
   CORE_PORT_METHODS,
 } from './ports-contract.js';
 
 // Device proof (§12.6.3, sprint §S6.2)
 export {
-  DEVICE_PROOF_ALGORITHMS,
   DEVICE_PROOF_DOMAIN_PREFIX,
   DEVICE_PROOF_HEADER,
   DEVICE_PROOF_SCHEMA_ID,
-  DEVICE_PROOF_VERSION,
-  DeviceProofEnvelopeV1Schema,
   DeviceProofProtectedClaimsSchema,
   canonicalizeJson,
   canonicalizeJsonBytes,
   deviceProofCanonicalClaims,
-  deviceProofCanonicalJson,
   deviceProofSigningInput,
   parseDeviceProofEnvelope,
 } from './attestation.js';
 export type {
-  DeviceProofAlgorithm,
   DeviceProofEnvelopeV1,
   DeviceProofProtectedClaims,
   DeviceProofVerifier,
-  DeviceProofVerifyInput,
   JsonObject,
-  JsonPrimitive,
   JsonValue,
 } from './attestation.js';
 
@@ -261,7 +235,6 @@ export type {
 // comment for why none of it is folded into the device proof above.
 export {
   authenticateDeviceAssertion,
-  DEVICE_ASSERTION_ALGORITHMS,
   DEVICE_ASSERTION_AUDIENCE_MAX_BYTES,
   DEVICE_ASSERTION_DEFAULT_TTL_MS,
   DEVICE_ASSERTION_DOMAIN_PREFIX,
@@ -269,9 +242,6 @@ export {
   DEVICE_ASSERTION_SCHEMA_ID,
   DEVICE_ASSERTION_VERSION,
   DeviceAssertionClaimsSchema,
-  DeviceAssertionEnvelopeV1Schema,
-  deviceAssertionCanonicalClaims,
-  deviceAssertionCanonicalJson,
   deviceAssertionSigningInput,
   parseDeviceAssertionEnvelope,
   verifyDeviceAssertion,
@@ -282,37 +252,24 @@ export {
 // own schema.
 export {
   authenticateTaskAssertion,
-  TASK_ASSERTION_AGENT_REF_MAX_BYTES,
   TASK_ASSERTION_DOMAIN_PREFIX,
   TASK_ASSERTION_SCHEMA_ID,
-  TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH,
-  TASK_ASSERTION_VERSION,
   TaskAssertionAgentRefSchema,
   TaskAssertionClaimsSchema,
-  TaskAssertionEnvelopeV1Schema,
   parseTaskAssertionEnvelope,
-  taskAssertionCanonicalClaims,
-  taskAssertionCanonicalJson,
   taskAssertionSigningInput,
   verifyTaskAssertion,
 } from './device-assertion.js';
 export type {
-  AuthenticateDeviceAssertionDeps,
-  AuthenticatedAssertion,
   AuthenticatedDeviceAssertion,
   AuthenticatedTaskAssertion,
-  DeviceAssertionAlgorithm,
-  DeviceAssertionAuthorityRow,
   DeviceAssertionClaims,
   DeviceAssertionDeviceRow,
   DeviceAssertionEnvelopeV1,
   DeviceAssertionExpectedBinding,
   DeviceAssertionReplayConsumeInput,
   DeviceAssertionReplayAuthority,
-  DeviceAssertionReplaySchemaId,
   DeviceAssertionVerifier,
-  DeviceAssertionVerifyDeps,
-  DeviceAssertionVerifyInput,
   TaskAssertionAgentRef,
   TaskAssertionClaims,
   TaskAssertionEnvelopeV1,
@@ -323,50 +280,28 @@ export type {
 export {
   PROVIDER_PROVISIONING_MAX_TTL_MS,
   PROVIDER_PROVISIONING_OPERATIONS,
-  PROVIDER_PROVISIONING_REQUEST_VERSION,
-  PROVIDER_PROVISIONING_SECRET_OPERATIONS,
-  PROVIDER_SECRET_HPKE_INFO,
-  PROVIDER_SECRET_HPKE_SUITE,
-  PROVIDER_SECRET_MAX_BYTES,
-  PROVIDER_SECRET_MAX_PADDED_BYTES,
-  PROVIDER_SECRET_PAD_BLOCK_BYTES,
-  ProviderProvisioningConfigV1Schema,
-  ProviderProvisioningExpectedProfileSchema,
-  ProviderProvisioningHeaderV1Schema,
-  ProviderProvisioningIdentityRevisionSchema,
-  ProviderProvisioningRequestV1Schema,
-  SEALING_KEY_ID_LENGTH,
-  SealedProviderSecretV1Schema,
-  SealingKeyClaimV1Schema,
-  SealingKeyIdSchema,
   SealingPublicJwkSchema,
   assertProviderProvisioningConfigDigest,
   deriveSealingKeyId,
   openProviderProvisioningSecret,
   parseProviderProvisioningRequest,
-  providerProvisioningConfigDigest,
   providerProvisioningRequestDigest,
-  providerSecretAadBytes,
   sealProviderProvisioningRequest,
   sealingKeyClaimCanonicalBytes,
 } from './sealed-provider-secret.js';
 export type {
-  ProviderProvisioningConfigV1,
   ProviderProvisioningExpectedProfile,
-  ProviderProvisioningHeaderV1,
   ProviderProvisioningOperation,
   ProviderProvisioningRequestV1,
-  ProviderSecretRecipient,
-  SealProviderProvisioningRequestInput,
-  SealedProviderSecretV1,
-  SealingKeyClaimV1,
   SealingPublicJwk,
   WebCryptoKey,
 } from './sealed-provider-secret.js';
 
 // Host-approved Agent memory intent identity digest
-export { AGENT_MEMORY_INTENT_DIGEST_VERSION, agentMemoryIntentOperationDigest } from './agent-memory-intent.js';
-export type { AgentMemoryIntentDigestInput } from './agent-memory-intent.js';
+export {
+  agentMemoryIntentOperationDigest,
+} from './agent-memory-intent.js';
+
 
 // Nonce signing domain (§6.2) — the one authority the daemon, the hosted
 // surface, and the reference server all sign/verify against.

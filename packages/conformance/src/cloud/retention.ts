@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_APPROVAL_TIMELINE_TTL_MS, REQUEST_RECEIPT_PREFIXES } from '@byok-sdk/cloud';
-import { TENANT_A, TENANT_B, registration } from './fixtures';
+import { TENANT_A, TENANT_B, registration, PI_EXECUTOR } from './fixtures';
 import { withCloudComposition, type CloudCompositionFactory } from './harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
@@ -55,14 +55,15 @@ export function runCloudRetentionConformance(name: string, factory: CloudComposi
         const expiresAt = handle.now();
         for (const code of ['used', 'unused-1', 'unused-2']) await stores.pairingCodes.issue(TENANT_A, { code, productId: 'product-1', expiresAt });
         const device = registration('paired');
-        const input = { pairingCode: 'used', deviceId: device.deviceId, deviceName: device.deviceName, devicePublicKey: device.devicePublicKey, proofKeyId: device.proofKeyId, proofKeyEpoch: device.proofKeyEpoch };
+        const input = { pairingCode: 'used', deviceId: device.deviceId, deviceName: device.deviceName, devicePublicKey: device.devicePublicKey, proofKeyId: device.proofKeyId, proofKeyEpoch: device.proofKeyEpoch, expectedDeviceDigest: null };
         const enrolled = await stores.pairing.redeemAndRegister(input);
-        expect(enrolled).toBeDefined();
+        expect(enrolled).toMatchObject({ outcome: 'registered' });
         expect(await stores.pairingCodes.collectExpired(TENANT_A, { now: handle.now(), limit: 1 })).toEqual({ removed: 0, expired: 0, releasedBytes: 0n, more: false });
         await handle.advanceTime(1);
         expect(await stores.pairingCodes.collectExpired(TENANT_A, { now: handle.now(), limit: 1 })).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: true });
         expect(await stores.pairingCodes.collectExpired(TENANT_A, { now: handle.now(), limit: 1 })).toEqual({ removed: 1, expired: 0, releasedBytes: 0n, more: false });
-        expect(await stores.pairing.redeemAndRegister(input)).toEqual(enrolled);
+        // A retry mints a fresh device id; the completion replays all the same.
+        expect(await stores.pairing.redeemAndRegister({ ...input, deviceId: 'paired-retry' })).toEqual(enrolled);
       });
     });
     for (const kind of ['activity', 'approvals'] as const) it(`bounds expired ${kind} tails and protects another tenant`, async () => {
@@ -79,7 +80,7 @@ export function runCloudRetentionConformance(name: string, factory: CloudComposi
           // An approval timeline expires only after its task's output closes (#1113 A3).
           const close = async (tenant: typeof TENANT_A, taskId: string) => {
             await handle.stores.tasks.reserveAgentOffer(tenant, { taskId, deviceId: 'device-1', agentRef: AGENT_REF });
-            await handle.stores.tasks.claim(tenant, { taskId, deviceId: 'device-1' });
+            await handle.stores.tasks.claim(tenant, { taskId, deviceId: 'device-1', executor: PI_EXECUTOR });
             await handle.stores.tasks.recordStatus(tenant, { taskId, status: 'complete', agentRef: AGENT_REF });
           };
           for (let n = 1; n <= 3; n++) await close(TENANT_A, `tail-${n}`);

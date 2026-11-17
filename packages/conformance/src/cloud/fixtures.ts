@@ -7,9 +7,13 @@
  */
 import { tenantId, type TenantId } from '@byok-sdk/core';
 import type { DeviceRegistration } from '@byok-sdk/cloud';
+import { pairDeviceDigest, type ClaimedExecutor } from '@byok-sdk/protocol';
 
 export const TENANT_A: TenantId = tenantId('tenant-a');
 export const TENANT_B: TenantId = tenantId('tenant-b');
+
+/** The executor a claim reports when a case does not care which runtime ran. */
+export const PI_EXECUTOR: ClaimedExecutor = { kind: 'runtime', runtimeId: 'pi' };
 
 /** Ed25519 public keys are opaque to every store here; only their identity matters. */
 export function registration(deviceId: string, overrides: Partial<DeviceRegistration> = {}): DeviceRegistration {
@@ -20,8 +24,14 @@ export function registration(deviceId: string, overrides: Partial<DeviceRegistra
     devicePublicKey: `pk-${deviceId}`,
     proofKeyId: 'identity',
     proofKeyEpoch: 0,
+    expectedDeviceDigest: null,
     ...overrides,
   };
+}
+
+/** The registration fence value naming `deviceId` as the machine's current device (#2045). */
+export function deviceDigest(tenant: TenantId, deviceId: string, productId = 'product-1'): Promise<string> {
+  return pairDeviceDigest({ tenantId: tenant, productId, deviceId });
 }
 
 /**

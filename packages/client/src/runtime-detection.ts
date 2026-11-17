@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
-import type { RuntimeId } from '@byok-sdk/protocol';
+import type { ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types.js';
 
@@ -268,12 +268,12 @@ export async function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: 
   return validateRuntimeDetectResult(await adapter.detect(signal));
 }
 
-/** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by `harnessId`. */
+/** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by a `harness` target. */
 export function isWireRuntimeId(id: string): id is RuntimeId {
   return (RUNTIME_IDS as readonly string[]).includes(id);
 }
 
-/** The task selection that reaches this adapter: `runtime` for a wire runtime id, else `harnessId`. Never both. */
-export function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): { readonly runtime: RuntimeId } | { readonly harnessId: string } {
-  return isWireRuntimeId(descriptor.id) ? { runtime: descriptor.id } : { harnessId: descriptor.id };
+/** The `task.offer` target that reaches this adapter: the `runtime` lane for a wire runtime id, else the `harness` lane. */
+export function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): Extract<ExecutionTarget, { readonly lane: 'runtime' | 'harness' }> {
+  return isWireRuntimeId(descriptor.id) ? { lane: 'runtime', runtimeId: descriptor.id } : { lane: 'harness', harnessId: descriptor.id };
 }

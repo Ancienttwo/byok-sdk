@@ -79,6 +79,11 @@
     "nextStep": "Check productId and SDK compatibility with the server, or pair again.",
     "anchor": "#troubleshooting"
   },
+  "protocol_negotiation_failed": {
+    "retryable": false,
+    "nextStep": "Read the HTTP status in the halt. On 404, check the server base URL and that the Host mounts the messages route; otherwise upgrade the server side and the daemons to the same wire protocol major.",
+    "anchor": "#troubleshooting"
+  },
   "replay_cursor_too_old": {
     "retryable": false,
     "nextStep": "Pair again or use the Host operator recovery procedure for expired history.",

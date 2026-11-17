@@ -58,10 +58,8 @@ describe('device pairing + Ed25519 keypair (protocol §6.1)', () => {
     expect(onDisk.devicePrivateKeyPem).toBeUndefined();
     expect(onDisk.accessToken).toBeUndefined();
     expect(onDisk.devicePublicKey).toBe(record.devicePublicKey);
-    expect(await store.credentials.read()).toMatchObject({
-      accessToken: record.accessToken,
-      devicePrivateKeyPem: record.devicePrivateKeyPem,
-    });
+    // The OS-held record is the enrollment alone; the access token stays in memory (#2045).
+    expect(await store.credentials.read()).toEqual(record);
 
     auth.stop();
   });
@@ -241,8 +239,8 @@ describe('access token renewal (protocol §6.2)', () => {
     const auth = new AuthManager({ serverUrl: server.url, store: createTestDeviceStore(storeDir) });
 
     const record = await auth.pair('pairing-code');
-    const staleToken = record.accessToken;
-    expect(await auth.getValidAccessToken()).toBe(staleToken);
+    const staleToken = await auth.getValidAccessToken();
+    expect(staleToken).toBe(server.currentAccessToken(record.deviceId));
 
     // Simulate the server invalidating the cached token out-of-band (e.g. a
     // forced rotation) — the client's own expiry bookkeeping has no way to
@@ -265,21 +263,24 @@ describe('access token renewal (protocol §6.2)', () => {
     const record = await auth.pair('pairing-code');
     server.rotateDeviceToken(record.deviceId);
 
-    let renewalSaveReached!: () => void;
+    // Renewal persists nothing (#2045); its last step is the enrollment check's read.
+    let renewalCheckReached!: () => void;
     const reached = new Promise<void>((resolve) => {
-      renewalSaveReached = resolve;
+      renewalCheckReached = resolve;
     });
-    let releaseRenewalSave!: () => void;
-    const saveGate = new Promise<void>((resolve) => {
-      releaseRenewalSave = resolve;
+    let releaseRenewalCheck!: () => void;
+    const checkGate = new Promise<void>((resolve) => {
+      releaseRenewalCheck = resolve;
     });
-    const realReplace = store.credentials.replace.bind(store.credentials);
-    vi.spyOn(store.credentials, 'replace').mockImplementation(async (next) => {
-      if (next.accessToken !== record.accessToken) {
-        renewalSaveReached();
-        await saveGate;
+    const realRead = store.credentials.read.bind(store.credentials);
+    let holdNextRead = true;
+    vi.spyOn(store.credentials, 'read').mockImplementation(async (signal) => {
+      if (holdNextRead) {
+        holdNextRead = false;
+        renewalCheckReached();
+        await checkGate;
       }
-      await realReplace(next);
+      return realRead(signal);
     });
 
     const renewal = auth.handleUnauthorized();
@@ -293,38 +294,40 @@ describe('access token renewal (protocol §6.2)', () => {
       ]),
     ).resolves.toBe('pending');
 
-    releaseRenewalSave();
+    releaseRenewalCheck();
     const renewedToken = await renewal;
     await expect(tokenRead).resolves.toBe(renewedToken);
     expect(renewedToken).toBe(server.currentAccessToken(record.deviceId));
     await auth.stop();
   });
 
-  it('stop waits for an already-started renewal writer before it resolves', async () => {
+  it('stop waits for an already-started renewal before it resolves', async () => {
     server.setTokenTtlMs(60 * 60 * 1000);
     const storeDir = await tmpDir('byok-auth-stop-barrier-');
     const store = createTestDeviceStore(storeDir);
     const auth = new AuthManager({ serverUrl: server.url, store });
     const record = await auth.pair('pairing-code');
+    const pairedToken = await auth.getValidAccessToken();
     server.rotateDeviceToken(record.deviceId);
 
-    let releaseSave!: () => void;
-    const saveGate = new Promise<void>((resolve) => {
-      releaseSave = resolve;
+    // Renewal persists nothing (#2045); hold its enrollment check's read.
+    let releaseCheck!: () => void;
+    const checkGate = new Promise<void>((resolve) => {
+      releaseCheck = resolve;
     });
-    let saveReached!: () => void;
+    let checkReached!: () => void;
     const reached = new Promise<void>((resolve) => {
-      saveReached = resolve;
+      checkReached = resolve;
     });
-    const realReplace = store.credentials.replace.bind(store.credentials);
-    const save = vi.spyOn(store.credentials, 'replace').mockImplementation(async (next) => {
-      saveReached();
-      await saveGate;
-      await realReplace(next);
+    const realRead = store.credentials.read.bind(store.credentials);
+    const check = vi.spyOn(store.credentials, 'read').mockImplementation(async (signal) => {
+      checkReached();
+      await checkGate;
+      return realRead(signal);
     });
     const renewal = auth.handleUnauthorized();
     await reached;
-    expect(save).toHaveBeenCalledTimes(1);
+    expect(check).toHaveBeenCalledTimes(1);
 
     let stopped = false;
     const stopping = auth.stop().then(() => {
@@ -332,8 +335,8 @@ describe('access token renewal (protocol §6.2)', () => {
     });
     await Promise.resolve();
     expect(stopped).toBe(false);
-    releaseSave();
-    await expect(renewal).resolves.not.toBe(record.accessToken);
+    releaseCheck();
+    await expect(renewal).resolves.not.toBe(pairedToken);
     await stopping;
     expect(stopped).toBe(true);
   });
@@ -346,21 +349,24 @@ describe('access token renewal (protocol §6.2)', () => {
     const first = await auth.pair('pairing-code');
     server.rotateDeviceToken(first.deviceId);
 
-    let renewalSaveReached!: () => void;
+    // Renewal persists nothing (#2045); hold its enrollment check's read.
+    let renewalCheckReached!: () => void;
     const reached = new Promise<void>((resolve) => {
-      renewalSaveReached = resolve;
+      renewalCheckReached = resolve;
     });
-    let releaseRenewalSave!: () => void;
-    const saveGate = new Promise<void>((resolve) => {
-      releaseRenewalSave = resolve;
+    let releaseRenewalCheck!: () => void;
+    const checkGate = new Promise<void>((resolve) => {
+      releaseRenewalCheck = resolve;
     });
-    const realReplace = store.credentials.replace.bind(store.credentials);
-    vi.spyOn(store.credentials, 'replace').mockImplementation(async (record) => {
-      if (record.accessToken !== first.accessToken) {
-        renewalSaveReached();
-        await saveGate;
+    const realRead = store.credentials.read.bind(store.credentials);
+    let holdNextRead = true;
+    vi.spyOn(store.credentials, 'read').mockImplementation(async (signal) => {
+      if (holdNextRead) {
+        holdNextRead = false;
+        renewalCheckReached();
+        await checkGate;
       }
-      await realReplace(record);
+      return realRead(signal);
     });
 
     const renewal = auth.handleUnauthorized();
@@ -372,12 +378,14 @@ describe('access token renewal (protocol §6.2)', () => {
     });
     await Promise.resolve();
     expect(pairSettled).toBe(false);
-    releaseRenewalSave();
+    releaseRenewalCheck();
     const renewedToken = await renewal;
     const replacement = await pairing;
-    expect(replacement.accessToken).not.toBe(renewedToken);
+    const replacementToken = await auth.getValidAccessToken();
+    expect(replacementToken).not.toBe(renewedToken);
+    expect(replacementToken).toBe(server.currentAccessToken(replacement.deviceId));
     expect(await store.load()).toMatchObject({ deviceId: replacement.deviceId });
-    expect(await store.credentials.read()).toMatchObject({ accessToken: replacement.accessToken });
+    expect(await store.credentials.read()).toEqual(replacement);
     await auth.stop();
   });
 
@@ -467,14 +475,15 @@ describe('access token renewal (protocol §6.2)', () => {
     }
   });
 
-  it('bounds a hung error body instead of leaving safeErrorText unbounded', async () => {
+  it('bounds a hung rejection body read under the request deadline', async () => {
     const store = createTestDeviceStore(await tmpDir('byok-auth-error-body-deadline-'));
     const auth = authWithDeadline(server.url, store, 40);
     const realFetch = globalThis.fetch;
+    // A 409 body is read to match the typed fence rejection.
     const fetch = vi.spyOn(globalThis, 'fetch').mockImplementation(async () =>
       new Response(new ReadableStream<Uint8Array>({ start: () => undefined }), {
-        status: 503,
-        headers: { 'content-type': 'text/plain' },
+        status: 409,
+        headers: { 'content-type': 'application/json' },
       }),
     );
     try {

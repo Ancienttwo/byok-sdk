@@ -9,6 +9,8 @@ import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
 
+const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
+
 const FAKE_CODEX = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 const sessions: Session[] = [];
 const dirs: string[] = [];
@@ -42,7 +44,7 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
       ...(interactive ? { nativeInteractions: { onRequest: () => {} } } : {}),
     });
     expect(adapter.descriptor.mcpToolApprovals).toBe(true);
-    const session = await startPreparedOperation(adapter, {
+    const session = await startPreparedOperation(adapter, { target: CODEX_TARGET,
       instruction: 'hello', ...(sessionRef === undefined ? {} : { sessionRef }),
     }, {
       workspaceDir: home, agentHome: home,
@@ -105,7 +107,7 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
       resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }),
       ...(excluded ? { agentUserMcpServers: 'excluded' as const } : {}),
     });
-    const session = await startPreparedOperation(adapter, {
+    const session = await startPreparedOperation(adapter, { target: CODEX_TARGET,
       instruction: 'hello', ...(sessionRef === undefined ? {} : { sessionRef }),
     }, {
       workspaceDir: home,

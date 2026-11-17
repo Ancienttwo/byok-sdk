@@ -22,13 +22,13 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   const auth = new AuthManager({ serverUrl: cloud.url, store: createTestDeviceStore(root) });
   const device = await auth.pair((await cloud.createPairingCode()).code);
   const post = async (envelope: Envelope) => {
-    const response = await fetch(`${cloud.url}/byok/messages`, { method: 'POST', headers: { authorization: `Bearer ${device.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [envelope] }) });
+    const response = await fetch(`${cloud.url}/byok/messages`, { method: 'POST', headers: { authorization: `Bearer ${await auth.getValidAccessToken()}`, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [envelope] }) });
     expect(await response.json()).toMatchObject({ accepted: 1 });
   };
   // Agent offer admission reads the durable capability snapshot a hello records.
   await post(createEnvelope('conn.hello', { deviceId: device.deviceId, productId: 'read-ahead', protocolVersions: [PROTOCOL_VERSION], capabilities: ['agent-home-contract'] }));
   const resume = (instruction: string, sessionRef: string, agentRef = freshTestAgentRef()) =>
-    cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: { instruction, agentRef, session: { mode: 'resume', sessionRef } } });
+    cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: { instruction, agentRef, session: { mode: 'resume', sessionRef }, target: { lane: 'auto' } } });
   const agentB = freshTestAgentRef();
   const a = await resume('slow A', 'session-a');
   const b = await resume('fast B', 'session-b', agentB);
@@ -47,7 +47,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   cleanup.push(async () => { release(); await connection.stop(); await auth.stop(); });
   await connection.start();
   await vi.waitFor(() => expect([aCalls, bCalls]).toEqual([1, 1]));
-  await post(createEnvelope('task.claim', { deviceId: device.deviceId, runtime: 'pi', agentRef: agentB }, { taskId: b.taskId }));
+  await post(createEnvelope('task.claim', { deviceId: device.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' }, agentRef: agentB }, { taskId: b.taskId }));
   await post(createEnvelope('task.started', {}, { taskId: b.taskId }));
   await post(createEnvelope('task.await_approval', { summary: 'approve B', approvalId: 'approval-b' }, { taskId: b.taskId }));
   await cloud.cloud.approveTask(cloud.tenant, b.taskId);

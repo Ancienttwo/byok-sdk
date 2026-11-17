@@ -16,7 +16,7 @@
  * unfalsifiable.
  */
 import { tenantKey, type Clock, type TenantId } from '@byok-sdk/core';
-import type { RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import { assertTaskAttemptListLimit } from '../../coordination.js';
 import {
   TASK_ATTEMPT_ACTIVE_STATUSES,
@@ -218,8 +218,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
     input: {
       taskId: string;
       deviceId: string;
-      runtime?: RuntimeId;
-      harnessId?: string;
+      executor: ClaimedExecutor;
       capabilities?: RuntimeCapabilities;
     },
   ): Promise<TaskAttempt | undefined> {
@@ -240,8 +239,7 @@ export class InMemoryTaskAttemptStore implements TaskAttemptStore {
       const claimed: TaskAttempt = {
         ...existing,
         ownerDeviceId: input.deviceId,
-        ...(input.runtime === undefined ? {} : { claimedRuntime: input.runtime }),
-        ...(input.harnessId === undefined ? {} : { claimedHarnessId: input.harnessId }),
+        claimedExecutor: input.executor,
         ...(input.capabilities === undefined
           ? {}
           : { claimedRuntimeCapabilities: { ...input.capabilities } }),

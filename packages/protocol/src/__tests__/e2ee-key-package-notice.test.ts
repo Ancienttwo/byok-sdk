@@ -16,7 +16,7 @@ import {
 
 const TYPE = 'e2ee.key_package.available';
 const envelopeBase = {
-  v: 6,
+  v: 7,
   id: '20000000-0000-4000-8000-0000000000e2',
   ts: '2026-10-24T00:00:00.000Z',
   type: TYPE,
@@ -70,8 +70,8 @@ describe('e2ee.key_package.available notice', () => {
   });
 
   it('is gated as a whole type by the device capability sealed-payload-v1', () => {
-    expect(WIRE_ADDITIONS.filter(entry => entry.kind === 'envelope' && entry.surface === TYPE)).toEqual([
-      { kind: 'envelope', rule: 'gated', surface: TYPE, capability: SEALED_PAYLOAD_CAPABILITY, advertisedBy: 'device' },
+    expect(WIRE_ADDITIONS.filter(entry => entry.surface === TYPE)).toEqual([
+      { surface: TYPE, capability: SEALED_PAYLOAD_CAPABILITY },
     ]);
     expect(requiredReceiverCapabilities(TYPE, { scopeId: 'scope-1', epoch: 1 })).toEqual([SEALED_PAYLOAD_CAPABILITY]);
   });

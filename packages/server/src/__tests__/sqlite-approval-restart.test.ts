@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { createByokServer, createHmacTokenSigner, type TaskEventEntry } from '../index';
-import { connectFakeDaemonLongPoll, startServer, stopServer } from './test-support';
+import { connectFakeDaemonLongPoll, startServer, stopServer, TEST_CLAIMED_EXECUTOR } from './test-support';
 const PRODUCT_ID = 'acme-task-events';
 const AGENT = { agentId: 'events-agent', profileRevision: 'rev-1' };
 const EXECUTION_CAPABILITIES = [
@@ -48,9 +48,9 @@ describe('ByokServer.tasks.events restoring an approval written before a SQLite 
       };
       await instance.executions.submit({
         taskId: 'waiting', deviceId: daemon.deviceId,
-        payload: { instruction: 'ask first', runtime: 'pi', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+        payload: { instruction: 'ask first', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
       });
-      await post(createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'waiting' }));
+      await post(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'waiting' }));
       await post(createEnvelope('task.started', {}, { taskId: 'waiting' }));
 
       await post(createEnvelope('task.await_approval', { summary: 'ok to deploy?', approvalId: 'appr-restart' }, { taskId: 'waiting' }));

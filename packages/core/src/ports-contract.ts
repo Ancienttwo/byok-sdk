@@ -20,31 +20,14 @@
  * Adding a port method means editing this table, which is the point: a port
  * grows by contract, not by whichever composition needed something.
  */
-import { CORE_STORE_NAMES, type CoreStoreName } from './stores.js';
-
-/**
- * Ports that are core ports but NOT members of the composition contract.
- *
- * Now empty, and that is the whole point of Phase 2. Phase 1 of
- * `skill-pack-delivery-channel` held `skillPacks` here as a self-declared
- * temporary bridge: adding it to `CoreStores` before its Postgres
- * implementation existed would have obliged every composition to implement it
- * in the same slice, and the alternatives — an optional port member (a
- * compatibility fallback, forbidden) or a port outside the contract table
- * entirely (exempt from the tenant-first scan, the one rule most worth having)
- * — were both worse. Phase 2 delivered that implementation and moved
- * `skillPacks` into `CORE_STORE_NAMES`, so this list goes back to empty exactly
- * as the Phase 1 note promised. The empty set stays named rather than deleted:
- * it is the testable statement "every core port is a composition member", which
- * `CORE_STORE_NAMES` alone cannot make.
- */
-export const CORE_NON_COMPOSITION_PORT_NAMES = [] as const;
+import type { CoreStoreName } from './stores.js';
 
 export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]>> = {
   mailbox: [
     'append',
     'readUsage',
     'readAfter',
+    'readMessage',
     'recordDelivery',
     'advanceCursor',
     'readCursor',
@@ -79,15 +62,4 @@ export const CORE_PORT_METHODS: Readonly<Record<CoreStoreName, readonly string[]
     'collectExpired',
   ],
   skillPacks: ['publish', 'get', 'list', 'readFile'],
-};
-
-/** The interface each port name is declared as, for the source-side scan. */
-export const CORE_PORT_INTERFACES: Readonly<Record<CoreStoreName, string>> = {
-  mailbox: 'MailboxStore',
-  board: 'BoardStore',
-  truth: 'TruthStore',
-  presence: 'PresenceStore',
-  objects: 'ObjectStore',
-  quota: 'QuotaStore',
-  skillPacks: 'SkillPackStore',
 };

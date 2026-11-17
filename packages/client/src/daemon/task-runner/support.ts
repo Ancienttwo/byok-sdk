@@ -18,7 +18,7 @@ import { randomBytes } from 'node:crypto';
 import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { createEnvelope, RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
+import { createEnvelope, RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclineCode, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
 import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types.js';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable.js';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home.js';
@@ -279,10 +279,22 @@ export type PickResult =
   | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor }
   | { ok: false; reason: string; retryable: boolean; runtimeUnavailable?: RuntimeUnavailableAdmission };
 
+/**
+ * One pre-claim decline. `code` is a fixed protocol token naming device state,
+ * never derived from user content (paths, file names, prompt text, runtime
+ * messages); `reason` is display text only.
+ */
+export interface OfferDecline {
+  readonly reason: string;
+  readonly retryable: boolean;
+  readonly code?: TaskDeclineCode;
+  readonly runtimeUnavailable?: RuntimeUnavailableAdmission;
+}
+
 /** The closures that handleOffer builds once and gives to its phase methods. */
 export interface OfferPhaseContext {
   readonly taskId: string;
-  readonly decline: (reason: string, retryable: boolean, code?: TaskDeclinePayload['code'], runtimeUnavailable?: RuntimeUnavailableAdmission) => void;
+  readonly decline: (decline: OfferDecline) => void;
   readonly admissionWithdrawn: () => boolean;
   /** Aborted exactly when `admissionWithdrawn()` would decline: cancel, shutdown, or the startup deadline. */
   readonly admissionSignal: AbortSignal;
@@ -703,6 +715,12 @@ export function taskTearingDown(runner: TaskRunner, taskId: string): boolean {
   const phase = hostFor(runner).current(taskId)?.phase;
   return phase === undefined || phase === 'terminalizing' || phase === 'retiring'
     || phase === 'finished' || phase === 'declined';
+}
+
+/** The task selected its terminal: from that selection until it retires, its teardown owns the session. */
+export function taskTerminalSelected(runner: TaskRunner, taskId: string): boolean {
+  const current = hostFor(runner).current(taskId);
+  return current?.terminal !== undefined || current?.phase === 'terminalizing' || current?.phase === 'retiring';
 }
 
 /** The old `finalizationStarted` flag: the terminal is sent and cleanup owns the task. */

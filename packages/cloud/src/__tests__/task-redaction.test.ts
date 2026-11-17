@@ -37,6 +37,7 @@ const CAPABILITIES = [
   'agent-egress-fresh-session',
 ];
 const SECRET = 'redaction-secret-text';
+const CODEX_EXECUTOR = { kind: 'runtime', runtimeId: 'codex' } as const;
 
 function executionInput(taskId: string, deviceId: string) {
   return {
@@ -45,7 +46,7 @@ function executionInput(taskId: string, deviceId: string) {
     payload: {
       instruction: `instruction ${SECRET}`,
       agentRef: AGENT_REF,
-      runtime: 'codex',
+      target: { lane: 'runtime', runtimeId: 'codex' },
       session: { mode: 'fresh' },
       egressPolicy: {
         policyRevision: 'policy-v1',
@@ -154,7 +155,7 @@ function createFixture(withStore = true): Fixture {
       const response = await request('/byok/pair', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ pairingCode: code, deviceName: 'test-device', devicePublicKey: keys.publicKeyBase64Url }),
+        body: JSON.stringify({ pairingCode: code, deviceName: 'test-device', devicePublicKey: keys.publicKeyBase64Url, expectedDeviceDigest: null }),
       });
       const body = (await response.json()) as { deviceId: string; accessToken: string };
       await base.stores.devices.recordCapabilities(tenant, { deviceId: body.deviceId, capabilities: CAPABILITIES });
@@ -198,13 +199,14 @@ function complete(taskId: string) {
     sessionRef: 'session-1',
     summary: `summary ${SECRET}`,
     finalMessage: `final ${SECRET}`,
+    executor: CODEX_EXECUTOR,
   }, { taskId });
 }
 
 /** One Agent task run to `complete`, with an admitted message. */
 async function completedTask(fixture: Fixture, device: PairedDevice, taskId: string): Promise<void> {
   await fixture.cloud.submitAgentExecution(device.tenant, executionInput(taskId, device.deviceId));
-  await fixture.send(device, createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId }));
+  await fixture.send(device, createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: CODEX_EXECUTOR }, { taskId }));
   await fixture.send(device, createEnvelope('task.started', {}, { taskId }));
   await fixture.send(device, publish(taskId, `message ${SECRET}`));
   expect((await fixture.send(device, complete(taskId))).status).toBe(200);
@@ -376,7 +378,7 @@ describe('ByokCloud.redactTasks', () => {
     expect((await fixture.cloud.readActivity(TENANT_A, 'task-1'))?.entries).toEqual([]);
 
     // A late claim is refused with the existing reason, not a server error.
-    const claim = await fixture.send(device, createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, runtime: 'codex' }, { taskId: 'task-1' }));
+    const claim = await fixture.send(device, createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: CODEX_EXECUTOR }, { taskId: 'task-1' }));
     expect(claim).toMatchObject({ status: 200, body: { rejected: 1, outcomes: [{ outcome: 'rejected', reason: 'not_permitted' }] } });
 
     // The Host gets the same answer for a resubmit as before the redaction.

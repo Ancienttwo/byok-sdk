@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "b1889f4d3346234cb75e8b723ced5c649a3b15584050b29f7c0d689c9dec2700"
+    "snapshotSha256": "e923f1c3966fa7495d353c3f7eb26f4abe0fc293706a10a11fc40ae8ce414d0a"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,425 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "narrow-protocol-core-public-api",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol and @byok-sdk/core remove unused public declarations and entry exports, including constants and sealed-payload subpaths. Remove imports of these names; use retained public contracts and operations instead. Implementations needed by live schemas remain internal, accepted wire values and capability token bytes stay the same, and symbols imported by another workspace package remain public. Retained exports also record the declaration-digest changes caused by their support types becoming internal; those root declarations and runtime behavior are unchanged.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/1933",
+      "items": [
+        "export:@byok-sdk/core#AGENT_MEMORY_INTENT_DIGEST_VERSION",
+        "export:@byok-sdk/core#AgentMemoryIntentDigestInput",
+        "export:@byok-sdk/core#AuthenticateDeviceAssertionDeps",
+        "export:@byok-sdk/core#AuthenticatedAssertion",
+        "export:@byok-sdk/core#BOARD_TRANSITIONS",
+        "export:@byok-sdk/core#BoardAssignee",
+        "export:@byok-sdk/core#BoardItem",
+        "export:@byok-sdk/core#CANONICAL_TIMESTAMP_PATTERN",
+        "export:@byok-sdk/core#CAPABILITY_DECLARATION_SCHEMA_ID",
+        "export:@byok-sdk/core#CORE_ERROR_CODES",
+        "export:@byok-sdk/core#CORE_NON_COMPOSITION_PORT_NAMES",
+        "export:@byok-sdk/core#CORE_PORT_INTERFACES",
+        "export:@byok-sdk/core#CoreErrorCode",
+        "export:@byok-sdk/core#DEVICE_ASSERTION_ALGORITHMS",
+        "export:@byok-sdk/core#DEVICE_PROOF_ALGORITHMS",
+        "export:@byok-sdk/core#DEVICE_PROOF_VERSION",
+        "export:@byok-sdk/core#DeviceAssertionAlgorithm",
+        "export:@byok-sdk/core#DeviceAssertionAuthorityRow",
+        "export:@byok-sdk/core#DeviceAssertionEnvelopeV1",
+        "export:@byok-sdk/core#DeviceAssertionEnvelopeV1Schema",
+        "export:@byok-sdk/core#DeviceAssertionReplayConsumeInput",
+        "export:@byok-sdk/core#DeviceAssertionReplaySchemaId",
+        "export:@byok-sdk/core#DeviceAssertionVerifier",
+        "export:@byok-sdk/core#DeviceAssertionVerifyDeps",
+        "export:@byok-sdk/core#DeviceAssertionVerifyInput",
+        "export:@byok-sdk/core#DeviceProofAlgorithm",
+        "export:@byok-sdk/core#DeviceProofEnvelopeV1",
+        "export:@byok-sdk/core#DeviceProofEnvelopeV1Schema",
+        "export:@byok-sdk/core#DeviceProofVerifier",
+        "export:@byok-sdk/core#DeviceProofVerifyInput",
+        "export:@byok-sdk/core#JsonPrimitive",
+        "export:@byok-sdk/core#JsonValue",
+        "export:@byok-sdk/core#MAILBOX_MESSAGE_STATES",
+        "export:@byok-sdk/core#MailboxMessageState",
+        "export:@byok-sdk/core#OBJECT_STATES",
+        "export:@byok-sdk/core#OBJECT_STATE_TRANSITIONS",
+        "export:@byok-sdk/core#ObjectState",
+        "export:@byok-sdk/core#ObservedSkillPackFile",
+        "export:@byok-sdk/core#PRINCIPAL_KINDS",
+        "export:@byok-sdk/core#PROVIDER_PROVISIONING_REQUEST_VERSION",
+        "export:@byok-sdk/core#PROVIDER_PROVISIONING_SECRET_OPERATIONS",
+        "export:@byok-sdk/core#PROVIDER_SECRET_HPKE_INFO",
+        "export:@byok-sdk/core#PROVIDER_SECRET_HPKE_SUITE",
+        "export:@byok-sdk/core#PROVIDER_SECRET_MAX_BYTES",
+        "export:@byok-sdk/core#PROVIDER_SECRET_MAX_PADDED_BYTES",
+        "export:@byok-sdk/core#PROVIDER_SECRET_PAD_BLOCK_BYTES",
+        "export:@byok-sdk/core#PrincipalKind",
+        "export:@byok-sdk/core#ProviderProvisioningConfigV1",
+        "export:@byok-sdk/core#ProviderProvisioningConfigV1Schema",
+        "export:@byok-sdk/core#ProviderProvisioningExpectedProfile",
+        "export:@byok-sdk/core#ProviderProvisioningExpectedProfileSchema",
+        "export:@byok-sdk/core#ProviderProvisioningHeaderV1",
+        "export:@byok-sdk/core#ProviderProvisioningHeaderV1Schema",
+        "export:@byok-sdk/core#ProviderProvisioningIdentityRevisionSchema",
+        "export:@byok-sdk/core#ProviderProvisioningRequestV1",
+        "export:@byok-sdk/core#ProviderProvisioningRequestV1Schema",
+        "export:@byok-sdk/core#ProviderSecretRecipient",
+        "export:@byok-sdk/core#SEALING_KEY_ID_LENGTH",
+        "export:@byok-sdk/core#SKILL_FRONTMATTER_FIELDS",
+        "export:@byok-sdk/core#SKILL_PACK_DESCRIPTION_MAX_LENGTH",
+        "export:@byok-sdk/core#SKILL_PACK_FILE_PATH_MAX_LENGTH",
+        "export:@byok-sdk/core#SKILL_PACK_MAX_FILES",
+        "export:@byok-sdk/core#SKILL_PACK_NAME_MAX_LENGTH",
+        "export:@byok-sdk/core#SKILL_PACK_NAME_PATTERN",
+        "export:@byok-sdk/core#SKILL_PACK_REJECTIONS",
+        "export:@byok-sdk/core#SKILL_PACK_VERSION_PATTERN",
+        "export:@byok-sdk/core#STORAGE_RESERVATION_STATES",
+        "export:@byok-sdk/core#STORAGE_WRITE_KINDS",
+        "export:@byok-sdk/core#STORAGE_WRITE_POSTURES",
+        "export:@byok-sdk/core#SealProviderProvisioningRequestInput",
+        "export:@byok-sdk/core#SealedProviderSecretV1",
+        "export:@byok-sdk/core#SealedProviderSecretV1Schema",
+        "export:@byok-sdk/core#SealingKeyClaimV1",
+        "export:@byok-sdk/core#SealingKeyClaimV1Schema",
+        "export:@byok-sdk/core#SealingKeyIdSchema",
+        "export:@byok-sdk/core#SkillFrontmatter",
+        "export:@byok-sdk/core#SkillPackCheck",
+        "export:@byok-sdk/core#SkillPackFile",
+        "export:@byok-sdk/core#SkillPackFileSchema",
+        "export:@byok-sdk/core#SkillPackManifest",
+        "export:@byok-sdk/core#SkillPackManifestSchema",
+        "export:@byok-sdk/core#SkillPackRejection",
+        "export:@byok-sdk/core#StorageReservationState",
+        "export:@byok-sdk/core#StorageWriteKind",
+        "export:@byok-sdk/core#StorageWritePosture",
+        "export:@byok-sdk/core#TASK_ASSERTION_AGENT_REF_MAX_BYTES",
+        "export:@byok-sdk/core#TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH",
+        "export:@byok-sdk/core#TASK_ASSERTION_VERSION",
+        "export:@byok-sdk/core#TENANT_KEY_SEPARATOR",
+        "export:@byok-sdk/core#TaskAssertionEnvelopeV1",
+        "export:@byok-sdk/core#TaskAssertionEnvelopeV1Schema",
+        "export:@byok-sdk/core#agentMemoryIntentOperationDigest",
+        "export:@byok-sdk/core#authenticateDeviceAssertion",
+        "export:@byok-sdk/core#authenticateTaskAssertion",
+        "export:@byok-sdk/core#checkSkillPackFileContent",
+        "export:@byok-sdk/core#deviceAssertionCanonicalClaims",
+        "export:@byok-sdk/core#deviceAssertionCanonicalJson",
+        "export:@byok-sdk/core#deviceProofCanonicalJson",
+        "export:@byok-sdk/core#isControlPlanePrincipal",
+        "export:@byok-sdk/core#isDevicePrincipal",
+        "export:@byok-sdk/core#openProviderProvisioningSecret",
+        "export:@byok-sdk/core#parseSkillFrontmatter",
+        "export:@byok-sdk/core#providerProvisioningConfigDigest",
+        "export:@byok-sdk/core#providerSecretAadBytes",
+        "export:@byok-sdk/core#sealProviderProvisioningRequest",
+        "export:@byok-sdk/core#sealingKeyClaimCanonicalBytes",
+        "export:@byok-sdk/core#taskAssertionCanonicalClaims",
+        "export:@byok-sdk/core#taskAssertionCanonicalJson",
+        "export:@byok-sdk/core#verifyDeviceAssertion",
+        "export:@byok-sdk/core#verifyTaskAssertion",
+        "export:@byok-sdk/core/sealed-payload#CLIENT_PAIRING_MAC_DOMAIN",
+        "export:@byok-sdk/core/sealed-payload#ClientPairingMacInput",
+        "export:@byok-sdk/core/sealed-payload#CreateMemberKeyBundleInput",
+        "export:@byok-sdk/core/sealed-payload#DEVICE_PAIRING_MAC_DOMAIN",
+        "export:@byok-sdk/core/sealed-payload#DevicePairingMacInput",
+        "export:@byok-sdk/core/sealed-payload#MEMBER_FINGERPRINT_DOMAIN",
+        "export:@byok-sdk/core/sealed-payload#MEMBER_KEY_BUNDLE_VERSION",
+        "export:@byok-sdk/core/sealed-payload#MemberChainAnchorFailure",
+        "export:@byok-sdk/core/sealed-payload#MemberChainAnchorResult",
+        "export:@byok-sdk/core/sealed-payload#MemberChainEntryVerifyResult",
+        "export:@byok-sdk/core/sealed-payload#MemberChainHead",
+        "export:@byok-sdk/core/sealed-payload#MemberChainState",
+        "export:@byok-sdk/core/sealed-payload#MemberChainWalkFailure",
+        "export:@byok-sdk/core/sealed-payload#MemberChainWalkResult",
+        "export:@byok-sdk/core/sealed-payload#MemberFingerprintInput",
+        "export:@byok-sdk/core/sealed-payload#MemberKeyBundleV1",
+        "export:@byok-sdk/core/sealed-payload#OpenScopeKeyPackageInput",
+        "export:@byok-sdk/core/sealed-payload#OpenSealedContentInput",
+        "export:@byok-sdk/core/sealed-payload#PAIRING_VERIFICATION_SECRET_BYTES",
+        "export:@byok-sdk/core/sealed-payload#PairingInput",
+        "export:@byok-sdk/core/sealed-payload#SEALED_DIRECTIONS",
+        "export:@byok-sdk/core/sealed-payload#SealContentInput",
+        "export:@byok-sdk/core/sealed-payload#SealScopeKeyPackageInput",
+        "export:@byok-sdk/core/sealed-payload#SealedBinding",
+        "export:@byok-sdk/core/sealed-payload#SealedContentOpenResult",
+        "export:@byok-sdk/core/sealed-payload#SealedDirection",
+        "export:@byok-sdk/core/sealed-payload#SealedScopePolicy",
+        "export:@byok-sdk/core/sealed-payload#VerifyMemberChainFromAnchorInput",
+        "export:@byok-sdk/core/sealed-payload#applyMemberChainEntries",
+        "export:@byok-sdk/core/sealed-payload#computeClientPairingMac",
+        "export:@byok-sdk/core/sealed-payload#computeDevicePairingMac",
+        "export:@byok-sdk/core/sealed-payload#createMemberKeyBundle",
+        "export:@byok-sdk/core/sealed-payload#memberFingerprint",
+        "export:@byok-sdk/core/sealed-payload#openScopeKeyPackage",
+        "export:@byok-sdk/core/sealed-payload#openSealedContent",
+        "export:@byok-sdk/core/sealed-payload#parsePairingInput",
+        "export:@byok-sdk/core/sealed-payload#sealContent",
+        "export:@byok-sdk/core/sealed-payload#sealScopeKeyPackage",
+        "export:@byok-sdk/core/sealed-payload#verifyClientPairingMac",
+        "export:@byok-sdk/core/sealed-payload#verifyDevicePairingMac",
+        "export:@byok-sdk/core/sealed-payload#verifyMemberChainEntry",
+        "export:@byok-sdk/core/sealed-payload#verifyMemberChainFromAnchor",
+        "export:@byok-sdk/protocol#AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH",
+        "export:@byok-sdk/protocol#AGENT_HOME_PROJECTION_MAX_BYTES",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_OPERATIONS",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_PATH_MAX_BYTES",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_READBACK_DISPOSITIONS",
+        "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_RESERVATIONS",
+        "export:@byok-sdk/protocol#ActivityIngress",
+        "export:@byok-sdk/protocol#ActivityIngressSchema",
+        "export:@byok-sdk/protocol#AgentContentActor",
+        "export:@byok-sdk/protocol#AgentContentActorKind",
+        "export:@byok-sdk/protocol#AgentContentActorKindSchema",
+        "export:@byok-sdk/protocol#AgentContentDecodeAs",
+        "export:@byok-sdk/protocol#AgentContentReadDecision",
+        "export:@byok-sdk/protocol#AgentContentReadDecisionSchema",
+        "export:@byok-sdk/protocol#AgentContentReadDenialReason",
+        "export:@byok-sdk/protocol#AgentEgressActivityPolicy",
+        "export:@byok-sdk/protocol#AgentEgressActivityPolicySchema",
+        "export:@byok-sdk/protocol#AgentEgressDropReason",
+        "export:@byok-sdk/protocol#AgentEgressDropReasonSchema",
+        "export:@byok-sdk/protocol#AgentEgressLane",
+        "export:@byok-sdk/protocol#AgentEgressLaneSchema",
+        "export:@byok-sdk/protocol#AgentEventSpill",
+        "export:@byok-sdk/protocol#AgentEventSpillSchema",
+        "export:@byok-sdk/protocol#AgentHomeAccess",
+        "export:@byok-sdk/protocol#AgentHomeAccessSchema",
+        "export:@byok-sdk/protocol#AgentHomeProjectionAgentRef",
+        "export:@byok-sdk/protocol#AgentHomeProjectionHash",
+        "export:@byok-sdk/protocol#AgentHomeProjectionHostRevision",
+        "export:@byok-sdk/protocol#AgentHomeProjectionProfileRevision",
+        "export:@byok-sdk/protocol#AgentHomeProjectionStatus",
+        "export:@byok-sdk/protocol#AgentHomeProjectionStatusSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentApprovalRef",
+        "export:@byok-sdk/protocol#AgentMemoryIntentContent",
+        "export:@byok-sdk/protocol#AgentMemoryIntentContentSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentFetchDisposition",
+        "export:@byok-sdk/protocol#AgentMemoryIntentFetchRequest",
+        "export:@byok-sdk/protocol#AgentMemoryIntentFetchResponse",
+        "export:@byok-sdk/protocol#AgentMemoryIntentFetchResponseSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentFileObservation",
+        "export:@byok-sdk/protocol#AgentMemoryIntentFileObservationSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentHostTerminalCode",
+        "export:@byok-sdk/protocol#AgentMemoryIntentHostTerminalCodeSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentOperation",
+        "export:@byok-sdk/protocol#AgentMemoryIntentOperationDigest",
+        "export:@byok-sdk/protocol#AgentMemoryIntentOperationSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentPath",
+        "export:@byok-sdk/protocol#AgentMemoryIntentReadbackDisposition",
+        "export:@byok-sdk/protocol#AgentMemoryIntentReadbackDispositionSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentRejectionCode",
+        "export:@byok-sdk/protocol#AgentMemoryIntentRejectionCodeSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentReservation",
+        "export:@byok-sdk/protocol#AgentMemoryIntentReservationSchema",
+        "export:@byok-sdk/protocol#AgentMemoryIntentRevision",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponse",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponseSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionGrantRef",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionGrantRefSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionMeteringReceipt",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionMeteringReceiptSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionPlainReceipt",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionPlainReceiptSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSealedMeteringReceipt",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSealedReceipt",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSessionRef",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSessionRefSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSnapshot",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSnapshotSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSourceSeq",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionSourceSeqSchema",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionWriterEpoch",
+        "export:@byok-sdk/protocol#AgentMemoryProjectionWriterEpochSchema",
+        "export:@byok-sdk/protocol#AgentMemorySelection",
+        "export:@byok-sdk/protocol#AgentMemorySelectionSchema",
+        "export:@byok-sdk/protocol#AgentMessageDestinationBindingSchema",
+        "export:@byok-sdk/protocol#AgentMessageDispositionPlainPayload",
+        "export:@byok-sdk/protocol#AgentMessageDispositionPlainPayloadSchema",
+        "export:@byok-sdk/protocol#AgentMessageDispositionSealedPayload",
+        "export:@byok-sdk/protocol#AgentMessageDraftPayload",
+        "export:@byok-sdk/protocol#AgentMessageFreshnessCursorSchema",
+        "export:@byok-sdk/protocol#AgentMessagePublishPlainPayload",
+        "export:@byok-sdk/protocol#AgentMessagePublishPlainPayloadSchema",
+        "export:@byok-sdk/protocol#AgentReliableQuotaPolicy",
+        "export:@byok-sdk/protocol#AgentReliableQuotaPolicySchema",
+        "export:@byok-sdk/protocol#BYOK_AGENT_HOME_PROJECTIONS_PATH",
+        "export:@byok-sdk/protocol#BYOK_INPUT_PREPARATIONS_PATH",
+        "export:@byok-sdk/protocol#BlobDownloadUrlResponse",
+        "export:@byok-sdk/protocol#BlobDownloadUrlResponseSchema",
+        "export:@byok-sdk/protocol#BotTurnOutcome",
+        "export:@byok-sdk/protocol#BotTurnOutcomeFragments",
+        "export:@byok-sdk/protocol#BotTurnOutcomeKind",
+        "export:@byok-sdk/protocol#BotTurnOutcomeSchemaError",
+        "export:@byok-sdk/protocol#BotTurnOutcomeSchemaErrorCode",
+        "export:@byok-sdk/protocol#CancelDelegationAction",
+        "export:@byok-sdk/protocol#CancelRoutineAction",
+        "export:@byok-sdk/protocol#ConnHelloPayload",
+        "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+        "export:@byok-sdk/protocol#CreateBlobRequest",
+        "export:@byok-sdk/protocol#CreateBlobResponse",
+        "export:@byok-sdk/protocol#CreateBlobResponseSchema",
+        "export:@byok-sdk/protocol#CreateEnvelopeOptions",
+        "export:@byok-sdk/protocol#CreateRoomAction",
+        "export:@byok-sdk/protocol#DelegateAction",
+        "export:@byok-sdk/protocol#DeleteBotAction",
+        "export:@byok-sdk/protocol#DreamBudget",
+        "export:@byok-sdk/protocol#DreamInstructionInput",
+        "export:@byok-sdk/protocol#DreamWindow",
+        "export:@byok-sdk/protocol#E2eeMemberKeyRegisterRequest",
+        "export:@byok-sdk/protocol#E2eePairingMacSchema",
+        "export:@byok-sdk/protocol#EventsPollQuery",
+        "export:@byok-sdk/protocol#EventsPollQuerySchema",
+        "export:@byok-sdk/protocol#HANDOFF_EXCERPT_LINE_MAX_BYTES",
+        "export:@byok-sdk/protocol#HandoffJson",
+        "export:@byok-sdk/protocol#HandoffLine",
+        "export:@byok-sdk/protocol#HandoffTurn",
+        "export:@byok-sdk/protocol#HarnessId",
+        "export:@byok-sdk/protocol#HarnessInfo",
+        "export:@byok-sdk/protocol#HarnessInfoSchema",
+        "export:@byok-sdk/protocol#InputPreparationAccountingPolicyRef",
+        "export:@byok-sdk/protocol#InputPreparationCounterEvidenceSchema",
+        "export:@byok-sdk/protocol#InputPreparationCounterProviderEvidenceSchema",
+        "export:@byok-sdk/protocol#InputPreparationCounterTargetSchema",
+        "export:@byok-sdk/protocol#InputPreparationHostCanonicalAssistantMessageSchema",
+        "export:@byok-sdk/protocol#InputPreparationMessage",
+        "export:@byok-sdk/protocol#InputPreparationMessageSchema",
+        "export:@byok-sdk/protocol#InputPreparationModel",
+        "export:@byok-sdk/protocol#InputPreparationModelCostSchema",
+        "export:@byok-sdk/protocol#InputPreparationOptions",
+        "export:@byok-sdk/protocol#InputPreparationProjectionSchema",
+        "export:@byok-sdk/protocol#InputPreparationPromptSnapshotSchema",
+        "export:@byok-sdk/protocol#InputPreparationReadinessReason",
+        "export:@byok-sdk/protocol#InputPreparationReadinessReasonSchema",
+        "export:@byok-sdk/protocol#InputPreparationReferenceSchema",
+        "export:@byok-sdk/protocol#InputPreparationResidualKeySchema",
+        "export:@byok-sdk/protocol#InputPreparationResidualValueClass",
+        "export:@byok-sdk/protocol#InputPreparationResidualValueClassSchema",
+        "export:@byok-sdk/protocol#InputPreparationRuntimeIdentity",
+        "export:@byok-sdk/protocol#InputPreparationRuntimeIdentitySchema",
+        "export:@byok-sdk/protocol#InputPreparationSource",
+        "export:@byok-sdk/protocol#InputPreparationState",
+        "export:@byok-sdk/protocol#InputPreparationStateSchema",
+        "export:@byok-sdk/protocol#InputPreparationStatus",
+        "export:@byok-sdk/protocol#InputPreparationStatusQuery",
+        "export:@byok-sdk/protocol#InputPreparationStatusSchema",
+        "export:@byok-sdk/protocol#InputPreparationUserMessageSchema",
+        "export:@byok-sdk/protocol#KNOWN_AGENT_EVENT_TYPES",
+        "export:@byok-sdk/protocol#MessageSendOutcome",
+        "export:@byok-sdk/protocol#MessageSendOutcomeSchema",
+        "export:@byok-sdk/protocol#MessagesSendRequest",
+        "export:@byok-sdk/protocol#OfferAdmissionTimings",
+        "export:@byok-sdk/protocol#OfferAdmissionTimingsSchema",
+        "export:@byok-sdk/protocol#OfferSelectionRule",
+        "export:@byok-sdk/protocol#OfferSelectionViolation",
+        "export:@byok-sdk/protocol#PROVIDER_PROVISIONING_DISPOSITIONS",
+        "export:@byok-sdk/protocol#PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM",
+        "export:@byok-sdk/protocol#PresencePublishRequest",
+        "export:@byok-sdk/protocol#ProviderProfileHash",
+        "export:@byok-sdk/protocol#ProviderProfileHashSchema",
+        "export:@byok-sdk/protocol#ProviderProfileRevision",
+        "export:@byok-sdk/protocol#ProviderProfileRevisionSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningCompletion",
+        "export:@byok-sdk/protocol#ProviderProvisioningCompletionSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningDisposition",
+        "export:@byok-sdk/protocol#ProviderProvisioningDispositionSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningKeyCheck",
+        "export:@byok-sdk/protocol#ProviderProvisioningKeyCheckResult",
+        "export:@byok-sdk/protocol#ProviderProvisioningKeyCheckResultSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningKeyCheckSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningOperation",
+        "export:@byok-sdk/protocol#ProviderProvisioningOperationDigest",
+        "export:@byok-sdk/protocol#ProviderProvisioningOperationDigestSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningOperationGeneration",
+        "export:@byok-sdk/protocol#ProviderProvisioningOperationGenerationSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningOperationSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningProviderStatus",
+        "export:@byok-sdk/protocol#ProviderProvisioningProviderStatusSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningRejectionCode",
+        "export:@byok-sdk/protocol#ProviderProvisioningRejectionCodeSchema",
+        "export:@byok-sdk/protocol#RESULT_ISSUES_MAX_BYTES",
+        "export:@byok-sdk/protocol#RESULT_JSON_MAX_DEPTH",
+        "export:@byok-sdk/protocol#RESULT_SCHEMA_INSTANCE_TYPES",
+        "export:@byok-sdk/protocol#RESULT_SCHEMA_KEYWORDS",
+        "export:@byok-sdk/protocol#RESULT_SCHEMA_MAX_DEPTH",
+        "export:@byok-sdk/protocol#ROUTINE_MAX_NOW",
+        "export:@byok-sdk/protocol#ROUTINE_MIN_NOW",
+        "export:@byok-sdk/protocol#ResultDocumentCheck",
+        "export:@byok-sdk/protocol#ResultDocumentFailureReason",
+        "export:@byok-sdk/protocol#ResultDocumentSchemaSchema",
+        "export:@byok-sdk/protocol#ResultOutcomeCheck",
+        "export:@byok-sdk/protocol#ResultSchema",
+        "export:@byok-sdk/protocol#ResultSchemaCheck",
+        "export:@byok-sdk/protocol#ResultSchemaInstanceType",
+        "export:@byok-sdk/protocol#ResultSchemaKeyword",
+        "export:@byok-sdk/protocol#RoomCallAction",
+        "export:@byok-sdk/protocol#RoomSpeech",
+        "export:@byok-sdk/protocol#RoutineScheduleCheck",
+        "export:@byok-sdk/protocol#RoutineScheduleError",
+        "export:@byok-sdk/protocol#RoutineScheduleIssueCode",
+        "export:@byok-sdk/protocol#RuntimeFailureClass",
+        "export:@byok-sdk/protocol#RuntimeFailureClassSchema",
+        "export:@byok-sdk/protocol#RuntimeInfo",
+        "export:@byok-sdk/protocol#RuntimeInfoSchema",
+        "export:@byok-sdk/protocol#RuntimeUnavailableCauseReading",
+        "export:@byok-sdk/protocol#RuntimeUnavailableEntry",
+        "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
+        "export:@byok-sdk/protocol#SEALED_PAYLOAD_MAX_PADDED_LENGTH",
+        "export:@byok-sdk/protocol#SEALED_TASK_PLAIN_CODES",
+        "export:@byok-sdk/protocol#TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH",
+        "export:@byok-sdk/protocol#TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH",
+        "export:@byok-sdk/protocol#TaskApprovePayload",
+        "export:@byok-sdk/protocol#TaskArtifactSealedPayload",
+        "export:@byok-sdk/protocol#TaskAwaitApprovalPayload",
+        "export:@byok-sdk/protocol#TaskAwaitApprovalSealedPayload",
+        "export:@byok-sdk/protocol#TaskCancelPayload",
+        "export:@byok-sdk/protocol#TaskCancelPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCancelledPayload",
+        "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCancelledSealedPayload",
+        "export:@byok-sdk/protocol#TaskCompletePayload",
+        "export:@byok-sdk/protocol#TaskCompleteSealedPayload",
+        "export:@byok-sdk/protocol#TaskDeclinePayload",
+        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
+        "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+        "export:@byok-sdk/protocol#TaskFailSealedPayload",
+        "export:@byok-sdk/protocol#TaskProgressPayload",
+        "export:@byok-sdk/protocol#TaskProgressSealedPayload",
+        "export:@byok-sdk/protocol#TaskRejectPayload",
+        "export:@byok-sdk/protocol#TaskRejectPayloadSchema",
+        "export:@byok-sdk/protocol#TaskStartedPayload",
+        "export:@byok-sdk/protocol#TaskStartedPayloadSchema",
+        "export:@byok-sdk/protocol#TaskSteerPayload",
+        "export:@byok-sdk/protocol#TaskSteerPayloadSchema",
+        "export:@byok-sdk/protocol#TeamNoteAction",
+        "export:@byok-sdk/protocol#TerminalInferenceUsage",
+        "export:@byok-sdk/protocol#TerminalInferenceUsageSchema",
+        "export:@byok-sdk/protocol#TerminalPreparedObservation",
+        "export:@byok-sdk/protocol#TerminalPreparedObservationSchema",
+        "export:@byok-sdk/protocol#TerminalProjectionContractSchema",
+        "export:@byok-sdk/protocol#TokenRequest",
+        "export:@byok-sdk/protocol#UnknownAgentEvent",
+        "export:@byok-sdk/protocol#UnknownAgentEventSchema",
+        "export:@byok-sdk/protocol#UpdateRoomAction",
+        "export:@byok-sdk/protocol#WIRE_ADDITIONS",
+        "export:@byok-sdk/protocol#WireAddition",
+        "export:@byok-sdk/protocol#buildDreamInstruction",
+        "export:@byok-sdk/protocol#canTransition",
+        "export:@byok-sdk/protocol#checkResultDocument",
+        "export:@byok-sdk/protocol#checkResultSchema",
+        "export:@byok-sdk/protocol#checkRoutineSchedule",
+        "export:@byok-sdk/protocol#composeBotTurnOutcomeSchema",
+        "export:@byok-sdk/protocol#partitionAgentEvents",
+        "export:@byok-sdk/protocol#readRuntimeUnavailableCause",
+        "export:@byok-sdk/protocol#sealedBase64UrlByteLength",
+        "export:@byok-sdk/protocol#validateResultOutcome",
+        "export:@byok-sdk/protocol/constants#canTransition"
+      ]
+    },
     {
       "id": "retire-compatibility-apis",
       "impact": "breaking",
@@ -342,12 +761,8 @@
       "items": [
         "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
         "export:@byok-sdk/client/adapters#RuntimeDetectionRefusalReason",
-        "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
         "export:@byok-sdk/protocol#PresencePublishRequestSchema",
         "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSES",
-        "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
-        "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
-        "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
         "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES"
       ]
     },
@@ -415,6 +830,329 @@
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
         "export:@byok-sdk/cloud-dataplane/runtime#PostgresInboundDedupStore"
+      ]
+    },
+    {
+      "id": "wire-v7",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol PROTOCOL_VERSION is 7 and there is no v6 reader: start the server side on a new store, pair the devices again, upgrade the cloud first and the daemons after. The POST /byok/messages frame (MessagesSendRequestSchema) accepts any positive v; an entry of another major is answered rejected with protocol_version_unsupported and an unknown daemon-to-server type with type_unsupported (OUTBOUND_REFUSAL_REASONS, MessageSendOutcomeSchema). A v6 daemon halts on that answer to its hello; ProtocolNegotiationError (code protocol_negotiation_failed) is the typed halt of a v7 peer refused by another major. EnvelopeSchema, MESSAGE_PAYLOAD_SCHEMAS and createEnvelope carry the v7 message set.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+        "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+        "export:@byok-sdk/protocol#OUTBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#ProtocolNegotiationError",
+        "export:@byok-sdk/protocol#EnvelopeSchema",
+        "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+        "export:@byok-sdk/protocol#createEnvelope",
+        "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION"
+      ]
+    },
+    {
+      "id": "wire-v7-execution-target",
+      "impact": "breaking",
+      "summary": "task.offer replaces runtime, harnessId and dispatchSelection with one required target (ExecutionTargetSchema: auto, runtime, subscription without providerId, byok, byok-profile, harness) and drops limits.maxTokens; nativeSessions needs an explicit Pi target, which targetsPi(target) tells. task.claim replaces runtime, harnessId and agentId with a required executor (ClaimedExecutorSchema); task.complete requires executor and task.fail and task.cancelled carry it after a claim. DispatchSelectionSchema and DispatchSelection are removed; the offer selection rules runtime_selection_mismatch and harness_selection_conflict are gone (OfferSelectionRule, offerSelectionViolation). @byok-sdk/cloud TaskAttempt.claimedExecutor replaces claimedRuntime and claimedHarnessId, and TaskAttemptStore.claim takes executor; AgentExecutionInputSchema and SealedAgentExecutionInputSchema embed the v7 offer. Build offers with target and read claimedExecutor; the K4 example execution core (example:host-execution-core) does both.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#ExecutionTarget",
+        "export:@byok-sdk/protocol#ExecutionTargetSchema",
+        "export:@byok-sdk/protocol#ClaimedExecutor",
+        "export:@byok-sdk/protocol#ClaimedExecutorSchema",
+        "export:@byok-sdk/protocol#DispatchSelection",
+        "export:@byok-sdk/protocol#DispatchSelectionSchema",
+        "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+        "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+        "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+        "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+        "export:@byok-sdk/protocol#TaskFailPayloadSchema",
+        "export:@byok-sdk/protocol#offerSelectionViolation",
+        "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+        "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+        "export:@byok-sdk/cloud#TaskAttempt",
+        "export:@byok-sdk/cloud#TaskAttemptStore",
+        "export:@byok-sdk/protocol#targetsPi",
+        "example:host-execution-core"
+      ]
+    },
+    {
+      "id": "wire-v7-dream-native-sessions-pi-target",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration BotOptions.dreaming.nativeSessions requests native session input only for a dream template whose target names Pi (targetsPi): a template with an auto, harness, Claude or Codex target dreams without it, where wire v6 sent the request with every runtime template. To dream with native session input, list a Pi-targeted template in dreaming.models.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-dream-native-sessions-pi-target"
+      ]
+    },
+    {
+      "id": "wire-v7-steer-refused",
+      "impact": "breaking",
+      "summary": "Wire v7 adds the daemon-to-server task.steer_refused { steerMessageId, reason } (TaskSteerRefusedPayloadSchema, DAEMON_TO_SERVER_TYPES): a device reports a steer it received and did not deliver. reason is open (STEER_REFUSAL_REASONS, readSteerRefusalReason); the envelope id is steerRefusalEnvelopeId(steerMessageId), built on uuidFromSha256, so the first reason wins. Custom @byok-sdk/cloud compositions add the steerRefusals port (TaskSteerRefusalStore, SteerRefusalRecord; CloudStores, CLOUD_STORE_NAMES) and @byok-sdk/core MailboxStore.readMessage; both have conformance specs. Host read APIs follow in the same release.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "union:wire#task.steer_refused",
+        "export:@byok-sdk/protocol#TaskSteerRefusedPayload",
+        "export:@byok-sdk/protocol#TaskSteerRefusedPayloadSchema",
+        "export:@byok-sdk/protocol#STEER_REFUSAL_REASONS",
+        "export:@byok-sdk/protocol#SteerRefusalReason",
+        "export:@byok-sdk/protocol#SteerRefusalReasonReading",
+        "export:@byok-sdk/protocol#readSteerRefusalReason",
+        "export:@byok-sdk/protocol#steerRefusalEnvelopeId",
+        "export:@byok-sdk/protocol#uuidFromSha256",
+        "export:@byok-sdk/protocol#DAEMON_TO_SERVER_TYPES",
+        "export:@byok-sdk/cloud#TaskSteerRefusalStore",
+        "export:@byok-sdk/cloud#SteerRefusalRecord",
+        "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
+        "export:@byok-sdk/core#MailboxStore"
+      ]
+    },
+    {
+      "id": "wire-v7-no-server-capabilities",
+      "impact": "breaking",
+      "summary": "The server advertises no capabilities in wire v7: EventsPollResponseSchema and MessagesSendResponseSchema lose capabilities, and WireAddition loses kind, rule and advertisedBy; every row is a device-gated server-to-daemon surface, and the offer's model lanes (target.lane subscription, byok, byok-profile) take the dispatch-selection row. Stop reading server capabilities.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#EventsPollResponseSchema",
+        "export:@byok-sdk/protocol#MessagesSendResponseSchema"
+      ]
+    },
+    {
+      "id": "wire-v7-decline-codes",
+      "impact": "breaking",
+      "summary": "task.decline codes are typed: DECLINE_CODES lists every known code (TaskDeclineCode), including runtime_unavailable, the offer admission codes that used to be a reason prefix, PREPARED_OFFER_DECLINE_CODES (PreparedOfferDeclineCode) and the input-preparation rejections. code stays optional and open: read it with readDeclineCode and keep unknown codes; stop parsing reason prefixes.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#DECLINE_CODES",
+        "export:@byok-sdk/protocol#TaskDeclineCode",
+        "export:@byok-sdk/protocol#PREPARED_OFFER_DECLINE_CODES",
+        "export:@byok-sdk/protocol#PreparedOfferDeclineCode"
+      ]
+    },
+    {
+      "id": "wire-v7-retired-flags-and-bounds",
+      "impact": "breaking",
+      "summary": "CAPABILITY_FLAGS loses the device flags steer and provider-profile-binding (PROVIDER_PROFILE_BINDING_CAPABILITY is removed): steering is gated on the claim's runtime capabilities, and a device that cannot bind a provider profile declines. conn.hello carries at most CONN_HELLO_CAPABILITIES_MAX_ITEMS (64) flags, and a plaintext task.steer text at most TASK_STEER_TEXT_MAX_BYTES (65,536 UTF-8 bytes); send longer follow-up input as a new task.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol#PROVIDER_PROFILE_BINDING_CAPABILITY",
+        "export:@byok-sdk/protocol#CONN_HELLO_CAPABILITIES_MAX_ITEMS",
+        "export:@byok-sdk/protocol#TASK_STEER_TEXT_MAX_BYTES",
+        "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+        "export:@byok-sdk/protocol/constants#PROVIDER_PROFILE_BINDING_CAPABILITY"
+      ]
+    },
+    {
+      "id": "wire-v7-decline-reason-bound",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol TaskDeclinePayloadSchema now bounds task.decline reason like task.fail reason: every parse and createEnvelope redacts credentials and truncates it to TASK_FAIL_REASON_MAX_BYTES UTF-8 bytes. A Host that showed or stored the full decline reason gets the bounded text; read the meaning from code.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-decline-reason-bound"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-fencing",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol PairRequestSchema requires expectedDeviceDigest: null, or the pairDeviceDigest (PairDeviceDigestSchema, PAIR_DEVICE_DIGEST_NAMESPACE, PairDeviceDigestInput) of the device the client knew as current for its machine. With machineId, POST /byok/pair supersedes only when it names the current device, and otherwise answers 409 PairSupersededResponseSchema (PAIRING_SUPERSEDED_CODE, currentDeviceDigest only) without consuming the code. The 401 is PairingCodeInvalidResponseSchema (PAIRING_CODE_INVALID_CODE). A v6 client gets 400; upgrade the cloud first.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "export:@byok-sdk/protocol#PairRequestSchema",
+        "export:@byok-sdk/protocol#pairDeviceDigest",
+        "export:@byok-sdk/protocol#PairDeviceDigestSchema",
+        "export:@byok-sdk/protocol#PAIR_DEVICE_DIGEST_NAMESPACE",
+        "export:@byok-sdk/protocol#PairDeviceDigestInput",
+        "export:@byok-sdk/protocol#PairSupersededResponseSchema",
+        "export:@byok-sdk/protocol#PairSupersededResponse",
+        "export:@byok-sdk/protocol#PAIRING_SUPERSEDED_CODE",
+        "export:@byok-sdk/protocol#PairingCodeInvalidResponseSchema",
+        "export:@byok-sdk/protocol#PairingCodeInvalidResponse",
+        "export:@byok-sdk/protocol#PAIRING_CODE_INVALID_CODE"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-field-bounds",
+      "impact": "breaking",
+      "summary": "@byok-sdk/protocol bounds PairRequest.deviceName and PairResponse.deviceId to 1-64 characters (PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH, PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH), so every field a device stores from a pairing has a bound. A server rejects a longer deviceName with 400; a client refuses a longer deviceId. deviceName, deviceId and tenantId must also be isPairingText: well-formed text with no control character (C0, DEL, C1) and no unpaired surrogate.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/protocol#PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH",
+        "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH",
+        "export:@byok-sdk/protocol#isPairingText"
+      ]
+    },
+    {
+      "id": "wire-v7-tenant-id-text",
+      "impact": "breaking",
+      "summary": "@byok-sdk/core tenantId() and isTenantId refuse any control character or unpaired surrogate, not only NUL, matching the protocol's isPairingText. A Host that mints such tenant ids changes them before upgrading.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-tenant-id-text"
+      ]
+    },
+    {
+      "id": "wire-v7-pairing-enrollment-port",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud DeviceRegistration and PairingEnrollmentInput require expectedDeviceDigest. DeviceDirectory.register returns DeviceRegistrationResult (registered or conflict) and PairingEnrollment.redeemAndRegister returns PairingEnrollmentResult (registered, conflict, or code_invalid in place of undefined). A custom store checks the fence, supersedes and inserts in one atomic section per (tenant, product, machineId); a conflict writes nothing and consumes no code, and a consumed code with the same binding replays before the fence is read. Run the cloud conformance suite.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryPairingCodeStore",
+        "export:@byok-sdk/cloud#DeviceDirectory",
+        "export:@byok-sdk/cloud#DeviceRegistration",
+        "export:@byok-sdk/cloud#DeviceRegistrationResult",
+        "export:@byok-sdk/cloud#PairingEnrollment",
+        "export:@byok-sdk/cloud#PairingEnrollmentInput",
+        "export:@byok-sdk/cloud#PairingEnrollmentResult",
+        "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore"
+      ]
+    },
+    {
+      "id": "wire-v7-pairing-product-id-bound",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud createPairingCode (and the server's pairing.createPairingCode) refuses a productId longer than PAIRING_CODE_PRODUCT_ID_MAX_LENGTH (64) with ByokCloudError code pairing_product_id_invalid and mints nothing. The device keys its enrollment and every pairDeviceDigest by productId, so it is bounded where it enters.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "export:@byok-sdk/cloud#PAIRING_CODE_PRODUCT_ID_MAX_LENGTH"
+      ]
+    },
+    {
+      "id": "wire-v7-pairing-product-id-refused",
+      "impact": "breaking",
+      "summary": "createPairingCode throws ByokCloudError pairing_product_id_invalid for a productId over 64 characters and mints nothing.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pairing-registration-fence-2045",
+      "items": [
+        "behavior:wire-v7-pairing-product-id-refused"
+      ]
+    },
+    {
+      "id": "wire-v7-client-pairing-errors",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client pairing rejects with PairingSupersededError (another pairing of this productId replaced this one while its request was in flight; nothing written), PairingBusyError (retryable; two pairings of one machine at once; retry with the same code) and PairingCodeRejectedError (code unknown, expired or used). FirstPairingAttemptRefusedError is renamed PairingAttemptRefusedError and has no code. PairingInputInvalidError (field deviceName or machineId) refuses an out-of-bound pairing input before anything is staged or sent. AuthResponseInvalidError's cause is optional: a malformed 2xx body carries none, since the parser's message quotes the body.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#PairingSupersededError",
+        "export:@byok-sdk/client#PairingBusyError",
+        "export:@byok-sdk/client#PairingCodeRejectedError",
+        "export:@byok-sdk/client#PairingAttemptRefusedError",
+        "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+        "export:@byok-sdk/client#PairingInputInvalidError",
+        "export:@byok-sdk/client#AuthResponseInvalidError"
+      ]
+    },
+    {
+      "id": "wire-v7-device-credential-attempt",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DeviceCredentialBackend implements readPairingAttempt and savePairingAttempt (PairingAttempt) in place of the first-pairing methods; InMemoryDeviceCredentialBackend follows. clearDeviceEnrollment loses clearUnattributedAttempt and DeviceEnrollmentClearErrorCode loses pairing_attempt_unattributed: a v7 attempt always names its store. DeviceRecord drops accessToken and expiresAt, and replace always discards a staged attempt.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#DeviceCredentialBackend",
+        "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+        "export:@byok-sdk/client#clearDeviceEnrollment",
+        "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode"
+      ]
+    },
+    {
+      "id": "wire-v7-auth-manager-pair",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client AuthManager.pair, reached through BlobClient and InstallSkillPacksOptions, no longer takes the internal custody option; nothing to change unless a Host passed it.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/client#InstallSkillPacksOptions"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-gate-split",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Daemon.pair no longer holds the productId enrollment lock across its request or its E2EE member custody; re-pairing a running daemon shuts it down outside the lock, and member entries are written only while the new enrollment holds. Hosts that relied on another store's pairing waiting for this one get the server fence instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-pair-gate-split"
+      ]
+    },
+    {
+      "id": "wire-v7-pair-new-code-fresh-key",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Daemon.pair stages an attempt on every pairing: the same code resumes it, a new code stages a fresh device key, except a re-pair of the store's own enrollment, which keeps its key.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-pair-new-code-fresh-key"
+      ]
+    },
+    {
+      "id": "wire-v7-v6-enrollment-entry-deleted",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client deletes a wire v6 device-enrollment OS entry, recognized by its format version without reading its key: start deletes it and reports re-pair required, pair deletes it and pairs as a first pairing, clearDeviceEnrollment deletes it. Re-pair every device after the cloud upgrade.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-v6-enrollment-entry-deleted"
+      ]
+    },
+    {
+      "id": "wire-v7-auth-errors-without-server-text",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client pairing and token renewal errors carry only the HTTP status, never the server's response text; read the typed errors instead of parsing messages.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-auth-errors-without-server-text"
+      ]
+    },
+    {
+      "id": "wire-v7-access-token-in-memory",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client no longer persists the access token: the daemon exchanges one with the device key on its first request after start and after a 401, and keeps it in memory. A start costs one /byok/challenge and /byok/token round trip; renewal writes nothing to the OS entry.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#client-pairing",
+      "items": [
+        "behavior:wire-v7-access-token-in-memory"
+      ]
+    },
+    {
+      "id": "wire-v7-server-execution-target",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server follows the wire v7 execution target. DispatchInput (AgentResumeDispatchInput) takes one required target: ExecutionTarget in place of runtime, harnessId and dispatchSelection; pass { lane: 'auto' } for the device's own runtime preference. TaskSnapshot and the task.state ByokServerEvent expose claimedExecutor (a runtime or a harness) in place of claimedRuntime and claimedHarnessId, and SteerRejectedError carries executor in place of runtime. An execution-core intent's fresh execution template must name a concrete target; auto is refused.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/server#AgentResumeDispatchInput",
+        "export:@byok-sdk/server#ByokServerEvent",
+        "export:@byok-sdk/server#TaskSnapshot",
+        "export:@byok-sdk/server#SteerRejectedError"
+      ]
+    },
+    {
+      "id": "wire-v7-server-steer-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server reports steer refusals. TaskHandle.steer resolves { messageId }, the id a refusal names, and refuses text over TASK_STEER_TEXT_MAX_BYTES UTF-8 bytes with ByokCloudError coordination_input_invalid before anything is enqueued. ServerTaskEvent gains { kind: 'steer_refused', messageId, reason, at }: a task's event feed yields the refusals recorded before its terminal, and ByokServer.tasks.readSteerRefusal and listSteerRefusals (SteerRefusal) read any refusal, including one recorded after the feed ended. tasks.events cursors move from te1. to te2.; a te1. cursor is refused with cursor_unknown. Exhaustive switches over ServerTaskEvent need the new arm.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/server#ServerTaskEvent",
+        "export:@byok-sdk/server#TaskHandle",
+        "export:@byok-sdk/server#ByokServer",
+        "export:@byok-sdk/server#SteerRefusal"
+      ]
+    },
+    {
+      "id": "wire-v7-server-sqlite-store",
+      "impact": "breaking",
+      "acceptance": "new-path-repair",
+      "summary": "The embedded server SQLite store moves to schema version 10 for wire v7 and upgrades no older file in place: opening a version 6 to 9 file fails with SqliteSchemaError SQLITE_SCHEMA_UNSUPPORTED, and inspectSqliteStore reports new-path-repair. Start the v7 server on a new state path and pair the daemons again; keep the old file to export its history first. Version 10 adds the task_steer_refusal table and keeps the claimed executor in two task_attempt columns, at most one of them set.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "store:server-sqlite"
+      ]
+    },
+    {
+      "id": "server-sqlite-format-before-write",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server's SQLite store decides a file's format with @byok-sdk/core/sqlite-node readSqliteFileUnchanged before it opens the file for writing, and refuses with SqliteSchemaError while the file's bytes, WAL, SHM and directory stay unchanged: an older, newer or foreign file; a current file whose tables, indexes or triggers differ from schema 10's by name or definition (a missing or changed one is SQLITE_SCHEMA_INVALID and is no longer recreated; an unknown one is SQLITE_SCHEMA_UNSUPPORTED). The removed migration option is no longer checked. A new store checkpoints its metadata into the main file when it is created.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
+      "items": [
+        "behavior:server-sqlite-format-before-write"
       ]
     },
     {
@@ -644,6 +1382,286 @@
       "items": [
         "export:@byok-sdk/client/mcp-server#MCP_SERVER_MAX_FRAME_BYTES"
       ]
+    },
+    {
+      "id": "wire-v7-cloud-executor",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud reads the v7 claim executor: InMemoryTaskAttemptStore.claim and TenantBoundTaskAttempts.claim take executor, SteerRejectedError.executor replaces runtime, and TerminalResult.executor replaces harnessId and is the attempt's claimed executor (absent when the task was never claimed); projectTerminalResult takes that claimed executor as a third argument. INBOUND_REFUSAL_REASONS renames claim_harness_mismatch to claim_executor_mismatch and terminal_harness_mismatch to terminal_executor_mismatch, removes claim_harness_and_runtime_conflict, and adds steer_refusal_id_mismatch, steer_refusal_unknown_steer and task_not_claimed. Rename the reason strings an observer matches.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+        "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+        "export:@byok-sdk/cloud#SteerRejectedError",
+        "export:@byok-sdk/cloud#TerminalResult",
+        "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+        "export:@byok-sdk/cloud#projectTerminalResult"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-steer-refusal-reads",
+      "impact": "additive",
+      "summary": "@byok-sdk/cloud ByokCloud.readSteerRefusal and listSteerRefusals read a task's steer refusals by steer id or by revision; TenantStores.steerRefusals and TenantBoundMailbox.readMessage carry them, and @byok-sdk/core InMemoryMailboxStore implements readMessage.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/cloud#TenantStores",
+        "export:@byok-sdk/cloud#TenantBoundMailbox",
+        "export:@byok-sdk/core#InMemoryMailboxStore"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-terminal-executor",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages hold the executor to the claim and the offer. A task.claim whose executor the offer target does not allow is rejected (claim_offer_mismatch): any executor under auto, otherwise exactly the named runtime or harness. After a claim, a task.complete, task.fail or task.cancelled whose executor differs from TaskAttempt.claimedExecutor is rejected (terminal_executor_mismatch, wire not_permitted), and so is a task.complete with no claim and an unclaimed cancel or ordinary failure that carries an executor. An unclaimed daemon_interrupted recovery may name the executor its device admitted: it must be one the offer target allows (terminal_executor_mismatch otherwise), and it records no claim or owner. Devices on v7 echo the claimed executor; nothing for the Host to change beyond the reason rename.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-terminal-executor"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-unclaimed-task-reports",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud handleInboundEnvelope and POST /byok/messages accept only task.claim, task.decline, task.cancelled and a task.fail with recovery for a task that has no claim, and only from the offered device. Every other task report before a claim (task.started, task.progress, task.artifact, task.await_approval, task.approval_resolved, task.steer_refused, task.complete, task.fail without recovery) is rejected with task_not_claimed (wire not_permitted) and changes nothing. A device that claims before it reports sees no change.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-unclaimed-task-reports"
+      ]
+    },
+    {
+      "id": "wire-v7-cloud-steer-text-bound",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ByokCloud.steerTask rejects a plaintext text over TASK_STEER_TEXT_MAX_BYTES (65,536 UTF-8 bytes) with coordination_input_invalid before it enqueues anything. Send longer follow-up input as a new task.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-cloud-steer-text-bound"
+      ]
+    },
+    {
+      "id": "wire-v7-dataplane-postgres-new-database",
+      "impact": "breaking",
+      "acceptance": "new-path-repair",
+      "summary": "@byok-sdk/cloud-dataplane migration 0040_wire_v7.sql adds task_steer_refusal, the one-executor check on task and the byok_wire_epoch marker. It stops before any change on a database where any table holds a row, Host configuration included. Run the migrations on a new Postgres database, then write entitlements and retention policy, and pair the devices again.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "store:cloud-dataplane-postgres"
+      ]
+    },
+    {
+      "id": "wire-v7-dataplane-store-epoch",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane createPostgresCloudStores checks the database's wire epoch instead of pending mailbox rows: it rejects a database whose epoch is not 7, or that has none, with PostgresStoreEpochUnsupportedError (POSTGRES_STORE_EPOCH_UNSUPPORTED). PostgresMailboxProtocolUnsupportedError and POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED are removed; match the new code.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#PostgresStoreEpochUnsupportedError",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresStoreEpochUnsupportedError",
+        "export:@byok-sdk/cloud-dataplane#POSTGRES_STORE_EPOCH_UNSUPPORTED",
+        "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_STORE_EPOCH_UNSUPPORTED",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxProtocolUnsupportedError",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxProtocolUnsupportedError",
+        "export:@byok-sdk/cloud-dataplane#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
+        "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED"
+      ]
+    },
+    {
+      "id": "wire-v7-dataplane-stores",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane PostgresTaskAttemptStore.claim takes executor and reads claimedExecutor; PostgresTaskSteerRefusalStore is the steerRefusals port; PostgresMailboxStore implements readMessage; TENANT_ERASURE_TABLES gains task_steer_refusal.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskAttemptStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskSteerRefusalStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskSteerRefusalStore",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+        "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES"
+      ]
+    },
+    {
+      "id": "cloud-unused-exports-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud removes exports with no caller: BoardFeedClient, BoardFeedRetryableError, BoardFeedStoppedError and the BoardFeed* types; CLOUD_PORT_INTERFACES; TRUTH_RECORD_CAPABILITY and TRUTH_INLINE_CONTENT_TYPE (use CLOUD_CAPABILITIES.truthRecords); CapabilitiesResponseSchema and CapabilitiesResponse (use CapabilityDeclarationSchema and CapabilityDeclaration from @byok-sdk/core); receiptRetentionClass; InMemoryAgentMemoryProjectionStore and InMemoryAgentMemoryProjectionAuthorizer.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#BoardFeedClient",
+        "export:@byok-sdk/cloud#BoardFeedClientOptions",
+        "export:@byok-sdk/cloud#BoardFeedItem",
+        "export:@byok-sdk/cloud#BoardFeedMode",
+        "export:@byok-sdk/cloud#BoardFeedPage",
+        "export:@byok-sdk/cloud#BoardFeedRead",
+        "export:@byok-sdk/cloud#BoardFeedRetryableError",
+        "export:@byok-sdk/cloud#BoardFeedStoppedError",
+        "export:@byok-sdk/cloud#CLOUD_PORT_INTERFACES",
+        "export:@byok-sdk/cloud#TRUTH_RECORD_CAPABILITY",
+        "export:@byok-sdk/cloud#TRUTH_INLINE_CONTENT_TYPE",
+        "export:@byok-sdk/cloud#CapabilitiesResponseSchema",
+        "export:@byok-sdk/cloud#CapabilitiesResponse",
+        "export:@byok-sdk/cloud#receiptRetentionClass",
+        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer"
+      ]
+    },
+    {
+      "id": "cloud-auth-plane-export-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud removes createAuthPlane and its AuthPlane, AuthPlaneDeps, MintedAccessToken and PairInput types. createCloud composes the auth plane; ByokCloud.createPairingCode is the only way to mint a pairing code and enforces PAIRING_CODE_PRODUCT_ID_MAX_LENGTH.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#createAuthPlane",
+        "export:@byok-sdk/cloud#AuthPlane",
+        "export:@byok-sdk/cloud#AuthPlaneDeps",
+        "export:@byok-sdk/cloud#MintedAccessToken",
+        "export:@byok-sdk/cloud#PairInput"
+      ]
+    },
+    {
+      "id": "cloud-host-facade-methods-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ByokCloud removes completeAgentHomeProjection and completeInputPreparation (the device completion routes still complete both), listBoardItems and acceptBoardItem (use the tenant board store), enqueueSealedAgentOffer and enqueueSealedAgentEgressOffer with SealedAgentDispatchInput and SealedAgentEgressDispatchInput (submitSealedAgentExecution is the hosted sealed lane), and enqueueProviderProvisioningNotice with ProviderProvisioningNoticeInput. ByokCloud also gains readSteerRefusal and listSteerRefusals (wire-v7-cloud-steer-refusal-reads).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#ByokCloud",
+        "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+        "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+        "export:@byok-sdk/cloud#ProviderProvisioningNoticeInput"
+      ]
+    },
+    {
+      "id": "cloud-approval-identity-required",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud ApprovalObservationSchema, ApprovalTimelineEventSchema and PendingApproval require approvalId on approval_requested, a local approval_resolved and a host approve or reject. Every producer already sets it: the wire payloads require it and host decisions copy the pending request's id.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#ApprovalObservationSchema",
+        "export:@byok-sdk/cloud#ApprovalTimelineEventSchema",
+        "export:@byok-sdk/cloud#PendingApproval"
+      ]
+    },
+    {
+      "id": "cloud-approval-unnamed-observation-refused",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud approval timeline stores (in-memory, Postgres, SQLite) refuse to read or append an observation without approvalId instead of folding it as the single outstanding request; ByokCloud.approve and reject no longer refuse a pre-v4 unnamed request specially. No id is synthesized. Wire v7 starts on new stores, so a v7 store holds none.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "behavior:cloud-approval-unnamed-observation-refused"
+      ]
+    },
+    {
+      "id": "cloud-agentless-archive-input-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud taskArchiveInput requires agentRef. @byok-sdk/cloud-dataplane removes retireAgentlessTasks, RetireAgentlessTasksOptions and RetireAgentlessTasksResult: wire v7 starts on a new database, so no pre-0039 agentless row exists. The retired-id fence stays: a task id in task_agentless_retired refuses a new offer with agent_task_already_exists.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#taskArchiveInput",
+        "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
+        "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+        "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult"
+      ]
+    },
+    {
+      "id": "cloud-error-agent-ref-missing-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud CLOUD_ERROR_CODES removes task_attempt_agent_ref_missing. Migration 0039 makes the task Agent columns NOT NULL, so the read that raised it cannot fail; drop any match on the code.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud#CLOUD_ERROR_CODES"
+      ]
+    },
+    {
+      "id": "dataplane-unused-exports-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane removes the resident Postgres wakes (createPostgresMailboxWake, createPostgresTaskEventsWake, MailboxWakeProbeMissedError, TaskEventsWakeProbeMissedError and their types; use the cloud's in-process wake with fallbackMs; the SQL triggers stay) and the composition factories createPostgresCloudMaintenance, createPostgresTenantErasure, createPostgresTaskRedactionStore and createPostgresAgentMemoryProjectionStore with their option types (construct PostgresCloudCleanup, PostgresTenantErasure, PostgresTaskRedactionStore or PostgresAgentMemoryProjectionStore).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#createPostgresMailboxWake",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+        "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresCloudMaintenance",
+        "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTenantErasure",
+        "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+        "export:@byok-sdk/cloud-dataplane#createPostgresTaskRedactionStore",
+        "export:@byok-sdk/cloud-dataplane#createPostgresAgentMemoryProjectionStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#createPostgresTaskRedactionStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#createPostgresAgentMemoryProjectionStore"
+      ]
+    },
+    {
+      "id": "dataplane-retention-policy-store-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane removes PostgresRetentionPolicyStore, TenantRetentionPolicy and TenantRetentionPolicyInput. The tenant_retention_policy table and runMaintenance are unchanged: the Host writes and reads the policy with SQL and passes it to maintenance.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+        "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicy",
+        "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicyInput",
+        "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+        "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicy",
+        "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicyInput"
+      ]
+    },
+    {
+      "id": "dataplane-mailbox-row-tenant-validated",
+      "impact": "breaking",
+      "summary": "@byok-sdk/cloud-dataplane maps every outbox row through one projection (PostgresMailboxStore reads, task cancellation and PostgresCloudCleanup dead-letter pages and replay), and it brands the row's tenant with @byok-sdk/core tenantId(). A stored row whose tenant_id is not a valid tenant id now fails that read with ByokCoreError tenant_id_invalid instead of being passed through unchecked. Rows the SDK wrote always carry a valid tenant id.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-cloud-and-data-plane-apis",
+      "items": [
+        "behavior:dataplane-mailbox-row-tenant-validated"
+      ]
+    },
+    {
+      "id": "wire-v7-client-negotiation-halt",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client DAEMON_HALT_REASONS adds protocol_negotiation_failed, and DaemonLifecycle's halted phase carries httpStatus for it. The daemon halts instead of reconnecting when its lone conn.hello is refused as another wire major: a rejected outcome with protocol_version_unsupported (httpStatus 200) or a 4xx other than 401, 403, 409, 413 and 429. whenOpen() rejects with a DaemonHaltError whose cause is a ProtocolNegotiationError. Handle the new halt reason wherever halts are switched on.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/client#DAEMON_HALT_REASONS",
+        "export:@byok-sdk/client#DaemonLifecycle"
+      ]
+    },
+    {
+      "id": "wire-v7-client-execution-target",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client RuntimeTaskInput takes the offer's required target in place of runtime, harnessId and dispatchSelection, and RuntimeOperationManifest.modelTarget (the model-lane target) replaces dispatchSelection. taskRuntimeTarget returns { lane: 'runtime', runtimeId } or { lane: 'harness', harnessId }: use it as the offer target. Custom adapters read the model selection from manifest.modelTarget.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "export:@byok-sdk/client#RuntimeTaskInput",
+        "export:@byok-sdk/client#RuntimeOperationManifest",
+        "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+        "export:@byok-sdk/client/adapters#taskRuntimeTarget"
+      ]
+    },
+    {
+      "id": "wire-v7-client-decline-reason-detail",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client declines carry the decline code only in task.decline code; reason is the detail alone and no longer starts with '<code>: ' (for example offer_capability_missing and the offer selection rules). Hosts that parsed a code out of reason read code instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-client-decline-reason-detail"
+      ]
+    },
+    {
+      "id": "wire-v7-client-selection-before-native-sessions",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client checks the offer selection rules before native-sessions support, so an offer that breaks a rule declines with the rule's code (for example native_sessions_selection_invalid for nativeSessions without an explicit Pi target) even on a device without native sessions; native_sessions_unsupported answers only an offer the rules accept.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:wire-v7-client-selection-before-native-sessions"
+      ]
+    },
+    {
+      "id": "claim-accepted-before-runtime-start",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client createDaemon starts a task's runtime and sends task.started only after the cloud accepts its task.claim; a refused claim declines the task (retryable false, reason 'claim refused: <refusal reason>', no code) and an unsettled claim fails at the offer's startup deadline. Hosts that treated task.started as the claim result read the decline instead.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v7",
+      "items": [
+        "behavior:claim-accepted-before-runtime-start"
+      ]
     }
   ],
   "changes": [
@@ -778,6 +1796,13 @@
       "entry": "core-sqlite-node-entry"
     },
     {
+      "item": "example:host-execution-core",
+      "change": "changed",
+      "before": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
+      "after": "K4 0.0.1 src-sha256=17c9ab1fc3785ffe",
+      "entry": "wire-v7-execution-target"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
       "change": "changed",
       "entry": "k4-settlement-notice"
@@ -868,6 +1893,21 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#AuthResponseInvalidError",
+      "change": "changed",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#BlobClient",
+      "change": "changed",
+      "entry": "wire-v7-auth-manager-pair"
+    },
+    {
+      "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
+      "change": "changed",
+      "entry": "wire-v7-client-negotiation-halt"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonConfigFieldRemovedError",
       "change": "removed",
       "entry": "daemon-config-unknown-fields-fail-closed"
@@ -898,6 +1938,11 @@
       "entry": "remove-unused-client-aliases"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonLifecycle",
+      "change": "changed",
+      "entry": "wire-v7-client-negotiation-halt"
+    },
+    {
       "item": "export:@byok-sdk/client#DaemonLog",
       "change": "removed",
       "entry": "remove-standalone-daemon-log"
@@ -906,6 +1951,16 @@
       "item": "export:@byok-sdk/client#DaemonObserver",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceCredentialBackend",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
@@ -918,9 +1973,19 @@
       "entry": "grok-session-store"
     },
     {
+      "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
+      "change": "removed",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
       "item": "export:@byok-sdk/client#GrokAdapterOptions",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client#InstallSkillPacksOptions",
+      "change": "changed",
+      "entry": "wire-v7-auth-manager-pair"
     },
     {
       "item": "export:@byok-sdk/client#LocalMemoryFilter",
@@ -943,6 +2008,31 @@
       "entry": "remove-truth-memory-client"
     },
     {
+      "item": "export:@byok-sdk/client#PairingAttemptRefusedError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingBusyError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingCodeRejectedError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingInputInvalidError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#PairingSupersededError",
+      "change": "added",
+      "entry": "wire-v7-client-pairing-errors"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeDetectResult",
       "change": "changed",
       "entry": "runtime-version-verdict-only"
@@ -956,6 +2046,16 @@
       "item": "export:@byok-sdk/client#RuntimeDetectionRefusalReason",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeTaskInput",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
     },
     {
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
@@ -1038,6 +2138,11 @@
       "entry": "remove-truth-memory-client"
     },
     {
+      "item": "export:@byok-sdk/client#clearDeviceEnrollment",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
       "item": "export:@byok-sdk/client#createAgentHomeProjection",
       "change": "removed",
       "entry": "remove-unused-client-aliases"
@@ -1093,14 +2198,124 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#taskRuntimeTarget",
+      "change": "changed",
+      "entry": "wire-v7-client-execution-target"
+    },
+    {
       "item": "export:@byok-sdk/client/mcp-server#MCP_SERVER_MAX_FRAME_BYTES",
       "change": "changed",
       "entry": "mcp-frame-ceiling-single-authority"
     },
     {
+      "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
+      "change": "changed",
+      "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ApprovalObservationSchema",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ApprovalTimelineEventSchema",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AuthPlane",
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#AuthPlaneDeps",
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedClient",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedClientOptions",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedItem",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedMode",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedPage",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedRead",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedRetryableError",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BoardFeedStoppedError",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloud",
+      "change": "changed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",
       "change": "changed",
       "entry": "e2ee-member-store-in-cloud-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+      "change": "changed",
+      "entry": "cloud-error-agent-ref-missing-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_PORT_INTERFACES",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CLOUD_STORE_NAMES",
+      "change": "changed",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilitiesResponse",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#CapabilitiesResponseSchema",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#CapabilityPorts",
@@ -1113,6 +2328,21 @@
       "entry": "e2ee-member-store-in-cloud-stores"
     },
     {
+      "item": "export:@byok-sdk/cloud#DeviceDirectory",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#DeviceRegistration",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#DeviceRegistrationResult",
+      "change": "added",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
       "item": "export:@byok-sdk/cloud#DeviceScopedStores",
       "change": "added",
       "entry": "in-memory-directory-device-state"
@@ -1121,6 +2351,21 @@
       "item": "export:@byok-sdk/cloud#E2eeMemberStore",
       "change": "changed",
       "entry": "e2ee-member-store-delete-device"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#INBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionAuthorizer",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#InMemoryByokCloudOptions",
@@ -1148,14 +2393,139 @@
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/cloud#InMemoryPairingCodeStore",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryTaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
       "item": "export:@byok-sdk/cloud#InboundDedupStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/cloud#MintedAccessToken",
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud#NonceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PAIRING_CODE_PRODUCT_ID_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pairing-product-id-bound"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairInput",
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairingEnrollment",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairingEnrollmentInput",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PairingEnrollmentResult",
+      "change": "added",
+      "entry": "wire-v7-pairing-enrollment-port"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#PendingApproval",
+      "change": "changed",
+      "entry": "cloud-approval-identity-required"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ProviderProvisioningNoticeInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentDispatchInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentEgressDispatchInput",
+      "change": "removed",
+      "entry": "cloud-host-facade-methods-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SealedAgentExecutionInputSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SteerRefusalRecord",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#SteerRejectedError",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TRUTH_INLINE_CONTENT_TYPE",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TRUTH_RECORD_CAPABILITY",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttempt",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TaskSteerRefusalStore",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantBoundMailbox",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantBoundTaskAttempts",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TenantStores",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TerminalResult",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#createAuthPlane",
+      "change": "removed",
+      "entry": "cloud-auth-plane-export-removed"
     },
     {
       "item": "export:@byok-sdk/cloud#createInMemoryBlobs",
@@ -1168,9 +2538,49 @@
       "entry": "in-memory-directory-device-state"
     },
     {
+      "item": "export:@byok-sdk/cloud#projectTerminalResult",
+      "change": "changed",
+      "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#receiptRetentionClass",
+      "change": "removed",
+      "entry": "cloud-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#taskArchiveInput",
+      "change": "changed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#MailboxWakeProbeMissedError",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
+      "change": "removed",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#POSTGRES_STORE_EPOCH_UNSUPPORTED",
+      "change": "added",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudMaintenanceOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "e2ee-composition-opt-ins"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresE2eeMemberStore",
@@ -1183,9 +2593,34 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxProtocolUnsupportedError",
+      "change": "removed",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresMailboxWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresPairingCodeStore",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane#PostgresPresenceStore",
@@ -1193,9 +2628,129 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresRetentionPolicyStore",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresStoreEpochUnsupportedError",
+      "change": "added",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskEventsWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTaskSteerRefusalStore",
+      "change": "added",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresTenantErasureCompositionOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#PostgresWakeOptions",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksOptions",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#RetireAgentlessTasksResult",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TENANT_ERASURE_TABLES",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TaskEventsWakeProbeMissedError",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicy",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#TenantRetentionPolicyInput",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresCloudMaintenance",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresMailboxWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskEventsWake",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTaskRedactionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#createPostgresTenantErasure",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane#retireAgentlessTasks",
+      "change": "removed",
+      "entry": "cloud-agentless-archive-input-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED",
+      "change": "removed",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#POSTGRES_STORE_EPOCH_UNSUPPORTED",
+      "change": "added",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresCloudStoreOptions",
       "change": "changed",
       "entry": "e2ee-composition-opt-ins"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresDeviceDirectory",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresE2eeMemberStore",
@@ -1208,9 +2763,24 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxProtocolUnsupportedError",
+      "change": "removed",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresMailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresNonceStore",
       "change": "changed",
       "entry": "postgres-device-state-delete"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPairingCodeStore",
+      "change": "changed",
+      "entry": "wire-v7-pairing-enrollment-port"
     },
     {
       "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresPresenceStore",
@@ -1218,14 +2788,824 @@
       "entry": "postgres-device-state-delete"
     },
     {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresRetentionPolicyStore",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresStoreEpochUnsupportedError",
+      "change": "added",
+      "entry": "wire-v7-dataplane-store-epoch"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskAttemptStore",
+      "change": "changed",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#PostgresTaskSteerRefusalStore",
+      "change": "added",
+      "entry": "wire-v7-dataplane-stores"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicy",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#TenantRetentionPolicyInput",
+      "change": "removed",
+      "entry": "dataplane-retention-policy-store-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createPostgresAgentMemoryProjectionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/cloud-dataplane/runtime#createPostgresTaskRedactionStore",
+      "change": "removed",
+      "entry": "dataplane-unused-exports-removed"
+    },
+    {
+      "item": "export:@byok-sdk/core#AGENT_MEMORY_INTENT_DIGEST_VERSION",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#AgentMemoryIntentDigestInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#AuthenticateDeviceAssertionDeps",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#AuthenticatedAssertion",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#BOARD_TRANSITIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#BoardAssignee",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#BoardItem",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#CANONICAL_TIMESTAMP_PATTERN",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#CAPABILITY_DECLARATION_SCHEMA_ID",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#CORE_ERROR_CODES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#CORE_NON_COMPOSITION_PORT_NAMES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#CORE_PORT_INTERFACES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#CoreErrorCode",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DEVICE_ASSERTION_ALGORITHMS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DEVICE_PROOF_ALGORITHMS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DEVICE_PROOF_VERSION",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionAlgorithm",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionAuthorityRow",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionEnvelopeV1",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionEnvelopeV1Schema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionReplayConsumeInput",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionReplaySchemaId",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionVerifier",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionVerifyDeps",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceAssertionVerifyInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceProofAlgorithm",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceProofEnvelopeV1",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceProofEnvelopeV1Schema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceProofVerifier",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#DeviceProofVerifyInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryMailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-cloud-steer-refusal-reads"
+    },
+    {
       "item": "export:@byok-sdk/core#InMemoryPresenceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
     },
     {
+      "item": "export:@byok-sdk/core#JsonPrimitive",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#JsonValue",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#MAILBOX_MESSAGE_STATES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxMessageState",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#MailboxStore",
+      "change": "changed",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/core#OBJECT_STATES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#OBJECT_STATE_TRANSITIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ObjectState",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ObservedSkillPackFile",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PRINCIPAL_KINDS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PROVIDER_PROVISIONING_REQUEST_VERSION",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PROVIDER_PROVISIONING_SECRET_OPERATIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PROVIDER_SECRET_HPKE_INFO",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PROVIDER_SECRET_HPKE_SUITE",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PROVIDER_SECRET_MAX_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PROVIDER_SECRET_MAX_PADDED_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PROVIDER_SECRET_PAD_BLOCK_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
       "item": "export:@byok-sdk/core#PresenceStore",
       "change": "changed",
       "entry": "device-state-delete-ports"
+    },
+    {
+      "item": "export:@byok-sdk/core#PrincipalKind",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningConfigV1",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningConfigV1Schema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningExpectedProfile",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningExpectedProfileSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningHeaderV1",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningHeaderV1Schema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningIdentityRevisionSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningRequestV1",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderProvisioningRequestV1Schema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#ProviderSecretRecipient",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SEALING_KEY_ID_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SKILL_FRONTMATTER_FIELDS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SKILL_PACK_DESCRIPTION_MAX_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SKILL_PACK_FILE_PATH_MAX_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SKILL_PACK_MAX_FILES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SKILL_PACK_NAME_MAX_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SKILL_PACK_NAME_PATTERN",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SKILL_PACK_REJECTIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SKILL_PACK_VERSION_PATTERN",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#STORAGE_RESERVATION_STATES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#STORAGE_WRITE_KINDS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#STORAGE_WRITE_POSTURES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SealProviderProvisioningRequestInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SealedProviderSecretV1",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SealedProviderSecretV1Schema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SealingKeyClaimV1",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SealingKeyClaimV1Schema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SealingKeyIdSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SkillFrontmatter",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SkillPackCheck",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SkillPackFile",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SkillPackFileSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SkillPackManifest",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SkillPackManifestSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#SkillPackRejection",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#StorageReservationState",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#StorageWriteKind",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#StorageWritePosture",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#TASK_ASSERTION_AGENT_REF_MAX_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#TASK_ASSERTION_TOOLSET_ID_MAX_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#TASK_ASSERTION_VERSION",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#TENANT_KEY_SEPARATOR",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#TaskAssertionEnvelopeV1",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#TaskAssertionEnvelopeV1Schema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#agentMemoryIntentOperationDigest",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#authenticateDeviceAssertion",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#authenticateTaskAssertion",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#checkSkillPackFileContent",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#deviceAssertionCanonicalClaims",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#deviceAssertionCanonicalJson",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#deviceProofCanonicalJson",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#isControlPlanePrincipal",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#isDevicePrincipal",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#openProviderProvisioningSecret",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#parseSkillFrontmatter",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#providerProvisioningConfigDigest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#providerSecretAadBytes",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#sealProviderProvisioningRequest",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#sealingKeyClaimCanonicalBytes",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#taskAssertionCanonicalClaims",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#taskAssertionCanonicalJson",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#verifyDeviceAssertion",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#verifyTaskAssertion",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#CLIENT_PAIRING_MAC_DOMAIN",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#ClientPairingMacInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#CreateMemberKeyBundleInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#DEVICE_PAIRING_MAC_DOMAIN",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#DevicePairingMacInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MEMBER_FINGERPRINT_DOMAIN",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MEMBER_KEY_BUNDLE_VERSION",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberChainAnchorFailure",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberChainAnchorResult",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberChainEntryVerifyResult",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberChainHead",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberChainState",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberChainWalkFailure",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberChainWalkResult",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberFingerprintInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#MemberKeyBundleV1",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#OpenScopeKeyPackageInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#OpenSealedContentInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#PAIRING_VERIFICATION_SECRET_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#PairingInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#SEALED_DIRECTIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#SealContentInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#SealScopeKeyPackageInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#SealedBinding",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#SealedContentOpenResult",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#SealedDirection",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#SealedScopePolicy",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#VerifyMemberChainFromAnchorInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#applyMemberChainEntries",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#computeClientPairingMac",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#computeDevicePairingMac",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#createMemberKeyBundle",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#memberFingerprint",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#openScopeKeyPackage",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#openSealedContent",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#parsePairingInput",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#sealContent",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#sealScopeKeyPackage",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#verifyClientPairingMac",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#verifyDevicePairingMac",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#verifyMemberChainEntry",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core/sealed-payload#verifyMemberChainFromAnchor",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/core/sqlite-node#SQLITE_USER_OBJECT",
@@ -1298,9 +3678,974 @@
       "entry": "retire-compatibility-apis"
     },
     {
-      "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+      "item": "export:@byok-sdk/protocol#AGENT_EVENT_SPILL_UNSTORED_REASON_MAX_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_HOME_PROJECTION_MAX_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_OPERATIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_PATH_MAX_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_READBACK_DISPOSITIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AGENT_MEMORY_INTENT_RESERVATIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ActivityIngress",
       "change": "changed",
-      "entry": "agent-user-context-unavailable-cause"
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ActivityIngressSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentContentActor",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentContentActorKind",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentContentActorKindSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentContentDecodeAs",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentContentReadDecision",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentContentReadDecisionSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentContentReadDenialReason",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEgressActivityPolicy",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEgressActivityPolicySchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEgressDropReason",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEgressDropReasonSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEgressLane",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEgressLaneSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventSpill",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventSpillSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeAccess",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeAccessSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionAgentRef",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionHash",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionHostRevision",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionProfileRevision",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionStatus",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentHomeProjectionStatusSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentApprovalRef",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentContent",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentContentSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentFetchDisposition",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentFetchRequest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentFetchResponse",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentFetchResponseSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentFileObservation",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentFileObservationSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentHostTerminalCode",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentHostTerminalCodeSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentOperation",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentOperationDigest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentOperationSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentPath",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentReadbackDisposition",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentReadbackDispositionSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentRejectionCode",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentRejectionCodeSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentReservation",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentReservationSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryIntentRevision",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponse",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionCommitResponseSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionGrantRef",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionGrantRefSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionMeteringReceipt",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionMeteringReceiptSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionPlainReceipt",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionPlainReceiptSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSealedMeteringReceipt",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSealedReceipt",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSessionRef",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSessionRefSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSnapshot",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSnapshotSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSourceSeq",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionSourceSeqSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionWriterEpoch",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemoryProjectionWriterEpochSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemorySelection",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMemorySelectionSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDestinationBindingSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDispositionPlainPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDispositionPlainPayloadSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDispositionSealedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageDraftPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessageFreshnessCursorSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessagePublishPlainPayload",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentMessagePublishPlainPayloadSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentReliableQuotaPolicy",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentReliableQuotaPolicySchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BYOK_AGENT_HOME_PROJECTIONS_PATH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BYOK_INPUT_PREPARATIONS_PATH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BlobDownloadUrlResponse",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BlobDownloadUrlResponseSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BotTurnOutcome",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BotTurnOutcomeFragments",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BotTurnOutcomeKind",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BotTurnOutcomeSchemaError",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#BotTurnOutcomeSchemaErrorCode",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CONN_HELLO_CAPABILITIES_MAX_ITEMS",
+      "change": "added",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CancelDelegationAction",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CancelRoutineAction",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ClaimedExecutor",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ClaimedExecutorSchema",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnHelloPayload",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ConnHelloPayloadSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CreateBlobRequest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CreateBlobResponse",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CreateBlobResponseSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CreateEnvelopeOptions",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#CreateRoomAction",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DAEMON_TO_SERVER_TYPES",
+      "change": "changed",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DECLINE_CODES",
+      "change": "added",
+      "entry": "wire-v7-decline-codes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DelegateAction",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DeleteBotAction",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DispatchSelection",
+      "change": "removed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DispatchSelectionSchema",
+      "change": "removed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamBudget",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamInstructionInput",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamWindow",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#E2eeMemberKeyRegisterRequest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#E2eePairingMacSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#EnvelopeSchema",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#EventsPollQuery",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#EventsPollQuerySchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#EventsPollResponseSchema",
+      "change": "changed",
+      "entry": "wire-v7-no-server-capabilities"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ExecutionTarget",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ExecutionTargetSchema",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HANDOFF_EXCERPT_LINE_MAX_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffJson",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffLine",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HandoffTurn",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessId",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInfo",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HarnessInfoSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationAccountingPolicyRef",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationCounterEvidenceSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationCounterProviderEvidenceSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationCounterTargetSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationHostCanonicalAssistantMessageSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationMessage",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationMessageSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationModel",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationModelCostSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationOptions",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationProjectionSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationPromptSnapshotSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationReadinessReason",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationReadinessReasonSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationReferenceSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationResidualKeySchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationResidualValueClass",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationResidualValueClassSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationRuntimeIdentity",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationRuntimeIdentitySchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationSource",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationState",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationStateSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationStatus",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationStatusQuery",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationStatusSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputPreparationUserMessageSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#KNOWN_AGENT_EVENT_TYPES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessageSendOutcome",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessageSendOutcomeSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessagesSendRequestSchema",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#MessagesSendResponseSchema",
+      "change": "changed",
+      "entry": "wire-v7-no-server-capabilities"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OUTBOUND_REFUSAL_REASONS",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferAdmissionTimings",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferAdmissionTimingsSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferSelectionRule",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#OfferSelectionViolation",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIRING_CODE_INVALID_CODE",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIRING_SUPERSEDED_CODE",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIR_DEVICE_DIGEST_NAMESPACE",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIR_REQUEST_DEVICE_NAME_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PAIR_RESPONSE_DEVICE_ID_MAX_LENGTH",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PREPARED_OFFER_DECLINE_CODES",
+      "change": "added",
+      "entry": "wire-v7-decline-codes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROVIDER_PROFILE_BINDING_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROVIDER_PROVISIONING_DISPOSITIONS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PROVIDER_PROVISIONING_OPERATION_GENERATION_MAXIMUM",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairDeviceDigestInput",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairDeviceDigestSchema",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairRequestSchema",
+      "change": "changed",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairSupersededResponse",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairSupersededResponseSchema",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairingCodeInvalidResponse",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PairingCodeInvalidResponseSchema",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PreparedOfferDeclineCode",
+      "change": "added",
+      "entry": "wire-v7-decline-codes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#PresencePublishRequest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#PresencePublishRequestSchema",
@@ -1308,29 +4653,679 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/protocol#ProtocolNegotiationError",
+      "change": "added",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProfileHash",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProfileHashSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProfileRevision",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProfileRevisionSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningCompletion",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningCompletionSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningDisposition",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningDispositionSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningKeyCheck",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningKeyCheckResult",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningKeyCheckResultSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningKeyCheckSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningOperation",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningOperationDigest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningOperationDigestSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningOperationGeneration",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningOperationGenerationSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningOperationSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningProviderStatus",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningProviderStatusSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningRejectionCode",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningRejectionCodeSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESULT_ISSUES_MAX_BYTES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESULT_JSON_MAX_DEPTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESULT_SCHEMA_INSTANCE_TYPES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESULT_SCHEMA_KEYWORDS",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RESULT_SCHEMA_MAX_DEPTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ROUTINE_MAX_NOW",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ROUTINE_MIN_NOW",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
       "item": "export:@byok-sdk/protocol#RUNTIME_UNAVAILABLE_CAUSES",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
     },
     {
-      "item": "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
+      "item": "export:@byok-sdk/protocol#ResultDocumentCheck",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultDocumentFailureReason",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultDocumentSchemaSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultOutcomeCheck",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultSchema",
       "change": "changed",
-      "entry": "agent-user-context-unavailable-cause"
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultSchemaCheck",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultSchemaInstanceType",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ResultSchemaKeyword",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoomCallAction",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoomSpeech",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoutineScheduleCheck",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoutineScheduleError",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RoutineScheduleIssueCode",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeFailureClass",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeFailureClassSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeInfo",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeInfoSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeUnavailableCauseReading",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeUnavailableEntry",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#RuntimeUnavailableEntrySchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_PAYLOAD_MAX_PADDED_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SEALED_TASK_PLAIN_CODES",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#STEER_REFUSAL_REASONS",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SteerRefusalReason",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#SteerRefusalReasonReading",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TASK_STEER_TEXT_MAX_BYTES",
+      "change": "added",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TERMINAL_INFERENCE_USAGE_CLIENT_VERSION_MAX_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TERMINAL_INFERENCE_USAGE_PROVIDER_MAX_LENGTH",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskApprovePayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskArtifactSealedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskAwaitApprovalPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskAwaitApprovalSealedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelPayloadSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledPayloadSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCancelledSealedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskClaimPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompletePayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompletePayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskCompleteSealedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclineCode",
+      "change": "changed",
+      "entry": "wire-v7-decline-codes"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskDeclinePayload",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#TaskDeclinePayloadSchema",
-      "change": "changed",
-      "entry": "agent-user-context-unavailable-cause"
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
     },
     {
       "item": "export:@byok-sdk/protocol#TaskDeclineSealedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailPayloadSchema",
       "change": "changed",
-      "entry": "agent-user-context-unavailable-cause"
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskFailSealedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferPlainPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskOfferSealedPayloadSchema",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskProgressPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskProgressSealedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskRejectPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskRejectPayloadSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskStartedPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskStartedPayloadSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerPayload",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerPayloadSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerRefusedPayload",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskSteerRefusedPayloadSchema",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TeamNoteAction",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalInferenceUsage",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalInferenceUsageSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalPreparedObservation",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalPreparedObservationSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TerminalProjectionContractSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TokenRequest",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#UnknownAgentEvent",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#UnknownAgentEventSchema",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#UpdateRoomAction",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#WIRE_ADDITIONS",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#WireAddition",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#buildDreamInstruction",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#canTransition",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#checkResultDocument",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#checkResultSchema",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#checkRoutineSchedule",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#composeBotTurnOutcomeSchema",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#createEnvelope",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#isPairingText",
+      "change": "added",
+      "entry": "wire-v7-pair-field-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#offerSelectionViolation",
+      "change": "changed",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#pairDeviceDigest",
+      "change": "added",
+      "entry": "wire-v7-pair-fencing"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#partitionAgentEvents",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readRuntimeUnavailableCause",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#readSteerRefusalReason",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#sealedBase64UrlByteLength",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#steerRefusalEnvelopeId",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#targetsPi",
+      "change": "added",
+      "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#uuidFromSha256",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#validateResultOutcome",
+      "change": "changed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#CAPABILITY_FLAGS",
+      "change": "changed",
+      "entry": "wire-v7-retired-flags-and-bounds"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
+      "change": "changed",
+      "entry": "wire-v7"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#PROVIDER_PROFILE_BINDING_CAPABILITY",
+      "change": "removed",
+      "entry": "wire-v7-retired-flags-and-bounds"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#canTransition",
+      "change": "removed",
+      "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/server#AgentResumeDispatchInput",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServerEvent",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#ServerTaskEvent",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#SteerRefusal",
+      "change": "added",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#SteerRejectedError",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskHandle",
+      "change": "changed",
+      "entry": "wire-v7-server-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskSnapshot",
+      "change": "changed",
+      "entry": "wire-v7-server-execution-target"
     },
     {
       "item": "export:@byok-sdk/server/execution-core#HostExecutionCore",
@@ -1380,6 +5375,25 @@
       "before": "ddl-sha256=dc9f3290dd91055a",
       "after": "ddl-sha256=e8335dbafcb630c4",
       "entry": "client-journal-exact-format"
+    },
+    {
+      "item": "store:cloud-dataplane-postgres",
+      "change": "changed",
+      "before": "migrations=39 last=0039_task_agent_ref_not_null.sql sha256=144f848980cbf31e",
+      "after": "migrations=40 last=0040_wire_v7.sql sha256=d1b9f29467de31be",
+      "entry": "wire-v7-dataplane-postgres-new-database"
+    },
+    {
+      "item": "store:server-sqlite",
+      "change": "changed",
+      "before": "schema_version=9",
+      "after": "schema_version=10",
+      "entry": "wire-v7-server-sqlite-store"
+    },
+    {
+      "item": "union:wire#task.steer_refused",
+      "change": "added",
+      "entry": "wire-v7-steer-refused"
     }
   ]
 }

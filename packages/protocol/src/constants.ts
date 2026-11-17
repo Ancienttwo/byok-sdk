@@ -1,6 +1,12 @@
 /** Schema-free protocol values. Import this entry when runtime schemas are unnecessary. */
 export * from './version.js';
-export * from './task-state.js';
+export {
+  TASK_STATES,
+  TASK_TRANSITIONS,
+} from './task-state.js';
+export type {
+  TaskState,
+} from './task-state.js';
 export * from './capability-constants.js';
 export * from './failure-reason.js';
 

@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   CONFIGURED_TOOLSETS_MAX_ITEMS,
   ConfiguredToolsetsSchema,
-  ConnHelloPayloadSchema,
   MESSAGE_PAYLOAD_SCHEMAS,
   ToolsetIdSchema,
   createEnvelope,
 } from '../index';
+import { ConnHelloPayloadSchema } from '../messages';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' };
 const RESUME_SESSION = { mode: 'resume', sessionRef: 'session-1' } as const;
@@ -19,7 +19,7 @@ describe('requiredToolsets on an Agent offer', () => {
         instruction: 'find qualified leads',
         agentRef: AGENT_REF,
         session: RESUME_SESSION,
-        runtime: 'claude',
+        target: { lane: 'runtime', runtimeId: 'claude' },
         requiredToolsets: ['salesko', 'crm.readonly'],
       },
       { taskId: 'task-toolsets-1', seq: 1 },

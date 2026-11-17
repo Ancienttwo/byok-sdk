@@ -4,7 +4,7 @@ import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, sdkLaneReport,
 import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities.js';
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources.js';
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity.js';
-import type { RuntimeTaskInput } from '../../types.js';
+import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { startDurablePi } from '../pi-durable/session.js';
 import { startAborted, untilStartAborted } from './start-signal.js';
@@ -370,7 +370,7 @@ export class PiAdapter implements RuntimeAdapter {
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     if (this.options.durableLane === true && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
-    if (this.options.durableLane === true && input.offer.dispatchSelection === undefined) {
+    if (this.options.durableLane === true && modelLaneTarget(input.offer.target) === undefined) {
       return { kind: 'reject', reason: 'durable Pi requires an ordinary BYOK selection', retryable: false };
     }
     // Fail closed BEFORE anything is spawned. pi registers one tool per
@@ -414,8 +414,8 @@ export class PiAdapter implements RuntimeAdapter {
     // creates a missing session. BYOK deliberately uses `--session` so a
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
-    const selection = input.offer.dispatchSelection;
-    const pinnedSelection: RuntimeTaskInput['dispatchSelection'] = selection === undefined
+    const selection = modelLaneTarget(input.offer.target);
+    const pinnedSelection: ModelLaneTarget | undefined = selection === undefined
       ? undefined
       : selection.lane === 'byok-profile'
         ? Object.freeze({
@@ -424,8 +424,8 @@ export class PiAdapter implements RuntimeAdapter {
               ...selection.providerProfile,
               requiredCapabilities: Object.freeze([...selection.providerProfile.requiredCapabilities]),
             }),
-          }) as unknown as RuntimeTaskInput['dispatchSelection']
-        : Object.freeze({ ...selection }) as RuntimeTaskInput['dispatchSelection'];
+          }) as unknown as ModelLaneTarget
+        : Object.freeze({ ...selection });
     let launcherArgs: string[] | undefined;
     if (pinnedSelection !== undefined) {
       if ((pinnedSelection.lane !== 'byok' && pinnedSelection.lane !== 'byok-profile') || pinnedSelection.runtimeId !== 'pi') {
@@ -538,8 +538,8 @@ export class PiAdapter implements RuntimeAdapter {
           }
           parsePiMcpEnvironment(startInput.mcpEnv);
           const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
-          const manifestSelection = startInput.manifest.dispatchSelection;
-          if (!sameDispatchSelection(manifestSelection, pinnedSelection)) {
+          const manifestSelection = startInput.manifest.modelTarget;
+          if (!sameModelTarget(manifestSelection, pinnedSelection)) {
             throw new RuntimeExecutionFailure({
               phase: 'start', retry: 'non-retryable',
               reason: 'prepared pi operation received a manifest with different runtime selection',
@@ -897,7 +897,7 @@ interface PreparedPiLaunchInput {
   readonly preparation: RuntimePreparedLaunchV1;
   readonly manifest: RuntimeOperationManifest;
   readonly manifestCwd: string;
-  readonly manifestSelection: RuntimeTaskInput['dispatchSelection'];
+  readonly manifestSelection: ModelLaneTarget | undefined;
   readonly env: NodeJS.ProcessEnv;
   /**
    * The credential-custody launcher this operation must be parented by, and
@@ -1233,10 +1233,10 @@ async function validateProviderProfileBindingWithLauncher(
 }
 
 /**
- * Compare two dispatch selections field-for-field within their own lane.
+ * Compare two model-lane targets field-for-field within their own lane.
  *
- * The lanes do not share an identity shape: `subscription` and `byok` pin a
- * flat `providerId`/`modelId` pair, while `byok-profile` pins an exact local
+ * The lanes do not share an identity shape: `subscription` pins a model,
+ * `byok` a flat `providerId`/`modelId` pair, while `byok-profile` pins an exact local
  * provider profile (ref, revision, hash, model, and the capabilities the task
  * requires). Comparing only the fields one lane happens to expose would let a
  * manifest carrying a *different* profile pass the start-time authority check,
@@ -1244,9 +1244,9 @@ async function validateProviderProfileBindingWithLauncher(
  * `requiredCapabilities` in order, since the sealed array is the exact value
  * the manifest froze rather than a set.
  */
-function sameDispatchSelection(
-  left: RuntimeTaskInput['dispatchSelection'],
-  right: RuntimeTaskInput['dispatchSelection'],
+function sameModelTarget(
+  left: ModelLaneTarget | undefined,
+  right: ModelLaneTarget | undefined,
 ): boolean {
   if (left === undefined || right === undefined) return left === right;
   if (left.lane === 'byok-profile' || right.lane === 'byok-profile') {
@@ -1263,10 +1263,11 @@ function sameDispatchSelection(
         (capability, index) => capability === rightProfile.requiredCapabilities[index],
       );
   }
-  return left.lane === right.lane &&
-    left.runtimeId === right.runtimeId &&
-    left.providerId === right.providerId &&
-    left.modelId === right.modelId;
+  if (left.lane === 'byok' || right.lane === 'byok') {
+    if (left.lane !== 'byok' || right.lane !== 'byok') return false;
+    return left.runtimeId === right.runtimeId && left.providerId === right.providerId && left.modelId === right.modelId;
+  }
+  return left.runtimeId === right.runtimeId && left.modelId === right.modelId;
 }
 
 /**
@@ -1367,7 +1368,7 @@ class PiSession implements Session {
   constructor(
     public readonly sessionRef: string,
     private readonly rpc: PiRpcClient,
-    private readonly selection: RuntimeTaskInput['dispatchSelection'],
+    private readonly selection: ModelLaneTarget | undefined,
     /** Task-scoped isolated MCP extension configuration, removed in close(). */
     private readonly scratch: ExecutionScratch,
     /** Where the first turn starts in `rpc.events`, or `handled` when Pi consumed the input without a run. */
@@ -1505,7 +1506,7 @@ class PiSession implements Session {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('pi adapter only supports string instructions in M0 (no blob-ref fetch yet)');
     }
-    const requestedSelection = task.dispatchSelection;
+    const requestedSelection = modelLaneTarget(task.target);
     if (requestedSelection !== undefined && (
       this.selection?.lane !== 'byok' ||
       requestedSelection.lane !== 'byok' ||

@@ -77,7 +77,6 @@ export const AgentEgressActivityPolicySchema = z
     maxEventBytes: POSITIVE_LIMIT,
   })
   .strict();
-export type AgentEgressActivityPolicy = z.infer<typeof AgentEgressActivityPolicySchema>;
 
 export const AgentReliableQuotaPolicySchema = z
   .object({
@@ -86,7 +85,6 @@ export const AgentReliableQuotaPolicySchema = z
     maxPendingBytesPerTenant: POSITIVE_LIMIT,
   })
   .strict();
-export type AgentReliableQuotaPolicy = z.infer<typeof AgentReliableQuotaPolicySchema>;
 
 /**
  * The only consumable policy shape for Agent egress. It selects transport
@@ -112,7 +110,6 @@ export type AgentEgressPolicy = z.infer<typeof AgentEgressPolicySchema>;
 
 /** Delivery stores are semantically distinct; this enum is never a durable boolean. */
 export const AgentEgressLaneSchema = z.enum(['reliable', 'latest-value']);
-export type AgentEgressLane = z.infer<typeof AgentEgressLaneSchema>;
 
 /** Every refusal/replacement is observable rather than silently degrading to another lane. */
 export const AgentEgressDropReasonSchema = z.enum([
@@ -139,11 +136,9 @@ export const AgentContentActorSchema = z
     id: z.string().min(1).max(512).regex(/^[^\u0000-\u001f\u007f]+$/u, 'actor id must not contain control characters'),
   })
   .strict();
-export type AgentContentActor = z.infer<typeof AgentContentActorSchema>;
 
 /** No byte/text interpretation is inferred from a target name or MIME declaration. */
 export const AgentContentDecodeAsSchema = z.enum(['bytes', 'utf8']);
-export type AgentContentDecodeAs = z.infer<typeof AgentContentDecodeAsSchema>;
 
 export const AgentContentReadDecisionSchema = z.enum(['allowed', 'denied']);
 export type AgentContentReadDecision = z.infer<typeof AgentContentReadDecisionSchema>;
@@ -169,7 +164,6 @@ export const AgentContentReadDenialReasonSchema = z.enum([
   'text-decode-failed',
   'identity-mismatch',
 ]);
-export type AgentContentReadDenialReason = z.infer<typeof AgentContentReadDenialReasonSchema>;
 
 /** SHA-256 transport receipt hash, never a content byte projection. */
 export const AgentEgressContentHashSchema = z

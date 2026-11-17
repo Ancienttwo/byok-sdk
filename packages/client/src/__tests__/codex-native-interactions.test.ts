@@ -8,6 +8,8 @@ import { CodexNativeInteractions } from '../adapters/codex/native-interactions';
 import type { NativeInteractionChannel, NativeInteractionRequest, NativeInteractionHostOptions } from '../native-interactions';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+
+const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
 const fixture = fileURLToPath(new URL('./fixtures/fake-codex-native-interactions.mjs', import.meta.url));
 const sessions: Session[] = []; const directories: string[] = [];
 afterEach(async () => { await Promise.all(sessions.splice(0).map(s => s.close())); await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); vi.useRealTimers(); });
@@ -15,7 +17,7 @@ async function open(scenario = 'question', host?: Partial<NativeInteractionHostO
   const dir = await mkdtemp(path.join(os.tmpdir(), 'byok-native-codex-')); directories.push(dir); const receipt = path.join(dir, 'frames.jsonl');
   const requests: { request: NativeInteractionRequest; channel: NativeInteractionChannel }[] = [];
   const adapter = new CodexAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }), nativeInteractions: { timeoutMs: 1000, onRequest: (request, channel) => { requests.push({ request, channel }); }, ...host } });
-  const session = await startPreparedOperation(adapter, { instruction: 'fixture', ...(resume ? { sessionRef: resume } : {}) }, {
+  const session = await startPreparedOperation(adapter, { target: CODEX_TARGET, instruction: 'fixture', ...(resume ? { sessionRef: resume } : {}) }, {
     workspaceDir: dir, env: { PATH: process.env.PATH, FAKE_NATIVE_SCENARIO: scenario, FAKE_NATIVE_RECEIPT: receipt },
   });
   sessions.push(session);
@@ -103,7 +105,7 @@ describe('Codex native interaction prepared-adapter bridge', () => {
   });
   it('a refused follow-up disables native callbacks until another valid prompt', async () => {
     const f = await open('refused-followup'); const r = await first(f); await r.channel.respond(answer(r.request)); await finish(f.session);
-    await expect(f.session.followUp({ instruction: 'refused' })).rejects.toThrow('fixture prompt refused');
+    await expect(f.session.followUp({ target: CODEX_TARGET, instruction: 'refused' })).rejects.toThrow('fixture prompt refused');
     await expect(finish(f.session)).rejects.toThrow(); expect(f.requests).toHaveLength(1);
   });
 });

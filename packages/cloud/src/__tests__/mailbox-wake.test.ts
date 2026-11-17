@@ -1,4 +1,4 @@
-import { createInMemoryCoreStores, createMutableClock, tenantId } from '@byok-sdk/core';
+import { ByokCoreError, createInMemoryCoreStores, createMutableClock, tenantId } from '@byok-sdk/core';
 import type { EventsPollResponse } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { MailboxWake } from '../mailbox-wake';
@@ -186,11 +186,15 @@ describe('in-process subscription contract', () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(returned).toBe(false);
     b.close(); await held; a.close();
-    const separated = wake.subscribe(tenantId('a\nb'), 'c', new AbortController().signal);
-    const other = wake.subscribe(tenantId('a'), 'b\nc', new AbortController().signal);
+    // A tenant id holds no control character, so a newline can never be a tenant's separator.
+    expect(() => tenantId('a\nb')).toThrow(expect.objectContaining({ name: 'ByokCoreError', code: 'tenant_id_invalid' }));
+    expect(() => tenantId('a\nb')).toThrow(ByokCoreError);
+    // The route key is JSON.stringify([tenant, key]); its own delimiters inside a value must not collide.
+    const separated = wake.subscribe(tenantId('a","b'), 'c', new AbortController().signal);
+    const other = wake.subscribe(tenantId('a'), 'b","c', new AbortController().signal);
     let otherReturned = false;
     const otherHeld = other.next(5_000).then(() => { otherReturned = true; });
-    wake.appended(tenantId('a\nb'), 'c');
+    wake.appended(tenantId('a","b'), 'c');
     await separated.next(5_000);
     await vi.advanceTimersByTimeAsync(1);
     expect(otherReturned).toBe(false);
@@ -232,7 +236,7 @@ describe('in-memory task events wake (#1113 A4)', () => {
       expect(performance.now() - started).toBeLessThan(100);
     };
     await woken(() => stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task', deviceId: 'device', agentRef: AGENT_REF }));
-    await woken(() => stores.tasks.claim(TENANT_A, { taskId: 'task', deviceId: 'device' }));
+    await woken(() => stores.tasks.claim(TENANT_A, { taskId: 'task', deviceId: 'device', executor: { kind: 'runtime', runtimeId: 'pi' } }));
     await woken(() => stores.activity.append(TENANT_A, {
       taskId: 'task', sourceEnvelopeId: 'progress', batchSeq: 1, events: [{ type: 'progress', text: 'one' }], dropped: 0, ttlMs: 600_000,
     }));

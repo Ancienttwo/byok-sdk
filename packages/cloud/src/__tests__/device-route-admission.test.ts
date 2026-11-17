@@ -19,7 +19,7 @@ import { createByokCloud, type ByokCloud } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { routeKey } from '../router/registry';
-import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from '../stores/in-memory/agent-memory-projection';
+import { InMemoryAgentMemoryProjectionAuthorizer, InMemoryAgentMemoryProjectionStore } from './support/agent-memory-projection';
 import type { CloudStores, InboundRateLimiter, RateLimitUnit } from '../stores/ports';
 import type { TruthCommitter, TruthObjectDownloads } from '../truth/contract';
 import { CLOUD_ORIGIN, PRODUCT_ID, TENANT_A, createDeviceKeys } from './support/harness';
@@ -96,7 +96,7 @@ function createFullHarness(): FullHarness {
       const response = await request('/byok/pair', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'drift-device', devicePublicKey: keys.publicKeyBase64Url }),
+        body: JSON.stringify({ pairingCode: pairing.code, deviceName: 'drift-device', devicePublicKey: keys.publicKeyBase64Url, expectedDeviceDigest: null }),
       });
       expect(response.status).toBe(200);
       const body = (await response.json()) as PairResponse;

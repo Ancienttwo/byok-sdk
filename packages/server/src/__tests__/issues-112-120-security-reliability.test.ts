@@ -64,6 +64,7 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
       pairingCode: code,
       deviceName: 'retryable-first-pair',
       devicePublicKey: publicKey,
+      expectedDeviceDigest: null,
     };
 
     const first = await fetch(`${started.baseUrl}/byok/pair`, {
@@ -217,6 +218,7 @@ describe('Issues #112/#114/#115/#116/#117/#118/#120 reference-server regressions
       ],
     });
     const task = await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       instruction: 'late publish must not side effect',
       agentRef: AGENT_REF,

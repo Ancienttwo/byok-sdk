@@ -1,16 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
-  AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES,
   AGENT_MEMORY_INTENT_CAPABILITY,
-  AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES,
-  AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION,
-  AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES,
-  AGENT_MEMORY_INTENT_PATH_MAX_BYTES,
   AGENT_MEMORY_INTENT_REJECTION_CODES,
   AgentMemoryIntentAvailablePayloadSchema,
   AgentMemoryIntentCompletionSchema,
   AgentMemoryIntentFetchRequestSchema,
-  AgentMemoryIntentFetchResponseSchema,
   AgentMemoryIntentReadbackSchema,
   AgentMemoryIntentV1Schema,
   CAPABILITY_FLAGS,
@@ -25,6 +19,14 @@ import {
   type AgentMemoryIntentReadback,
   type AgentMemoryIntentV1,
 } from '../index';
+import {
+  AGENT_MEMORY_INTENT_APPROVAL_REF_MAX_BYTES,
+  AGENT_MEMORY_INTENT_CONTENT_MAX_BYTES,
+  AGENT_MEMORY_INTENT_FETCH_DISPOSITIONS_BY_RESERVATION,
+  AGENT_MEMORY_INTENT_HOST_TERMINAL_CODES,
+  AGENT_MEMORY_INTENT_PATH_MAX_BYTES,
+  AgentMemoryIntentFetchResponseSchema,
+} from '../agent-memory-intent';
 
 const INTENT_ID = '20000000-0000-4000-8000-000000000001';
 const OTHER_INTENT_ID = '20000000-0000-4000-8000-000000000002';
@@ -113,7 +115,7 @@ describe('agent-memory-intent.v1 capability', () => {
 
 describe('agent.memory.intent.available notice', () => {
   const envelopeBase = {
-    v: 6,
+    v: 7,
     id: '20000000-0000-4000-8000-000000000099',
     ts: '2026-09-28T05:00:00.000Z',
     type: 'agent.memory.intent.available',

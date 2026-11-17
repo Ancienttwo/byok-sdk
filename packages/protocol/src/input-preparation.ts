@@ -89,7 +89,6 @@ export type PreparedAgentMemoryMode = z.infer<typeof PreparedAgentMemoryModeSche
 export const InputPreparationSourceSchema = z
   .object({ revision: OPAQUE_ID, digest: OPAQUE_ID })
   .strict();
-export type InputPreparationSource = z.infer<typeof InputPreparationSourceSchema>;
 
 export const InputPreparationModelCostSchema = z
   .object({
@@ -201,7 +200,6 @@ export const InputPreparationModelSchema = z
     compat: InputPreparationModelCompatSchema.optional(),
   })
   .strict();
-export type InputPreparationModel = z.infer<typeof InputPreparationModelSchema>;
 
 /**
  * Body-affecting options only. Transport options are deliberately not on this wire.
@@ -226,7 +224,6 @@ export const InputPreparationOptionsSchema = z
     reasoningEffort: z.enum(['minimal', 'low', 'medium', 'high', 'xhigh', 'max']).optional(),
   })
   .strict();
-export type InputPreparationOptions = z.infer<typeof InputPreparationOptionsSchema>;
 
 export const InputPreparationSelectionSchema = z
   .object({ model: InputPreparationModelSchema, options: InputPreparationOptionsSchema })
@@ -322,7 +319,6 @@ export const InputPreparationStateSchema = z.enum([
   'failed',
   'counter_interrupted',
 ]);
-export type InputPreparationState = z.infer<typeof InputPreparationStateSchema>;
 
 /**
  * Why a receipt is not ready. An empty list is the only thing that makes
@@ -393,7 +389,6 @@ export const InputPreparationRuntimeIdentitySchema = z
     compilerVersion: z.number().int().nonnegative(),
   })
   .strict();
-export type InputPreparationRuntimeIdentity = z.infer<typeof InputPreparationRuntimeIdentitySchema>;
 
 export const InputPreparationCounterTargetSchema = z
   .object({ endpoint: OPAQUE_TEXT, modelId: OPAQUE_ID })
@@ -422,7 +417,6 @@ export const InputPreparationAccountingPolicyRefSchema = z
     ruledResidualKeys: z.array(OPAQUE_ID).max(64),
   })
   .strict();
-export type InputPreparationAccountingPolicyRef = z.infer<typeof InputPreparationAccountingPolicyRefSchema>;
 
 /**
  * What the provider side of a count asserted, and which exact projection it
@@ -498,7 +492,6 @@ export const InputPreparationResidualValueClassSchema = z.enum([
   'nonempty_string',
   'object_shape',
 ]);
-export type InputPreparationResidualValueClass = z.infer<typeof InputPreparationResidualValueClassSchema>;
 
 export const InputPreparationResidualKeySchema = z
   .object({ key: OPAQUE_ID, valueClass: InputPreparationResidualValueClassSchema })
@@ -716,3 +709,29 @@ export const InputPreparationRejectionReasonSchema = z.enum([
   'input_preparation_record_log_unsupported',
 ]);
 export type InputPreparationRejectionReason = z.infer<typeof InputPreparationRejectionReasonSchema>;
+
+/**
+ * Why a device refused a prepared `task.offer` (wire v7): the `task.decline`
+ * code of each refusal. All are terminal for the offer: re-offering the same
+ * reference against the same device state reaches the same answer.
+ */
+export const PREPARED_OFFER_DECLINE_CODES = [
+  'preparation_lane_unconfigured',
+  'preparation_result_schema_mismatch',
+  'preparation_not_found',
+  'preparation_not_ready',
+  'preparation_device_mismatch',
+  'preparation_agent_mismatch',
+  'preparation_profile_revision_mismatch',
+  'preparation_policy_revision_mismatch',
+  'preparation_request_digest_mismatch',
+  'preparation_artifact_digest_mismatch',
+  'agent_memory_mismatch',
+  'preparation_runtime_identity_mismatch',
+  'preparation_tool_set_mismatch',
+  'preparation_tool_binding_digest_mismatch',
+  'preparation_observation_digest_mismatch',
+  'preparation_tool_surface_unfingerprintable',
+  'preparation_already_pinned',
+] as const;
+export type PreparedOfferDeclineCode = (typeof PREPARED_OFFER_DECLINE_CODES)[number];

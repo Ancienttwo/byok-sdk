@@ -11,11 +11,9 @@ import { createHash } from 'node:crypto';
 import {
   contentHash,
   MailboxStreamClosedError,
-  tenantId,
   type Clock,
   type ContentHash,
   type MailboxMessage,
-  type MailboxMessageState,
   type MailboxStreamCloseCause,
   type TenantId,
 } from '@byok-sdk/core';
@@ -23,12 +21,9 @@ import { decodeEnvelope, encodeEnvelope, EnvelopeSchema, isServerToDaemonType } 
 import type { Pool, PoolClient } from 'pg';
 import type { ByokPool } from './pool.js';
 import { assertByokPool } from './pool-brand.js';
-import {
-  R2ObjectMaintenanceStore,
-  type R2ObjectMaintenance,
-  type R2ObjectMaintenanceOptions,
-} from './stores/r2-blobs.js';
+import type { R2ObjectMaintenance } from './stores/r2-blobs.js';
 import { BEGIN_OUTBOX_WRITE, insertOutboxRow } from './stores/core/outbox-writer.js';
+import { toMailboxMessage, type OutboxRow as MailboxOutboxRow } from './stores/core/mailbox.js';
 
 const DEFAULT_BATCH_SIZE = 100;
 const MAX_BATCH_SIZE = 1000;
@@ -82,13 +77,6 @@ export interface PostgresCloudCleanupOptions {
   readonly batchSize?: number;
 }
 
-export interface PostgresCloudMaintenanceOptions {
-  readonly pool: ByokPool;
-  readonly clock: Clock;
-  readonly objectStorage: R2ObjectMaintenanceOptions;
-  readonly batchSize?: number;
-}
-
 interface ManifestMaintenanceRow {
   readonly hash: string;
   readonly byte_size: bigint;
@@ -98,16 +86,7 @@ interface ManifestMaintenanceRow {
   readonly gc_accounted_object: boolean | null;
 }
 
-interface OutboxRow {
-  readonly tenant_id: string;
-  readonly device_id: string;
-  readonly seq: bigint;
-  readonly message_id: string;
-  readonly body: string;
-  readonly body_hash: string;
-  readonly byte_size: bigint;
-  readonly state: string;
-  readonly appended_at: string;
+interface OutboxRow extends MailboxOutboxRow {
   readonly replay_source_seq: bigint | null;
 }
 
@@ -516,19 +495,6 @@ export class PostgresCloudCleanup {
   }
 }
 
-/** Build the maintenance composition against the same Postgres/R2 authority. */
-export function createPostgresCloudMaintenance(
-  options: PostgresCloudMaintenanceOptions,
-): PostgresCloudCleanup {
-  const objectStorage = new R2ObjectMaintenanceStore(options.objectStorage);
-  return new PostgresCloudCleanup({
-    pool: options.pool,
-    clock: options.clock,
-    objectStorage,
-    ...(options.batchSize === undefined ? {} : { batchSize: options.batchSize }),
-  });
-}
-
 function emptyCounts(): MutableCounts {
   return {
     objectsDeleted: 0n,
@@ -538,20 +504,6 @@ function emptyCounts(): MutableCounts {
     shapeDrift: 0n,
     invalidObjectKeys: 0n,
     operationErrors: 0n,
-  };
-}
-
-function toMailboxMessage(row: OutboxRow): MailboxMessage {
-  return {
-    tenantId: tenantId(row.tenant_id),
-    deviceId: row.device_id,
-    seq: Number(row.seq),
-    messageId: row.message_id,
-    body: row.body,
-    bodyHash: row.body_hash as ContentHash,
-    byteSize: row.byte_size,
-    state: row.state as MailboxMessageState,
-    appendedAt: row.appended_at,
   };
 }
 

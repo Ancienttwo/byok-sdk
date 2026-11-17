@@ -12,6 +12,7 @@ import {
   waitForServerEvent,
   waitForTaskEvent,
   type FakeLongPollDaemon,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -20,7 +21,7 @@ const SHORT_HOLD_MS = 150;
 
 /** Offered -> Claimed -> Running over the long-poll send path. */
 async function claimAndStart(daemon: FakeLongPollDaemon, handle: TaskHandle): Promise<void> {
-  await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId }, { taskId: handle.taskId }));
+  await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef: TEST_AGENT_REF }, { taskId: handle.taskId }));
   await daemon.send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
   await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 }
@@ -96,9 +97,10 @@ describe('a pending approval is resolved only by a decision or a daemon report, 
     await claimAndStart(daemon, handle);
     await moveToAwaitApproval(daemon, handle, 'appr-pending-b');
 
-    await daemon.send(
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'done after local approval', sessionRef: 'sess-1' }, { taskId: handle.taskId }),
+    const completed = await daemon.send(
+      createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done after local approval', sessionRef: 'sess-1' }, { taskId: handle.taskId }),
     );
+    expect(await completed.json()).toMatchObject({ accepted: 1, outcomes: [{ outcome: 'accepted' }] });
 
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Complete');
 

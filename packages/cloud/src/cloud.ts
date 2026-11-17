@@ -1,4 +1,4 @@
-import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
+import type { HostOfferPlainPayload } from '@byok-sdk/protocol';
 import { createTenantApi } from './api/tenant.js';
 import { createTaskReadsApi } from './api/task-reads.js';
 import { createTaskCancellationApi } from './api/task-cancellation.js';
@@ -53,8 +53,6 @@ import {
   principalTenant,
   type BoardItem,
   type BoardItemInput,
-  type BoardListQuery,
-  type BoardPage,
   type CapabilityDeclaration,
   type Clock,
   type ControlPlanePrincipal,
@@ -107,11 +105,9 @@ import {
   type AgentMessageDispositionPayload,
   type AgentMessagePublishPayload,
   type AgentMessageServerContext,
-  type AgentHomeProjectionCompletionRequest,
   type AgentHomeProjectionPayload,
   type AgentHomeProjectionReadback,
   type AgentInputPreparationPayload,
-  type ProviderProvisioningAvailablePayload,
   type AgentMemoryIntentAvailablePayload,
   type InputPreparationCompletionRequest,
   type InputPreparationReadback,
@@ -125,7 +121,7 @@ import {
   type E2eeScopeKeyPackageSchema,
 } from '@byok-sdk/protocol';
 import type { SteerRejectedError } from './steer-control.js';
-import { createAuthPlane, type AuthPlane } from './auth/plane.js';
+import { createAuthPlane, PAIRING_CODE_PRODUCT_ID_MAX_LENGTH, type AuthPlane } from './auth/plane.js';
 import type { TokenSigner } from './auth/tokens.js';
 import { CAPABILITY_PORTS, CLOUD_CAPABILITIES, capabilityPort, declares, type CapabilityPortName, type CapabilityPorts, type CloudCapability } from './capabilities.js';
 import {
@@ -207,6 +203,7 @@ import type {
   AgentEgressRecord,
   PairingCodeInfo,
   RequestReceipt,
+  SteerRefusalRecord,
   TaskAbandonCause,
   TaskAttempt,
   TaskAttemptListQuery,
@@ -405,32 +402,6 @@ export interface AgentEgressDispatchInput {
   readonly agentMessageContext?: AgentMessageServerContext;
 }
 
-/**
- * The sealed lane of {@link AgentDispatchInput} (#654). Resume-only, as the
- * plaintext lane is. Each sealed lane has its own input, as
- * {@link PreparedDispatchInput} does: a plaintext lane refuses `sealing` and
- * `sealed`, so a caller cannot reach the plaintext lane by a missing field,
- * and no lane strips a sealing policy.
- */
-export interface SealedAgentDispatchInput {
-  /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
-  readonly taskId?: string;
-  readonly payload: HostOfferSealedPayload & {
-    readonly session: ResumeSession;
-    readonly egressPolicy?: never;
-    readonly messageEgress?: never;
-  };
-}
-
-/** The sealed lane of {@link AgentEgressDispatchInput} (#654). */
-export interface SealedAgentEgressDispatchInput {
-  /** Required with a sealed instruction, whose AAD and content MAC bind it. Without one, cloud mints the id. */
-  readonly taskId?: string;
-  readonly payload: HostOfferSealedPayload & { readonly session: ResumeSession; readonly egressPolicy: AgentEgressPolicy };
-  /** Host-only product destination/freshness authority; never serialized to the daemon. */
-  readonly agentMessageContext?: AgentMessageServerContext;
-}
-
 /** A task-free, independently capability-gated Agent content read. */
 export interface AgentContentReadInput {
   readonly payload: AgentContentReadPayload;
@@ -438,13 +409,6 @@ export interface AgentContentReadInput {
 
 /** Task-free exact-device projection desired state, intentionally unrelated to TaskAttempt. */
 export type AgentHomeProjectionInput = AgentHomeProjectionPayload;
-
-/**
- * Task-free sealed provider provisioning notice: exactly `{ requestId }`. The
- * sealed request itself stays in the Host's own store and is fetched by the
- * device over Host routes; nothing else can be carried by this input.
- */
-export type ProviderProvisioningNoticeInput = ProviderProvisioningAvailablePayload;
 
 /**
  * Task-free Host-approved Agent memory intent notice: exactly
@@ -527,7 +491,11 @@ export interface ByokCloud {
    */
   readonly mountedRoutes: readonly { readonly method: string; readonly path: string }[];
   readonly capabilities: CapabilityDeclaration;
-  /** Host control plane: mint a single-use pairing code for a tenant/product. */
+  /**
+   * Host control plane: mint a single-use pairing code for a tenant/product.
+   * Rejects with `pairing_product_id_invalid` when `productId` is longer than
+   * `PAIRING_CODE_PRODUCT_ID_MAX_LENGTH`.
+   */
   createPairingCode(tenant: TenantId, input: { readonly productId: string; readonly ttlMs?: number }): Promise<PairingCodeInfo>;
   /**
    * Host control plane: enqueue a strict Agent resume offer to an explicit
@@ -569,14 +537,12 @@ export interface ByokCloud {
    */
   submitAgentExecution(tenant: TenantId, input: AgentExecutionInput): Promise<EnqueuedOffer>;
   /**
-   * Sealed offer lanes (#654). Each sends the sealed branch of its plaintext
-   * sibling's `task.offer` with the same rules, and needs every flag that
-   * `requiredReceiverCapabilities` names for it, `sealed-payload-v1` among them.
-   * The plaintext siblings refuse `sealing` and `sealed` with
-   * `coordination_input_invalid`.
+   * Sealed fresh-execution lane (#654): the sealed branch of
+   * {@link ByokCloud.submitAgentExecution}'s `task.offer` with the same rules,
+   * needing every flag that `requiredReceiverCapabilities` names for it,
+   * `sealed-payload-v1` among them. The plaintext lanes refuse `sealing` and
+   * `sealed` with `coordination_input_invalid`.
    */
-  enqueueSealedAgentOffer(tenant: TenantId, deviceId: string, input: SealedAgentDispatchInput): Promise<EnqueuedOffer>;
-  enqueueSealedAgentEgressOffer(tenant: TenantId, deviceId: string, input: SealedAgentEgressDispatchInput): Promise<EnqueuedOffer>;
   submitSealedAgentExecution(tenant: TenantId, input: SealedAgentExecutionInput): Promise<EnqueuedOffer>;
   /** Host control plane: request one policy-bound content read without a task fallback. */
   enqueueAgentContentRead(
@@ -596,12 +562,6 @@ export interface ByokCloud {
     deviceId: string,
     input: AgentHomeProjectionStatusInput,
   ): Promise<AgentHomeProjectionReadback | undefined>;
-  /** Direct device completion endpoint authority; first exact terminal receipt wins. */
-  completeAgentHomeProjection(
-    tenant: TenantId,
-    deviceId: string,
-    receipt: AgentHomeProjectionCompletionRequest,
-  ): Promise<AgentHomeProjectionReadback>;
   /**
    * Durable, task-free remote input preparation for precisely one admitted
    * device. Capability admission, the immutable desired receipt and the
@@ -613,23 +573,6 @@ export interface ByokCloud {
     deviceId: string,
     input: InputPreparationInput,
   ): Promise<EnqueuedInputPreparation>;
-  /**
-   * Durable, task-free `provider.provisioning.available` notice for precisely
-   * one device that durably advertised `provider-provisioning.v1`. The payload
-   * is validated strictly before admission, and admission happens before the
-   * mailbox append, so a refused call leaves no delivery row behind.
-   *
-   * Idempotent per (tenant, device, requestId): the mailbox message id is
-   * derived from that identity, so a retried enqueue returns the existing row
-   * and its seq instead of appending a second notice. The completion and its
-   * durable readback are Host authority on Host routes; this plane records no
-   * provisioning receipt of its own.
-   */
-  enqueueProviderProvisioningNotice(
-    tenant: TenantId,
-    deviceId: string,
-    input: ProviderProvisioningNoticeInput,
-  ): Promise<EnqueuedAgentControl>;
   /**
    * Durable, task-free `agent.memory.intent.available` notice for precisely
    * one device that durably advertised `agent-memory-intent.v1`. The payload
@@ -675,12 +618,6 @@ export interface ByokCloud {
     deviceId: string,
     input: InputPreparationStatusInput,
   ): Promise<InputPreparationReadback | undefined>;
-  /** Direct device completion endpoint authority; first exact terminal receipt wins. */
-  completeInputPreparation(
-    tenant: TenantId,
-    deviceId: string,
-    receipt: InputPreparationCompletionRequest,
-  ): Promise<InputPreparationReadback>;
   /**
    * Server-side consent revocation and hosted projection erasure. It does not
    * depend on a device being online and never imports anything back locally.
@@ -781,9 +718,7 @@ export interface ByokCloud {
    *      terminal attempt, an unclaimed one, and a timeline with no unresolved
    *      request (expired or never written). Checked BEFORE targeting, so it
    *      still wins when both would apply;
-   *   3. the pending request has no `approvalId` (recorded before wire v4)
-   *      -> `task_not_awaiting_approval`;
-   *   4. `opts.approvalId` names an approval this task has already superseded
+   *   3. `opts.approvalId` names an approval this task has already superseded
    *      -> {@link StaleApprovalError}.
    *
    * Delivery is a best-effort notification, the same contract the wire message
@@ -791,7 +726,7 @@ export interface ByokCloud {
    * enqueued envelope is durable, the runtime's response to it is observable
    * only through that task's own later messages. The outgoing `approvalId` is
    * the pending request's id; `opts.approvalId` is only compared against it
-   * (gate 4) and is never sent.
+   * (gate 3) and is never sent.
    */
   approveTask(
     tenant: TenantId,
@@ -821,6 +756,8 @@ export interface ByokCloud {
    * in full before a mailbox row is allocated, so a refused call has
    * zero side effects:
    *
+   *   0. a text over `TASK_STEER_TEXT_MAX_BYTES` (65,536) UTF-8 bytes ->
+   *      `coordination_input_invalid` ({@link ByokCloudError});
    *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});
    *   2. terminal attempt -> {@link SteerRejectedError} `task_terminal`,
    *      checked BEFORE the running check so a steer racing a terminal
@@ -832,8 +769,9 @@ export interface ByokCloud {
    *      there is no snapshot at all.
    *
    * Delivery is the same best-effort notification every control message has:
-   * the enqueued envelope is durable, and whether the runtime acted on it is
-   * observable only through that task's own later messages.
+   * the enqueued envelope is durable. A device that does not deliver it to the
+   * runtime reports `task.steer_refused`; read that with
+   * {@link ByokCloud.readSteerRefusal} by the returned envelope's id.
    */
   steerTask(
     tenant: TenantId,
@@ -851,6 +789,17 @@ export interface ByokCloud {
     taskId: string,
     payload: TaskSteerSealedPayload,
   ): Promise<EnqueuedAgentControl>;
+  /**
+   * The device's refusal of one steer (wire v7, #2009), by the steer's
+   * envelope id, or `undefined` while none is recorded. The first refusal
+   * recorded wins; its `reason` reads through `readSteerRefusalReason`.
+   */
+  readSteerRefusal(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
+  /** The task's steer refusals with `revision > afterRevision`, ascending, at most `limit`. */
+  listSteerRefusals(
+    tenant: TenantId,
+    query: { readonly taskId: string; readonly afterRevision: number; readonly limit: number },
+  ): Promise<readonly SteerRefusalRecord[]>;
   readTaskAttempt(tenant: TenantId, taskId: string): Promise<TaskAttempt | undefined>;
   /** Read the original executable offer; missing/corrupt authority never becomes a guessed payload. */
   readTaskOffer(tenant: TenantId, taskId: string): Promise<TaskOfferReadback | undefined>;
@@ -912,9 +861,6 @@ export interface ByokCloud {
   revokeDevice(tenant: TenantId, deviceId: string): Promise<void>;
   /** Host control plane: create a board row from explicit producer labels. */
   createBoardItem(tenant: TenantId, input: BoardItemInput): Promise<BoardItem>;
-  listBoardItems(tenant: TenantId, query: BoardListQuery): Promise<BoardPage>;
-  /** Human review authority. Device routes cannot produce `done`. */
-  acceptBoardItem(tenant: TenantId, itemId: string): Promise<BoardItem>;
   listPresence(tenant: TenantId): Promise<readonly PresenceHint[]>;
   /** SDK-owned observation only; never a scheduler or execution authority. */
   readTenantReadiness(tenant: TenantId): Promise<TenantReadiness>;
@@ -1281,7 +1227,13 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
     mountedRoutes: registry.mounted,
     capabilities: declaration,
 
-    createPairingCode(tenant, input) {
+    async createPairingCode(tenant, input) {
+      if (input.productId.length > PAIRING_CODE_PRODUCT_ID_MAX_LENGTH) {
+        throw new ByokCloudError(
+          'pairing_product_id_invalid',
+          `productId must be at most ${PAIRING_CODE_PRODUCT_ID_MAX_LENGTH} characters`,
+        );
+      }
       return auth.createPairingCode(tenant, input);
     },
 
@@ -1293,8 +1245,6 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     submitAgentExecution: agentExecutionsApi.submitAgentExecution,
 
-    enqueueSealedAgentOffer: offersApi.enqueueSealedAgentOffer,
-    enqueueSealedAgentEgressOffer: offersApi.enqueueSealedAgentEgressOffer,
     submitSealedAgentExecution: agentExecutionsApi.submitSealedAgentExecution,
 
     enqueueAgentContentRead: agentControlsApi.enqueueAgentContentRead,
@@ -1303,17 +1253,14 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     getAgentHomeProjectionStatus: projectionReceiptsApi.getAgentHomeProjectionStatus,
 
-    completeAgentHomeProjection: projectionReceiptsApi.completeAgentHomeProjection,
 
     enqueueInputPreparation: agentControlsApi.enqueueInputPreparation,
 
     getInputPreparationStatus: projectionReceiptsApi.getInputPreparationStatus,
 
-    enqueueProviderProvisioningNotice: agentControlsApi.enqueueProviderProvisioningNotice,
 
     enqueueAgentMemoryIntentNotice: agentControlsApi.enqueueAgentMemoryIntentNotice,
 
-    completeInputPreparation: projectionReceiptsApi.completeInputPreparation,
     eraseAgentMemoryProjection: agentMemoryApi.eraseAgentMemoryProjection,
     redactTasks: taskRedactionsApi.redactTasks,
 
@@ -1331,6 +1278,8 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     steerTask: steeringApi.steerTask,
     steerSealedTask: steeringApi.steerSealedTask,
+    readSteerRefusal: steeringApi.readSteerRefusal,
+    listSteerRefusals: steeringApi.listSteerRefusals,
 
     cancelTask: taskCancellationApi.cancelTask,
 
@@ -1363,9 +1312,7 @@ export function createByokCloud(options: ByokCloudOptions): ByokCloud {
 
     createBoardItem: tenantApi.createBoardItem,
 
-    listBoardItems: tenantApi.listBoardItems,
 
-    acceptBoardItem: tenantApi.acceptBoardItem,
 
     listPresence: tenantApi.listPresence,
 

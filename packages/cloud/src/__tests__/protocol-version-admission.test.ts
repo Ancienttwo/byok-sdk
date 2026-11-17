@@ -1,9 +1,17 @@
-import { createEnvelope, PROTOCOL_VERSION, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
+import { readFileSync } from 'node:fs';
+import type { Clock } from '@byok-sdk/core';
+import {
+  BYOK_CHALLENGE_PATH, BYOK_MESSAGES_PATH, BYOK_TOKEN_PATH, createEnvelope, DEVICE_NOT_REGISTERED_CODE, DeviceNotRegisteredResponseSchema,
+  PROTOCOL_VERSION, type Envelope, type EventsPollResponse,
+} from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { AgentExecutionInputSchema } from '../agent-execution';
+import { createHmacTokenSigner } from '../auth/tokens';
 import { handleInboundEnvelope, type ByokCloudObserver, type InboundRefused } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { createHarness, grantAgentHome, offerPayload, TENANT_A, TEST_AGENT_REF } from './support/harness';
+import { createHarness, grantAgentHome, offerPayload, PRODUCT_ID, TENANT_A, TEST_AGENT_REF } from './support/harness';
+
+const PI = { kind: 'runtime', runtimeId: 'pi' } as const;
 
 function storesFor(harness: ReturnType<typeof createHarness>, deviceId: string) {
   return tenantStoresFor(
@@ -24,7 +32,7 @@ function resultDocumentExecution(deviceId: string) {
     deviceId,
     payload: {
       instruction: 'produce a structured result',
-      runtime: 'codex',
+      target: { lane: 'runtime', runtimeId: 'codex' },
       agentRef: { agentId: 'agent', profileRevision: 'revision' },
       session: { mode: 'fresh' },
       egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -36,17 +44,30 @@ function resultDocumentExecution(deviceId: string) {
   });
 }
 
+/** Raw request bodies a v6 daemon (0.41.0–0.43.0) sent, from the frozen v6 HTTP corpus. */
+function v6HttpBodies() {
+  const lines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.http.ndjson', import.meta.url), 'utf8')
+    .trimEnd().split('\n').map((line) => JSON.parse(line) as { surface: string; body: string; value: { messages?: { type: string }[] } });
+  const body = (match: (line: (typeof lines)[number]) => boolean) => lines.find(match)!.body;
+  return {
+    challenge: body((line) => line.surface === 'ChallengeRequest'),
+    token: body((line) => line.surface === 'TokenRequest'),
+    pair: JSON.parse(body((line) => line.surface === 'PairResponse')) as { deviceId: string; tenantId: string },
+    hello: body((line) => line.surface === 'MessagesSendRequest' && line.value.messages?.[0]?.type === 'conn.hello'),
+  };
+}
+
 describe('protocol-version admission at cloud lifecycle boundaries', () => {
-  it('is wire v6', () => {
-    expect(PROTOCOL_VERSION).toBe(6);
+  it('is wire v7', () => {
+    expect(PROTOCOL_VERSION).toBe(7);
   });
 
-  it.each([1, 2, 3, 4, 5])('rejects the retired v:%i at the exported inbound gate before the claim lifecycle mutation', async (v) => {
+  it.each([1, 2, 3, 4, 5, 6])('rejects the retired v:%i at the exported inbound gate before the claim lifecycle mutation', async (v) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const retiredClaim = { ...createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }), v } as unknown as Envelope;
+    const retiredClaim = { ...createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI }, { taskId: offer.taskId }), v } as unknown as Envelope;
     const { refused, observer } = refusalRecorder();
 
     await expect(
@@ -57,35 +78,36 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it.each([1, 2, 3, 4, 5])('rejects the retired v:%i at POST /byok/messages before it can be acknowledged as accepted', async (v) => {
+  it.each([1, 2, 3, 4, 5, 6])('answers the retired v:%i at POST /byok/messages with a per-entry protocol_version_unsupported', async (v) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const retiredClaim = { ...createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }), v };
+    const retiredClaim = { ...createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI }, { taskId: offer.taskId }), v };
 
-    const response = await harness.request('/byok/messages', {
+    const response = await harness.json('/byok/messages', {
       method: 'POST',
       headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({ messages: [retiredClaim] }),
     });
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({ accepted: 0, rejected: 1, outcomes: [{ id: retiredClaim.id, outcome: 'rejected', reason: 'protocol_version_unsupported' }] });
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it('keeps the supported v:6 claim path accepted', async () => {
+  it('keeps the supported v:7 claim path accepted', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId });
-    expect(claim.v).toBe(6);
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI }, { taskId: offer.taskId });
+    expect(claim.v).toBe(7);
 
     await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, claim).then((result) => result.outcome)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
   });
 
-  it.each([2, 5])('refuses a v%i daemon handshake and delivers no offer to it', async (retired) => {
+  it.each([2, 5, 6])('refuses a v%i daemon handshake and delivers no offer to it', async (retired) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const stores = storesFor(harness, device.deviceId);
@@ -113,8 +135,10 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
       .then((result) => result.outcome)).toBe('rejected');
     expect(envelopeRefusal.refused.map((entry) => entry.reason)).toEqual(['protocol_version_unsupported']);
 
-    // Over HTTP the same handshake answers with no advertisement, and the `v: 2`
-    // envelope fails the schema boundary.
+    // Over HTTP the same handshake answers with no ingress. The daemon's own
+    // envelope gets the frozen cross-version refusal: a 200 whose lone outcome
+    // is `protocol_version_unsupported`, which a v6 daemon reads as a refused
+    // handshake and halts on (#1757 G1).
     const post = (messages: unknown[]) => harness.json('/byok/messages', {
       method: 'POST',
       headers: { ...device.authorization, 'content-type': 'application/json' },
@@ -123,8 +147,10 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     const httpHello = await post([createEnvelope('conn.hello', helloPayload as never)]);
     expect(httpHello.status).toBe(200);
     expect(httpHello.body).toMatchObject({ accepted: 0, rejected: 1 });
-    expect(Object.hasOwn(httpHello.body as object, 'capabilities')).toBe(false);
-    expect((await post([v2Hello])).status).toBe(400);
+    expect(Object.hasOwn(httpHello.body as object, 'ingress')).toBe(false);
+    const retiredHello = await post([v2Hello]);
+    expect(retiredHello.status).toBe(200);
+    expect(retiredHello.body).toEqual({ accepted: 0, rejected: 1, outcomes: [{ id: v2Hello.id, outcome: 'rejected', reason: 'protocol_version_unsupported' }] });
 
     // No capability snapshot was recorded, so no Agent offer can be admitted for
     // the device and its mailbox stays empty.
@@ -136,5 +162,55 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     const poll = await harness.json('/byok/events?cursor=0', { headers: device.authorization });
     expect(poll.status).toBe(200);
     expect((poll.body as EventsPollResponse).events).toEqual([]);
+  });
+
+  // #1757 G1, the half before any hello: a v6 daemon whose enrollment was not
+  // paired again into the v7 store. A v6 daemon renews through challenge →
+  // token and halts as `device_revoked` on the typed `device_not_registered`
+  // 401 (0.43.0 `AuthManager.readUnauthorized`, same schema as today); a 401
+  // on any bearer route sends it to that renewal first.
+  it('stops a v6 daemon that was not paired again at authentication, before its hello is read', async () => {
+    const v6 = v6HttpBodies();
+    const clock: Clock = { now: () => new Date() };
+    const signer = createHmacTokenSigner(new Uint8Array(32).fill(17), clock);
+    const harness = createHarness({ tokenSigner: signer, clock });
+    const post = (path: string, body: string, headers: Record<string, string> = {}) =>
+      harness.json(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
+
+    // A cold start renews first: both auth steps answer the typed revocation 401.
+    for (const [path, body] of [[BYOK_CHALLENGE_PATH, v6.challenge], [BYOK_TOKEN_PATH, v6.token]] as const) {
+      const answer = await post(path, body);
+      expect(answer.status).toBe(401);
+      expect(answer.body).toMatchObject({ code: DEVICE_NOT_REGISTERED_CODE });
+      expect(DeviceNotRegisteredResponseSchema.safeParse(answer.body).success).toBe(true);
+    }
+
+    // A daemon still running across the upgrade holds a v6 bearer. Even signed
+    // with a key the v7 deployment kept, it names no v7 device row, so its v6
+    // hello gets the untyped 401 that sends it to the renewal above, never the
+    // per-entry protocol_version_unsupported a paired-again daemon reads.
+    const v6Bearer = await signer.sign({ deviceId: v6.pair.deviceId, tenantId: v6.pair.tenantId, productId: PRODUCT_ID }, 1800);
+    await expect(post(BYOK_MESSAGES_PATH, v6.hello, { authorization: `Bearer ${v6Bearer}` }))
+      .resolves.toEqual({ status: 401, body: { error: 'unauthorized' } });
+  });
+
+  it('answers an unknown daemon type type_unsupported per entry and applies the rest of the batch', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
+    const unknown = { ...createEnvelope('task.started', {}, { taskId: offer.taskId }), type: 'task.later_report' };
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI }, { taskId: offer.taskId });
+
+    const response = await harness.json('/byok/messages', {
+      method: 'POST',
+      headers: { ...device.authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ messages: [unknown, claim] }),
+    });
+    expect(response.body).toEqual({ accepted: 1, rejected: 1, outcomes: [
+      { id: unknown.id, outcome: 'rejected', reason: 'type_unsupported' },
+      { id: claim.id, outcome: 'accepted' },
+    ] });
+    expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
   });
 });

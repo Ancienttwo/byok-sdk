@@ -1,6 +1,6 @@
 // `TaskRunner` members for offer admission before any runtime work, and for
 // sealed offers (see ./support.ts for how a member module runs).
-import { requiredReceiverCapabilities, type Envelope, type SealedDeclineCode, type TaskDeclinePayload } from '@byok-sdk/protocol';
+import { offerSelectionViolation, requiredReceiverCapabilities, type Envelope, type SealedDeclineCode, type TaskDeclineCode } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../../agent-home.js';
 import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers.js';
 import type { OfferPhaseContext } from './support.js';
@@ -10,10 +10,14 @@ import type { TaskRunner } from '../task-runner.js';
 import type { AcceptedOfferPayload } from './support.js';
 import type { OfferAdmissionTiming } from './offer-admission-timing.js';
 import { hostFor } from './host.js';
-import { createOfferFacts } from './state.js';
+import { createOfferFacts, offerSettled } from './state.js';
 
 /**
  * Suppress redelivered offers for owned tasks and recently finished tasks.
+ * The finished/strict-declined rule belongs to the reducer (`offerSettled`,
+ * applied by O1); this guard adds the runner's ownership registries, which
+ * the reducer cannot see, and runs before `beginOffer` archives the task's
+ * previous state.
  * The reducer's finished list retains the most recent MAX_TRACKED_TASK_IDS
  * ids, evicting the oldest first. This is a bounded redelivery horizon: a
  * connection stalled across more finished tasks can redeliver an evicted id,
@@ -23,8 +27,7 @@ import { createOfferFacts } from './state.js';
  */
 export function offerAlreadyHandled(this: TaskRunner, taskId: string): boolean {
   return this['tasks'].has(taskId) || this['startupOwnership'].has(taskId)
-    || this['inFlightOffers'].has(taskId) || hostFor(this).runnerSnapshot().finished.includes(taskId)
-    || hostFor(this).runnerSnapshot().strictDeclined.includes(taskId);
+    || this['inFlightOffers'].has(taskId) || offerSettled(hostFor(this).runnerSnapshot(), taskId);
 }
 
 export function offerHasOwner(this: TaskRunner, taskId: string): boolean {
@@ -85,7 +88,7 @@ export async function reserveOfferHome(
   // taskId, so a taskId that is not one plain path segment is refused here,
   // before any side effect.
   if (readerAttempt && sessionRef === undefined && !isReaderRunName(taskId)) {
-    decline('a memory-reader Attempt needs a taskId that is one plain path segment ([A-Za-z0-9._-], at most 128 characters)', false);
+    decline({ reason: 'a memory-reader Attempt needs a taskId that is one plain path segment ([A-Za-z0-9._-], at most 128 characters)', retryable: false });
     return undefined;
   }
   const limit = readerAttempt ? this['maxConcurrentReaderAttemptsPerAgentHome'] : 1;
@@ -93,13 +96,13 @@ export async function reserveOfferHome(
   try {
     canonicalHome = await this['deps'].agentHome!.layout.canonicalHomePath(agentRef);
   } catch (error) {
-    decline(
-      `Agent home admission failed: ${outboundErrorMessage(error)}`,
-      !(error instanceof AgentHomeResolutionError),
-      error instanceof AgentHomeBusyError
-        ? readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy'
-        : undefined,
-    );
+    decline({
+      reason: `Agent home admission failed: ${outboundErrorMessage(error)}`,
+      retryable: !(error instanceof AgentHomeResolutionError),
+      ...(error instanceof AgentHomeBusyError
+        ? { code: readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy' }
+        : {}),
+    });
     return undefined;
   }
   if (admissionWithdrawn()) return undefined;
@@ -119,8 +122,11 @@ export async function reserveOfferHome(
     }
   }
   if (active >= limit) {
-    decline(`agent home busy: ${active} active ${readerAttempt ? 'reader ' : ''}attempt(s)`, true,
-      readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy');
+    decline({
+      reason: `agent home busy: ${active} active ${readerAttempt ? 'reader ' : ''}attempt(s)`,
+      retryable: true,
+      code: readerAttempt ? 'agent_home_reader_busy' : 'agent_home_writer_busy',
+    });
     return undefined;
   }
   // Check and reserve are synchronous at the canonical-home authority.
@@ -135,14 +141,14 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
   // workspace side effect.
   const guarded = this['deps'].admissionGuard?.({ taskId, payload });
   if (guarded !== undefined && !guarded.admit) {
-    decline(guarded.reason, guarded.retryable);
+    decline({ reason: guarded.reason, retryable: guarded.retryable });
     return undefined;
   }
 
   // M4 Phase 2: the control socket's `shutdown` RPC flips this before
   // tearing down active tasks — any later offer is declined outright.
   if (this['stoppingOffers']) {
-    decline('daemon is shutting down', true);
+    decline({ reason: 'daemon is shutting down', retryable: true });
     return undefined;
   }
 
@@ -152,37 +158,15 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
   // ones are still starting. Check and reserve are synchronous.
   const deviceTasks = new Set([...this['tasks'].keys(), ...this['deviceTaskReservations']]).size;
   if (deviceTasks >= this['maxConcurrentTasks']) {
-    decline(`device busy: ${deviceTasks} of ${this['maxConcurrentTasks']} concurrent task(s) in use`, true);
+    decline({ reason: `device busy: ${deviceTasks} of ${this['maxConcurrentTasks']} concurrent task(s) in use`, retryable: true });
     return undefined;
   }
   this['deviceTaskReservations'].add(taskId);
 
-  // M5 batch-3 (workstream 1): `limits.maxTokens` has no hard-enforcement
-  // path on ANY bundled runtime adapter today — nothing actually counts
-  // or caps tokens against it. Silently accepting the offer would let a
-  // caller believe a token ceiling is in effect when nothing checks it;
-  // declining fail-closed, pre-claim, is honest about that gap and lets
-  // the dispatcher route the task elsewhere instead of running
-  // unbounded. `retryable: true` — a different device's adapter set (or
-  // a future SDK version) might genuinely enforce this, so re-routing
-  // can help even though nothing here can. `limits.maxDurationMs` is
-  // deliberately left OUT of this admission gate: unlike maxTokens, it
-  // IS hard-enforced — daemon-authoritative, at the TaskRunner layer
-  // itself (a wall-clock timer armed once this task is registered as
-  // active — see `armMaxDurationTimer` — not delegated to any adapter),
-  // so there is no gap here to decline fail-closed for.
-  if (payload.limits?.maxTokens !== undefined) {
-    decline(
-      `offer requests limits.maxTokens (${payload.limits.maxTokens}), which no bundled runtime adapter enforces — declining fail-closed rather than silently ignoring it`,
-      true,
-    );
-    return undefined;
-  }
-
   const requiredToolsets = payload.requiredToolsets;
   const resolvedMcp = requiredToolsets ? this['resolveMcpServers'](requiredToolsets) : undefined;
   if (resolvedMcp && !resolvedMcp.ok) {
-    decline(resolvedMcp.reason, true);
+    decline({ reason: resolvedMcp.reason, retryable: true });
     return undefined;
   }
   return { requiredToolsets, resolvedMcp };
@@ -201,18 +185,25 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
 export function declineOfferMissingCapabilities(this: TaskRunner, envelope: Extract<Envelope, { type: 'task.offer' }>, admission: OfferAdmissionTiming): boolean {
   const taskId = envelope.task_id;
   const advertised = this['deps'].advertisedCapabilities();
-  const missing = requiredReceiverCapabilities('task.offer', envelope.payload).filter((flag) => !advertised.includes(flag));
+  // The offer selection rules run before any native-sessions support check
+  // (docs/protocol.md §3.2 "Order on the device"): an offer they reject keeps
+  // its rule's code, which `handleOffer` sends, even on a device without
+  // native sessions. Every other missing flag still declines here first.
+  const selectionViolated = offerSelectionViolation(envelope.payload) !== undefined;
+  const missing = requiredReceiverCapabilities('task.offer', envelope.payload)
+    .filter((flag) => !advertised.includes(flag) && !(selectionViolated && flag === 'native-sessions'));
   if (missing.length === 0) return false;
   if (offerAlreadyHandled.call(this, taskId) || this['sealedOpening'].has(taskId)) return true;
   const { agentRef, sealing } = envelope.payload;
   console.error(`[byok/client] task.offer for task ${taskId} declined: this daemon does not advertise ${missing.join(', ')}`);
+  const nativeSessionsMissing = missing.includes('native-sessions');
   if (sealing?.categories.includes('task-output') === true) {
-    this['declineSealedOffer'](taskId, admission, agentRef, missing.includes('native-sessions') ? 'native_sessions_unsupported' : 'sealed_key_unavailable');
+    this['declineSealedOffer'](taskId, admission, agentRef, nativeSessionsMissing ? 'native_sessions_unsupported' : 'sealed_key_unavailable');
     return true;
   }
-  declineStrict.call(this, taskId, admission, agentRef, missing.includes('native-sessions') ? 'native_sessions_unsupported'
-    : `offer_capability_missing: this daemon does not advertise ${missing.join(', ')}`,
-    missing.includes('native-sessions') ? 'native_sessions_unsupported' : undefined, false);
+  declineStrict.call(this, taskId, admission, agentRef, nativeSessionsMissing
+    ? { reason: 'native_sessions_unsupported', code: 'native_sessions_unsupported' }
+    : { reason: `this daemon does not advertise ${missing.join(', ')}`, code: 'offer_capability_missing' }, false);
   return true;
 }
 
@@ -238,18 +229,18 @@ export async function handleSealedOffer(this: TaskRunner, envelope: Envelope, ad
   }
 }
 
-function declineStrict(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, reason: string, code: TaskDeclinePayload['code'] | undefined, sealed: boolean): void {
+function declineStrict(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, { reason, code }: { readonly reason: string; readonly code: TaskDeclineCode }, sealed: boolean): void {
   const host = hostFor(this);
   host.beginOffer(taskId, { stage: 'receive', sendDecline: hostDeclineSender.call(this, taskId, admission) });
   host.setAgentRef(taskId, agentRef);
   try {
     host.dispatchSync({ type: 'offer.received', taskId, atMs: Date.now(), offer: createOfferFacts({ digest: taskId, strict: true, sealed }) });
-    host.dispatchSync({ type: 'admission.declined', taskId, atMs: Date.now(), stage: 'receive', reason, retryable: false, strict: true, ...(code === undefined ? {} : { code }) });
+    host.dispatchSync({ type: 'admission.declined', taskId, atMs: Date.now(), stage: 'receive', reason, retryable: false, strict: true, code });
   } finally {
     host.endOffer(taskId);
   }
 }
 
 export function declineSealedOffer(this: TaskRunner, taskId: string, admission: OfferAdmissionTiming, agentRef: AgentRef | undefined, code: SealedDeclineCode): void {
-  declineStrict.call(this, taskId, admission, agentRef, code, code, true);
+  declineStrict.call(this, taskId, admission, agentRef, { reason: code, code }, true);
 }

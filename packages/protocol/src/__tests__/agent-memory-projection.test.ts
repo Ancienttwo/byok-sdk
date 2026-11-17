@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   AGENT_MEMORY_PROJECTION_CAPABILITY,
   AgentMemoryProjectionCommitRequestSchema,
-  AgentMemoryProjectionCommitResponseSchema,
   AgentMemoryProjectionEraseResultSchema,
   AgentMemoryProjectionMutationSchema,
   BYOK_AGENT_MEMORY_PROJECTIONS_PATH,
   agentMemoryProjectionBase64UrlByteLength,
   type AgentMemoryProjectionPlainMutation,
 } from '../index';
+import { AgentMemoryProjectionCommitResponseSchema } from '../http-api';
 
 const HASH = `sha256:${'a'.repeat(64)}`;
 

@@ -61,7 +61,7 @@ async function openMemoryHost(mode: 'cloud' | 'embedded') {
   await mkdir(path.join(home, 'notes'), { recursive: true });
   await writeFile(path.join(home, 'MEMORY.md'), 'original private-value\n');
   await writeFile(path.join(home, 'notes', 'x.md'), 'note to remove\n');
-  const daemon = createDaemonWithAdapters({ productId, productName: 'Memory page', localAgentRelease: { version: '0.0.0-test' },
+  const daemon = createDaemonWithAdapters({ productId, productName: 'Memory page', deviceName: 'ci-smoke', localAgentRelease: { version: '0.0.0-test' },
     serverUrl: `http://127.0.0.1:${address.port}`, storeDir: path.join(root, 'sdk'),
     agentHome: { hostStorageRoot: agentRoot }, agentEgress: { policy },
     agentMemoryExport: true,

@@ -236,7 +236,7 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     server.send(createEnvelope('task.offer', {
       instruction: 'work',
       agentRef: { agentId: 'commit', profileRevision: 'r1' },
-      runtime: 'pi',
+      target: { lane: 'runtime', runtimeId: 'pi' },
       ...FRESH_OFFER,
       ...(options.commit === false ? {} : { agentMemoryCommit: 'on-success' as const }),
       ...(options.reader === true ? { homeAccess: 'memory-reader' as const } : {}),
@@ -272,7 +272,6 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     ['was cancelled', 'task.cancelled', () => server.send(createEnvelope('task.cancel', { reason: 'stop' }, { taskId: 'ended', seq: server.nextSeq() })), {}],
     ['timed out', 'task.fail', () => {}, { limits: { maxDurationMs: 200 } }],
   ] as const)('restores MEMORY.md and notes/ of a task that %s', async (_label, type, end, options) => {
-    server.setAckCapabilities(['resident-memory-over-limit']);
     const { pi, home } = await start();
     offer('ended', options);
     await terminal('task.started', 'ended');

@@ -112,7 +112,7 @@ function memoryEvidenceFields(type: SealableMessageType): readonly string[] {
 }
 
 /** Fields a `task.fail` keeps when a task that cannot seal reports `sealed_key_unavailable`. */
-const UNSEALABLE_FAIL_FIELDS = ['harnessId', 'usage', 'agentRef', 'agentHomeProjection', ...memoryEvidenceFields('task.fail')];
+const UNSEALABLE_FAIL_FIELDS = ['executor', 'usage', 'agentRef', 'agentHomeProjection', ...memoryEvidenceFields('task.fail')];
 
 /** The fields a closed plaintext terminal keeps: a task that seals `memory-projection` keeps its memory evidence sealed only (#1045). */
 function plainTerminalFields(fields: readonly string[], categories: readonly SealedCategory[]): readonly string[] {

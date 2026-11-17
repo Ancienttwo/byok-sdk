@@ -54,3 +54,43 @@ it('default daemon/cloud limits deliver two 40 KiB tool results in separate acce
   expect(accepted.every((batch) => batch.rejected === 0 && Buffer.byteLength(JSON.stringify(batch.events)) <= 65536)).toBe(true);
   expect(daemon.status().outbound.rejected).toBe(0);
 });
+
+// #2294: the cloud accepted the claim but its answer was lost. The resent claim
+// (same envelope id) is answered `duplicate`, which starts the runtime.
+it('starts the runtime when a claim whose answer was lost is resent and answered duplicate', async () => {
+  server = await startRealServer({ productId: 'test-product', longPollHoldMs: 20 });
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-settle-real-')); dirs.push(dir);
+  const adapter = new StubRuntimeAdapter();
+  daemon = createDaemonWithAdapters({ localAgentRelease: { version: '0.0.0-test' }, productName: 'Test',
+    productId: 'test-product', serverUrl: server.url, storeDir: path.join(dir, 'store'),
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY } }, [adapter],
+    { longPoll: { retryDelayMs: 10, idleDelayMs: 10 } });
+  const record = await daemon.pair((await server.createPairingCode()).code);
+  await daemon.start(); await waitForDaemonOpen(daemon);
+  const nativeFetch = globalThis.fetch;
+  const claimOutcomes: Array<{ id: string; outcome: string }> = [];
+  let loseClaimAnswer = false;
+  const { handle, session } = await dispatchResumedAgentTask(server, adapter, { deviceId: record.deviceId, instruction: 'claim answer lost' }, {
+    beforeResume: async () => {
+      loseClaimAnswer = true;
+      vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+        const response = await nativeFetch(input, init);
+        const url = input instanceof Request ? input.url : String(input);
+        if (new URL(url).pathname !== '/byok/messages' || typeof init?.body !== 'string') return response;
+        const claims = (JSON.parse(init.body) as { messages: Array<{ id: string; type: string }> }).messages.filter((e) => e.type === 'task.claim');
+        if (claims.length === 0) return response;
+        if (loseClaimAnswer) {
+          loseClaimAnswer = false;
+          throw new TypeError('injected loss of the claim answer');
+        }
+        const { outcomes } = await response.clone().json() as { outcomes: Array<{ id: string; outcome: string }> };
+        claimOutcomes.push(...outcomes.filter((o) => claims.some((c) => c.id === o.id)));
+        return response;
+      });
+    },
+  });
+  expect(claimOutcomes).toEqual([{ id: expect.any(String), outcome: 'duplicate' }]);
+  await vi.waitFor(async () => expect((await server!.byok.tasks.get(handle.taskId))?.state).toBe('Running'));
+  session.emit({ type: 'turn_end' });
+  await expect(handle.result()).resolves.toMatchObject({ state: 'Complete' });
+});

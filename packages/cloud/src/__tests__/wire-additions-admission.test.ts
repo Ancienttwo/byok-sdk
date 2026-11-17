@@ -21,7 +21,8 @@ import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, of
  * every flag a fresh execution can need.
  *
  * #925: every offer is a `task.offer`, so a corpus line takes the hosted lane
- * its payload selects (`offerVariantOf`), one per old offer type.
+ * its payload selects (`offerVariantOf`), one per old offer type. A sealed
+ * resume offer has no hosted lane, so its corpus lines are out of scope here.
  */
 
 type Enqueue = (harness: CloudHarness, deviceId: string, payload: never) => Promise<unknown>;
@@ -40,7 +41,7 @@ async function steerSealedRunningTask(harness: CloudHarness, deviceId: string, p
     { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
   for (const envelope of [
-    createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, runtime: 'pi', capabilities: { steer: true } }, { taskId: offer.taskId }),
+    createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' }, capabilities: { steer: true } }, { taskId: offer.taskId }),
     createEnvelope('task.started', {}, { taskId: offer.taskId }),
   ]) {
     expect((await handleInboundEnvelope(stores, deviceId, envelope)).outcome).toBe('accepted');
@@ -50,12 +51,15 @@ async function steerSealedRunningTask(harness: CloudHarness, deviceId: string, p
   return harness.cloud.steerSealedTask(TENANT_A, offer.taskId, payload);
 }
 
-type OfferVariant = 'resume' | 'resume with egress' | 'fresh execution' | 'prepared' | 'sealed resume' | 'sealed egress' | 'sealed execution';
+type OfferVariant = 'resume' | 'resume with egress' | 'fresh execution' | 'prepared' | 'sealed execution';
 
-/** The hosted lane that sends a `task.offer` payload: every lane sends the one type, so the payload picks the lane. */
-function offerVariantOf(payload: Record<string, unknown>): OfferVariant {
+/**
+ * The hosted lane that sends a `task.offer` payload: every lane sends the one
+ * type, so the payload picks the lane. `undefined` for a sealed resume offer.
+ */
+function offerVariantOf(payload: Record<string, unknown>): OfferVariant | undefined {
   const fresh = (payload.session as { mode?: unknown } | undefined)?.mode === 'fresh';
-  if (payload.sealing !== undefined) return fresh ? 'sealed execution' : payload.egressPolicy === undefined ? 'sealed resume' : 'sealed egress';
+  if (payload.sealing !== undefined) return fresh ? 'sealed execution' : undefined;
   if (payload.preparation !== undefined) return 'prepared';
   if (fresh) return 'fresh execution';
   return payload.egressPolicy === undefined ? 'resume' : 'resume with egress';
@@ -85,18 +89,14 @@ const OFFER_ENQUEUE: Record<OfferVariant, Enqueue> = {
   'resume with egress': (h, d, payload) => h.cloud.enqueueAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'fresh execution': submitFresh,
   prepared: (h, d, payload) => h.cloud.enqueuePreparedOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  // #654: each sealed lane has its own hosted entry.
-  'sealed resume': (h, d, payload) => h.cloud.enqueueSealedAgentOffer(TENANT_A, d, { taskId: 'gated', payload }),
-  'sealed egress': (h, d, payload) => h.cloud.enqueueSealedAgentEgressOffer(TENANT_A, d, { taskId: 'gated', payload }),
   'sealed execution': submitSealedFresh,
 };
 
 const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
-  'task.offer': (h, d, payload) => OFFER_ENQUEUE[offerVariantOf(payload as Record<string, unknown>)](h, d, payload),
+  'task.offer': (h, d, payload) => OFFER_ENQUEUE[offerVariantOf(payload as Record<string, unknown>)!](h, d, payload),
   'agent.content.read': (h, d, payload) => h.cloud.enqueueAgentContentRead(TENANT_A, d, { payload }),
   'agent.home.projection': (h, d, payload) => h.cloud.enqueueAgentHomeProjection(TENANT_A, d, payload),
   'agent.input.preparation': (h, d, payload) => h.cloud.enqueueInputPreparation(TENANT_A, d, payload),
-  'provider.provisioning.available': (h, d, payload) => h.cloud.enqueueProviderProvisioningNotice(TENANT_A, d, payload),
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
   'e2ee.key_package.available': (h, d, payload) => h.cloud.enqueueScopeKeyPackageNotice(TENANT_A, d, payload),
   'task.steer': steerSealedRunningTask,
@@ -110,7 +110,10 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
  */
 const CLOUD_EMITTED: readonly MessageType[] = ['agent.message.disposition'];
 
-const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v6.envelopes.ndjson', import.meta.url));
+/** A gated server-to-daemon type this cloud has no Host enqueue for. */
+const NOT_HOSTED: readonly MessageType[] = ['provider.provisioning.available'];
+
+const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url));
 const gatedLines = readFileSync(corpusPath, 'utf8')
   .split('\n')
   .filter((line) => line.length > 0)
@@ -124,14 +127,13 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
       flags: requiredReceiverCapabilities(envelope.type, envelope.payload),
     };
   })
-  .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0 && !CLOUD_EMITTED.includes(entry.type));
+  .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0 && !CLOUD_EMITTED.includes(entry.type)
+    && !NOT_HOSTED.includes(entry.type) && !(entry.type === 'task.offer' && entry.variant === undefined));
 
 /** Keep every corpus row's gates exercised with valid Host selections (#1671). */
 function hostCopy(entry: (typeof gatedLines)[number]) {
   if (entry.type !== 'task.offer') return entry;
   const payload = { ...entry.payload };
-  const selection = payload.dispatchSelection as { runtimeId: string } | undefined;
-  if (selection !== undefined && payload.runtime !== undefined) payload.runtime = selection.runtimeId;
   if (payload.homeAccess === 'memory-reader' && payload.agentMemory === 'read-write') payload.agentMemory = 'read';
   return { ...entry, payload };
 }
@@ -142,6 +144,12 @@ const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => {
   if (entry.variant === 'sealed execution') return SealedAgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
   return true;
 };
+
+/** The custom harness a harness `target` names, if any. */
+function harnessTargetOf(payload: Record<string, unknown>): string | undefined {
+  const target = payload.target as { lane?: unknown; harnessId?: string } | undefined;
+  return target?.lane === 'harness' ? target.harnessId : undefined;
+}
 
 /** `harnessId` also advertises that custom harness: an unadvertised one is a missing capability. */
 async function deviceWith(capabilities: readonly string[], harnessId?: unknown): Promise<{ harness: CloudHarness; deviceId: string }> {
@@ -174,8 +182,7 @@ async function expectTerminalProjectionRequired(run: Promise<unknown>): Promise<
 describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
   it('every device-advertised gated surface has a hosted enqueue path under test', () => {
     const surfaces = new Set(WIRE_ADDITIONS.flatMap((entry) =>
-      entry.kind === 'envelope' && entry.rule === 'gated' && entry.advertisedBy === 'device' && !CLOUD_EMITTED.includes(entry.surface)
-        ? [entry.surface] : []));
+      !CLOUD_EMITTED.includes(entry.surface) && !NOT_HOSTED.includes(entry.surface) ? [entry.surface] : []));
     expect([...surfaces].filter((surface) => ENQUEUE[surface] === undefined)).toEqual([]);
     expect(new Set(gatedLines.map((entry) => entry.type))).toEqual(surfaces);
   });
@@ -185,34 +192,33 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     const fresh = gatedLines.filter((entry) => entry.variant === 'fresh execution');
     const table = new Set(
       WIRE_ADDITIONS.flatMap((entry) => (
-        entry.kind === 'envelope' && entry.rule === 'gated' && entry.advertisedBy === 'device' && entry.surface === 'task.offer'
+        entry.surface === 'task.offer'
           && entry.field !== 'preparation' && entry.field !== 'sealing' && entry.field !== 'sealing.categories' ? [entry.capability] : [])),
     );
     expect(union(fresh)).toEqual(table);
     expect(union(fresh.filter(submitExpressible))).toEqual(table);
     // The hosted entry requires an explicit terminal projection (#470), so the
     // fresh lines without one stay inexpressible rather than being reclassified.
-    // HarnessId-only lines (no runtime) with a projection are expressible.
+    // Harness-target lines with a projection are expressible.
     const withoutProjection = fresh.filter((entry) => entry.payload.terminalProjection === undefined);
     expect(withoutProjection.length).toBeGreaterThan(0);
     expect(withoutProjection.filter(submitExpressible)).toEqual([]);
-    const harnessOnly = fresh.filter((entry) => entry.payload.harnessId !== undefined && entry.payload.runtime === undefined);
+    const harnessOnly = fresh.filter((entry) => harnessTargetOf(entry.payload) !== undefined);
     expect(harnessOnly.length).toBeGreaterThan(0);
     expect(harnessOnly.filter(submitExpressible)).toEqual(harnessOnly);
   });
 
-  it.each([53, 54, 55, 58, 59, 60, 68, 69, 70, 164, 165, 166, 173, 179, 180, 181, 188, 337])(
-    'raw corpus offer %i has pinned selection refusals before device reads', async line => {
+  // Wire v7: one offer `target` cannot contradict itself, so the only pinned
+  // refusal left in the corpus is line 69's reader rule.
+  it.each([69])(
+    'raw corpus offer %i has its pinned reader-rule refusal before device reads', async line => {
       const entry = gatedLines.find(candidate => candidate.line === line)!;
       const { harness, deviceId } = await deviceWith(entry.flags);
       const reads = vi.spyOn(harness.stores.devices, 'get');
       const error = await ENQUEUE[entry.type]!(harness, deviceId, entry.payload as never)
         .then(() => undefined, (caught: unknown) => caught);
       expect(error).toBeInstanceOf(ZodError);
-      // Line 69 also fails the reader rule, which is checked first and alone reported.
-      expect((error as ZodError).issues.map(({ code, path }) => ({ code, path }))).toEqual([
-        line === 69 ? { code: 'custom', path: ['agentMemory'] } : { code: 'custom', path: ['runtime'] },
-      ]);
+      expect((error as ZodError).issues.map(({ code, path }) => ({ code, path }))).toEqual([{ code: 'custom', path: ['agentMemory'] }]);
       expect(reads).not.toHaveBeenCalled();
       expect(await harness.cloud.readTaskAttempt(TENANT_A, 'gated')).toBeUndefined();
       expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0 })).messages).toEqual([]);
@@ -224,7 +230,6 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     const host = entries.map(hostCopy).filter(submitExpressible);
     expect(new Set(host.flatMap(entry => entry.flags))).toEqual(new Set(entries.flatMap(entry => entry.flags)));
     for (const entry of host) expect(requiredReceiverCapabilities(entry.type, entry.payload)).toEqual(entry.flags);
-    if (variant === 'sealed egress') expect(host.flatMap(entry => entry.flags)).toContain('sealed-payload-v2');
   });
 
   it.each(gatedLines.flatMap((entry) => entry.flags.map((flag) => [entry.line, entry.variant ?? entry.type, flag, entry] as const)))(
@@ -255,7 +260,7 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     'corpus line %i (%s) is not refused for a capability when the device advertises every flag the table requires',
     async (_line, _label, entry) => {
       const { type } = entry;
-      const { harness, deviceId } = await deviceWith(entry.flags, entry.payload.harnessId);
+      const { harness, deviceId } = await deviceWith(entry.flags, harnessTargetOf(entry.payload));
       const host = hostCopy(entry);
       const run = ENQUEUE[type]!(harness, deviceId, host.payload as never);
       if (submitExpressible(host)) expect(await errorCode(run)).not.toBe('agent_capability_missing');

@@ -4,7 +4,7 @@
 // and only when the Host calls tickGoal. No background timer is installed. The Host
 // owns authentication, selected context, semantic acceptance and scheduling.
 import type { ByokServer, AgentExecutionInput } from '@byok-sdk/server';
-import type { ResultSchema } from '@byok-sdk/protocol';
+import { ExecutionTargetSchema, type ExecutionTarget, type ResultSchema } from '@byok-sdk/protocol';
 import { HostRevisionConflict, SqliteGoalBtwStore, type HostSnapshot } from './goal-btw-store';
 
 export const GOAL_RESULT_CONTRACT = 'host-goal-step-v1';
@@ -26,7 +26,7 @@ export const BTW_RESULT_SCHEMA = {
   properties: { contract: { const: BTW_RESULT_CONTRACT }, answer: { type: 'string', minLength: 1 } },
 } as const satisfies ResultSchema;
 export type BotTarget = Pick<AgentExecutionInput, 'deviceId'> & Pick<AgentExecutionInput['payload'], 'agentRef' | 'egressPolicy'> & {
-  runtime: 'pi' | 'claude' | 'codex';
+  target: ExecutionTarget;
   requiredToolsets?: AgentExecutionInput['payload']['requiredToolsets'];
 };
 type Input = AgentExecutionInput & { payload: AgentExecutionInput['payload'] & { instruction: string } };
@@ -59,8 +59,9 @@ function safeTime(value: number): void {
 function validateTarget(target: BotTarget): void {
   nonempty(target.deviceId, 'deviceId'); nonempty(target.agentRef?.agentId, 'agentId');
   nonempty(target.agentRef?.profileRevision, 'profileRevision');
-  if (!['pi', 'claude', 'codex'].includes(target.runtime) || !target.egressPolicy) throw new Error('Select an explicit runtime and egress policy');
-  const keys = ['deviceId', 'agentRef', 'egressPolicy', 'runtime', 'requiredToolsets'];
+  const selected = ExecutionTargetSchema.safeParse(target.target);
+  if (!selected.success || selected.data.lane === 'auto' || !target.egressPolicy) throw new Error('Select an explicit target and egress policy');
+  const keys = ['deviceId', 'agentRef', 'egressPolicy', 'target', 'requiredToolsets'];
   if (Object.keys(target).some(key => !keys.includes(key))) throw new Error('Target contains undeclared execution authority');
 }
 function canonical(value: unknown): string {
@@ -117,8 +118,7 @@ export class GoalBtwHost {
       const contract = value.kind === 'goal' ? GOAL_RESULT_CONTRACT : BTW_RESULT_CONTRACT;
       const { instruction: _text, terminalProjection: projection, session, ...selection } = input.payload;
       if (session?.mode !== 'fresh') throw new Error('Reserved execution is not a fresh session');
-      if (selection.runtime === undefined) throw new Error('Select an explicit runtime and egress policy');
-      const target = { deviceId: input.deviceId, ...selection, runtime: selection.runtime };
+      const target = { deviceId: input.deviceId, ...selection };
       validateTarget(target);
       if (projection?.mode !== 'result-document' || projection.contract !== contract) throw new Error('Invalid reserved result authority');
       if (value.kind === 'goal') {

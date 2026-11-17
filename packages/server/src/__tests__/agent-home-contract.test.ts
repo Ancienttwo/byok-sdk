@@ -10,6 +10,7 @@ import {
   testPairingClaims,
   waitForTaskEvent,
   type FakeLongPollDaemon,
+  TEST_CLAIMED_EXECUTOR,
 } from './test-support';
 
 const PRODUCT_ID = 'acme';
@@ -56,7 +57,7 @@ describe('agent-home-contract reference server', () => {
       const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
         productId: PRODUCT_ID, capabilities: ['agent-home-contract'],
       });
-      const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'busy readback', agentRef, sessionRef: SESSION_REF });
+      const handle = await started.byok.dispatch({ target: { lane: 'auto' }, deviceId: daemon.deviceId, instruction: 'busy readback', agentRef, sessionRef: SESSION_REF });
       await awaitEnvelope(daemon, e => e.task_id === handle.taskId);
       const payload = { reason: 'display only', retryable: true, agentRef, ...(code === undefined ? {} : { code }) };
       const terminal = createEnvelope('task.decline', payload, { taskId: handle.taskId });
@@ -80,7 +81,7 @@ describe('agent-home-contract reference server', () => {
     });
 
     await expect(
-      started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'agent work', agentRef, sessionRef: SESSION_REF }),
+      started.byok.dispatch({ target: { lane: 'auto' }, deviceId: daemon.deviceId, instruction: 'agent work', agentRef, sessionRef: SESSION_REF }),
     ).rejects.toThrow(/agent-home-contract/);
     expect((await started.byok.tasks.list()).tasks).toHaveLength(0);
   });
@@ -112,6 +113,7 @@ describe('agent-home-contract reference server', () => {
 
     // The refusal left no relay or store state: the same id dispatches as a resume.
     const handle = await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       taskId: 'fresh-refused',
       instruction: 'resume Agent work',
@@ -131,6 +133,7 @@ describe('agent-home-contract reference server', () => {
 
     await expect(
       started.byok.dispatch({
+        target: { lane: 'auto' },
         deviceId: daemon.deviceId,
         taskId: 'empty-session-refused',
         instruction: 'fresh Agent work',
@@ -173,6 +176,7 @@ describe('agent-home-contract reference server', () => {
     // The same dispatch with a real sessionRef reaches capability admission.
     await expect(
       started.byok.dispatch({
+        target: { lane: 'auto' },
         deviceId: daemon.deviceId,
         instruction: 'resume Agent work',
         agentRef,
@@ -189,7 +193,7 @@ describe('agent-home-contract reference server', () => {
       capabilities: ['agent-home-contract'],
     });
 
-    const handle = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'agent work', agentRef, sessionRef: SESSION_REF });
+    const handle = await started.byok.dispatch({ target: { lane: 'auto' }, deviceId: daemon.deviceId, instruction: 'agent work', agentRef, sessionRef: SESSION_REF });
     const envelope = await awaitEnvelope(daemon, (e) => e.task_id === handle.taskId);
     expect(envelope.type).toBe('task.offer');
     if (envelope.type !== 'task.offer') throw new Error('unreachable');
@@ -218,11 +222,12 @@ describe('agent-home-contract reference server', () => {
       body: JSON.stringify({ messages: [hello] }),
     });
     expect(response.status).toBe(200);
-    // The accepted hello's answer carries the poll's capability advertisement (#391 Phase 2), empty in v6.
-    const answer = (await response.json()) as { accepted: number; capabilities?: string[] };
-    expect(answer).toMatchObject({ accepted: 1, capabilities: [] });
+    // Wire v7 (B2): the accepted hello's answer advertises no server capabilities.
+    const answer = (await response.json()) as { accepted: number };
+    expect(answer).toMatchObject({ accepted: 1 });
+    expect(answer).not.toHaveProperty('capabilities');
     await expect(
-      started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'agent over long-poll', agentRef, sessionRef: SESSION_REF }),
+      started.byok.dispatch({ target: { lane: 'auto' }, deviceId: daemon.deviceId, instruction: 'agent over long-poll', agentRef, sessionRef: SESSION_REF }),
     ).resolves.toMatchObject({ taskId: expect.any(String) });
   });
 
@@ -233,12 +238,12 @@ describe('agent-home-contract reference server', () => {
       capabilities: ['agent-home-contract'],
     });
 
-    const claimMismatch = await started.byok.dispatch({ deviceId: daemon.deviceId, instruction: 'claim mismatch', agentRef, sessionRef: SESSION_REF });
+    const claimMismatch = await started.byok.dispatch({ target: { lane: 'auto' }, deviceId: daemon.deviceId, instruction: 'claim mismatch', agentRef, sessionRef: SESSION_REF });
     await awaitEnvelope(daemon, (e) => e.task_id === claimMismatch.taskId);
     const claimRes = await daemon.send(
       createEnvelope(
         'task.claim',
-        { deviceId: daemon.deviceId, agentRef: { ...agentRef, profileRevision: 'wrong' } },
+        { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef: { ...agentRef, profileRevision: 'wrong' } },
         { taskId: claimMismatch.taskId },
       ),
     );
@@ -246,19 +251,20 @@ describe('agent-home-contract reference server', () => {
     expect((await started.byok.tasks.get(claimMismatch.taskId))?.state).toBe('Offered'); // never claimed
 
     const terminalMismatch = await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: daemon.deviceId,
       instruction: 'terminal mismatch',
       agentRef,
       sessionRef: SESSION_REF,
     });
     await awaitEnvelope(daemon, (e) => e.task_id === terminalMismatch.taskId);
-    await daemon.send(createEnvelope('task.claim', { deviceId: daemon.deviceId, agentRef }, { taskId: terminalMismatch.taskId }));
+    await daemon.send(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef }, { taskId: terminalMismatch.taskId }));
     await daemon.send(createEnvelope('task.started', {}, { taskId: terminalMismatch.taskId }));
     await waitForTaskEvent(terminalMismatch, (event) => event.kind === 'state' && event.state === 'Running');
     const terminalRes = await daemon.send(
       createEnvelope(
         'task.complete',
-        { summary: 'done', sessionRef: 'sess-1', agentRef: { ...agentRef, profileRevision: 'wrong' } },
+        { executor: TEST_CLAIMED_EXECUTOR, summary: 'done', sessionRef: 'sess-1', agentRef: { ...agentRef, profileRevision: 'wrong' } },
         { taskId: terminalMismatch.taskId },
       ),
     );
@@ -281,6 +287,7 @@ describe('agent-home-contract reference server', () => {
     });
 
     const claimTarget = await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: target.deviceId,
       instruction: 'target-device claim isolation',
       agentRef,
@@ -288,13 +295,14 @@ describe('agent-home-contract reference server', () => {
     });
     await awaitEnvelope(target, (e) => e.task_id === claimTarget.taskId);
     const claimResponse = await attacker.send(
-      createEnvelope('task.claim', { deviceId: attacker.deviceId, agentRef }, { taskId: claimTarget.taskId }),
+      createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: attacker.deviceId, agentRef }, { taskId: claimTarget.taskId }),
     );
     expect(claimResponse.status).toBe(200);
     expect(await claimResponse.json()).toMatchObject({ accepted: 0, rejected: 1 });
     expect((await started.byok.tasks.get(claimTarget.taskId))?.state).toBe('Offered');
 
     const declineTarget = await started.byok.dispatch({
+      target: { lane: 'auto' },
       deviceId: target.deviceId,
       instruction: 'target-device decline isolation',
       agentRef,

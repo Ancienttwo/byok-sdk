@@ -101,7 +101,8 @@ export function sealedZeroHitSuite(name: string, skip: boolean, openHost: (optio
       const adapter = new ZeroHitAdapter();
       // What the product's observer is handed is a location too: it is the only reader of a sealed task.artifact.
       const observed: { envelope: { type: string; task_id?: string; payload: unknown } }[] = [];
-      host = await openHost({ e2ee: { scopeId: SCOPE, categories: SEALING.categories }, deviceName: `device ${P}`, adapter,
+      // The pairing bound is 64 UTF-16 units, so the device name carries the plain core, which the scanner's `core` form finds.
+      host = await openHost({ e2ee: { scopeId: SCOPE, categories: SEALING.categories }, deviceName: `device ${P_CORE}`, adapter,
         objectStorage: objectStorage.config, observer: { onInboundCommitted: (input) => { observed.push(input); } } });
       const { cloud, tenant, deviceId, member, port } = host;
       // The device advertises sealed-payload-v1 once it verified its member keyring against the chain.

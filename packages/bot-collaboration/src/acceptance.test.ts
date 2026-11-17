@@ -17,7 +17,7 @@ async function setup(rest: Partial<BotOptions> = {}) {
   const options: BotOptions = { botId: 'main', execution: { ...base,
     agentMessageContext: { destinationBinding: 'owner', freshnessCursor: 'acceptance' }, payload: { ...base.payload,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 65536 },
-    } }, connector: async id => ({ externalId: id }), ...rest };
+    } }, connector: async id => ({ externalId: id }), dreaming: false, ...rest };
   bot = new BotCollaboration(fixture.server, fixture.ledger, options);
   // Test fixture: these cases exercise the actions the Main Bot applies. The product default is observe (#1229);
   // autonomy.test.ts owns that default.

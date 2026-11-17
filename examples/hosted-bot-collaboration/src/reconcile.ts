@@ -157,7 +157,7 @@ export class HostedReconciler {
       terminal = await port.deviceTerminal(task);
     }
     if (attempt && await this.record(scopeKey, key, attempt)) started();
-    if (attempt?.status === 'cancelled' && !attempt.claimedRuntime && !attempt.ownerDeviceId && !terminal) {
+    if (attempt?.status === 'cancelled' && !attempt.claimedExecutor && !attempt.ownerDeviceId && !terminal) {
       return this.conclude(scopeKey, key, cancelReason === 'expired' ? 'expired' : 'cancelled');
     }
     if (terminal) {
@@ -199,7 +199,7 @@ export class HostedReconciler {
 
   /** Stores the attempt, and the first claim. Returns true when this write committed the first claim. */
   private record(scopeKey: string, key: string, attempt: TaskAttempt): Promise<boolean> {
-    const claimed = !!(attempt.claimedRuntime || attempt.ownerDeviceId);
+    const claimed = !!(attempt.claimedExecutor || attempt.ownerDeviceId);
     return this.locked(scopeKey, async client => {
       const before = (await client.query<{ started: boolean }>('SELECT started FROM intent WHERE scope = $1 AND key = $2 AND conclusion IS NULL',
         [scopeKey, key])).rows[0];

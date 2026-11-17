@@ -30,7 +30,7 @@ import {
 import type { McpToolsetConfig, RuntimeCapabilities } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
-import { testIngressBudget } from './activity-ingress';
+import { acceptClaimSettlement, testIngressBudget } from './activity-ingress';
 import { advertiseEveryDeviceFlag } from '../support/advertised-capabilities';
 
 /**
@@ -182,7 +182,7 @@ const sent: Envelope[] = [];
 await fs.mkdir(config.runnerStoreDir, { recursive: true });
 await fs.mkdir(config.agentHomeDir, { recursive: true });
 
-const runner = new TaskRunner({ getIngressBudget: testIngressBudget, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: new ScratchRoot(config.scratchRoot),
+const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: new ScratchRoot(config.scratchRoot),
   adapters: [adapter],
   deviceId: DEVICE_ID,
   send: (envelope) => sent.push(envelope),
@@ -355,7 +355,7 @@ function preparedOffer(
     {
       session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      runtime: 'pi',
+      target: { lane: 'runtime', runtimeId: 'pi' },
       agentRef: agentRefOf(agentId),
       requiredToolsets: [TOOLSET_ID],
       agentMemory: 'none',
@@ -370,8 +370,8 @@ function report(before: number): Record<string, unknown> {
   const produced = sent.slice(before);
   return {
     claims: produced.filter((envelope) => envelope.type === 'task.claim').length,
-    declines: produced.flatMap((envelope) => (
-      envelope.type === 'task.decline' && envelope.payload.sealed === undefined ? [envelope.payload.reason] : []
+    declineCodes: produced.flatMap((envelope) => (
+      envelope.type === 'task.decline' && envelope.payload.sealed === undefined ? [envelope.payload.code] : []
     )),
     preparedStarts: adapter.preparedStartCalls.length,
     instructionStarts: adapter.startCalls.length,

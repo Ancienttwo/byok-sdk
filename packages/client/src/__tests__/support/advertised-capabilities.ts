@@ -6,7 +6,7 @@ import { WIRE_ADDITIONS } from '@byok-sdk/protocol';
  * check admits every offer the test sends.
  */
 export const EVERY_DEVICE_FLAG: readonly string[] = [...new Set(
-  WIRE_ADDITIONS.flatMap((row) => (row.kind === 'envelope' && row.rule === 'gated' && row.advertisedBy === 'device' ? [row.capability] : [])),
+  WIRE_ADDITIONS.map((row) => row.capability),
 )];
 
 export const advertiseEveryDeviceFlag = (): readonly string[] => EVERY_DEVICE_FLAG;

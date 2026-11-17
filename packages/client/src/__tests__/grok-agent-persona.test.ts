@@ -7,6 +7,8 @@ import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import type { Session } from '../types';
 
+const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
+
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
 const sessions: Session[] = [];
 const dirs: string[] = [];
@@ -40,7 +42,7 @@ it.each([false, true])('routes canonical persona only to session/new rules, pres
   await fs.writeFile(path.join(fixture.root, 'AGENTS.md'), 'ancestor decoy');
   await fs.writeFile(path.join(fixture.home, 'AGENTS.md'), 'Begin with SYNTHETIC_PERSONA_MARKER');
   if (reader) await fs.writeFile(path.join(fixture.cwd, 'AGENTS.md'), 'reader decoy');
-  const session = await openTracked(fixture.adapter, { instruction: 'hello' }, fixture.resources);
+  const session = await openTracked(fixture.adapter, { target: GROK_TARGET, instruction: 'hello' }, fixture.resources);
   const wire = await facts(fixture.log);
   const initialized = wire.find(fact => fact.kind === 'initialize')!;
   const opened = wire.find(fact => fact.kind === 'open')!;
@@ -61,14 +63,14 @@ it.each(['symlink', 'directory', 'oversize'])('refuses unsafe canonical persona 
   if (kind === 'symlink') { await fs.writeFile(path.join(fixture.root, 'outside'), 'not persona'); await fs.symlink(path.join(fixture.root, 'outside'), persona); }
   else if (kind === 'directory') await fs.mkdir(persona);
   else await fs.writeFile(persona, Buffer.alloc(65537, 120));
-  await expect(openTracked(fixture.adapter, { instruction: 'hello' }, fixture.resources)).rejects.toMatchObject({ retry: 'non-retryable' });
+  await expect(openTracked(fixture.adapter, { target: GROK_TARGET, instruction: 'hello' }, fixture.resources)).rejects.toMatchObject({ retry: 'non-retryable' });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
 it('refuses persona-bearing Agent resume explicitly, without opening a replacement session', async () => {
   const fixture = await setup();
   await fs.writeFile(path.join(fixture.home, 'AGENTS.md'), 'persona');
-  await expect(openTracked(fixture.adapter, { instruction: 'hello', sessionRef: 'fake-grok-session' }, fixture.resources)).rejects.toMatchObject({
+  await expect(openTracked(fixture.adapter, { target: GROK_TARGET, instruction: 'hello', sessionRef: 'fake-grok-session' }, fixture.resources)).rejects.toMatchObject({
     retry: 'non-retryable', message: expect.stringContaining('persona resume is not qualified'),
   });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -77,13 +79,13 @@ it('refuses persona-bearing Agent resume explicitly, without opening a replaceme
 it.each(['missing', 'empty'])('keeps Agent resume without persona unchanged (%s)', async kind => {
   const fixture = await setup();
   if (kind === 'empty') await fs.writeFile(path.join(fixture.home, 'AGENTS.md'), '');
-  const session = await openTracked(fixture.adapter, { instruction: 'hello', sessionRef: 'fake-grok-session' }, fixture.resources);
+  const session = await openTracked(fixture.adapter, { target: GROK_TARGET, instruction: 'hello', sessionRef: 'fake-grok-session' }, fixture.resources);
   expect((await facts(fixture.log)).find(fact => fact.kind === 'open')!.params._meta).toEqual({ yoloMode: true });
 });
 
 it('rejects writer cwd inconsistent with its sealed canonical home', async () => {
   const fixture = await setup();
-  await expect(openTracked(fixture.adapter, { instruction: 'hello' }, { ...fixture.resources, workspaceDir: fixture.root })).rejects.toMatchObject({ retry: 'non-retryable' });
+  await expect(openTracked(fixture.adapter, { target: GROK_TARGET, instruction: 'hello' }, { ...fixture.resources, workspaceDir: fixture.root })).rejects.toMatchObject({ retry: 'non-retryable' });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
 
@@ -91,7 +93,7 @@ it('refuses a resumed reader cwd outside the home run directories before spawnin
   const fixture = await setup(true);
   const outside = path.join(fixture.home, 'notes');
   await fs.mkdir(outside, { recursive: true });
-  await expect(openTracked(fixture.adapter, { instruction: 'hello', sessionRef: 'fake-grok-session' }, { ...fixture.resources, workspaceDir: outside }))
+  await expect(openTracked(fixture.adapter, { target: GROK_TARGET, instruction: 'hello', sessionRef: 'fake-grok-session' }, { ...fixture.resources, workspaceDir: outside }))
     .rejects.toMatchObject({ retry: 'non-retryable' });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
@@ -106,7 +108,7 @@ it.each([
   const fixture = await setup(true);
   const cwd = cwdOf(fixture.home);
   await fs.mkdir(path.resolve(cwd), { recursive: true });
-  await expect(openTracked(fixture.adapter, { instruction: 'hello', ...(resumed ? { sessionRef: 'fake-grok-session' } : {}) }, { ...fixture.resources, workspaceDir: cwd }))
+  await expect(openTracked(fixture.adapter, { target: GROK_TARGET, instruction: 'hello', ...(resumed ? { sessionRef: 'fake-grok-session' } : {}) }, { ...fixture.resources, workspaceDir: cwd }))
     .rejects.toMatchObject({ retry: 'non-retryable' });
   await expect(fs.access(fixture.log)).rejects.toMatchObject({ code: 'ENOENT' });
 });
@@ -114,7 +116,7 @@ it.each([
 it('does not read ordinary workspace AGENTS.md or change ordinary resume', async () => {
   const fixture = await setup();
   await fs.mkdir(path.join(fixture.cwd, 'AGENTS.md'));
-  const session = await openTracked(fixture.adapter, { instruction: 'hello', sessionRef: 'fake-grok-session' }, { workspaceDir: fixture.cwd, env: fixture.env });
+  const session = await openTracked(fixture.adapter, { target: GROK_TARGET, instruction: 'hello', sessionRef: 'fake-grok-session' }, { workspaceDir: fixture.cwd, env: fixture.env });
   const opened = (await facts(fixture.log)).find(fact => fact.kind === 'open')!;
   expect(opened.method).toBe('session/resume');
   expect(opened.params._meta).toEqual({ yoloMode: true });

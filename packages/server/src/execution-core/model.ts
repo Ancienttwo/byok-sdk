@@ -3,7 +3,7 @@ import { canonical, hash } from './canonical.js';
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
 import type { ByokServer } from '../index.js';
 import type { WakeScheduleInput } from '../wakes/types.js';
-import { HarnessIdSchema, RuntimeIdSchema, HostOfferSealedPayloadSchema, type HostOfferSealedPayload, type AgentMessageServerContext } from '@byok-sdk/protocol';
+import { ExecutionTargetSchema, HostOfferSealedPayloadSchema, type HostOfferSealedPayload, type AgentMessageServerContext } from '@byok-sdk/protocol';
 
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type ExecutionTemplate = Omit<AgentExecutionInput, 'taskId'>;
@@ -162,10 +162,9 @@ export function validateInput(input: LedgerIntentInput): void {
   if (!input.key.trim() || !['user', 'bot', 'routine'].includes(input.source)) throw new Error('Invalid intent identity');
   time(input.waitUntil);
   const { execution } = input;
-  const { runtime, harnessId } = execution.payload;
-  const validIdentity = runtime !== undefined
-    ? harnessId === undefined && RuntimeIdSchema.safeParse(runtime).success
-    : HarnessIdSchema.safeParse(harnessId).success;
+  // A template names a concrete executor; `auto` names none.
+  const target = ExecutionTargetSchema.safeParse(execution.payload.target);
+  const validIdentity = target.success && target.data.lane !== 'auto';
   if (!execution.deviceId || !execution.payload.agentRef?.agentId || !execution.payload.agentRef.profileRevision
     || !validIdentity || !execution.payload.egressPolicy || !execution.payload.terminalProjection
     || execution.payload.session?.mode !== 'fresh' || 'taskId' in execution) throw new Error('Supply a complete fresh execution template');

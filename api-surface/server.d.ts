@@ -36,6 +36,7 @@
 //   SqliteSchemaErrorCode -> dist/sqlite-support.d.ts
 //   SqliteUnavailableError -> dist/sqlite-support.d.ts
 //   StaleApprovalError -> @byok-sdk/cloud#StaleApprovalError
+//   SteerRefusal -> dist/types.d.ts
 //   SteerRejectedError -> dist/task-handle.d.ts
 //   SteerRejectionCode -> @byok-sdk/cloud#SteerRejectionCode
 //   TaskEventEntry -> dist/types.d.ts
@@ -921,8 +922,8 @@ export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import { type ActivityReadOptions, type ActivityTail, type ApprovalTimelineTail, type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
 import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
-import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, TaskEventEntry, TaskHandle, TaskSnapshot } from './types.js';
-export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types.js';
+import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, SteerRefusal, TaskEventEntry, TaskHandle, TaskSnapshot } from './types.js';
+export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, SteerRefusal, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types.js';
 export { TaskEventsUnavailableError } from './types.js';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 export { StaleApprovalError } from '@byok-sdk/cloud';
@@ -994,6 +995,11 @@ export interface ByokServer {
             from?: 'state';
             signal?: AbortSignal;
         }): AsyncIterable<TaskEventEntry>;
+        readSteerRefusal(taskId: string, messageId: string): Promise<SteerRefusal | undefined>;
+        listSteerRefusals(taskId: string, options?: {
+            afterRevision?: number;
+            limit?: number;
+        }): Promise<readonly SteerRefusal[]>;
         list(query?: TaskListQuery): Promise<TaskPage>;
     };
     blobs: {
@@ -1067,17 +1073,17 @@ import type { StoreCompatibility } from '@byok-sdk/core';
 export declare function inspectSqliteStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/server dist/task-handle.d.ts ====
 import { type SteerRejectionCode } from '@byok-sdk/cloud';
-import type { RuntimeId, TaskState } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, TaskState } from '@byok-sdk/protocol';
 export declare class SteerRejectedError extends Error {
     readonly taskId: string;
     readonly code: SteerRejectionCode;
     readonly state: TaskState;
-    readonly runtime: RuntimeId | undefined;
-    constructor(taskId: string, code: SteerRejectionCode, state: TaskState, runtime: RuntimeId | undefined);
+    readonly executor: ClaimedExecutor | undefined;
+    constructor(taskId: string, code: SteerRejectionCode, state: TaskState, executor: ClaimedExecutor | undefined);
 }
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, DispatchSelection, RuntimeCapabilities, RuntimeId, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types.js';
@@ -1121,9 +1127,7 @@ export interface CreateByokServerOptions {
 interface DispatchInputBase {
     taskId?: string;
     instruction: string;
-    dispatchSelection?: DispatchSelection;
-    runtime?: RuntimeId;
-    harnessId?: string;
+    target: ExecutionTarget;
     deviceId: string;
     requiredToolsets?: ToolsetId[];
     egressPolicy?: AgentEgressPolicy;
@@ -1182,6 +1186,12 @@ export type ServerTaskEvent = {
     kind: 'await_approval';
     summary: string;
     approvalId: string;
+}
+ | {
+    kind: 'steer_refused';
+    messageId: string;
+    reason: SteerRefusalReasonReading;
+    at: string;
 } | {
     kind: 'error';
     reason: string;
@@ -1196,6 +1206,12 @@ export declare class TaskEventsUnavailableError extends Error {
     readonly reason: 'cursor_unknown';
     constructor(taskId: string, reason: 'cursor_unknown');
 }
+export interface SteerRefusal {
+    readonly messageId: string;
+    readonly reason: SteerRefusalReasonReading;
+    readonly at: string;
+    readonly revision: number;
+}
 export interface TaskHandle {
     readonly taskId: string;
     events(): AsyncIterable<ServerTaskEvent>;
@@ -1207,7 +1223,9 @@ export interface TaskHandle {
     reject(reason?: string, opts?: {
         approvalId?: string;
     }): Promise<void>;
-    steer(text: string): Promise<void>;
+    steer(text: string): Promise<{
+        readonly messageId: string;
+    }>;
     result(): Promise<TaskResult>;
 }
 export interface MachineInfo {
@@ -1230,8 +1248,7 @@ export interface TaskSnapshot {
     updatedAt: string;
     result?: TaskResult;
     pendingApprovalId?: string;
-    claimedRuntime?: RuntimeId;
-    claimedHarnessId?: string;
+    claimedExecutor?: ClaimedExecutor;
     claimedRuntimeCapabilities?: RuntimeCapabilities;
 }
 export type ByokServerEvent = {
@@ -1252,8 +1269,7 @@ export type ByokServerEvent = {
     taskId: string;
     state: TaskState;
     at: string;
-    claimedRuntime?: RuntimeId;
-    claimedHarnessId?: string;
+    claimedExecutor?: ClaimedExecutor;
 }
  | ({
     kind: 'task.approval_resolved';

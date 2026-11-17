@@ -4,7 +4,7 @@ import { createEnvelope } from '@byok-sdk/protocol';
 import { StaleApprovalError, pendingApproval, type PendingApproval } from '../approval-control.js';
 import type { ApprovalTimelineTail } from '../approval-timeline.js';
 import { ByokCloudError } from '../errors.js';
-import { uuidFromSha256 } from '../offer-identity.js';
+import { uuidFromSha256 } from '@byok-sdk/protocol';
 import type { TaskAttempt } from '../stores/ports.js';
 import { tenantStoresFor, type CloudRootStores } from '../tenant-stores.js';
 import { isTerminalAttemptStatus, type EnqueuePaths } from './enqueue.js';
@@ -57,11 +57,7 @@ export function createApprovalsApi({
     for (let index = tail.entries.length - 1; index >= 0; index -= 1) {
       const entry = tail.entries[index]!;
       if (entry.event.type !== 'approval_requested') continue;
-      return {
-        sourceEnvelopeId: entry.sourceEnvelopeId,
-        revision: entry.revision,
-        ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
-      };
+      return { approvalId: entry.event.approvalId, sourceEnvelopeId: entry.sourceEnvelopeId, revision: entry.revision };
     }
     return undefined;
   }
@@ -73,8 +69,8 @@ export function createApprovalsApi({
     tail: ApprovalTimelineTail | undefined,
     request: PendingApproval,
   ): Promise<
-    | { readonly decision: 'approve'; readonly approvalId?: string }
-    | { readonly decision: 'reject'; readonly approvalId?: string; readonly reason: string | null }
+    | { readonly decision: 'approve'; readonly approvalId: string }
+    | { readonly decision: 'reject'; readonly approvalId: string; readonly reason: string | null }
     | undefined
   > {
     for (const decision of ['approve', 'reject'] as const) {
@@ -85,32 +81,16 @@ export function createApprovalsApi({
       const laterResolution = tail!.entries.slice(index + 1).some(
         (candidate) =>
           candidate.event.type === 'approval_resolved' &&
-          (request.approvalId === undefined || candidate.event.approvalId === request.approvalId),
+          candidate.event.approvalId === request.approvalId,
       );
       if (!laterResolution) {
         if (entry.event.decision === 'reject') {
-          return {
-            decision: 'reject',
-            ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
-            reason: entry.event.reason,
-          };
+          return { decision: 'reject', approvalId: entry.event.approvalId, reason: entry.event.reason };
         }
-        return {
-          decision: 'approve',
-          ...(entry.event.approvalId === undefined ? {} : { approvalId: entry.event.approvalId }),
-        };
+        return { decision: 'approve', approvalId: entry.event.approvalId };
       }
     }
     return undefined;
-  }
-
-  /**
-   * Wire v4 names every approval, so a decision cannot reach a request that
-   * has no `approvalId`. Only a request recorded before v4 lacks one; the
-   * upgrade drains those executions first.
-   */
-  function unnamedApproval(taskId: string, decision: 'approve' | 'reject'): ByokCloudError {
-    return new ByokCloudError('task_not_awaiting_approval', `Task ${taskId} has no named pending approval to ${decision}.`);
   }
 
   /**
@@ -171,7 +151,6 @@ export function createApprovalsApi({
               `Task ${taskId} has no owning device to receive its recorded ${decision}.`,
             );
           }
-          if (recorded.approvalId === undefined) throw unnamedApproval(taskId, decision);
           const messageId = await approvalDecisionSource(tenant, taskId, attempt, latestRequest, decision);
           const targeting = { approvalId: recorded.approvalId };
           const recordedReason = recorded.decision === 'reject' ? recorded.reason : undefined;
@@ -191,7 +170,6 @@ export function createApprovalsApi({
         `Task ${taskId} has no pending approval to ${decision}.`,
       );
     }
-    if (pending.approvalId === undefined) throw unnamedApproval(taskId, decision);
     if (opts?.approvalId !== undefined && opts.approvalId !== pending.approvalId) {
       throw new StaleApprovalError(taskId, opts.approvalId, pending.approvalId);
     }

@@ -1,4 +1,5 @@
 import type { DatabaseSync, DatabaseSyncOptions } from 'node:sqlite';
+import { sqliteOpenPath } from '@byok-sdk/core/sqlite-node';
 
 export type SqliteOpenStep = 'after-open' | 'after-wal';
 
@@ -57,9 +58,9 @@ export class SqliteUnavailableError extends Error {
 /**
  * Why a SQLite file was refused at open, so a host can tell the user what to do
  * without parsing the message:
- * - `SQLITE_SCHEMA_UNSUPPORTED`: the stored version is neither this build's
- *   nor the one older version it upgrades in place. Any other older file is
- *   not adopted (start on a new database); a newer file needs a newer build.
+ * - `SQLITE_SCHEMA_UNSUPPORTED`: the stored version is not this build's. No
+ *   older file is upgraded in place (start on a new database); a newer file
+ *   needs a newer build.
  * - `SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`: pending mailbox rows do not use
  *   the current wire major. Drain with the previous SDK before upgrading.
  * - `SQLITE_SCHEMA_INVALID`: the file contradicts its declared BYOK schema or
@@ -257,7 +258,7 @@ export function openSqliteDatabase(
   }
   let db: DatabaseSync;
   try {
-    db = new DatabaseSync(path, { timeout: DEFAULT_BUSY_TIMEOUT_MS, ...options });
+    db = new DatabaseSync(sqliteOpenPath(path), { timeout: DEFAULT_BUSY_TIMEOUT_MS, ...options });
   } catch (error) {
     throw sqliteOpenError(path, error);
   }

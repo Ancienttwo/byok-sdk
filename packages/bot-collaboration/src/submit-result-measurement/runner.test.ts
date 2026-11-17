@@ -164,7 +164,7 @@ it.skipIf(process.platform === 'win32')('observes a real CodexAdapter through th
   const { manifest, trials } = await readRun(out);
   const label = { tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' } };
   expect(manifest).toMatchObject({ completion: 'complete', predicate: { confirmed: true, label }, calibration: { category: 'valid', label } });
-  expect(manifest.cell).toMatchObject({ runtime: 'codex', dispatchSelection: { lane: 'subscription', runtimeId: 'codex', providerId: null, modelId: 'fake-codex-model' } });
+  expect(manifest.cell).toMatchObject({ runtime: 'codex', target: { lane: 'subscription', runtimeId: 'codex', modelId: 'fake-codex-model' } });
   expect(trials).toEqual([expect.objectContaining({ caseId: 'C01-small', category: 'valid', exactTarget: true, firstCallValid: true })]);
   expect(trials[0]!.submissions).toEqual([expect.objectContaining({ validation: 'staged', label })]);
 }, 120_000);

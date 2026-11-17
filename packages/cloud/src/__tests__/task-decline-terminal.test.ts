@@ -117,11 +117,12 @@ describe('task.decline terminal', () => {
       deviceId,
       createEnvelope(
         'task.complete',
-        { agentRef: TEST_AGENT_REF, summary: 'late terminal', sessionRef: 'session-late' },
+        { agentRef: TEST_AGENT_REF, summary: 'late terminal', sessionRef: 'session-late', executor: { kind: 'runtime', runtimeId: 'pi' } },
         { taskId },
       ),
     ).then((result) => result.outcome);
-    expect(late).toBe('accepted');
+    // Wire v7: a task.complete needs a claim, so the unclaimed late complete is refused outright.
+    expect(late).toBe('rejected');
 
     const result = await harness.cloud.readTaskResult(TENANT_A, taskId);
     expect(result).toMatchObject({ state: 'failed', reason: 'agent home busy', retryable: true });
@@ -131,11 +132,11 @@ describe('task.decline terminal', () => {
 
   it('keeps a completed result when a late decline races it', async () => {
     const taskId = await offeredTask();
-    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome);
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId })).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'did the thing', sessionRef: 'session-1' }, { taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'did the thing', sessionRef: 'session-1', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,

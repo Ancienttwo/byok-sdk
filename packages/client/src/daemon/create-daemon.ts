@@ -297,9 +297,9 @@ export interface DaemonConfig {
    */
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /**
-   * Separate-process Pi BYOK credential boundary. Required only for a
-   * `dispatchSelection` in the BYOK lane; subscription runtimes and legacy
-   * Pi tasks do not invoke it.
+   * Separate-process Pi BYOK credential boundary. Required only for an offer
+   * `target` in the `byok` or `byok-profile` lane; subscription runtimes and
+   * Pi tasks without a model lane do not invoke it.
    */
   piByokLauncher?: import('../adapters/pi/pi-adapter.js').PiByokLauncherConfig;
   /**
@@ -324,7 +324,7 @@ export interface DaemonConfig {
    * construction order — see `ALL_RUNTIME_IDS`'s own doc comment below for
    * the construction-vs-selection-order split this introduces.
    *
-   * Only affects the auto-select (no `task.offer.runtime`) path — an offer
+   * Only affects the auto-select (`task.offer.target.lane: 'auto'`) path — an offer
    * naming an explicit runtime is unaffected (unchanged semantics: that
    * exact adapter is used, or the offer is declined; never a fallback
    * substitution). Independent of `runtimeAllowlist` above (which restricts

@@ -27,8 +27,6 @@ describe('stored device proof signer', () => {
     await seedDeviceEnrollment(store, {
       deviceId: 'device-a',
       tenantId: 'tenant-a',
-      accessToken: 'not-used-by-proof',
-      expiresAt: '2026-08-10T00:00:00.000Z',
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
       devicePublicKey: publicJwk.x,
     });
@@ -88,8 +86,6 @@ describe('stored device proof signer', () => {
     await seedDeviceEnrollment(store, {
       deviceId: 'device-a',
       tenantId: 'tenant-a',
-      accessToken: 'unused',
-      expiresAt: '2026-08-10T00:00:00.000Z',
       devicePrivateKeyPem: exportPrivateKeyPem(keys.privateKey),
       devicePublicKey: publicJwk.x,
     });

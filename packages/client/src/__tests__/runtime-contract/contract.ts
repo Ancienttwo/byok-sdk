@@ -368,7 +368,7 @@ export async function runTurn(
   resources: PreparedOperationResources,
   timeoutMs = 120_000,
 ): Promise<TurnEvent[]> {
-  const session: Session = await startPreparedOperation(adapter, { instruction }, resources);
+  const session: Session = await startPreparedOperation(adapter, { instruction, target: { lane: 'auto' } }, resources);
   const events: TurnEvent[] = [];
   let timer: NodeJS.Timeout | undefined;
   try {

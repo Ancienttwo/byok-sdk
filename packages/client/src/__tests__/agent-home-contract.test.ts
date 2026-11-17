@@ -34,7 +34,7 @@ import { npmNodeShim } from './fixtures/npm-node-shim';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
-import { testIngressBudget } from './fixtures/activity-ingress';
+import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -527,7 +527,7 @@ describe('SDK-owned Agent home contract', () => {
       resolveInstruction: async () => { throw new Error('not used'); },
       uploadArtifact: async () => { throw new Error('not used'); },
     };
-    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome,
       agentSessionHandoffs: handoffs,
@@ -542,7 +542,7 @@ describe('SDK-owned Agent home contract', () => {
     const agentRef = ref('agent-runtime', 'profile-3');
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { instruction: 'run in the durable Agent home', runtime: 'pi', agentRef, ...FRESH_OFFER },
+      { instruction: 'run in the durable Agent home', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER },
       { taskId: 'task-agent-runtime', seq: 1 },
     ));
 
@@ -567,7 +567,7 @@ describe('SDK-owned Agent home contract', () => {
     const storeDir = await makeRoot();
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -589,12 +589,12 @@ describe('SDK-owned Agent home contract', () => {
     await Promise.all([
       runner.handleEnvelope(createEnvelope(
         'task.offer',
-        { instruction: 'first conversation', runtime: 'pi', agentRef, ...FRESH_OFFER, homeAccess: 'memory-reader' },
+        { instruction: 'first conversation', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER, homeAccess: 'memory-reader' },
         { taskId: 'task-parallel-a', seq: 1 },
       )),
       runner.handleEnvelope(createEnvelope(
         'task.offer',
-        { instruction: 'second conversation', runtime: 'pi', agentRef, ...FRESH_OFFER, homeAccess: 'memory-reader' },
+        { instruction: 'second conversation', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER, homeAccess: 'memory-reader' },
         { taskId: 'task-parallel-b', seq: 2 },
       )),
     ]);
@@ -652,7 +652,7 @@ describe('SDK-owned Agent home contract', () => {
       expect(sent.some((entry) => entry.type === 'task.fail')).toBe(false);
       return realRecordTaskTerminal(...args);
     });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: handoffs,
@@ -671,7 +671,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { instruction: 'fail before session start', runtime: 'pi', agentRef, ...FRESH_OFFER },
+      { instruction: 'fail before session start', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER },
       { taskId, seq: 1 },
     ));
 
@@ -705,7 +705,7 @@ describe('SDK-owned Agent home contract', () => {
       expect(sent.some((entry) => entry.type === 'task.fail')).toBe(false);
       return realRecordTaskTerminal(...args);
     });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: handoffs,
@@ -724,7 +724,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { instruction: 'fail while writing handoff', runtime: 'pi', agentRef, ...FRESH_OFFER },
+      { instruction: 'fail while writing handoff', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER },
       { taskId, seq: 1 },
     ));
 
@@ -767,7 +767,7 @@ describe('SDK-owned Agent home contract', () => {
       return realRecordTaskTerminal(...args);
     });
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome,
       agentSessionHandoffs: handoffs,
@@ -786,14 +786,14 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { instruction: 'fail while writing handoff', runtime: 'pi', agentRef, ...FRESH_OFFER },
+      { instruction: 'fail while writing handoff', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER },
       { taskId, seq: 1 },
     ));
 
     const cwd = await agentHome.layout.canonicalHomePath(agentRef);
     expect(agentHome.executionLeaseManager.activeAttemptCount(cwd, 'memory-writer')).toBe(1);
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'competing writer', runtime: 'pi', agentRef, ...FRESH_OFFER,
+      instruction: 'competing writer', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER,
     }, { taskId: 'competing-writer', seq: 2 }));
     expect(adapter.sessions).toHaveLength(1);
     expect(sent.at(-1)?.type).toBe('task.decline');
@@ -816,7 +816,7 @@ describe('SDK-owned Agent home contract', () => {
     const evidenceFailures: NonNullable<TaskRunnerDeps['onAgentTerminalEvidenceFailure']> extends (event: infer T) => void ? T[] : never = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-permanent-prestart-failure', 'profile-1');
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome,
       agentSessionHandoffs: handoffs,
@@ -834,7 +834,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { instruction: 'fail safely', runtime: 'pi', agentRef, ...FRESH_OFFER },
+      { instruction: 'fail safely', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER },
       { taskId: 'task-permanent-prestart-failure', seq: 1 },
     ));
 
@@ -858,7 +858,7 @@ describe('SDK-owned Agent home contract', () => {
     const evidenceFailures: NonNullable<TaskRunnerDeps['onAgentTerminalEvidenceFailure']> extends (event: infer T) => void ? T[] : never = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-permanent-active-failure', 'profile-1');
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome,
       agentSessionHandoffs: handoffs,
@@ -876,7 +876,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { instruction: 'complete despite evidence outage', runtime: 'pi', agentRef, ...FRESH_OFFER },
+      { instruction: 'complete despite evidence outage', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER },
       { taskId: 'task-permanent-active-failure', seq: 1 },
     ));
     adapter.sessions[0]!.emit({ type: 'turn_end' });
@@ -912,7 +912,7 @@ describe('SDK-owned Agent home contract', () => {
 
     const adapter = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: manager,
       agentSessionHandoffs: handoffs,
@@ -930,7 +930,7 @@ describe('SDK-owned Agent home contract', () => {
       'task.offer',
       {
         instruction: 'resume',
-        runtime: 'pi' as const,
+        target: { lane: 'runtime', runtimeId: 'pi' as const },
         session: { mode: 'resume' as const, sessionRef: 'session-original' },
         agentRef,
       },
@@ -960,7 +960,7 @@ describe('SDK-owned Agent home contract', () => {
     const adapter = new StubRuntimeAdapter('pi');
     const manager = new AgentHomeManager({ hostStorageRoot });
     const agentRef = ref('agent-release-conflict', 'profile-1');
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: manager,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -977,7 +977,7 @@ describe('SDK-owned Agent home contract', () => {
 
     await runner.handleEnvelope(createEnvelope(
       'task.offer',
-      { instruction: 'finish after lease marker conflict', runtime: 'pi', agentRef, ...FRESH_OFFER },
+      { instruction: 'finish after lease marker conflict', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, ...FRESH_OFFER },
       { taskId: 'task-release-conflict', seq: 1 },
     ));
     const home = path.join(await fs.realpath(hostStorageRoot), 'agents', agentRef.agentId);
@@ -1029,7 +1029,7 @@ describe('SDK-owned Agent home contract', () => {
           : new CodexAdapter({ resolveBin: () => ({ command, source: 'path' }), spawnFn });
       const session = await startPreparedOperation(
         adapter,
-        { instruction: 'verify cwd' },
+        { target: { lane: 'auto' }, instruction: 'verify cwd' },
         { workspaceDir: cwd, env: process.env },
       );
       await session.close();

@@ -28,7 +28,7 @@ export async function openHostedDevice(cloud: CanaryCloud, tenant: TenantId, ser
     }
     const daemon = createDaemonWithAdapters({ productId: PRODUCT_ID, productName: 'Hosted collaboration', localAgentRelease: { version: '0.0.0-test' },
       serverUrl, storeDir: path.join(root, 'sdk'),
-      ...(options.deviceName === undefined ? {} : { deviceName: options.deviceName }),
+      deviceName: options.deviceName ?? 'ci-smoke',
       ...(deviceCredentials === undefined ? {} : { deviceCredentials }),
       // The Host's persona hook (#793 S13): it writes the Bot persona of a home projection, so the device applies a task-free
       // projection and advertises `agent-home-projection`.

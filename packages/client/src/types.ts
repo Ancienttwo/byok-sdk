@@ -8,6 +8,7 @@ import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-mem
 import type {
   AgentEgressPolicy,
   AgentEvent,
+  ExecutionTarget,
   TaskOfferPlainPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation.js';
@@ -21,11 +22,22 @@ export type { AgentRef } from './agent-home.js';
  * The offer fields a runtime adapter receives. The client owns this shape;
  * the daemon projects each wire offer onto it.
  */
-export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'runtime' | 'harnessId' | 'dispatchSelection' | 'limits'> & {
+export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> & {
   instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
   /** The runtime session to resume (`session.mode: 'resume'` on the offer); absent for a fresh session. */
   sessionRef?: string;
 };
+
+/**
+ * The model lanes of an offer `target`: the only lanes that carry a model
+ * selection an adapter must honor. The other lanes only name the adapter.
+ */
+export type ModelLaneTarget = Extract<ExecutionTarget, { readonly lane: 'subscription' | 'byok' | 'byok-profile' }>;
+
+/** The model selection of an offer `target`, or `undefined` for the `auto`, `runtime` and `harness` lanes. */
+export function modelLaneTarget(target: ExecutionTarget): ModelLaneTarget | undefined {
+  return target.lane === 'subscription' || target.lane === 'byok' || target.lane === 'byok-profile' ? target : undefined;
+}
 export type {
   McpServerObservation,
   McpToolDescriptor,
@@ -335,7 +347,7 @@ export interface RuntimeAdapterDescriptor {
    * adapter constructor. Absent for a custom adapter with no policy.
    */
   readonly versionPolicy?: RuntimeVersionPolicy;
-  /** Explicit opt-in to authoritative `task.offer.dispatchSelection` semantics. */
+  /** Explicit opt-in to the authoritative model lanes of `task.offer.target` (`subscription`, `byok`, `byok-profile`). */
   readonly supportsDispatchSelection: boolean;
   /**
    * Whether this adapter actually CONSUMES
@@ -452,12 +464,12 @@ export interface RuntimeOperationManifest {
   /** Required by prepared operations, absent on ordinary operations. */
   readonly agentMemory?: PreparedAgentMemoryMode;
   readonly taskId: string;
-  /** Selected runtime id; lane/provider/model, when present, live only in `dispatchSelection`. */
+  /** Selected runtime id; lane/provider/model, when present, live only in `modelTarget`. */
   readonly runtimeId: string;
   readonly descriptor: RuntimeAdapterDescriptor;
   readonly requiredToolsetIds: readonly string[];
-  /** The credential-free runtime/lane/provider/model authority for this operation. */
-  readonly dispatchSelection?: RuntimeTaskInput['dispatchSelection'];
+  /** The credential-free runtime/lane/provider/model authority for this operation: the offer's model-lane target. */
+  readonly modelTarget?: ModelLaneTarget;
   readonly sessionRef?: string;
   /** Strict Agent identity, present on every `task.offer`. */
   readonly agentRef?: AgentRef;
@@ -751,26 +763,26 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
 
 /** Copy then freeze the complete safe operation authority just before claim. */
 export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest): RuntimeOperationManifest {
-  const dispatchSelection = manifest.dispatchSelection === undefined
+  const modelTarget = manifest.modelTarget === undefined
     ? undefined
-    : manifest.dispatchSelection.lane === 'byok-profile'
+    : manifest.modelTarget.lane === 'byok-profile'
       ? Object.freeze({
-          ...manifest.dispatchSelection,
+          ...manifest.modelTarget,
           providerProfile: Object.freeze({
-            ...manifest.dispatchSelection.providerProfile,
+            ...manifest.modelTarget.providerProfile,
             requiredCapabilities: Object.freeze([
-              ...manifest.dispatchSelection.providerProfile.requiredCapabilities,
+              ...manifest.modelTarget.providerProfile.requiredCapabilities,
             ]),
           }),
-        }) as RuntimeTaskInput['dispatchSelection']
-      : Object.freeze({ ...manifest.dispatchSelection });
+        }) as ModelLaneTarget
+      : Object.freeze({ ...manifest.modelTarget });
   return Object.freeze({
     ...(manifest.agentMemory === undefined ? {} : {agentMemory: manifest.agentMemory}),
     taskId: manifest.taskId,
     runtimeId: manifest.runtimeId,
     descriptor: freezeRuntimeAdapterDescriptor(manifest.descriptor),
     requiredToolsetIds: Object.freeze([...manifest.requiredToolsetIds]),
-    ...(dispatchSelection === undefined ? {} : { dispatchSelection }),
+    ...(modelTarget === undefined ? {} : { modelTarget }),
     ...(manifest.sessionRef === undefined ? {} : { sessionRef: manifest.sessionRef }),
     ...(manifest.agentRef === undefined
       ? {}

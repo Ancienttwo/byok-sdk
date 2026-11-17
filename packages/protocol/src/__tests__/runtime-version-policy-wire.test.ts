@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import {
-  ConnHelloPayloadSchema,
   HarnessIdSchema,
   PresencePublishRequestSchema,
   RuntimeCapabilitiesSchema,
   RuntimeIdSchema,
-  RuntimeUnavailableEntrySchema,
   RuntimeVersionPolicyProjectionSchema,
-  readRuntimeUnavailableCause,
 } from '../index';
+import { ConnHelloPayloadSchema, RuntimeUnavailableEntrySchema } from '../messages';
 
 /**
  * #1103 B2b wire shape: hello and presence carry strip-safe version-policy and
@@ -19,7 +17,7 @@ import {
  */
 
 const helloBase = {
-  protocolVersions: [6],
+  protocolVersions: [7],
   capabilities: ['runtime-unavailable-cause'],
   deviceId: 'device-1',
   productId: 'product-1',
@@ -47,7 +45,6 @@ describe('conn.hello version policy projection (#1103 D8/D9)', () => {
     expect(payload.harnesses?.[0]?.versionPolicy).toEqual({ state: 'warn', qualifiedVersion: '1.0.52' });
     // The cause vocabulary is open: an unknown well-formed token is kept.
     expect(payload.runtimeUnavailable?.[1]).toEqual({ id: 'grok', cause: 'invented_cause', retryable: false });
-    expect(readRuntimeUnavailableCause('invented_cause')).toEqual({ cause: 'unknown', reportedCause: 'invented_cause' });
   });
 
   it('treats an absent projection as unknown, never allow, and leaves an old payload byte-identical', () => {

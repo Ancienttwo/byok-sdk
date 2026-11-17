@@ -34,6 +34,7 @@ import path from 'node:path';
 import { decodeEnvelope, encodeEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
+import { AuthManager } from '../daemon/auth-manager';
 import { journalHash, type JournalIdentity, type ReceivedEnvelopeRecord } from '../daemon/journal/journal';
 import {
   JOURNAL_DB_FILENAME,
@@ -313,12 +314,16 @@ describe('S3.4 crash matrix, points 1-6', () => {
       }, { timeout: 10_000 });
 
       const body = await cloud.readTerminalBody(offer.taskId);
-      const credentials = await createTestDeviceStore(storeDir, undefined, 'test-product').credentials.read();
+      // The access token lives only in the daemon's memory (#2045): exchange one from the stored enrollment.
+      const deviceAuth = new AuthManager({ serverUrl: cloud.url, store: createTestDeviceStore(storeDir, undefined, 'test-product') });
+      await deviceAuth.loadExisting();
+      const accessToken = await deviceAuth.getValidAccessToken();
+      await deviceAuth.stop();
       return {
         taskId: offer.taskId,
         storeDir,
         terminal: decodeEnvelope(body ?? ''),
-        accessToken: credentials?.accessToken ?? '',
+        accessToken,
         cloudHandle: cloud,
         journalHandle: journal,
       };

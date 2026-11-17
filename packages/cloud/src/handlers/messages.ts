@@ -32,7 +32,9 @@ import type { Context } from 'hono';
 import { STORAGE_ERROR_HTTP_STATUS, isCoreError } from '@byok-sdk/core';
 import {
   EnvelopeSchema,
+  MESSAGE_TYPES,
   MESSAGES_SEND_MAX_BODY_BYTES,
+  PROTOCOL_VERSION,
   MessagesSendRequestSchema,
   type AgentContentReceiptPayload,
   type AgentMessageDispositionPayload,
@@ -44,7 +46,6 @@ import type { ActivityBounds } from '../coordination.js';
 import type { AgentEgressRecord } from '../stores/ports.js';
 import type { TenantStores } from '../tenant-stores.js';
 import { DeviceRetiredError } from '../errors.js';
-import { CLOUD_PROTOCOL_CAPABILITIES } from './events.js';
 import { authenticateDevice, rateLimited, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
 
 
@@ -52,7 +53,6 @@ import { authenticateDevice, rateLimited, readBoundedJsonBody, type DeviceRouteD
 const WIRE_REFUSAL_REASONS = {
   task_id_missing: 'payload_invalid',
   content_receipt_event_request_mismatch: 'payload_invalid',
-  claim_harness_and_runtime_conflict: 'payload_invalid',
   recovery_report_invalid: 'payload_invalid',
   activity_batch_invalid: 'payload_invalid',
   sealed_ciphertext_invalid: 'payload_invalid',
@@ -70,10 +70,11 @@ const WIRE_REFUSAL_REASONS = {
   content_receipt_request_mismatch: 'not_permitted',
   task_not_found_for_device: 'not_permitted',
   task_owned_by_other_device: 'not_permitted',
+  task_not_claimed: 'not_permitted',
   agent_identity_mismatch: 'not_permitted',
-  terminal_harness_mismatch: 'not_permitted',
+  terminal_executor_mismatch: 'not_permitted',
   claim_device_mismatch: 'not_permitted',
-  claim_harness_mismatch: 'not_permitted',
+  claim_executor_mismatch: 'not_permitted',
   claim_harness_unavailable: 'not_permitted',
   claim_offer_mismatch: 'not_permitted',
   recovery_offer_mismatch: 'not_permitted',
@@ -92,7 +93,22 @@ const WIRE_REFUSAL_REASONS = {
   sealed_payload_unsupported: 'unsupported',
   sealed_output_required: 'not_permitted',
   hello_protocol_version_unsupported: 'unsupported',
+  steer_refusal_id_mismatch: 'payload_invalid',
+  steer_refusal_unknown_steer: 'not_permitted',
 } satisfies Record<InboundRefusalReason, import('@byok-sdk/protocol').OutboundRefusalReason>;
+
+/**
+ * The cross-version refusals, decided before an entry is decoded (wire v7).
+ * An entry of another wire major is `protocol_version_unsupported`, so a
+ * daemon of another major reads its refused hello and halts instead of
+ * retrying. A type this version does not know is `type_unsupported`, which
+ * the daemon does not retry; a known type in the wrong direction is still
+ * refused by the inbound gate. Both answers are frozen in shape from v7 on.
+ */
+function frameRefusal(entry: { readonly v: number; readonly [key: string]: unknown }): 'protocol_version_unsupported' | 'type_unsupported' | undefined {
+  if (entry.v !== PROTOCOL_VERSION) return 'protocol_version_unsupported';
+  return typeof entry.type === 'string' && !(MESSAGE_TYPES as readonly string[]).includes(entry.type) ? 'type_unsupported' : undefined;
+}
 
 export interface MessagesRouteDeps extends DeviceRouteDeps {
   readonly clock: import('@byok-sdk/core').Clock;
@@ -168,9 +184,10 @@ function batchHandler(deps: MessagesRouteDeps) {
     let handshake = false;
     const outcomes: NonNullable<MessagesSendResponse['outcomes']> = [];
     for (const entry of parsed.data.messages) {
-      const decoded = EnvelopeSchema.safeParse(entry);
-      if (!decoded.success) {
-        outcomes.push({ id: entry.id, outcome: 'rejected', reason: 'payload_invalid' });
+      const refusal = frameRefusal(entry);
+      const decoded = refusal === undefined ? EnvelopeSchema.safeParse(entry) : undefined;
+      if (decoded === undefined || !decoded.success) {
+        outcomes.push({ id: entry.id, outcome: 'rejected', reason: refusal ?? 'payload_invalid' });
         rejected += 1;
         continue;
       }
@@ -210,15 +227,14 @@ function batchHandler(deps: MessagesRouteDeps) {
     }
 
     // A batch whose `conn.hello` was accepted is the daemon's handshake: its
-    // answer carries the same advertisement `GET /byok/events` does, so the
-    // device learns the server's capabilities in that one round trip instead
-    // of waiting out a held poll (§8.2). Every other answer, a rejected
-    // hello's included, omits it ("no update").
+    // answer carries the activity limits `GET /byok/events` does, so the
+    // device learns them in that one round trip instead of waiting out a held
+    // poll (§8.2). Every other answer, a rejected hello's included, omits them.
     const response: MessagesSendResponse = {
       accepted,
       outcomes,
       ...(rejected > 0 ? { rejected } : {}),
-      ...(handshake ? { capabilities: [...CLOUD_PROTOCOL_CAPABILITIES], ingress: { activityMaxEvents: deps.activityBounds.maxEvents, activityMaxBytes: deps.activityBounds.maxBytes } } : {}),
+      ...(handshake ? { ingress: { activityMaxEvents: deps.activityBounds.maxEvents, activityMaxBytes: deps.activityBounds.maxBytes } } : {}),
     };
     return c.json(response, 200);
   };

@@ -64,11 +64,6 @@ export interface LongPollClientOptions {
   /** The activity ingress every events page advertises, applied before its envelopes are delivered. */
   onIngress?: (ingress: ActivityIngress) => void;
   /**
-   * Capabilities advertised by the server that produced the current poll
-   * response. Called before any envelopes from that response are delivered.
-   */
-  onServerCapabilities?: (capabilities: string[]) => void;
-  /**
    * The poll failed — an HTTP status, a network failure, an unusable body or
    * a credential failure. This loop generation has ended and does not retry:
    * the caller's reconnect loop owns that (it handshakes again first).
@@ -132,9 +127,19 @@ export interface MessageBatchPostResult {
   readonly outcomes: readonly CorrelatedOutcome[];
   readonly accepted: number;
   readonly rejected?: number;
-  /** The server's advertisement, when it sent one (a handshake answer); absence means "no update". */
-  readonly capabilities?: readonly string[];
 }
+
+/**
+ * The server refused the whole request with a permanent 4xx before reading
+ * any envelope; on a lone `conn.hello` that means it cannot read this wire
+ * major (a v6 server answers 400 to a v7 frame).
+ */
+export interface MessageBatchRefusal {
+  readonly refusedStatus: number;
+}
+
+/** 4xx answers that are not a refused frame: auth, entitlement retry, size and rate limits. */
+const NOT_A_FRAME_REFUSAL: ReadonlySet<number> = new Set([401, 403, 409, 413, 429]);
 
 /** Finding R1: soft cap on `LongPollClient`'s own `warnedValidationFailureSeqs` bookkeeping — see that field's own doc comment for why this is a simple "clear outright" reset rather than an eviction policy: a rare/pathological path, not a hot one. */
 const MAX_TRACKED_VALIDATION_FAILURE_WARNINGS = 1000;
@@ -208,8 +213,8 @@ function extractExecutableSeq(raw: unknown): number | undefined {
  * Design B (finding N4): this is a stateless drainer; it holds no outbound
  * queue of its own. `ConnectionManager` owns the single shared outbox;
  * `postBatch` is a single POST attempt, reporting only frozen-v1 accepted and
- * rejected counts (plus an advertisement, when the server sent one) after its
- * response body has been read and validated. All retry/backoff and rejection
+ * rejected counts after its response body has been read and validated, or
+ * an HTTP 400 refusal of the whole request. All retry/backoff and rejection
  * isolation policy lives in the caller (`ConnectionManager`).
  *
  * The receive loop likewise never retries a failed poll: one loop generation
@@ -318,7 +323,7 @@ export class LongPollClient {
    * `signal` aborting is the caller's own lifecycle ending, not a route
    * failure: it resolves `undefined` without a warning.
    */
-  async postBatch(envelopes: Envelope[], signal?: AbortSignal): Promise<MessageBatchPostResult | undefined> {
+  async postBatch(envelopes: Envelope[], signal?: AbortSignal): Promise<MessageBatchPostResult | MessageBatchRefusal | undefined> {
     // Phase 1 — credentials. This happens BEFORE the route request exists, so
     // its failure can never be attributed to `/byok/messages`. Pre-flighting
     // the token here (rather than letting `authedFetch`'s own identical call
@@ -357,7 +362,7 @@ export class LongPollClient {
     if (!res.ok) {
       this.noteRetryAfter(res);
       this.warnRouteFailure(this.messagesEndpoint, res.status, undefined);
-      return undefined;
+      return res.status >= 400 && res.status < 500 && !NOT_A_FRAME_REFUSAL.has(res.status) ? { refusedStatus: res.status } : undefined;
     }
     try {
       const response = MessagesSendResponseSchema.parse(await res.json());
@@ -483,7 +488,6 @@ export class LongPollClient {
         const madeReadProgress = parsed.cursor > afterSeq;
         readCursor = parsed.cursor;
         this.opts.onIngress?.(parsed.ingress);
-        this.opts.onServerCapabilities?.(parsed.capabilities);
         // Finding R1 (Codex's new P2): true the moment THIS batch contains
         // at least one validation-failed entry — used below to apply the
         // stalled backoff on the VERY SAME cycle the failure is first

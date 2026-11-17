@@ -39,19 +39,18 @@ export {
   PostgresProofRequestReceiptStore,
   PostgresRequestReceiptStore,
   PostgresTaskAttemptStore,
+  PostgresTaskSteerRefusalStore,
   PostgresTaskCancellationStore,
   PostgresActivityStore,
   PostgresAgentMessageDraftStore,
   PostgresApprovalTimelineStore,
   PostgresDeviceAssertionReplayAuthority,
   PostgresAgentMemoryProjectionStore,
-  createPostgresAgentMemoryProjectionStore,
   PostgresTaskRedactionStore,
-  createPostgresTaskRedactionStore,
   PostgresE2eeMemberStore,
   createPostgresCloudStores,
-  POSTGRES_MAILBOX_PROTOCOL_UNSUPPORTED,
-  PostgresMailboxProtocolUnsupportedError,
+  POSTGRES_STORE_EPOCH_UNSUPPORTED,
+  PostgresStoreEpochUnsupportedError,
 } from './stores/index.js';
 export type {
   PostgresCloudStoreOptions,
@@ -104,8 +103,5 @@ export type { PostgresCoreStoreOptions } from './stores/core/index.js';
 export { PostgresTruthCommitter } from './truth-committer.js';
 export type { PostgresTruthCommitterOptions } from './truth-committer.js';
 
-// Hosted cron/alarm policy uses the same portable SQL authority as maintenance.
-export { PostgresRetentionPolicyStore } from './stores/retention-policy.js';
-export type { TenantRetentionPolicy, TenantRetentionPolicyInput } from './stores/retention-policy.js';
 export { CLOUD_CLEANUP_ERROR_CODES, CloudCleanupError } from './maintenance-errors.js';
 export type { CloudCleanupErrorCode } from './maintenance-errors.js';

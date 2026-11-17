@@ -10,6 +10,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentResultStore } from '../daemon/agent-result-store';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
 import { DaemonJournalProtocolUnsupportedError } from '../daemon/daemon-errors';
+import { CursorStore } from '../daemon/cursor-store';
 import { journalHash } from '../daemon/journal/journal';
 import { JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
 import { createTestDeviceStore } from './fixtures/device-credentials';
@@ -95,8 +96,8 @@ describe('startup refuses a journal of another wire major', () => {
     const { config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     // A v3 row first: scanning before acting means it gets no terminal either.
-    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
-    await seedOffer(journal, identity, 'v2-task', 2, majorBytes(encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v2-task', seq: 2 })), 2));
+    await seedOffer(journal, identity, 'v3-task', 1, encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'current' }, { taskId: 'v3-task', seq: 1 })));
+    await seedOffer(journal, identity, 'v2-task', 2, majorBytes(encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v2-task', seq: 2 })), 2));
     await journal.close();
     await expectStartupRefused(config, { taskId: 'v2-task', record: 'recovery-offer' });
     expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
@@ -105,7 +106,7 @@ describe('startup refuses a journal of another wire major', () => {
   it('a v5 recovery offer, the last retired major, stops startup', async () => {
     const { config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
-    await seedOffer(journal, identity, 'v5-task', 1, majorBytes(encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v5-task', seq: 1 })), 5));
+    await seedOffer(journal, identity, 'v5-task', 1, majorBytes(encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'old' }, { taskId: 'v5-task', seq: 1 })), 5));
     await journal.close();
     await expectStartupRefused(config, { taskId: 'v5-task', record: 'recovery-offer', found: 5 });
     expect(snapshot(config.storeDir!).journal_terminal).toEqual([]);
@@ -114,8 +115,8 @@ describe('startup refuses a journal of another wire major', () => {
   it('a v2 pending terminal stops startup before replay', async () => {
     const { server, config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
-    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
-    const terminal = majorBytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's' }, { taskId: 'done-task', sessionRef: 's' })), 2);
+    await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
+    const terminal = majorBytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'done-task', sessionRef: 's' })), 2);
     await journal.recordTerminal({ taskId: 'done-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
     await journal.close();
@@ -146,7 +147,7 @@ describe('result-document recovery from the journal', () => {
     const device = (await createTestDeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
     const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
     const offerBytes = (taskId: string) => encodeEnvelope(createEnvelope('task.offer', {
-      session: { mode: 'fresh' }, instruction: 'submit one result', runtime: 'pi', agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
+      session: { mode: 'fresh' }, instruction: 'submit one result', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
       ...(requiredReply ? { messageEgress: { mode: 'required', contract: 'reply.v1', contentType: 'text/plain', maxBytes: 1024 } } : {}),
     }, { taskId, seq: 1 }));
     const home = path.join(config.agentHome!.hostStorageRoot, 'agents', agentRef.agentId);
@@ -209,10 +210,24 @@ describe('result-document recovery from the journal', () => {
     journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     await startWith(config, journal);
     const terminal = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.fail');
-    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef });
+    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef, executor: { kind: 'runtime', runtimeId: 'pi' } });
     expect(JSON.stringify(terminal)).not.toContain('"document"');
     expect(server.received.some((envelope) => envelope.type === 'task.complete')).toBe(false);
     expect(await (await AgentResultStore.open(home)).get(taskId)).toEqual(staged);
+  });
+
+  it('an acknowledged offer that was never claimed recovers as daemon_interrupted without an executor', async () => {
+    const { server, config, identity, offerBytes } = await pairedAgentStore();
+    const taskId = 'acked-never-claimed';
+    const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
+    const bytes = offerBytes(taskId);
+    await journal.appendEnvelope({ identity, taskId, envelopeId: (JSON.parse(bytes) as { id: string }).id, seq: 1, bytes,
+      bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
+    await new CursorStore(config.storeDir!).save(config.serverUrl, identity.deviceId, 1);
+    await startWith(config, journal);
+    const terminal = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.fail');
+    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef, recovery: { kind: 'daemon_interrupted' } });
+    expect(terminal.payload).not.toHaveProperty('executor');
   });
 
   it('a task.complete with its document recorded before send is replayed once, byte-identical', async () => {
@@ -224,7 +239,7 @@ describe('result-document recovery from the journal', () => {
       bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
     await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
     const complete = encodeEnvelope(createEnvelope('task.complete', {
-      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef,
+      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef, executor: { kind: 'runtime', runtimeId: 'pi' },
     }, { taskId, sessionRef: 'session-1' }));
     await journal.recordTerminal({ taskId, terminalType: 'complete', bytes: complete, payloadHash: journalHash(complete),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });

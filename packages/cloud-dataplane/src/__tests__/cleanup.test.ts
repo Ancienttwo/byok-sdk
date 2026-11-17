@@ -1,4 +1,4 @@
-import { createByokCloud, createInProcessMailboxWake, createWebCrypto, createHmacTokenSigner, type MaintenanceReport } from '@byok-sdk/cloud';
+import { createByokCloud, createInProcessMailboxWake, createWebCrypto, createHmacTokenSigner, type MaintenanceReport, type RetentionPolicy } from '@byok-sdk/cloud';
 import { createPostgresCoreStores } from '../stores/core';
 import { createPostgresCloudStores } from '../stores';
 /** S4B-c retention, tombstone, crash and reconciliation matrix. */
@@ -16,7 +16,6 @@ import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protoc
 import type { PoolClient } from 'pg';
 import type { ByokPool } from '../pool';
 import { PostgresCloudCleanup } from '../cleanup';
-import { PostgresRetentionPolicyStore } from '../stores/retention-policy';
 import { migrate } from '../migrate';
 import { PostgresMailboxStore } from '../stores/core/mailbox';
 import { PostgresObjectStore } from '../stores/core/objects';
@@ -59,6 +58,7 @@ function replayableOffer(seed: number) {
           instruction: `cleanup offer ${seed}`,
           agentRef: { agentId: `agent-cleanup-${seed}`, profileRevision: 'rev-1' },
           session: { mode: 'resume', sessionRef: `session-cleanup-${seed}` },
+          target: { lane: 'auto' },
         },
         {
           id: `00000000-0000-4000-8000-${String(seed).padStart(12, '0')}`,
@@ -178,17 +178,14 @@ async function seedCommittedObject(
   });
 }
 
-async function configurePolicy(pool: ByokPool, clock: Clock): Promise<void> {
-  await new PostgresRetentionPolicyStore(pool, clock).writeRetentionPolicy(TENANT, {
-    policyId: 'default',
-    mailboxAckedRetentionMs: 1_000n,
-    mailboxUnackedRetentionMs: 1_000n,
-    mailboxDeadLetterRetentionMs: 1_000n,
-    requestReceiptRetentionMs: 1_000n,
-    objectOrphanGraceMs: 1_000n,
-    terminalTaskArchiveMs: 2_000n,
-  });
-}
+const POLICY: RetentionPolicy = {
+  mailboxAckedRetentionMs: 1_000n,
+  mailboxUnackedRetentionMs: 1_000n,
+  mailboxDeadLetterRetentionMs: 1_000n,
+  requestReceiptRetentionMs: 1_000n,
+  objectOrphanGraceMs: 1_000n,
+  terminalTaskArchiveMs: 2_000n,
+};
 
 function interceptCleanupDelete(pool: ByokPool, beforeDelete: () => Promise<void>): ByokPool {
   let intercepted = false;
@@ -261,7 +258,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const mailbox = new PostgresMailboxStore(scope.pool, clock);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 2_000n, 2_000n);
-      await configurePolicy(scope.pool, clock);
 
       const first = await mailbox.append(TENANT, {
         deviceId: 'device-a',
@@ -304,12 +300,12 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
          VALUES ($1, 'task-expired-approval', $2::jsonb, 2, 0, 50,
                  '2025-12-31T23:50:00.500Z', '2026-01-01T00:00:00.500Z')`,
         // A closed timeline past its deadline; collection clears what it holds.
-        [TENANT, JSON.stringify([{ taskId: 'task-expired-approval', sourceEnvelopeId: 'request', revision: 1, receivedAt: '2025-12-31T23:49:00.000Z', event: { type: 'approval_requested', summary: 'Allow' } }])],
+        [TENANT, JSON.stringify([{ taskId: 'task-expired-approval', sourceEnvelopeId: 'request', revision: 1, receivedAt: '2025-12-31T23:49:00.000Z', event: { type: 'approval_requested', summary: 'Allow', approvalId: 'approval-1' } }])],
       );
       clock.set('2026-01-01T00:00:02.000Z');
 
       const cloud = await maintenanceCloud(scope.pool, clock, storage);
-      const result = await cloud.runMaintenance({ tenant: TENANT, now: clock.now().toISOString(), policy: await new PostgresRetentionPolicyStore(scope.pool, clock).readRetentionPolicy(TENANT) });
+      const result = await cloud.runMaintenance({ tenant: TENANT, now: clock.now().toISOString(), policy: POLICY });
       expect(step(result, 'mailbox')).toMatchObject({ removed: 1, expired: 1, releasedBytes: 0n });
       // Nonce, presence and approval tail. Request receipts are no longer
       // swept by hosted cleanup (#411), so `old-receipt` is retained below.
@@ -538,7 +534,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         clock,
         objectStorage: storage,
       });
-      await configurePolicy(scope.pool, clock);
       clock.set('2026-01-01T00:00:02.000Z');
       await mailbox.collectExpired(TENANT, bounds(clock));
 
@@ -596,7 +591,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         materialize: replayableOffer(5),
       });
       const expirer = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
-      await configurePolicy(scope.pool, clock);
       clock.set('2026-01-01T00:00:02.000Z');
       await mailbox.collectExpired(TENANT, bounds(clock));
 
@@ -687,7 +681,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
         batchSize: 1,
       });
       await seedEntitlement(quota, 100n);
-      await configurePolicy(scope.pool, clock);
       await seedCommittedObject(quota, objects, HASH_A, 5n, 'reservation-poison-a');
       await seedCommittedObject(quota, objects, HASH_B, 5n, 'reservation-poison-b');
       storage.put(TENANT, HASH_A, 5n);
@@ -721,7 +714,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const objects = new PostgresObjectStore(scope.pool, clock, storage);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 10n);
-      await configurePolicy(scope.pool, clock);
       await seedCommittedObject(quota, objects, HASH_A, 5n, 'reservation-a');
       await seedCommittedObject(quota, objects, HASH_B, 5n, 'reservation-b');
       storage.put(TENANT, HASH_A, 5n);
@@ -796,7 +788,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const objects = new PostgresObjectStore(scope.pool, clock, storage);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 100n);
-      await configurePolicy(scope.pool, clock);
       await seedCommittedObject(quota, objects, HASH_A, 7n, 'reservation-a');
       storage.put(TENANT, HASH_A, 7n);
       clock.set('2026-01-01T00:00:02.000Z');
@@ -840,7 +831,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const objects = new PostgresObjectStore(scope.pool, clock, storage);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 100n);
-      await configurePolicy(scope.pool, clock);
       await seedCommittedObject(quota, objects, HASH_A, 7n, 'reservation-a');
       await objects.addReference(TENANT, { hash: HASH_A, refKind: 'truth', refId: 'truth-a' });
 
@@ -863,7 +853,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const mailbox = new PostgresMailboxStore(scope.pool, clock);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 2_000n, 2_000n);
-      await configurePolicy(scope.pool, clock);
 
       // No manual accounting: the rows are the only record of their bytes.
       const first = await mailbox.append(TENANT, {
@@ -971,7 +960,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const mailbox = new PostgresMailboxStore(scope.pool, clock);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 2_000n, 2_000n);
-      await configurePolicy(scope.pool, clock);
 
       // One key per family the SDK writes. Until #412 classifies which ones
       // are TTL-bound requests, none of them may be swept.
@@ -1009,7 +997,7 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       clock.set('2026-01-01T00:00:02.000Z');
 
       const cloud = await maintenanceCloud(scope.pool, clock, storage);
-      const result = await cloud.runMaintenance({ tenant: TENANT, now: clock.now().toISOString(), policy: await new PostgresRetentionPolicyStore(scope.pool, clock).readRetentionPolicy(TENANT) });
+      const result = await cloud.runMaintenance({ tenant: TENANT, now: clock.now().toISOString(), policy: POLICY });
       expect(step(result, 'mailbox')).toMatchObject({ status: 'ok', removed: 1 });
       expect(step(result, 'receipts')).toMatchObject({ status: 'ok', removed: 0 });
       const retained = await scope.pool.query<{ readonly key: string }>(
@@ -1032,7 +1020,6 @@ describe.skipIf(SKIP_DATAPLANE)('Postgres cloud cleanup', () => {
       const mailbox = new PostgresMailboxStore(scope.pool, clock);
       const cleanup = new PostgresCloudCleanup({ pool: scope.pool, clock, objectStorage: storage });
       await seedEntitlement(quota, 2_000n, 2_000n);
-      await configurePolicy(scope.pool, clock);
       const original = await mailbox.append(TENANT, {
         deviceId: 'device-replay-limit',
         messageId: 'replay-limit-original',

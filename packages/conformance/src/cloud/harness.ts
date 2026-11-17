@@ -34,6 +34,7 @@ import { runDedupConformance } from './dedup';
 import { runTaskAttemptConformance } from './task-attempts';
 import { runTaskCancellationConformance } from './task-cancellations';
 import { runReceiptConformance } from './receipts';
+import { runSteerRefusalConformance } from './steer-refusals';
 import { runProofReceiptConformance } from './proof-receipts';
 import { runBlobConformance } from './blobs';
 import { runCloudTenantIsolationConformance } from './tenant-isolation';
@@ -76,6 +77,7 @@ export const CLOUD_CONFORMANCE_PORTS = [
   'tasks',
   'cancellations',
   'receipts',
+  'steerRefusals',
   'egress',
   'proofReceipts',
   'blobs',
@@ -364,6 +366,7 @@ export function runCloudConformance(name: string, factory: CloudCompositionFacto
     runTaskAttemptConformance(factory);
     runTaskCancellationConformance(factory);
     runReceiptConformance(factory);
+    runSteerRefusalConformance(factory);
     runProofReceiptConformance(factory);
     runBlobConformance(factory);
     runCloudTenantIsolationConformance(factory);
