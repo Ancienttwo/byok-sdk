@@ -210,6 +210,23 @@ describe('SDK-owned Agent home contract', () => {
     expect(await manager.withIdleHomeLease('one', async () => {})).toBe(true);
   });
 
+  it('drops a home from activeHomes and passes the error on when its base lease release fails (#2349)', async () => {
+    const root = await makeRoot();
+    const manager = new AgentHomeManager({ hostStorageRoot: root });
+    const resolution = await manager.layout.resolve(ref('one'));
+    const acquire = manager.leaseManager.acquire.bind(manager.leaseManager);
+    vi.spyOn(manager.leaseManager, 'acquire').mockImplementationOnce(async (claim) => {
+      const base = await acquire(claim);
+      const release = base.release.bind(base);
+      (base as { release(): Promise<void> }).release = async () => { await release(); throw new Error('base release failed'); };
+      return base;
+    });
+    const execution = await manager.executionLeaseManager.acquire(resolution, { taskId: 'task-1' });
+
+    await expect(execution.release()).rejects.toThrow('base release failed');
+    expect(manager.executionLeaseManager.activeAttemptSummary()).toEqual({ homes: 0, attempts: 0, readerAttempts: 0 });
+  });
+
   it('an execution claim whose acquire throws synchronously leaves no task mark: a later standalone acquire of the same resolution fails at once', async () => {
     const root = await makeRoot();
     const manager = new AgentHomeManager({ hostStorageRoot: root });

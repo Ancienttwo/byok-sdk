@@ -1156,9 +1156,11 @@ export interface AgentHomeExecutionStatus {
   maxConcurrentReaderAttemptsPerAgentHome: number;
   /**
    * Canonical Agent homes this daemon holds an execution lease in, or is still
-   * releasing the base lease of. It reads 0 only once every such home is free
-   * for maintenance; `activeAttempts` drops to 0 as soon as the last Attempt
-   * releases, before its home's base lease is released.
+   * releasing the base lease of. `activeAttempts` drops to 0 as soon as the
+   * last Attempt releases, before its home's base lease is released. A home
+   * leaves this count once that release settles: after a successful release
+   * maintenance can take it, while a release that fails leaves the count too
+   * but may leave the lease marker that keeps maintenance out.
    */
   activeHomes: number;
   /** Total Attempts, writers and readers, holding an execution lease across those homes. */
@@ -1323,8 +1325,9 @@ export class AgentHomeExecutionLeaseManager {
             currentGroup.leasesByKey.delete(currentKey);
             released = true;
             if (currentGroup.leasesByKey.size === 0) {
-              // The group stays until its base lease is released, so `activeHomes`
-              // reads 0 only once maintenance can take the home (#2349). An
+              // The group stays until its base lease release settles, so
+              // `activeHomes` counts the home while it is released (#2349). A
+              // failed release drops the group too and reaches the caller. An
               // acquire of this home waits in the same `exclusive` queue.
               try {
                 await currentGroup.baseLease.release();

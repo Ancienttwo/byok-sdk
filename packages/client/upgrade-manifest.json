@@ -1783,7 +1783,7 @@
     {
       "id": "agent-home-active-homes-includes-base-lease-release",
       "impact": "breaking",
-      "summary": "@byok-sdk/client status().agentHomeExecution.activeHomes (Daemon.status() and the local control status) counts a canonical Agent home until its base lease is released, not only while an execution lease is held: when the last Attempt of a home releases, activeAttempts reads 0 at once and activeHomes reads 0 only after the base lease is gone. No field or type changes. A Host that waits for a home to be free for maintenance waits for activeHomes === 0 rather than activeAttempts === 0.",
+      "summary": "@byok-sdk/client status().agentHomeExecution.activeHomes (Daemon.status() and the local control status) counts a canonical Agent home until its base lease is released, not only while an execution lease is held: when the last Attempt of a home releases, activeAttempts reads 0 at once and activeHomes reads 0 only after the base lease is gone. No field or type changes. A Host that waits for a home to be free for maintenance waits for activeHomes === 0 rather than activeAttempts === 0. activeHomes also drops when a base lease release fails, whose error reaches the releasing caller; its lease marker may then still keep maintenance out, so a free home follows only a successful release.",
       "migration": "docs/releases/host-upgrade-next-minor.md#retention-sweeps-count-busy-agent-homes-2349",
       "items": [
         "behavior:agent-home-active-homes-includes-base-lease-release"

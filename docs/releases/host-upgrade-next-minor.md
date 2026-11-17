@@ -1111,7 +1111,9 @@ is released, not only while it holds an execution lease. `activeAttempts` still
 drops to 0 as soon as the last Attempt releases. A Host that waits for a home to
 be free for maintenance waits for `activeHomes === 0` instead of
 `activeAttempts === 0`; in between, a retention pass skips the home and counts it
-in `busyHomes`.
+in `busyHomes`. A home is free only after its base lease released successfully:
+a release that fails also drops the home from `activeHomes`, its error reaches the
+caller that released, and a lease marker it leaves still keeps maintenance out.
 
 ### Local task journal commits on a worker thread (#2332)
 
