@@ -1240,10 +1240,21 @@ process then failed with `EBUSY`: journal quarantine, the retention sweep's Pi
 replica reset and lock removal, `inspectDaemonStores`, doctor's journal check,
 and a Host that deletes or moves a store it has just closed. Bun 1.4.4 releases
 the files at `close()`, and this repository now builds and tests with it.
-Compile with Bun 1.4.4 or newer, and without Bun's
-`--disallow-code-generation-from-strings=strict`: the journal starts its worker
-from inline source, which that mode refuses. Node Hosts are not affected. No manifest
-entry: the SDK does not ship a Bun runtime. Source: [#2347].
+Compile with Bun 1.4.4 or newer. Do not run the daemon under Bun's
+`--disallow-code-generation-from-strings=strict`, whether it is passed to
+`bun`, embedded with `bun build --compile --compile-exec-argv`, or set through
+`BUN_OPTIONS`. That mode refuses `new Worker(source, { eval: true })`, which is
+how the journal starts its worker. `new SqliteLocalTaskJournal()` then throws
+`JournalUnavailableError` (cause: `EvalError: Code generation from strings
+disallowed for this context`), and `daemon.start()` rejects with it before
+pairing, so the daemon fails closed. Bun's non-strict
+`--disallow-code-generation-from-strings` and Node's
+`--disallow-code-generation-from-strings` block `eval` and `new Function` but
+not the journal worker. That holds on the Node command line and through
+`NODE_OPTIONS` for a Node SEA; measured with Node 24.22.1 and Bun 1.4.4. A
+Host that wants strict mode for its own code runs the daemon in a separate
+process without it. Node Hosts are not affected. No manifest entry: the SDK
+does not ship a Bun runtime. Source: [#2347].
 
 ### Integration and adoption evidence
 
