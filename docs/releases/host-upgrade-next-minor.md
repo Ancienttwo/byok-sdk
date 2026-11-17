@@ -274,15 +274,16 @@ code to any exhaustive switch over `CloudErrorCode`. The sealed lane keeps
 
 Manifest entries: `agent-home-lease-writer-liveness`, `agent-home-lease-held-error`, `device-operator-agent-lease-held`.
 
-An Agent-home lease marker now records the process that wrote it: its pid and
-start time, a digest of the machine identifier (never the raw value), the boot,
-and on Linux the PID namespace. A marker of this owner is reclaimed only when
-its writer is proved gone (same machine and namespace, and an earlier boot, no
-process with that pid, or another process under it), and only by a caller that
-holds the owner's daemon lease and has ended the earlier run's processes: a
-started daemon, or the doctor operator actions. Before, any acquire of the same
-owner reclaimed it, so a memory export or reliable egress append from a second
-process could take the marker of a running daemon and write the same home.
+An Agent-home lease marker now records the process that wrote it: its pid and,
+off Windows, its start time, a digest of the machine identifier (never the raw
+value), the boot, and on Linux the PID namespace. A marker of this owner is
+reclaimed only when its writer is proved gone (same machine and namespace, and
+an earlier boot, no process with that pid, or another process under it), and
+only by a caller that holds the owner's daemon lease and has ended the earlier
+run's processes: a started daemon, or the doctor operator actions. Before, any
+acquire of the same owner reclaimed it, so a memory export or reliable egress
+append from a second process could take the marker of a running daemon and
+write the same home.
 
 What changes for a Host:
 
@@ -869,7 +870,9 @@ not call this API and need no change.
 The vendored OAR moves from 0.110.0 to 0.112.0 ([#2361]). No Host action is
 required and there is no manifest entry. OAR's removed public exports,
 `usability()` and the changed installation snapshot type do not reach a Host,
-because the SDK re-exports no OAR API.
+because the SDK re-exports from the vendored OAR only typed errors, session
+factories and the projection and helper functions its sessions use, and none
+of the removed APIs.
 
 #### agy model selectors agy's catalog does not resolve
 
