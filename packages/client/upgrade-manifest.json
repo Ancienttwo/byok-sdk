@@ -1787,9 +1787,9 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#retention-sweeps-count-busy-agent-homes-2349",
       "items": [
         "behavior:agent-home-active-homes-includes-base-lease-release"
-        ]
-      },
-      {
+      ]
+    },
+    {
       "id": "client-journal-macos-fullfsync",
       "impact": "breaking",
       "summary": "@byok-sdk/client SqliteLocalTaskJournal, and the journal createDaemon opens, sets PRAGMA fullfsync = ON on macOS, so each commit flushes the drive's write cache instead of stopping at it. Journal commits on macOS take a few milliseconds longer (idle Apple Silicon M4 Pro: one write p50 0.13 to 3.8 ms, a burst 1.2 to 9.9 ms per operation; idle Intel Mac Pro: 0.41 to 22.6 ms and 4.9 to 93 ms). They run on the journal worker, so the event loop is unaffected. No Host action; a Host with a latency budget on macOS accounts for the added commit time.",
