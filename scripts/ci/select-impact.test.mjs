@@ -344,6 +344,16 @@ test('a platform family is selected only by a path it owns', () => {
     for (const owner of owners) assert.ok([...tracked].some(path => owner.test(path)), `${family} owner ${owner} matches no tracked file`);
   }
   for (const [family, path] of Object.entries(owned)) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
+  // #2354: the fixture entries the kill test compiles with `bun build --compile`
+  // and the test-side modules they or the test import select the compiled job.
+  for (const path of [
+    'packages/client/src/__tests__/fixtures/execution-recovery-daemon.ts',
+    'packages/client/src/__tests__/fixtures/execution-recovery-cloud.ts',
+    'packages/client/src/__tests__/fixtures/lifecycle-barrier.ts',
+    'packages/client/src/__tests__/fixtures/runtime-env.ts',
+    'packages/client/src/__tests__/fixtures/execution-scratch.ts',
+    'packages/client/src/__tests__/support/cleanup-retry.ts',
+  ]) assert.ok(selectImpact([path]).families.includes('execution-recovery-native'), path);
   // #1812: the desktop fork guide is a doc like the example's README.
   assert.deepEqual(selectImpact(['examples/desktop-bot-app/FORKING.md']).dirs, []);
   // #1805: renderer stylesheets select the desktop example; other renderer assets stay unmapped.
