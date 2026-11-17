@@ -10,9 +10,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedPayload } from '@byok-sdk/protocol';
 import {
-  assertTaskCancellationBinding,
   journalHash,
   JournalIntegrityError,
   JournalRecordTooLargeError,
@@ -32,34 +30,6 @@ import {
   type WithheldOfferTask,
 } from './journal.js';
 import type { JournalFaultStep } from './sqlite-journal.js';
-
-/** The AES-256-GCM tag of the sealed payload v1 suite. */
-const SEALED_AEAD_TAG_BYTES = 16;
-/**
- * Room beside the largest inline sealed member for the rest of its envelope:
- * the envelope fields, the sealed header and the plaintext fields of the
- * sealed type (selection, policies, `sealing`).
- */
-const SEALED_ENVELOPE_MARGIN_BYTES = 64 * 1024;
-/**
- * The least bound on an inbound envelope record (#654). An inline sealed
- * member carries up to `SEALED_INLINE_MAX_PADDED_LENGTH` + 16 bytes of
- * ciphertext as unpadded base64url. That is above the default record bound,
- * and the daemon must journal such an envelope before it can decline it.
- * A sealed terminal record has the same floor; plaintext terminal and
- * transition records keep `maxRecordBytes`.
- */
-export const ENVELOPE_RECORD_FLOOR_BYTES = Math.ceil(((SEALED_INLINE_MAX_PADDED_LENGTH + SEALED_AEAD_TAG_BYTES) * 4) / 3) + SEALED_ENVELOPE_MARGIN_BYTES;
-
-/** Whether canonical envelope bytes carry a sealed payload (#654); read only for a record above `maxRecordBytes`. */
-function isSealedEnvelope(bytes: string): boolean {
-  try {
-    const { type, payload } = JSON.parse(bytes) as { type?: unknown; payload?: unknown };
-    return typeof type === 'string' && isSealedPayload(type, payload);
-  } catch {
-    return false;
-  }
-}
 
 export function byteLength(value: string): number {
   return Buffer.byteLength(value, 'utf8');
@@ -135,9 +105,13 @@ function written<T>(value: T, ...afterCommit: JournalFaultStep[]): JournalWrite<
 export interface JournalStoreOptions {
   readonly dbPath: string;
   readonly quarantineDir: string;
-  readonly maxRecordBytes: number;
   /** The fault seam; throws to fail the current write at `step`. */
   readonly fault: (step: JournalFaultStep) => void;
+  /**
+   * `assertTaskCancellationBinding` for stored bytes, answered by the journal's
+   * own thread: the protocol decoder stays out of the worker bundle.
+   */
+  readonly cancellationSeq: (bytes: string, taskId: string, offerSeq: number) => number;
 }
 
 export class JournalStore {
@@ -202,7 +176,7 @@ export class JournalStore {
   }
 
   /** #826: the decline commits with the row, because the cursor moves once this commits. */
-  appendWithheldOffer(record: WithheldOfferRecord, admittedAt: string): JournalWrite<JournalReceipt> {
+  appendWithheldOffer(record: WithheldOfferRecord, admittedAt: string, declineBound: number): JournalWrite<JournalReceipt> {
     const { decline, taskId } = record;
     return this.#append(record, '', record.byteLength, admittedAt, (committedAt) => {
       const task = this.#db.prepare(`SELECT t.tenant_id, t.product_id, t.device_id, e.withheld_bytes FROM journal_task t
@@ -214,7 +188,7 @@ export class JournalStore {
         if (task.withheld_bytes === null) throw new Error('journal task identity reused with a different execution contract');
         return;
       }
-      this.#assertTerminalBytes(decline.bytes, decline.payloadHash);
+      this.#assertTerminalBytes(decline.bytes, decline.payloadHash, declineBound);
       this.#insertTask(record, taskId, 'terminal:declined', committedAt);
       this.#insertTerminal({ taskId, terminalType: 'declined', bytes: decline.bytes, payloadHash: decline.payloadHash,
         truthState: 'pending', attempt: 1, recordedAt: committedAt });
@@ -352,8 +326,8 @@ export class JournalStore {
    * terminal for a task that already has one, and is recorded nowhere — the
    * first fact stands.
    */
-  recordTerminal(record: LocalTerminalRecord): JournalWrite<void> {
-    this.#assertTerminalBytes(record.bytes, record.payloadHash);
+  recordTerminal(record: LocalTerminalRecord, bound: number): JournalWrite<void> {
+    this.#assertTerminalBytes(record.bytes, record.payloadHash, bound);
     this.#requireTask(record.taskId, 'recordTerminal');
     const existing = this.#db.prepare('SELECT * FROM journal_terminal WHERE task_id = ?')
       .get(record.taskId) as { payload_hash: string; bytes: string; truth_state: string } | undefined;
@@ -376,14 +350,12 @@ export class JournalStore {
       : written(undefined, 'recovery:after-commit', 'terminal:after-commit');
   }
 
-  #assertTerminalBytes(bytes: string, payloadHash: string): void {
+  /** `bound` is the record bound for these bytes, decided on the journal's own thread (a sealed terminal has a higher floor). */
+  #assertTerminalBytes(bytes: string, payloadHash: string, bound: number): void {
     if (typeof bytes !== 'string' || journalHash(bytes) !== payloadHash) {
       throw new Error('terminal bytes do not match their canonical hash');
     }
-    const { maxRecordBytes } = this.#options;
     const length = byteLength(bytes);
-    if (length <= maxRecordBytes) return;
-    const bound = isSealedEnvelope(bytes) ? Math.max(maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES) : maxRecordBytes;
     if (length > bound) throw new JournalRecordTooLargeError('terminal bytes', length, bound);
   }
 
@@ -395,8 +367,8 @@ export class JournalStore {
         record.attempt, record.lastError ?? null, record.recordedAt, record.recordedAt);
   }
 
-  replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): JournalWrite<void> {
-    this.#assertTerminalBytes(record.bytes, record.payloadHash);
+  replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord, bound: number): JournalWrite<void> {
+    this.#assertTerminalBytes(record.bytes, record.payloadHash, bound);
     const row = this.#db.prepare('SELECT payload_hash, truth_state, terminal_type, last_error FROM journal_terminal WHERE task_id = ?')
       .get(taskId) as { payload_hash: string; truth_state: string; terminal_type: string; last_error: string | null } | undefined;
     if (row?.payload_hash === record.payloadHash) return written(undefined, 'replace:after-commit');
@@ -496,7 +468,7 @@ export class JournalStore {
     return integrity(taskId, () => rows.filter((row) => {
       const envelope = JSON.parse(row.bytes as string) as { type?: unknown; task_id?: unknown };
       if (envelope.type === 'task.cancel') {
-        if (assertTaskCancellationBinding(row.bytes as string, taskId, Number(row.seq) - 1) !== Number(row.seq)) {
+        if (this.#options.cancellationSeq(row.bytes as string, taskId, Number(row.seq) - 1) !== Number(row.seq)) {
           throw new Error('invalid durable cancellation binding');
         }
         return true;

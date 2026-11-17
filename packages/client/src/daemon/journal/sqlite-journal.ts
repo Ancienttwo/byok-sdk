@@ -43,7 +43,9 @@ import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { MessageChannel, receiveMessageOnPort, Worker, type MessagePort } from 'node:worker_threads';
+import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedPayload } from '@byok-sdk/protocol';
 import {
+  assertTaskCancellationBinding,
   JournalClosedError,
   JournalCorruptError,
   JournalRecordTooLargeError,
@@ -63,10 +65,12 @@ import {
   type WithheldOfferRecord,
   type WithheldOfferTask,
 } from './journal.js';
-import { byteLength, ENVELOPE_RECORD_FLOOR_BYTES } from './journal-store.js';
+import { byteLength } from './journal-store.js';
 import {
   decodeError,
   encodeError,
+  type JournalHostAnswer,
+  type JournalHostCall,
   type JournalOp,
   type JournalOpArgs,
   type JournalOpenReply,
@@ -74,7 +78,6 @@ import {
   type JournalRequest,
   type JournalResponse,
   type JournalWorkerData,
-  type WireError,
 } from './journal-worker-protocol.js';
 import { readSqliteFileUnchanged, SQLITE_USER_OBJECT, SqliteReadOnlyOpenError } from '@byok-sdk/core/sqlite-node';
 import {
@@ -111,6 +114,34 @@ export const JOURNAL_QUARANTINE_DIRNAME = 'quarantine';
  * journal into a blob store. See {@link JournalRecordTooLargeError}.
  */
 export const DEFAULT_MAX_RECORD_BYTES = 256 * 1024;
+
+/** The AES-256-GCM tag of the sealed payload v1 suite. */
+const SEALED_AEAD_TAG_BYTES = 16;
+/**
+ * Room beside the largest inline sealed member for the rest of its envelope:
+ * the envelope fields, the sealed header and the plaintext fields of the
+ * sealed type (selection, policies, `sealing`).
+ */
+const SEALED_ENVELOPE_MARGIN_BYTES = 64 * 1024;
+/**
+ * The least bound on an inbound envelope record (#654). An inline sealed
+ * member carries up to `SEALED_INLINE_MAX_PADDED_LENGTH` + 16 bytes of
+ * ciphertext as unpadded base64url. That is above the default record bound,
+ * and the daemon must journal such an envelope before it can decline it.
+ * A sealed terminal record has the same floor; plaintext terminal and
+ * transition records keep `maxRecordBytes`.
+ */
+const ENVELOPE_RECORD_FLOOR_BYTES = Math.ceil(((SEALED_INLINE_MAX_PADDED_LENGTH + SEALED_AEAD_TAG_BYTES) * 4) / 3) + SEALED_ENVELOPE_MARGIN_BYTES;
+
+/** Whether canonical envelope bytes carry a sealed payload (#654); read only for a record above `maxRecordBytes`. */
+function isSealedEnvelope(bytes: string): boolean {
+  try {
+    const { type, payload } = JSON.parse(bytes) as { type?: unknown; payload?: unknown };
+    return typeof type === 'string' && isSealedPayload(type, payload);
+  } catch {
+    return false;
+  }
+}
 
 /** Default bound on how long a write waits for the write lock before failing. */
 export const DEFAULT_JOURNAL_BUSY_TIMEOUT_MS = 5_000;
@@ -389,24 +420,18 @@ interface StartedWorker {
  */
 function startJournalWorker(
   db: DatabaseSync,
-  settings: Pick<JournalWorkerData, 'dbPath' | 'quarantineDir' | 'busyTimeoutMs' | 'maxRecordBytes' | 'faults'>,
+  settings: Pick<JournalWorkerData, 'dbPath' | 'quarantineDir' | 'busyTimeoutMs' | 'faults'>,
   faults: JournalFaultSeam | undefined,
 ): StartedWorker {
   const channel = new MessageChannel();
-  const faultChannel = faults === undefined ? undefined : new MessageChannel();
+  const hostChannel = new MessageChannel();
   const signal = new Int32Array(new SharedArrayBuffer(8));
   let worker: Worker | undefined;
   let reply: JournalOpenReply | undefined;
   let startError: unknown;
   try {
-    const workerData: JournalWorkerData = {
-      ...settings, signal, port: channel.port2, ...(faultChannel === undefined ? {} : { faultPort: faultChannel.port2 }),
-    };
-    worker = new Worker(__BYOK_JOURNAL_WORKER_SOURCE__, {
-      eval: true,
-      workerData,
-      transferList: faultChannel === undefined ? [channel.port2] : [channel.port2, faultChannel.port2],
-    });
+    const workerData: JournalWorkerData = { ...settings, signal, port: channel.port2, hostPort: hostChannel.port2 };
+    worker = new Worker(__BYOK_JOURNAL_WORKER_SOURCE__, { eval: true, workerData, transferList: [channel.port2, hostChannel.port2] });
     // A worker that fails after a failed handshake is already accounted for below.
     worker.on('error', () => {});
     if (Atomics.wait(signal, 0, 0, WORKER_OPEN_TIMEOUT_MS) !== 'timed-out') {
@@ -422,7 +447,7 @@ function startJournalWorker(
       void worker.terminate();
       throw new JournalHandleCleanupError('the journal worker opened the database, but this thread could not close its own SQLite handle', [closeError]);
     }
-    if (faultChannel !== undefined && faults !== undefined) answerFaults(faultChannel.port1, signal, faults);
+    answerHostCalls(hostChannel.port1, signal, faults);
     return { worker, port: channel.port1 };
   }
   void worker?.terminate();
@@ -446,16 +471,21 @@ function startJournalWorker(
   throw new JournalUnavailableError(`the journal worker could not open ${settings.dbPath}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
 }
 
-/** Runs the test fault seam for the worker, which waits on `signal[1]` for the verdict. */
-function answerFaults(port: MessagePort, signal: Int32Array, seam: JournalFaultSeam): void {
-  port.on('message', (step: JournalFaultStep) => {
-    let verdict: WireError | null = null;
+/** Answers the worker's synchronous calls (see `JournalHostCall`); the worker waits on `signal[1]`. */
+function answerHostCalls(port: MessagePort, signal: Int32Array, faults: JournalFaultSeam | undefined): void {
+  port.on('message', (call: JournalHostCall) => {
+    let answer: JournalHostAnswer;
     try {
-      seam.onStep?.(step);
+      if (call.kind === 'fault') {
+        faults?.onStep?.(call.step as JournalFaultStep);
+        answer = { ok: true, value: null };
+      } else {
+        answer = { ok: true, value: assertTaskCancellationBinding(call.bytes, call.taskId, call.offerSeq) };
+      }
     } catch (error) {
-      verdict = encodeError(error);
+      answer = { ok: false, error: encodeError(error) };
     }
-    port.postMessage(verdict);
+    port.postMessage(answer);
     Atomics.store(signal, 1, 1);
     Atomics.notify(signal, 1);
   });
@@ -585,7 +615,6 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       dbPath,
       quarantineDir: join(options.storeDir, JOURNAL_QUARANTINE_DIRNAME),
       busyTimeoutMs: options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
-      maxRecordBytes: this.#maxRecordBytes,
       ...(options.faults === undefined ? {} : { faults: options.faults.exitWorkerAt === undefined ? {} : { exitWorkerAt: options.faults.exitWorkerAt } }),
     }, options.faults);
     this.#worker = worker;
@@ -706,7 +735,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
   /** #826: the decline commits with the row, because the cursor moves once this commits. */
   appendWithheldOffer(record: WithheldOfferRecord): Promise<JournalReceipt> {
-    return this.#call('appendWithheldOffer', record, this.#clock().toISOString());
+    return this.#call('appendWithheldOffer', record, this.#clock().toISOString(), this.#terminalBound(record.decline.bytes));
   }
 
   recordAdmission(record: AdmissionRecord): Promise<void> {
@@ -722,8 +751,15 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     return this.#call('recordTransition', record);
   }
 
+  /** The record bound for terminal bytes: a sealed terminal may reach the inbound floor (#654). The worker enforces it. */
+  #terminalBound(bytes: string): number {
+    const max = this.#maxRecordBytes;
+    if (typeof bytes !== 'string' || byteLength(bytes) <= max) return max;
+    return isSealedEnvelope(bytes) ? Math.max(max, ENVELOPE_RECORD_FLOOR_BYTES) : max;
+  }
+
   recordTerminal(record: LocalTerminalRecord): Promise<void> {
-    return this.#call('recordTerminal', record);
+    return this.#call('recordTerminal', record, this.#terminalBound(record.bytes));
   }
 
   readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined> {
@@ -751,7 +787,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
   }
 
   replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): Promise<void> {
-    return this.#call('replaceRefusedTerminal', taskId, refusedPayloadHash, record);
+    return this.#call('replaceRefusedTerminal', taskId, refusedPayloadHash, record, this.#terminalBound(record.bytes));
   }
 
   listRecoverable(): Promise<RecoverableTask[]> {

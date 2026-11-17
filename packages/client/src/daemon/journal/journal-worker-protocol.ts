@@ -48,14 +48,25 @@ export interface JournalWorkerData {
   readonly dbPath: string;
   readonly quarantineDir: string;
   readonly busyTimeoutMs: number;
-  readonly maxRecordBytes: number;
-  /** Set only when a test supplied a fault seam: the worker then asks the daemon's thread at every step. */
+  /** Set only when a test supplied a fault seam: the worker then asks the journal's thread at every step. */
   readonly faults?: { readonly exitWorkerAt?: string };
-  /** `[0]` open handshake, `[1]` fault verdict. */
+  /** `[0]` open handshake, `[1]` host call answered. */
   readonly signal: Int32Array;
   readonly port: MessagePort;
-  readonly faultPort?: MessagePort;
+  /** Synchronous calls from the worker to the journal's own thread; see {@link JournalHostCall}. */
+  readonly hostPort: MessagePort;
 }
+
+/**
+ * What the worker asks the journal's own thread while it waits on `signal[1]`:
+ * the test fault seam, and the protocol decoder that the worker bundle does
+ * not carry. The answer is the call's value, or the error it threw.
+ */
+export type JournalHostCall =
+  | { readonly kind: 'fault'; readonly step: string }
+  | { readonly kind: 'cancellationSeq'; readonly bytes: string; readonly taskId: string; readonly offerSeq: number };
+
+export type JournalHostAnswer = { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: WireError };
 
 export type JournalRequest =
   | { readonly id: number; readonly op: JournalOp; readonly args: readonly unknown[] }

@@ -23,11 +23,12 @@ import {
   encodeError,
   JOURNAL_MAX_BATCH_WRITES,
   JOURNAL_WRITE_OPS,
+  type JournalHostAnswer,
+  type JournalHostCall,
   type JournalOpenReply,
   type JournalRequest,
   type JournalResponse,
   type JournalWorkerData,
-  type WireError,
 } from './journal-worker-protocol.js';
 import type { JournalFaultStep } from './sqlite-journal.js';
 
@@ -35,20 +36,23 @@ const data = workerData as JournalWorkerData;
 const WRITES: ReadonlySet<string> = new Set(JOURNAL_WRITE_OPS);
 const SAVEPOINT = 'journal_op';
 
-/**
- * The test fault seam. The closure lives on the daemon's thread, so this
- * thread waits for its verdict: it throws exactly where the closure threw.
- */
-function fault(step: JournalFaultStep): void {
-  const { faults, faultPort } = data;
-  if (faults === undefined || faultPort === undefined) return;
-  // Ends this thread the way a crash or an out-of-memory kill would.
-  if (faults.exitWorkerAt === step) process.exit(70);
+/** A synchronous call to the journal's own thread; this thread waits for the answer. */
+function host(call: JournalHostCall): unknown {
   Atomics.store(data.signal, 1, 0);
-  faultPort.postMessage(step);
+  data.hostPort.postMessage(call);
   Atomics.wait(data.signal, 1, 0);
-  const verdict = receiveMessageOnPort(faultPort)?.message as WireError | null | undefined;
-  if (verdict) throw decodeError(verdict);
+  const answer = receiveMessageOnPort(data.hostPort)?.message as JournalHostAnswer | undefined;
+  if (answer === undefined) throw new Error('the journal thread did not answer a host call');
+  if (!answer.ok) throw decodeError(answer.error);
+  return answer.value;
+}
+
+/** The test fault seam: the closure lives on the journal's thread and throws exactly where it threw there. */
+function fault(step: JournalFaultStep): void {
+  if (data.faults === undefined) return;
+  // Ends this thread the way a crash or an out-of-memory kill would.
+  if (data.faults.exitWorkerAt === step) process.exit(70);
+  host({ kind: 'fault', step });
 }
 
 function handshake(reply: JournalOpenReply): void {
@@ -71,8 +75,8 @@ function serve(db: DatabaseSync): void {
   const store = new JournalStore(db, {
     dbPath: data.dbPath,
     quarantineDir: data.quarantineDir,
-    maxRecordBytes: data.maxRecordBytes,
     fault,
+    cancellationSeq: (bytes, taskId, offerSeq) => host({ kind: 'cancellationSeq', bytes, taskId, offerSeq }) as number,
   });
   const queue: JournalRequest[] = [];
   let scheduled = false;
