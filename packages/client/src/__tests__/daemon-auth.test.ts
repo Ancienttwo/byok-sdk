@@ -4,6 +4,8 @@ import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { execFileSync, spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { buildSync } from 'esbuild';
 import { createServer } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -714,25 +716,13 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
     const pairer = createDaemonWithAdapters(config, [new StubRuntimeAdapter()]);
     await pairer.pair('pairing-code');
 
-    // The journal's fault seam is internal, so the child loads the daemon from source.
+    // The journal's fault seam is internal, so the child runs one bundle of the daemon's source:
+    // a single file loads without transforming the module graph in a busy test run.
     const childSource = `
-      import { readFileSync } from 'node:fs';
-      import { createRequire, registerHooks } from 'node:module';
-      const { transformSync } = createRequire(import.meta.resolve('tsup'))('esbuild');
-      registerHooks({ load(url, context, nextLoad) {
-        // Source imports package.json without an import attribute, as the bundler allows.
-        if (url.startsWith('file:') && url.endsWith('.json')) {
-          const json = readFileSync(new URL(url), 'utf8');
-          const names = Object.keys(JSON.parse(json)).filter((key) => /^[A-Za-z_$][\\w$]*$/.test(key));
-          return { format: 'module', shortCircuit: true, source: 'const json = ' + json + '; export default json; export const { ' + names.join(', ') + ' } = json;' };
-        }
-        if (!url.endsWith('.ts')) return nextLoad(url, context);
-        return { format: 'module', shortCircuit: true, source: transformSync(readFileSync(new URL(url), 'utf8'), { loader: 'ts', format: 'esm', sourcefile: url }).code };
-      } });
-      globalThis.__BYOK_CLIENT_PACKAGE_VERSION__ = '0.0.0-test';
-      const { setJournalFaultsForTests } = await import(${JSON.stringify(new URL('../daemon/journal/sqlite-journal.ts', import.meta.url).href)});
-      const { createDaemonWithAdapters } = await import(${JSON.stringify(new URL('../daemon/create-daemon.ts', import.meta.url).href)});
-      const config = JSON.parse(Buffer.from(process.argv[1], 'base64url').toString('utf8'));
+      import { setJournalFaultsForTests } from '../daemon/journal/sqlite-journal';
+      import { createDaemonWithAdapters } from '../daemon/create-daemon';
+      void (async () => {
+      const config = JSON.parse(Buffer.from(process.argv[2], 'base64url').toString('utf8'));
       const adapter = {
         descriptor: Object.freeze({
           id: 'pi',
@@ -761,10 +751,21 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
         process.send?.({ kind: 'failed-with-retained-lease' });
         setInterval(() => undefined, 1_000);
       }
+      })();
     `;
+    // Inside this package's node_modules, so the bundle's external imports resolve as the package's own.
+    const cacheDir = fileURLToPath(new URL('../../node_modules/.cache/', import.meta.url));
+    await fs.mkdir(cacheDir, { recursive: true });
+    const bundleDir = await fs.mkdtemp(path.join(cacheDir, 'open-cleanup-child-'));
+    const bundle = path.join(bundleDir, 'child.mjs');
+    buildSync({
+      stdin: { contents: childSource, resolveDir: path.dirname(fileURLToPath(import.meta.url)), sourcefile: 'child.ts', loader: 'ts' },
+      bundle: true, platform: 'node', format: 'esm', target: 'node22', packages: 'external', outfile: bundle, logLevel: 'warning',
+      define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify('0.0.0-test'), __BYOK_JOURNAL_WORKER_SOURCE__: JSON.stringify('') },
+    });
     const child = spawn(
       process.execPath,
-      ['--import', new URL('./fixtures/ts-source-resolve-hook.mjs', import.meta.url).href, '--input-type=module', '-e', childSource, Buffer.from(JSON.stringify(config)).toString('base64url')],
+      [bundle, Buffer.from(JSON.stringify(config)).toString('base64url')],
       { stdio: ['ignore', 'ignore', 'pipe', 'ipc'] },
     );
     let childStderr = '';
@@ -786,6 +787,7 @@ describe('daemon-level auth integration (WS reconnect + revocation)', () => {
       if (child.exitCode === null && child.signalCode === null) {
         await new Promise<void>((resolve) => child.once('exit', () => resolve()));
       }
+      await fs.rm(bundleDir, { recursive: true, force: true });
     }
 
     const recovered = await acquireDaemonOwner(storeDir, 'doctor');
