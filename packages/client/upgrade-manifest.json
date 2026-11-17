@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "9109160ba7471249ede3e61e6aef570c8d575220dd528e690695f437227a0ae5"
+    "snapshotSha256": "97bb6e55bc156054b7791a7b5c0df2c6e0d21b060b9818f4a79340b60a60cd51"
   },
   "configFields": {
     "status": "tracked",
@@ -2163,6 +2163,11 @@
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#SqliteLocalTaskJournalOptions",
+      "change": "changed",
+      "entry": "journal-fault-seam-exit-worker"
     },
     {
       "item": "export:@byok-sdk/client#SweepReport",
