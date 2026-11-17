@@ -39,6 +39,7 @@ export {
   AgentHomeResolutionError,
   AgentHomeCollisionError,
   AgentHomeBusyError,
+  AgentHomeLeaseHeldError,
   AgentHomeLeaseCorruptError,
   AgentHomeReaderRunMissingError,
   AgentHomeLayout,
@@ -74,6 +75,7 @@ export type {
   AgentHomeExecutionBinding,
   AgentHomeExecutionStatus,
 } from './agent-home.js';
+export type { AgentHomeLeaseBlock } from './agent-home.js';
 export type { AgentHomeAccessMode } from './agent-home-readers.js';
 export {
   localStateRelocation,

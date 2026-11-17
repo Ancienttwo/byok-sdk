@@ -11,7 +11,7 @@
  */
 import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { DeviceCommandResult, DeviceCommandRunner } from '../daemon/device-credential-store';
+import type { DeviceCommandResult, DeviceCommandRunner } from '../util/system-command';
 import { resolveMachineId } from '../daemon/machine-id';
 
 const PRODUCT_ID = 'test-product';

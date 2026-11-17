@@ -46,6 +46,7 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   // Only then does this run's own ledger begin. win32 records none: its job
   // object already ended them.
   const reconciliation = await ownedProcessLedger.reconcile();
+  daemonState.ownedProcessesReconciledUnder = daemonState.daemonOwnerLease;
   if (reconciliation.recorded > 0) {
     console.warn(
       `[byok/client] previous daemon run left owned runtime process groups: recorded=${reconciliation.recorded} found=${reconciliation.found} terminated=${reconciliation.terminated} survived=${reconciliation.survived} liveWriter=${reconciliation.liveWriter}`,

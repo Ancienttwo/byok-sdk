@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_MEMORY_MAX_SNAPSHOT_BYTES, AGENT_MEMORY_MAX_SNAPSHOT_FILES, type AgentRef } from '@byok-sdk/protocol';
-import { AgentHomeBusyError, AgentHomeManager } from '../agent-home';
+import { AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeManager, stableAgentHomeOwnerId } from '../agent-home';
+import { currentAgentHomeLeaseWriter } from '../agent-home-writer';
+import { DeviceStore } from '../daemon/store';
 import { AgentMemoryService, AgentMemorySnapshotLimitError } from '../daemon/agent-memory';
 import { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper';
 import { createDaemonWithAdapters, type DaemonConfig } from '../daemon/create-daemon';
@@ -86,6 +88,22 @@ describe.skipIf(!supported)('native task-free raw memory export (synthetic homes
     try { await expect(daemon.exportAgentMemory!(AGENT)).rejects.toBeInstanceOf(AgentHomeBusyError); }
     finally { await writer.lease.release(); }
     await expect(daemon.exportAgentMemory!(AGENT)).resolves.toHaveProperty('snapshotDigest');
+  });
+
+  it('refuses a dead daemon\'s lease marker of its own store, and names the way out', async () => {
+    const { daemon, config } = await harness();
+    const ownerId = stableAgentHomeOwnerId(DeviceStore.resolveDir(config.productId, config.storeDir), config.productId);
+    const initial = await new AgentHomeManager({ hostStorageRoot: config.agentHome!.hostStorageRoot }).prepare(AGENT);
+    await initial.lease.release();
+    const marker = path.join(initial.resolution.canonicalHome, '.byok', 'agent-home.lease');
+    // Its writer is gone (no pid is this large), but only that daemon's next start may reclaim it.
+    await fs.writeFile(marker, JSON.stringify({ version: 1, ownerId, leaseId: 'dead-daemon', agentRef: AGENT,
+      canonicalHome: initial.resolution.canonicalHome, writer: { ...(await currentAgentHomeLeaseWriter())!, pid: 2147483646 } }));
+    const refused = await daemon.exportAgentMemory!(AGENT).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(AgentHomeLeaseHeldError);
+    expect(refused).toMatchObject({ blockedBy: 'owner-reclaim-required', markerPath: marker });
+    expect((refused as Error).message).toMatch(/start this store's daemon once/u);
+    await expect(fs.readFile(marker, 'utf8')).resolves.toContain('dead-daemon');
   });
 
   it('rejects a mismatched applied profile and returns observed metadata only when present', async () => {

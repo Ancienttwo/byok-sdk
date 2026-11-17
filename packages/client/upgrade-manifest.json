@@ -1748,6 +1748,26 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#sqlite-stores-decide-their-format-before-any-write-2286",
       "items": [
         "behavior:client-journal-refuses-host-objects"
+        ]
+      },
+      {
+      "id": "agent-home-lease-writer-liveness",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client Agent-home lease markers record their writer (pid, start time, machine digest, boot, Linux PID namespace). A marker of the same owner is reclaimed only when its writer is proved gone and only by a caller that holds the owner's daemon lease and has reconciled its owned processes (a started daemon, the doctor operator actions, or a Host passing AgentHomeLeaseManagerOptions.reclaimsResidue). A marker from an earlier release is never reclaimed automatically, and exportAgentMemory or publishReliableAgentEgress on an unstarted daemon refuses a dead daemon's marker. Both throw the new AgentHomeLeaseHeldError (an AgentHomeBusyError) whose blockedBy names the case; the offer decline stays agent_home_writer_busy and retryable.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-home-lease-markers-record-their-writer-2348",
+      "items": [
+        "behavior:agent-home-lease-writer-liveness"
+      ]
+    },
+    {
+      "id": "agent-home-lease-held-error",
+      "impact": "additive",
+      "summary": "@byok-sdk/client exports AgentHomeLeaseHeldError, an AgentHomeBusyError with blockedBy (AgentHomeLeaseBlock) and markerPath, thrown when an Agent-home lease marker of the same owner refuses an acquire. AgentHomeLeaseManagerOptions gains reclaimsResidue; AgentHomeLeaseManager gains private members. See agent-home-lease-writer-liveness for the behavior.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-home-lease-markers-record-their-writer-2348",
+      "items": [
+        "export:@byok-sdk/client#AgentHomeLeaseHeldError",
+        "export:@byok-sdk/client#AgentHomeLeaseBlock",
+        "export:@byok-sdk/client#AgentHomeLeaseManager"
       ]
     }
   ],

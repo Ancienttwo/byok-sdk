@@ -158,7 +158,8 @@ export async function archiveAgentTerminalMessages(
         throw new DeviceOperatorError('target-mismatch');
       }
       const manager = new AgentHomeManager({ hostStorageRoot: config.agentHome.hostStorageRoot,
-        leaseManager: new AgentHomeLeaseManager({ ownerId: stableAgentHomeOwnerId(storeDir, config.productId) }) });
+        // It holds the owner lease and reconciled above, so it reclaims residue as a started daemon does.
+        leaseManager: new AgentHomeLeaseManager({ ownerId: stableAgentHomeOwnerId(storeDir, config.productId), reclaimsResidue: () => true }) });
       const home = await manager.layout.canonicalHomePath(parsedRef.data);
       if (!await existingOutbox(home)) return notNeeded;
       const binding = await manager.acquire(parsedRef.data);

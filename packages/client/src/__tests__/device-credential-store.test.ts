@@ -28,10 +28,9 @@ import {
   DeviceCredentialStoreUnavailableError,
   OS_CREDENTIAL_ENTRY_MAX_BYTES,
   OsCredentialEntry,
-  type DeviceCommandRunner,
   type PairingAttempt,
-  runDeviceCommand,
 } from '../daemon/device-credential-store';
+import { runDeviceCommand, type DeviceCommandRunner } from '../util/system-command';
 import type { Win32CredentialBindings, Win32CredentialCallback, Win32CredentialWrite } from '../daemon/win32-credential-api';
 
 function deviceKey() {

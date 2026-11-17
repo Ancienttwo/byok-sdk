@@ -8,7 +8,8 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 import { createMemberKeyBundle, deriveMemberId, encodePairingVerificationSecret, generatePairingVerificationSecret } from '@byok-sdk/core/sealed-payload';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { DeviceCredentialStore, type DeviceCommandRunner } from '../daemon/device-credential-store';
+import { DeviceCredentialStore } from '../daemon/device-credential-store';
+import type { DeviceCommandRunner } from '../util/system-command';
 import {
   DeviceMemberCustodyError,
   DeviceMemberRecords,

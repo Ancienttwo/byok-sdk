@@ -58,7 +58,8 @@ const writeAll: AgentHomeProjectionApplyFunction = async ({ agentRef, writeHomeF
 function manager(root: string, apply: AgentHomeProjectionApplyFunction = writeAll) {
   return new AgentHomeManager({
     hostStorageRoot: root,
-    leaseManager: new AgentHomeLeaseManager({ ownerId: OWNER }),
+    // Each delivery stands for a restart of the owner: it reclaims a killed child's marker.
+    leaseManager: new AgentHomeLeaseManager({ ownerId: OWNER, reclaimsResidue: () => true }),
     projection: createAgentHomeProjectionConsumer(apply),
   });
 }
