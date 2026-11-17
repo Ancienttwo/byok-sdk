@@ -124,7 +124,8 @@ const SECURE_FILE_MODE = 0o600;
 
 /** Per-connection settings: every connection to the journal applies both. */
 const FOREIGN_KEYS_ON = 'PRAGMA foreign_keys = ON;';
-const SYNCHRONOUS_FULL = 'PRAGMA synchronous = FULL;';
+// #2336: on darwin fsync() stops at the drive's volatile cache; F_FULLFSYNC flushes it.
+const SYNCHRONOUS_FULL = process.platform === 'darwin' ? 'PRAGMA synchronous = FULL; PRAGMA fullfsync = ON;' : 'PRAGMA synchronous = FULL;';
 
 /**
  * Open (or create) the journal database at `path` with the durability
