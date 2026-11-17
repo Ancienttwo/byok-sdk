@@ -7,14 +7,13 @@ import {
   SealedDispatchUnavailableError,
   sameFrozenOffer,
   submitFrozen,
-  sealRoutineTemplate,
   type FrozenInput,
   type FrozenOffer,
   type FrozenSubmitPort,
   type SealedAgentExecutionInput,
   type RoutineRef,
 } from '@byok-sdk/server/execution-core';
-import { template as plainTemplate } from './test-support';
+import { sealRoutineTemplate, template as plainTemplate } from './test-support';
 
 const egressPolicy = {
   policyRevision: 'k4-v1', activity: { delivery: 'latest-value' as const, maxCoalesceMs: 250, maxEventBytes: 262144 },

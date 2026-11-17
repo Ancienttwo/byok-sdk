@@ -12,7 +12,6 @@ import {
   routineCommands,
   enqueue,
   routineTemplateBinding,
-  sealRoutineTemplate,
   type AgentRoutineDefinition,
   type LedgerState,
   type SealedAgentExecutionInput,
@@ -22,7 +21,7 @@ import {
   type FrozenOffer,
 } from '@byok-sdk/server/execution-core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
-import { openHost, template, type TestHost } from './test-support';
+import { openHost, sealRoutineTemplate, template, type TestHost } from './test-support';
 
 let host: TestHost | undefined;
 afterEach(async () => { vi.useRealTimers(); await host?.close(); host = undefined; });

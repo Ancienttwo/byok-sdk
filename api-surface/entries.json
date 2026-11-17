@@ -153,7 +153,6 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
-        "@byok-sdk/core/sealed-payload",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",
@@ -2388,7 +2387,6 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
-        "@byok-sdk/core/sealed-payload",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/protocol",
         "@byok-sdk/protocol/agent-memory",

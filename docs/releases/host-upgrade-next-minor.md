@@ -230,6 +230,18 @@ Sources: [#2297]. Manifest entries: `cloud-unused-exports-removed`, `cloud-host-
   types. The `task_agentless_retired` fence still rejects new offers for
   retired ids with `agent_task_already_exists`.
 
+### Removed server execution-core APIs
+
+Manifest entries: `server-seal-routine-template-removed`.
+
+`sealRoutineTemplate` and `SealRoutineTemplateInput` are removed from
+`@byok-sdk/server/execution-core`. No product code called them: sealing a
+routine template is the member's work, and only the SDK's own tests sealed one.
+Those tests now take the fixture from the repository's test support. A member
+that seals routine templates seals `['task-input']` inline under
+`routineTemplateBinding`, which is unchanged, as are the ciphertext, scope key,
+binding and hash rules. `RoutineRef` and `SealedTaskInput` stay exported.
+
 ### Undici in the Host dependency tree
 
 Keep a Host override to **8.12.4**. Pi's exact dependency can still install a

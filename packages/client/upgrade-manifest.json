@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "a0f0f6b0c46b1d451bacad3a4df6fdcfe31cfebc98a8a588591392a472afb691"
+    "snapshotSha256": "33229f3914969ae78b4f5b2dea0d9b4f5ea647efc59cca7e26661efb343f5b16"
   },
   "configFields": {
     "status": "tracked",
@@ -1615,6 +1615,16 @@
       ]
     },
     {
+      "id": "server-seal-routine-template-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core no longer exports sealRoutineTemplate or SealRoutineTemplateInput. No product code called them; tests take the member-side sealing fixture from test support. routineTemplateBinding, RoutineRef and SealedTaskInput are unchanged.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-server-execution-core-apis",
+      "items": [
+        "export:@byok-sdk/server/execution-core#sealRoutineTemplate",
+        "export:@byok-sdk/server/execution-core#SealRoutineTemplateInput"
+      ]
+    },
+    {
       "id": "wire-v7-client-negotiation-halt",
       "impact": "breaking",
       "summary": "@byok-sdk/client DAEMON_HALT_REASONS adds protocol_negotiation_failed, and DaemonLifecycle's halted phase carries httpStatus for it. The daemon halts instead of reconnecting when its lone conn.hello is refused as another wire major: a rejected outcome with protocol_version_unsupported (httpStatus 200) or a 4xx other than 401, 403, 409, 413 and 429. whenOpen() rejects with a DaemonHaltError whose cause is a ProtocolNegotiationError. Handle the new halt reason wherever halts are switched on.",
@@ -1821,7 +1831,7 @@
       "item": "example:host-execution-core",
       "change": "changed",
       "before": "K4 0.0.1 src-sha256=a62de5b4c4495e5e",
-      "after": "K4 0.0.1 src-sha256=17c9ab1fc3785ffe",
+      "after": "K4 0.0.1 src-sha256=de7bf7d4abde271f",
       "entry": "wire-v7-execution-target"
     },
     {
@@ -5413,6 +5423,16 @@
       "item": "export:@byok-sdk/server/execution-core#LedgerState",
       "change": "changed",
       "entry": "host-ledger-format-api"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#SealRoutineTemplateInput",
+      "change": "removed",
+      "entry": "server-seal-routine-template-removed"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#sealRoutineTemplate",
+      "change": "removed",
+      "entry": "server-seal-routine-template-removed"
     },
     {
       "item": "store:bot-collaboration-ledger",

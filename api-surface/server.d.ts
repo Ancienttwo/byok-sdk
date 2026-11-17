@@ -133,7 +133,6 @@
 //   RoutineDefinition -> dist/execution-core/model.d.ts
 //   RoutineRef -> dist/execution-core/sealed-routine.d.ts
 //   RoutineValidation -> dist/execution-core/routines.d.ts
-//   SealRoutineTemplateInput -> dist/execution-core/sealed-routine.d.ts
 //   SealedAgentExecutionInput -> dist/execution-core/model.d.ts
 //   SealedDispatchUnavailableError -> dist/execution-core/submit.d.ts
 //   SealedExecutionTemplate -> dist/execution-core/model.d.ts
@@ -169,7 +168,6 @@
 //   routineWakeKey -> dist/execution-core/routines.d.ts
 //   sameFrozenOffer -> dist/execution-core/submit.d.ts
 //   scheduleNext -> dist/execution-core/routines.d.ts
-//   sealRoutineTemplate -> dist/execution-core/sealed-routine.d.ts
 //   setLifecycle -> dist/execution-core/routines.d.ts
 //   settle -> dist/execution-core/transitions.d.ts
 //   stageVersion -> dist/execution-core/routines.d.ts
@@ -341,8 +339,8 @@ export type { LedgerState, IgnoredWakeAudit } from './model.js';
 export { enqueue, agentKey, fifoHeads, queuedExpiry, settle } from './transitions.js';
 export { FrozenOfferMismatchError, SealedDispatchUnavailableError, sameFrozenOffer, submitFrozen } from './submit.js';
 export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit.js';
-export { routineTemplateBinding, sealRoutineTemplate } from './sealed-routine.js';
-export type { RoutineRef, SealRoutineTemplateInput, SealedTaskInput } from './sealed-routine.js';
+export { routineTemplateBinding } from './sealed-routine.js';
+export type { RoutineRef, SealedTaskInput } from './sealed-routine.js';
 export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, routineWakeKey, versionSwitchDue, promoteOccurrence, concludeOccurrence, recordOccurrence, createRoutine, stageVersion, setLifecycle, switchVersion, nextWake, validateRoutineDefinition, occurrenceRun, routineCommands, applyPlan, auditCalendarError, scheduleNext } from './routines.js';
 export type { RoutineValidation, RoutineCommands, RoutineCommandOptions } from './routines.js';
 export type { MemoryRestoreInput, MemoryRestoreResult, MemoryRestoreFileResult } from './memory-restore.js';
@@ -862,26 +860,12 @@ import { type RoutineDefinition } from './model.js';
 export type NextOccurrence = (definition: Readonly<RoutineDefinition>, after: number) => number | null;
 export declare const nextIntervalOccurrence: NextOccurrence;
 // ==== @byok-sdk/server dist/execution-core/sealed-routine.d.ts ====
-import { type SealedBinding, type SealedCategory } from '@byok-sdk/core/sealed-payload';
-import { type AgentRef, type TaskSealing } from '@byok-sdk/protocol';
+import type { SealedBinding, SealedCategory } from '@byok-sdk/core/sealed-payload';
+import type { AgentRef } from '@byok-sdk/protocol';
 import type { SealedExecutionTemplate } from './model.js';
 export type RoutineRef = NonNullable<SealedExecutionTemplate['payload']['routineRef']>;
 export type SealedTaskInput = NonNullable<SealedExecutionTemplate['payload']['sealed']>;
 export declare function routineTemplateBinding(tenantId: string, routineRef: RoutineRef, agentRef: AgentRef, categories: readonly SealedCategory[]): SealedBinding;
-export interface SealRoutineTemplateInput {
-    readonly tenantId: string;
-    readonly scopeKey: Uint8Array;
-    readonly sealing: TaskSealing;
-    readonly chainHead: {
-        readonly seq: number;
-        readonly hash: string;
-    };
-    readonly sender: string;
-    readonly routineRef: RoutineRef;
-    readonly agentRef: AgentRef;
-    readonly instruction: string;
-}
-export declare function sealRoutineTemplate(input: SealRoutineTemplateInput): Promise<SealedTaskInput>;
 // ==== @byok-sdk/server dist/execution-core/submit.d.ts ====
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
 import type { ByokServer } from '../index.js';

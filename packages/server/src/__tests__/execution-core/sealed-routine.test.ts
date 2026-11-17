@@ -2,7 +2,8 @@ import { readFileSync } from 'node:fs';
 import { openSealedContent } from '@byok-sdk/core/sealed-payload';
 import type { AgentRef, TaskSealing } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
-import { routineTemplateBinding, sealRoutineTemplate, type RoutineRef, type SealedTaskInput } from '../../execution-core/sealed-routine';
+import { routineTemplateBinding, type RoutineRef, type SealedTaskInput } from '../../execution-core/sealed-routine';
+import { sealRoutineTemplate } from './sealed-routine.test-support';
 
 // The golden corpus seals its routine lines with this scope key, in tenant `tenant-golden` (cloud sealed-payload-wire test).
 const CORPUS_SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
