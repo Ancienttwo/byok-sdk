@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Fake ACP agent over stdio for offline adapter tests. It calls no model and
-// reads no login. Frame shapes follow OAR 552a4f9 tests/fixtures
+// reads no login. Frame shapes follow OAR bc1b2ac tests/fixtures
 // (fake-acp-agent.mjs, fake-acp-grok.mjs: Grok 1.0.25 wire, Apache-2.0).
 //
 // argv: `--version` prints a version; `agent stdio --help` prints help;
@@ -14,6 +14,8 @@
 // after its two chunks and before the prompt answer.
 // FAKE_ACP_INITIALIZE=exit ends the agent on `initialize`; =error answers it
 // with an internal error.
+// FAKE_ACP_MODEL_CATALOG=<id,...>: agy's `session/new` answer lists these models,
+// the native catalog OAR resolves a requested model against.
 // `inspect --json` logs an `inspect` fact and prints FAKE_ACP_INSPECT (default:
 // no servers, plugins or instruction files); FAKE_ACP_INSPECT=fail exits 1 instead.
 // The `orphan-tool` prompt starts a tool parent in this group whose own child
@@ -41,6 +43,7 @@ if (args[0] === 'inspect') {
   process.exit(0);
 }
 const agy = args[0] === 'acp';
+const modelCatalog = (models) => ({ id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: models[0], options: models.map(value => ({ value, name: value })) });
 if (args.at(-1) !== 'stdio' && !agy) { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
 
 let SESSION = process.env.FAKE_ACP_SESSION_ID ?? 'fake-grok-session';
@@ -372,7 +375,7 @@ function request(message) {
       }
       log({ kind: 'open', method: message.method, params: message.params });
       log({ kind: 'native-session', sessionId: SESSION });
-      result(message.id, { sessionId: SESSION });
+      result(message.id, { sessionId: SESSION, ...(agy && process.env.FAKE_ACP_MODEL_CATALOG ? { configOptions: [modelCatalog(process.env.FAKE_ACP_MODEL_CATALOG.split(','))] } : {}) });
       return;
     case 'session/resume':
       if (sessionStore && savedSession()?.id === message.params?.sessionId) SESSION = savedSession().id;

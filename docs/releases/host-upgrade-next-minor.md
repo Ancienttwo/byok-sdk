@@ -824,6 +824,45 @@ written. A later stdin failure reaches the `events` iteration as a retryable
 run failure. Resend the undelivered input on a new session. Daemon Hosts do
 not call this API and need no change.
 
+### OAR 0.112
+
+The vendored OAR moves from 0.110.0 to 0.112.0 ([#2361]). No Host action is
+required and there is no manifest entry. OAR's removed public exports,
+`usability()` and the changed installation snapshot type do not reach a Host,
+because the SDK re-exports no OAR API.
+
+#### agy model selectors agy's catalog does not resolve
+
+agy now refuses three kinds of selector before it sends any model request: an
+unknown model, a `<model>-<effort>` selector that more than one catalog model
+prefixes, and an effort outside that model's own menu. The start fails as it
+did before: `task.fail.retryable: false`, `failure.class: 'model_unavailable'`.
+Only the `reason` text changes; it now names the requested selector and agy's
+reported model and thought level. A `<model>-<effort>` selector whose model
+and effort agy lists separately now opens that model at that effort. OAR 0.110
+sent it as one model id.
+
+#### ACP `initialize` deadline
+
+Grok, agy and OpenCode now wait up to 60 seconds for `initialize`. Before,
+Grok waited 15 seconds and agy and OpenCode 30. The daemon's
+`startupTimeoutMs` (default 30 seconds) still ends a start that runs longer, so
+with the default only Grok changes: an `initialize` that hangs fails at the
+startup deadline instead of after 15 seconds, and it stays retryable. A Host
+that raises `startupTimeoutMs`, or embeds an ACP adapter without its own
+deadline, can see an `initialize` take up to 60 seconds.
+
+#### Unchanged
+
+- Codex now refuses a queued input after an interrupted turn. The SDK never
+  queues Codex input: follow-ups use `prompt`, and a steer after the turn ends
+  is refused as before.
+- A tool call that ends after its turn no longer marks an OAR session running.
+  The SDK does not use OAR's status fold, so turn-end detection is unchanged.
+- dsh now accepts `name`, `disallowedTools`, `systemPrompt` and
+  `appendSystemPrompt`. The SDK passes none of them and its dsh capabilities
+  are unchanged. [#2363] tracks whether a Host gets them.
+
 ### Blocked Turn projection ids (#2245)
 
 Sources: [#2263]. Manifest entries: `bot-blocked-projection-id`.
@@ -1134,6 +1173,8 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2316]: https://github.com/Ancienttwo/byok-sdk/pull/2316
 [#2318]: https://github.com/Ancienttwo/byok-sdk/issues/2318
 [#2349]: https://github.com/Ancienttwo/byok-sdk/issues/2349
+[#2361]: https://github.com/Ancienttwo/byok-sdk/issues/2361
+[#2363]: https://github.com/Ancienttwo/byok-sdk/issues/2363
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384
 [#2319]: https://github.com/Ancienttwo/byok-sdk/pull/2319
 [#2334]: https://github.com/Ancienttwo/byok-sdk/issues/2334

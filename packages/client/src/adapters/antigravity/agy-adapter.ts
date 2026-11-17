@@ -2,7 +2,7 @@ import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-l
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
+import { agyStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
@@ -230,7 +230,7 @@ export class AgyAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      throw runtimeStartFailure(session.halted ?? thrown, { classify: oarStartClassifier(acp), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'agy' });
+      throw runtimeStartFailure(session.halted ?? thrown, { classify: agyStartClassifier(acp), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'agy' });
     }
   }
 }

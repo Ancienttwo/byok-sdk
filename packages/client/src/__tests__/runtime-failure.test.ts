@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON,
   RuntimeExecutionFailure,
@@ -9,12 +9,13 @@ import {
 import type { RuntimeFailurePhase } from '../runtime-failure';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { oarStartClassifier, runtimeStartFailure } from '../adapters/runtime-start-failure';
-import { SessionNotFoundError } from '../../vendor/oar/552a4f9/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/552a4f9/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/552a4f9/contracts/errors';
-import { ModelConfirmationError } from '../../vendor/oar/552a4f9/contracts/model-confirmation-error';
-import { RuntimeFailureError } from '../../vendor/oar/552a4f9/contracts/runtime-failure-error';
+import { agyStartClassifier, oarStartClassifier, runtimeStartFailure } from '../adapters/runtime-start-failure';
+import { SessionNotFoundError } from '../../vendor/oar/bc1b2ac/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/bc1b2ac/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/bc1b2ac/contracts/errors';
+import { ModelConfirmationError } from '../../vendor/oar/bc1b2ac/contracts/model-confirmation-error';
+import { RuntimeFailureError } from '../../vendor/oar/bc1b2ac/contracts/runtime-failure-error';
+import { configureAntigravityModel } from '../../vendor/oar/bc1b2ac/runtimes/antigravity/model-selection';
 
 const teardownIsNotExecutionPhase = (): RuntimeFailurePhase => {
   // @ts-expect-error teardown evidence belongs to Sprint Row 3, not the execution failure union.
@@ -136,5 +137,30 @@ describe('runtime start failures', () => {
   });
   it('uses the runtime name for non-error throws and unknown for a live process', () => {
     expect(runtimeStartFailure(null, { classify, exitedOnItsOwn: false, runtime: 'grok' })).toMatchObject({ message: 'grok open failed', failure: { class: 'unknown' }, cause: null });
+  });
+
+  // OAR 0.111 refuses these agy selectors from the native catalog, before any model request; 0.110 sent them and agy refused them as model_unavailable (#2361).
+  const agy = agyStartClassifier({ SessionNotFoundError, SessionUnavailableError, UnsupportedOptionError, ModelConfirmationError, RuntimeFailureError });
+  const catalog = (models: string[]) => ({ configOptions: [{ id: 'model', currentValue: models[0], options: models.map(value => ({ value })) }] });
+  it.each([
+    ['an unknown model', ['gemini-3-pro', 'gemini-3-flash'], 'claude-opus', undefined],
+    ['an ambiguous model-effort selector', ['gemini-3', 'gemini-3-pro'], 'gemini-3-pro-high', undefined],
+    ['an effort outside the model menu', ['gemini-3-pro'], 'gemini-3-pro-xhigh',
+      { configOptions: [{ id: 'model', currentValue: 'gemini-3-pro' }, { id: 'thought_level', category: 'thought_level', currentValue: 'low', options: [{ value: 'low' }, { value: 'high' }] }] }],
+  ])('fails an agy start with %s as the model_unavailable it was before', async (_case, models, model, menu) => {
+    const setModel = vi.fn(async () => menu);
+    const setEffort = vi.fn(async () => ({}));
+    const refusal = await configureAntigravityModel({ options: { model } as never, response: catalog(models), setModel, setEffort }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(ModelConfirmationError);
+    expect(setModel).toHaveBeenCalledTimes(menu === undefined ? 0 : 1);
+    expect(setEffort).not.toHaveBeenCalled();
+    const before = runtimeStartFailure(new RuntimeFailureError('model_unavailable', 'refused'), { classify: agy, exitedOnItsOwn: false, runtime: 'agy' });
+    const after = runtimeStartFailure(refusal, { classify: agy, exitedOnItsOwn: false, runtime: 'agy' });
+    expect(after).toMatchObject({ phase: 'start', retry: before.retry, failure: before.failure });
+    expect(after.failure).toEqual({ class: 'model_unavailable' });
+  });
+  it('keeps an agy confirmation failure without a catalog as unknown', () => {
+    const result = runtimeStartFailure(new ModelConfirmationError('left at b', { requested: 'a', reported: 'b' }), { classify: agy, exitedOnItsOwn: false, runtime: 'agy' });
+    expect(result).toMatchObject({ retry: 'non-retryable', failure: { class: 'unknown' } });
   });
 });
