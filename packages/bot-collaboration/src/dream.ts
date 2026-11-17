@@ -80,7 +80,7 @@ export function dreamIntentIds(state: CollaborationState): string[] {
   return Object.keys(state.dreams?.open ?? {}).map(key => hash(occurrenceIntentKey(key)));
 }
 /**
- * The K4 `yieldUnclaimed` predicate (#2334): `user_input` when the intent is an open dream and its Bot has a queued Turn that
+ * The K4 `yieldUnclaimed` predicate (#2334): `user_input` when the intent is an open dream and its Bot has a queued or frozen (`processing`) Turn that
  * is not autonomous. K4 then cancels the dream only if no device has claimed it; a claimed dream is never interrupted.
  */
 export function dreamYield(state: CollaborationState, intentKey: string): 'user_input' | undefined {

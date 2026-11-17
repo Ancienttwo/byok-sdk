@@ -4615,13 +4615,17 @@ device, and a running dream is not interrupted, so that input waits at most
   and freezes while its Bot has a submitted dream waits `maxDurationMs` of that
   dream's offer plus the usual 5 minutes. Without a submitted dream it waits
   the usual 5 minutes. The wait is frozen with the Turn's intent.
-- While a submitted dream has no observed claim and its Bot has a queued Turn
-  that is not autonomous, the Host asks the SDK to cancel the dream task only if
+- While a submitted dream has no observed claim and its Bot has a Turn that is
+  not autonomous and is queued or frozen (`processing`), the Host asks the SDK to cancel the dream task only if
   no device has claimed it, in one step against the claim. If the cancel wins,
   the dream's intent concludes `cancelled` and `snapshot().dreams` records
   outcome `cancelled` with reason `user_input`, read from the cancellation that
   the stored attempt carries. If the claim wins, the dream runs on and is not
-  interrupted.
+  interrupted. A Turn whose intent has concluded still reads `processing` until
+  the next sync records it, so in that window an unclaimed dream can yield to
+  input that has already finished. Its only cost is one dream deferred to the
+  next occurrence, counted in `userInputCancels`; claimed work is never
+  affected.
 - A yielded dream's occurrence is concluded. The next routine occurrence (the
   next 03:00) dreams over the same window, because `since` is not advanced.
 - `userInputCancels` on the Bot's dream record counts the dreams in a row that
