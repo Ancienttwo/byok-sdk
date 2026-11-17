@@ -370,6 +370,22 @@ describe('host task cancellation', () => {
     ]);
   });
 
+  it('does not coalesce a conditional cancel with an unconditional one of a task whose id extends it', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    const first = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId: 'yield', payload: offerPayload('first') });
+    const second = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
+      taskId: 'yield\u0000ifUnclaimed', payload: offerPayload('second'),
+    });
+    const [conditional, unconditional] = await Promise.all([
+      harness.cloud.cancelTask(TENANT_A, first.taskId, 'idle', { ifUnclaimed: true }),
+      harness.cloud.cancelTask(TENANT_A, second.taskId, 'forced'),
+    ]);
+    expect(conditional).toMatchObject({ taskId: first.taskId, status: 'cancelled', cancellation: { reason: 'idle' } });
+    expect(unconditional).toMatchObject({ taskId: second.taskId, status: 'cancelled', cancellation: { reason: 'forced' } });
+  });
+
   it('fails closed for unknown and cross-tenant task ids without changing the real task', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
