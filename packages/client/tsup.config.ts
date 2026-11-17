@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'tsup';
+import { journalWorkerSource } from './scripts/journal-worker-source';
 import { workspaceExternals } from './scripts/workspace-externals';
 
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
@@ -72,5 +73,8 @@ export default defineConfig({
     /^typebox(?:\/|$)/,
     'undici',
   ],
-  define: { __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version) },
+  define: {
+    __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
+    __BYOK_JOURNAL_WORKER_SOURCE__: JSON.stringify(journalWorkerSource()),
+  },
 });

@@ -122,6 +122,10 @@ export function isSqliteAvailable(): boolean {
 /** POSIX mode the journal database and its WAL/SHM siblings are restricted to — owner read/write only. Same convention as `daemon/store.ts`'s device credential file. */
 const SECURE_FILE_MODE = 0o600;
 
+/** Per-connection settings: every connection to the journal applies both. */
+const FOREIGN_KEYS_ON = 'PRAGMA foreign_keys = ON;';
+const SYNCHRONOUS_FULL = 'PRAGMA synchronous = FULL;';
+
 /**
  * Open (or create) the journal database at `path` with the durability
  * settings architecture §12.7.2 pins, in the order they have to be applied:
@@ -171,9 +175,9 @@ export function openJournalDatabase(
     faults?.onStep?.('after-auto-vacuum');
     db.exec('PRAGMA journal_mode = WAL;');
     faults?.onStep?.('after-wal');
-    db.exec('PRAGMA foreign_keys = ON;');
+    db.exec(FOREIGN_KEYS_ON);
     faults?.onStep?.('after-foreign-keys');
-    db.exec('PRAGMA synchronous = FULL;');
+    db.exec(SYNCHRONOUS_FULL);
     faults?.onStep?.('after-synchronous');
     // Forces a real header read: a file that is not a SQLite database (or whose
     // header is damaged) fails HERE, at open, where the quarantine path can act
@@ -190,6 +194,31 @@ export function openJournalDatabase(
         'local task journal initialization failed and its SQLite handle could not be closed',
         [err, closeError],
       );
+    }
+    throw err;
+  }
+}
+
+/**
+ * A second connection to a journal that {@link openJournalDatabase} has
+ * already prepared: the journal worker's (#2332). `auto_vacuum` and
+ * `journal_mode` live in the file and are already set; applying `auto_vacuum`
+ * again to a non-empty file rewrites its meta page, a commit this open does
+ * not need. `foreign_keys` and `synchronous` are per connection, so they are
+ * applied here with the same values.
+ */
+export function openJournalConnection(path: string, busyTimeoutMs: number): DatabaseSync {
+  const { DatabaseSync } = loadSqliteModule();
+  const db = new DatabaseSync(sqliteOpenPath(path), { timeout: busyTimeoutMs });
+  try {
+    db.exec(FOREIGN_KEYS_ON);
+    db.exec(SYNCHRONOUS_FULL);
+    return db;
+  } catch (err) {
+    try {
+      db.close();
+    } catch (closeError) {
+      throw new JournalHandleCleanupError('local task journal worker connection failed and its SQLite handle could not be closed', [err, closeError]);
     }
     throw err;
   }

@@ -11,41 +11,49 @@
  *    the mailbox cursor move past that seq, so anything weaker here turns
  *    every power cut into a task-loss window.
  * 2. **Envelope bytes, task record, and idempotency receipt land together or
- *    not at all.** One `BEGIN IMMEDIATE` transaction covers all three
- *    (§12.7.3: "v1 bytes 与本机 task record 已在同一个本机 transaction durable
- *    append"). This is the repo's first multi-statement SQLite transaction, so
- *    the idiom is established here: `BEGIN IMMEDIATE` (take the write lock up
- *    front — `DEFERRED` would upgrade mid-transaction and can deadlock two
- *    writers), work, `COMMIT`, and a `ROLLBACK` on any throw.
+ *    not at all.** One transaction covers all three (§12.7.3: "v1 bytes 与本机
+ *    task record 已在同一个本机 transaction durable append").
  * 3. **A redelivered envelope is a no-op.** The wire is at-least-once and a
  *    crash between commit and ack GUARANTEES a redelivery, so idempotency is
  *    the normal path, not the exceptional one: the receipt row keyed by
  *    envelope id is looked up inside the same transaction that would write it.
  *
- * Writes are serialized through a single-writer promise queue. `node:sqlite`
- * is fully synchronous, so this is not about mutual exclusion within one
- * operation — it is about ordering across them, and about giving the fault
- * seam and the busy timeout one place to live. The timeout is BOUNDED
- * (`busyTimeoutMs`) so lock contention surfaces as an error the envelope path
- * can report rather than an unbounded stall.
+ * The constructor checks the format, opens the file, builds the schema and
+ * quarantines what it cannot open, on the calling thread. Every operation
+ * after that runs on one worker thread that owns the only writable handle
+ * (`journal-worker.ts`, #2332): `node:sqlite` has no async API, and a
+ * `synchronous=FULL` commit on the event loop stalls the whole Host for as
+ * long as the fsync takes. Operations reach the worker in call order, so it is
+ * still a single-writer FIFO. Writes that queue up while a commit runs share
+ * the next commit (group commit); an operation resolves only after the commit
+ * that contains it has returned.
+ *
+ * Times the journal records (`committedAt`, disposition and recovery times,
+ * `measuredAt`) are read from the injected clock when the operation is called,
+ * on the caller's thread: they are admission times. One FIFO worker commits in
+ * admission order, so they stay monotonic with commit order.
+ *
+ * If the worker thread ends without closing the database, every operation in
+ * flight or queued rejects with {@link JournalUnavailableError} and none of
+ * them counts as durable; every later operation rejects the same way, and
+ * `close()` reports {@link JournalHandleCleanupError}, so the daemon keeps its
+ * store lease. The worker is never restarted behind the caller's back.
  */
-import { existsSync, mkdirSync, readdirSync, renameSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
+import { MessageChannel, receiveMessageOnPort, Worker, type MessagePort } from 'node:worker_threads';
 import { SEALED_INLINE_MAX_PADDED_LENGTH, isSealedPayload } from '@byok-sdk/protocol';
 import {
   assertTaskCancellationBinding,
-  journalHash,
-  type JournalIdentity,
   JournalClosedError,
   JournalCorruptError,
   JournalRecordTooLargeError,
   JournalUnavailableError,
-  JournalUnknownTaskError,
-  JournalIntegrityError,
   type AdmissionRecord,
   type CompactOptions,
   type CompactResult,
+  type JournalIdentity,
   type JournalReceipt,
   type LocalStorageUsage,
   type LocalTaskJournal,
@@ -57,6 +65,20 @@ import {
   type WithheldOfferRecord,
   type WithheldOfferTask,
 } from './journal.js';
+import { byteLength } from './journal-store.js';
+import {
+  decodeError,
+  encodeError,
+  type JournalHostAnswer,
+  type JournalHostCall,
+  type JournalOp,
+  type JournalOpArgs,
+  type JournalOpenReply,
+  type JournalOpResult,
+  type JournalRequest,
+  type JournalResponse,
+  type JournalWorkerData,
+} from './journal-worker-protocol.js';
 import { readSqliteFileUnchanged, SQLITE_USER_OBJECT, SqliteReadOnlyOpenError } from '@byok-sdk/core/sqlite-node';
 import {
   isSqliteAvailable,
@@ -68,6 +90,16 @@ import {
 } from '../../util/sqlite-support.js';
 
 export { JournalHandleCleanupError };
+
+/** `journal-worker.ts` bundled into one CommonJS string; defined by tsup and vitest (`scripts/journal-worker-source.ts`). */
+declare const __BYOK_JOURNAL_WORKER_SOURCE__: string;
+
+/**
+ * Bound on the worker's open handshake: thread start, evaluating the bundled
+ * worker and one SQLite open, under IO load. Past it the constructor gives up
+ * and reports the worker's handle as not proven closed.
+ */
+const WORKER_OPEN_TIMEOUT_MS = 30_000;
 
 /** The single database file, per §12.7.2's "建议单库 `<storeDir>/daemon.db`". */
 export const JOURNAL_DB_FILENAME = 'daemon.db';
@@ -145,11 +177,23 @@ export type JournalFaultStep =
   | 'replace:after-commit'
   | 'recovery:before-commit'
   | 'cleanup:before-commit'
-  | 'prune:before-commit';
+  | 'prune:before-commit'
+  /** The worker's `COMMIT` of a batch that carries writes; a throw here fails that `COMMIT`. */
+  | 'batch:commit';
 
 export interface JournalFaultSeam {
-  /** Throw to simulate a crash or IO error at exactly this step. Return normally to proceed. */
+  /**
+   * Throw to simulate a crash or IO error at exactly this step. Return normally
+   * to proceed. Called on the journal's own thread; the worker waits for it.
+   */
   onStep?(step: JournalFaultStep): void;
+  /**
+   * End the journal worker thread at this step, as a crash or an out-of-memory
+   * kill would. `'open'` ends it before it answers the constructor's handshake.
+   */
+  exitWorkerAt?: JournalFaultStep | 'open';
+  /** Test-only bound on the constructor's wait for that handshake. Default 30 s. */
+  workerOpenTimeoutMs?: number;
 }
 
 export interface SqliteLocalTaskJournalOptions {
@@ -169,7 +213,7 @@ export interface SqliteLocalTaskJournalOptions {
   readonly faults?: JournalFaultSeam;
   /** Test seam for post-open/pre-return SQLite initialization failures. Never supplied in production. */
   readonly openFaults?: JournalOpenFaultSeam;
-  /** Injected clock, so receipt/quarantine timestamps are deterministic under test. Defaults to the real one. */
+  /** Injected clock, read when an operation is called (its admission time) and for quarantine stamps, so they are deterministic under test. Defaults to the real one. */
   readonly clock?: () => Date;
 }
 
@@ -330,55 +374,6 @@ function assertCurrentJournalFormat(db: DatabaseSync): 'empty' | 'current' {
 /** Task-keyed envelope lookups (stored cancellation, prune) read through this instead of scanning the table. */
 const ENVELOPE_TASK_INDEX = 'CREATE INDEX IF NOT EXISTS journal_envelope_task ON journal_envelope (task_id, seq)';
 
-/**
- * A received offer with no terminal or recovery marker whose task also has a
- * stored `task.cancel` sequenced after it: the restart rule settles it as
- * cancelled, so it ages out like a confirmed terminal. A cancellation at or
- * below the offer sequence preceded the offer and never qualifies. Malformed
- * bytes do not match; the prune transaction verifies the qualifying cancellation's hash.
- */
-const CANCELLED_RECEIVED_TASK = `t.local_state = 'received' AND t.recovery_marker IS NULL
-  AND NOT EXISTS (SELECT 1 FROM journal_terminal term WHERE term.task_id = t.task_id)`;
-const LATER_CANCELLATION = `FROM journal_envelope c WHERE c.task_id = t.task_id AND c.seq > t.seq AND c.withheld_bytes IS NULL
-  AND CASE WHEN json_valid(c.bytes) THEN json_extract(c.bytes, '$.type') END = 'task.cancel'`;
-
-/** `local_state` for a task whose admission declined it — terminal for local purposes, and NOT something recovery should re-offer. */
-const DECLINED_STATE = 'declined';
-/** `local_state` a task starts in: its offer envelope is durable, nothing has been decided yet. */
-const RECEIVED_STATE = 'received';
-
-function byteLength(value: string): number {
-  return Buffer.byteLength(value, 'utf8');
-}
-
-/** A missing file or directory (absent WAL/SHM, no quarantine yet) measures 0; any other error must surface, not read as a small healthy journal. */
-function absentAsZero(error: unknown): number {
-  if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
-  throw error;
-}
-
-function fileBytes(path: string): number {
-  try {
-    return statSync(path).size;
-  } catch (error) {
-    return absentAsZero(error);
-  }
-}
-
-function directoryBytes(dir: string): number {
-  let total = 0;
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = readdirSync(dir, { withFileTypes: true, encoding: 'utf8' });
-  } catch (error) {
-    return absentAsZero(error);
-  }
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    total += entry.isDirectory() ? directoryBytes(full) : fileBytes(full);
-  }
-  return total;
-}
 
 /**
  * Move a database that could not be opened aside, with its WAL/SHM siblings
@@ -418,20 +413,102 @@ function quarantineDatabase(storeDir: string, dbPath: string, reason: string, no
   return join(dir, base);
 }
 
+interface StartedWorker {
+  readonly worker: Worker;
+  readonly port: MessagePort;
+}
+
+/**
+ * Starts the worker and waits, synchronously, for it to open its own
+ * connection. This thread's handle `db` is still open meanwhile, so the WAL
+ * and its permissions survive the handoff; it is closed only once the worker
+ * holds the database. On any failure both handles are accounted for: a
+ * handle that cannot be proven closed is a {@link JournalHandleCleanupError}.
+ */
+function startJournalWorker(
+  db: DatabaseSync,
+  settings: Pick<JournalWorkerData, 'dbPath' | 'quarantineDir' | 'busyTimeoutMs' | 'faults'>,
+  faults: JournalFaultSeam | undefined,
+): StartedWorker {
+  const channel = new MessageChannel();
+  const hostChannel = new MessageChannel();
+  const signal = new Int32Array(new SharedArrayBuffer(8));
+  const openTimeoutMs = faults?.workerOpenTimeoutMs ?? WORKER_OPEN_TIMEOUT_MS;
+  let worker: Worker | undefined;
+  let reply: JournalOpenReply | undefined;
+  let startError: unknown;
+  try {
+    const workerData: JournalWorkerData = { ...settings, signal, port: channel.port2, hostPort: hostChannel.port2 };
+    worker = new Worker(__BYOK_JOURNAL_WORKER_SOURCE__, { eval: true, workerData, transferList: [channel.port2, hostChannel.port2] });
+    // A worker that fails after a failed handshake is already accounted for below.
+    worker.on('error', () => {});
+    if (Atomics.wait(signal, 0, 0, openTimeoutMs) !== 'timed-out') {
+      reply = receiveMessageOnPort(channel.port1)?.message as JournalOpenReply | undefined;
+    }
+  } catch (error) {
+    startError = error;
+  }
+  if (reply?.ok === true && worker !== undefined) {
+    try {
+      db.close();
+    } catch (closeError) {
+      void worker.terminate();
+      throw new JournalHandleCleanupError('the journal worker opened the database, but this thread could not close its own SQLite handle', [closeError]);
+    }
+    answerHostCalls(hostChannel.port1, signal, faults);
+    return { worker, port: channel.port1 };
+  }
+  void worker?.terminate();
+  const cause = reply?.ok === false
+    ? decodeError(reply.error)
+    : startError ?? new Error(`the journal worker did not open the database within ${openTimeoutMs} ms`);
+  // No worker means no second handle; a worker that never answered may hold one.
+  const workerHandleClosed = worker === undefined || (reply?.ok === false && reply.closed);
+  let closeError: unknown;
+  try {
+    db.close();
+  } catch (error) {
+    closeError = error;
+  }
+  if (!workerHandleClosed || closeError !== undefined) {
+    throw new JournalHandleCleanupError(
+      'the journal worker could not open the database, and its SQLite handles could not be proven closed',
+      closeError === undefined ? [cause] : [cause, closeError],
+    );
+  }
+  throw new JournalUnavailableError(`the journal worker could not open ${settings.dbPath}: ${cause instanceof Error ? cause.message : String(cause)}`, { cause });
+}
+
+/** Answers the worker's synchronous calls (see `JournalHostCall`); the worker waits on `signal[1]`. */
+function answerHostCalls(port: MessagePort, signal: Int32Array, faults: JournalFaultSeam | undefined): void {
+  port.on('message', (call: JournalHostCall) => {
+    let answer: JournalHostAnswer;
+    try {
+      if (call.kind === 'fault') {
+        faults?.onStep?.(call.step as JournalFaultStep);
+        answer = { ok: true, value: null };
+      } else {
+        answer = { ok: true, value: assertTaskCancellationBinding(call.bytes, call.taskId, call.offerSeq) };
+      }
+    } catch (error) {
+      answer = { ok: false, error: encodeError(error) };
+    }
+    port.postMessage(answer);
+    Atomics.store(signal, 1, 1);
+    Atomics.notify(signal, 1);
+  });
+  port.unref();
+}
+
 export class SqliteLocalTaskJournal implements LocalTaskJournal {
-  readonly #db: DatabaseSync;
-  readonly #dbPath: string;
-  readonly #storeDir: string;
   readonly #maxRecordBytes: number;
-  readonly #faults: JournalFaultSeam | undefined;
   readonly #clock: () => Date;
-  /**
-   * The single-writer queue's tail. Every operation chains onto it, so two
-   * concurrent callers never interleave two transactions — and the `#closed`
-   * check happens in queue order, not at call time, so an operation queued
-   * before `close()` still runs.
-   */
-  #tail: Promise<unknown> = Promise.resolve();
+  readonly #worker: Worker;
+  readonly #port: MessagePort;
+  /** Operations sent to the worker and not yet answered, by request id. */
+  readonly #requests = new Map<number, { resolve(value: unknown): void; reject(error: unknown): void }>();
+  #nextId = 1;
+  /** Set by `close()`: every later operation rejects with {@link JournalClosedError}. */
   #closed = false;
   /**
    * The one in-flight or settled `close()`, so closing twice is a no-op that
@@ -441,6 +518,10 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
    * in it tolerates a second call, so this one has to as well.
    */
   #closing: Promise<void> | undefined;
+  /** Set when the worker ended without closing the database; every later operation rejects with it. */
+  #failure: JournalUnavailableError | undefined;
+  #workerError: unknown;
+  readonly #exited: Promise<void>;
 
   constructor(options: SqliteLocalTaskJournalOptions) {
     // Checked BEFORE anything touches the filesystem: §12.7.2's
@@ -450,10 +531,8 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       throw new JournalUnavailableError(`node:sqlite could not be loaded on Node ${process.versions.node}`);
     }
 
-    this.#storeDir = options.storeDir;
-    this.#dbPath = join(options.storeDir, JOURNAL_DB_FILENAME);
+    const dbPath = join(options.storeDir, JOURNAL_DB_FILENAME);
     this.#maxRecordBytes = options.maxRecordBytes ?? DEFAULT_MAX_RECORD_BYTES;
-    this.#faults = options.faults;
     this.#clock = options.clock ?? (() => new Date());
 
     mkdirSync(options.storeDir, { recursive: true, mode: 0o700 });
@@ -464,11 +543,11 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     // stays where it is. A main file SQLite cannot read is left to the writable
     // open below, which also sees the WAL and quarantines only what it cannot open.
     try {
-      readSqliteFileUnchanged(this.#dbPath, assertCurrentJournalFormat);
+      readSqliteFileUnchanged(dbPath, assertCurrentJournalFormat);
     } catch (err) {
       if (err instanceof JournalUnavailableError) throw err;
       if (err instanceof SqliteReadOnlyOpenError) {
-        throw new JournalUnavailableError(`the journal at ${this.#dbPath} could not be opened read-only to check its format; it was left unchanged`, { cause: err });
+        throw new JournalUnavailableError(`the journal at ${dbPath} could not be opened read-only to check its format; it was left unchanged`, { cause: err });
       }
     }
     // Open + schema are one unit for quarantine purposes: a file whose header
@@ -478,7 +557,7 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     let created = false;
     try {
       db = openJournalDatabase(
-        this.#dbPath,
+        dbPath,
         options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
         options.openFaults,
       );
@@ -509,8 +588,8 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       }
       if (err instanceof JournalUnavailableError) throw err;
       const reason = err instanceof Error ? err.message : String(err);
-      const quarantinePath = quarantineDatabase(options.storeDir, this.#dbPath, reason, this.#clock());
-      throw new JournalCorruptError(this.#dbPath, quarantinePath, reason, { cause: err });
+      const quarantinePath = quarantineDatabase(options.storeDir, dbPath, reason, this.#clock());
+      throw new JournalCorruptError(dbPath, quarantinePath, reason, { cause: err });
     }
     // A deployed store gains the index on its first open; a failure is a
     // refusal to start, not corruption, so the file stays in place.
@@ -524,9 +603,8 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       db.close();
       throw new JournalUnavailableError(`journal task index could not be built: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
     }
-    this.#db = db;
     try {
-      secureJournalFilePermissions(this.#dbPath);
+      secureJournalFilePermissions(dbPath);
     } catch (err) {
       // Permission hardening failure is not database corruption and must not
       // move evidence. It is still a construction failure, with the handle
@@ -541,62 +619,84 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
       }
       throw err;
     }
-  }
-
-  // ---------------------------------------------------------------------
-  // Single-writer queue + the repo's first multi-statement transaction idiom
-  // ---------------------------------------------------------------------
-
-  #enqueue<T>(operation: string, work: () => T): Promise<T> {
-    const run = this.#tail.then(() => {
-      if (this.#closed) throw new JournalClosedError(operation);
-      return work();
+    const { worker, port } = startJournalWorker(db, {
+      dbPath,
+      quarantineDir: join(options.storeDir, JOURNAL_QUARANTINE_DIRNAME),
+      busyTimeoutMs: options.busyTimeoutMs ?? DEFAULT_JOURNAL_BUSY_TIMEOUT_MS,
+      ...(options.faults === undefined ? {} : { faults: options.faults.exitWorkerAt === undefined ? {} : { exitWorkerAt: options.faults.exitWorkerAt } }),
+    }, options.faults);
+    this.#worker = worker;
+    this.#port = port;
+    let exited!: () => void;
+    this.#exited = new Promise((resolve) => { exited = resolve; });
+    port.on('message', (response: JournalResponse) => this.#settle(response));
+    worker.on('error', (error) => { this.#workerError ??= error; });
+    worker.on('exit', (code) => {
+      this.#onExit(code);
+      exited();
     });
-    // The queue must survive a failed operation: chain the NEXT caller onto a
-    // settled promise regardless of this one's outcome, or one rejected write
-    // would poison every write after it.
-    this.#tail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    return run;
+    this.#idle();
   }
 
-  /**
-   * `BEGIN IMMEDIATE` … `COMMIT`, with `ROLLBACK` on any throw.
-   *
-   * `IMMEDIATE` rather than the default `DEFERRED`: the write lock is taken up
-   * front, so a transaction can never discover halfway through that it cannot
-   * upgrade. The `ROLLBACK` is itself wrapped — if the failure was the commit
-   * or the connection, SQLite may already have rolled back and a second
-   * `ROLLBACK` throws "cannot rollback - no transaction is active"; swallowing
-   * that is correct, and swallowing it must not mask the ORIGINAL error, which
-   * is what is rethrown.
-   */
-  #transaction<T>(work: () => T): T {
-    this.#db.exec('BEGIN IMMEDIATE');
-    let result: T;
-    try {
-      result = work();
-      this.#db.exec('COMMIT');
-    } catch (err) {
+  // ---------------------------------------------------------------------
+  // The worker channel
+  // ---------------------------------------------------------------------
+
+  #call<K extends JournalOp>(op: K, ...args: JournalOpArgs<K>): Promise<JournalOpResult<K>> {
+    if (this.#closed) return Promise.reject(new JournalClosedError(op));
+    return this.#send({ id: this.#nextId++, op, args }) as Promise<JournalOpResult<K>>;
+  }
+
+  #send(request: JournalRequest): Promise<unknown> {
+    if (this.#failure) return Promise.reject(this.#failure);
+    return new Promise((resolve, reject) => {
+      this.#requests.set(request.id, { resolve, reject });
+      if (this.#requests.size === 1) this.#busy();
       try {
-        this.#db.exec('ROLLBACK');
-      } catch {
-        // Already rolled back by SQLite itself — see above.
+        this.#port.postMessage(request);
+      } catch (error) {
+        this.#requests.delete(request.id);
+        if (this.#requests.size === 0) this.#idle();
+        reject(error);
       }
-      throw err;
+    });
+  }
+
+  #settle(response: JournalResponse): void {
+    const request = this.#requests.get(response.id);
+    if (request === undefined) return;
+    this.#requests.delete(response.id);
+    if (this.#requests.size === 0) this.#idle();
+    if (response.ok) request.resolve(response.value);
+    else request.reject(decodeError(response.error));
+  }
+
+  /** An idle journal does not keep the process alive, as a plain SQLite handle never did; an answer still owed does. */
+  #idle(): void {
+    if (this.#closing !== undefined) return;
+    this.#worker.unref();
+    this.#port.unref();
+  }
+
+  #busy(): void {
+    this.#worker.ref();
+    this.#port.ref();
+  }
+
+  #onExit(code: number): void {
+    // Answers the worker sent before it ended still count.
+    for (let queued = receiveMessageOnPort(this.#port); queued !== undefined; queued = receiveMessageOnPort(this.#port)) {
+      this.#settle(queued.message as JournalResponse);
     }
-    return result;
-  }
-
-  #fault(step: JournalFaultStep): void {
-    this.#faults?.onStep?.(step);
-  }
-
-  #requireTask(taskId: string, operation: string): void {
-    const row = this.#db.prepare('SELECT task_id FROM journal_task WHERE task_id = ?').get(taskId);
-    if (!row) throw new JournalUnknownTaskError(taskId, operation);
+    if (this.#requests.size === 0 && this.#closed) return;
+    const failure = new JournalUnavailableError(
+      `the journal worker thread exited (code ${code}) without closing the database; no operation still in flight counts as durable`,
+      { cause: this.#workerError },
+    );
+    if (!this.#closed) this.#failure = failure;
+    const owed = [...this.#requests.values()];
+    this.#requests.clear();
+    for (const request of owed) request.reject(failure);
   }
 
   // ---------------------------------------------------------------------
@@ -605,15 +705,8 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
 
   /**
    * The ack-critical path. Envelope bytes, the task record it opens, and the
-   * idempotency receipt all land in ONE transaction, or none of them do.
-   *
-   * The receipt lookup happens INSIDE that transaction rather than as a cheap
-   * pre-check outside it: `BEGIN IMMEDIATE` already holds the write lock by
-   * then, so "is this a redelivery?" and "write it" cannot be separated by
-   * another writer. The duplicate answer is served from the stored receipt,
-   * so a redelivery returns the ORIGINAL commit time and hash — the caller
-   * learns the bytes are durable and that this call changed nothing, which is
-   * exactly what the cursor needed.
+   * idempotency receipt land in one transaction, or none of them do; a
+   * redelivery is answered from the stored receipt (see `journal-store.ts`).
    */
   appendEnvelope(record: ReceivedEnvelopeRecord): Promise<JournalReceipt> {
     // A string cannot change after the check; a Buffer from untyped callers could.
@@ -645,633 +738,111 @@ export class SqliteLocalTaskJournal implements LocalTaskJournal {
     if (boundTaskId !== entry.taskId) {
       return Promise.reject(new TypeError('ReceivedEnvelopeRecord.taskId does not match the task_id in its bytes'));
     }
-
-    return this.#append('appendEnvelope', entry, entry.bytes, null, (committedAt) => {
-      if (!entry.opensTask || entry.taskId === undefined) return;
-      const task = this.#db.prepare('SELECT * FROM journal_task WHERE task_id = ?').get(entry.taskId) as Record<string, unknown> | undefined;
-      if (task) {
-        this.#assertIdentity(task, entry.identity);
-        const original = this.#db.prepare('SELECT bytes, withheld_bytes FROM journal_envelope WHERE envelope_id = ?')
-          .get(task.envelope_id as string) as { bytes: string; withheld_bytes: number | null };
-        // Transport IDs/seq can change on duplicate delivery, but the execution
-        // contract (including exact AgentRef) must never change under task_id.
-        // A withheld offer has no contract to compare: its task is declined.
-        if (original.withheld_bytes === null) {
-          const oldOffer = JSON.parse(original.bytes) as { type?: unknown; payload?: unknown };
-          const newOffer = JSON.parse(entry.bytes) as { type?: unknown; payload?: unknown };
-          if (oldOffer.type !== newOffer.type || JSON.stringify(oldOffer.payload) !== JSON.stringify(newOffer.payload)) {
-            throw new Error('journal task identity reused with a different execution contract');
-          }
-        }
-      }
-      // `OR IGNORE`: a second, different envelope re-opening the same task
-      // id (a re-offer after the cloud lost track) must not clobber the
-      // admission/claim state the first one already accumulated. The
-      // envelope row above still records that the second envelope arrived.
-      this.#insertTask(entry, entry.taskId, RECEIVED_STATE, committedAt);
-    });
+    return this.#call('appendEnvelope', entry, this.#clock().toISOString());
   }
 
   /** #826: the decline commits with the row, because the cursor moves once this commits. */
   appendWithheldOffer(record: WithheldOfferRecord): Promise<JournalReceipt> {
-    const { decline, taskId } = record;
-    return this.#append('appendWithheldOffer', record, '', record.byteLength, (committedAt) => {
-      const task = this.#db.prepare(`SELECT t.tenant_id, t.product_id, t.device_id, e.withheld_bytes FROM journal_task t
-        JOIN journal_envelope e ON e.envelope_id = t.envelope_id WHERE t.task_id = ?`).get(taskId) as Record<string, unknown> | undefined;
-      if (task) {
-        this.#assertIdentity(task, record.identity);
-        // A task opened by a stored offer may be running: a decline must not
-        // become its terminal. A task opened by a withheld offer is already declined.
-        if (task.withheld_bytes === null) throw new Error('journal task identity reused with a different execution contract');
-        return;
-      }
-      this.#assertTerminalBytes(decline.bytes, decline.payloadHash);
-      this.#insertTask(record, taskId, 'terminal:declined', committedAt);
-      this.#insertTerminal({ taskId, terminalType: 'declined', bytes: decline.bytes, payloadHash: decline.payloadHash,
-        truthState: 'pending', attempt: 1, recordedAt: committedAt });
-    });
-  }
-
-  /** One transaction: envelope row, task step and receipt; a redelivery is answered from its receipt. */
-  #append(
-    operation: string,
-    record: Omit<ReceivedEnvelopeRecord, 'bytes' | 'opensTask'>,
-    bytes: string,
-    withheldBytes: number | null,
-    openTask: (committedAt: string) => void,
-  ): Promise<JournalReceipt> {
-    return this.#enqueue(operation, () => {
-      this.#fault('append:before-begin');
-      const committed = this.#transaction((): JournalReceipt => {
-        const existing = this.#db
-          .prepare('SELECT receipt FROM journal_idempotency WHERE scope = ? AND key = ?')
-          .get('envelope', record.envelopeId) as { receipt: string } | undefined;
-        if (existing) {
-          const prior = JSON.parse(existing.receipt) as Omit<JournalReceipt, 'created'>;
-          if (prior.bytesHash !== record.bytesHash) throw new Error('journal envelope identity collision');
-          const priorIdentity = this.#db.prepare('SELECT tenant_id, product_id, device_id FROM journal_envelope WHERE envelope_id = ?').get(record.envelopeId) as Record<string, unknown>;
-          this.#assertIdentity(priorIdentity, record.identity);
-          return { ...prior, created: false };
-        }
-
-        const committedAt = this.#clock().toISOString();
-        this.#db
-          .prepare(
-            `INSERT INTO journal_envelope
-               (envelope_id, tenant_id, product_id, device_id, seq, task_id, bytes, bytes_hash, withheld_bytes, received_at, committed_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            record.envelopeId,
-            record.identity.tenantId,
-            record.identity.productId,
-            record.identity.deviceId,
-            record.seq,
-            record.taskId ?? null,
-            bytes,
-            record.bytesHash,
-            withheldBytes,
-            record.receivedAt,
-            committedAt,
-          );
-        this.#fault('append:after-envelope');
-        openTask(committedAt);
-        this.#fault('append:after-task');
-
-        const receipt: Omit<JournalReceipt, 'created'> = {
-          envelopeId: record.envelopeId,
-          seq: record.seq,
-          bytesHash: record.bytesHash,
-          committedAt,
-        };
-        this.#db
-          .prepare('INSERT INTO journal_idempotency (scope, key, task_id, receipt, created_at) VALUES (?, ?, ?, ?, ?)')
-          .run('envelope', record.envelopeId, record.taskId ?? null, JSON.stringify(receipt), committedAt);
-        this.#fault('append:after-receipt');
-        this.#fault('append:before-commit');
-
-        return { ...receipt, created: true };
-      });
-      this.#fault('append:after-commit');
-      return committed;
-    });
-  }
-
-  #insertTask(record: { identity: JournalIdentity; envelopeId: string; seq: number }, taskId: string, localState: string, at: string): void {
-    this.#db
-      .prepare(
-        `INSERT OR IGNORE INTO journal_task
-           (task_id, envelope_id, tenant_id, product_id, device_id, seq, local_state, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(taskId, record.envelopeId, record.identity.tenantId, record.identity.productId, record.identity.deviceId,
-        record.seq, localState, at, at);
+    return this.#call('appendWithheldOffer', record, this.#clock().toISOString(), this.#terminalBound(record.decline.bytes));
   }
 
   recordAdmission(record: AdmissionRecord): Promise<void> {
-    return this.#enqueue('recordAdmission', () => {
-      this.#transaction(() => {
-        this.#requireTask(record.taskId, 'recordAdmission');
-        this.#db
-          .prepare(
-            `UPDATE journal_task
-                SET admitted = ?, admission_reason = ?, admission_retryable = ?, claimed_runtime = ?,
-                    effective_policy_hash = ?, workspace_ref = ?, local_state = ?, updated_at = ?
-              WHERE task_id = ?`,
-          )
-          .run(
-            record.admitted ? 1 : 0,
-            record.reason ?? null,
-            record.retryable === undefined ? null : record.retryable ? 1 : 0,
-            record.claimedRuntime ?? null,
-            record.effectivePolicyHash ?? null,
-            record.workspaceRef ?? null,
-            record.admitted ? 'admitted' : DECLINED_STATE,
-            record.decidedAt,
-            record.taskId,
-          );
-        this.#fault('admission:before-commit');
-      });
-    });
+    return this.#call('recordAdmission', record);
   }
 
-  /**
-   * Idempotent by transition id. `INSERT OR IGNORE` decides it: when the row
-   * already exists nothing is inserted AND the task's `local_state` is left
-   * alone, so replaying an old transition cannot drag a task's state
-   * backwards — which is precisely what recovery replaying a stored sequence
-   * would otherwise do.
-   */
   recordTransition(record: LocalTransitionRecord): Promise<void> {
     if (record.detail !== undefined && byteLength(record.detail) > MAX_TRANSITION_DETAIL_BYTES) {
       return Promise.reject(
         new JournalRecordTooLargeError('detail', byteLength(record.detail), MAX_TRANSITION_DETAIL_BYTES),
       );
     }
-    return this.#enqueue('recordTransition', () => {
-      this.#transaction(() => {
-        this.#requireTask(record.taskId, 'recordTransition');
-        const inserted = this.#db
-          .prepare(
-            `INSERT OR IGNORE INTO journal_transition (transition_id, task_id, from_state, to_state, occurred_at, detail)
-             VALUES (?, ?, ?, ?, ?, ?)`,
-          )
-          .run(
-            record.transitionId,
-            record.taskId,
-            record.from ?? null,
-            record.to,
-            record.occurredAt,
-            record.detail ?? null,
-          );
-        if (inserted.changes > 0) {
-          this.#db
-            .prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ? AND NOT EXISTS (SELECT 1 FROM journal_terminal WHERE journal_terminal.task_id = journal_task.task_id)')
-            .run(record.to, record.occurredAt, record.taskId);
-        }
-        this.#fault('transition:before-commit');
-      });
-    });
+    return this.#call('recordTransition', record);
   }
 
-  /**
-   * First terminal wins, matching the cloud's own receipt rule (§12.6.4:
-   * 不覆写第一份事实). A repeat carrying the SAME payload hash is a delivery
-   * retry and updates only the retry bookkeeping (`truth_state`, `attempt`,
-   * `last_error`); a repeat carrying a DIFFERENT hash is a second, distinct
-   * terminal for a task that already has one, and is recorded nowhere — the
-   * first fact stands.
-   */
+  /** The record bound for terminal bytes: a sealed terminal may reach the inbound floor (#654). The worker enforces it. */
+  #terminalBound(bytes: string): number {
+    const max = this.#maxRecordBytes;
+    if (typeof bytes !== 'string' || byteLength(bytes) <= max) return max;
+    return isSealedEnvelope(bytes) ? Math.max(max, ENVELOPE_RECORD_FLOOR_BYTES) : max;
+  }
+
   recordTerminal(record: LocalTerminalRecord): Promise<void> {
-    return this.#enqueue('recordTerminal', () => {
-      this.#assertTerminalBytes(record.bytes, record.payloadHash);
-      this.#transaction(() => {
-        this.#requireTask(record.taskId, 'recordTerminal');
-        const existing = this.#db.prepare('SELECT * FROM journal_terminal WHERE task_id = ?')
-          .get(record.taskId) as { payload_hash: string; bytes: string; truth_state: string } | undefined;
-        if (!existing) {
-          this.#insertTerminal(record);
-          this.#db.prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ?')
-            .run(`terminal:${record.terminalType}`, record.recordedAt, record.taskId);
-        } else if (existing.payload_hash === record.payloadHash && existing.bytes === record.bytes && existing.truth_state !== 'confirmed') {
-          this.#db.prepare('UPDATE journal_terminal SET truth_state = ?, attempt = ?, last_error = ?, updated_at = ? WHERE task_id = ?')
-            .run(record.truthState, record.attempt, record.lastError ?? null, record.recordedAt, record.taskId);
-        }
-        if (record.recovery !== undefined && !existing) {
-          this.#db.prepare('UPDATE journal_task SET recovery_marker = ?, updated_at = ? WHERE task_id = ?')
-            .run(JSON.stringify({ ...record.recovery, occurredAt: record.recovery.occurredAt ?? record.recordedAt }), record.recordedAt, record.taskId);
-          this.#fault('recovery:before-commit');
-        }
-        this.#fault('terminal:before-commit');
-      });
-      if (record.recovery !== undefined) this.#fault('recovery:after-commit');
-      this.#fault('terminal:after-commit');
-    });
-  }
-
-  #assertTerminalBytes(bytes: string, payloadHash: string): void {
-    if (typeof bytes !== 'string' || journalHash(bytes) !== payloadHash) {
-      throw new Error('terminal bytes do not match their canonical hash');
-    }
-    const length = byteLength(bytes);
-    if (length <= this.#maxRecordBytes) return;
-    const bound = isSealedEnvelope(bytes) ? Math.max(this.#maxRecordBytes, ENVELOPE_RECORD_FLOOR_BYTES) : this.#maxRecordBytes;
-    if (length > bound) throw new JournalRecordTooLargeError('terminal bytes', length, bound);
-  }
-
-  #insertTerminal(record: LocalTerminalRecord): void {
-    this.#db.prepare(`INSERT INTO journal_terminal
-      (task_id, terminal_type, bytes, payload_hash, truth_state, attempt, last_error, recorded_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(record.taskId, record.terminalType, record.bytes, record.payloadHash, record.truthState,
-        record.attempt, record.lastError ?? null, record.recordedAt, record.recordedAt);
-  }
-
-  #assertIdentity(row: Record<string, unknown>, identity: JournalIdentity): void {
-    if (row.tenant_id !== identity.tenantId || row.product_id !== identity.productId || row.device_id !== identity.deviceId) {
-      throw new Error('journal enrollment identity mismatch; refusing cross-enrollment execution or terminal replay');
-    }
-  }
-
-  #taskFields(row: Record<string, unknown>): Omit<RecoverableTask, 'envelopeBytes'> {
-    return {
-      taskId: row.task_id as string, envelopeId: row.envelope_id as string, seq: Number(row.seq),
-      identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
-      localState: row.recovery_marker !== null && !String(row.local_state).startsWith('terminal:') ? 'interrupted' : row.local_state as string,
-      ...(row.claimed_runtime == null ? {} : { claimedRuntime: row.claimed_runtime as string }),
-      ...(row.workspace_ref == null ? {} : { workspaceRef: row.workspace_ref as string }),
-      updatedAt: row.updated_at as string,
-    };
-  }
-
-  /** Recovery never reads a withheld offer: its task always has a terminal. */
-  #storedTaskRow(row: Record<string, unknown>): RecoverableTask {
-    if (typeof row.envelope_bytes !== 'string' || journalHash(row.envelope_bytes) !== row.envelope_hash) {
-      throw new Error('durable offer bytes/hash mismatch');
-    }
-    return { ...this.#taskFields(row), envelopeBytes: row.envelope_bytes };
-  }
-
-  #taskRow(row: Record<string, unknown>): RecoverableTask | WithheldOfferTask {
-    if (row.withheld_bytes === null) return this.#storedTaskRow(row);
-    if (row.envelope_bytes !== '') throw new Error('withheld offer row carries bytes');
-    return { ...this.#taskFields(row), withheldEnvelopeBytes: Number(row.withheld_bytes) };
+    return this.#call('recordTerminal', record, this.#terminalBound(record.bytes));
   }
 
   readTask(taskId: string, identity: JournalIdentity): Promise<RecoverableTask | WithheldOfferTask | undefined> {
-    return this.#enqueue('readTask', () => {
-      const row = this.#db.prepare(`SELECT t.*, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash, e.withheld_bytes FROM journal_task t
-        JOIN journal_envelope e ON e.envelope_id = t.envelope_id WHERE t.task_id = ?`).get(taskId) as Record<string, unknown> | undefined;
-      if (!row) return undefined;
-      this.#assertIdentity(row, identity);
-      return this.#taskRow(row);
-    });
+    return this.#call('readTask', taskId, identity);
   }
 
   readTaskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
-    return this.#enqueue('readTaskCancellation', () => {
-      return this.#taskCancellation(taskId, identity, afterSeq);
-    });
-  }
-
-  /** Every non-withheld stored envelope of the task, in sequence order, after its enrollment and hash are verified. */
-  #taskEnvelopeRows(taskId: string, identity: JournalIdentity): Record<string, unknown>[] {
-    const rows = this.#db.prepare(`SELECT tenant_id, product_id, device_id, seq, bytes, bytes_hash, committed_at, withheld_bytes FROM journal_envelope
-      WHERE task_id = ?
-      ORDER BY seq, envelope_id`).all(taskId) as Record<string, unknown>[];
-    // Validate every candidate before its content can exclude it, including
-    // candidates after the first valid cancellation.
-    integrity(taskId, () => {
-      for (const row of rows) {
-        this.#assertIdentity(row, identity);
-        if (row.withheld_bytes !== null) {
-          if (row.bytes !== '') throw new Error('withheld offer row carries bytes');
-          continue;
-        }
-        if (typeof row.bytes !== 'string' || journalHash(row.bytes) !== row.bytes_hash) {
-          throw new Error('durable cancellation candidate bytes/hash mismatch');
-        }
-      }
-    });
-    return rows.filter((row) => row.withheld_bytes === null);
-  }
-
-  #taskCancellation(taskId: string, identity: JournalIdentity, afterSeq: number) {
-    const row = this.#taskEnvelopeRows(taskId, identity).find((candidate) => (candidate.seq as number) > afterSeq
-      && JSON.parse(candidate.bytes as string).type === 'task.cancel');
-    if (!row) return undefined;
-    return {
-      identity: { tenantId: row.tenant_id as string, productId: row.product_id as string, deviceId: row.device_id as string },
-      bytes: row.bytes as string, bytesHash: row.bytes_hash as string,
-    };
+    return this.#call('readTaskCancellation', taskId, identity, afterSeq);
   }
 
   listRecoveryTasks(identity: JournalIdentity): Promise<RecoverableTask[]> {
-    return this.#enqueue('listRecoveryTasks', () => {
-      const rows = this.#db.prepare(`SELECT t.*, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash FROM journal_task t
-        JOIN journal_envelope e ON e.envelope_id = t.envelope_id
-        LEFT JOIN journal_terminal term ON term.task_id = t.task_id
-        WHERE term.task_id IS NULL ORDER BY t.seq, t.task_id`).all() as Record<string, unknown>[];
-      return rows.map((row) => { this.#assertIdentity(row, identity); return this.#storedTaskRow(row); });
-    });
+    return this.#call('listRecoveryTasks', identity);
   }
 
   listPendingTerminals(identity: JournalIdentity): Promise<LocalTerminalRecord[]> {
-    return this.#enqueue('listPendingTerminals', () => {
-      const rows = this.#db.prepare(`SELECT term.*, t.tenant_id, t.product_id, t.device_id FROM journal_terminal term
-        JOIN journal_task t ON t.task_id = term.task_id WHERE term.truth_state <> 'confirmed'
-        ORDER BY term.recorded_at, term.task_id`).all() as Record<string, unknown>[];
-      return rows.map((row) => {
-        this.#assertIdentity(row, identity);
-        if (typeof row.bytes !== 'string' || journalHash(row.bytes) !== row.payload_hash) throw new Error('durable terminal bytes/hash mismatch');
-        return { taskId: row.task_id as string, terminalType: row.terminal_type as LocalTerminalRecord['terminalType'],
-          bytes: row.bytes, payloadHash: row.payload_hash as string, truthState: row.truth_state as LocalTerminalRecord['truthState'],
-          attempt: Number(row.attempt), recordedAt: row.recorded_at as string,
-          ...(row.last_error === null ? {} : { lastError: row.last_error as string }) };
-      });
-    });
+    return this.#call('listPendingTerminals', identity);
   }
 
   confirmTerminal(taskId: string, payloadHash: string): Promise<void> {
-    return this.#terminalDisposition(taskId, payloadHash, 'confirmed');
+    return this.#call('terminalDisposition', taskId, payloadHash, 'confirmed', undefined, this.#clock().toISOString());
   }
 
   rejectTerminal(taskId: string, payloadHash: string, reason: string): Promise<void> {
-    return this.#terminalDisposition(taskId, payloadHash, 'failed', reason);
+    return this.#call('terminalDisposition', taskId, payloadHash, 'failed', reason, this.#clock().toISOString());
   }
 
   replaceRefusedTerminal(taskId: string, refusedPayloadHash: string, record: LocalTerminalRecord): Promise<void> {
-    return this.#enqueue('replaceRefusedTerminal', () => {
-      this.#assertTerminalBytes(record.bytes, record.payloadHash);
-      this.#transaction(() => {
-        const row = this.#db.prepare('SELECT payload_hash, truth_state, terminal_type, last_error FROM journal_terminal WHERE task_id = ?')
-          .get(taskId) as { payload_hash: string; truth_state: string; terminal_type: string; last_error: string | null } | undefined;
-        if (row?.payload_hash === record.payloadHash) return;
-        if (row?.payload_hash !== refusedPayloadHash || row.truth_state !== 'failed') {
-          throw new Error('terminal replacement does not match a refused durable terminal');
-        }
-        this.#db.prepare(`UPDATE journal_terminal SET terminal_type = ?, bytes = ?, payload_hash = ?, truth_state = 'pending',
-          attempt = ?, last_error = NULL, updated_at = ? WHERE task_id = ? AND payload_hash = ? AND truth_state = 'failed'`)
-          .run(record.terminalType, record.bytes, record.payloadHash, record.attempt, record.recordedAt, taskId, refusedPayloadHash);
-        this.#db.prepare('UPDATE journal_task SET local_state = ?, updated_at = ? WHERE task_id = ?')
-          .run(`terminal:${record.terminalType}`, record.recordedAt, taskId);
-        this.#db.prepare(`INSERT OR IGNORE INTO journal_transition (transition_id, task_id, from_state, to_state, occurred_at, detail)
-             VALUES (?, ?, ?, ?, ?, ?)`)
-          .run(`terminal-replaced:${taskId}:${refusedPayloadHash}`, taskId, `terminal:${row.terminal_type}`, `terminal:${record.terminalType}`,
-            record.recordedAt, `refused ${refusedPayloadHash}: ${row.last_error ?? ''}`);
-        this.#fault('replace:before-commit');
-      });
-      this.#fault('replace:after-commit');
-    });
+    return this.#call('replaceRefusedTerminal', taskId, refusedPayloadHash, record, this.#terminalBound(record.bytes));
   }
 
-  #terminalDisposition(taskId: string, payloadHash: string, state: 'confirmed' | 'failed', reason?: string): Promise<void> {
-    return this.#enqueue('terminalDisposition', () => {
-      this.#transaction(() => {
-        const row = this.#db.prepare('SELECT payload_hash FROM journal_terminal WHERE task_id = ?').get(taskId) as { payload_hash: string } | undefined;
-        if (!row || row.payload_hash !== payloadHash) {
-          // A late disposition of bytes that a replacement took over changes nothing.
-          if (this.#db.prepare('SELECT 1 FROM journal_transition WHERE transition_id = ?').get(`terminal-replaced:${taskId}:${payloadHash}`)) return;
-          throw new Error('terminal acknowledgement does not match durable terminal');
-        }
-        this.#db.prepare(`UPDATE journal_terminal SET truth_state = ?, last_error = ?, updated_at = ?
-          WHERE task_id = ? AND truth_state <> 'confirmed'`).run(state, reason ?? null, this.#clock().toISOString(), taskId);
-        this.#fault('confirm:before-commit');
-      });
-      this.#fault('confirm:after-commit');
-    });
-  }
-
-  /**
-   * What this daemon was in the middle of: a task whose offer envelope is
-   * durable, that has no terminal, that was not declined, and that recovery
-   * has not already closed out.
-   *
-   * A task with a terminal is NOT here even when the cloud has not confirmed
-   * it — that is terminal REDELIVERY (§12.7.3's "terminal 生成后、truth 写入前"
-   * row), a different track with different evidence, and folding the two
-   * together would have recovery re-admit a task that already finished.
-   */
   listRecoverable(): Promise<RecoverableTask[]> {
-    return this.#enqueue('listRecoverable', () => {
-      const rows = this.#db
-        .prepare(
-          `SELECT t.task_id, t.envelope_id, t.seq, t.tenant_id, t.product_id, t.device_id,
-                  t.local_state, t.claimed_runtime, t.workspace_ref, t.updated_at, e.bytes AS envelope_bytes, e.bytes_hash AS envelope_hash
-             FROM journal_task t
-             JOIN journal_envelope e ON e.envelope_id = t.envelope_id
-             LEFT JOIN journal_terminal term ON term.task_id = t.task_id
-            WHERE t.recovery_marker IS NULL
-              AND term.task_id IS NULL
-              AND t.local_state <> ?
-            ORDER BY t.created_at ASC, t.task_id ASC`,
-        )
-        .all(DECLINED_STATE) as Array<Record<string, unknown>>;
-      return rows.map((row): RecoverableTask => {
-        const claimedRuntime = row.claimed_runtime as string | null;
-        const workspaceRef = row.workspace_ref as string | null;
-        return {
-          taskId: row.task_id as string,
-          envelopeId: row.envelope_id as string,
-          seq: Number(row.seq),
-          identity: {
-            tenantId: row.tenant_id as string,
-            productId: row.product_id as string,
-            deviceId: row.device_id as string,
-          },
-          localState: row.local_state as string,
-          ...(claimedRuntime === null ? {} : { claimedRuntime }),
-          ...(workspaceRef === null ? {} : { workspaceRef }),
-          updatedAt: row.updated_at as string,
-          envelopeBytes: row.envelope_bytes as string,
-        };
-      });
-    });
+    return this.#call('listRecoverable');
   }
 
-  /**
-   * Writes the recovery marker. Idempotent and additive: a task already
-   * marked is left exactly as it was (the FIRST recovery decision is the real
-   * one), and no path here deletes anything — §12.7.2.1 puts recovery-marked
-   * records on the never-auto-delete list, and this is what puts them there.
-   */
   markRecovered(taskId: string, outcome: RecoveryOutcome): Promise<void> {
-    return this.#enqueue('markRecovered', () => {
-      this.#transaction(() => {
-        this.#requireTask(taskId, 'markRecovered');
-        const occurredAt = outcome.occurredAt ?? this.#clock().toISOString();
-        this.#db
-          .prepare('UPDATE journal_task SET recovery_marker = ?, updated_at = ? WHERE task_id = ? AND recovery_marker IS NULL')
-          .run(
-            JSON.stringify({ disposition: outcome.disposition, reason: outcome.reason ?? null, occurredAt }),
-            occurredAt,
-            taskId,
-          );
-        this.#fault('recovery:before-commit');
-      });
-    });
+    return this.#call('markRecovered', taskId, outcome, this.#clock().toISOString());
   }
 
   /** Physical journal/quarantine footprint and confirmed-row inventory. */
   measureUsage(): Promise<LocalStorageUsage> {
-    return this.#enqueue('measureUsage', () => {
-      const rows = this.#db.prepare(`SELECT COUNT(*) AS entries FROM journal_envelope`).get() as { entries: number };
-      const confirmed = this.#db.prepare(`SELECT COUNT(*) AS entries, MIN(term.updated_at) AS oldest
-        FROM journal_terminal term JOIN journal_task task ON task.task_id = term.task_id
-        WHERE term.truth_state = 'confirmed' AND task.recovery_marker IS NULL`).get() as { entries: number; oldest: string | null };
-      const cancelled = this.#db.prepare(`SELECT COUNT(*) AS entries, MIN(at) AS oldest FROM (SELECT (SELECT MIN(c.committed_at) ${LATER_CANCELLATION}) AS at
-        FROM journal_task t WHERE ${CANCELLED_RECEIVED_TASK}) WHERE at IS NOT NULL`).get() as { entries: number; oldest: string | null };
-      const oldest = [confirmed.oldest, cancelled.oldest].filter((at): at is string => at !== null).sort()[0];
-      return {
-        measuredAt: this.#clock().toISOString(),
-        journalBytes: fileBytes(this.#dbPath) + fileBytes(`${this.#dbPath}-wal`) + fileBytes(`${this.#dbPath}-shm`),
-        quarantineBytes: directoryBytes(join(this.#storeDir, JOURNAL_QUARANTINE_DIRNAME)),
-        journalEntries: Number(rows.entries), confirmedEntries: Number(confirmed.entries) + Number(cancelled.entries),
-        ...(oldest === undefined ? {} : { oldestConfirmedAt: oldest }),
-      };
-    });
+    return this.#call('measureUsage', this.#clock().toISOString());
   }
 
   listPrunableConfirmedTasks(cutoff: Date, limit: number, after?: string): Promise<string[]> {
     if (!Number.isFinite(cutoff.getTime()) || !Number.isSafeInteger(limit) || limit <= 0) return Promise.reject(new TypeError('invalid journal retention bounds'));
-    return this.#enqueue('listPrunableConfirmedTasks', () => {
-      // A cancelled received offer ages from its cancellation's commit. Once it
-      // is pruned, a conforming mailbox never redelivers the offer: it replays
-      // only above the acknowledged cursor and suppresses a cancelled task's
-      // offer through a task record it never deletes (spec, #1990).
-      const candidates = `SELECT task.task_id, term.updated_at AS at FROM journal_task task
-            JOIN journal_terminal term ON term.task_id = task.task_id
-           WHERE term.truth_state = 'confirmed' AND task.recovery_marker IS NULL
-          UNION ALL
-          SELECT t.task_id, (SELECT MIN(c.committed_at) ${LATER_CANCELLATION}) AS at FROM journal_task t WHERE ${CANCELLED_RECEIVED_TASK}`;
-      const rows = (after === undefined
-        ? this.#db.prepare(`SELECT task_id FROM (${candidates}) WHERE at < ? ORDER BY at, task_id LIMIT ?`).all(cutoff.toISOString(), limit)
-        : this.#db.prepare(`WITH candidate AS (${candidates})
-            SELECT task_id FROM candidate WHERE at < ? AND (at, task_id) > (SELECT at, task_id FROM candidate WHERE task_id = ?)
-            ORDER BY at, task_id LIMIT ?`).all(cutoff.toISOString(), after, limit)) as { task_id: string }[];
-      return rows.map(row => row.task_id);
-    });
+    return this.#call('listPrunableConfirmedTasks', cutoff.toISOString(), limit, after);
   }
 
   pruneConfirmedJournalTask(taskId: string, cutoff: Date): Promise<boolean> {
     if (!Number.isFinite(cutoff.getTime())) return Promise.reject(new TypeError('invalid journal retention bounds'));
-    const before = cutoff.toISOString();
-    return this.#enqueue('pruneConfirmedJournalTask', () =>
-      this.#transaction(() => {
-        const eligible = this.#db
-          .prepare(
-            `SELECT t.tenant_id, t.product_id, t.device_id
-               FROM journal_task t
-               JOIN journal_terminal term ON term.task_id = t.task_id
-              WHERE t.task_id = ?
-                AND t.recovery_marker IS NULL
-                AND term.truth_state = 'confirmed'
-                AND term.updated_at < ?`,
-          )
-          .get(taskId, before) as Record<string, unknown> | undefined;
-        if (eligible) this.#prunableTaskCancellations(taskId, eligible);
-        else if (!this.#cancelledReceivedTask(taskId, before)) return false;
-
-        // Child-first, so `foreign_keys=ON` is satisfied at every statement
-        // rather than deferred to the commit — a deletion order the database
-        // itself rejects is a deletion order that was never reviewed.
-        this.#db.prepare('DELETE FROM journal_transition WHERE task_id = ?').run(taskId);
-        this.#db.prepare('DELETE FROM journal_terminal WHERE task_id = ?').run(taskId);
-        this.#db.prepare('DELETE FROM journal_task WHERE task_id = ?').run(taskId);
-        this.#db.prepare('DELETE FROM journal_idempotency WHERE task_id = ?').run(taskId);
-        this.#db.prepare('DELETE FROM journal_envelope WHERE task_id = ?').run(taskId);
-        this.#fault('prune:before-commit');
-        return true;
-      }),
-    );
+    return this.#call('pruneConfirmedJournalTask', taskId, cutoff.toISOString());
   }
 
-  /** Rechecks the cancelled-offer rule and its cutoff inside the prune transaction, verifying every stored envelope of the task first. */
-  #cancelledReceivedTask(taskId: string, before: string): boolean {
-    const task = this.#db.prepare(`SELECT t.tenant_id, t.product_id, t.device_id, t.seq FROM journal_task t
-      WHERE t.task_id = ? AND ${CANCELLED_RECEIVED_TASK}`).get(taskId) as Record<string, unknown> | undefined;
-    if (!task) return false;
-    const cancellations = this.#prunableTaskCancellations(taskId, task);
-    const cancellation = cancellations.find((row) => Number(row.seq) > Number(task.seq));
-    // Fresh evidence under a reused task id, or a direct call, is not yet past retention.
-    return cancellation !== undefined && (cancellation.committed_at as string) < before;
-  }
-
-  /** Both prune branches delete all task envelopes, so neither may bypass their integrity checks. */
-  #prunableTaskCancellations(taskId: string, task: Record<string, unknown>): Record<string, unknown>[] {
-    const identity = { tenantId: task.tenant_id as string, productId: task.product_id as string, deviceId: task.device_id as string };
-    const rows = this.#taskEnvelopeRows(taskId, identity);
-    return integrity(taskId, () => rows.filter((row) => {
-      const envelope = JSON.parse(row.bytes as string) as { type?: unknown; task_id?: unknown };
-      if (envelope.type === 'task.cancel') {
-        if (assertTaskCancellationBinding(row.bytes as string, taskId, Number(row.seq) - 1) !== Number(row.seq)) {
-          throw new Error('invalid durable cancellation binding');
-        }
-        return true;
-      }
-      if (envelope.task_id !== taskId) throw new Error('invalid durable envelope task binding');
-      return false;
-    }));
+  compact(options: CompactOptions): Promise<CompactResult> {
+    return this.#call('compact', options);
   }
 
   /**
-   * WAL checkpoint plus a BOUNDED incremental vacuum. Maintenance only — it
-   * goes through the same single-writer queue as everything else, so it can
-   * never run concurrently with an ack-critical append, and `incrementalVacuumPages`
-   * caps how long one pass can hold that queue.
+   * Runs after every operation called before it, closes the worker's handle
+   * and resolves once the worker thread has ended. A worker that cannot close
+   * its handle, or that ended without closing it, rejects with
+   * {@link JournalHandleCleanupError}: the handle is not proven released.
    */
-  compact(options: CompactOptions): Promise<CompactResult> {
-    return this.#enqueue('compact', () => {
-      const startedAt = Date.now();
-      const mode = options.checkpoint === 'truncate' ? 'TRUNCATE' : 'PASSIVE';
-      const checkpoint = this.#db.prepare(`PRAGMA wal_checkpoint(${mode})`).get() as
-        | { busy: number; log: number; checkpointed: number }
-        | undefined;
-
-      const freelistBefore = this.#freelistPages();
-      if (options.incrementalVacuumPages !== undefined && options.incrementalVacuumPages > 0) {
-        this.#db.exec(`PRAGMA incremental_vacuum(${Math.floor(options.incrementalVacuumPages)});`);
-      }
-      const freelistAfter = this.#freelistPages();
-
-      const log = Number(checkpoint?.log ?? 0);
-      const checkpointed = Number(checkpoint?.checkpointed ?? 0);
-      return {
-        checkpointed: Number(checkpoint?.busy ?? 0) === 0,
-        walFramesRemaining: Math.max(0, log - checkpointed),
-        pagesVacuumed: Math.max(0, freelistBefore - freelistAfter),
-        durationMs: Date.now() - startedAt,
-      };
-    });
-  }
-
-  #freelistPages(): number {
-    const row = this.#db.prepare('PRAGMA freelist_count').get() as { freelist_count?: number } | undefined;
-    return Number(row?.freelist_count ?? 0);
-  }
-
   close(): Promise<void> {
-    // Deliberately NOT via `#enqueue`: that path rejects with
-    // `JournalClosedError` once `#closed` is set, which is right for every
-    // operation that still needs an open database and wrong for the one that
-    // wanted it closed. Still chained onto `#tail` the same way, so an
-    // operation queued before this one still runs against an open handle.
     if (this.#closing) return this.#closing;
-    const run = this.#tail.then(() => {
-      this.#closed = true;
-      this.#db.close();
-    });
-    this.#tail = run.then(
-      () => undefined,
-      () => undefined,
+    this.#closed = true;
+    // Kept alive until the thread has ended, so a caller awaiting close() is not cut off.
+    this.#worker.ref();
+    this.#closing = this.#send({ id: this.#nextId++, op: 'close' }).then(
+      () => this.#exited,
+      (error: unknown) => {
+        void this.#worker.terminate();
+        throw new JournalHandleCleanupError('the local task journal could not prove its SQLite handle closed', [error]);
+      },
     );
-    this.#closing = run;
-    return run;
+    return this.#closing;
   }
-}
-
-/** Names the task in a failed integrity check over its stored rows; the cause stays attached. */
-function integrity<T>(taskId: string, check: () => T): T {
-  try { return check(); }
-  catch (error) { throw new JournalIntegrityError(taskId, error); }
 }

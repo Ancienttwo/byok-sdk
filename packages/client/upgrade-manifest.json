@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "9109160ba7471249ede3e61e6aef570c8d575220dd528e690695f437227a0ae5"
+    "snapshotSha256": "f59c69495e38c125fde24989159402298fbfb9f7d7c7f9a2f9eeb393426b1c8f"
   },
   "configFields": {
     "status": "tracked",
@@ -1721,6 +1721,24 @@
       "items": [
         "behavior:retention-sweep-audit-lines-without-busy-homes-skipped"
       ]
+    },
+    {
+      "id": "journal-fault-seam-exit-worker",
+      "impact": "additive",
+      "summary": "@byok-sdk/client SqliteLocalTaskJournalOptions.faults (JournalFaultSeam) gains two test-only fields: exitWorkerAt, which ends the journal worker thread at a step ('open' ends it before the constructor's handshake), and workerOpenTimeoutMs, which bounds the constructor's wait for that handshake. JournalFaultStep gains 'batch:commit', the worker's COMMIT of a batch that carries writes. Production never supplies faults; no Host action.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2332",
+      "items": [
+        "export:@byok-sdk/client#SqliteLocalTaskJournalOptions"
+      ]
+    },
+    {
+      "id": "journal-worker-group-commit",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client SqliteLocalTaskJournal commits on a worker thread, and writes queued behind a running commit share the next one. JournalReceipt.committedAt is the time the append was called, not the time it reached disk. A failed batch commit rejects every write in that batch. A worker that ends without closing the database rejects every pending and later operation with JournalUnavailableError, and close() then rejects with JournalHandleCleanupError. A Host that calls the journal directly reads committedAt as admission time, retries each rejected write, and treats JournalHandleCleanupError as a handle that is not proven released.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2332",
+      "items": [
+        "behavior:journal-worker-group-commit"
+      ]
     }
   ],
   "changes": [
@@ -2145,6 +2163,11 @@
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#SqliteLocalTaskJournalOptions",
+      "change": "changed",
+      "entry": "journal-fault-seam-exit-worker"
     },
     {
       "item": "export:@byok-sdk/client#SweepReport",
