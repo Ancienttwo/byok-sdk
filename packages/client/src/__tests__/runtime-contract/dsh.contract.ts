@@ -33,6 +33,7 @@ const STEER_MARKER = 'BYOK-CONTRACT-DSH-STEER-3c8e';
 const ROOT_MARKER = 'BYOK-CONTRACT-DSH-ROOT-6d1f';
 const CHILD_MARKER = 'BYOK-CONTRACT-DSH-CHILD-92ab';
 const RESUME_MARKER = 'BYOK-CONTRACT-DSH-RESUME-e07c';
+const AGENT_PERSONA_MARKER = 'BYOK-CONTRACT-DSH-AGENT-PERSONA-71d4';
 const SKILL_FILE = `---\nname: ${SKILL}\ndescription: ${SKILL_MARKER}\n---\n\nRuntime contract user skill.\n`;
 
 const loopbackModel = (baseUrl: string): DshModelSelection => ({ provider: 'custom', model: MODEL, baseUrl, keyEnv: KEY_ENV });
@@ -296,6 +297,41 @@ async function backgroundTurn() {
   }
 }
 
+/**
+ * A memory-reader Agent Turn and its resume. The reader runs in its run
+ * directory under an Agent home with no `.git`, so dsh's own project chain
+ * stops there and the home's AGENTS.md reaches the model only as the appended
+ * persona: once in each request, on open and again on resume.
+ */
+async function agentPersonaTurn() {
+  const box = await createSandbox('dsh-agent-persona');
+  const recorder = await fileEgress();
+  const home = path.join(box.root, 'agent');
+  const run = path.join(home, '.byok', 'runs', 'adapter-unit-test');
+  await fs.mkdir(run, { recursive: true });
+  await fs.writeFile(path.join(home, 'AGENTS.md'), `# Agent\n\n${AGENT_PERSONA_MARKER}\n`);
+  const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }), MODEL);
+  try {
+    const runtime = await adapter(loopbackModel(provider.baseUrl));
+    const resources = { workspaceDir: run, reader: { canonicalHome: home }, env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env } };
+    const turnOf = async (offer: Parameters<typeof startPreparedOperation>[1]) => {
+      const before = provider.requests.length;
+      const session = await startPreparedOperation(runtime, offer, resources);
+      try {
+        for await (const event of session.events) if (event.type === 'turn_end') break;
+      } finally {
+        await session.close();
+      }
+      return { sessionRef: session.sessionRef, counts: provider.requests.slice(before).filter(request => request.model).map(request => request.text.split(AGENT_PERSONA_MARKER).length - 1) };
+    };
+    const opened = await turnOf({ target: DSH_TARGET, instruction: 'Reply.' });
+    const resumed = await turnOf({ target: DSH_TARGET, instruction: 'Reply again.', sessionRef: opened.sessionRef });
+    return { opened, resumed };
+  } finally {
+    await provider.close();
+  }
+}
+
 /** Each real tool's native input reaches `tool_use` whole, so tool authorization classifies it. */
 async function toolInputTurn() {
   const box = await createSandbox('dsh-tool-input');
@@ -327,6 +363,7 @@ const contractTurn = once(turn);
 const steered = once(steerTurn);
 const background = once(backgroundTurn);
 const toolInput = once(toolInputTurn);
+const readerPersona = once(agentPersonaTurn);
 const skillControl = once(() => controlTurn('skill', async root => {
   const skills = path.join(dshAgentsHome(root), 'skills', SKILL);
   await fs.mkdir(skills, { recursive: true });
@@ -382,7 +419,7 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   'isolation.sessionPersistence': skip('the dsh adapter has no session persistence option; dsh keeps sessions under the SDK-owned DSH_HOME, which resume needs'),
   drafts: notAdvertised(descriptor, 'messageDraft'),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await instructionsControl(); await personaControl(); await closed(); await sigkilled(); await background(); await steered(); await toolInput(); }),
+  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await instructionsControl(); await personaControl(); await closed(); await sigkilled(); await background(); await steered(); await toolInput(); await readerPersona(); }),
 }, DSH_ABSENT_ISOLATION_SOURCES);
 
 defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, {
@@ -420,6 +457,14 @@ defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.exp
     expect(models.length).toBeGreaterThan(0);
     for (const request of models) expect(JSON.parse(request.text).model).toBe(MODEL);
   })],
+  'dsh.agentPersona': ['a memory reader gets its Agent home AGENTS.md once in every request, on open and on resume', check(async () => {
+    const { opened, resumed } = await readerPersona();
+    expect(resumed.sessionRef).toBe(opened.sessionRef);
+    for (const { counts } of [opened, resumed]) {
+      expect(counts.length).toBeGreaterThan(0);
+      expect(counts.every(count => count === 1), JSON.stringify(counts)).toBe(true);
+    }
+  }, 240_000)],
   'dsh.close': ['closing a session while its shell tool runs reaps the tool processes', check(async () => {
     const { survivors, diagnostic } = await closed();
     expect(survivors, diagnostic).toEqual([]);

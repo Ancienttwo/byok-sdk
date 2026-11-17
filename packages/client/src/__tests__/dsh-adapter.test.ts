@@ -189,9 +189,27 @@ describe('DshAdapter sessions', () => {
     const [row] = all.find((fact) => fact.kind === 'start')!.overlay[1].insert;
     expect(row).toMatchObject({ name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'byokagentresult', command: '/usr/bin/env', args: ['node', 'helper.mjs'], cwd: workspaceDir } });
     expect(session.sessionRef).toBe(all.find((fact) => fact.method === 'open')!.request.sessionId);
-    // The vendored dsh session can carry these since OAR 0.111; the SDK declares none of them and passes none (ADR-051 §3, #2361).
+    // The vendored dsh session can carry these since OAR 0.111; a task with no Agent gets none of them (#2363).
     const opened = all.find((fact) => fact.method === 'open')!.request;
     for (const option of ['disallowedTools', 'systemPrompt', 'appendSystemPrompt']) expect(opened).not.toHaveProperty(option);
+    expect(all.some((fact) => fact.method === 'name')).toBe(false);
+  });
+
+  it('appends the Agent persona for a memory reader on open and on resume, never for a writer', async () => {
+    const { open, facts } = await setup();
+    const home = await tempDir('bdh-');
+    const run = path.join(home, '.byok', 'runs', 'adapter-unit-test');
+    await fs.mkdir(run, { recursive: true });
+    await fs.writeFile(path.join(home, 'AGENTS.md'), 'agent persona');
+    await turn(await open(undefined, { workspaceDir: home, agentHome: home }));
+    const reader = { workspaceDir: run, reader: { canonicalHome: home } };
+    const first = await open({ target: DSH_TARGET, instruction: 'read' }, reader);
+    await turn(first);
+    await turn(await open({ target: DSH_TARGET, instruction: 'again', sessionRef: first.sessionRef }, reader));
+    const all = await facts();
+    const requests = all.filter((fact) => fact.method === 'open' || fact.method === 'resume').map((fact) => fact.request);
+    expect(requests.map((request) => request.appendSystemPrompt)).toEqual([undefined, 'agent persona', 'agent persona']);
+    for (const request of requests) for (const option of ['disallowedTools', 'systemPrompt']) expect(request).not.toHaveProperty(option);
     expect(all.some((fact) => fact.method === 'name')).toBe(false);
   });
 
