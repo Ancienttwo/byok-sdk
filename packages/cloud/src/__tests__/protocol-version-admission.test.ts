@@ -1,9 +1,15 @@
-import { createEnvelope, PROTOCOL_VERSION, type Envelope, type EventsPollResponse } from '@byok-sdk/protocol';
+import { readFileSync } from 'node:fs';
+import type { Clock } from '@byok-sdk/core';
+import {
+  BYOK_CHALLENGE_PATH, BYOK_MESSAGES_PATH, BYOK_TOKEN_PATH, createEnvelope, DEVICE_NOT_REGISTERED_CODE, DeviceNotRegisteredResponseSchema,
+  PROTOCOL_VERSION, type Envelope, type EventsPollResponse,
+} from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
 import { AgentExecutionInputSchema } from '../agent-execution';
+import { createHmacTokenSigner } from '../auth/tokens';
 import { handleInboundEnvelope, type ByokCloudObserver, type InboundRefused } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { createHarness, grantAgentHome, offerPayload, TENANT_A, TEST_AGENT_REF } from './support/harness';
+import { createHarness, grantAgentHome, offerPayload, PRODUCT_ID, TENANT_A, TEST_AGENT_REF } from './support/harness';
 
 const PI = { kind: 'runtime', runtimeId: 'pi' } as const;
 
@@ -36,6 +42,19 @@ function resultDocumentExecution(deviceId: string) {
         schema: { type: 'object', properties: { answer: { type: 'string' } }, required: ['answer'], additionalProperties: false } },
     },
   });
+}
+
+/** Raw request bodies a v6 daemon (0.41.0–0.43.0) sent, from the frozen v6 HTTP corpus. */
+function v6HttpBodies() {
+  const lines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v6.http.ndjson', import.meta.url), 'utf8')
+    .trimEnd().split('\n').map((line) => JSON.parse(line) as { surface: string; body: string; value: { messages?: { type: string }[] } });
+  const body = (match: (line: (typeof lines)[number]) => boolean) => lines.find(match)!.body;
+  return {
+    challenge: body((line) => line.surface === 'ChallengeRequest'),
+    token: body((line) => line.surface === 'TokenRequest'),
+    pair: JSON.parse(body((line) => line.surface === 'PairResponse')) as { deviceId: string; tenantId: string },
+    hello: body((line) => line.surface === 'MessagesSendRequest' && line.value.messages?.[0]?.type === 'conn.hello'),
+  };
 }
 
 describe('protocol-version admission at cloud lifecycle boundaries', () => {
@@ -143,6 +162,36 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     const poll = await harness.json('/byok/events?cursor=0', { headers: device.authorization });
     expect(poll.status).toBe(200);
     expect((poll.body as EventsPollResponse).events).toEqual([]);
+  });
+
+  // #1757 G1, the half before any hello: a v6 daemon whose enrollment was not
+  // paired again into the v7 store. A v6 daemon renews through challenge →
+  // token and halts as `device_revoked` on the typed `device_not_registered`
+  // 401 (0.43.0 `AuthManager.readUnauthorized`, same schema as today); a 401
+  // on any bearer route sends it to that renewal first.
+  it('stops a v6 daemon that was not paired again at authentication, before its hello is read', async () => {
+    const v6 = v6HttpBodies();
+    const clock: Clock = { now: () => new Date() };
+    const signer = createHmacTokenSigner(new Uint8Array(32).fill(17), clock);
+    const harness = createHarness({ tokenSigner: signer, clock });
+    const post = (path: string, body: string, headers: Record<string, string> = {}) =>
+      harness.json(path, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
+
+    // A cold start renews first: both auth steps answer the typed revocation 401.
+    for (const [path, body] of [[BYOK_CHALLENGE_PATH, v6.challenge], [BYOK_TOKEN_PATH, v6.token]] as const) {
+      const answer = await post(path, body);
+      expect(answer.status).toBe(401);
+      expect(answer.body).toMatchObject({ code: DEVICE_NOT_REGISTERED_CODE });
+      expect(DeviceNotRegisteredResponseSchema.safeParse(answer.body).success).toBe(true);
+    }
+
+    // A daemon still running across the upgrade holds a v6 bearer. Even signed
+    // with a key the v7 deployment kept, it names no v7 device row, so its v6
+    // hello gets the untyped 401 that sends it to the renewal above, never the
+    // per-entry protocol_version_unsupported a paired-again daemon reads.
+    const v6Bearer = await signer.sign({ deviceId: v6.pair.deviceId, tenantId: v6.pair.tenantId, productId: PRODUCT_ID }, 1800);
+    await expect(post(BYOK_MESSAGES_PATH, v6.hello, { authorization: `Bearer ${v6Bearer}` }))
+      .resolves.toEqual({ status: 401, body: { error: 'unauthorized' } });
   });
 
   it('answers an unknown daemon type type_unsupported per entry and applies the rest of the batch', async () => {
