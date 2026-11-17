@@ -665,7 +665,7 @@ entries with a real server and daemon.
 | `model.ts`, `transitions.ts` | Durable records, stable identities, atomic state changes, and the FIFO head and queued expiry rules. |
 | `canonical.ts` | Canonical JSON and its SHA-256: the `./execution-core/canonical` entry. |
 | `submit.ts` | The frozen-offer submit protocol: readback first, the frozen offer check and the stop hook. Shared with the hosted lane. |
-| `sealed-routine.ts` | The member side of a sealed routine: the template binding and `sealRoutineTemplate` (#953). |
+| `sealed-routine.ts` | The routine template binding, `routineTemplateBinding` (#953). |
 | `routines.ts` | Occurrence deduplication, next-slot commit, coalescing, lifecycle, version switches and Host occurrence transitions. |
 | `schedule.ts` | The default UTC interval calendar and the shared calendar callback type. |
 | `memory.ts`, `memory-restore.ts` | `HostMemoryPage`: Host memory approvals, intents, projections, ContextPack and explicit tree restore. |
@@ -1010,9 +1010,11 @@ chain. Let pending versions switch, or restore a backup, before you roll back to
 ### Sealed routines
 
 A sealed routine (#654 E3d-4, design §6.3) runs an execution whose task input only a member and
-the device can read. A member seals one routine template for one routine version with
-`sealRoutineTemplate`: family `routine.template`, the routine id and version
-in place of a task id, no device, the Agent, the category list and the expiry `notAfter`. The Host
+the device can read. A member seals one routine template for one routine version under
+`routineTemplateBinding`: family `routine.template`, the routine id and version
+in place of a task id, no device, the Agent, the category list and the expiry `notAfter`. The SDK
+exports the binding only; sealing is the member's work, and the repository's tests seal with the
+fixture in the server test support. The Host
 stores the template and puts it, byte for byte, in the `sealed` member of each occurrence's
 `task.offer` (its sealed branch, with `session: { mode: 'fresh' }`), next to the plaintext `routineRef`. It never
 sees the scope key or the instruction.
@@ -1029,7 +1031,7 @@ sees the scope key or the instruction.
   - Its `sealing.categories` is exactly `['task-input']`: the core settles from the plaintext
     terminal and reads its outcome.
   - Its `sealed` member is inline: between occurrences no task holds a `ciphertextRef` blob, so
-    orphan GC could delete it. `sealRoutineTemplate` refuses a template above the inline limit.
+    orphan GC could delete it.
 - `routineRef` must name the routine's own id and version: `addRoutine`, `updateRoutine` and
   `promoteOccurrence` refuse another one. Every version needs its own template, and a retry
   generation reuses the frozen bytes.
@@ -1043,7 +1045,7 @@ sees the scope key or the instruction.
   lane at every submit: when a server loses it while a sealed submit is uncertain, the reconcile
   still verifies the frozen offer, but runs no submit readback and no submit until the lane
   returns or the intent expires.
-- `sealRoutineTemplate` seals exactly `['task-input']`, the only category list K4 runs. The embedded `ByokServer` has none,
+- A routine template seals exactly `['task-input']`, the only category list K4 runs. The embedded `ByokServer` has none,
   because it declares no `e2ee.member` and so no daemon paired to it advertises `sealed-payload-v1`.
 - `sameFrozenOffer` checks the offer type (`task.offer` for both lanes) and the canonical payload: a plain
   readback never matches a sealed input, nor the reverse, because only the sealed payload carries `sealing`. The payload compares exactly, because the Host resubmits its

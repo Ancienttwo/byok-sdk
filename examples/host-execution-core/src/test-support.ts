@@ -6,6 +6,7 @@ import { createByokServer, type CreateByokServerOptions, type DueWake } from '@b
 import { createDaemonWithAdapters, type AgentEgressPolicy } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { BotStubAdapter, waitForReady } from '../../basic/goal-btw.test-support';
+export { sealRoutineTemplate, type SealRoutineTemplateInput } from '../../../packages/server/src/__tests__/execution-core/sealed-routine.test-support';
 import {
   HostExecutionCore,
   HostLedger,

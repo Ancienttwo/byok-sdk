@@ -17,8 +17,8 @@ export type { LedgerState, IgnoredWakeAudit } from './model.js';
 export { enqueue, agentKey, fifoHeads, queuedExpiry, settle } from './transitions.js';
 export { FrozenOfferMismatchError, SealedDispatchUnavailableError, sameFrozenOffer, submitFrozen } from './submit.js';
 export type { FrozenSubmitPort, FrozenInput, FrozenOffer } from './submit.js';
-export { routineTemplateBinding, sealRoutineTemplate } from './sealed-routine.js';
-export type { RoutineRef, SealRoutineTemplateInput, SealedTaskInput } from './sealed-routine.js';
+export { routineTemplateBinding } from './sealed-routine.js';
+export type { RoutineRef, SealedTaskInput } from './sealed-routine.js';
 export { WAKE_HORIZON_MS, IGNORED_WAKE_AUDIT_LIMIT, parseRoutineWakeKey, routineWakeKey, versionSwitchDue, promoteOccurrence, concludeOccurrence, recordOccurrence, createRoutine,
   stageVersion, setLifecycle, switchVersion, nextWake, validateRoutineDefinition, occurrenceRun, routineCommands, applyPlan, auditCalendarError,
   scheduleNext } from './routines.js';

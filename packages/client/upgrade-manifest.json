@@ -1615,6 +1615,16 @@
       ]
     },
     {
+      "id": "server-seal-routine-template-removed",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core no longer exports sealRoutineTemplate or SealRoutineTemplateInput. No product code called them; tests take the member-side sealing fixture from test support. routineTemplateBinding, RoutineRef and SealedTaskInput are unchanged.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#removed-server-execution-core-apis",
+      "items": [
+        "export:@byok-sdk/server/execution-core#sealRoutineTemplate",
+        "export:@byok-sdk/server/execution-core#SealRoutineTemplateInput"
+      ]
+    },
+    {
       "id": "wire-v7-client-negotiation-halt",
       "impact": "breaking",
       "summary": "@byok-sdk/client DAEMON_HALT_REASONS adds protocol_negotiation_failed, and DaemonLifecycle's halted phase carries httpStatus for it. The daemon halts instead of reconnecting when its lone conn.hello is refused as another wire major: a rejected outcome with protocol_version_unsupported (httpStatus 200) or a 4xx other than 401, 403, 409, 413 and 429. whenOpen() rejects with a DaemonHaltError whose cause is a ProtocolNegotiationError. Handle the new halt reason wherever halts are switched on.",

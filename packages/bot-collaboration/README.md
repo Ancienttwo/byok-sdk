@@ -456,8 +456,8 @@ command needs the Main Bot role and gets the K4 rows through the
 
 A sealed Bot routine (#953, #654 E3d-4) is a `bot-routine` whose Turn
 instruction only a member and the device can read. The owner's member endpoint
-seals the whole instruction once per routine version with K4
-`sealRoutineTemplate`. The instruction contains the K8 Turn frame with every
+seals the whole instruction once per routine version under K4's
+`routineTemplateBinding`. The instruction contains the K8 Turn frame with every
 action, `Request:` and the prompt, and no
 ContextPack, because v1 has no plaintext field for Host content next to a
 sealed instruction. The Turn's frozen outcome schema stays the authority on
