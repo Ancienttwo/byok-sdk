@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "3f0fbb0fa9efbca9a4a6699639224cc8f7cd06e5ce81b40357f0db3763d1038a"
+    "snapshotSha256": "161bae48e592440bb4703199522ca1483b076d0e7aba0f0b361c21ae14bca83a"
   },
   "configFields": {
     "status": "tracked",
@@ -2020,6 +2020,21 @@
       "entry": "remove-egress-drop-receipts"
     },
     {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseBlock",
+      "change": "added",
+      "entry": "agent-home-lease-held-error"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseHeldError",
+      "change": "added",
+      "entry": "agent-home-lease-held-error"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgentHomeLeaseManager",
+      "change": "changed",
+      "entry": "agent-home-lease-held-error"
+    },
+    {
       "item": "export:@byok-sdk/client#AgentHomeProjectionFunction",
       "change": "removed",
       "entry": "remove-unused-client-aliases"
@@ -2108,6 +2123,16 @@
       "item": "export:@byok-sdk/client#DeviceEnrollmentClearErrorCode",
       "change": "changed",
       "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceOperatorError",
+      "change": "changed",
+      "entry": "device-operator-agent-lease-held"
+    },
+    {
+      "item": "export:@byok-sdk/client#DeviceOperatorErrorCode",
+      "change": "changed",
+      "entry": "device-operator-agent-lease-held"
     },
     {
       "item": "export:@byok-sdk/client#DiagnosticsSnapshot",
