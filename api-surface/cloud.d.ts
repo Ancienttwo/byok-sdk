@@ -1926,6 +1926,7 @@ export declare const CLOUD_ERROR_CODES: {
     readonly agent_task_already_exists: 'agent_task_already_exists';
     readonly task_offer_append_refused: 'task_offer_append_refused';
     readonly agent_content_request_mismatch: 'agent_content_request_mismatch';
+    readonly agent_message_consumer_missing: 'agent_message_consumer_missing';
     readonly agent_message_sealed_consumer_missing: 'agent_message_sealed_consumer_missing';
     readonly mailbox_receipt_mismatch: 'mailbox_receipt_mismatch';
     readonly agent_home_projection_request_conflict: 'agent_home_projection_request_conflict';
