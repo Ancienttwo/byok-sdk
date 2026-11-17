@@ -272,7 +272,7 @@ code to any exhaustive switch over `CloudErrorCode`. The sealed lane keeps
 
 ### Agent-home lease markers record their writer (#2348)
 
-Manifest entries: `agent-home-lease-writer-liveness`, `agent-home-lease-held-error`.
+Manifest entries: `agent-home-lease-writer-liveness`, `agent-home-lease-held-error`, `device-operator-agent-lease-held`.
 
 An Agent-home lease marker now records the process that wrote it: its pid and
 start time, a digest of the machine identifier (never the raw value), the boot,
@@ -297,6 +297,9 @@ What changes for a Host:
 - A Host that uses `AgentHomeLeaseManager` with a stable `ownerId` reclaims
   residue only when it passes `reclaimsResidue`, returning true only while it
   holds that owner's daemon lease and has reconciled its owned processes.
+- An operator action (`archiveAgentTerminalMessages`) refused by such a marker
+  throws `DeviceOperatorError` with the new code `agent-lease-held` and its
+  `blockedBy`, where it threw `agent-busy`. Add the code to exhaustive switches.
 - `AgentHomeLeaseHeldError` extends `AgentHomeBusyError`, so the offer decline
   stays `agent_home_writer_busy` and retryable. Its `blockedBy` tells
   `other-host`, `other-pid-namespace`, `writer-running`, `unverifiable`,

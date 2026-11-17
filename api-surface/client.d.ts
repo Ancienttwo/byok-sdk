@@ -3899,6 +3899,7 @@ export declare class DeviceCursorResetError extends Error {
 export declare function resetDeviceCursor(config: DaemonConfig, input: ResetDeviceCursorInput): Promise<DeviceCursorResetResult>;
 // ==== @byok-sdk/client dist/diagnostics/operator-actions.d.ts ====
 import { type AgentRef } from '@byok-sdk/protocol';
+import { type AgentHomeLeaseBlock } from '../agent-home.js';
 import type { DaemonConfig } from '../daemon/create-daemon.js';
 import type { OperationalHealthFixResult } from './types.js';
 import type { DiagnoseDeviceOptions } from './device-doctor.js';
@@ -3909,6 +3910,7 @@ declare const MESSAGES: {
     readonly 'daemon-running': 'Stop the host daemon before local maintenance.';
     readonly 'store-busy': 'Another operation owns the device store.';
     readonly 'agent-busy': 'Another operation owns the Agent home.';
+    readonly 'agent-lease-held': 'An Agent home lease marker blocks this action.';
     readonly 'owned-process-residue': 'Runtime processes a crashed daemon left could not be ended. Start the daemon to see the record path, verify the processes are gone, then delete that record from the owned-processes directory of the device store.';
     readonly 'target-mismatch': 'The stored device or Agent records do not match the authorized target.';
     readonly 'source-unavailable': 'The local source cannot be accessed safely; preserve it for inspection.';
@@ -3918,7 +3920,8 @@ declare const MESSAGES: {
 export type DeviceOperatorErrorCode = keyof typeof MESSAGES;
 export declare class DeviceOperatorError extends Error {
     readonly code: DeviceOperatorErrorCode;
-    constructor(code: DeviceOperatorErrorCode);
+    readonly blockedBy?: AgentHomeLeaseBlock | undefined;
+    constructor(code: DeviceOperatorErrorCode, blockedBy?: AgentHomeLeaseBlock | undefined);
 }
 export interface ConfirmDeviceMaintenanceInput {
     confirmed: true;
