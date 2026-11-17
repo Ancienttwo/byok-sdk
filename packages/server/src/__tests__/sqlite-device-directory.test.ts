@@ -141,6 +141,7 @@ describe('SQLite durable device authority', () => {
     ['index', 'CREATE INDEX future_idx ON request_receipt (recorded_at)'],
     ['trigger', 'CREATE TRIGGER future_trigger AFTER INSERT ON request_receipt BEGIN SELECT 1; END'],
     ['trigger named like an SQLite object', 'CREATE TRIGGER sqliteX_guard AFTER INSERT ON request_receipt BEGIN SELECT 1; END'],
+    ['view', 'CREATE VIEW future_view AS SELECT recorded_at FROM request_receipt'],
   ])('refuses a current file holding an unknown %s, which a newer build wrote', async (_kind, ddl) => {
     const path = database(); await open(path).close();
     const edit = new DatabaseSync(path); edit.exec(ddl); edit.close();

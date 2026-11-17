@@ -59,7 +59,7 @@ export async function runInputPreparation(
 
 /** Construct every daemon-owned hosted writer only after ownership exists. */
 export function initializeOwnedHostedStorage(daemonScope: DaemonScope): LocalTaskJournal {
-  const { daemonState, config, storeDir, overrides } = daemonScope;
+  const { daemonState, config, storeDir } = daemonScope;
   if (!daemonState.journal) {
     const tuning = config.storage?.journal;
     try {
@@ -67,7 +67,6 @@ export function initializeOwnedHostedStorage(daemonScope: DaemonScope): LocalTas
         storeDir,
         ...(tuning?.busyTimeoutMs === undefined ? {} : { busyTimeoutMs: tuning.busyTimeoutMs }),
         ...(tuning?.maxRecordBytes === undefined ? {} : { maxRecordBytes: tuning.maxRecordBytes }),
-        ...(overrides.journalOpenFaults === undefined ? {} : { openFaults: overrides.journalOpenFaults }),
       });
     } catch (err) {
       if (err instanceof JournalHandleCleanupError) daemonState.hostedStorageInitializationBarrierComplete = false;

@@ -23,7 +23,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { CursorStore } from '../daemon/cursor-store';
 import { JournalRecordTooLargeError, JournalUnavailableError, journalHash, type JournalIdentity } from '../daemon/journal/journal';
-import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME, SqliteLocalTaskJournal } from '../daemon/journal/sqlite-journal';
+import { DEFAULT_JOURNAL_BUSY_TIMEOUT_MS, JOURNAL_DB_FILENAME, SqliteLocalTaskJournal, openJournalWithFaultsForTests } from '../daemon/journal/sqlite-journal';
 import { openJournalDatabase } from '../util/sqlite-support';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -188,7 +188,7 @@ describe('the withheld offer record of the journal (#826)', () => {
 
   it.each(['append:after-envelope', 'append:after-task', 'append:after-receipt'] as const)('writes nothing when it fails at %s', async (step) => {
     const storeDir = await tmp();
-    const journal = new SqliteLocalTaskJournal({ storeDir, faults: { onStep: (at) => { if (at === step) throw new Error(`fault at ${at}`); } } });
+    const journal = openJournalWithFaultsForTests({ storeDir }, { faults: { onStep: (at) => { if (at === step) throw new Error(`fault at ${at}`); } } });
     try {
       await expect(journal.appendWithheldOffer(withheld(randomUUID(), 'task-1'))).rejects.toThrow(`fault at ${step}`);
     } finally { await journal.close(); }

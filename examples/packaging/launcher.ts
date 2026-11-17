@@ -48,7 +48,7 @@
 // resolution breaking module load instead of degrading) is unmistakable in
 // CI output rather than silently swallowed.
 
-import { createDaemon, PiAdapter } from '@byok-sdk/client';
+import { createDaemon, PiAdapter, SqliteLocalTaskJournal } from '@byok-sdk/client';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -60,6 +60,7 @@ async function main(): Promise<void> {
     process.platform === 'win32' ? os.tmpdir() : '/tmp', 'byok-pkg-',
   )));
   try {
+    const storeDir = path.join(os.tmpdir(), 'byok-packaging-smoke', String(process.pid));
     const daemon = createDaemon({
       localAgentRelease: { version: '0.0.0-packaging-probe' },
       productId: 'byok-packaging-smoke',
@@ -69,7 +70,7 @@ async function main(): Promise<void> {
       serverUrl: 'http://127.0.0.1:0',
       // Hermetic: never touch a real ~/.byok on whatever machine/CI runner
       // this compiled binary happens to execute on.
-      storeDir: path.join(os.tmpdir(), 'byok-packaging-smoke', String(process.pid)),
+      storeDir,
       storage: { scratchRoot },
     });
 
@@ -81,10 +82,19 @@ async function main(): Promise<void> {
     // The actual hazard probe -- see file header.
     const piDetect = await new PiAdapter().detect();
 
+    // The journal commits on a worker thread started from source the client
+    // bundle inlines (#2332): an open, a read and a close prove that thread
+    // runs inside the bundled/compiled binary. It is the daemon's own journal,
+    // in the store this probe never deletes.
+    const journal = new SqliteLocalTaskJournal({ storeDir });
+    const journalEntries = (await journal.measureUsage()).journalEntries;
+    await journal.close();
+
     const result = {
       ok: true as const,
       daemonStatus,
       piDetect,
+      journalEntries,
       byokPiBinSet: process.env.BYOK_PI_BIN !== undefined,
     };
     console.log(`${PROBE_MARKER} ${JSON.stringify(result)}`);

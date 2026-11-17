@@ -47,7 +47,6 @@ import { DaemonObserver, type DaemonEventListener, type DaemonTaskInfo, type Uns
 import { type DeviceEnrollment } from './store.js';
 import { type DeviceMemberStatus } from './e2ee-key-package-notice.js';
 import { type LocalTaskJournal } from './journal/journal.js';
-import type { JournalOpenFaultSeam } from '../util/sqlite-support.js';
 import { promises as fs } from 'node:fs';
 import { type StorageConfig } from './retention/config.js';
 import { RetentionSweeper, type RetentionTimers } from './retention/sweeper.js';
@@ -860,8 +859,6 @@ export interface DaemonOverrides {
    * owns its lifetime.
    */
   journal?: LocalTaskJournal;
-  /** Test-only post-open SQLite initialization fault seam. */
-  journalOpenFaults?: JournalOpenFaultSeam;
 }
 
 /**

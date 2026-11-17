@@ -2208,7 +2208,6 @@ import { type OperationalHealthSnapshot } from './operational-health.js';
 import { type DaemonEventListener, type DaemonTaskInfo, type Unsubscribe } from './observer.js';
 import { type DeviceEnrollment } from './store.js';
 import { type LocalTaskJournal } from './journal/journal.js';
-import type { JournalOpenFaultSeam } from '../util/sqlite-support.js';
 import { type StorageConfig } from './retention/config.js';
 import { type RetentionTimers } from './retention/sweeper.js';
 import { type ProgressBatcherOptions } from './progress-batcher.js';
@@ -2404,7 +2403,6 @@ export interface DaemonOverrides {
         idleDelayMs?: number;
     };
     journal?: LocalTaskJournal;
-    journalOpenFaults?: JournalOpenFaultSeam;
 }
 export declare function createDaemonWithAdapters(config: DaemonConfig, adapters: RuntimeAdapter[], overrides?: DaemonOverrides): Daemon;
 export declare function createDaemon(config: DaemonConfig, overrides?: DaemonOverrides): Daemon;
@@ -3001,22 +2999,13 @@ export declare class JournalClosedError extends Error {
     constructor(operation: string);
 }
 // ==== @byok-sdk/client dist/daemon/journal/sqlite-journal.d.ts ====
-import { type JournalIdentity, type AdmissionRecord, type CompactOptions, type CompactResult, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type WithheldOfferRecord, type WithheldOfferTask } from './journal.js';
-import { type JournalOpenFaultSeam } from '../../util/sqlite-support.js';
+import { type AdmissionRecord, type CompactOptions, type CompactResult, type JournalIdentity, type JournalReceipt, type LocalStorageUsage, type LocalTaskJournal, type LocalTerminalRecord, type LocalTransitionRecord, type RecoverableTask, type RecoveryOutcome, type ReceivedEnvelopeRecord, type WithheldOfferRecord, type WithheldOfferTask } from './journal.js';
 export declare const JOURNAL_DB_FILENAME = "daemon.db";
 export declare const JOURNAL_QUARANTINE_DIRNAME = "quarantine";
-// support
-export type JournalFaultStep = 'append:before-begin' | 'append:after-envelope' | 'append:after-task' | 'append:after-receipt' | 'append:before-commit' | 'append:after-commit' | 'admission:before-commit' | 'transition:before-commit' | 'terminal:before-commit' | 'terminal:after-commit' | 'recovery:after-commit' | 'confirm:before-commit' | 'confirm:after-commit' | 'replace:before-commit' | 'replace:after-commit' | 'recovery:before-commit' | 'cleanup:before-commit' | 'prune:before-commit';
-// support
-export interface JournalFaultSeam {
-    onStep?(step: JournalFaultStep): void;
-}
 export interface SqliteLocalTaskJournalOptions {
     readonly storeDir: string;
     readonly busyTimeoutMs?: number;
     readonly maxRecordBytes?: number;
-    readonly faults?: JournalFaultSeam;
-    readonly openFaults?: JournalOpenFaultSeam;
     readonly clock?: () => Date;
 }
 export declare class SqliteLocalTaskJournal implements LocalTaskJournal {
@@ -6035,15 +6024,6 @@ export interface ServiceInstallationRecord {
     installRoot: string;
 }
 export declare function readServiceInstallationRecord(storeDir: string): Promise<ServiceInstallationRecord | undefined>;
-// ==== @byok-sdk/client dist/util/sqlite-support.d.ts ====
-import type { DatabaseSync } from 'node:sqlite';
-// support
-export type JournalOpenStep = 'after-open' | 'after-auto-vacuum' | 'after-wal' | 'after-foreign-keys' | 'after-synchronous' | 'after-header-read';
-// support
-export interface JournalOpenFaultSeam {
-    onStep?(step: JournalOpenStep): void;
-    close?(db: DatabaseSync): void;
-}
 // ==== @byok-sdk/client dist/util/team-tmux-view.d.ts ====
 // support
 export type TmuxRunner = (file: string, args: readonly string[]) => Promise<{

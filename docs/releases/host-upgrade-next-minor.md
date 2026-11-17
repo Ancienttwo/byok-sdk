@@ -288,7 +288,7 @@ No new manifest entry: this carries forward the
 
 ### SQLite stores decide their format before any write (#2286)
 
-Sources: [#2295], [#2309], [#2316], [#2318]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`, `server-sqlite-format-before-write`.
+Sources: [#2295], [#2309], [#2316], [#2318], [#2356]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`, `server-sqlite-format-before-write`, `client-journal-refuses-host-objects`.
 
 SQLite stores check the unchanged main file before writable open, pragmas or
 DDL. Refusal preserves bytes and creates no sidecars, except for
@@ -305,7 +305,9 @@ opens, including paths past `MAX_PATH`; `:memory:` remains unchanged.
 SQLite's own; use it instead of `name NOT LIKE 'sqlite_%'`, which also hides
 objects named `sqliteX…` because `_` matches any character in `LIKE`.
 
-- Local task journals must have exactly the current tables and columns. Old
+- Local task journals must have exactly the current tables and columns, and
+  exactly the indexes, triggers and views this build creates; a journal from
+  before 0.43.0 lacks `journal_envelope_task`, which the open creates. Old
   `local_artifact_ref`, `local_cleanup_candidate` or `local_storage_usage`
   tables cause `JournalUnavailableError`; they are no longer dropped. Format
   refusals and read-only open failures stay in place. Unreadable SQLite files
@@ -321,10 +323,13 @@ objects named `sqliteX…` because `_` matches any character in `LIKE`.
 - A durable replica with a different pi-durable schema is refused with
   `DurableReplicaFormatError`, without migration. A replica lock path holding
   another database is also refused without writing it.
-- The embedded server's store file holds only the SDK's objects: a Host
-  table, index, trigger or view in it is refused as above. The local task
-  journal refuses a Host table but does not check indexes, triggers or views.
-  Keep every Host object in a separate database file that the Host opens itself.
+- The embedded server's store file and the local task journal hold only the
+  SDK's objects: a Host table, index, trigger or view in either is refused as
+  above, the journal's with `JournalUnavailableError` (#2356). An object in the
+  main file is refused before any write, leaving the file unchanged. One that is
+  only in the journal's WAL is decided on the writable connection, as described
+  in [WAL-only format metadata](#wal-only-format-metadata). Keep every Host
+  object in a separate database file that the Host opens itself.
 - Released journals and replicas are current. Export or preserve refused
   stores before starting the candidate.
 - Copy-and-own Desktop `HostStore`, basic Clarification and goal/btw stores,
@@ -1053,6 +1058,34 @@ because they were not idle. `byok-agent status` and `byok-agent tasks` skip
 `retention-sweep` lines an older daemon wrote to `audit.jsonl`, because they lack
 `busyHomes`; the file stays on disk and every other line still renders.
 
+### Local task journal commits on a worker thread (#2332)
+
+Sources: [#2332], [#2344]. Manifest entries: `journal-worker-group-commit`, `journal-test-fault-seams-removed`.
+
+`SqliteLocalTaskJournal` runs every SQLite commit on a worker thread, so
+`synchronous=FULL` fsyncs no longer block the daemon's event loop. An operation
+still resolves only after the commit that contains it, so durability is
+unchanged. A daemon built from `createDaemon` needs no action. A Host that calls
+the journal directly:
+
+- reads `JournalReceipt.committedAt`, terminal and recovery times, and
+  `measuredAt` as the time the operation was called, not the time it reached
+  disk. One FIFO worker commits in call order, so the times stay monotonic;
+- retries each rejected write. Writes queued behind a running commit share the
+  next one, and a failed `COMMIT` rejects every write in that batch;
+- treats a worker that ended without closing the database as a closed journal.
+  Every pending and later operation rejects with `JournalUnavailableError`, the
+  worker is never restarted, and `close()` then rejects with
+  `JournalHandleCleanupError`: keep the store lease, as for any handle that is
+  not proven released. A worker that does not open within 30 s fails the
+  constructor the same way;
+- allows worker threads. A Node process run with `--permission` and without
+  `--allow-worker` cannot open the journal.
+
+`SqliteLocalTaskJournalOptions` no longer has `faults` or `openFaults`, and
+`DaemonOverrides` no longer has `journalOpenFaults`. They were test-only fault
+seams that production never supplied. Remove any use; nothing replaces them.
+
 ### Other manifest entries
 
 These entries linked to separate docs/issues; include them in the Host review too.
@@ -1105,13 +1138,14 @@ Before restoring traffic, verify these paths with the candidate release:
 
 ### WAL-only format metadata
 
-Sources: [#2295], [#2309], [#2283]. Manifest entries: `sqlite-stores-refuse-before-write`, `client-journal-exact-format`, `host-ledger-format-table`, `keys-store-refuse-before-write`, `wire-v7-server-sqlite-store`.
+Sources: [#2295], [#2309], [#2283], [#2356]. Manifest entries: `sqlite-stores-refuse-before-write`, `client-journal-exact-format`, `host-ledger-format-table`, `keys-store-refuse-before-write`, `wire-v7-server-sqlite-store`, `client-journal-refuses-host-objects`.
 
 An older store that crashed before its first checkpoint can hold its schema
 only in WAL. Its format is then decided on a writable connection; closing after
 refusal checkpoints WAL into the main file and removes `-wal` and `-shm`.
 Logical content remains, but bytes change. This applies to the SQLite stores
-above, including Host ledgers, keys and the v7 server. New stores checkpoint
+above, including Host ledgers, keys and the v7 server, and to a local task
+journal whose Host index, trigger or view is only in WAL. New stores checkpoint
 immediately after schema creation to shorten this window.
 
 Preserve the main file **and sidecars together** before trying the candidate
@@ -1124,6 +1158,16 @@ execution scratch, reports a cleanup `RuntimeDisposalFailure`, skips retention
 for that execution, and blocks later Grok starts. The user moves the file back
 to their Grok home or deletes it and logs in again. The SDK never restores or
 deletes it. Source: [#2258]; entry `grok-agent-user-context`.
+
+### Bun on Windows keeps SQLite files open after close
+
+A Bun-compiled daemon or Host on Windows keeps a SQLite database's files open
+after `close()` until garbage collection, for every connection on which it
+prepared a statement. Node releases them at `close()`. Deleting or renaming a
+store that the same process has just closed can fail with `EBUSY`; a separate
+process after the daemon has exited is not affected. The journal worker's own
+connection is released when its thread exits. Tracked in [#2347], with no fix
+in this release.
 
 ### Integration and adoption evidence
 
@@ -1175,6 +1219,10 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2349]: https://github.com/Ancienttwo/byok-sdk/issues/2349
 [#2361]: https://github.com/Ancienttwo/byok-sdk/issues/2361
 [#2363]: https://github.com/Ancienttwo/byok-sdk/issues/2363
+[#2356]: https://github.com/Ancienttwo/byok-sdk/issues/2356
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384
 [#2319]: https://github.com/Ancienttwo/byok-sdk/pull/2319
 [#2334]: https://github.com/Ancienttwo/byok-sdk/issues/2334
+[#2332]: https://github.com/Ancienttwo/byok-sdk/issues/2332
+[#2344]: https://github.com/Ancienttwo/byok-sdk/pull/2344
+[#2347]: https://github.com/Ancienttwo/byok-sdk/issues/2347

@@ -15,7 +15,7 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { DatabaseSync } from 'node:sqlite';
 import { createEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
 import {
@@ -34,7 +34,11 @@ import {
   JournalHandleCleanupError,
   SqliteLocalTaskJournal,
   type JournalFaultStep,
+  type JournalTestFaults,
+  openJournalWithFaultsForTests,
+  type SqliteLocalTaskJournalOptions,
 } from '../daemon/journal/sqlite-journal';
+import { TASK_ENVELOPE_ROWS } from '../daemon/journal/journal-store';
 import {
   openJournalDatabase,
   type JournalOpenStep,
@@ -103,8 +107,12 @@ describe('SqliteLocalTaskJournal', () => {
     return dir;
   }
 
-  function build(storeDir: string, options: Partial<ConstructorParameters<typeof SqliteLocalTaskJournal>[0]> = {}): SqliteLocalTaskJournal {
-    const journal = new SqliteLocalTaskJournal({ storeDir, ...options });
+  function build(storeDir: string, options: Partial<SqliteLocalTaskJournalOptions> & JournalTestFaults = {}): SqliteLocalTaskJournal {
+    const { faults, openFaults, ...rest } = options;
+    const journal = openJournalWithFaultsForTests({ storeDir, ...rest }, {
+      ...(faults === undefined ? {} : { faults }),
+      ...(openFaults === undefined ? {} : { openFaults }),
+    });
     open.push(journal);
     return journal;
   }
@@ -169,17 +177,9 @@ describe('SqliteLocalTaskJournal', () => {
       await build(storeDir).close();
       readRows(storeDir, 'DROP INDEX journal_envelope_task');
       const journal = build(storeDir);
-      // Plan the statement the journal actually prepares, not a copy of its text.
-      const prepare = vi.spyOn(DatabaseSync.prototype, 'prepare');
-      let statements: string[];
-      try {
-        await journal.readTaskCancellation('task-1', IDENTITY, 0);
-        statements = prepare.mock.calls.map(([statement]) => statement).filter((statement) => statement.includes('FROM journal_envelope'));
-      } finally {
-        prepare.mockRestore();
-      }
-      expect(statements).toHaveLength(1);
-      const plan = readRows(storeDir, `EXPLAIN QUERY PLAN ${statements[0]}`).map((row) => String(row.detail));
+      await expect(journal.readTaskCancellation('task-1', IDENTITY, 0)).resolves.toBeUndefined();
+      // Plan the statement the journal's store prepares, not a copy of its text.
+      const plan = readRows(storeDir, `EXPLAIN QUERY PLAN ${TASK_ENVELOPE_ROWS}`).map((row) => String(row.detail));
       expect(plan.join('\n')).toMatch(/SEARCH journal_envelope USING INDEX journal_envelope_task \(task_id=\?\)/);
     });
 
@@ -205,8 +205,7 @@ describe('SqliteLocalTaskJournal', () => {
     it.each(OPEN_STEPS)('closes the native handle when initialization fails at %s', async (step) => {
       const storeDir = await tmpStore(`byok-journal-open-fault-${step}-`);
       expect(() =>
-        new SqliteLocalTaskJournal({
-          storeDir,
+        openJournalWithFaultsForTests({ storeDir }, {
           openFaults: {
             onStep(current) {
               if (current === step) throw new Error(`injected open fault at ${step}`);
@@ -224,8 +223,7 @@ describe('SqliteLocalTaskJournal', () => {
     it('preserves a typed barrier failure and does not quarantine when handle cleanup cannot be proven', async () => {
       const storeDir = await tmpStore('byok-journal-open-cleanup-failure-');
       expect(() =>
-        new SqliteLocalTaskJournal({
-          storeDir,
+        openJournalWithFaultsForTests({ storeDir }, {
           openFaults: {
             onStep(step) {
               if (step === 'after-open') throw new Error('injected post-open failure');
@@ -419,6 +417,13 @@ describe('SqliteLocalTaskJournal', () => {
       ['a table this build does not have', 'CREATE TABLE local_storage_usage (category TEXT PRIMARY KEY)'],
       // `_` is a LIKE wildcard, so NOT LIKE 'sqlite_%' would not see this table (#2318).
       ['a user table named like an SQLite one', 'CREATE TABLE sqliteX_notes (v TEXT)'],
+      // A Host's own index, trigger or view in the journal file (#2356).
+      ['a Host index', 'CREATE INDEX host_terminal_state ON journal_terminal (truth_state)'],
+      ['a Host trigger', 'CREATE TRIGGER host_task_audit AFTER INSERT ON journal_task BEGIN SELECT 1; END'],
+      ['a Host view', 'CREATE VIEW host_tasks AS SELECT task_id FROM journal_task'],
+      // An index this build creates that is missing, or whose definition differs (#2356).
+      ['a journal without one of its indexes', 'DROP INDEX journal_envelope_seq'],
+      ['a journal index with another definition', 'DROP INDEX journal_terminal_retention; CREATE INDEX journal_terminal_retention ON journal_terminal (updated_at)'],
     ])('refuses %s before any write, leaving the file and its directory unchanged', async (_label, reshape) => {
       const storeDir = await tmpStore();
       const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
@@ -692,7 +697,7 @@ describe('SqliteLocalTaskJournal', () => {
     const refused = terminal('refused-terminal');
     const replacement = terminal('replacement-terminal', 'failed', '2026-08-07T00:00:09.000Z');
 
-    async function refusedJournal(options: Partial<ConstructorParameters<typeof SqliteLocalTaskJournal>[0]> = {}) {
+    async function refusedJournal(options: Partial<SqliteLocalTaskJournalOptions> & JournalTestFaults = {}) {
       const storeDir = await tmpStore();
       const journal = build(storeDir, options);
       await journal.appendEnvelope(envelopeRecord());
@@ -839,6 +844,77 @@ describe('SqliteLocalTaskJournal', () => {
 
       expect(await journal.listRecoverable()).toEqual([]);
       expect(countRows(storeDir, 'journal_task')).toBe(1);
+    });
+  });
+
+  describe('worker thread (#2332)', () => {
+    function offer(n: number): ReceivedEnvelopeRecord {
+      const bytes = JSON.stringify({ v: 1, id: `env-${n}`, type: 'task.offer', task_id: `task-${n}` });
+      return envelopeRecord({ envelopeId: `env-${n}`, taskId: `task-${n}`, seq: n, bytes, bytesHash: journalHash(bytes) });
+    }
+
+    // Appends 2-4 are called while the worker waits inside batch 1's COMMIT, so they form the next batch.
+    function batchBehindFirstCommit(storeDir: string, atStep: (step: JournalFaultStep, commits: number) => void) {
+      const steps: JournalFaultStep[] = [];
+      let behind: Array<Promise<unknown>> = [];
+      const journal = build(storeDir, {
+        faults: {
+          onStep(step) {
+            if (step !== 'append:before-commit' && step !== 'batch:commit') return;
+            steps.push(step);
+            const commits = steps.filter((seen) => seen === 'batch:commit').length;
+            if (step === 'batch:commit' && commits === 1) behind = [2, 3, 4].map((n) => journal.appendEnvelope(offer(n)));
+            atStep(step, commits);
+          },
+        },
+      });
+      const first = journal.appendEnvelope(offer(1));
+      return { journal, steps, settle: async () => [await Promise.allSettled([first]), await Promise.allSettled(behind)].flat() };
+    }
+
+    it('commits the writes queued behind a commit in one COMMIT, rolling back only the write that failed', async () => {
+      const storeDir = await tmpStore();
+      let ran = 0;
+      const { steps, settle } = batchBehindFirstCommit(storeDir, (step) => {
+        if (step === 'append:before-commit' && ++ran === 2) throw new Error('injected fault in write 2');
+      });
+      expect((await settle()).map((result) => result.status)).toEqual(['fulfilled', 'rejected', 'fulfilled', 'fulfilled']);
+      expect(steps).toEqual(['append:before-commit', 'batch:commit', 'append:before-commit', 'append:before-commit', 'append:before-commit', 'batch:commit']);
+      expect(readRows(storeDir, 'SELECT envelope_id FROM journal_envelope ORDER BY envelope_id').map((row) => row.envelope_id)).toEqual(['env-1', 'env-3', 'env-4']);
+    });
+
+    it('rejects every write of a batch whose COMMIT fails and keeps none of them', async () => {
+      const storeDir = await tmpStore();
+      const { journal, settle } = batchBehindFirstCommit(storeDir, (step, commits) => {
+        if (step === 'batch:commit' && commits === 2) throw new Error('injected COMMIT failure');
+      });
+      expect((await settle()).map((result) => result.status)).toEqual(['fulfilled', 'rejected', 'rejected', 'rejected']);
+      for (const [table, key] of [['journal_envelope', 'envelope_id'], ['journal_task', 'task_id'], ['journal_idempotency', 'task_id']] as const) {
+        expect(readRows(storeDir, `SELECT ${key} AS k FROM ${table}`).map((row) => row.k), table).toEqual([table === 'journal_envelope' ? 'env-1' : 'task-1']);
+      }
+      // The failed batch leaves the journal open: the next write commits.
+      await expect(journal.appendEnvelope(offer(5))).resolves.toMatchObject({ created: true });
+    });
+
+    it('fails closed when the worker ends mid-commit: nothing in flight or queued counts as durable, and the handle barrier holds', async () => {
+      const storeDir = await tmpStore();
+      const journal = build(storeDir, { faults: { exitWorkerAt: 'append:before-commit' } });
+      const inFlight = journal.appendEnvelope(offer(1));
+      const queued = journal.appendEnvelope(offer(2));
+      await expect(inFlight).rejects.toBeInstanceOf(JournalUnavailableError);
+      await expect(queued).rejects.toBeInstanceOf(JournalUnavailableError);
+      // No restart behind the caller's back: every later operation fails the same way.
+      await expect(journal.readTask('task-1', IDENTITY)).rejects.toBeInstanceOf(JournalUnavailableError);
+      await expect(journal.close()).rejects.toBeInstanceOf(JournalHandleCleanupError);
+      expect(countRows(storeDir, 'journal_envelope')).toBe(0);
+    });
+
+    it('fails closed within its bound when the worker never answers the open handshake', async () => {
+      const storeDir = await tmpStore();
+      const started = performance.now();
+      // A worker that never answered may still hold a handle, so the barrier holds as on close().
+      expect(() => build(storeDir, { faults: { exitWorkerAt: 'open', workerOpenTimeoutMs: 200 } })).toThrow(JournalHandleCleanupError);
+      expect(performance.now() - started).toBeLessThan(5_000);
     });
   });
 

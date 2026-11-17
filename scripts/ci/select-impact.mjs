@@ -777,6 +777,11 @@ export function selectImpact(paths, context = {}) {
     if (path === 'packages/client/scripts/build-pi-jiti-seed.mjs') {
       dirs.add('packages/client'); families.add('npm-release-pack'); families.add('packaging-consistency'); continue;
     }
+    // #2332: the journal worker source generator. tsup and vitest define its bundle, which ships inside every client
+    // bundle and compiled launcher, and the compiled execution-recovery fixtures pass it to `bun build`.
+    if (path === 'packages/client/scripts/journal-worker-source.ts') {
+      dirs.add('packages/client'); families.add('npm-release-pack'); families.add('packageability-smoke'); families.add('execution-recovery-native'); continue;
+    }
     if (path === 'packages/keys/tsup.config.ts') { dirs.add('packages/keys'); families.add('npm-release-pack'); continue; }
     // #654: the core sealed-payload subpath entry.
     if (path === 'packages/core/tsup.config.ts') { dirs.add('packages/core'); families.add('npm-release-pack'); continue; }

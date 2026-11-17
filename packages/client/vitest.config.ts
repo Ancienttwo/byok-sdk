@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vitest/config';
+import { journalWorkerSource } from './scripts/journal-worker-source';
 
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
 if (typeof manifest.version !== 'string') throw new Error('packages/client/package.json must declare a string version');
@@ -11,6 +12,7 @@ if (typeof manifest.version !== 'string') throw new Error('packages/client/packa
 export default defineConfig({
   define: {
     __BYOK_CLIENT_PACKAGE_VERSION__: JSON.stringify(manifest.version),
+    __BYOK_JOURNAL_WORKER_SOURCE__: JSON.stringify(journalWorkerSource()),
   },
   test: {
     // One short per-run TMPDIR, removed in teardown; see scripts/vitest/tmp-root.mjs.
