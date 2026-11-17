@@ -1014,6 +1014,33 @@ because they were not idle. `byok-agent status` and `byok-agent tasks` skip
 `retention-sweep` lines an older daemon wrote to `audit.jsonl`, because they lack
 `busyHomes`; the file stays on disk and every other line still renders.
 
+### Local task journal commits on a worker thread (#2332)
+
+Sources: [#2332], [#2344]. Manifest entries: `journal-worker-group-commit`, `journal-fault-seam-exit-worker`.
+
+`SqliteLocalTaskJournal` runs every SQLite commit on a worker thread, so
+`synchronous=FULL` fsyncs no longer block the daemon's event loop. An operation
+still resolves only after the commit that contains it, so durability is
+unchanged. A daemon built from `createDaemon` needs no action. A Host that calls
+the journal directly:
+
+- reads `JournalReceipt.committedAt`, terminal and recovery times, and
+  `measuredAt` as the time the operation was called, not the time it reached
+  disk. One FIFO worker commits in call order, so the times stay monotonic;
+- retries each rejected write. Writes queued behind a running commit share the
+  next one, and a failed `COMMIT` rejects every write in that batch;
+- treats a worker that ended without closing the database as a closed journal.
+  Every pending and later operation rejects with `JournalUnavailableError`, the
+  worker is never restarted, and `close()` then rejects with
+  `JournalHandleCleanupError`: keep the store lease, as for any handle that is
+  not proven released. A worker that does not open within 30 s fails the
+  constructor the same way;
+- allows worker threads. A Node process run with `--permission` and without
+  `--allow-worker` cannot open the journal.
+
+`JournalFaultSeam` gains the test-only fields `exitWorkerAt` and
+`workerOpenTimeoutMs`. Production never supplies `faults`.
+
 ### Other manifest entries
 
 These entries linked to separate docs/issues; include them in the Host review too.
@@ -1086,6 +1113,16 @@ for that execution, and blocks later Grok starts. The user moves the file back
 to their Grok home or deletes it and logs in again. The SDK never restores or
 deletes it. Source: [#2258]; entry `grok-agent-user-context`.
 
+### Bun on Windows keeps SQLite files open after close
+
+A Bun-compiled daemon or Host on Windows keeps a SQLite database's files open
+after `close()` until garbage collection, for every connection on which it
+prepared a statement. Node releases them at `close()`. Deleting or renaming a
+store that the same process has just closed can fail with `EBUSY`; a separate
+process after the daemon has exited is not affected. The journal worker's own
+connection is released when its thread exits. Tracked in [#2347], with no fix
+in this release.
+
 ### Integration and adoption evidence
 
 Verify the candidate's store refusals, pairing and v6 handshake halts against
@@ -1137,3 +1174,6 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384
 [#2319]: https://github.com/Ancienttwo/byok-sdk/pull/2319
 [#2334]: https://github.com/Ancienttwo/byok-sdk/issues/2334
+[#2332]: https://github.com/Ancienttwo/byok-sdk/issues/2332
+[#2344]: https://github.com/Ancienttwo/byok-sdk/pull/2344
+[#2347]: https://github.com/Ancienttwo/byok-sdk/issues/2347
