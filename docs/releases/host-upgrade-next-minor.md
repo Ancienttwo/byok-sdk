@@ -41,7 +41,7 @@ Missing dedicated entries are stated explicitly.
 For each existing Hyperdrive configuration used by the SDK, run
 `wrangler hyperdrive update <id> --caching-disabled` before deployment. See
 [Hyperdrive query caching](../../packages/cloud-dataplane/README.md#hyperdrive-query-caching).
-Source: #794. No dedicated manifest entry.
+Sources: [#2373]. No dedicated manifest entry.
 
 ### Retired compatibility paths
 
@@ -1367,6 +1367,7 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2349]: https://github.com/Ancienttwo/byok-sdk/issues/2349
 [#2361]: https://github.com/Ancienttwo/byok-sdk/issues/2361
 [#2363]: https://github.com/Ancienttwo/byok-sdk/issues/2363
+[#2373]: https://github.com/Ancienttwo/byok-sdk/pull/2373
 [#2356]: https://github.com/Ancienttwo/byok-sdk/issues/2356
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384
 [#2319]: https://github.com/Ancienttwo/byok-sdk/pull/2319
