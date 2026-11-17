@@ -627,7 +627,7 @@
     {
       "id": "agy-model-confirmation-deadline",
       "impact": "breaking",
-      "summary": "@byok-sdk/client agy starts that request a model may now wait up to the 30 s request deadline (packages/client/vendor/oar/bc1b2ac/runtimes/antigravity/session.ts:42) before failing a model mismatch; a matching update still confirms the switch immediately. A conflicting config_option_update followed by the requested model now starts the task instead of failing, and a real mismatch reaches task.fail about 30 s after the switch instead of immediately. A Host start timeout shorter than 30 s now fires first and never receives the ModelConfirmationError failure; allow at least the 30 s deadline for agy starts that request a model.",
+      "summary": "@byok-sdk/client agy starts that request a model may now wait up to the 30 s request deadline (packages/client/vendor/oar/bc1b2ac/runtimes/antigravity/session.ts:43) before failing a model mismatch; a matching update still confirms the switch immediately. A conflicting config_option_update followed by the requested model now starts the task instead of failing, and a real mismatch reaches task.fail about 30 s after the switch instead of immediately. A Host start timeout shorter than 30 s now fires first and never receives the ModelConfirmationError failure; allow at least the 30 s deadline for agy starts that request a model.",
       "migration": "docs/releases/host-upgrade-next-minor.md#agy-model-mismatches-wait-up-to-the-request-deadline",
       "items": [
         "behavior:agy-model-confirmation-deadline"

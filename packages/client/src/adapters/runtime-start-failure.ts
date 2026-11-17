@@ -34,3 +34,17 @@ export function oarStartClassifier(classes: OarStartErrorClasses): RuntimeStartC
     return undefined;
   };
 }
+
+/**
+ * agy refuses a model selector its native catalog does not resolve (an unknown
+ * model, an ambiguous model-effort selector, or an effort outside that model's
+ * menu) before any model request, with the catalog it read (OAR 0.111, #2361).
+ * Earlier the request itself was refused as `model_unavailable`; the start keeps
+ * that outcome. A confirmation failure without a catalog stays as it was.
+ */
+export function agyStartClassifier(classes: OarStartErrorClasses): RuntimeStartClassifier {
+  const oar = oarStartClassifier(classes);
+  return (error) => error instanceof classes.ModelConfirmationError && error.catalogSelectorIds !== undefined
+    ? { retry: 'non-retryable', failure: { class: 'model_unavailable' } }
+    : oar(error);
+}

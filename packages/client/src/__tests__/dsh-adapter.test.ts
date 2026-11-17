@@ -189,6 +189,10 @@ describe('DshAdapter sessions', () => {
     const [row] = all.find((fact) => fact.kind === 'start')!.overlay[1].insert;
     expect(row).toMatchObject({ name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'byokagentresult', command: '/usr/bin/env', args: ['node', 'helper.mjs'], cwd: workspaceDir } });
     expect(session.sessionRef).toBe(all.find((fact) => fact.method === 'open')!.request.sessionId);
+    // The vendored dsh session can carry these since OAR 0.111; the SDK declares none of them and passes none (ADR-051 §3, #2361).
+    const opened = all.find((fact) => fact.method === 'open')!.request;
+    for (const option of ['disallowedTools', 'systemPrompt', 'appendSystemPrompt']) expect(opened).not.toHaveProperty(option);
+    expect(all.some((fact) => fact.method === 'name')).toBe(false);
   });
 
   it.each([
