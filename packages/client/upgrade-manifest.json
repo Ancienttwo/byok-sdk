@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "023820b20a522aabecb3795bcc9c5b7d4534705978a9387e350563a75955077d"
+    "snapshotSha256": "9109160ba7471249ede3e61e6aef570c8d575220dd528e690695f437227a0ae5"
   },
   "configFields": {
     "status": "tracked",
@@ -1702,9 +1702,9 @@
       "migration": "docs/releases/host-upgrade-next-minor.md#missing-agent-message-consumer-is-a-typed-cloud-error",
       "items": [
         "behavior:cloud-agent-message-consumer-missing-code"
-        ]
-      },
-      {
+      ]
+    },
+    {
       "id": "retention-sweep-busy-homes",
       "impact": "additive",
       "summary": "@byok-sdk/client SweepReport gains busyHomes: the number of distinct Agent homes a retention pass skipped at least once because they were not idle (an execution lease held the home, or it held a commit copy). It is a count only and carries no home name or path. status().storage.lastSweep, the retention-sweep DaemonEvent and its audit record carry it. A Host that builds a SweepReport itself adds the field; no other Host action.",
@@ -2145,6 +2145,11 @@
       "item": "export:@byok-sdk/client#ServiceExitDisposition",
       "change": "removed",
       "entry": "remove-service-exit-disposition"
+    },
+    {
+      "item": "export:@byok-sdk/client#SweepReport",
+      "change": "changed",
+      "entry": "retention-sweep-busy-homes"
     },
     {
       "item": "export:@byok-sdk/client#TOOL_AUTHORIZATION_MODES",
