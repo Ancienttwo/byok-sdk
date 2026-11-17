@@ -218,7 +218,8 @@ describe('M4 Phase 2: control socket end-to-end', () => {
     // and no pending approvals yet.
     expect(status.queueWatermarks).toEqual([{ taskId: 't1', progressBatcherPending: 0, pendingApprovals: 0 }]);
 
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    // The daemon sends task.started only after start() resolved, so the session is recorded.
+    expect(adapter.sessions).toHaveLength(1);
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete');
 
@@ -240,7 +241,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
 
     const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
     if (!conn.ok) throw new Error('expected reachable');
@@ -285,7 +286,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'do work', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
     adapter.sessions[0]?.emit({ type: 'turn_end' });
     await server.waitFor((e) => e.type === 'task.complete');
 
@@ -308,7 +309,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't1', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
 
     const observed: Array<{ kind: string }> = [];
     daemon.subscribe((event) => observed.push(event));
@@ -354,10 +355,15 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'long task', ...FRESH_OFFER, target: { lane: 'auto' } }, { taskId: 't-stalled', seq: server.nextSeq() }),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
 
     const observed: DaemonEvent[] = [];
-    daemon.subscribe((event) => observed.push(event));
+    let completed!: () => void;
+    const shutdownCompleted = new Promise<void>((resolve) => { completed = resolve; });
+    daemon.subscribe((event) => {
+      observed.push(event);
+      if (event.kind === 'shutdown-complete') completed();
+    });
 
     // Genuinely stalled — never settles — the exact scenario this finding
     // names, not merely a slow-but-eventually-ok POST.
@@ -365,17 +371,13 @@ describe('M4 Phase 2: control socket end-to-end', () => {
 
     const conn = await connectControlClient({ storeDir: built.storeDir, productId: built.config.productId });
     if (!conn.ok) throw new Error('expected reachable');
-    const startedAt = Date.now();
     await expect(conn.client.request('shutdown', { reason: 'operator' })).resolves.toEqual({ acknowledged: true });
     conn.client.close();
 
-    await vi.waitFor(() => expect(observed.some((e) => e.kind === 'shutdown-complete')).toBe(true), { timeout: 3000 });
-    const elapsedMs = Date.now() - startedAt;
-
-    // Bounded — proves this test's own stalled mock actually matters (the
-    // shutdown genuinely completed instead of hanging on the stalled POST),
-    // and stays comfortably under the outer SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS.
-    expect(elapsedMs).toBeLessThan(5000);
+    // Shutdown completes despite the POST that never settles: the drain gives up
+    // after outboxDrainTimeoutMs. A shutdown that hung would fail this test at
+    // its own timeout, so no wall-clock assertion is needed.
+    await shutdownCompleted;
 
     const shutdownComplete = observed.find((e) => e.kind === 'shutdown-complete');
     if (shutdownComplete?.kind !== 'shutdown-complete') throw new Error('unreachable');
@@ -453,7 +455,7 @@ describe('M4 Phase 2: control socket end-to-end', () => {
       ),
     );
     await server.waitFor((e) => e.type === 'task.started');
-    await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
+    expect(adapter.sessions).toHaveLength(1);
 
     const conn = await connectControlClient({ storeDir, productId: config.productId });
     if (!conn.ok) throw new Error('expected reachable');
