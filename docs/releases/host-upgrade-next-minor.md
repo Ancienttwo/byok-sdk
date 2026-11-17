@@ -288,7 +288,7 @@ No new manifest entry: this carries forward the
 
 ### SQLite stores decide their format before any write (#2286)
 
-Sources: [#2295], [#2309], [#2316], [#2318]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`, `server-sqlite-format-before-write`.
+Sources: [#2295], [#2309], [#2316], [#2318], [#2356]. Manifest entries: `core-sqlite-node-entry`, `sqlite-stores-refuse-before-write`, `client-journal-exact-format`, `server-sqlite-format-before-write`, `client-journal-refuses-host-objects`.
 
 SQLite stores check the unchanged main file before writable open, pragmas or
 DDL. Refusal preserves bytes and creates no sidecars, except for
@@ -305,7 +305,8 @@ opens, including paths past `MAX_PATH`; `:memory:` remains unchanged.
 SQLite's own; use it instead of `name NOT LIKE 'sqlite_%'`, which also hides
 objects named `sqliteX…` because `_` matches any character in `LIKE`.
 
-- Local task journals must have exactly the current tables and columns. Old
+- Local task journals must have exactly the current tables and columns, and
+  no index, trigger or view this build does not create. Old
   `local_artifact_ref`, `local_cleanup_candidate` or `local_storage_usage`
   tables cause `JournalUnavailableError`; they are no longer dropped. Format
   refusals and read-only open failures stay in place. Unreadable SQLite files
@@ -321,10 +322,10 @@ objects named `sqliteX…` because `_` matches any character in `LIKE`.
 - A durable replica with a different pi-durable schema is refused with
   `DurableReplicaFormatError`, without migration. A replica lock path holding
   another database is also refused without writing it.
-- The embedded server's store file holds only the SDK's objects: a Host
-  table, index, trigger or view in it is refused as above. The local task
-  journal refuses a Host table but does not check indexes, triggers or views.
-  Keep every Host object in a separate database file that the Host opens itself.
+- The embedded server's store file and the local task journal hold only the
+  SDK's objects: a Host table, index, trigger or view in either is refused as
+  above, the journal's with `JournalUnavailableError` (#2356). Keep every Host
+  object in a separate database file that the Host opens itself.
 - Released journals and replicas are current. Export or preserve refused
   stores before starting the candidate.
 - Copy-and-own Desktop `HostStore`, basic Clarification and goal/btw stores,
@@ -1173,6 +1174,7 @@ passed. Sources: [#2295], [#2309], [#2287], [#2303].
 [#2316]: https://github.com/Ancienttwo/byok-sdk/pull/2316
 [#2318]: https://github.com/Ancienttwo/byok-sdk/issues/2318
 [#2349]: https://github.com/Ancienttwo/byok-sdk/issues/2349
+[#2356]: https://github.com/Ancienttwo/byok-sdk/issues/2356
 [AiphaBee #1384]: https://github.com/Ancienttwo/aiphabee/issues/1384
 [#2319]: https://github.com/Ancienttwo/byok-sdk/pull/2319
 [#2334]: https://github.com/Ancienttwo/byok-sdk/issues/2334

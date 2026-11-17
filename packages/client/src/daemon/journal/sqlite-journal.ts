@@ -310,10 +310,12 @@ CREATE INDEX IF NOT EXISTS journal_terminal_retention ON journal_terminal (truth
 `;
 
 /**
- * The tables and columns of a current journal, read from {@link SCHEMA} itself
- * so the format check and the schema cannot drift apart.
+ * A current journal's tables with their columns, and its indexes, triggers and
+ * views with their definitions, read from {@link SCHEMA} and
+ * {@link ENVELOPE_TASK_INDEX} themselves so the format check and the schema
+ * cannot drift apart.
  */
-let currentJournalTables: ReadonlyMap<string, string> | undefined;
+let currentJournalFormat: { readonly tables: ReadonlyMap<string, string>; readonly objects: ReadonlyMap<string, string> } | undefined;
 
 /** `table -> sorted column names` for every user table in `db`. */
 function journalTables(db: DatabaseSync): Map<string, string> {
@@ -326,17 +328,25 @@ function journalTables(db: DatabaseSync): Map<string, string> {
   return tables;
 }
 
-function expectedJournalTables(): ReadonlyMap<string, string> {
-  if (currentJournalTables) return currentJournalTables;
+/** `type name -> table and stored definition` for every user index, trigger and view in `db`. */
+function journalObjects(db: DatabaseSync): Map<string, string> {
+  const rows = db.prepare(`SELECT type, name, tbl_name, sql FROM sqlite_schema WHERE type <> 'table' AND ${SQLITE_USER_OBJECT}`)
+    .all() as Array<{ type: string; name: string; tbl_name: string; sql: string | null }>;
+  return new Map(rows.map((row) => [`${row.type} ${row.name}`, `${row.tbl_name}\n${String(row.sql)}`]));
+}
+
+function expectedJournalFormat(): NonNullable<typeof currentJournalFormat> {
+  if (currentJournalFormat) return currentJournalFormat;
   const { DatabaseSync } = loadSqliteModule();
   const db = new DatabaseSync(':memory:');
   try {
     db.exec(SCHEMA);
-    currentJournalTables = journalTables(db);
+    db.exec(ENVELOPE_TASK_INDEX);
+    currentJournalFormat = { tables: journalTables(db), objects: journalObjects(db) };
   } finally {
     db.close();
   }
-  return currentJournalTables;
+  return currentJournalFormat;
 }
 
 const PRESERVE = 'preserve/export this journal and resolve it before starting this build';
@@ -346,8 +356,11 @@ const PRESERVE = 'preserve/export this journal and resolve it before starting th
  * opens it for writing (through `readSqliteFileUnchanged`) and again on the
  * writable connection, where a not-yet-checkpointed WAL is visible. There is no
  * version row: a current journal is one whose tables and columns are exactly
- * {@link SCHEMA}'s, and a file with no schema objects is new. Anything else is
- * refused with {@link JournalUnavailableError} and left as it is.
+ * {@link SCHEMA}'s and whose every index, trigger and view is one this build
+ * creates, with the same definition (#2356). One of those that is missing is
+ * created by the open that follows. A file with no schema objects is new.
+ * Anything else, a Host's own object included, is refused with
+ * {@link JournalUnavailableError} and left as it is.
  */
 function assertCurrentJournalFormat(db: DatabaseSync): 'empty' | 'current' {
   const objects = db.prepare(`SELECT count(*) AS n FROM sqlite_schema WHERE ${SQLITE_USER_OBJECT}`).get() as { n: number };
@@ -363,10 +376,14 @@ function assertCurrentJournalFormat(db: DatabaseSync): 'empty' | 'current' {
   if (envelope !== undefined && !envelope.split(',').includes('withheld_bytes')) {
     throw new JournalUnavailableError(`journal written before the withheld-offer column (#826); ${PRESERVE}`);
   }
-  const expected = expectedJournalTables();
-  const differs = [...new Set([...expected.keys(), ...tables.keys()])].filter((name) => expected.get(name) !== tables.get(name));
+  const expected = expectedJournalFormat();
+  const differs = [...new Set([...expected.tables.keys(), ...tables.keys()])].filter((name) => expected.tables.get(name) !== tables.get(name));
   if (differs.length > 0) {
     throw new JournalUnavailableError(`journal tables ${differs.sort().join(', ')} do not match this build's journal format; ${PRESERVE}`);
+  }
+  const foreign = [...journalObjects(db)].filter(([object, definition]) => expected.objects.get(object) !== definition).map(([object]) => object);
+  if (foreign.length > 0) {
+    throw new JournalUnavailableError(`journal objects ${foreign.sort().join(', ')} do not match this build's journal format; ${PRESERVE}`);
   }
   return 'current';
 }
