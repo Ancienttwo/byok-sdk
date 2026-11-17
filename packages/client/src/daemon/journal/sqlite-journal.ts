@@ -351,14 +351,17 @@ function expectedJournalFormat(): NonNullable<typeof currentJournalFormat> {
 
 const PRESERVE = 'preserve/export this journal and resolve it before starting this build';
 
+/** The one object a current journal may lack: builds before 0.43.0 did not create it, and every open does. */
+const OPTIONAL_JOURNAL_OBJECT = 'index journal_envelope_task';
+
 /**
  * The journal's one format authority, run on the main file before anything
  * opens it for writing (through `readSqliteFileUnchanged`) and again on the
  * writable connection, where a not-yet-checkpointed WAL is visible. There is no
  * version row: a current journal is one whose tables and columns are exactly
- * {@link SCHEMA}'s and whose every index, trigger and view is one this build
- * creates, with the same definition (#2356). One of those that is missing is
- * created by the open that follows. A file with no schema objects is new.
+ * {@link SCHEMA}'s and whose indexes, triggers and views are exactly the ones
+ * this build creates, with the same definitions (#2356), except that
+ * {@link OPTIONAL_JOURNAL_OBJECT} may be missing. A file with no schema objects is new.
  * Anything else, a Host's own object included, is refused with
  * {@link JournalUnavailableError} and left as it is.
  */
@@ -381,9 +384,11 @@ function assertCurrentJournalFormat(db: DatabaseSync): 'empty' | 'current' {
   if (differs.length > 0) {
     throw new JournalUnavailableError(`journal tables ${differs.sort().join(', ')} do not match this build's journal format; ${PRESERVE}`);
   }
-  const foreign = [...journalObjects(db)].filter(([object, definition]) => expected.objects.get(object) !== definition).map(([object]) => object);
-  if (foreign.length > 0) {
-    throw new JournalUnavailableError(`journal objects ${foreign.sort().join(', ')} do not match this build's journal format; ${PRESERVE}`);
+  const found = journalObjects(db);
+  const mismatched = [...new Set([...expected.objects.keys(), ...found.keys()])]
+    .filter((object) => expected.objects.get(object) !== found.get(object) && !(object === OPTIONAL_JOURNAL_OBJECT && !found.has(object)));
+  if (mismatched.length > 0) {
+    throw new JournalUnavailableError(`journal objects ${mismatched.sort().join(', ')} do not match this build's journal format; ${PRESERVE}`);
   }
   return 'current';
 }

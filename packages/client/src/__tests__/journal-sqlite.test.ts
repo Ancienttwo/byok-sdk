@@ -416,6 +416,9 @@ describe('SqliteLocalTaskJournal', () => {
       ['a Host index', 'CREATE INDEX host_terminal_state ON journal_terminal (truth_state)'],
       ['a Host trigger', 'CREATE TRIGGER host_task_audit AFTER INSERT ON journal_task BEGIN SELECT 1; END'],
       ['a Host view', 'CREATE VIEW host_tasks AS SELECT task_id FROM journal_task'],
+      // An index this build creates that is missing, or whose definition differs (#2356).
+      ['a journal without one of its indexes', 'DROP INDEX journal_envelope_seq'],
+      ['a journal index with another definition', 'DROP INDEX journal_terminal_retention; CREATE INDEX journal_terminal_retention ON journal_terminal (updated_at)'],
     ])('refuses %s before any write, leaving the file and its directory unchanged', async (_label, reshape) => {
       const storeDir = await tmpStore();
       const dbPath = path.join(storeDir, JOURNAL_DB_FILENAME);
