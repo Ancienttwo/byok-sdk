@@ -77,6 +77,9 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/609f347/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
     ['../../vendor/oar/609f347/runtimes/opencode/session.js', [['opencodeSession', 'opencodeSession']]],
     ['../../vendor/oar/609f347/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
+    ['../../vendor/oar/609f347/runtimes/grok/list-models.js', [['grokListModels', 'grokListModels']]],
+    ['../../vendor/oar/609f347/runtimes/grok/account-usage.js', [['grokAccountUsage', 'grokAccountUsage']]],
+    ['../../vendor/oar/609f347/runtimes/antigravity/list-models.js', [['antigravityListModels', 'antigravityListModels']]],
   ]);
 });
 

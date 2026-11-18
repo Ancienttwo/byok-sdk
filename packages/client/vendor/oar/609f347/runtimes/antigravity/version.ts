@@ -12,13 +12,13 @@ export function readAntigravityVersion(stdout: string): string | undefined {
   return /^(\d+\.\d+\.\d+(?:-[A-Za-z\d.-]+)?)$/u.exec(stdout.trim())?.[1];
 }
 
-type VersionRefusal = Omit<VersionUnsupportedInstallation, "via" | "command">;
+type VersionRefusal = Omit<VersionUnsupportedInstallation, "via" | "command" | "requiredVersion"> & { readonly requiredVersion: string };
 
 export function antigravityVersionRefusal(version: string | undefined): VersionRefusal | null {
   if (version !== undefined && /^\d+\.\d+\.\d+$/u.test(version) && (compareSemver(version, ANTIGRAVITY_MINIMUM_VERSION) ?? -1) >= 0) { return null; }
   return {
     kind: "unsupported" as const, code: "version_unsupported" as const,
-    reason: `Antigravity requires a stable agy CLI ${ANTIGRAVITY_MINIMUM_VERSION} or newer with native ACP; this installation reports ${version ?? "an unrecognized CLI version"}`,
+    reason: `Antigravity requires a stable agy CLI ${ANTIGRAVITY_MINIMUM_VERSION} or newer with native ACP; this installation reports ${version === undefined ? "an unrecognized CLI version" : readAntigravityVersion(version) ?? "an unrecognized CLI version"}`,
     ...(version === undefined || readAntigravityVersion(version) === undefined ? {} : { installedVersion: version }), requiredVersion: ANTIGRAVITY_MINIMUM_VERSION,
   };
 }

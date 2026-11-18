@@ -110,7 +110,7 @@ export type CheckVendorRecords = Assert<Equal<ReturnType<CodexAdapterSession['re
 export type CheckVendorHook = Assert<Equal<NonNullable<VendorHooks['onRecord']>, (record: RawEvent) => void>>;
 
 // Check the real transport, env producer, and record consumer too.
-export type CheckSpawnParameters = Assert<Equal<Parameters<typeof spawnOwnedLineProcess>, Parameters<SpawnLineProcess>>>;
+export type CheckSpawnParameters = Assert<Assignable<typeof spawnOwnedLineProcess, SpawnLineProcess>>;
 export type CheckVendorSpawnParameter = Assert<Equal<VendorArgs[0], SpawnLineProcess>>;
 export type CheckSpawn = Assert<Assignable<typeof spawnOwnedLineProcess, SpawnLineProcess>>;
 export type CheckLineProcess = Assert<Equal<
@@ -172,7 +172,7 @@ type AcpBridgeSession = {
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'grokSession' | 'antigravitySession' | 'opencodeSession'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'grokSession' | 'antigravitySession' | 'opencodeSession' | 'grokListModels' | 'grokAccountUsage' | 'antigravityListModels'>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckAcpUnsupportedOption = Assert<Assignable<VendorUnsupportedOptionError, AcpBridge.UnsupportedOptionError>>;
@@ -326,3 +326,38 @@ import type { Runtime as VendorRuntime } from '../../packages/client/vendor/oar/
 export type CheckRuntimeMinVersionOmitted = Assert<Equal<VendorRuntime['minVersion'], string | undefined>>;
 // The pre-open declaration is intentionally deferred until the SDK consumes it.
 export type CheckRuntimeSessionCapabilitiesOmitted = Assert<Equal<VendorRuntime['sessionCapabilities'], ((installation: import('../../packages/client/vendor/oar/609f347/contracts/installation.js').AvailableInstallation) => import('../../packages/client/vendor/oar/609f347/contracts/runtime.js').SessionCapabilityDeclaration) | undefined>>;
+
+// The SDK supplies both the filtered environment and every reader transport.
+import type * as Readers from '../../packages/client/src/runtime/oar-readers.js';
+import type { OwnedReaderOptions as SdkReaderOptions } from '../../packages/client/src/runtime/oar-reader-contract.js';
+import type { OwnedReaderOptions as VendorReaderOptions, ListModelsResult } from '../../packages/client/vendor/oar/609f347/contracts/list-models.js';
+import type { AccountUsageSnapshot } from '../../packages/client/vendor/oar/609f347/contracts/account-usage.js';
+import type { RuntimeAccountUsage, RuntimeModelCatalog } from '../../packages/client/src/runtime/runtime-reader-types.js';
+import type { codexListModels as V_codexListModels } from '../../packages/client/vendor/oar/609f347/runtimes/codex/list-models.js';
+export type Check_codexListModels = Assert<Assignable<typeof V_codexListModels, typeof Readers.codexListModels>>;
+import type { codexAccountUsage as V_codexAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/codex/account-usage.js';
+export type Check_codexAccountUsage = Assert<Assignable<typeof V_codexAccountUsage, typeof Readers.codexAccountUsage>>;
+import type { claudeListModels as V_claudeListModels } from '../../packages/client/vendor/oar/609f347/runtimes/claude/list-models.js';
+export type Check_claudeListModels = Assert<Assignable<typeof V_claudeListModels, typeof Readers.claudeListModels>>;
+import type { claudeAccountUsage as V_claudeAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/claude/account-usage.js';
+export type Check_claudeAccountUsage = Assert<Assignable<typeof V_claudeAccountUsage, typeof Readers.claudeAccountUsage>>;
+import type { dshListModels as V_dshListModels } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/list-models.js';
+export type Check_dshListModels = Assert<Assignable<typeof V_dshListModels, typeof Readers.dshListModels>>;
+import type { opencodeListModels as V_opencodeListModels } from '../../packages/client/vendor/oar/609f347/runtimes/opencode/list-models.js';
+export type Check_opencodeListModels = Assert<Assignable<typeof V_opencodeListModels, typeof Readers.opencodeListModels>>;
+import type { antigravityAccountUsage as V_antigravityAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/account-usage.js';
+export type Check_antigravityAccountUsage = Assert<Assignable<typeof V_antigravityAccountUsage, typeof Readers.antigravityAccountUsage>>;
+import type { antigravityVersionRefusal as V_antigravityVersionRefusal } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/version.js';
+export type Check_antigravityVersionRefusal = Assert<Assignable<typeof V_antigravityVersionRefusal, typeof Readers.antigravityVersionRefusal>>;
+import type { dshVersionUnsupported as V_dshVersionUnsupported } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/version.js';
+export type Check_dshVersionUnsupported = Assert<Assignable<typeof V_dshVersionUnsupported, typeof Readers.dshVersionUnsupported>>;
+import type { grokListModels as V_grokListModels } from '../../packages/client/vendor/oar/609f347/runtimes/grok/list-models.js';
+import type { grokAccountUsage as V_grokAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/grok/account-usage.js';
+import type { antigravityListModels as V_antigravityListModels } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/list-models.js';
+export type CheckGrokListModels = Assert<Assignable<typeof V_grokListModels, typeof AcpBridge.grokListModels>>;
+export type CheckGrokAccountUsage = Assert<Assignable<typeof V_grokAccountUsage, typeof AcpBridge.grokAccountUsage>>;
+export type CheckAntigravityListModels = Assert<Assignable<typeof V_antigravityListModels, typeof AcpBridge.antigravityListModels>>;
+export type CheckReaderEnvironment = Assert<Assignable<SdkReaderOptions, VendorReaderOptions>>;
+export type CheckModelCatalog = Assert<Equal<RuntimeModelCatalog, ListModelsResult>>;
+export type CheckUsageSnapshot = Assert<Assignable<AccountUsageSnapshot, RuntimeAccountUsage>>;
+export type CheckUsageKinds = Assert<Equal<AccountUsageSnapshot['kind'], RuntimeAccountUsage['kind']>>;

@@ -1,3 +1,4 @@
+// BYOK change: Modified from OAR 609f347 to omit untrusted version output and require the floor (Apache-2.0).
 import type { VersionUnsupportedInstallation } from "../../contracts/installation.js";
 
 /** The oldest release the native vendor suite ran against. A release above it still passes through the method inventory. */
@@ -45,12 +46,12 @@ export function compareSemver(left: string, right: string): number | null {
 export function dshVersionRefusal(version: string | undefined): string | null {
   if (version === undefined || version.length === 0) { return `DSH did not report a version; OAR requires ${DSH_MINIMUM_VERSION} or later`; }
   const order = compareSemver(version, DSH_MINIMUM_VERSION);
-  if (order === null) { return `DSH reported the unreadable version ${JSON.stringify(version)}; OAR requires ${DSH_MINIMUM_VERSION} or later`; }
+  if (order === null) { return `DSH reported an unreadable version; OAR requires ${DSH_MINIMUM_VERSION} or later`; }
   return order < 0 ? `DSH ${version} is below the supported floor; OAR requires ${DSH_MINIMUM_VERSION} or later` : null;
 }
 
 /** Structured reader refusal, using the same prerelease-aware floor as session open. */
-export function dshVersionUnsupported(version: string | undefined): Omit<VersionUnsupportedInstallation, "via" | "command"> | null {
+export function dshVersionUnsupported(version: string | undefined): (Omit<VersionUnsupportedInstallation, "via" | "command" | "requiredVersion"> & { readonly requiredVersion: string }) | null {
   const reason = dshVersionRefusal(version);
   return reason === null ? null : { kind: "unsupported" as const, code: "version_unsupported" as const, reason,
     ...(version === undefined || parse(version) === null ? {} : { installedVersion: version }), requiredVersion: DSH_MINIMUM_VERSION };

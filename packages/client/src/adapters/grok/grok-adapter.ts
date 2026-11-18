@@ -1,4 +1,6 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { modelLaneTarget, type RuntimeTaskInput } from '../../types.js';
@@ -132,6 +134,25 @@ export interface GrokAdapterOptions {
  * selection; the model is the adapter's `model` option.
  */
 export class GrokAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin).bin.command,
+      version: grokVersionToken,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => (await import('#byok-acp-runtime')).grokListModels(installation, reader));
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, async (installation, reader) => (await import('#byok-acp-runtime')).grokAccountUsage(installation, reader));
+  }
+
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'grok',
     supportsDispatchSelection: false,

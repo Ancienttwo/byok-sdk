@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.115.0",
-    "commit": "e83ca45d98363822b9d8f69e5b2cd02a8fe13f99"
+    "commit": "51c7555ab64d3d38abb6555fd63f76aed0f51801"
   },
   "release": {
     "ecosystem": "npm",
@@ -314,7 +314,7 @@
       "path": "runtimes/antigravity/version.ts",
       "sourcePath": "packages/oar/src/runtimes/antigravity/version.ts",
       "upstreamSha256": "d80c42d77c5e7077a635032a802262b0dc5dbe2d9ee18b5351a7549ee8a40c1b",
-      "vendoredSha256": "c43387a890e5bea44389eadce8d505d5e85f83668045fb53e321185c2616d1ce",
+      "vendoredSha256": "cb702cd2c4ddd98939b2e2cb2622d4f07cda6e30f7d4a3dff37de8d4d1b4839e",
       "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1."
     },
     {
@@ -385,7 +385,7 @@
       "path": "runtimes/codex/account-request.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/account-request.ts",
       "upstreamSha256": "01b74b2d7e55db56466fd5abb075c00870f9ec151f12eb2688c9330a624e71a4",
-      "vendoredSha256": "b8ba84991e8e8abbf9348ee8fca9c5bf38526fdca7c364dcf3e78af76169e240",
+      "vendoredSha256": "a518dbe31a63ab646b85ca5cc057b4d1314a876f0fcb1dfd974ca877be7370b7",
       "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1."
     },
     {
@@ -575,7 +575,7 @@
       "path": "runtimes/dsh/list-models.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/list-models.ts",
       "upstreamSha256": "981393b9625dbca82f19a88939c596b959525190a63c2ba2f80b1bb615e40ba5",
-      "vendoredSha256": "739a3e23c0e3a61533af8a94d8ccc093576a151a9a0cf6fc3be8270b3697fb3f",
+      "vendoredSha256": "cb0a738b34d91622c58d1a5cfdab3dc3956c464305d51426d3a6474f30661592",
       "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1."
     },
     {
@@ -607,7 +607,8 @@
       "path": "runtimes/dsh/version.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/version.ts",
       "upstreamSha256": "6465d198d1c256b44f488f578d80170745e5f36d8c75411b4c30fcdd9845c0a7",
-      "vendoredSha256": "6465d198d1c256b44f488f578d80170745e5f36d8c75411b4c30fcdd9845c0a7"
+      "vendoredSha256": "0e3114a9db0de8e5caa8c74d778e6ebb903a6ffc183d3db4e45d41a19b5a6e1c",
+      "delta": "Structured floor refusal without untrusted native version text. Upstream: draft D1."
     },
     {
       "path": "runtimes/grok/account-usage.ts",

@@ -1,5 +1,9 @@
 import type { spawnOwnedLineProcess } from './owned-line-process';
 import type { spawnOwnedTerminalProcess } from './owned-terminal-process';
+import type { ModelReader, UsageReader } from './oar-reader-contract.js';
+export declare const grokListModels: ModelReader;
+export declare const grokAccountUsage: UsageReader;
+export declare const antigravityListModels: ModelReader;
 // Self-contained: the build copies this declaration to dist for the private `#byok-acp-runtime` import.
 /** A resume of a missing native session: the vendored typed error, never matched by name or message. */
 export declare class SessionNotFoundError extends Error {

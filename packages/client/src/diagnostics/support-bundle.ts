@@ -31,7 +31,7 @@ export interface SupportBundle {
   };
   device: { status: DiagnosticsSnapshot['device']['status']; deviceIdHash?: string };
   /** #1103: policy verdict, restart comparison and executable stay in local status/doctor; the bundle keeps only the existing observation facts. */
-  runtimes: Array<Omit<DiagnosticsSnapshot['runtimes'][number], 'versionVerdict' | 'versionChange' | 'executablePath' | 'executableSource'>>;
+  runtimes: Array<Omit<DiagnosticsSnapshot['runtimes'][number], 'versionVerdict' | 'versionChange' | 'executablePath' | 'executableSource' | 'unsupportedVersion'>>;
   runtimeSource: DiagnosticsSnapshot['runtimeSource'];
   control:
     | { status: 'offline' }
@@ -242,7 +242,7 @@ export async function createSupportBundle(
       status: snapshot.device.status,
       ...(snapshot.device.deviceIdHash ? { deviceIdHash: snapshot.device.deviceIdHash } : {}),
     },
-    runtimes: snapshot.runtimes.map(({ versionVerdict: _versionVerdict, versionChange: _versionChange, executablePath: _executablePath, executableSource: _executableSource, ...runtime }) => runtime),
+    runtimes: snapshot.runtimes.map(({ versionVerdict: _versionVerdict, versionChange: _versionChange, executablePath: _executablePath, executableSource: _executableSource, unsupportedVersion: _unsupportedVersion, ...runtime }) => runtime),
     runtimeSource: snapshot.runtimeSource,
     control: projectControl(snapshot.control),
     lifecycle: projectLifecycle(snapshot.lifecycle),

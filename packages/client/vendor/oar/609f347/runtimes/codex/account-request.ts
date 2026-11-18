@@ -81,6 +81,8 @@ export async function callAppServer(
       const stop = (): void => { client.kill(); };
       signal.addEventListener("abort", stop, { once: true });
       try {
+        await client.spawned;
+        signal.throwIfAborted();
         await client.request("initialize", {
           clientInfo: { name: "oar", version: "0.0.0" },
           capabilities: { experimentalApi: true },

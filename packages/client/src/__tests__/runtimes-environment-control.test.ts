@@ -3,8 +3,9 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
-import { connectControlClient } from '../daemon/control-client';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { connectControlClient, requestRuntimeModels, requestRuntimeUsage } from '../daemon/control-client';
+import type { RuntimeAccountUsage, RuntimeListModelsOptions, RuntimeReadOptions } from '../runtime/runtime-reader-types.js';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { RUNTIMES_ENVIRONMENT_METHOD } from '../daemon/control-protocol';
@@ -129,6 +130,43 @@ it('sends only name and source, name and rule, whatever else a custom adapter pu
     });
     const serialized = JSON.stringify(result);
     for (const value of ['NAME_VALUE_SENTINEL', 'REMOVED_VALUE_SENTINEL', 'LANE_VALUE_SENTINEL', 'LANE_NAME_SENTINEL']) expect(serialized).not.toContain(value);
+  } finally {
+    connection.client.close();
+  }
+});
+
+it('forwards on-demand catalog and usage reads on a paired host and keeps them out of SaaS discovery', async () => {
+  const calls: Array<{ operation: string; signal?: AbortSignal; refresh?: boolean }> = [];
+  let usage: RuntimeAccountUsage = { kind: 'available', plan: 'test-private-plan', rateLimited: false, windows: [{ label: 'week', usedRatio: 0.37 }] };
+  const catalog = { kind: 'ok', models: [{ id: 'model-a', effortLevels: ['low', 'high'], defaultEffort: 'low' },
+    { id: 'model-b', effortUnavailableReason: 'Native model selection did not return a confirmed effort menu.' }] } as const;
+  const adapter = Object.assign(new StubRuntimeAdapter('claude'), {
+    async listModels(options: RuntimeListModelsOptions) { calls.push({ operation: 'models', ...options }); return catalog; },
+    async accountUsage(options: RuntimeReadOptions) { calls.push({ operation: 'usage', ...options }); return usage; },
+  });
+  daemon = createDaemonWithAdapters({
+    agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() },
+    localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir,
+  }, [adapter]);
+  await daemon.pair('code');
+  await daemon.start();
+  await vi.waitFor(() => expect(server.received.some(envelope => envelope.type === 'conn.hello')).toBe(true));
+  expect(calls).toEqual([]);
+  const connection = await connectControlClient({ storeDir, productId: 'test-product' });
+  if (!connection.ok) throw new Error('expected the control socket');
+  try {
+    await expect(requestRuntimeModels(connection.client, 'claude', true)).resolves.toEqual(catalog);
+    await expect(requestRuntimeUsage(connection.client, 'claude')).resolves.toEqual(usage);
+    usage = { kind: 'reauth_required', reason: 'not_authenticated' };
+    await expect(requestRuntimeUsage(connection.client, 'claude')).resolves.toEqual(usage);
+    usage = { kind: 'unavailable', reason: 'access_token_expired' };
+    await expect(requestRuntimeUsage(connection.client, 'claude')).resolves.toEqual(usage);
+    await expect(connection.client.request('runtimes.usage', { runtimeId: 'claude', refresh: true })).rejects.toMatchObject({ code: 'bad_request' });
+    expect(calls.map(({ operation, refresh }) => ({ operation, refresh }))).toEqual([
+      { operation: 'models', refresh: true }, { operation: 'usage' }, { operation: 'usage' }, { operation: 'usage' },
+    ]);
+    expect(calls.every(call => call.signal instanceof AbortSignal)).toBe(true);
+    expect(JSON.stringify(server.received)).not.toMatch(/test-private-plan|usedRatio|effortLevels|accountUsage/);
   } finally {
     connection.client.close();
   }

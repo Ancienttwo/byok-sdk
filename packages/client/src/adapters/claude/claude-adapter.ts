@@ -1,4 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
+import { claudeListModels, claudeAccountUsage } from '../../runtime/oar-readers.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
@@ -160,6 +163,25 @@ const claudeEnvironmentConflicts: RuntimeEnvironmentConflictRule = (passed) =>
     : [];
 
 export class ClaudeAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin).bin.command,
+      version: claudeVersionToken,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, claudeListModels);
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, claudeAccountUsage);
+  }
+
   readonly descriptor;
   private readonly nativeOptions?: NativeInteractionHostOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;

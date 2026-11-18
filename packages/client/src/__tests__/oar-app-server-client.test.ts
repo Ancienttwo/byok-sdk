@@ -235,6 +235,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'runtimes/dsh/launch.ts',
     'runtimes/dsh/list-models.ts',
     'runtimes/dsh/session.ts',
+    'runtimes/dsh/version.ts',
     'runtimes/grok/account-usage.ts',
     'runtimes/grok/auth.ts',
     'runtimes/grok/list-models.ts',

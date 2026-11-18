@@ -8,3 +8,6 @@ export { grokSession } from '../../vendor/oar/609f347/runtimes/grok/session.js';
 export { antigravitySession } from '../../vendor/oar/609f347/runtimes/antigravity/session.js';
 export { opencodeSession } from '../../vendor/oar/609f347/runtimes/opencode/session.js';
 export { SessionUnavailableError } from '../../vendor/oar/609f347/contracts/session-unavailable-error.js';
+export { grokListModels } from '../../vendor/oar/609f347/runtimes/grok/list-models.js';
+export { grokAccountUsage } from '../../vendor/oar/609f347/runtimes/grok/account-usage.js';
+export { antigravityListModels } from '../../vendor/oar/609f347/runtimes/antigravity/list-models.js';

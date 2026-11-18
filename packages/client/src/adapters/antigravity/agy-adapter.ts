@@ -1,4 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
+import { antigravityAccountUsage, antigravityVersionRefusal } from '../../runtime/oar-readers.js';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -38,7 +41,7 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { AGY_RUNTIME_CAPABILITIES } from './agy-capabilities.js';
 import { agyEnvironment, agyNativeHome, agyStoreDir, ensureAgyHome } from './agy-profile.js';
-import { AGY_VERSION_POLICY, agyHasNativeAcp, agyVersionToken } from './agy-version.js';
+import { AGY_VERSION_POLICY, agyVersionToken } from './agy-version.js';
 import { AgyProjection, agyMcpEventIdentities, type AgyTurnOutcome } from './projection.js';
 import { resolveAgyBin } from './resolve-bin.js';
 
@@ -86,6 +89,30 @@ const refused = (body: AcpControl['response']['body'] | undefined, fallback: str
  * custom-harness identity (`harnessId: 'agy'`).
  */
 export class AgyAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (env) => resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(env)).bin.command,
+      version: agyVersionToken,
+      versionRefusal: antigravityVersionRefusal,
+      environment: async env => {
+        await ensureAgyHome(this.root);
+        return agyEnvironment(env, this.root);
+      },
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => (await import('#byok-acp-runtime')).antigravityListModels(installation, reader));
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, antigravityAccountUsage);
+  }
+
   private readonly root: string;
   private readonly options: AgyAdapterOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
@@ -135,7 +162,11 @@ export class AgyAdapter implements RuntimeAdapter {
       const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, agyEnvironment(base, this.root));
       if (version.kind !== 'available') return version;
       const token = agyVersionToken(version.stdout);
-      if (!agyHasNativeAcp(token)) return { kind: 'refused', reason: 'acp_unavailable' };
+      const unsupported = antigravityVersionRefusal(token);
+      if (unsupported !== null) {
+        const { installedVersion, requiredVersion } = unsupported;
+        return { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion } };
+      }
       return {
         kind: 'available',
         version: token,
@@ -148,7 +179,7 @@ export class AgyAdapter implements RuntimeAdapter {
     }
   }
 
-  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+  async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     const detected = await this.detect();
     if (detected.kind !== 'available') {
       return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };
@@ -177,7 +208,6 @@ export class AgyAdapter implements RuntimeAdapter {
     const reader = readerScope(input.manifest);
     const session = new AgySession(
       input.scratch,
-      this.options.model,
       this.interruptTimeoutMs,
       agyMcpEventIdentities(input.mcpToolsetTools),
       resume,
@@ -263,7 +293,6 @@ class AgySession implements Session {
 
   constructor(
     private readonly scratch: ExecutionScratch,
-    private readonly model: string | undefined,
     private readonly interruptMs: number,
     private readonly identities: McpEventIdentities,
     private readonly expectedSessionRef?: string,

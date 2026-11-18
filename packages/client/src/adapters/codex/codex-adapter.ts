@@ -1,4 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
+import { codexListModels, codexAccountUsage } from '../../runtime/oar-readers.js';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
@@ -132,6 +135,25 @@ const READER_PROJECT_ROOT_ARGS = Object.freeze(['-c', 'project_root_markers=[".b
 
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export class CodexAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin).bin.command,
+      version: codexVersionToken,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, codexListModels);
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, codexAccountUsage);
+  }
+
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
@@ -213,7 +235,9 @@ export class CodexAdapter implements RuntimeAdapter {
         });
         // Codex reports configured credentials with exit 0; its display text is not a contract.
         authPresent = true;
-      } catch {}
+      } catch {
+          // An unreadable credential store leaves auth presence unconfirmed.
+        }
       return {
         kind: 'available',
         version: text,

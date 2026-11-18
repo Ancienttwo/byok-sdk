@@ -701,11 +701,11 @@ describe('AgyAdapter', () => {
 
   it('detect refuses a CLI without native ACP, a prerelease and an extra notice, and writes the native settings', async () => {
     const home = await agyVersion('1.4.9');
-    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion: '1.4.9', requiredVersion: '1.5.0' } });
     vi.stubEnv('FAKE_ACP_VERSION', '1.5.0-rc.1');
-    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion: '1.5.0-rc.1', requiredVersion: '1.5.0' } });
     vi.stubEnv('FAKE_ACP_VERSION', '1.5.0\nupdate available');
-    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { requiredVersion: '1.5.0' } });
     vi.stubEnv('FAKE_ACP_VERSION', '1.5.0');
     expect(await agy(home).detect()).toMatchObject({ kind: 'available', version: '1.5.0' });
     expect(JSON.parse(readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8')))

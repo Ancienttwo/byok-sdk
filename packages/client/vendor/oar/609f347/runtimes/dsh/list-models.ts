@@ -42,12 +42,13 @@ export async function dshListModels(installation: AvailableInstallation, options
     const catalog = await control.request("models", {}, options.timeoutMs);
     const models = projectDshModels(catalog);
     if (models.length === 0) {
-      const failures = asRecordList(catalog.providers).flatMap((provider) => typeof provider.failure === "string" ? [`${String(provider.id)}: ${provider.failure}`] : []);
-      if (failures.length > 0) { return { kind: "unsupported", reason: `DSH could not list any provider's models: ${failures.join("; ")}` }; }
+      if (asRecordList(catalog.providers).some(provider => typeof provider.failure === "string")) {
+        return { kind: "unsupported", reason: "DSH could not list any provider's models" };
+      }
     }
     return { kind: "ok", models };
   } catch (error) {
-    if (error instanceof DshCommandError && error.code === "native_method_unavailable") { return { kind: "unsupported", reason: error.message }; }
+    if (error instanceof DshCommandError && error.code === "native_method_unavailable") { return { kind: "unsupported", reason: "DSH does not expose its native model catalog" }; }
     throw error;
   } finally {
     child.kill();

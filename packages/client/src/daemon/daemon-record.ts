@@ -46,7 +46,7 @@ export type DaemonRecord =
   | { kind: 'lifecycle'; ts: string; lifecycle: DaemonLifecycle }
   | { kind: 'paired'; ts: string; deviceId: string }
   | { kind: 'unpaired'; ts: string }
-  | { kind: 'runtimes-detected'; ts: string; runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict' | 'versionChange' | 'executablePath' | 'executableSource'>> }
+  | { kind: 'runtimes-detected'; ts: string; runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict' | 'versionChange' | 'executablePath' | 'executableSource' | 'unsupportedVersion'>> }
   | { kind: 'shutdown-requested'; ts: string; reasonBytes: number }
   | { kind: 'shutdown-complete'; ts: string; reasonBytes: number; undeliveredOutboxCount?: number }
   | { kind: 'stale-approval-decision'; ts: string; taskId: string; decision: 'approve' | 'reject'; reasonBytes?: number }
@@ -320,7 +320,7 @@ function recordOf(event: Exclude<DaemonEvent, { kind: 'progress' }>): DaemonReco
       // enters audit or support sinks.
       return {
         kind: 'runtimes-detected', ts,
-        runtimes: event.runtimes.map(({ version: _version, versionVerdict: _versionVerdict, versionChange: _versionChange, executablePath: _executablePath, executableSource: _executableSource, ...observation }) => observation),
+        runtimes: event.runtimes.map(({ version: _version, versionVerdict: _versionVerdict, versionChange: _versionChange, executablePath: _executablePath, executableSource: _executableSource, unsupportedVersion: _unsupportedVersion, ...observation }) => observation),
       };
     case 'environment-resolved': {
       const record = parseEnvironmentRecord({ kind: 'environment-resolved', ts, ...event.status });
