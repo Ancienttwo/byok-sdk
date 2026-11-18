@@ -126,6 +126,49 @@ it.skipIf(process.platform === 'win32')('builds unpaired catalog adapters throug
   await expect(adapter!.accountUsage!()).resolves.toMatchObject({ kind: 'available' });
 });
 
+it.skipIf(process.platform === 'win32')('reads Antigravity effort menus and keeps its remote auth probe on the usage path', async () => {
+  const script = String.raw`
+const readline = require('node:readline');
+const [command] = process.argv.slice(1);
+if (command === '--version') { console.log('1.5.9'); process.exit(0); }
+if (command === 'models') { console.error('Please sign in'); process.exit(1); }
+let current = 'model-a';
+function options() {
+  return [{ id: 'model', name: 'Model', category: 'model', type: 'select', currentValue: current,
+    options: ['model-a', 'model-b'].map(value => ({ value, name: value })) },
+    { id: 'effort', name: 'Effort', category: 'thought_level', type: 'select', currentValue: 'low',
+      options: ['low', 'high'].map(value => ({ value, name: value })) }];
+}
+readline.createInterface({ input: process.stdin }).on('line', line => {
+  const request = JSON.parse(line);
+  const result = request.method === 'initialize' ? { protocolVersion: 1 } : { sessionId: 'read-only-session', configOptions: options() };
+  const reply = request.method === 'session/set_config_option' && request.params.value === 'model-b'
+    ? { error: { code: -32603, message: 'unconfirmed model' } }
+    : { result };
+  console.log(JSON.stringify({ jsonrpc: '2.0', id: request.id, ...reply }));
+});`;
+  const dir = await tempDir();
+  const argsSeen: string[] = [];
+  const key = 'gemini-credential-test-value';
+  vi.stubEnv('GEMINI_API_KEY', key);
+  const adapter = new AgyAdapter({ home: path.join(dir, 'owned'), resolveBin: () => ({ command: process.execPath, source: 'env' }),
+    runtimeEnvironment: { base: 'allowlist', allow: ['GEMINI_API_KEY'] },
+    spawnFn: ((_command: string, args: readonly string[], options: SpawnOptions) => {
+      argsSeen.push(args[0]!);
+      expect(options.env?.GEMINI_API_KEY).not.toBe(key);
+      expect(options.env?.GEMINI_API_KEY).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      return spawn(process.execPath, ['-e', script, '--', ...args], options);
+    }) as typeof spawn,
+  });
+  await expect(adapter.listModels()).resolves.toEqual({ kind: 'ok', models: [
+    { id: 'model-a', default: true, effortLevels: ['low', 'high'], defaultEffort: 'low' },
+    { id: 'model-b', effortUnavailableReason: 'Native model selection did not return a confirmed effort menu.' },
+  ] });
+  expect(argsSeen).toEqual(['--version', 'acp']);
+  await expect(adapter.accountUsage()).resolves.toEqual({ kind: 'reauth_required', reason: 'not_authenticated' });
+  expect(argsSeen).toEqual(['--version', 'acp', '--version', 'models']);
+});
+
 it.skipIf(process.platform === 'win32')('keeps native version floor evidence local to status and doctor', async () => {
   const dir = await tempDir();
   const executable = path.join(dir, 'agy');

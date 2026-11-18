@@ -100,7 +100,9 @@ export class AgyAdapter implements RuntimeAdapter {
       versionRefusal: antigravityVersionRefusal,
       environment: async env => {
         await ensureAgyHome(this.root);
-        return agyEnvironment(env, this.root);
+        const apiKey = env.GEMINI_API_KEY;
+        const proxy = apiKey ? await startAgyGeminiProxy({ apiKey, environment: env, upstreamOrigin: agyEndpointOf(this) }) : undefined;
+        return { env: agyEnvironment(env, this.root, proxy), close: proxy === undefined ? undefined : () => proxy.close() };
       },
     });
   }

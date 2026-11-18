@@ -200,7 +200,9 @@ describe('support bundle privacy and bounds', () => {
     const dir = await tempDir();
     const status = {
       storage: unmeasuredRetentionSnapshot(), pid: 1, uptimeMs: 1, paired: false, lifecycle: { phase: 'running', connection: 'open' },
-      activeTasks: [], runtimes: [], queueWatermarks: [], approvals: [], approvalsPending: 0,
+      activeTasks: [], runtimes: [{ id: 'agy', outcome: 'refused', reason: 'acp_unavailable', present: false,
+        unsupportedVersion: { installedVersion: '1.4.91', requiredVersion: '1.5.93' }, steer: false, resume: false }],
+      queueWatermarks: [], approvals: [], approvalsPending: 0,
       operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, windowMs: 60_000, failureThreshold: 3, crashCount: 0 },
     };
     const environments = {
@@ -218,8 +220,11 @@ describe('support bundle privacy and bounds', () => {
     const bundle = await createSupportBundle(config(dir), dir, { adapters: [], connectControl });
 
     expect(bundle.runtimeEnvironment).toEqual({ status: 'known', runtimes: [{ idHash: expect.any(String), status: 'built', names: 1, removed: 1 }] });
+    expect(bundle.runtimes).toEqual([expect.objectContaining({ outcome: 'refused', reason: 'acp_unavailable' })]);
     const serialized = JSON.stringify(bundle);
-    for (const sentinel of ['SENTINEL_RUNTIME_ID', 'SENTINEL_ENV_NAME', 'SENTINEL_REMOVED_NAME']) expect(serialized).not.toContain(sentinel);
+    for (const sentinel of ['SENTINEL_RUNTIME_ID', 'SENTINEL_ENV_NAME', 'SENTINEL_REMOVED_NAME', 'unsupportedVersion', 'installedVersion', 'requiredVersion', '1.4.91', '1.5.93']) {
+      expect(serialized).not.toContain(sentinel);
+    }
   });
 
   it.skipIf(process.platform === 'win32')('does not block when audit.jsonl is a FIFO', async () => {

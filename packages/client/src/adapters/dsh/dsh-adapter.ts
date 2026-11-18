@@ -146,7 +146,7 @@ export class DshAdapter implements RuntimeAdapter {
       versionRefusal: dshVersionUnsupported,
       environment: async env => {
         await this.ensureRoot();
-        return dshEnvironment(env, this.root, this.sandbox);
+        return { env: dshEnvironment(env, this.root, this.sandbox) };
       },
       credentialName: this.options.model.keyEnv,
     });
@@ -228,6 +228,11 @@ export class DshAdapter implements RuntimeAdapter {
       const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, env);
       if (version.kind !== 'available') return version;
       const token = dshVersionToken(version.stdout);
+      const unsupported = dshVersionUnsupported(token);
+      if (unsupported !== null) {
+        const { installedVersion, requiredVersion } = unsupported;
+        return { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion } };
+      }
       if (!await probeAcpProfile(command, this.root, env)) return { kind: 'refused', reason: 'acp_unavailable' };
       const key = base[this.options.model.keyEnv];
       return {

@@ -142,6 +142,7 @@ export class GrokAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin).bin.command,
       version: grokVersionToken,
+      environment: env => ({ env: { ...env, ...AUTO_UPDATE_OFF } }),
     });
   }
 
@@ -223,7 +224,7 @@ export class GrokAdapter implements RuntimeAdapter {
     }
   }
 
-  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+  async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     const detected = await this.detect();
     if (detected.kind !== 'available')
       return {

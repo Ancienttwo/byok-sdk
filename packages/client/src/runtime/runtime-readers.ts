@@ -35,25 +35,23 @@ interface ReaderConfig {
   readonly command: (env: ReaderEnv) => string;
   readonly version: (stdout: string) => string | undefined;
   readonly versionRefusal?: (version: string | undefined) => VersionRefusal | null;
-  readonly environment?: (env: ReaderEnv) => ReaderEnv | Promise<ReaderEnv>;
+  readonly environment?: (env: ReaderEnv) => { env: ReaderEnv; close?: () => Promise<void> } | Promise<{ env: ReaderEnv; close?: () => Promise<void> }>;
   readonly credentialName?: string;
 }
-
-type WithBaseEnv<Reader extends ModelReader | UsageReader> = (...args: [...Parameters<Reader>, baseEnv: ReaderEnv]) => ReturnType<Reader>;
 
 /** Each adapter owns one cache entry for its current executable and version. */
 export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConfig) {
   let cache: { key: string; catalog: RuntimeModelCatalog } | undefined;
   const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: config.nativeAssetRoot, spawnFn: config.spawnFn, label: `${adapter.descriptor.id} reader` });
   const read = <T>(options: RuntimeReadOptions, query: (
-    installation: Parameters<ModelReader>[0], reader: OwnedReaderOptions, key: string | undefined, base: ReaderEnv,
+    installation: Parameters<ModelReader>[0], reader: OwnedReaderOptions, key: string | undefined,
     redactValue: <Value>(value: Value) => Value,
   ) => Promise<T>, unsupported: (refusal?: VersionRefusal) => T) => boundRuntimeRead(options.signal, async (signal) => {
     const { env: base } = await adapter.runtimeEnvironment();
     signal.throwIfAborted();
-    const env = await (config.environment?.(base) ?? base);
-    signal.throwIfAborted();
-    const redactor = sessionCredentialRedactor({ env: { ...base, ...env } });
+    const { env, close } = await (config.environment?.(base) ?? { env: base });
+    const redactor = sessionCredentialRedactor({ env: base });
+    for (const value of sessionCredentialRedactor({ env }).values()) redactor.add(value);
     if (config.credentialName !== undefined) redactor.add(base[config.credentialName]);
     const { redact } = redactor;
     const children = new Set<ReturnType<typeof spawn>>();
@@ -96,6 +94,7 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
     }
     signal.addEventListener('abort', terminate, { once: true });
     try {
+      signal.throwIfAborted();
       const command = config.command(base);
       const host = runtimeInvocationHost(env);
       const executable = path.isAbsolute(command) ? command : findRuntimeCommandOnPath(command, host);
@@ -108,7 +107,7 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
       if (refusal) return unsupported(refusal);
       const installation = { kind: 'available', via: 'executable', command: executable, ...(version === undefined ? {} : { version }) } as const;
       const key = version === undefined ? undefined : `${adapter.descriptor.id}\0${executable}\0${version}`;
-      return await query(installation, reader, key, base, redactor.redactValue);
+      return await query(installation, reader, key, redactor.redactValue);
     } catch (error) {
       if (signal.aborted) throw error;
       // Native exception text/causes can also contain credentials from a runtime's own store.
@@ -116,15 +115,16 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
     } finally {
       signal.removeEventListener('abort', terminate);
       terminate();
+      await close?.();
     }
   });
 
   return {
-    listModels(options: RuntimeListModelsOptions, reader: WithBaseEnv<ModelReader>): Promise<RuntimeModelCatalog> {
-      return read(options, async (installation, owned, key, base, redactValue) => {
+    listModels(options: RuntimeListModelsOptions, reader: ModelReader): Promise<RuntimeModelCatalog> {
+      return read(options, async (installation, owned, key, redactValue) => {
         if (!options.refresh && key !== undefined && cache?.key === key) return structuredClone(cache.catalog);
         cache = undefined;
-        const result = redactValue(await reader(installation, owned, base));
+        const result = redactValue(await reader(installation, owned));
         owned.signal?.throwIfAborted();
         // Unauthenticated details can include native credential-store diagnostics.
         if (result.kind === 'unauthenticated') return { kind: 'unauthenticated' };
@@ -132,8 +132,8 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
         return result;
       }, refusal => refusal ?? { kind: 'unsupported', reason: 'runtime installation unavailable' });
     },
-    accountUsage(options: RuntimeReadOptions, reader: WithBaseEnv<UsageReader>): Promise<RuntimeAccountUsage> {
-      return read(options, async (installation, owned, _key, base, redactValue) => redactValue(await reader(installation, owned, base)), refusal => refusal === undefined
+    accountUsage(options: RuntimeReadOptions, reader: UsageReader): Promise<RuntimeAccountUsage> {
+      return read(options, async (installation, owned, _key, redactValue) => redactValue(await reader(installation, owned)), refusal => refusal === undefined
         ? { kind: 'unsupported', reason: 'unsupported_installation' }
         : { kind: 'unsupported', reason: 'version_unsupported', requiredVersion: refusal.requiredVersion,
           ...(refusal.installedVersion === undefined ? {} : { installedVersion: refusal.installedVersion }) });
