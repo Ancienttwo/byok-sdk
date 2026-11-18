@@ -380,8 +380,10 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
     events: z.ZodArray<z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
         type: z.ZodLiteral<"progress">;
         text: z.ZodString;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_use">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         tool: z.ZodString;
         mcp: z.ZodOptional<z.ZodObject<{
             server: z.ZodString;
@@ -408,6 +410,7 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         tool: z.ZodString;
         mcp: z.ZodOptional<z.ZodObject<{
             server: z.ZodString;
@@ -442,8 +445,16 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
         message: z.ZodString;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"subagent_start">;
+        agentPath: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"subagent_end">;
+        agentPath: z.ZodArray<z.ZodString>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"usage">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         inputTokens: z.ZodOptional<z.ZodNumber>;
         cachedInputTokens: z.ZodOptional<z.ZodNumber>;
         outputTokens: z.ZodOptional<z.ZodNumber>;
@@ -473,8 +484,10 @@ export declare const TimelineEventSchema: z.ZodObject<{
     event: z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
         type: z.ZodLiteral<"progress">;
         text: z.ZodString;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_use">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         tool: z.ZodString;
         mcp: z.ZodOptional<z.ZodObject<{
             server: z.ZodString;
@@ -501,6 +514,7 @@ export declare const TimelineEventSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         tool: z.ZodString;
         mcp: z.ZodOptional<z.ZodObject<{
             server: z.ZodString;
@@ -535,8 +549,16 @@ export declare const TimelineEventSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
         message: z.ZodString;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"subagent_start">;
+        agentPath: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"subagent_end">;
+        agentPath: z.ZodArray<z.ZodString>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"usage">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         inputTokens: z.ZodOptional<z.ZodNumber>;
         cachedInputTokens: z.ZodOptional<z.ZodNumber>;
         outputTokens: z.ZodOptional<z.ZodNumber>;
@@ -648,6 +670,21 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        images: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            blob: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            mediaType: z.ZodEnum<{
+                "image/gif": "image/gif";
+                "image/jpeg": "image/jpeg";
+                "image/png": "image/png";
+                "image/webp": "image/webp";
+            }>;
+        }, z.core.$strict>>>;
         agentMemory: z.ZodOptional<z.ZodEnum<{
             none: "none";
             read: "read";
@@ -666,6 +703,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -673,11 +711,13 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                 codex: "codex";
             }>;
             modelId: z.ZodString;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok">;
             runtimeId: z.ZodLiteral<"pi">;
             providerId: z.ZodString;
             modelId: z.ZodString;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok-profile">;
             runtimeId: z.ZodLiteral<"pi">;
@@ -690,9 +730,12 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"harness">;
             harnessId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
@@ -775,6 +818,21 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        images: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            blob: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            mediaType: z.ZodEnum<{
+                "image/gif": "image/gif";
+                "image/jpeg": "image/jpeg";
+                "image/png": "image/png";
+                "image/webp": "image/webp";
+            }>;
+        }, z.core.$strict>>>;
         agentMemory: z.ZodOptional<z.ZodEnum<{
             none: "none";
             read: "read";
@@ -793,6 +851,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -800,11 +859,13 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 codex: "codex";
             }>;
             modelId: z.ZodString;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok">;
             runtimeId: z.ZodLiteral<"pi">;
             providerId: z.ZodString;
             modelId: z.ZodString;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok-profile">;
             runtimeId: z.ZodLiteral<"pi">;
@@ -817,9 +878,12 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"harness">;
             harnessId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
