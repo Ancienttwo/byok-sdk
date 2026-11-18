@@ -610,4 +610,21 @@ describe('freeze guard: dual-authority cross-check (agent-event.ts)', () => {
     // still produce equal Sets if one has a duplicate).
     expect(KNOWN_AGENT_EVENT_TYPES.length).toBe(schemaVariantTypes.length);
   });
+
+  it('gives only the five attributed events and two child lifecycle events a bounded agentPath', () => {
+    const schema = z.toJSONSchema(AgentEventSchema) as unknown as {
+      oneOf: Array<{ properties: { type: { const: string }; agentPath?: object }; required: string[] }>;
+    };
+    const attributed = schema.oneOf.filter(branch => branch.properties.agentPath !== undefined);
+    expect(attributed.map(branch => branch.properties.type.const).sort()).toEqual([
+      'error', 'progress', 'subagent_end', 'subagent_start', 'tool_result', 'tool_use', 'usage',
+    ]);
+    for (const branch of attributed) {
+      expect(branch.properties.agentPath).toEqual({
+        type: 'array', minItems: 1, maxItems: 16,
+        items: { type: 'string', minLength: 1, maxLength: 128 },
+      });
+      expect(branch.required.includes('agentPath')).toBe(branch.properties.type.const.startsWith('subagent_'));
+    }
+  });
 });

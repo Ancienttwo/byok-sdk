@@ -584,6 +584,7 @@ function fieldValues(root: unknown, field: string): unknown[] {
 
 function carries(line: CorpusLine, entry: WireAddition): boolean {
   if (line.type !== entry.surface) return false;
+  if (entry.when !== undefined && !fieldValues(line.payload, entry.when.field).includes(entry.when.value)) return false;
   if (entry.field === undefined) return true;
   const value = fieldValues(line.payload, entry.field).find(value => value !== undefined);
   if (value === undefined) return false;

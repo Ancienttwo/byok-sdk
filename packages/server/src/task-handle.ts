@@ -195,9 +195,9 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
       return rejectPendingApproval(deps, taskId, reason, opts);
     },
 
-    async steer(text: string): Promise<{ readonly messageId: string }> {
+    async steer(text, { images } = {}): Promise<{ readonly messageId: string }> {
       try {
-        const { envelope } = await deps.cloud.steerTask(deps.tenant, taskId, { text });
+        const { envelope } = await deps.cloud.steerTask(deps.tenant, taskId, { text, ...(images === undefined ? {} : { images }) });
         return { messageId: envelope.id };
       } catch (caught) {
         if (!(caught instanceof KernelSteerRejectedError)) throw caught;

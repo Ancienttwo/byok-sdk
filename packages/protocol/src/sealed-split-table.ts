@@ -93,12 +93,12 @@ const TERMINAL_DIGESTS = {
  * the Host's comparison projection and the receiver's merge read it.
  *
  * A sealed offer carries the task's `sealing`. When the categories include
- * `task-input`, `instruction` is sealed; otherwise it stays plaintext and only
- * the task output is sealed. A prepared Execution is never sealed.
+ * `task-input`, `instruction` and `images` are sealed; otherwise they stay
+ * plaintext. A prepared Execution is never sealed. The input split seals the
+ * image references. The blob plane still owns the image bytes.
  *
- * Blob bytes have no sealing rule yet, so a sealed branch carries no plaintext
- * blob reference: `artifactRefs` and the artifact `blobRef` are dropped until
- * that rule exists. A sealed artifact is inline content, so its `inline`
+ * Blob bytes have no sealing rule yet, so sealed output drops `artifactRefs`
+ * and the artifact `blobRef`. A sealed artifact is inline content, so its `inline`
  * takes up to 2 MiB instead of the plaintext 64 KB (decision 12b).
  */
 export const SEALED_SPLIT_TABLE = Object.freeze({
@@ -106,10 +106,11 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
     marker: 'sealing',
     category: 'task-input',
     identity: [],
-    moved: ['instruction'],
+    moved: ['instruction', 'images'],
     forbidden: ['preparation'],
     digests: {
       'instruction.blobRef.contentHash': 'sealed',
+      'images[].blob.contentHash': 'sealed',
       'agentRef.profileRevision': 'plain',
       'target.providerProfile.profileRevision': 'plain',
       'target.providerProfile.profileHash': 'plain',
@@ -118,7 +119,10 @@ export const SEALED_SPLIT_TABLE = Object.freeze({
       'preparation.artifactDigest': 'forbidden',
     },
   },
-  'task.steer': { marker: 'sealed', category: 'task-input', identity: ['steerId'], moved: ['text'], forbidden: [], digests: {} },
+  'task.steer': {
+    marker: 'sealed', category: 'task-input', identity: ['steerId'], moved: ['text', 'images'], forbidden: [],
+    digests: { 'images[].blob.contentHash': 'sealed' },
+  },
   'task.complete': {
     marker: 'sealed',
     category: 'task-output',

@@ -262,6 +262,42 @@ function additions(v6Envelopes, v7Envelopes) {
     push({ type: 'task.decline', task_id: sealedTemplate.task_id, payload: { retryable: false, code, sealed: sealedTemplate.payload.sealed } });
   }
 
+  // #2377: strict target additions in both offer branches, plus image refs
+  // on plaintext input and an attributed child event batch.
+  const images = ['png', 'jpeg', 'gif', 'webp'].map((format, index) => {
+    const mediaType = `image/${format}`;
+    const blobId = `image-golden-${index + 1}`;
+    return { blob: { blobId, contentHash: `sha256:${'a'.repeat(64)}`, size: 32, contentType: mediaType, url: `https://example.invalid/${blobId}` }, mediaType };
+  });
+  const target = { lane: 'harness', harnessId: 'grok', modelId: 'grok-code', effort: 'xhigh' };
+  const plainOffer = byId(v7Envelopes, '00000000-0000-4000-8000-000000000019');
+  const sealedOffer = byId(v7Envelopes, '00000000-0000-4000-8000-0000000009b3');
+  push({ type: 'task.offer', task_id: plainOffer.task_id, seq: plainOffer.seq, payload: { ...plainOffer.payload, target, images } });
+  push({ type: 'task.offer', task_id: sealedOffer.task_id, seq: sealedOffer.seq, payload: { ...sealedOffer.payload, target } });
+  const outputOnly = v7Envelopes.find(({ type, payload }) => type === 'task.offer' && payload.sealing !== undefined && payload.sealed === undefined);
+  push({ type: 'task.offer', task_id: outputOnly.task_id, seq: outputOnly.seq, payload: { ...outputOnly.payload, target, images } });
+  for (const lane of ['runtime', 'subscription', 'byok', 'byok-profile']) {
+    const { payload: { target: laneTarget } } = v7Envelopes.find(({ type, payload }) => type === 'task.offer' && payload.target.lane === lane);
+    for (const offer of [plainOffer, sealedOffer]) {
+      push({ type: 'task.offer', task_id: offer.task_id, seq: offer.seq, payload: { ...offer.payload, target: { ...laneTarget, effort: 'max' } } });
+    }
+  }
+  push({ type: 'task.steer', task_id: plainSteer.task_id, seq: plainSteer.seq, payload: { ...plainSteer.payload, images } });
+  const agentPath = ['child-1'];
+  push({ type: 'task.progress', task_id: plainOffer.task_id, payload: { seq: 1, events: [
+    { type: 'subagent_start', agentPath },
+    { type: 'progress', text: 'working', agentPath },
+    { type: 'tool_use', tool: 'read', agentPath },
+    { type: 'tool_result', tool: 'read', agentPath },
+    { type: 'usage', outputTokens: 3, agentPath },
+    { type: 'error', message: 'child failed', agentPath },
+    { type: 'subagent_end', agentPath },
+    { type: 'turn_end' },
+  ] } });
+  push({ type: 'conn.hello', payload: { ...v7Envelopes[0].payload, capabilities: ['task-execution-options', 'input-images'],
+    runtimes: [{ id: 'pi', capabilities: { images: true } }], harnesses: [{ id: 'grok', capabilities: { images: true } }] } });
+  push({ type: 'task.claim', task_id: plainOffer.task_id, payload: { deviceId: 'device-golden-1', executor: { kind: 'runtime', runtimeId: 'pi' }, capabilities: { images: true } } });
+
   return out;
 }
 
@@ -293,6 +329,7 @@ function httpAdditions(v6HelloLine, v7HelloLine) {
     httpLine('PairSupersededResponse', { error: 'pairing superseded', code: 'pairing_superseded', currentDeviceDigest: pairDeviceDigest('tenant-golden', 'acme-agent', 'dev_00000000-0000-4000-8000-000000002046') }),
     httpLine('PairSupersededResponse', { error: 'pairing superseded', code: 'pairing_superseded', currentDeviceDigest: null }),
     httpLine('PairingCodeInvalidResponse', { error: 'invalid pairing code', code: 'pairing_code_invalid' }),
+    httpLine('PresencePublishRequest', { level: 'online', runtimes: [{ id: 'pi', capabilities: { images: true } }] }),
   ];
 }
 

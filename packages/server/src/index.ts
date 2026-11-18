@@ -47,6 +47,7 @@ import {
   AgentContentReadPayloadSchema,
   AgentHomeProjectionPayloadSchema,
   AgentRefSchema,
+  InputImagesSchema,
   TASK_STATES,
   type AgentHomeProjectionPayload,
   type AgentRef,
@@ -557,6 +558,16 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     finally { dispatching.delete(taskId); }
   }
 
+  async function readInputImages(input: unknown) {
+    const images = InputImagesSchema.parse(input);
+    for (const { blob } of images) {
+      if (await composition.cloud.blobs.getDownloadUrl(tenant, blob.blobId) === undefined) {
+        throw new ByokCloudError('coordination_input_invalid', 'Input images must name committed blobs of this tenant.');
+      }
+    }
+    return images;
+  }
+
   async function dispatchInternal(
     input: DispatchInput,
   ): Promise<TaskHandle> {
@@ -575,7 +586,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       throw new ByokCloudError('coordination_input_invalid', 'dispatch requires an explicit deviceId (non-empty string)');
     }
 
-    const common = { instruction: input.instruction, target };
+    const images = input.images === undefined ? undefined : await readInputImages(input.images);
+    const common = { instruction: input.instruction, target, ...(images === undefined ? {} : { images }) };
 
     // A known id lets the relay exist before enqueue can make the offer
     // observable. Inbound claim/terminal traffic racing append is buffered by
@@ -761,7 +773,13 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
         dispatching.add(taskId);
         try {
           relay.provision(taskId);
-          const enqueued = await cloud.submitAgentExecution(tenant, input);
+          let submission = input;
+          if (input.payload?.images !== undefined) {
+            refuseSealedFields(input.payload);
+            const images = await readInputImages(input.payload.images);
+            submission = { ...input, payload: { ...input.payload, images } };
+          }
+          const enqueued = await cloud.submitAgentExecution(tenant, submission);
           relay.noteDispatched(taskId, enqueued.envelope.ts);
           return enqueued;
         } catch (error) {

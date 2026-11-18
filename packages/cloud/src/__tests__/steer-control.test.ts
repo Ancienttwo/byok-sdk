@@ -219,6 +219,21 @@ describe('steerTask (GAP-2)', () => {
     });
   });
 
+  it('refuses invalid or unavailable image refs before enqueuing a steer', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { capabilities: { steer: true } });
+    await deviceStores(harness, device).devices.recordCapabilities({ capabilities: ['agent-home-contract', 'input-images'] });
+    const image = { mediaType: 'image/png' as const, blob: { blobId: 'missing', contentHash: `sha256:${'a'.repeat(64)}`, size: 1, contentType: 'image/png' } };
+    for (const images of [[], Array(17).fill(image)]) {
+      await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'look', images })).rejects.toMatchObject({ name: 'ZodError' });
+    }
+    await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'look', images: [image] }))
+      .rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    const textOnly = await harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'continue' });
+    expect((await poll(harness, device, task.seq)).events.map(({ id }) => id)).toEqual([textOnly.envelope.id]);
+  });
+
   it('steerSealedTask delivers the sealed task.steer only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
     const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8');
     const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })

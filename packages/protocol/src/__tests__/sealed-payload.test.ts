@@ -11,6 +11,9 @@ import { z } from 'zod';
 
 import {
   AGENT_MESSAGE_MAX_BYTES,
+  HostOfferPlainPayloadSchema,
+  HostOfferSealedPayloadSchema,
+  INPUT_IMAGES_CAPABILITY,
   MESSAGE_PAYLOAD_SCHEMAS,
   MESSAGE_TYPES,
   createEnvelope,
@@ -26,6 +29,7 @@ import {
   isServerToDaemonType,
   requiredReceiverCapabilities,
   sealedAgentMessageMaxContentLength,
+  sealedMovedFields,
   sealedPayloadPaddedLength,
   type MessageType,
   type SealableMessageType,
@@ -254,6 +258,55 @@ describe('sealed payload v1: the sealed offer', () => {
     for (const line of corpus.filter((candidate) => candidate.type === 'task.offer')) {
       expect(isSealedPayload('task.offer', line.payload)).toBe(line.payload.sealing !== undefined);
     }
+  });
+});
+
+describe('task input images (#2377)', () => {
+  const images = [{ blob: { ...blobRef, contentType: 'image/png' }, mediaType: 'image/png' }];
+
+  it.each(['task.offer', 'task.steer'] as const)('validates and gates %s before sealing and after opening', (type) => {
+    const plain = corpus.find(line => line.type === type && line.payload.images !== undefined && line.payload.sealing === undefined)!.payload;
+    const logical = { ...plain, images };
+    expect(MESSAGE_PAYLOAD_SCHEMAS[type].parse(logical)).toMatchObject({ images });
+    const sealed = sealedLine(type);
+    const moved = sealedMovedFields(type, ['task-input']);
+    const inner = Object.fromEntries(Object.entries(logical).filter(([field]) => moved.includes(field)));
+    expect(inner).toHaveProperty('images', images);
+    expect(parse(type, sealed)).toBe(true);
+    expect(parse(type, { ...sealed, images })).toBe(false);
+    // There is no cleartext indicator of images. Admission uses the logical
+    // input, and the device uses the same gate on the reconstructed input.
+    expect(requiredReceiverCapabilities(type, sealed)).not.toContain(INPUT_IMAGES_CAPABILITY);
+    const opened = { ...Object.fromEntries(Object.entries(logical).filter(([field]) => !moved.includes(field))), ...inner };
+    expect(MESSAGE_PAYLOAD_SCHEMAS[type].parse(opened)).toMatchObject({ images });
+    const advertised = new Set(requiredReceiverCapabilities(type, plain));
+    advertised.delete(INPUT_IMAGES_CAPABILITY);
+    for (const payload of [logical, opened]) {
+      const required = requiredReceiverCapabilities(type, payload);
+      expect(required.filter(flag => !advertised.has(flag))).toEqual([INPUT_IMAGES_CAPABILITY]);
+    }
+    advertised.add(INPUT_IMAGES_CAPABILITY);
+    expect(requiredReceiverCapabilities(type, logical).every(flag => advertised.has(flag))).toBe(true);
+    expect(requiredReceiverCapabilities(type, opened).every(flag => advertised.has(flag))).toBe(true);
+  });
+
+  it('preserves image refs on Host offers with plaintext input', () => {
+    const plain = corpus.find(line => line.type === 'task.offer' && line.payload.images !== undefined && line.payload.sealing === undefined)!.payload;
+    const outputOnly = { ...plain, sealing: { ...sealedLine('task.offer').sealing as Json, categories: ['task-output'] } };
+    expect(HostOfferPlainPayloadSchema.parse(plain).images).toEqual(plain.images);
+    expect(HostOfferSealedPayloadSchema.parse(outputOnly).images).toEqual(plain.images);
+    expect(requiredReceiverCapabilities('task.offer', outputOnly)).toContain(INPUT_IMAGES_CAPABILITY);
+    const prepared = corpus.find(line => line.type === 'task.offer' && line.payload.preparation !== undefined)!.payload;
+    expect(HostOfferPlainPayloadSchema.safeParse({ ...prepared, images }).success).toBe(false);
+  });
+
+  it.each(['task.offer', 'task.steer'] as const)('applies the same image bounds to %s', (type) => {
+    const plain = corpus.find(line => line.type === type && line.payload.images !== undefined && line.payload.sealing === undefined)!.payload;
+    expect(parse(type, { ...plain, images: [] })).toBe(false);
+    expect(parse(type, { ...plain, images: Array.from({ length: 16 }, () => images[0]) })).toBe(true);
+    expect(parse(type, { ...plain, images: Array.from({ length: 17 }, () => images[0]) })).toBe(false);
+    expect(parse(type, { ...plain, images: [{ ...images[0], mediaType: 'image/svg+xml' }] })).toBe(false);
+    expect(parse(type, { ...plain, images: [{ ...images[0], blob: { ...blobRef, contentHash: 'invalid' } }] })).toBe(false);
   });
 });
 
@@ -586,8 +639,10 @@ describe('sealed payload v1: the split table', () => {
         if (rule === 'plain') expect(sealedPaths, `${type} ${path}`).toContain(path);
       }
       const plainRules = Object.entries(entry.digests).filter(([, rule]) => rule === 'plain').map(([path]) => path);
-      const offerInstruction = (path: string) => entry.category === 'task-input' && topField(path) === 'instruction';
-      expect(sealedPaths.filter((path) => !offerInstruction(path)), `${type}: a digest the sealed branch carries in plaintext`).toEqual(plainRules.sort());
+      const sealedRules = Object.entries(entry.digests).filter(([, rule]) => rule === 'sealed').map(([path]) => path);
+      // A sealed offer's conditional input fields are visible to JSON Schema for its output-only form.
+      const conditionalInput = type === 'task.offer' ? sealedRules : [];
+      expect(sealedPaths, `${type}: digest paths visible to the sealed branch schema`).toEqual([...plainRules, ...conditionalInput].sort());
     }
   });
 
@@ -602,8 +657,11 @@ describe('sealed payload v1: the split table', () => {
       expect(Object.keys(properties), type).toContain('sealed');
       for (const field of [...entry.moved, ...entry.forbidden]) {
         expect(plainProperties, `${type}.${field}`).toContain(field);
-        // A task that seals only its output keeps a plaintext instruction.
-        if (field === 'instruction') expect(required, `${type}.${field}`).not.toContain(field);
+        // A task that seals only its output keeps the moved offer fields optional in the schema.
+        if (type === 'task.offer' && entry.moved.includes(field)) {
+          expect(properties, `${type}.${field}`).toHaveProperty(field);
+          expect(required, `${type}.${field}`).not.toContain(field);
+        }
         else if (field in properties) expect(properties[field], `${type}.${field} holds no value`).toEqual({ not: {} });
       }
       for (const field of entry.identity) expect(required, `${type}.${field}`).toContain(field);

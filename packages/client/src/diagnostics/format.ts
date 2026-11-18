@@ -45,6 +45,9 @@ export function formatAgentEvent(event: AgentEvent): string {
       return 'turn_end';
     case 'error':
       return `error: ${quote(event.message)}`;
+    case 'subagent_start':
+    case 'subagent_end':
+      return `${event.type}: ${JSON.stringify(event.agentPath)}`;
     case 'usage': {
       const parts: string[] = [];
       if (event.inputTokens !== undefined) parts.push(`in=${event.inputTokens}`);
