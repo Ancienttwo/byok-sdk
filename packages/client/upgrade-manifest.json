@@ -7,13 +7,29 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "74c716ac94443d12518252898dfa368791a7090bdf1dec4cd84440b5ca6bd77c"
+    "snapshotSha256": "f6ff27dc273af04fd1dfb0dace97bbae8a76b566265350a64e58867e1f765540"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "offline-provider-secret-recovery",
+      "impact": "additive",
+      "summary": "List provider credential entry names from a recognized offline store. Before deleting obsolete credentials, exclude names used by active stores in the same credential scope.",
+      "migration": "packages/keys/README.md#recover-provider-credentials-from-an-offline-store",
+      "items": [
+        "export:@byok-sdk/keys#listProviderProfileSecretNames"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/keys#listProviderProfileSecretNames",
+      "change": "added",
+      "entry": "offline-provider-secret-recovery"
+    }
+  ]
 }

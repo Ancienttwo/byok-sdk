@@ -121,6 +121,59 @@ profile that declares `'openai-responses'`, `providerId` or `inputLimits`. It al
 carry them. A profile without `thinkingLevelMap` passes: the prepared wire may
 leave the map out.
 
+### Recover provider credentials from an offline store
+
+If `inspectProviderProfileStore(path)` reports `new-path-repair` with
+`PROVIDER_STORE_SCHEMA_STALE`, preserve the old database. With the user's
+approval, enumerate and remove its obsolete credentials before provisioning a
+new store. `listProviderProfileSecretNames(path)` returns sorted, unique
+candidate entry names from known released layouts, including the current
+0.42.0–0.44.0 layout (reported as `accepted`), for recovery or uninstall. It
+reads an offline copy and returns only names. It never queries the credential
+store.
+
+First stop the processes that use the stores, and prevent provider changes in
+the credential scope through the end of cleanup. Any `-wal`, `-shm` or
+`-journal` file causes `PROVIDER_STORE_UNAVAILABLE`, including an open WAL
+connection. Close it normally and retry. After a crash, preserve the database
+and its sidecars together. Recover an independent backup with the old build,
+close it, and enumerate that backup once it has no sidecars. An unknown layout
+returns `PROVIDER_STORE_SCHEMA_STALE`. Use the old build's settings or the OS
+credential UI if the SDK cannot enumerate an owned store.
+
+**Protect credentials used by active stores before deleting anything.** Stores
+in the same scope can share a name such as `model-openai-api-key`. This
+includes a replacement store that has already been configured. Supply every
+store still in use in the original scope, even though its processes are stopped
+for cleanup. If any of those stores cannot be enumerated, or you cannot confirm
+the original backend, account and scope, stop and report cleanup as incomplete.
+
+```ts
+import { listProviderProfileSecretNames, type SecretStore } from '@byok-sdk/keys';
+
+async function removeRetiredProviderCredentials(
+  retiredPath: string,
+  retainedPathsInOriginalScope: readonly string[],
+  originalScope: SecretStore,
+): Promise<void> {
+  const candidates = await listProviderProfileSecretNames(retiredPath);
+  const retained = new Set<string>();
+  for (const path of retainedPathsInOriginalScope) {
+    for (const name of await listProviderProfileSecretNames(path)) retained.add(name);
+  }
+  for (const name of candidates) {
+    if (!retained.has(name)) await originalScope.delete(name);
+  }
+}
+```
+
+Use the original OS credential account, backend, prefix and scope, including
+its keychain or envelope settings if configured. A `false` deletion result
+means the entry was already absent. A deletion error can leave a partial
+cleanup. Keep the old database and report the failure so the Host can retry.
+Once cleanup is complete, provision a separate store if needed and re-enter
+any required credentials.
+
 ### Your own OpenAI-compatible gateway
 
 A gateway that you run yourself, for example magpie, is an external
