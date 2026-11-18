@@ -2065,7 +2065,9 @@ export declare class BlobClient implements BlobResolver {
     private readonly requestDeadlineMs;
     constructor(serverUrl: string, auth: AuthManager, options?: BlobClientOptions);
     resolveInstruction(blobRef: BlobRef, options?: BlobRequestOptions): Promise<string>;
-    downloadBlob(blobRef: BlobRef, options?: BlobRequestOptions): Promise<Uint8Array>;
+    downloadBlob(blobRef: BlobRef, options?: BlobRequestOptions & {
+        readonly maxBytes?: number;
+    }): Promise<Uint8Array>;
     uploadArtifact(content: string | Uint8Array, contentType: string, options?: BlobRequestOptions & {
         readonly idempotencyKey?: string;
     }): Promise<BlobRef>;

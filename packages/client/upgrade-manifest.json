@@ -7,13 +7,101 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "74c716ac94443d12518252898dfa368791a7090bdf1dec4cd84440b5ca6bd77c"
+    "snapshotSha256": "2a71e9526ef851470f8dbe938433cd69803a06e47c28c2ad80caf6a7d9697fc4"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "embedded-input-image-upload",
+      "impact": "additive",
+      "summary": "A trusted Host can upload a committed input image through ByokServer.blobs.uploadInputImage and pass the returned ref to dispatch or steer. Use images up to 20 MiB and respect any lower server blob limit.",
+      "migration": "packages/server/README.md#task-input-images",
+      "items": [
+        "export:@byok-sdk/client#BlobClient",
+        "export:@byok-sdk/cloud#BLOB_RESERVATION_TTL_MS",
+        "export:@byok-sdk/cloud#ByokCloudOptions",
+        "export:@byok-sdk/cloud#EmbeddedBlobAccess",
+        "export:@byok-sdk/cloud#InMemoryBlobBytes",
+        "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
+        "export:@byok-sdk/cloud#InMemoryCloudBlobStore",
+        "export:@byok-sdk/core#InMemoryCoreComposition",
+        "export:@byok-sdk/core#InMemoryObjectStore",
+        "export:@byok-sdk/protocol#INPUT_IMAGE_MAX_BYTES",
+        "export:@byok-sdk/server#ByokServer",
+        "export:@byok-sdk/server#InputImageUploadError",
+        "export:@byok-sdk/server#UploadInputImage"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/client#BlobClient",
+      "change": "changed",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#BLOB_RESERVATION_TTL_MS",
+      "change": "added",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ByokCloudOptions",
+      "change": "changed",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#EmbeddedBlobAccess",
+      "change": "added",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryBlobBytes",
+      "change": "changed",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
+      "change": "changed",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#InMemoryCloudBlobStore",
+      "change": "changed",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryCoreComposition",
+      "change": "changed",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/core#InMemoryObjectStore",
+      "change": "changed",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#INPUT_IMAGE_MAX_BYTES",
+      "change": "added",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/server#ByokServer",
+      "change": "changed",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/server#InputImageUploadError",
+      "change": "added",
+      "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/server#UploadInputImage",
+      "change": "added",
+      "entry": "embedded-input-image-upload"
+    }
+  ]
 }

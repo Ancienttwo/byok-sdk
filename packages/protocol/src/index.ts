@@ -231,6 +231,7 @@ export {
   AGENT_REF_MAX_BYTES,
   ExecutionTargetSchema,
   ReasoningEffortSchema,
+  INPUT_IMAGE_MAX_BYTES,
   InputImageBlobRefSchema,
   InputImagesSchema,
   ClaimedExecutorSchema,

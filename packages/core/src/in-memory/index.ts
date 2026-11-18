@@ -19,6 +19,8 @@ import { InMemorySkillPackStore } from './skill-pack.js';
 import { InMemoryTruthStore } from './truth.js';
 import { createMutableClock } from './clock.js';
 import type { Clock, CoreStores, MutableClock } from '../stores.js';
+import type { ContentHash } from '../blob.js';
+import type { TenantId } from '../tenant.js';
 
 export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock.js';
 export { InMemoryMailboxStore } from './mailbox.js';
@@ -38,6 +40,8 @@ export interface InMemoryCoreOptions {
 
 export interface InMemoryCoreComposition {
   readonly stores: CoreStores;
+  /** Embedded reuse extends orphan grace on this manifest only. */
+  refreshCommittedObject: (tenant: TenantId, hash: ContentHash) => void;
   /** The clock the stores read. Mutable only when the caller did not inject its own. */
   readonly clock: Clock;
 }
@@ -58,7 +62,7 @@ export function createInMemoryCoreStores(
     quota,
     skillPacks: new InMemorySkillPackStore(),
   };
-  return { stores, clock };
+  return { stores, clock, refreshCommittedObject: InMemoryObjectStore.refreshCommitted.bind(undefined, objects) };
 }
 
 /** Convenience for tests that need to move time: returns the composition and its mutable clock. */

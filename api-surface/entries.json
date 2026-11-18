@@ -391,6 +391,7 @@
         "#byok-acp-runtime",
         "#byok-oar-readers",
         "#byok-pi-runtime-host",
+        "./input-image-upload.js",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
@@ -2586,7 +2587,9 @@
         "path",
         "zod"
       ],
-      "lazyImports": [],
+      "lazyImports": [
+        "./input-image-upload.js"
+      ],
       "thirdParty": [
         "@cfworker/json-schema",
         "@hono/node-server",
