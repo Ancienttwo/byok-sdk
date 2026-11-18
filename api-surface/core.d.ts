@@ -786,7 +786,6 @@ export declare class InMemoryObjectStore implements ObjectStore {
     });
     putManifest(tenant: TenantId, input: ObjectManifestInput): Promise<ObjectManifestEntry>;
     commit(tenant: TenantId, input: ObjectCommitInput): Promise<ObjectManifestEntry>;
-    static refreshCommitted(store: InMemoryObjectStore, tenant: TenantId, hash: ContentHash): void;
     get(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry | undefined>;
     list(tenant: TenantId, query: ObjectListQuery): Promise<readonly ObjectManifestEntry[]>;
     addReference(tenant: TenantId, input: ObjectReferenceInput): Promise<ObjectManifestEntry>;
@@ -829,8 +828,6 @@ export declare class InMemoryDeviceAssertionReplayAuthority implements DeviceAss
 // ==== @byok-sdk/core dist/in-memory/index.d.ts ====
 import type { InMemoryObjectBytes } from './blob.js';
 import type { Clock, CoreStores, MutableClock } from '../stores.js';
-import type { ContentHash } from '../blob.js';
-import type { TenantId } from '../tenant.js';
 export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock.js';
 export { InMemoryMailboxStore } from './mailbox.js';
 export { InMemoryBoardStore } from './board.js';
@@ -846,7 +843,6 @@ export interface InMemoryCoreOptions {
 }
 export interface InMemoryCoreComposition {
     readonly stores: CoreStores;
-    refreshCommittedObject: (tenant: TenantId, hash: ContentHash) => void;
     readonly clock: Clock;
 }
 export declare function createInMemoryCoreStores(options: InMemoryCoreOptions): InMemoryCoreComposition;

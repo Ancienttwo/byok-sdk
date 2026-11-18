@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "059c644d12054fe92da4ad7d59f0ab100df4badf892a920c9656d30a028429b8"
+    "snapshotSha256": "c9f1c9296ba5bd916df01a5988a4fd516b8ac01ae2327e6d3fa8391a5056594d"
   },
   "configFields": {
     "status": "tracked",
@@ -22,14 +22,7 @@
       "migration": "packages/server/README.md#task-input-images",
       "items": [
         "export:@byok-sdk/client#BlobClient",
-        "export:@byok-sdk/cloud#BLOB_RESERVATION_TTL_MS",
         "export:@byok-sdk/cloud#ByokCloudOptions",
-        "export:@byok-sdk/cloud#EmbeddedBlobAccess",
-        "export:@byok-sdk/cloud#InMemoryBlobBytes",
-        "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
-        "export:@byok-sdk/cloud#InMemoryCloudBlobStore",
-        "export:@byok-sdk/core#InMemoryCoreComposition",
-        "export:@byok-sdk/core#InMemoryObjectStore",
         "export:@byok-sdk/protocol#INPUT_IMAGE_MAX_BYTES",
         "export:@byok-sdk/server#ByokServer",
         "export:@byok-sdk/server#InputImageUploadError",
@@ -82,42 +75,7 @@
       "entry": "embedded-input-image-upload"
     },
     {
-      "item": "export:@byok-sdk/cloud#BLOB_RESERVATION_TTL_MS",
-      "change": "added",
-      "entry": "embedded-input-image-upload"
-    },
-    {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",
-      "change": "changed",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#EmbeddedBlobAccess",
-      "change": "added",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#InMemoryBlobBytes",
-      "change": "changed",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#InMemoryBlobContentProxy",
-      "change": "changed",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#InMemoryCloudBlobStore",
-      "change": "changed",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/core#InMemoryCoreComposition",
-      "change": "changed",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/core#InMemoryObjectStore",
       "change": "changed",
       "entry": "embedded-input-image-upload"
     },

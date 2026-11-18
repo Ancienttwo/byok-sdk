@@ -525,6 +525,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/server/execution-core` | Host execution core: FIFO, ledger, routines, memory restore | `@cfworker/json-schema`, `zod` | allowed | 393408 B |
 | `@byok-sdk/server/execution-core/canonical` | Worker-safe canonical JSON hash | — | forbidden | 632 B |
 | `@byok-sdk/server/package.json` | Package metadata | — | forbidden | 1938 B |
+| `@byok-sdk/server#byok-embedded-blob-storage` | Private embedded blob store composition | `@cfworker/json-schema`, `zod` | allowed | 291000 B |
 | `@byok-sdk/ui-runtime` | UI folds; current cloud/Hono/Zod closure | `@cfworker/json-schema`, `hono`, `zod` | allowed | 621509 B |
 | `@byok-sdk/ui-runtime/package.json` | Package metadata | — | forbidden | 1337 B |
 | `bin:byok-agent` | Device daemon CLI | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2831637 B |

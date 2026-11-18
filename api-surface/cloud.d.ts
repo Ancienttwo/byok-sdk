@@ -62,7 +62,6 @@
 //   ApproveTaskOptions -> dist/cloud.d.ts
 //   AuthenticatedDeviceProof -> dist/auth/device-proof.d.ts
 //   BLOB_READ_ERROR_CODES -> dist/stores/ports.d.ts
-//   BLOB_RESERVATION_TTL_MS -> dist/handlers/blobs.d.ts
 //   BLOB_URL_TTL_MS -> dist/stores/in-memory/blobs.d.ts
 //   BearerAuthDeps -> dist/auth/bearer.d.ts
 //   BlobContent -> dist/stores/ports.d.ts
@@ -142,7 +141,6 @@
 //   E2eeScopeKeyPackagePutResult -> dist/e2ee-member.d.ts
 //   E2eeScopeKeyPackageRow -> dist/e2ee-member.d.ts
 //   E2eeScopeShred -> dist/e2ee-member.d.ts
-//   EmbeddedBlobAccess -> dist/stores/in-memory/blobs.d.ts
 //   EnqueuedAgentControl -> dist/cloud.d.ts
 //   EnqueuedAgentHomeProjection -> dist/cloud.d.ts
 //   EnqueuedInputPreparation -> dist/cloud.d.ts
@@ -2036,8 +2034,6 @@ export declare class DeviceRetiredError extends ByokCloudError {
     });
 }
 export declare function isCloudError(value: unknown, code?: CloudErrorCode): value is ByokCloudError;
-// ==== @byok-sdk/cloud dist/handlers/blobs.d.ts ====
-export declare const BLOB_RESERVATION_TTL_MS: number;
 // ==== @byok-sdk/cloud dist/handlers/board.d.ts ====
 export declare const DEFAULT_BOARD_PAGE_LIMIT = 50;
 export declare const DEFAULT_BOARD_STREAM_QUERY_INTERVAL_MS = 5000;
@@ -2163,8 +2159,6 @@ export { CLOUD_PORT_METHODS } from './stores/ports-contract.js';
 export type { BlobContent, BlobContentProxy, BlobDeclaration, BlobObservation, BlobReadErrorCode, BlobReadResult, BlobWriteResult, CloudBlobStore, CloudStoreName, CloudStores, DeviceDirectory, DeviceRecord, DeviceRegistration, DeviceRegistrationResult, InboundDedupStore, DeviceScopedStores, InboundRateLimiter, NonceStore, PairingCodeClaims, PairingCodeInfo, PairingCodeIssueInput, PairingCodeStore, PairingEnrollment, PairingEnrollmentInput, PairingEnrollmentResult, ProofRequestReceipt, ProofRequestReceiptInput, ProofRequestReceiptStore, RateLimitDecision, RateLimitUnit, RequestReceipt, RequestReceiptStore, SteerRefusalRecord, TaskSteerRefusalStore, TaskAttempt, TaskAttemptListQuery, TaskAttemptCounts, TaskAttemptPage, TaskAttemptStatus, TaskAttemptStore, AgentRef, AgentEgressRecord, AgentEgressStore, AgentMessageAdmission, TaskAbandonCause, TaskAbandonRequest, TaskCancellationMutation, TaskCancellationRequest, TaskCancellationStore, } from './stores/ports.js';
 export { AllowAllRateLimiter, BLOB_URL_TTL_MS, DEDUP_RING_CAPACITY, InMemoryBlobContentProxy, InMemoryCloudBlobStore, InMemoryActivityStore, InMemoryAgentMessageDraftStore, InMemoryDeviceDirectory, InMemoryInboundDedupStore, InMemoryNonceStore, InMemoryPairingCodeStore, InMemoryRequestReceiptStore, InMemoryAgentEgressStore, InMemoryProofRequestReceiptStore, InMemoryTaskAttemptStore, InMemoryTaskCancellationStore, NONCE_TTL_MS, createInMemoryCloudStores, createInMemoryBlobBytes, InMemoryBlobBytes, } from './stores/in-memory/index.js';
 export type { InMemoryBlobStoreOptions, InMemoryBlobs, InMemoryCloudComposition, } from './stores/in-memory/index.js';
-export type { EmbeddedBlobAccess } from './stores/in-memory/blobs.js';
-export { BLOB_RESERVATION_TTL_MS } from './handlers/blobs.js';
 export type { DeviceTerminal } from './terminal-result.js';
 export { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput, type SealedAgentExecutionInput, } from './agent-execution.js';
 export { DEFAULT_RETENTION_POLICY, DEFAULT_MAINTENANCE_LIMIT, MAINTENANCE_STEPS, resolveRetentionPolicy, DEFAULT_PROOF_RECEIPT_RETENTION_MS, PROOF_RECEIPT_RETENTION_FLOOR_MS, } from './maintenance.js';
@@ -2351,7 +2345,6 @@ export declare class InMemoryAgentMessageDraftStore implements AgentMessageDraft
 }
 // ==== @byok-sdk/cloud dist/stores/in-memory/blobs.d.ts ====
 import { type Clock, type ContentHash, type ObjectStore, type StorageReservation, type TenantId } from '@byok-sdk/core';
-import { type BlobRef } from '@byok-sdk/protocol';
 import type { CloudCrypto } from '../../crypto/port.js';
 import type { BlobContentProxy, BlobObservation, BlobReadResult, BlobWriteResult, CloudBlobStore } from '../ports.js';
 export declare const BLOB_URL_TTL_MS: number;
@@ -2372,7 +2365,6 @@ export interface InMemoryBlobStoreOptions {
 declare class InMemoryBlobRegistry {
     readonly blobs: Map<string, BlobRecord>;
     readonly reservationBlobs: Map<string, string>;
-    readonly objectBlobs: Map<string, Set<string>>;
     readonly clock: Clock;
     readonly crypto: CloudCrypto;
     readonly secret: Uint8Array;
@@ -2388,10 +2380,8 @@ export declare class InMemoryCloudBlobStore implements CloudBlobStore {
         blobId: string;
         uploadUrl: string;
     }>;
-    static registerUpload(store: InMemoryCloudBlobStore, tenant: TenantId, reservation: StorageReservation): Promise<string>;
     observeUpload(tenant: TenantId, blobId: string, reservation: StorageReservation): Promise<BlobObservation | undefined>;
     getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined>;
-    static readCommitted(store: InMemoryCloudBlobStore, tenant: TenantId, blobId: string): Promise<BlobRef | undefined>;
 }
 export declare class InMemoryBlobContentProxy implements BlobContentProxy {
     #private;
@@ -2402,11 +2392,6 @@ export declare class InMemoryBlobContentProxy implements BlobContentProxy {
     writeContent(blobId: string, data: Uint8Array): Promise<BlobWriteResult>;
     readContent(blobId: string): Promise<BlobReadResult | undefined>;
 }
-export interface EmbeddedBlobAccess {
-    readCommitted(tenant: TenantId, blobId: string): Promise<BlobRef | undefined>;
-    reuseCommitted(tenant: TenantId, hash: ContentHash, size: number, contentType: string): Promise<string | undefined>;
-    writeReserved(tenant: TenantId, reservation: StorageReservation, bytes: Uint8Array): Promise<string>;
-}
 export interface InMemoryBlobs {
     readonly blobs: CloudBlobStore;
     readonly contentProxy: BlobContentProxy;
@@ -2416,7 +2401,6 @@ export declare class InMemoryBlobBytes {
     constructor(clock: Clock, crypto: CloudCrypto, options?: InMemoryBlobStoreOptions);
     deleteObject(tenant: TenantId, hash: ContentHash): void;
     bind(objects: ObjectStore): InMemoryBlobs;
-    embeddedAccess(objects: ObjectStore, refreshCommitted: (tenant: TenantId, hash: ContentHash) => void): EmbeddedBlobAccess;
 }
 export declare function createInMemoryBlobBytes(clock: Clock, crypto: CloudCrypto, options?: InMemoryBlobStoreOptions): InMemoryBlobBytes;
 // ==== @byok-sdk/cloud dist/stores/in-memory/dedup.d.ts ====

@@ -1,5 +1,4 @@
 import {
-  createInMemoryCoreStores,
   tenantId,
   type Clock,
   type CoreStores,
@@ -9,10 +8,9 @@ import {
 } from '@byok-sdk/core';
 import {
   createInMemoryCloudStores,
-  createInMemoryBlobBytes,
   createInProcessMailboxWake,
   type MailboxWake,
-  type TaskEventsWake, type EmbeddedBlobAccess,
+  type TaskEventsWake,
   createWebCrypto,
   type BlobContentProxy,
   type ProofReceiptRetentionAuthority,
@@ -20,6 +18,7 @@ import {
   type CloudStores,
   type InboundDedupStore,
 } from '@byok-sdk/cloud';
+import { composeEmbeddedMemory, type EmbeddedBlobAccess } from '#byok-embedded-blob-storage';
 import { RateLimiter, createCountingInboundRateLimiter, type RateLimiterOptions } from './rate-limiter.js';
 import { createSqliteEmbeddedStores } from './stores/sqlite/index.js';
 import { MemoryWakeStore, type WakeStore } from './wakes/store.js';
@@ -118,13 +117,12 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
           { clock, crypto, ...(options.wake === undefined ? {} : { wake: options.wake }) },
         )
       : undefined;
-  const objectBytes = sqlite === undefined ? createInMemoryBlobBytes(clock, crypto) : undefined;
-  const inMemoryCore = objectBytes === undefined ? undefined : createInMemoryCoreStores({ clock, objectBytes });
-  const core = sqlite?.core ?? inMemoryCore!.stores;
-  const inMemoryCloud =
-    sqlite === undefined ? createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, core.presence, objectBytes!) : undefined;
+  const memory = sqlite === undefined ? composeEmbeddedMemory(clock, crypto) : undefined;
+  const core = sqlite?.core ?? memory!.core;
+  const inMemoryCloud = memory === undefined
+    ? undefined : createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, core.presence, memory.objectBytes);
   const stores = sqlite?.cloud ?? inMemoryCloud!.stores;
-  const embeddedBlobs = sqlite?.embeddedBlobs ?? objectBytes!.embeddedAccess(core.objects, inMemoryCore!.refreshCommittedObject);
+  const embeddedBlobs = sqlite?.embeddedBlobs ?? memory!.embeddedBlobs;
   const blobContentProxy = sqlite?.blobContentProxy ?? inMemoryCloud!.blobContentProxy;
 
   const rateLimiter = createCountingInboundRateLimiter(

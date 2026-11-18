@@ -1,4 +1,4 @@
-import { BLOB_RESERVATION_TTL_MS } from '@byok-sdk/cloud';
+import { BLOB_RESERVATION_TTL_MS } from '#byok-embedded-blob-storage';
 import { ByokCoreError, contentHash, isCoreError, type ContentHash, type TenantId } from '@byok-sdk/core';
 import type { InputImageBlobRef } from '@byok-sdk/protocol';
 import type { FacadeStoreComposition } from './stores.js';

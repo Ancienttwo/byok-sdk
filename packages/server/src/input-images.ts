@@ -1,4 +1,5 @@
-import { ByokCloudError, type EmbeddedBlobAccess } from '@byok-sdk/cloud';
+import type { EmbeddedBlobAccess } from './embedded-blob-storage-contract.js';
+import { ByokCloudError } from '@byok-sdk/cloud';
 import { ByokCoreError, isCoreError, type TenantId } from '@byok-sdk/core';
 import { INPUT_IMAGE_MAX_BYTES, InputImageBlobRefSchema, type InputImageBlobRef } from '@byok-sdk/protocol';
 import type { FacadeStoreComposition } from './stores.js';

@@ -19,8 +19,6 @@ import { InMemorySkillPackStore } from './skill-pack.js';
 import { InMemoryTruthStore } from './truth.js';
 import { createMutableClock } from './clock.js';
 import type { Clock, CoreStores, MutableClock } from '../stores.js';
-import type { ContentHash } from '../blob.js';
-import type { TenantId } from '../tenant.js';
 
 export { createMutableClock, IN_MEMORY_CLOCK_EPOCH } from './clock.js';
 export { InMemoryMailboxStore } from './mailbox.js';
@@ -40,8 +38,6 @@ export interface InMemoryCoreOptions {
 
 export interface InMemoryCoreComposition {
   readonly stores: CoreStores;
-  /** Embedded reuse extends orphan grace on this manifest only. */
-  refreshCommittedObject: (tenant: TenantId, hash: ContentHash) => void;
   /** The clock the stores read. Mutable only when the caller did not inject its own. */
   readonly clock: Clock;
 }
@@ -49,11 +45,16 @@ export interface InMemoryCoreComposition {
 export function createInMemoryCoreStores(
   options: InMemoryCoreOptions,
 ): InMemoryCoreComposition {
+  return composeInMemoryCore(options);
+}
+
+/** Internal composition entry for code that needs the concrete object store. */
+export function composeInMemoryCore(options: InMemoryCoreOptions) {
   const clock: Clock = options.clock ?? createMutableClock();
   const ledger = new InMemoryStorageLedger(clock);
   const objects = new InMemoryObjectStore(clock, { ledger, bytes: options.objectBytes });
   const quota = new InMemoryQuotaStore(clock, objects, ledger);
-  const stores: CoreStores = {
+  const stores = {
     mailbox: new InMemoryMailboxStore(clock, quota),
     board: new InMemoryBoardStore(clock),
     truth: new InMemoryTruthStore(clock),
@@ -62,7 +63,7 @@ export function createInMemoryCoreStores(
     quota,
     skillPacks: new InMemorySkillPackStore(),
   };
-  return { stores, clock, refreshCommittedObject: InMemoryObjectStore.refreshCommitted.bind(undefined, objects) };
+  return { stores: stores satisfies CoreStores, clock };
 }
 
 /** Convenience for tests that need to move time: returns the composition and its mutable clock. */

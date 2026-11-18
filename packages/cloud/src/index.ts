@@ -412,8 +412,6 @@ export type {
   InMemoryBlobs,
   InMemoryCloudComposition,
 } from './stores/in-memory/index.js';
-export type { EmbeddedBlobAccess } from './stores/in-memory/blobs.js';
-export { BLOB_RESERVATION_TTL_MS } from './handlers/blobs.js';
 
 export type { DeviceTerminal } from './terminal-result.js';
 

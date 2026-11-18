@@ -50,7 +50,6 @@ import {
   type AgentMessageAdmission,
   type AgentRef,
   type BlobContentProxy,
-  type EmbeddedBlobAccess,
   type CloudBlobStore,
   type BlobObservation,
   type BlobReadResult,
@@ -71,6 +70,7 @@ import {
   type TaskCancellationRequest,
   type TaskCancellationStore,
 } from '@byok-sdk/cloud';
+import type { EmbeddedBlobAccess } from '../../embedded-blob-storage-contract.js';
 import { PROTOCOL_VERSION, byokBlobContentPath, type ClaimedExecutor, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import {
@@ -444,7 +444,7 @@ class SqliteCoordinator {
       db.exec('BEGIN IMMEDIATE');
       let result: T;
       try { result = body(db); db.exec('COMMIT'); }
-      catch (cause) { this.#changedTasks.clear(); try { db.exec('ROLLBACK'); } catch {} throw cause; }
+      catch (cause) { this.#changedTasks.clear(); try { db.exec('ROLLBACK'); } catch { /* Preserve the original transaction error. */ } throw cause; }
       // No await splits the committed SQL state from its process-local ledger:
       // `afterCommit` starts synchronously, right after COMMIT.
       await afterCommit(result);

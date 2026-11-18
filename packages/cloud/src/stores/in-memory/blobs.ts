@@ -66,13 +66,13 @@ export interface InMemoryBlobStoreOptions {
 class InMemoryBlobRegistry {
   readonly blobs = new Map<string, BlobRecord>();
   readonly reservationBlobs = new Map<string, string>();
-  readonly objectBlobs = new Map<string, Set<string>>();
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
   readonly secret: Uint8Array;
   readonly urlTtlMs: number;
 
   constructor(clock: Clock, crypto: CloudCrypto, options: InMemoryBlobStoreOptions) {
+    objectBlobIndex.set(this, new Map());
     this.clock = clock;
     this.crypto = crypto;
     this.secret = globalThis.crypto.getRandomValues(new Uint8Array(SIGNING_SECRET_BYTES));
@@ -90,6 +90,61 @@ class InMemoryBlobRegistry {
   }
 }
 
+// Keep the object-to-blob index out of the constructor's public type.
+const objectBlobIndex = new WeakMap<InMemoryBlobRegistry, Map<string, Set<string>>>();
+
+async function registerUpload(registry: InMemoryBlobRegistry, objects: ObjectStore, tenant: TenantId, reservation: StorageReservation): Promise<string> {
+  const { blobs, reservationBlobs, crypto } = registry;
+  const objectBlobs = objectBlobIndex.get(registry)!;
+  assertReservedObject(tenant, reservation);
+  const reservationKey = tenantKey(tenant, reservation.reservationId);
+  const entry = await objects.putManifest(tenant, {
+    hash: reservation.contentHash,
+    byteSize: reservation.expectedBytes,
+    contentType: reservation.contentType,
+  });
+  if (
+    entry.byteSize !== reservation.expectedBytes ||
+    entry.contentType !== reservation.contentType
+  ) {
+    throw new ByokCoreError(
+      'storage_integrity_mismatch',
+      `Object ${reservation.contentHash} already binds a different storage declaration.`,
+    );
+  }
+  if (entry.state !== 'pending') {
+    throw new ByokCoreError('object_state_invalid', `Object ${reservation.contentHash} is ${entry.state}.`);
+  }
+  // Another registration may have landed while the manifest was read.
+  const registered = reservationBlobs.get(reservationKey);
+  if (registered !== undefined) return registered;
+
+  const blobId = `blob_${crypto.randomUuid()}`;
+  blobs.set(blobId, {
+    tenantId: tenant,
+    reservationId: reservation.reservationId,
+    contentHash: reservation.contentHash,
+    byteSize: reservation.expectedBytes,
+    contentType: reservation.contentType,
+    uploaded: false,
+  });
+  reservationBlobs.set(reservationKey, blobId);
+  const key = tenantKey(tenant, reservation.contentHash);
+  const ids = objectBlobs.get(key) ?? new Set<string>();
+  ids.add(blobId);
+  objectBlobs.set(key, ids);
+  return blobId;
+}
+
+async function readCommitted(registry: InMemoryBlobRegistry, objects: ObjectStore, tenant: TenantId, blobId: string): Promise<BlobRef | undefined> {
+  const record = registry.blobs.get(blobId);
+  // Another tenant's blob and a blob that does not exist answer identically.
+  if (record === undefined || record.tenantId !== tenant || !record.uploaded) return undefined;
+  const manifest = await objects.get(tenant, record.contentHash);
+  if (manifest?.state !== 'committed') return undefined;
+  return { blobId, contentHash: record.contentHash, size: Number(record.byteSize), contentType: record.contentType };
+}
+
 /** The narrowed port: tenant-first grants, no bytes. */
 export class InMemoryCloudBlobStore implements CloudBlobStore {
   readonly #registry: InMemoryBlobRegistry;
@@ -101,50 +156,8 @@ export class InMemoryCloudBlobStore implements CloudBlobStore {
   }
 
   async createUpload(tenant: TenantId, reservation: StorageReservation): Promise<{ blobId: string; uploadUrl: string }> {
-    const blobId = await InMemoryCloudBlobStore.registerUpload(this, tenant, reservation);
+    const blobId = await registerUpload(this.#registry, this.#objects, tenant, reservation);
     return { blobId, uploadUrl: await this.#registry.signUrl(blobId, 'put') };
-  }
-
-  static async registerUpload(store: InMemoryCloudBlobStore, tenant: TenantId, reservation: StorageReservation): Promise<string> {
-    const { blobs, reservationBlobs, objectBlobs, crypto } = store.#registry;
-    assertReservedObject(tenant, reservation);
-    const reservationKey = tenantKey(tenant, reservation.reservationId);
-    const entry = await store.#objects.putManifest(tenant, {
-      hash: reservation.contentHash,
-      byteSize: reservation.expectedBytes,
-      contentType: reservation.contentType,
-    });
-    if (
-      entry.byteSize !== reservation.expectedBytes ||
-      entry.contentType !== reservation.contentType
-    ) {
-      throw new ByokCoreError(
-        'storage_integrity_mismatch',
-        `Object ${reservation.contentHash} already binds a different storage declaration.`,
-      );
-    }
-    if (entry.state !== 'pending') {
-      throw new ByokCoreError('object_state_invalid', `Object ${reservation.contentHash} is ${entry.state}.`);
-    }
-    // Another registration may have landed while the manifest was read.
-    const registered = reservationBlobs.get(reservationKey);
-    if (registered !== undefined) return registered;
-
-    const blobId = `blob_${crypto.randomUuid()}`;
-    blobs.set(blobId, {
-      tenantId: tenant,
-      reservationId: reservation.reservationId,
-      contentHash: reservation.contentHash,
-      byteSize: reservation.expectedBytes,
-      contentType: reservation.contentType,
-      uploaded: false,
-    });
-    reservationBlobs.set(reservationKey, blobId);
-    const key = tenantKey(tenant, reservation.contentHash);
-    const ids = objectBlobs.get(key) ?? new Set<string>();
-    ids.add(blobId);
-    objectBlobs.set(key, ids);
-    return blobId;
   }
 
   async observeUpload(
@@ -170,17 +183,8 @@ export class InMemoryCloudBlobStore implements CloudBlobStore {
   }
 
   async getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined> {
-    if (await InMemoryCloudBlobStore.readCommitted(this, tenant, blobId) === undefined) return undefined;
+    if (await readCommitted(this.#registry, this.#objects, tenant, blobId) === undefined) return undefined;
     return this.#registry.signUrl(blobId, 'get');
-  }
-
-  static async readCommitted(store: InMemoryCloudBlobStore, tenant: TenantId, blobId: string): Promise<BlobRef | undefined> {
-    const record = store.#registry.blobs.get(blobId);
-    // Another tenant's blob and a blob that does not exist answer identically.
-    if (record === undefined || record.tenantId !== tenant || !record.uploaded) return undefined;
-    const manifest = await store.#objects.get(tenant, record.contentHash);
-    if (manifest?.state !== 'committed') return undefined;
-    return { blobId, contentHash: record.contentHash, size: Number(record.byteSize), contentType: record.contentType };
   }
 }
 
@@ -241,73 +245,74 @@ function sealBytes(record: BlobRecord, data: Uint8Array): void {
   record.uploaded = true;
 }
 
-/** Composition-owned operations over SDK-validated bytes. */
-export interface EmbeddedBlobAccess {
-  readCommitted(tenant: TenantId, blobId: string): Promise<BlobRef | undefined>;
-  reuseCommitted(tenant: TenantId, hash: ContentHash, size: number, contentType: string): Promise<string | undefined>;
-  /** The SDK owns these bytes and computed the reservation's digest over them. */
-  writeReserved(tenant: TenantId, reservation: StorageReservation, bytes: Uint8Array): Promise<string>;
-}
-
 /** Both halves over one registry. The only way to obtain either. */
 export interface InMemoryBlobs {
   readonly blobs: CloudBlobStore;
   readonly contentProxy: BlobContentProxy;
 }
 
+const blobRegistries = new WeakMap<InMemoryBlobBytes, InMemoryBlobRegistry>();
+
 /** Composition-owned bytes, constructed before the core metadata stores. */
 export class InMemoryBlobBytes {
   readonly #registry: InMemoryBlobRegistry;
   constructor(clock: Clock, crypto: CloudCrypto, options: InMemoryBlobStoreOptions = {}) {
     this.#registry = new InMemoryBlobRegistry(clock, crypto, options);
+    blobRegistries.set(this, this.#registry);
   }
   deleteObject(tenant: TenantId, hash: ContentHash): void {
     const key = tenantKey(tenant, hash);
-    for (const id of this.#registry.objectBlobs.get(key) ?? []) {
+    const objectBlobs = objectBlobIndex.get(this.#registry)!;
+    for (const id of objectBlobs.get(key) ?? []) {
       const record = this.#registry.blobs.get(id)!;
       this.#registry.blobs.delete(id);
       this.#registry.reservationBlobs.delete(tenantKey(tenant, record.reservationId));
     }
-    this.#registry.objectBlobs.delete(key);
+    objectBlobs.delete(key);
   }
   bind(objects: ObjectStore): InMemoryBlobs {
     return { blobs: new InMemoryCloudBlobStore(this.#registry, objects), contentProxy: new InMemoryBlobContentProxy(this.#registry) };
   }
-
-  embeddedAccess(objects: ObjectStore, refreshCommitted: (tenant: TenantId, hash: ContentHash) => void): EmbeddedBlobAccess {
-    const store = new InMemoryCloudBlobStore(this.#registry, objects);
-    return {
-      readCommitted: (tenant, blobId) => InMemoryCloudBlobStore.readCommitted(store, tenant, blobId),
-      reuseCommitted: async (tenant, hash, size, contentType) => {
-        const manifest = await objects.get(tenant, hash);
-        if (manifest?.state === 'delete_pending') {
-          throw new ByokCoreError('object_state_invalid', 'The image object is pending deletion.');
-        }
-        if (manifest?.state !== 'committed') return undefined;
-        if (manifest.byteSize !== BigInt(size) || manifest.contentType !== contentType) {
-          throw new ByokCoreError('storage_integrity_mismatch', 'The committed object binds a different storage declaration.');
-        }
-        for (const id of this.#registry.objectBlobs.get(tenantKey(tenant, hash)) ?? []) {
-          const record = this.#registry.blobs.get(id);
-          if (record?.uploaded) {
-            refreshCommitted(tenant, hash);
-            return id;
-          }
-        }
-        throw new ByokCoreError('object_state_invalid', 'The committed image object has no uploaded blob.');
-      },
-      writeReserved: async (tenant, reservation, bytes) => {
-        const id = await InMemoryCloudBlobStore.registerUpload(store, tenant, reservation);
-        const record = this.#registry.blobs.get(id);
-        if (record === undefined || record.tenantId !== tenant || record.reservationId !== reservation.reservationId) {
-          throw new ByokCoreError('storage_integrity_mismatch', 'The upload does not match its reservation.');
-        }
-        sealBytes(record, bytes);
-        return id;
-      },
-    };
-  }
 }
+
+/** Internal composition-only operations over SDK-validated bytes. */
+export function createEmbeddedBlobAccess(bytes: InMemoryBlobBytes, objects: ObjectStore,
+  refreshCommitted: (tenant: TenantId, hash: ContentHash) => void) {
+  const registry = blobRegistries.get(bytes)!;
+  const objectBlobs = objectBlobIndex.get(registry)!;
+  return {
+    readCommitted: (tenant: TenantId, blobId: string) => readCommitted(registry, objects, tenant, blobId),
+    reuseCommitted: async (tenant: TenantId, hash: ContentHash, size: number, contentType: string): Promise<string | undefined> => {
+      const manifest = await objects.get(tenant, hash);
+      if (manifest?.state === 'delete_pending') {
+        throw new ByokCoreError('object_state_invalid', 'The image object is pending deletion.');
+      }
+      if (manifest?.state !== 'committed') return undefined;
+      if (manifest.byteSize !== BigInt(size) || manifest.contentType !== contentType) {
+        throw new ByokCoreError('storage_integrity_mismatch', 'The committed object binds a different storage declaration.');
+      }
+      for (const id of objectBlobs.get(tenantKey(tenant, hash)) ?? []) {
+        const record = registry.blobs.get(id);
+        if (record?.uploaded) {
+          refreshCommitted(tenant, hash);
+          return id;
+        }
+      }
+      throw new ByokCoreError('object_state_invalid', 'The committed image object has no uploaded blob.');
+    },
+    // The SDK owns these bytes and computed the reservation digest over them.
+    writeReserved: async (tenant: TenantId, reservation: StorageReservation, bytes: Uint8Array): Promise<string> => {
+      const id = await registerUpload(registry, objects, tenant, reservation);
+      const record = registry.blobs.get(id);
+      if (record === undefined || record.tenantId !== tenant || record.reservationId !== reservation.reservationId) {
+        throw new ByokCoreError('storage_integrity_mismatch', 'The upload does not match its reservation.');
+      }
+      sealBytes(record, bytes);
+      return id;
+    },
+  };
+}
+
 export function createInMemoryBlobBytes(clock: Clock, crypto: CloudCrypto, options: InMemoryBlobStoreOptions = {}): InMemoryBlobBytes {
   return new InMemoryBlobBytes(clock, crypto, options);
 }
