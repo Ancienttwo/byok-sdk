@@ -87,8 +87,8 @@ export function foldStreamJsonStdout<S extends StreamJsonProjectionState>(
       return event({ events: [...result.before, { kind: "turn_ended", outcome: result.outcome, ...(typeof message.user_message_uuid === "string" ? { inputId: message.user_message_uuid } : {}),
         ...(Array.isArray(message.user_message_uuids) && message.user_message_uuids.every((id) => typeof id === "string") ? { inputIds: message.user_message_uuids } : {}) }, ...result.after] }, {
         ...result.state,
-        ...(agentPath.length === 0 ? { turnActive: false, nativeTurnActive: false, unclaimedInit: false, ...(state.pendingInputId === null ? { promptInputId: null } : {}) } : {}),
-        abortRequested: false,
+        // BYOK change: a child result must not consume the root interrupt marker.
+        ...(agentPath.length === 0 ? { turnActive: false, nativeTurnActive: false, unclaimedInit: false, abortRequested: false, ...(state.pendingInputId === null ? { promptInputId: null } : {}) } : {}),
       });
     }
     case "system": {

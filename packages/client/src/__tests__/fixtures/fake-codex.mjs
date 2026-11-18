@@ -75,9 +75,15 @@ let sessionMcpServers = {};
  * call one tool, then close stdin and require the server to exit.
  */
 async function callSessionMcpTool(name, tool, args) {
+  const connection = await openSessionMcp(name);
+  try { return await connection.call(tool, args); }
+  finally { await connection.close(); }
+}
+
+async function openSessionMcp(name, detached = false) {
   const server = sessionMcpServers[name];
   if (!server) throw new Error(`no session MCP server ${name}`);
-  const child = spawn(server.command, server.args ?? [], { env: { ...process.env, ...(server.env ?? {}) }, stdio: ['pipe', 'pipe', 'inherit'] });
+  const child = spawn(server.command, server.args ?? [], { env: { ...process.env, ...(server.env ?? {}) }, detached, stdio: ['pipe', 'pipe', 'inherit'] });
   const pending = new Map();
   let buffer = '';
   child.stdout.setEncoding('utf8');
@@ -101,8 +107,11 @@ async function callSessionMcpTool(name, tool, args) {
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
     const listed = await rpc('tools/list', {});
     if (process.env.FAKE_CODEX_MCP_TOOLS_RECEIPT) writeFileSync(process.env.FAKE_CODEX_MCP_TOOLS_RECEIPT, JSON.stringify(listed.result));
-    return await rpc('tools/call', { name: tool, arguments: args });
-  } finally {
+  } catch (error) {
+    child.kill('SIGKILL');
+    throw error;
+  }
+  return { pid: child.pid, call: (name, args) => rpc('tools/call', { name, arguments: args }), close: async () => {
     child.stdin.end();
     // A stdio MCP server exits once its client closes stdin; codex does not reap it.
     const exited = child.exitCode !== null || child.signalCode !== null || await new Promise((resolve) => {
@@ -113,8 +122,9 @@ async function callSessionMcpTool(name, tool, args) {
       child.kill('SIGKILL');
       throw new Error(`session MCP server ${name} did not exit after its stdin closed`);
     }
-  }
+  } };
 }
+let persistentMcp;
 let turn = 0;
 let active = null;
 const receipt = (frame) => {
@@ -150,6 +160,16 @@ const complete = (id, status = 'completed') => {
 };
 async function runTurn(id, input) {
   notify('turn/started', { threadId, turn: { id } });
+  if (process.env.FAKE_CODEX_ABORT_TREE) {
+    if (turn === 1) {
+      const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+      await new Promise(resolve => child.once('spawn', resolve));
+      writeFileSync(process.env.FAKE_CODEX_ABORT_TREE, JSON.stringify({ child: child.pid, mcp: (await persistentMcp).pid }));
+      return;
+    }
+    const reply = await (await persistentMcp).call('echo', { text: 'after abort' });
+    notify('item/completed', { threadId, turnId: id, item: { id: 'mcp-after-abort', type: 'mcpToolCall', server: 'host', tool: 'echo', result: reply.result, status: reply.error ? 'failed' : 'completed' } });
+  }
   notify('item/started', {
     threadId,
     turnId: id,
@@ -348,6 +368,10 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     for (const [name, server] of Object.entries(params.config?.mcp_servers ?? {}))
       if (server.command !== undefined) config[`mcp_servers.${name}.command`] = JSON.stringify(server.command);
     sessionMcpServers = { ...sessionMcpServers, ...(params.config?.mcp_servers ?? {}) };
+    if (process.env.FAKE_CODEX_ABORT_TREE) {
+      persistentMcp = openSessionMcp('host', true);
+      void persistentMcp.catch(error => { console.error(error.message); process.exit(1); });
+    }
     if (method === 'thread/resume' && params.threadId !== threadId) {
       send({
         id,

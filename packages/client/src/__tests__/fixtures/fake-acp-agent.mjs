@@ -303,6 +303,8 @@ async function prompt(message) {
     vendor({ sessionUpdate: 'subagent_spawned', subagent_id: 'fake-child', parent_session_id: SESSION, child_session_id: 'fake-child' });
     text('child-says-hi', 'fake-child');
     update({ sessionUpdate: 'tool_call', toolCallId: 'child-call', title: 'read_file', status: 'pending', rawInput: {} }, 'fake-child');
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'child-call', status: 'completed', content: [] }, 'fake-child');
+    update({ sessionUpdate: 'usage_update', used: 17, size: 1000 }, 'fake-child');
     vendor({ sessionUpdate: 'subagent_finished', subagent_id: 'fake-child', child_session_id: 'fake-child', status: 'completed' });
     text('parent-answer');
     result(message.id, answer());

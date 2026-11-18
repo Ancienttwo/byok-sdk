@@ -53,7 +53,7 @@ function messageText(native: unknown): string {
  * The terminal usage remains the session-wide total with the root context.
  */
 export class DshProjection {
-  private readonly tools = new Map<string, string>();
+  private readonly tools = new Map<string, { tool: string; agentPath?: string[] }>();
   private readonly buffered = new BufferedToolUse();
   private readonly billed = new Map<string, Tokens>();
   private pending?: Usage;
@@ -83,7 +83,7 @@ export class DshProjection {
     for (const value of events) {
       const event = record(value);
       if (event?.kind === 'usage') {
-        this.usage(record(event.usage), input.sessionId, root, attribution.agentPath, emit);
+        this.usage(record(event.usage), JSON.stringify([input.sessionId, path]), root, attribution.agentPath, emit);
         continue;
       }
       if (path === undefined) continue;
@@ -95,14 +95,14 @@ export class DshProjection {
         case 'tool_call_started':
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           const callId = identify(event.callId);
-          this.tools.set(callId, event.tool);
+          this.tools.set(callId, { tool: event.tool, ...attribution });
           this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: callId, input: toolInput(body?.native), ...attribution });
           this.buffered.observe(callId, undefined, false, true, emit);
           break;
         case 'tool_call_ended': {
           if (typeof event.callId !== 'string') break;
           const callId = identify(event.callId);
-          const tool = this.tools.get(callId) ?? 'tool';
+          const tool = this.tools.get(callId)?.tool ?? 'tool';
           this.buffered.finish(callId, emit);
           this.tools.delete(callId);
           emit({
@@ -133,7 +133,7 @@ export class DshProjection {
   private endTurn(turn: Record<string, unknown>, emit: (event: AgentEvent) => void, outcome: (turn: DshTurnOutcome) => void): void {
     for (const [toolCallId, tool] of this.tools) {
       this.buffered.finish(toolCallId, emit);
-      emit({ type: 'tool_result', tool, toolCallId, output: { status: turn.kind === 'aborted' ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' } });
+      emit({ type: 'tool_result', ...tool, toolCallId, output: { status: turn.kind === 'aborted' ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' } });
     }
     this.tools.clear();
     const usage = this.takePendingUsage();

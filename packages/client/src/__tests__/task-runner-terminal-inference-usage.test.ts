@@ -83,6 +83,7 @@ describe('TaskRunner terminal inference usage projection', () => {
 
     session.emit({ type: 'usage', inputTokens: 100, outputTokens: 20 });
     session.emit({ type: 'usage', inputTokens: 0, outputTokens: 5 });
+    session.emit({ type: 'usage', inputTokens: 99, outputTokens: 9, agentPath: ['child'] });
     session.emit({ type: 'usage', contextSource: 'estimate', contextTokens: 5000, contextWindow: 1000000 });
     session.emit({ type: 'turn_end' });
 

@@ -195,6 +195,8 @@ describe('TaskRunner task.complete.finalMessage (#322)', () => {
 
     session.emit({ type: 'progress', text: 'I will consolidate memory.' });
     session.emit({ type: 'progress', text: 'CONSOLIDATED' });
+    session.emit({ type: 'progress', text: 'child response', agentPath: ['child'] });
+    session.emit({ type: 'tool_result', tool: 'read', output: 'child result', agentPath: ['child'] });
     session.emit({ type: 'progress', text: '\n' });
     session.emit({ type: 'usage', inputTokens: 10, outputTokens: 2 });
     session.emit({ type: 'turn_end' });
@@ -203,6 +205,7 @@ describe('TaskRunner task.complete.finalMessage (#322)', () => {
     expect(payload.summary).toBe('I will consolidate memory.CONSOLIDATED\n');
     // A trailing blank message does not erase the answer before it.
     expect(payload.finalMessage).toBe('CONSOLIDATED\n');
+    expect(JSON.stringify(sent.filter(envelope => envelope.type === 'task.progress'))).toContain('child response');
   });
 
   it('joins streaming deltas after the last tool interaction for a delta adapter', async () => {

@@ -60,7 +60,7 @@ export class GrokProjection {
     if (input.kind !== 'frame') return;
     const body = record(input.body);
     const events = body?.events;
-    if (!Array.isArray(events) || events.length === 0 && body?.native === undefined) return;
+    if (!Array.isArray(events)) return;
     this.children.link(events);
     const path = this.children.path(input.sessionId, input.agentPath);
     if (path === undefined) return;
@@ -140,7 +140,7 @@ export class GrokProjection {
     return this.root.takePendingUsage();
   }
 
-  flushChildUsage(emit: (event: AgentEvent) => void): void {
+  flushChildren(emit: (event: AgentEvent) => void): void {
     this.children.flush(emit);
   }
 }

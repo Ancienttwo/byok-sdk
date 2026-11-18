@@ -568,6 +568,28 @@ describe('Codex persistent app-server adapter', () => {
       }),
     );
   });
+  it.skipIf(process.platform === 'win32')('reaps the aborted turn child and keeps the attached stdio MCP process for follow-up', async () => {
+    const resources = await ctx();
+    const receipt = path.join(resources.workspaceDir, 'turn-processes.json');
+    const audit = path.join(resources.workspaceDir, 'mcp.jsonl');
+    resources.env.FAKE_CODEX_ABORT_TREE = receipt;
+    resources.mcpServers = { host: { command: process.execPath, args: [fileURLToPath(new URL('./fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit] } };
+    // Readiness is part of thread open. The fixture receives the follow-up on the same app-server.
+    const s = await open(adapter(), task, resources);
+    await expect.poll(async () => fs.stat(receipt).then(() => true, () => false)).toBe(true);
+    const pids = JSON.parse(await fs.readFile(receipt, 'utf8')) as { child: number; mcp: number };
+    expect(gone(pids.child)).toBe(false);
+    expect(gone(pids.mcp)).toBe(false);
+    await s.interrupt();
+    expect(await turn(s)).toContainEqual({ type: 'turn_end' });
+    await expect.poll(() => gone(pids.child)).toBe(true);
+    expect(gone(pids.mcp)).toBe(false);
+    await s.followUp(task);
+    expect(await turn(s)).toContainEqual(expect.objectContaining({ type: 'tool_result', toolCallId: 'mcp-after-abort',
+      output: expect.objectContaining({ result: expect.objectContaining({ content: [{ type: 'text', text: 'byok-echo:after abort' }] }) }),
+    }));
+    expect(gone(pids.mcp)).toBe(false);
+  });
   it('late interrupt has a deadline and terminates the affected session', async () => {
     const s = await open(
       adapter({ interruptTimeoutMs: 30 }),

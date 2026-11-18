@@ -139,10 +139,14 @@ it('keeps v2 child calls distinct and execute opaque, and emits only native usag
   const events = await collect(await box.start('opencode-child'));
   expect(events.filter(event => event.type === 'tool_use')).toEqual([
     { type: 'tool_use', tool: 'shell', toolCallId: 'same-id', input: { code: 'host.lookup()' } },
-    { type: 'tool_use', tool: 'execute', toolCallId: 'native-child:same-id', input: { code: 'host.lookup()' } },
+    { type: 'tool_use', tool: 'execute', toolCallId: 'native-child:same-id', agentPath: ['native-child'], input: { code: 'host.lookup()' } },
   ]);
   expect(events).toContainEqual({ type: 'usage', contextTokens: 321, contextWindow: 1000 });
-  expect(events.filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'done' }]);
+  expect(events.filter(event => event.type === 'progress')).toEqual([
+    { type: 'progress', text: 'child private text', agentPath: ['native-child'] },
+    { type: 'progress', text: 'done' },
+  ]);
+  expect(events.filter(event => event.type === 'turn_end')).toEqual([{ type: 'turn_end' }]);
 });
 
 // #2188: 2.2.7 is the standard channel (no child-session-updates, as OAR 0.103 opened 2.3.0); 2.3.0 is child_update with OAR's fence.
@@ -157,8 +161,8 @@ it('delivers the same background child events on both OpenCode child channels an
     }
     expect(runs[1]).toEqual(runs[0]);
     expect(runs[0]).toEqual([
-      { type: 'tool_use', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', input: { filePath: 'in-call.md' } },
-      { type: 'tool_result', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', output: [{ type: 'text', text: 'in-call read' }] },
+      { type: 'tool_use', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', agentPath: ['ses_bg_child'], input: { filePath: 'in-call.md' } },
+      { type: 'tool_result', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', agentPath: ['ses_bg_child'], output: [{ type: 'text', text: 'in-call read' }] },
       { type: 'progress', text: 'done' },
       { type: 'turn_end' },
     ]);
@@ -589,6 +593,47 @@ it.each(['aborted', 'failed', 'completed'])('drains pending ACP calls once with 
     expect(events.filter(event => event.type === 'tool_use')).toEqual([
       { type: 'tool_use', tool: 'shell', toolCallId: 'running', input },
       { type: 'tool_use', tool: 'shell', toolCallId: 'pending', input },
+    ]);
+  }
+});
+
+it('isolates interleaved Grok and Antigravity child turn state', async () => {
+  const { GrokProjection } = await import('../adapters/grok/projection');
+  const { AgyProjection } = await import('../adapters/antigravity/projection');
+  for (const projection of [new GrokProjection('root'), new AgyProjection('root', new Map())]) {
+    const events: AgentEvent[] = [];
+    const end = vi.fn();
+    const consume = (agentPath: string[], events: object[], update?: object) => projection.consume({
+      kind: 'frame', seq: 1, sessionId: 'root', agentPath, body: { events, native: { update } },
+    }, event => { if (event.type !== 'message_draft_delta') collected.push(event); }, end);
+    const collected = events;
+    const root: string[] = [], a = ['outer', 'a'], b = ['outer', 'b'];
+    const delta = (text: string) => ({ kind: 'text_delta', text });
+    const usage = (input: number) => ({ kind: 'usage', usage: { tokens: { input, output: 1 } } });
+    const ended = { kind: 'turn_ended', outcome: { kind: 'completed' } };
+    const call = (tool: string) => ({ kind: 'tool_call_started', callId: 'same', tool });
+    const result = { kind: 'tool_call_ended', callId: 'same' };
+    consume(root, [delta('root '), usage(100)]);
+    consume(a, [delta('first '), call('read')], { toolCallId: 'same', rawInput: { file: 'a' }, status: 'in_progress' });
+    consume(b, [call('write')], { toolCallId: 'same', rawInput: { file: 'b' }, status: 'in_progress' });
+    consume(a, [result, delta('child a'), usage(20), ended]);
+    expect(end).not.toHaveBeenCalled();
+    expect(events.filter(event => event.type === 'tool_result')).toEqual([
+      { type: 'tool_result', tool: 'read', toolCallId: JSON.stringify([a, 'same']), agentPath: a, output: {} },
+    ]);
+    consume(b, [result, delta('child b'), usage(30), ended]);
+    consume(root, [delta('reply'), usage(120), ended]);
+    expect(end).toHaveBeenCalledOnce();
+    expect(events.filter(event => event.type === 'progress')).toEqual([
+      { type: 'progress', text: 'first ', agentPath: a },
+      { type: 'progress', text: 'child a', agentPath: a },
+      { type: 'progress', text: 'child b', agentPath: b },
+      { type: 'progress', text: 'root reply' },
+    ]);
+    expect(events.filter(event => event.type === 'usage')).toEqual([
+      { type: 'usage', inputTokens: 20, outputTokens: 1, agentPath: a },
+      { type: 'usage', inputTokens: 30, outputTokens: 1, agentPath: b },
+      { type: 'usage', inputTokens: 120, outputTokens: 1 },
     ]);
   }
 });

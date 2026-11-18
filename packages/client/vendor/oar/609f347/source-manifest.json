@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.115.0",
-    "commit": "af59f5b4f5c3adcf84549d60d85cebf86e253afe"
+    "commit": "1f9e2da811d328ee8d785936a7e61279a99c9f49"
   },
   "release": {
     "ecosystem": "npm",
@@ -362,7 +362,8 @@
       "path": "runtimes/claude/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/claude/projection.ts",
       "upstreamSha256": "287a05faf50a8c974756554c5c4a243eb5b96f10a25c5d97e95174a830971306",
-      "vendoredSha256": "287a05faf50a8c974756554c5c4a243eb5b96f10a25c5d97e95174a830971306"
+      "vendoredSha256": "67d33cb219c028502478765d6b140c8aaef402c0d4f1b1ff840e675974cb7342",
+      "delta": "Keep the root context, model ledger and failure state across child results. Upstream: planned contribution (#2381)."
     },
     {
       "path": "runtimes/claude/service-tier.ts",
@@ -1116,8 +1117,8 @@
       "path": "shared/stream-json/projection.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/projection.ts",
       "upstreamSha256": "100b9a2e895cb72b0b45a71c8dc9d9ff3d028c2fd6beed8d1cba745fdd50b9f2",
-      "vendoredSha256": "48e7458b35530eed2e3ad0bc907595ea0205c2f428f981b4a8bf1f2a08b4e86e",
-      "delta": "Attribution bookkeeping: rememberToolUses stores only tool uses made inside an agent. A root tool use adds no state.agents entry and copies no map; attributionOf gives a frame naming it the same path as before, because an empty-path entry and no entry read alike. Entries for tool uses inside an agent stay for the session, since a background agent can report after its tool's result. A root tool use whose id is already remembered removes that entry, so it is not attributed to the old ancestors."
+      "vendoredSha256": "86ac0fea15741c642c53fe0a52d7d91fcc884170066bc2e654b1dc9fae460649",
+      "delta": "Attribution bookkeeping: rememberToolUses stores only tool uses made inside an agent. A root tool use adds no state.agents entry and copies no map; attributionOf gives a frame naming it the same path as before, because an empty-path entry and no entry read alike. Entries for tool uses inside an agent stay for the session, since a background agent can report after its tool's result. A root tool use whose id is already remembered removes that entry, so it is not attributed to the old ancestors. Child results preserve the root abort marker. Upstream: planned contribution (#2381)."
     },
     {
       "path": "shared/stream-json/session.ts",

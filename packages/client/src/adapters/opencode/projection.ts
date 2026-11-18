@@ -14,7 +14,7 @@ export class OpenCodeProjection {
   private readonly buffered = new BufferedToolUse();
   output = false;
   private readonly children: AcpChildTurns;
-  constructor(root: string) { this.children = new AcpChildTurns(root); }
+  constructor(rootId: string) { this.children = new AcpChildTurns(rootId); }
 
   consume(record: AcpRecord, emit: (event: AgentEvent) => void, end: (outcome: OpenCodeTurnOutcome) => void): void {
     if (record.kind !== 'frame') return;
@@ -22,8 +22,8 @@ export class OpenCodeProjection {
     if (!Array.isArray(body?.events)) return;
     const events = body.events;
     this.children.link(events);
-    const path = this.children.path(record.sessionId, record.agentPath);
-    if (path === undefined) return;
+    // OAR also routes a verified child extension update by session id on its own channel.
+    const path = this.children.path(record.sessionId, record.agentPath) ?? [record.sessionId];
     const root = path.length === 0;
     const attribution = root ? {} : { agentPath: [...path] };
     const update = object(object(body.native)?.update);

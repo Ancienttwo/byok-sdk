@@ -174,9 +174,19 @@ describe('GrokAdapter sessions', () => {
     ]);
   });
 
-  it('keeps sub-agent text and tools out of the parent reply', async () => {
+  it('attributes the Grok subagent lifecycle and keeps its text distinct from the parent reply', async () => {
     const s = await open(adapter(), { target: GROK_TARGET, instruction: 'child' }, await ctx());
-    expect(await turn(s)).toEqual([{ type: 'progress', text: 'parent-answer' }, usage, { type: 'turn_end' }]);
+    const agentPath = ['fake-child'];
+    const toolCallId = JSON.stringify([agentPath, 'child-call']);
+    expect(await turn(s)).toEqual([
+      { type: 'subagent_start', agentPath },
+      { type: 'progress', text: 'child-says-hi', agentPath },
+      { type: 'tool_use', tool: 'read_file', toolCallId, agentPath, input: {} },
+      { type: 'tool_result', tool: 'read_file', toolCallId, agentPath, output: {} },
+      { type: 'usage', contextTokens: 17, contextWindow: 1000, contextSource: 'provider', agentPath },
+      { type: 'subagent_end', agentPath },
+      { type: 'progress', text: 'parent-answer' }, usage, { type: 'turn_end' },
+    ]);
   });
 
   it('runs a hosted terminal command and attaches task MCP servers on open', async () => {

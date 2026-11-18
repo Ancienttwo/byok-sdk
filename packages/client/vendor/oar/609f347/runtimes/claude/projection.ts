@@ -1,4 +1,5 @@
 /* oxlint-disable import/max-dependencies -- Claude composes its native usage, context, failure and task meanings with the shared protocol. */
+// BYOK change: keep root context and metering state across child results (Apache-2.0).
 import { claudeServiceTierEvents } from "./service-tier.js";
 import type { UtcInstant } from "../../contracts/account-usage.js";
 import type { RuntimeEventBody, TokenTotals, TurnOutcome } from "../../contracts/session.js";
@@ -95,6 +96,9 @@ export const claudeProjectionProfile: StreamJsonProjectionProfile<ClaudeProjecti
   duplicateReason: "claude ignored the input: its inputId was already used in this session",
   assistant: (state, message, root) => root ? { ...state, failureCategory: typeof message.error === "string" ? message.error : state.failureCategory, context: claudeContextSent(state.context, message) } : state,
   result: (state, message, agentPath) => {
+    if (agentPath.length > 0) {
+      return { state, outcome: resultOutcome(state, message), before: [], after: [] };
+    }
     const accumulated = accumulate(state, agentPath, message);
     const running = foldModelUsage(state.modelUsage, message);
     const { context, reading } = claudeContextUsage(state.context, message);

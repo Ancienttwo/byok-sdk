@@ -15,9 +15,10 @@ function setup() {
     native: unknown,
     origin = 'byok-native',
     sessionId = 'root',
+    agentPath: readonly string[] = [],
   ) => {
     const body = { type, native, events: [], origin };
-    const frame = kernel.frame(body, { sessionId });
+    const frame = kernel.frame(body, { sessionId, agentPath });
     projection.consume(kernel, frame, (e) => output.push(e));
     return frame;
   };
@@ -110,6 +111,7 @@ describe('required Codex native projection', () => {
         },
         'byok-native',
         threadId,
+        threadId === 'root' ? [] : ['outer', 'child'],
       );
     s.feed(
       'turn/completed',
@@ -119,7 +121,8 @@ describe('required Codex native projection', () => {
     );
     expect(
       s.output.map((e) => ('toolCallId' in e ? e.toolCallId : null)),
-    ).toEqual(['same', '["child",[],"same"]']);
+    ).toEqual(['same', '["child",["outer","child"],"same"]']);
+    expect(s.output[1]).toMatchObject({ agentPath: ['outer', 'child'] });
     expect(s.output.some((e) => e.type === 'turn_end')).toBe(false);
   });
   it('replay identity includes the stream instance and each derived ordinal', () => {

@@ -260,13 +260,20 @@ describe('DshAdapter sessions', () => {
     ]);
   });
 
-  it('sums interleaved subagent usage while keeping context and other events root-only', async () => {
+  it('attributes linked DSH child events and keeps the session-wide terminal totals', async () => {
     const { open } = await setup();
+    const agentPath = ['child-1'];
+    const toolCallId = JSON.stringify(['child-1', agentPath, 'call_1']);
     expect(await turn(await open({ target: DSH_TARGET, instruction: 'subagent-usage' }))).toEqual([
       { type: 'progress', text: 'first message: subagent-usage' },
       { type: 'tool_use', tool: 'bash', toolCallId: 'call_1', input: { command: 'ls' } },
       { type: 'tool_result', tool: 'bash', toolCallId: 'call_1', output: { content: [{ type: 'text', text: 'a.txt\n' }] } },
+      { type: 'progress', text: 'child reply', agentPath },
+      { type: 'usage', agentPath, inputTokens: 13, outputTokens: 2, cachedInputTokens: 3, reasoningTokens: 1, contextTokens: 15, contextWindow: 5000, contextSource: 'provider' },
+      { type: 'tool_use', agentPath, tool: 'bash', toolCallId, input: { command: 'ls' } },
+      { type: 'tool_result', agentPath, tool: 'bash', toolCallId, output: {} },
       { type: 'progress', text: 'final answer' },
+      { type: 'usage', agentPath, inputTokens: 24, outputTokens: 3, cachedInputTokens: 4, reasoningTokens: 2, contextTokens: 27, contextWindow: 5000, contextSource: 'provider' },
       { type: 'usage', inputTokens: 252, outputTokens: 18, cachedInputTokens: 27, reasoningTokens: 3, contextTokens: 127, contextSource: 'provider', contextWindow: 1000 },
       { type: 'turn_end' },
     ]);

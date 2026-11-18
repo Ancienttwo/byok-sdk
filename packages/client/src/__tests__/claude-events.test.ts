@@ -568,15 +568,24 @@ describe('Claude context window reserved for S4', () => {
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     claude.send({ type: 'system', subtype: 'init', model: 'root-model', session_id: 'session-1' });
     claude.send({ type: 'system', subtype: 'init', model: 'child-model', session_id: 'session-1', parent_tool_use_id: 'toolu_task' });
-    claude.send({ type: 'result', subtype: 'success', is_error: false, usage: {},
+    claude.send({ type: 'assistant', message: { model: 'root-model', usage: { input_tokens: 11, cache_read_input_tokens: 23, cache_creation_input_tokens: 7 }, content: [] } });
+    claude.send({ type: 'assistant', parent_tool_use_id: 'toolu_task', message: { model: 'child-model', usage: { input_tokens: 50 }, content: [{ type: 'text', text: 'child text' }] } });
+    claude.send({ type: 'result', subtype: 'success', is_error: false, parent_tool_use_id: 'toolu_task', usage: { input_tokens: 50 } });
+    claude.send({ type: 'result', subtype: 'success', is_error: false, usage: { input_tokens: 200 },
       modelUsage: { 'child-model': { contextWindow: 200000 }, 'root-model': { contextWindow: 1000000 } } });
     const iterator = stream.frames[Symbol.asyncIterator]();
-    const [root, child, result] = [await iterator.next(), await iterator.next(), await iterator.next()];
-    expect(root.value.agentPath).toEqual([]);
-    expect(child.value.agentPath).toEqual(['toolu_task']);
-    expect(mapClaudeMessageToAgentEvents(result.value.native, { toolNameByUseId: new Map() }, {
-      workspaceDir: '/workspace', initModel: stream.initModel, context: result.value.context,
-    }).events).toEqual([{ type: 'usage', contextWindow: 1000000, contextSource: 'provider' }, { type: 'turn_end' }]);
+    const frames = [];
+    for (let i = 0; i < 6; i++) frames.push((await iterator.next()).value);
+    const correlation = { toolNameByUseId: new Map() };
+    const events = frames.flatMap(frame => mapClaudeMessageToAgentEvents(frame.native, correlation, {
+      workspaceDir: '/workspace', initModel: stream.initModel, context: frame.context, agentPath: frame.agentPath,
+    }).events);
+    expect(events).toEqual([
+      { type: 'progress', text: 'child text', agentPath: ['toolu_task'] },
+      { type: 'usage', inputTokens: 50, agentPath: ['toolu_task'] },
+      { type: 'usage', inputTokens: 200, contextTokens: 41, contextWindow: 1000000, contextSource: 'provider' },
+      { type: 'turn_end' },
+    ]);
     expect(await stream.sessionRef).toBe('session-1');
   });
   it('elides old frame payloads past the retention budget while the session runs and every frame is read whole', async () => {
