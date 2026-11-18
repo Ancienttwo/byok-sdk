@@ -10,12 +10,19 @@ export async function opencodeRelease(installation: ExecutableInstallation, opti
   // BYOK: the SDK probes once using its selected executable and process boundary.
   const version = installation.version;
   if (version === undefined) throw new Error("opencode requires a probed executable version");
+  const release = parseOpencodeRelease(version);
+  if (release !== undefined) { return release; }
+  throw new Error(`Unrecognized opencode release line: ${JSON.stringify(version)}`);
+}
+
+/** Synchronous read of a `--version` line; undefined when it names neither line. */
+export function parseOpencodeRelease(version: string): OpencodeRelease | undefined {
   const match = /^(?:opencode\s+)?v?([12])\.(\d+)\.(\d+)(?:\S*)$/u.exec(version.trim());
   const [, major, minor, patch] = match ?? [];
   if ((major === "1" || major === "2") && minor !== undefined && patch !== undefined) {
     return { major: major === "1" ? 1 : 2, minor: Number(minor), patch: Number(patch) };
   }
-  throw new Error(`Unrecognized opencode release line: ${JSON.stringify(version)}`);
+  return undefined;
 }
 
 export async function opencodeMajor(installation: ExecutableInstallation, options?: Pick<SessionOptions, "cwd" | "env">): Promise<1 | 2> {

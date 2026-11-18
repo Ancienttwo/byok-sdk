@@ -57,6 +57,7 @@ function openFailure(error: unknown, sessionId: string, resuming: boolean): unkn
     if (error.capability === "confirming a reasoning effort") { return new UnsupportedOptionError("effort", error.message); }
     if (error.capability === "systemPrompt" || error.capability === "appendSystemPrompt") { return new UnsupportedOptionError(error.capability, error.message); }
     if (error.capability === "session MCP") { return new UnsupportedOptionError("mcpServers", error.message); }
+    if (error.capability === "goals") { return new UnsupportedOptionError(error.capability, error.message); }
     if (error.capability === "confirming a model") { return new UnsupportedOptionError("model", error.message); }
     return resuming ? new UnsupportedOptionError("resume", error.message) : new RuntimeFailureError("invalid_request", error.message, { cause: error });
   }

@@ -1,3 +1,4 @@
+import { dshGoalSource } from "./bridge-goal.js";
 import { dshPromptSource } from "./bridge-prompt.js";
 
 /** Revision of the internal transport between this source and `control.ts`. Both ship together; it is not a public protocol. */
@@ -157,7 +158,9 @@ ${dshPromptSource}  const configureSession = (agent, request) => {
     configurePrompt(agent, request);
   };
 
+${dshGoalSource}
   const commands = {
+    ...goalCommands,
     name(request) {
       const { agent } = owned(request.sessionId);
       const title = ctx.get("sessionTitle");
@@ -236,6 +239,11 @@ ${dshPromptSource}  const configureSession = (agent, request) => {
       if (agent.status === "idle") { throw refusal("no_active_turn", "no active turn"); }
       agent.cancel({ kind: "user" }, { keepInbox: false });
       return {};
+    },
+    async skills(request) {
+      const skills = ctx.get("skills");
+      requireMethod(skills, "snapshot", "listing skills");
+      return await skills.snapshot({ cwd: request.cwd });
     },
     async models() {
       const llm = ctx.get("llm");

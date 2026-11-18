@@ -5,10 +5,10 @@ import path from 'node:path';
 import {
   startAppServerClient,
   type LineProcess, type SpawnLineProcess,
-} from '../../vendor/oar/bc1b2ac/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/bc1b2ac/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/bc1b2ac/shared/session-kernel.js';
-import { sessionCredentialRedactor } from '../../vendor/oar/bc1b2ac/shared/credential-redactor.js';
+} from '../../vendor/oar/609f347/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/609f347/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/609f347/shared/session-kernel.js';
+import { sessionCredentialRedactor } from '../../vendor/oar/609f347/shared/credential-redactor.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -186,7 +186,7 @@ describe('OAR session kernel record redaction', () => {
 });
 
 it('accounts for every vendored file and the maintained source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/bc1b2ac');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/609f347');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     packageVersion: string;
     commit: string;

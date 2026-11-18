@@ -2,21 +2,21 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.112.0",
+  "packageVersion": "0.115.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "bc1b2ac7b1416e485e5fdc6942bd076c84525007",
+  "commit": "609f3478ccc4328ba965f1aa9077c0c18948f797",
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
-    "branch": "byok/0.112.0",
-    "commit": "03ebee58b279a93bd1206f3c26fc7a36988182b2"
+    "branch": "byok/0.115.0",
+    "commit": "5acdc3c226e89274d0c1da2cb16e1ffe1bbe8aa4"
   },
   "release": {
     "ecosystem": "npm",
     "name": "@botiverse/oar",
-    "version": "0.112.0",
-    "integrity": "sha512-nPebze7r0FV+BPIRMasfhLmGdFmzKNqr2KyBhFeITRcbLTP8S/QSCXjVSDe8OqYrjGDM+C20syHMlGJEDLswUw==",
-    "gitCommit": "bc1b2ac7b1416e485e5fdc6942bd076c84525007",
-    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.112.0"
+    "version": "0.115.0",
+    "integrity": "sha512-licwKUPX+9FBsuuQNZ7J9tpyVD/dhEwroYLs27KnDDa7kYnV3Uz/LZZ5dqtIYpeJ9Ox47I/L1C2HTf4zpHrNQA==",
+    "gitCommit": "609f3478ccc4328ba965f1aa9077c0c18948f797",
+    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.115.0"
   },
   "license": "Apache-2.0",
   "files": [
@@ -29,8 +29,8 @@
     {
       "path": "contracts/account-usage.ts",
       "sourcePath": "packages/oar/src/contracts/account-usage.ts",
-      "upstreamSha256": "389f82891505b402ecfcfe22fd869db8e2e551ea55711bbf0d54df24e21da177",
-      "vendoredSha256": "389f82891505b402ecfcfe22fd869db8e2e551ea55711bbf0d54df24e21da177"
+      "upstreamSha256": "7c108f5c431111ee36349bf26458ebb4d03008cdd9eff8972e784026612a16a8",
+      "vendoredSha256": "7c108f5c431111ee36349bf26458ebb4d03008cdd9eff8972e784026612a16a8"
     },
     {
       "path": "contracts/brand.ts",
@@ -114,8 +114,8 @@
     {
       "path": "contracts/inventory.ts",
       "sourcePath": "packages/oar/src/contracts/inventory.ts",
-      "upstreamSha256": "9d404a33ff99e3e437242c659a1f787251a5840d55c921989035a96334d77494",
-      "vendoredSha256": "9d404a33ff99e3e437242c659a1f787251a5840d55c921989035a96334d77494"
+      "upstreamSha256": "bf2e02332b1c167cdb5b5bc44bc942efc43df0cf4c817bca1a4d8dfa038eab88",
+      "vendoredSha256": "bf2e02332b1c167cdb5b5bc44bc942efc43df0cf4c817bca1a4d8dfa038eab88"
     },
     {
       "path": "contracts/list-models.ts",
@@ -169,8 +169,8 @@
     {
       "path": "contracts/runtime.ts",
       "sourcePath": "packages/oar/src/contracts/runtime.ts",
-      "upstreamSha256": "0e463bedf8afdda130fa4327d86a6cf4571d48c800702cc3fe7ceab6d8b0d74f",
-      "vendoredSha256": "0e463bedf8afdda130fa4327d86a6cf4571d48c800702cc3fe7ceab6d8b0d74f"
+      "upstreamSha256": "38f8535a891733e46ead2c85830ab50ca08c6a3d0cdbde7d637be3bda2970d61",
+      "vendoredSha256": "38f8535a891733e46ead2c85830ab50ca08c6a3d0cdbde7d637be3bda2970d61"
     },
     {
       "path": "contracts/session-not-found-error.ts",
@@ -431,6 +431,12 @@
       "vendoredSha256": "5e2f75ea7b5bd2a7bf3501fa914523b79ec594f4bc42b1a600a366ea38b0a8ad"
     },
     {
+      "path": "runtimes/dsh/bridge-goal.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/bridge-goal.ts",
+      "upstreamSha256": "05bce5722da070f5e677ba7d435b97ea7861796ae980ebc5c2d0ddfce469b5fb",
+      "vendoredSha256": "05bce5722da070f5e677ba7d435b97ea7861796ae980ebc5c2d0ddfce469b5fb"
+    },
+    {
       "path": "runtimes/dsh/bridge-prompt.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/bridge-prompt.ts",
       "upstreamSha256": "75ff7bbcfa0b1b76e3440ff7524cc2de86dbc65609875500ff31f21d824eee2f",
@@ -439,8 +445,8 @@
     {
       "path": "runtimes/dsh/bridge.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/bridge.ts",
-      "upstreamSha256": "15e198fb132c136df14da6a14207a1bcbf8c9296537916199b98fd8fb6f48c65",
-      "vendoredSha256": "15e198fb132c136df14da6a14207a1bcbf8c9296537916199b98fd8fb6f48c65"
+      "upstreamSha256": "0fd99e2860ef743ee1e967532da90bfbe5a48a5c5a06b0ac91a50753cbc0bcba",
+      "vendoredSha256": "0fd99e2860ef743ee1e967532da90bfbe5a48a5c5a06b0ac91a50753cbc0bcba"
     },
     {
       "path": "runtimes/dsh/control.ts",
@@ -448,6 +454,12 @@
       "upstreamSha256": "65e196a9da36884a3cb2f2d4b9f697c6db14e51e46df6f40fa70122682d616fd",
       "vendoredSha256": "196e3a01a3e3dd628fcafc639ad6005fad5fd107f0ba8e42b0101c057ed10276",
       "delta": "Use the codex LineProcess type and read stderr from the SDK process wrapper."
+    },
+    {
+      "path": "runtimes/dsh/goal.ts",
+      "sourcePath": "packages/oar/src/runtimes/dsh/goal.ts",
+      "upstreamSha256": "b579c7dd2a7a6b49fc08df840f164b5ab9615624745527e4eb2878e9e7423617",
+      "vendoredSha256": "b579c7dd2a7a6b49fc08df840f164b5ab9615624745527e4eb2878e9e7423617"
     },
     {
       "path": "runtimes/dsh/jobs.ts",
@@ -471,20 +483,20 @@
     {
       "path": "runtimes/dsh/options.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/options.ts",
-      "upstreamSha256": "9eae643f32e2dee5a9900d0e472e0d11a8fdc4c78a2433b9deee8ebfb05ae658",
-      "vendoredSha256": "9eae643f32e2dee5a9900d0e472e0d11a8fdc4c78a2433b9deee8ebfb05ae658"
+      "upstreamSha256": "0a1ecd63b558174ec80623e9f057252930f97373c720cd1f26460c1b69b2ae34",
+      "vendoredSha256": "0a1ecd63b558174ec80623e9f057252930f97373c720cd1f26460c1b69b2ae34"
     },
     {
       "path": "runtimes/dsh/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/projection.ts",
-      "upstreamSha256": "e89720f6566168f4d155828d7caf6feeb8f691db8c8edbb03bd6b7ae70c99197",
-      "vendoredSha256": "e89720f6566168f4d155828d7caf6feeb8f691db8c8edbb03bd6b7ae70c99197"
+      "upstreamSha256": "c83aa677b6a0a5f82e60282b1ca6e3c96c1837fd215e57180c5b0ccb03de94dd",
+      "vendoredSha256": "c83aa677b6a0a5f82e60282b1ca6e3c96c1837fd215e57180c5b0ccb03de94dd"
     },
     {
       "path": "runtimes/dsh/session.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/session.ts",
-      "upstreamSha256": "3d6e57a1a0ca5016c19e3b7bbeaed1488526179cf80d857f72579adafd4fb11f",
-      "vendoredSha256": "a957c529b724544ab59663f2258121511efcebcfaeb6c4709edcdb18c4a1164d",
+      "upstreamSha256": "26f9d10a40a0a4c9c8565349bddf400a104ea77aba96d13a9f6bbda383641bfa",
+      "vendoredSha256": "aa652e11eaeafed4dc66d12a1eef0f611e1c3f86284c0fe2a2ed652c59b0bc85",
       "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure. The caller's retainedBytes goes to the upstream kernel's record retention."
     },
     {
@@ -577,8 +589,8 @@
     {
       "path": "runtimes/opencode/version.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/version.ts",
-      "upstreamSha256": "a462ec108715d72e996301d1aac6f6c8e4b1d5f26faa518b963d53b46c772211",
-      "vendoredSha256": "bd2f8b0f60c9b37d9d66621dc694e947150d2dc077759e9cca391d3bc6be0e75",
+      "upstreamSha256": "1e691418e35294047166d6e1fa468a1100136d4e8df15d013e38a1a0c96607e5",
+      "vendoredSha256": "187f9f5d7325cbee4f6c7546952d53dc3dce1f9294bf41fcd902695e35e7241e",
       "delta": "Require the SDK-probed executable version instead of launching another version process."
     },
     {

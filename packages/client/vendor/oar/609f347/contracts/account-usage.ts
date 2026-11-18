@@ -76,11 +76,12 @@ export type AccountUsageUnsupportedReason =
   | "auth_configuration_unavailable"
   | "endpoint_unavailable"
   | "quota_unavailable";
-
+export type AccountUsageUnavailableReason = "access_token_expired";
 export type AccountUsageReauthReason =
   | "not_authenticated" | "credentials_missing" | "scope_missing" | "credentials_rejected";
 
 export type AccountUsageSnapshot =
+  | { readonly kind: "unavailable"; readonly reason: AccountUsageUnavailableReason }
   | {
       readonly kind: "available";
       /** Runtime-reported subscription plan or tier; omitted when not exposed. */
@@ -160,12 +161,10 @@ export interface LimitResetOptions {
   readonly timeoutMs?: number;
 }
 
-/**
- * How a redemption ended, as the runtime reports it. After any of the
- * available outcomes, read `accountUsage` again for the account's state;
- * none of them says what the limits are now.
+/** Native redemption outcome; read `accountUsage` again for the resulting limits.
+ * `onboardingCompleted`: Claude completed its recorded first-run defaults during this call.
  */
-export type LimitResetResult =
+export type LimitResetResult = { readonly onboardingCompleted?: true } & (
   /** The runtime reset the account's limits and spent a reset. */
   | { readonly kind: "reset" }
   /** No limit needed resetting; no reset was spent. */
@@ -186,7 +185,7 @@ export type LimitResetResult =
    * `fiveHourSpent`: claude's older program spent its 5-hour reset instead
    * of the kind asked for.
    */
-  | { readonly kind: "unknown"; readonly fiveHourSpent?: true };
+  | { readonly kind: "unknown"; readonly fiveHourSpent?: true });
 
 /** Why a limit-reset call or inspection is not available here. */
 export type LimitResetUnsupportedReason =
@@ -208,7 +207,7 @@ export type LimitResetNotAttemptedReason =
   | "usage_unread"
   /** Too little time was left to finish safely. */
   | "deadline"
-  /** The CLI did not reach an empty prompt with a screen oar recognises; nothing was typed but the folder-trust answer. `startup` on the result says what was seen. */
+  /** The CLI did not reach an empty prompt with a screen oar recognises; only recorded onboarding defaults and the folder-trust answer may have been typed. `startup` on the result says what was seen. */
   | "startup_failed";
 
 /** `not_attempted` / `startup_failed`, with what was recognised on the way when the runtime says. */
@@ -227,7 +226,7 @@ export interface LimitResetStartupFailed {
 export interface LimitResetStartupDiagnostic { readonly screen: LimitResetStartupScreen; readonly version?: string }
 
 /** Each value is described in docs/spec/account-usage.md (Claude limit resets). Values may be added: read one not listed here as `unknown`. */
-export type LimitResetStartupScreen = "blank" | "exited" | "trust_unrecognised" | "dialog" | "prompt_with_text" | "no_banner" | "unsettled" | "unknown";
+export type LimitResetStartupScreen = "blank" | "exited" | "onboarding" | "trust_unrecognised" | "dialog" | "prompt_with_text" | "no_banner" | "unsettled" | "unknown";
 
 /** One kind of reset, as `inspectLimitResets` found it. */
 export interface LimitResetKindStatus {
@@ -255,7 +254,8 @@ export interface LimitResetInspectOptions {
   readonly timeoutMs?: number;
 }
 
-export type LimitResetInspection =
+/** `onboardingCompleted`: Claude completed its recorded first-run defaults during this call. */
+export type LimitResetInspection = { readonly onboardingCompleted?: true } & (
   | {
       readonly kind: "inspected";
       /** Claude's older program (one 5-hour reset, no kinds) answered; it says nothing more. */
@@ -271,7 +271,7 @@ export type LimitResetInspection =
   | { readonly kind: "not_attempted"; readonly reason: Exclude<LimitResetNotAttemptedReason, "startup_failed"> }
   | LimitResetStartupFailed
   /** The first screen after the command was not recognised; nothing more was typed. */
-  | { readonly kind: "unknown" };
+  | { readonly kind: "unknown" });
 
 /**
  * Lists an account's limit resets by opening the runtime's own interactive
