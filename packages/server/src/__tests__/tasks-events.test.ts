@@ -337,7 +337,7 @@ describe('ByokServer.tasks.events', () => {
     await expect(first(instance.tasks.events('both', { after: 'x.0', from: 'state' }))).rejects.toThrow(TypeError);
   });
 
-  it('gives TaskHandle.events() the same events as tasks.events', async () => {
+  it('relays child attribution and lifecycle unchanged through both task event feeds', async () => {
     const instance = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 150 });
     byok = instance;
     const started = await startServer(instance);
@@ -345,13 +345,25 @@ describe('ByokServer.tasks.events', () => {
     const daemon = await connectFakeDaemonLongPoll(started.baseUrl, instance, { productId: PRODUCT_ID });
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'resume me' });
     await claimAndStart(instance, daemon, handle);
-    await send(daemon, createEnvelope('task.progress', progress(1, 'shared'), { taskId: handle.taskId }));
+    const agentPath = ['child', 'grandchild'];
+    const events: AgentEventOrUnknown[] = [
+      { type: 'subagent_start', agentPath },
+      { type: 'progress', text: 'shared', agentPath },
+      { type: 'tool_use', tool: 'read', agentPath },
+      { type: 'tool_result', tool: 'read', agentPath },
+      { type: 'usage', outputTokens: 3, agentPath },
+      { type: 'error', message: 'child failed', agentPath },
+      { type: 'subagent_end', agentPath },
+      { type: 'progress', text: 'root' },
+    ];
+    await send(daemon, createEnvelope('task.progress', { seq: 1, events }, { taskId: handle.taskId }));
     await send(daemon, createEnvelope('task.complete', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, summary: 'done', sessionRef: 'sess-h' }, { taskId: handle.taskId }));
     const viaHandle = [];
     for await (const event of handle.events()) viaHandle.push(event);
     const fromTasks = (await collect(instance.tasks.events(handle.taskId))).map((entry) => entry.event);
     expect(viaHandle).toEqual(fromTasks);
-    expect(fromTasks).toMatchObject([{ kind: 'agent' }, { state: 'Complete' }]);
+    expect(fromTasks.filter((event) => event.kind === 'agent').map(({ event }) => event)).toEqual(events);
+    expect(fromTasks.at(-1)).toMatchObject({ state: 'Complete' });
   });
 });
 

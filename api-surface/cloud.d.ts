@@ -1437,7 +1437,7 @@ export declare function capabilityDeclarationForPorts(ports: CapabilityPorts, ve
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
-import type { HostOfferPlainPayload } from '@byok-sdk/protocol';
+import type { HostOfferPlainPayload, InputImageBlobRef } from '@byok-sdk/protocol';
 import { z } from 'zod';
 import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft.js';
 import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance.js';
@@ -1655,6 +1655,7 @@ export interface ByokCloud {
     rejectTask(tenant: TenantId, taskId: string, opts?: RejectTaskOptions): Promise<EnqueuedAgentControl>;
     steerTask(tenant: TenantId, taskId: string, payload: {
         readonly text: string;
+        readonly images?: readonly InputImageBlobRef[];
     }): Promise<EnqueuedAgentControl>;
     steerSealedTask(tenant: TenantId, taskId: string, payload: TaskSteerSealedPayload): Promise<EnqueuedAgentControl>;
     readSteerRefusal(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
