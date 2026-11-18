@@ -3639,6 +3639,15 @@ owner/stop boundary, clears
 the OS authority first, and leaves enrollment observable and fail-closed if
 that clearance cannot be confirmed.
 
+Before `clearDeviceEnrollment`, a Host can call `inspectDeviceEnrollmentClear`
+with the same options (#2398). The inspection observes published store owner
+and reclaim markers and checks whether the OS entry holds another store's
+enrollment or staged pairing attempt. It takes no lease and changes no files
+or credentials. `ok: true` can occur while the store path gate is held before
+an owner marker is published, even if the store mutex has already bound. Treat
+the inspection as a point-in-time hint. Clear still acquires the store lease
+and checks the binding again under the productId gate before deletion.
+
 Windows service composition has one additional identity invariant. Credential
 Manager selects the credential set associated with the calling process token,
 and WinSW defaults to `LocalSystem`; an interactive pre-service pair therefore

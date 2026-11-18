@@ -9,6 +9,7 @@ import { withRelease } from './with-release.js';
 import {
   acquirePathMutationGate,
   PathMutationGateBusyError,
+  resolvePathWithoutCreate,
   withGateReleaseFailures,
   type PathMutationGate,
 } from '../util/path-mutation-gate.js';
@@ -311,6 +312,16 @@ async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
   // malformed, never an alternate compatibility authority. Keep only a short
   // fail-closed grace for a creator that may have crashed mid-publication.
   return Date.now() - stat.mtimeMs <= RECLAIM_MALFORMED_GRACE_MS;
+}
+
+/** Observe published store ownership without acquiring or reclaiming a lease. @internal */
+export async function assertDaemonOwnerAvailable(storeDir: string): Promise<void> {
+  const canonicalStoreDir = await resolvePathWithoutCreate(storeDir);
+  if (await reclaimExistsAndIsActive(path.join(canonicalStoreDir, RECLAIM_FILENAME))) {
+    throw new DaemonOwnerReclaimingError();
+  }
+  const owner = await readOwner(path.join(canonicalStoreDir, DAEMON_OWNER_FILENAME));
+  if (owner && await processOwnsRecord(owner)) throw new DaemonOwnerActiveError(owner.role);
 }
 
 async function createOwner(filePath: string, record: OwnerRecord): Promise<boolean> {

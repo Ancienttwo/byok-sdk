@@ -542,6 +542,7 @@
 //   generateSystemdUnit -> dist/lifecycle/systemd.d.ts
 //   generateWinswXml -> dist/lifecycle/winsw.d.ts
 //   inspectDaemonStores -> dist/diagnostics/store-compatibility.d.ts
+//   inspectDeviceEnrollmentClear -> dist/daemon/enrollment-clear.d.ts
 //   inspectServiceLogs -> dist/lifecycle/service-log.d.ts
 //   installSkillPacks -> dist/daemon/skill-pack-installer.d.ts
 //   isAgentMemorySecureFilesystemAvailable -> dist/daemon/agent-memory.d.ts
@@ -2874,6 +2875,16 @@ export declare class DeviceEnrollmentClearError extends Error {
     readonly code: DeviceEnrollmentClearErrorCode;
     constructor(code: DeviceEnrollmentClearErrorCode, options?: ErrorOptions);
 }
+export declare function inspectDeviceEnrollmentClear(options: DeviceEnrollmentStatusOptions & {
+    readonly storeDir: string;
+}, overrides?: {
+    readonly deviceCredentials?: DeviceCredentialBackend;
+}): Promise<{
+    ok: true;
+} | {
+    ok: false;
+    code: 'store_owned' | 'store_not_bound';
+}>;
 export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
     readonly storeDir: string;
 }, overrides?: {
@@ -4286,7 +4297,7 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
 export type { StoragePressureState } from './daemon/retention/pressure.js';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
-export { clearDeviceEnrollment, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
+export { clearDeviceEnrollment, inspectDeviceEnrollmentClear, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
 export type { DeviceEnrollmentClearErrorCode } from './daemon/enrollment-clear.js';
 export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
 export { AuthResponseInvalidError } from './daemon/auth-manager.js';

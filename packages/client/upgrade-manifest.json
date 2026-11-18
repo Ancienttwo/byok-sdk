@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "c9f1c9296ba5bd916df01a5988a4fd516b8ac01ae2327e6d3fa8391a5056594d"
+    "snapshotSha256": "b215638b7df6342f63bfc75f834a963bf4df9bd6c40003cd0db9910d64b50e64"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "inspect-device-enrollment-clear",
+      "impact": "additive",
+      "summary": "Hosts can call inspectDeviceEnrollmentClear with the same options as clearDeviceEnrollment to check published store ownership and another store's enrollment or staged pairing attempt. The result is a point-in-time hint and the clear checks again under its own lease.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2398",
+      "items": [
+        "export:@byok-sdk/client#inspectDeviceEnrollmentClear"
+      ]
+    },
     {
       "id": "embedded-input-image-upload",
       "impact": "additive",
@@ -73,6 +82,11 @@
       "item": "export:@byok-sdk/client#BlobClient",
       "change": "changed",
       "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/client#inspectDeviceEnrollmentClear",
+      "change": "added",
+      "entry": "inspect-device-enrollment-clear"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",

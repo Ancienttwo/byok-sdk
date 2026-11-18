@@ -14,7 +14,8 @@ import { createTestDeviceStore, InMemoryDeviceCredentialBackend } from './fixtur
 import { AuthManager } from '../daemon/auth-manager';
 import { DeviceMemberKeyStore, DeviceMemberRecords } from '../daemon/device-member-custody';
 import { testDeviceCredentials, testDeviceMemberCustody } from './fixtures/credential-backend';
-import { clearDeviceEnrollment, DeviceEnrollmentClearError } from '../daemon/enrollment-clear';
+import { clearDeviceEnrollment, DeviceEnrollmentClearError, inspectDeviceEnrollmentClear } from '../daemon/enrollment-clear';
+import { acquireDaemonOwner, DAEMON_OWNER_FILENAME } from '../util/daemon-owner';
 import { repairDeviceEnrollmentMetadata } from '../diagnostics/device-doctor';
 import { connectControlClient } from '../daemon/control-client';
 import { OPEN_LIFECYCLE, waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -437,6 +438,8 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
   describe('clearDeviceEnrollment clears a store without a daemon (#1841)', () => {
     const clear = (config: DaemonConfig) =>
       clearDeviceEnrollment({ productId, storeDir: config.storeDir! }, { deviceCredentials: testDeviceCredentials(productId) });
+    const inspect = (config: DaemonConfig) =>
+      inspectDeviceEnrollmentClear({ productId, storeDir: config.storeDir! }, { deviceCredentials: testDeviceCredentials(productId) });
 
     it('clears a paired store, and a second call succeeds', async () => {
       const config = await storeConfig();
@@ -515,12 +518,113 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       else expect(await credentials.readPairingAttempt()).toBeDefined();
     });
 
+    it('prechecks a live owner without changing the store or reading OS credentials', async () => {
+      const config = await storeConfig();
+      await daemonFor(config).pair('pairing-code');
+      const storeDir = config.storeDir!;
+      const ownerPath = path.join(storeDir, DAEMON_OWNER_FILENAME);
+      const lease = await acquireDaemonOwner(storeDir, 'doctor');
+      try {
+        const credentials = testDeviceCredentials(productId);
+        const enrollment = await credentials.read();
+        const entries = (await fs.readdir(storeDir)).sort();
+        const marker = await fs.readFile(ownerPath);
+        const { mtimeMs: storeMtime } = await fs.stat(storeDir);
+        const { mtimeMs: markerMtime } = await fs.stat(ownerPath);
+        const read = vi.spyOn(credentials, 'read');
+        const readAttempt = vi.spyOn(credentials, 'readPairingAttempt');
+
+        await expect(inspect(config)).resolves.toEqual({ ok: false, code: 'store_owned' });
+
+        expect(read).not.toHaveBeenCalled();
+        expect(readAttempt).not.toHaveBeenCalled();
+        expect(await credentials.read()).toEqual(enrollment);
+        expect(await credentials.readPairingAttempt()).toBeUndefined();
+        expect((await fs.readdir(storeDir)).sort()).toEqual(entries);
+        expect((await fs.stat(storeDir)).mtimeMs).toBe(storeMtime);
+        expect(await fs.readFile(ownerPath)).toEqual(marker);
+        expect((await fs.stat(ownerPath)).mtimeMs).toBe(markerMtime);
+      } finally {
+        await lease.release();
+      }
+    });
+
+    it('prechecks an active reclaim marker as store_owned', async () => {
+      const source = await storeConfig();
+      const target = await storeConfig();
+      const lease = await acquireDaemonOwner(source.storeDir!, 'installer');
+      try {
+        await fs.copyFile(
+          path.join(source.storeDir!, DAEMON_OWNER_FILENAME),
+          path.join(target.storeDir!, `${DAEMON_OWNER_FILENAME}.reclaim`),
+        );
+        await expect(inspect(target)).resolves.toEqual({ ok: false, code: 'store_owned' });
+        await expect(clear(target)).rejects.toMatchObject({ code: 'store_owned' });
+      } finally {
+        await lease.release();
+      }
+    });
+
+    it('leaves a stale owner marker for the actual clear to reclaim', async () => {
+      const config = await storeConfig();
+      const ownerPath = path.join(config.storeDir!, DAEMON_OWNER_FILENAME);
+      const lease = await acquireDaemonOwner(config.storeDir!, 'daemon');
+      const marker = await fs.readFile(ownerPath).finally(() => lease.release());
+      await fs.writeFile(ownerPath, marker, { mode: 0o600 });
+
+      await expect(inspect(config)).resolves.toEqual({ ok: true });
+      expect(await fs.readFile(ownerPath)).toEqual(marker);
+      await expect(clear(config)).resolves.toBeUndefined();
+      await expect(fs.access(ownerPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('prechecks an unpaired store without an attempt or a local directory', async () => {
+      const config = await storeConfig();
+      const storeDir = path.join(config.storeDir!, 'absent');
+      await expect(inspect({ ...config, storeDir })).resolves.toEqual({ ok: true });
+      await expect(fs.access(storeDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    });
+
+    it('prechecks a completed enrollment binding before reading the staged attempt', async () => {
+      const paired = await storeConfig();
+      await daemonFor(paired).pair('pairing-code');
+      const other = await storeConfig();
+      await expect(daemonFor(unreachable(other)).pair('pairing-code', { replaceOtherStore: true })).rejects.toThrow();
+      const credentials = testDeviceCredentials(productId);
+      expect(await credentials.readPairingAttempt()).toBeDefined();
+      const readAttempt = vi.spyOn(credentials, 'readPairingAttempt');
+
+      await expect(inspect(other)).resolves.toEqual({ ok: false, code: 'store_not_bound' });
+      expect(readAttempt).not.toHaveBeenCalled();
+    });
+
+    it('precheck reports an invalid projection before a foreign staged attempt', async () => {
+      await expect(daemonFor(unreachable(await storeConfig())).pair('pairing-code')).rejects.toThrow();
+      const config = await storeConfig();
+      await fs.writeFile(path.join(config.storeDir!, 'device.json'), '');
+      await expect(inspect(config)).rejects.toMatchObject({
+        code: 'clear_failed', cause: expect.any(DeviceRecordRePairRequiredError),
+      });
+    });
+
+    it('precheck surfaces a provider read failure', async () => {
+      const config = await storeConfig();
+      const credentials = testDeviceCredentials(productId);
+      const providerError = new Error('provider refused read');
+      vi.spyOn(credentials, 'read').mockRejectedValueOnce(providerError);
+      await expect(inspect(config)).rejects.toMatchObject({ code: 'clear_failed', cause: providerError });
+    });
+
     it('refuses another store\'s staged first pairing with store_not_bound and leaves it (#1964)', async () => {
       await expect(daemonFor(unreachable(await storeConfig())).pair('pairing-code')).rejects.toThrow();
       const credentials = testDeviceCredentials(productId);
+      const staged = await credentials.readPairingAttempt();
+      const config = await storeConfig();
 
-      expect(await clear(await storeConfig()).catch((error: unknown) => error)).toMatchObject({ code: 'store_not_bound' });
-      expect(await credentials.readPairingAttempt()).toBeDefined();
+      await expect(inspect(config)).resolves.toEqual({ ok: false, code: 'store_not_bound' });
+      await expect(clear(config)).rejects.toMatchObject({ code: 'store_not_bound' });
+      expect(await credentials.readPairingAttempt()).toEqual(staged);
+      expect(staged).toBeDefined();
     });
 
     it('an unpaired store clears the first pairing it staged (#1964, #1767)', async () => {
@@ -531,6 +635,8 @@ describe('#1094 a storeDir only uses the enrollment it paired', () => {
       expect((await credentials.readPairingAttempt())?.storeIdentity).toMatch(/^[0-9a-f]{64}$/u);
       expect((await credentials.readPairingAttempt())?.storeIdentity).toBe(own);
 
+      await expect(inspect(staging)).resolves.toEqual({ ok: true });
+      expect((await credentials.readPairingAttempt())?.storeIdentity).toBe(own);
       await clear(staging);
       expect(await credentials.readPairingAttempt()).toBeUndefined();
     });
