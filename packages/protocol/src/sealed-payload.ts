@@ -311,9 +311,9 @@ export const RoutineRefSchema = z
 
 /**
  * The rule of a sealed offer, for `superRefine`: `sealed` is present exactly
- * when the task's `sealing` includes `task-input`, and then `instruction` is
- * absent and `sealed.scope` is the task's scope at the task's epoch. When the
- * task seals only its output, `instruction` is plaintext and required. A
+ * when the task's `sealing` includes `task-input`, and then `instruction` and
+ * `images` are absent and `sealed.scope` is the task's scope at its epoch.
+ * When the task seals only its output, `instruction` is plaintext and required. A
  * `routineRef` names a routine template, which is sealed task input, so it
  * needs a task that seals `task-input`.
  *
@@ -321,7 +321,7 @@ export const RoutineRefSchema = z
  * device's check: they know the task's `sealing`, this payload does not.
  */
 export function sealedOfferRule(
-  payload: { readonly instruction?: unknown; readonly sealing: TaskSealing; readonly sealed?: SealedPayload; readonly routineRef?: unknown },
+  payload: { readonly instruction?: unknown; readonly images?: unknown; readonly sealing: TaskSealing; readonly sealed?: SealedPayload; readonly routineRef?: unknown },
   ctx: z.RefinementCtx,
 ): void {
   const { instruction, sealing, sealed, routineRef } = payload;
@@ -335,7 +335,9 @@ export function sealedOfferRule(
     ctx.addIssue({ code: 'custom', path: ['sealed'], message: 'a task that seals task-input carries the sealed instruction' });
     return;
   }
-  if (instruction !== undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a sealed instruction never travels in plaintext too' });
+  for (const field of SEALED_SPLIT_TABLE['task.offer'].moved) {
+    if (payload[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: `a sealed ${field} field never travels in plaintext too` });
+  }
   if (sealed.scope.id !== sealing.scopeId || sealed.scope.epoch !== sealing.epoch) {
     ctx.addIssue({ code: 'custom', path: ['sealed', 'scope'], message: 'the offer task-input must be sealed under the task scope at the task epoch' });
   }

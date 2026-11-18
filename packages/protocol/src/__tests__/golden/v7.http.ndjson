@@ -37,3 +37,4 @@
 {"surface":"PairSupersededResponse","body":"{\"error\":\"pairing superseded\",\"code\":\"pairing_superseded\",\"currentDeviceDigest\":\"jiYrzBIQYTkeC2h5nZN0zmIBfmfTTDN8QAlBWstaw-M\"}","value":{"error":"pairing superseded","code":"pairing_superseded","currentDeviceDigest":"jiYrzBIQYTkeC2h5nZN0zmIBfmfTTDN8QAlBWstaw-M"}}
 {"surface":"PairSupersededResponse","body":"{\"error\":\"pairing superseded\",\"code\":\"pairing_superseded\",\"currentDeviceDigest\":null}","value":{"error":"pairing superseded","code":"pairing_superseded","currentDeviceDigest":null}}
 {"surface":"PairingCodeInvalidResponse","body":"{\"error\":\"invalid pairing code\",\"code\":\"pairing_code_invalid\"}","value":{"error":"invalid pairing code","code":"pairing_code_invalid"}}
+{"surface":"PresencePublishRequest","body":"{\"level\":\"online\",\"runtimes\":[{\"id\":\"pi\",\"capabilities\":{\"images\":true}}]}","value":{"level":"online","runtimes":[{"id":"pi","capabilities":{"images":true}}]}}
