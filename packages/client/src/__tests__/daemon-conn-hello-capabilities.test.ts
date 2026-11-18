@@ -204,7 +204,17 @@ describe('conn.hello.capabilities', () => {
   });
 
   it('advertises exactly the connection flags, with no approval flag', async () => {
-    const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }) });
+    const pi: RuntimeAdapter = {
+      runtimeEnvironment: async () => testRuntimeEnvironment(),
+      descriptor: freezeRuntimeAdapterDescriptor({
+        id: 'pi',
+        supportsTaskExecutionOptions: true,
+        supportsDispatchSelection: true,
+        capabilities: { images: true, mcpToolsets: true, steer: false, resume: false, approvalInteractive: false },
+      }),
+      async detect() { return { kind: 'available' }; },
+      async prepare() { return { kind: 'reject', reason: 'not used by capability handshake test', retryable: false }; },
+    };
 
     const storeDir = await tmpDir('byok-conn-hello-capflags-store-');
     daemon = createDaemonWithAdapters(

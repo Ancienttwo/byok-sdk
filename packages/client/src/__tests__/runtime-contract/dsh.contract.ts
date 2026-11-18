@@ -427,8 +427,14 @@ defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.exp
     const { survivors, diagnostic, usage, modelRequests } = await background();
     expect(survivors, diagnostic).toEqual([]);
     expect(modelRequests.some(request => !request.text.includes(ROOT_MARKER))).toBe(true);
+    // Child usage is attributed for display; only the root observation is terminal metering.
+    expect(usage).toHaveLength(2);
+    expect(usage[0]!.agentPath).toEqual(expect.arrayContaining([expect.any(String)]));
+    expect(usage[1]!.agentPath).toBeUndefined();
     // The loopback provider bills one input and one output token per request, including the child's.
-    expect(usage).toEqual([expect.objectContaining({ inputTokens: modelRequests.length, outputTokens: modelRequests.length })]);
+    expect(usage.filter(event => event.agentPath === undefined)).toEqual([
+      expect.objectContaining({ inputTokens: modelRequests.length, outputTokens: modelRequests.length }),
+    ]);
   }, 240_000)],
   'dsh.resume': ['a second Turn of the same session runs through resume after the kill', check(async () => {
     const { events, sessionRef, resumedRef, resumed } = await background();
