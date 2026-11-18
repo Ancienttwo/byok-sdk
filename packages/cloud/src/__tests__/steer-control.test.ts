@@ -226,7 +226,8 @@ describe('steerTask (GAP-2)', () => {
     await deviceStores(harness, device).devices.recordCapabilities({ capabilities: ['agent-home-contract', 'input-images'] });
     const image = { mediaType: 'image/png' as const, blob: { blobId: 'missing', contentHash: `sha256:${'a'.repeat(64)}`, size: 1, contentType: 'image/png' } };
     for (const images of [[], Array(17).fill(image)]) {
-      await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'look', images })).rejects.toMatchObject({ name: 'ZodError' });
+      await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'look', images }))
+        .rejects.toMatchObject({ name: 'ByokCloudError', code: 'coordination_input_invalid' });
     }
     await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'look', images: [image] }))
       .rejects.toMatchObject({ code: 'coordination_input_invalid' });

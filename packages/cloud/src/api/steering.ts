@@ -9,6 +9,7 @@ import {
   type TaskSteerSealedPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from '../errors.js';
+import { assertCommittedInputImages } from '../input-images.js';
 import { uuidFromSha256 } from '@byok-sdk/protocol';
 import { releaseSealedCiphertext, sealedCiphertextRef } from '../sealed-ciphertext.js';
 import { sameSealedProjection } from '../sealed-comparison.js';
@@ -53,18 +54,16 @@ export function createSteeringApi({
     if (new TextEncoder().encode(text).length > TASK_STEER_TEXT_MAX_BYTES) {
       throw new ByokCloudError('coordination_input_invalid', `Steer text exceeds ${TASK_STEER_TEXT_MAX_BYTES} UTF-8 bytes.`);
     }
-    const images = payload.images === undefined ? undefined : InputImagesSchema.parse(payload.images);
+    const parsed = payload.images === undefined ? undefined : InputImagesSchema.safeParse(payload.images);
+    if (parsed?.success === false) {
+      throw new ByokCloudError('coordination_input_invalid', 'Input images must contain 1–16 valid image references.');
+    }
+    const images = parsed?.data;
     const steer = { text, ...(images === undefined ? {} : { images }) };
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     const required = requiredReceiverCapabilities('task.steer', steer);
     if (required.length > 0) await assertAgentCapabilities(tenant, ownerDeviceId, required);
-    if (images !== undefined) {
-      for (const { blob } of images) {
-        if (await options.cloud.blobs.getDownloadUrl(tenant, blob.blobId) === undefined) {
-          throw new ByokCloudError('coordination_input_invalid', 'Input images must name committed blobs of this tenant.');
-        }
-      }
-    }
+    if (images !== undefined) await assertCommittedInputImages(options.cloud.blobs, tenant, images);
     const messageId = options.crypto.randomUuid();
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
       createEnvelope('task.steer', steer, { id: messageId, taskId, seq }),

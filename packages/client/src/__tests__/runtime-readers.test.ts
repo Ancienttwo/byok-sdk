@@ -10,6 +10,7 @@ import { createDaemonRecordProjector } from '../daemon/daemon-record.js';
 import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper.js';
 import { formatLiveStatusLines } from '../diagnostics/format.js';
 import { parseControlStatusRuntimes } from '../runtime-detection.js';
+import { createRuntimeReaders } from '../runtime/runtime-readers.js';
 
 const dirs: string[] = [];
 async function tempDir() {
@@ -113,6 +114,53 @@ it('discards native errors and kills the owned reader when cancelled', async () 
   await rejected;
   await ended;
   expect(children[1]!.signalCode).not.toBeNull();
+});
+
+it('closes the reader environment when redactor setup fails', async () => {
+  const { adapter } = codexHarness();
+  const close = vi.fn(async () => {});
+  const readers = createRuntimeReaders(adapter, {
+    command: () => process.execPath,
+    version: () => undefined,
+    environment: async () => ({
+      env: { get BROKEN_KEY(): string { throw new Error('redactor setup failed'); } },
+      close,
+    }),
+  });
+  await expect(readers.listModels({}, vi.fn())).rejects.toThrow('redactor setup failed');
+  expect(close).toHaveBeenCalledTimes(1);
+});
+
+it('closes the reader environment when an in-flight reader is cancelled', async () => {
+  const { adapter } = codexHarness();
+  const close = vi.fn(async () => {});
+  const readers = createRuntimeReaders(adapter, {
+    command: () => process.execPath,
+    version: () => undefined,
+    environment: env => ({ env, close }),
+  });
+  const reader = vi.fn(() => new Promise<never>(() => {}));
+  const controller = new AbortController();
+  const rejected = expect(readers.listModels({ signal: controller.signal }, reader)).rejects.toThrow('runtime read cancelled');
+  await vi.waitFor(() => expect(reader).toHaveBeenCalledTimes(1));
+  controller.abort();
+  await rejected;
+  await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+});
+
+it('closes the reader environment if it arrives after cancellation', async () => {
+  const { adapter } = codexHarness();
+  const close = vi.fn(async () => {});
+  const environmentResult = Promise.withResolvers<{ env: Record<string, string>; close: typeof close }>();
+  const environment = vi.fn(() => environmentResult.promise);
+  const readers = createRuntimeReaders(adapter, { command: () => process.execPath, version: () => undefined, environment });
+  const controller = new AbortController();
+  const rejected = expect(readers.listModels({ signal: controller.signal }, vi.fn())).rejects.toThrow('runtime read cancelled');
+  await vi.waitFor(() => expect(environment).toHaveBeenCalledTimes(1));
+  controller.abort();
+  await rejected;
+  environmentResult.resolve({ env: {}, close });
+  await vi.waitFor(() => expect(close).toHaveBeenCalledTimes(1));
 });
 
 it.skipIf(process.platform === 'win32')('builds unpaired catalog adapters through the public factory', async () => {

@@ -22,6 +22,7 @@ export type { TenantId } from '@byok-sdk/core';
 
 // The composition entry points
 export { createByokCloud } from './cloud.js';
+export { assertCommittedInputImages } from './input-images.js';
 export type { TaskAgentMessage } from './task-agent-message.js';
 export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition.js';
 export type {

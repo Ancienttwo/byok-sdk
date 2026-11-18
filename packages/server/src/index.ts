@@ -20,6 +20,7 @@ export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import {
   agentHomeProjectionRequestKey,
+  assertCommittedInputImages,
   capabilityDeclarationForPorts,
   createByokCloud,
   createHmacTokenSigner,
@@ -559,13 +560,12 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   }
 
   async function readInputImages(input: unknown) {
-    const images = InputImagesSchema.parse(input);
-    for (const { blob } of images) {
-      if (await composition.cloud.blobs.getDownloadUrl(tenant, blob.blobId) === undefined) {
-        throw new ByokCloudError('coordination_input_invalid', 'Input images must name committed blobs of this tenant.');
-      }
+    const parsed = InputImagesSchema.safeParse(input);
+    if (!parsed.success) {
+      throw new ByokCloudError('coordination_input_invalid', 'Input images must contain 1–16 valid image references.');
     }
-    return images;
+    await assertCommittedInputImages(composition.cloud.blobs, tenant, parsed.data);
+    return parsed.data;
   }
 
   async function dispatchInternal(

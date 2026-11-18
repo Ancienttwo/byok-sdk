@@ -317,6 +317,7 @@
 //   agentHomeProjectionCompletionKey -> dist/agent-home-projections.d.ts
 //   agentHomeProjectionRequestKey -> dist/agent-home-projections.d.ts
 //   approvalTimelineCursor -> dist/approval-timeline.d.ts
+//   assertCommittedInputImages -> dist/input-images.d.ts
 //   assertTaskAttemptListLimit -> dist/coordination.d.ts
 //   authenticateBearer -> dist/auth/bearer.d.ts
 //   authenticateDeviceProof -> dist/auth/device-proof.d.ts
@@ -2093,6 +2094,7 @@ export declare function handleInboundEnvelope(stores: TenantStores, deviceId: st
 export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud.js';
+export { assertCommittedInputImages } from './input-images.js';
 export type { TaskAgentMessage } from './task-agent-message.js';
 export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition.js';
 export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud.js';
@@ -2168,6 +2170,11 @@ export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-w
 export { createInProcessMailboxWake, createInProcessTaskEventsWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS, DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS, } from './stores/in-memory/mailbox-wake.js';
 export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake.js';
 export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft.js';
+// ==== @byok-sdk/cloud dist/input-images.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+import type { InputImageBlobRef } from '@byok-sdk/protocol';
+import type { CloudBlobStore } from './stores/ports.js';
+export declare function assertCommittedInputImages(blobs: Pick<CloudBlobStore, 'getDownloadUrl'>, tenant: TenantId, images: readonly InputImageBlobRef[]): Promise<void>;
 // ==== @byok-sdk/cloud dist/input-preparations.d.ts ====
 import { type AgentInputPreparationPayload, type InputPreparationCompletionRequest, type InputPreparationReadback } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';

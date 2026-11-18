@@ -116,9 +116,10 @@ describe('embedded execution options and images (#2383)', () => {
     expect(await daemon.next()).toEqual([]);
   });
 
-  it('rejects empty image lists and images whose blobs are not yet committed', async () => {
+  it('rejects malformed image lists and images whose blobs are not yet committed', async () => {
     const { instance, daemon, input, upload } = await start([INPUT_IMAGES_CAPABILITY]);
-    await expect(instance.dispatch({ ...input, taskId: 'empty', images: [] })).rejects.toMatchObject({ name: 'ZodError' });
+    await expect(instance.dispatch({ ...input, taskId: 'empty', images: [] }))
+      .rejects.toMatchObject({ name: 'ByokCloudError', code: 'coordination_input_invalid' });
     await expect(instance.dispatch({ ...input, taskId: 'uncommitted', images: [await upload(false)] }))
       .rejects.toMatchObject({ code: 'coordination_input_invalid' });
     expect((await instance.tasks.list()).tasks).toEqual([]);
