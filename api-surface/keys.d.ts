@@ -128,6 +128,7 @@
 //   isLoopbackProviderUrl -> dist/url.d.ts
 //   isPrivateNetworkLiteral -> dist/url.d.ts
 //   isSqliteAvailable -> dist/sqlite-support.d.ts
+//   listProviderProfileSecretNames -> dist/provider-secret-recovery.d.ts
 //   loadSqliteModule -> dist/sqlite-support.d.ts
 //   modelApiUrl -> dist/http.d.ts
 //   modelMessageText -> dist/http.d.ts
@@ -443,6 +444,7 @@ export { isSqliteAvailable, loadSqliteModule, openSqliteDatabase, secureSqliteFi
 export { SqliteProviderProfileStore } from './sqlite-profile-store.js';
 export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
 export { inspectProviderProfileStore } from './store-compatibility.js';
+export { listProviderProfileSecretNames } from './provider-secret-recovery.js';
 export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, withConfigurationLock, } from './custody.js';
 export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody.js';
 export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key.js';
@@ -1151,6 +1153,9 @@ export declare const ModelProviderProfileSchema: z.ZodObject<{
 export type ModelProviderProfile = z.infer<typeof ModelProviderProfileSchema>;
 export type ModelProviderProfileInput = z.input<typeof ModelProviderProfileSchema>;
 export declare function parseModelProviderProfile(value: unknown): ModelProviderProfile;
+// ==== @byok-sdk/keys dist/provider-secret-recovery.d.ts ====
+import type { ModelProviderSecretName } from './secret-store.js';
+export declare function listProviderProfileSecretNames(path: string): Promise<readonly ModelProviderSecretName[]>;
 // ==== @byok-sdk/keys dist/registry.d.ts ====
 import { AnthropicMessagesClient } from './anthropic-client.js';
 import type { ProviderFetch } from './http.js';

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added (keys; #2397)** — `listProviderProfileSecretNames` finds credential entry names in recognized offline provider stores. Hosts can clean up retired credentials through the original `SecretStore` scope while preserving names used by active stores. See the [credential recovery steps](packages/keys/README.md#recover-provider-credentials-from-an-offline-store).
+
 ## 0.44.0 — 2026-11-18 (published)
 
 [Release notes](docs/releases/v0.44.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.44.0.md)

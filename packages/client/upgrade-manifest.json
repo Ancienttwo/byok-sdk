@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "2a71e9526ef851470f8dbe938433cd69803a06e47c28c2ad80caf6a7d9697fc4"
+    "snapshotSha256": "aa079097dcfbb80a3f0d5d116f1de7459c94f3f4b019ccf12eadb535db84586a"
   },
   "configFields": {
     "status": "tracked",
@@ -34,6 +34,15 @@
         "export:@byok-sdk/server#ByokServer",
         "export:@byok-sdk/server#InputImageUploadError",
         "export:@byok-sdk/server#UploadInputImage"
+      ]
+    },
+    {
+      "id": "offline-provider-secret-recovery",
+      "impact": "additive",
+      "summary": "List provider credential entry names from a recognized offline store. Before deleting obsolete credentials, exclude names used by active stores in the same credential scope.",
+      "migration": "packages/keys/README.md#recover-provider-credentials-from-an-offline-store",
+      "items": [
+        "export:@byok-sdk/keys#listProviderProfileSecretNames"
       ]
     }
   ],
@@ -82,6 +91,11 @@
       "item": "export:@byok-sdk/core#InMemoryObjectStore",
       "change": "changed",
       "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/keys#listProviderProfileSecretNames",
+      "change": "added",
+      "entry": "offline-provider-secret-recovery"
     },
     {
       "item": "export:@byok-sdk/protocol#INPUT_IMAGE_MAX_BYTES",
