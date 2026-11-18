@@ -174,6 +174,9 @@ export type {
   ProviderProvisioningFaultSeam,
 } from './sealed-provisioning.js';
 
+export { discoverProviderModels } from './model-discovery.js';
+export type { DiscoveredModel, ModelDiscoveryConnection } from './model-discovery.js';
+
 export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check.js';
 export type { ProviderKeyCheckOptions } from './provider-key-check.js';
 
