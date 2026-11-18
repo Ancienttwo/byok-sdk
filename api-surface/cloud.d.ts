@@ -1489,6 +1489,7 @@ export interface ByokCloudOptions {
     readonly agentMemoryProjectionStore?: AgentMemoryProjectionStore;
     readonly taskRedactionStore?: TaskRedactionStore;
     readonly maxBlobSizeBytes?: number;
+    readonly assertSteerImages?: (tenant: TenantId, images: readonly InputImageBlobRef[]) => Promise<void>;
     readonly longPollHoldMs?: number;
     readonly eventsPageLimit?: number;
     readonly accessTokenTtlSeconds?: number;

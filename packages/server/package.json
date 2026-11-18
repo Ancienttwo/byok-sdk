@@ -35,6 +35,12 @@
     },
     "./package.json": "./package.json"
   },
+  "imports": {
+    "#byok-embedded-blob-storage": {
+      "types": "./dist/embedded-blob-storage-contract.d.ts",
+      "import": "./dist/embedded-blob-storage.js"
+    }
+  },
   "files": [
     "dist",
     "README.md",

@@ -30,6 +30,7 @@ import {
   isCoreError,
   type StorageErrorCode,
 } from '@byok-sdk/core';
+import { BLOB_RESERVATION_TTL_MS } from '../blob-reservation.js';
 import type { BlobContentProxy, BlobReadErrorCode } from '../stores/ports.js';
 import { admitDeviceRequest, cancelBody, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
 
@@ -40,9 +41,6 @@ export interface BlobRouteDeps extends DeviceRouteDeps {
 
 /** `POST /byok/blobs` carries a size, a content type and a hash. */
 export const CREATE_BLOB_MAX_BODY_BYTES = 16 * 1024;
-
-/** Reservation and presign grants deliberately share one expiry horizon. */
-export const BLOB_RESERVATION_TTL_MS = 15 * 60 * 1000;
 
 /**
  * The two presigned routes. No bearer deps at all — there is no principal to

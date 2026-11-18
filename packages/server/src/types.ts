@@ -23,6 +23,7 @@ import type {
   TaskState,
   ToolsetId,
   TerminalProjectionSelection,
+  TerminalAgentHomeMemoryChange,
   AgentHomeAccess,
   AgentMemorySelection,
 } from '@byok-sdk/protocol';
@@ -30,6 +31,12 @@ import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAban
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types.js';
 import type { RateLimiterOptions } from './rate-limiter.js';
+
+/** One input image in the trusted embedder's process. */
+export interface UploadInputImage {
+  readonly bytes: Uint8Array;
+  readonly contentType: InputImageBlobRef['mediaType'];
+}
 
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage =
@@ -236,6 +243,13 @@ export interface TaskResult {
   finalMessage?: string;
   sessionRef?: string;
   artifactRefs?: BlobRef[];
+  /**
+   * Memory-change evidence from the terminal frame; see
+   * `TerminalAgentHomeMemoryChange` in `@byok-sdk/protocol`. Reported only on
+   * memory-reader passes, not writer passes; also absent if the reader never
+   * became active or the device did not report it.
+   */
+  agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   reason?: string;
   /**
    * The decline code (`agent_home_writer_busy` / `agent_home_reader_busy`).

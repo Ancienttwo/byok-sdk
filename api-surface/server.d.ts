@@ -23,6 +23,7 @@
 //   DueWake -> dist/wakes/types.d.ts
 //   HubStats -> dist/types.d.ts
 //   InboundRefusalReason -> @byok-sdk/cloud#InboundRefusalReason
+//   InputImageUploadError -> dist/input-images.d.ts
 //   LoopbackHandler -> dist/loopback.d.ts
 //   LoopbackListener -> dist/loopback.d.ts
 //   LoopbackListenerOptions -> dist/loopback.d.ts
@@ -49,6 +50,7 @@
 //   TaskSnapshot -> dist/types.d.ts
 //   TenantId -> @byok-sdk/cloud#TenantId
 //   TokenSigner -> @byok-sdk/cloud#TokenSigner
+//   UploadInputImage -> dist/types.d.ts
 //   WAKE_MAX_FUTURE_MS -> dist/wakes/types.d.ts
 //   WakeClosedError -> dist/wakes/types.d.ts
 //   WakeConflictError -> dist/wakes/types.d.ts
@@ -906,9 +908,10 @@ import { type MaintenanceReport } from '@byok-sdk/cloud';
 export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import { type ActivityReadOptions, type ActivityTail, type ApprovalTimelineTail, type AgentExecutionInput, type AgentMemoryIntentNoticeInput, type EnqueuedAgentControl, type EnqueuedOffer, type PairingCodeInfo, type TaskAttempt } from '@byok-sdk/cloud';
-import { type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
-import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, SteerRefusal, TaskEventEntry, TaskHandle, TaskSnapshot } from './types.js';
-export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, SteerRefusal, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, } from './types.js';
+import { type InputImageBlobRef, type AgentRef, type AgentMessagePublishPayload, type AgentMessageDispositionPayload } from '@byok-sdk/protocol';
+export { InputImageUploadError } from './input-images.js';
+import type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, SteerRefusal, TaskEventEntry, TaskHandle, TaskSnapshot, UploadInputImage } from './types.js';
+export type { ByokServerEvent, AgentContentReadRequest, AgentHomeProjectionRequest, AgentHomeProjectionStatusReadback, AgentEgressReceipt, ByokServerStorage, AgentResumeDispatchInput, CreateByokServerOptions, DispatchInput, HubStats, MachineInfo, ServerTaskEvent, SteerRefusal, TaskEventEntry, TaskHandle, TaskResult, TaskSnapshot, UploadInputImage, } from './types.js';
 export { TaskEventsUnavailableError } from './types.js';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
 export { StaleApprovalError } from '@byok-sdk/cloud';
@@ -990,6 +993,7 @@ export interface ByokServer {
         list(query?: TaskListQuery): Promise<TaskPage>;
     };
     blobs: {
+        uploadInputImage(input: UploadInputImage): Promise<InputImageBlobRef>;
         getDownloadUrl(blobId: string): Promise<string | undefined>;
     };
     egress: {
@@ -1011,6 +1015,11 @@ export interface ByokServer {
     stats(): Promise<HubStats>;
 }
 export declare function createByokServer(opts: CreateByokServerOptions): ByokServer;
+// ==== @byok-sdk/server dist/input-images.d.ts ====
+export declare class InputImageUploadError extends Error {
+    readonly code: 'server_closed' | 'blob_upload_failed';
+    constructor(code: 'server_closed' | 'blob_upload_failed', options?: ErrorOptions);
+}
 // ==== @byok-sdk/server dist/loopback.d.ts ====
 export interface LoopbackPortStore {
     read(): Promise<number | null>;
@@ -1070,11 +1079,15 @@ export declare class SteerRejectedError extends Error {
 }
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, InputImageBlobRef, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, InputImageBlobRef, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types.js';
 import type { RateLimiterOptions } from './rate-limiter.js';
+export interface UploadInputImage {
+    readonly bytes: Uint8Array;
+    readonly contentType: InputImageBlobRef['mediaType'];
+}
 export type ByokServerStorage = {
     readonly kind: 'memory';
 } | {
@@ -1151,6 +1164,7 @@ export interface TaskResult {
     finalMessage?: string;
     sessionRef?: string;
     artifactRefs?: BlobRef[];
+    agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
     reason?: string;
     code?: TaskDeclineCodeReading['code'];
     reportedCode?: string;

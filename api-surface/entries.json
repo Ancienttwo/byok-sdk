@@ -343,6 +343,7 @@
         "packages/bot-collaboration/dist/testing.d.ts"
       ],
       "bareImports": [
+        "#byok-embedded-blob-storage",
         "@byok-sdk/client",
         "@byok-sdk/cloud",
         "@byok-sdk/core",
@@ -391,6 +392,7 @@
         "#byok-acp-runtime",
         "#byok-oar-readers",
         "#byok-pi-runtime-host",
+        "./input-image-upload.js",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
@@ -2572,6 +2574,7 @@
         "packages/server/dist/index.d.ts"
       ],
       "bareImports": [
+        "#byok-embedded-blob-storage",
         "@byok-sdk/cloud",
         "@byok-sdk/core",
         "@byok-sdk/core/sqlite-node",
@@ -2586,7 +2589,9 @@
         "path",
         "zod"
       ],
-      "lazyImports": [],
+      "lazyImports": [
+        "./input-image-upload.js"
+      ],
       "thirdParty": [
         "@cfworker/json-schema",
         "@hono/node-server",
@@ -2760,6 +2765,66 @@
         "thirdParty": []
       },
       "codegen": []
+    }
+  },
+  "@byok-sdk/server#byok-embedded-blob-storage": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private embedded blob store composition",
+      "budgetBytes": 291000,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": false,
+        "thirdParty": false
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ]
+    },
+    "facts": {
+      "target": "packages/server/dist/embedded-blob-storage.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/server/dist/embedded-blob-storage-contract.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/core",
+        "@byok-sdk/protocol",
+        "@cfworker/json-schema",
+        "zod"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": [
+        {
+          "file": "zod/v4/core/compile.js",
+          "line": 180,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 33,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 228,
+          "rule": "Function reference"
+        }
+      ]
     }
   },
   "@byok-sdk/ui-runtime": {

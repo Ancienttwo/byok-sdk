@@ -66,7 +66,7 @@ export class BlobClient implements BlobResolver {
   }
 
   /** The blob's bytes, after the declared SHA-256 and size check. */
-  async downloadBlob(blobRef: BlobRef, options: BlobRequestOptions = {}): Promise<Uint8Array> {
+  async downloadBlob(blobRef: BlobRef, options: BlobRequestOptions & { readonly maxBytes?: number } = {}): Promise<Uint8Array> {
     const base = toHttpBase(this.serverUrl);
     const urlRes = await this.#request(
       (signal) => authedFetch(new URL(byokBlobUrlPath(blobRef.blobId), base), { method: 'GET', signal }, this.auth),
@@ -88,7 +88,7 @@ export class BlobClient implements BlobResolver {
     if (!contentRes.ok) {
       throw new Error(`failed to download blob content: HTTP ${contentRes.status}`);
     }
-    const bytes = await this.#readBody(contentRes, options.signal);
+    const bytes = await this.#readBody(contentRes, options.signal, options.maxBytes);
     const observedHash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     if (observedHash !== blobRef.contentHash || bytes.length !== blobRef.size) {
       throw new BlobIntegrityError(
@@ -235,7 +235,7 @@ export class BlobClient implements BlobResolver {
    * authority cancels the actual stream even when a fetch implementation has
    * already resolved at headers.
    */
-  async #readBody(res: Response, signal: AbortSignal | undefined): Promise<Uint8Array> {
+  async #readBody(res: Response, signal: AbortSignal | undefined, maxBytes?: number): Promise<Uint8Array> {
     try {
       return await this.#request(async (requestSignal) => {
         if (res.body === null) return new Uint8Array();
@@ -250,6 +250,10 @@ export class BlobClient implements BlobResolver {
           for (;;) {
             const { done, value } = await reader.read();
             if (done) break;
+            if (maxBytes !== undefined && value.byteLength > maxBytes - length) {
+              cancelBody();
+              throw new BlobIntegrityError(`Downloaded blob exceeds its ${maxBytes}-byte read limit.`);
+            }
             chunks.push(value);
             length += value.byteLength;
           }

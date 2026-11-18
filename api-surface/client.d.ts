@@ -11,6 +11,8 @@
 //   AGENT_MEMORY_MCP_SERVER_NAME -> dist/sdk-reserved-mcp.d.ts
 //   AGENT_MEMORY_OUTBOX_FILENAME -> dist/daemon/agent-memory.d.ts
 //   AGENT_PAYLOAD_ENTRY -> dist/lifecycle/agent-service.d.ts
+//   AGENT_RESULT_MCP_SERVER_NAME -> dist/sdk-reserved-mcp.d.ts
+//   AGENT_RESULT_TOOL_NAME -> dist/sdk-reserved-mcp.d.ts
 //   APPROVAL_REQUIRES_HOST -> dist/daemon/approvals.d.ts
 //   AdmissionRecord -> dist/daemon/journal/journal.d.ts
 //   AgentContentAuditReceipt -> dist/daemon/agent-content-read.d.ts
@@ -540,6 +542,7 @@
 //   generateSystemdUnit -> dist/lifecycle/systemd.d.ts
 //   generateWinswXml -> dist/lifecycle/winsw.d.ts
 //   inspectDaemonStores -> dist/diagnostics/store-compatibility.d.ts
+//   inspectDeviceEnrollmentClear -> dist/daemon/enrollment-clear.d.ts
 //   inspectServiceLogs -> dist/lifecycle/service-log.d.ts
 //   installSkillPacks -> dist/daemon/skill-pack-installer.d.ts
 //   isAgentMemorySecureFilesystemAvailable -> dist/daemon/agent-memory.d.ts
@@ -2065,7 +2068,9 @@ export declare class BlobClient implements BlobResolver {
     private readonly requestDeadlineMs;
     constructor(serverUrl: string, auth: AuthManager, options?: BlobClientOptions);
     resolveInstruction(blobRef: BlobRef, options?: BlobRequestOptions): Promise<string>;
-    downloadBlob(blobRef: BlobRef, options?: BlobRequestOptions): Promise<Uint8Array>;
+    downloadBlob(blobRef: BlobRef, options?: BlobRequestOptions & {
+        readonly maxBytes?: number;
+    }): Promise<Uint8Array>;
     uploadArtifact(content: string | Uint8Array, contentType: string, options?: BlobRequestOptions & {
         readonly idempotencyKey?: string;
     }): Promise<BlobRef>;
@@ -2870,6 +2875,16 @@ export declare class DeviceEnrollmentClearError extends Error {
     readonly code: DeviceEnrollmentClearErrorCode;
     constructor(code: DeviceEnrollmentClearErrorCode, options?: ErrorOptions);
 }
+export declare function inspectDeviceEnrollmentClear(options: DeviceEnrollmentStatusOptions & {
+    readonly storeDir: string;
+}, overrides?: {
+    readonly deviceCredentials?: DeviceCredentialBackend;
+}): Promise<{
+    ok: true;
+} | {
+    ok: false;
+    code: 'store_owned' | 'store_not_bound';
+}>;
 export declare function clearDeviceEnrollment(options: DeviceEnrollmentStatusOptions & {
     readonly storeDir: string;
 }, overrides?: {
@@ -4282,7 +4297,7 @@ export { LocalStorageEmergencyError } from './daemon/retention/pressure.js';
 export type { StoragePressureState } from './daemon/retention/pressure.js';
 export type { ExpiringClassId, ProtectedClassId, RetentionClassId, ClassUsage, SweepReport } from './daemon/retention/registry.js';
 export { readDeviceEnrollmentStatus, readDeviceEnrollmentIdentity } from './daemon/store.js';
-export { clearDeviceEnrollment, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
+export { clearDeviceEnrollment, inspectDeviceEnrollmentClear, DeviceEnrollmentClearError } from './daemon/enrollment-clear.js';
 export type { DeviceEnrollmentClearErrorCode } from './daemon/enrollment-clear.js';
 export { DeviceCredentialStoreError, DeviceCredentialStoreUnavailableError, DeviceCredentialInteractionRequiredError, DeviceCredentialCommandAbortedError } from './daemon/device-credential-store.js';
 export { AuthResponseInvalidError } from './daemon/auth-manager.js';
@@ -4359,6 +4374,7 @@ export { createExecutionScratch, ScratchRootPathError } from './daemon/retention
 export type { ExecutionScratch } from './daemon/retention/scratch.js';
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release.js';
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp.js';
+export { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from './sdk-reserved-mcp.js';
 export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets.js';
 export { resolveSdkHosting, SdkHostingAssetsMissingError, type SdkHosting, type SdkHostingOptions } from './sdk-hosting.js';
@@ -5718,6 +5734,8 @@ export declare function bundledSdkHelperHost(): SdkHelperHostConfig & {
 };
 // ==== @byok-sdk/client dist/sdk-reserved-mcp.d.ts ====
 export declare const AGENT_MEMORY_MCP_SERVER_NAME = "byokagentmemory";
+export declare const AGENT_RESULT_MCP_SERVER_NAME = "byokagentresult";
+export declare const AGENT_RESULT_TOOL_NAME = "submit_result";
 export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/service-payload-manifest.d.ts ====
 import type { JsonObject } from '@byok-sdk/core';

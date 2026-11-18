@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope, type InputImageBlobRef } from '@byok-sdk/protocol';
+import { createEnvelope, INPUT_IMAGE_MAX_BYTES, type InputImageBlobRef } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
@@ -88,6 +88,23 @@ describe('blob client (protocol §7)', () => {
     const failed = await server.waitFor(e => e.type === 'task.fail' && e.task_id === taskId);
     expect(failed.payload).toMatchObject({ retryable: false, failure: { class: 'invalid_request' } });
     expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it.each([
+    { size: INPUT_IMAGE_MAX_BYTES + 1, fetches: false },
+    { size: imageBytes.length - 1, fetches: true },
+  ])('rejects image size $size without invoking the runtime', async ({ size, fetches }) => {
+    const adapter = new StubRuntimeAdapter();
+    server.seedBlob(inputImage.blob.blobId, imageBytes, inputImage.mediaType);
+    await setupDaemon(adapter);
+    const taskId = 'image-size';
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },
+      instruction: 'see the image', images: [{ ...inputImage, blob: { ...inputImage.blob, size } }] },
+    { taskId, seq: server.nextSeq() }));
+    const failed = await server.waitFor(e => e.type === 'task.fail' && e.task_id === taskId);
+    expect(failed.payload).toMatchObject({ retryable: false, failure: { class: 'invalid_request' } });
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(server.httpRequests.some(req => req.pathname.includes(inputImage.blob.blobId))).toBe(fetches);
   });
 
   it('declines before claim when the selected installation declares no image support', async () => {

@@ -1,4 +1,4 @@
-import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
+import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../index';
 import { classifyToolCall } from '../tool-authorization';
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -325,7 +325,7 @@ it('retains native MCP identity on start, completion and interrupted closure wit
 
 it('retains the agent-result helper identity in Codex tool events', () => {
   const s = setup();
-  const item = { type: 'mcpToolCall', id: 'result', server: AGENT_RESULT_MCP_SERVER_NAME, tool: AGENT_RESULT_TOOL_NAME, arguments: {} };
+  const item = { type: 'mcpToolCall', id: 'result', server: 'byokagentresult', tool: 'submit_result', arguments: {} };
   s.feed('item/started', { item });
   s.feed('item/completed', { item: { ...item, result: {}, status: 'completed' } });
   expect(s.output).toHaveLength(2);

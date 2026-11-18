@@ -1,4 +1,4 @@
-import { acquireDaemonOwner, DaemonOwnerActiveError, DaemonOwnerReclaimingError, type DaemonOwnerLease } from '../util/daemon-owner.js';
+import { acquireDaemonOwner, assertDaemonOwnerAvailable, DaemonOwnerActiveError, DaemonOwnerReclaimingError, type DaemonOwnerLease } from '../util/daemon-owner.js';
 import { acquireEnrollmentGate } from './enrollment-gate.js';
 import {
   DeviceRecordRePairRequiredError, DeviceStore, readEnrollmentOptions, readStoreEnrollment,
@@ -81,20 +81,7 @@ export async function clearEnrollmentUnderLease(
 ): Promise<DeviceRecord | undefined> {
   const gate = await acquireEnrollmentGate(custody.store.productId);
   try {
-    let current: DeviceRecord | undefined;
-    try {
-      current = await readCurrent();
-    } catch (error) {
-      if (!(error instanceof DeviceCredentialLegacyEntryError) && !(error instanceof DeviceRecordRePairRequiredError)) throw error;
-      // Re-pair-required is either a valid projection without its credential,
-      // which is cleared, or a projection that cannot be parsed, whose load
-      // throws here before anything is deleted.
-      await custody.store.load();
-    }
-    const attempt = await readAttempt(custody.store.credentials);
-    if (attempt !== undefined && attempt.storeIdentity !== custody.store.identity) {
-      throw new DeviceEnrollmentClearError('store_not_bound');
-    }
+    const current = await readClearableEnrollment(custody.store, readCurrent);
     await custody.memberRecords?.clear();
     try {
       await custody.store.credentials.clear();
@@ -111,6 +98,26 @@ export async function clearEnrollmentUnderLease(
   }
 }
 
+async function readClearableEnrollment(
+  store: DeviceStore,
+  readCurrent: () => Promise<DeviceRecord | undefined>,
+): Promise<DeviceRecord | undefined> {
+  let current: DeviceRecord | undefined;
+  try {
+    current = await readCurrent();
+  } catch (error) {
+    if (!(error instanceof DeviceCredentialLegacyEntryError) && !(error instanceof DeviceRecordRePairRequiredError)) throw error;
+    // A valid projection without its credential can be cleared. An invalid
+    // projection throws on load before the clear can delete anything.
+    await store.load();
+  }
+  const attempt = await readAttempt(store.credentials);
+  if (attempt !== undefined && attempt.storeIdentity !== store.identity) {
+    throw new DeviceEnrollmentClearError('store_not_bound');
+  }
+  return current;
+}
+
 /** The staged attempt; a wire v6 entry holds none this clear could refuse. */
 async function readAttempt(credentials: DeviceCredentialBackend): Promise<PairingAttempt | undefined> {
   try {
@@ -119,6 +126,75 @@ async function readAttempt(credentials: DeviceCredentialBackend): Promise<Pairin
     if (error instanceof DeviceCredentialLegacyEntryError) return undefined;
     throw error;
   }
+}
+
+function composeClearStore(
+  options: DeviceEnrollmentStatusOptions & { readonly storeDir: string },
+  overrides: { readonly deviceCredentials?: DeviceCredentialBackend } | undefined,
+  operation: string,
+) {
+  const { productId, storeDir: configuredStoreDir, deviceCredentials, nativeAssetRoot } = readEnrollmentOptions(options);
+  if (configuredStoreDir === undefined || configuredStoreDir.length === 0) {
+    throw new TypeError(`${operation} requires a non-empty storeDir`);
+  }
+  const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
+  const provider = { productId, storeDir, deviceCredentials, nativeAssetRoot };
+  const injected = overrides?.deviceCredentials;
+  const store = new DeviceStore(productId, storeDir, injected ?? createDeviceCredentialStore(provider));
+  return { store, provider, injected };
+}
+
+async function readCurrentEnrollment(store: DeviceStore): Promise<DeviceRecord | undefined> {
+  const read = await readStoreEnrollment(store);
+  if (read.state === 're_pair_required') throw new DeviceRecordRePairRequiredError();
+  return read.state === 'paired' ? read.record : undefined;
+}
+
+function ownerRefusal(error: unknown): DeviceEnrollmentClearError {
+  const owned = error instanceof DaemonOwnerActiveError || error instanceof DaemonOwnerReclaimingError;
+  return new DeviceEnrollmentClearError(owned ? 'store_owned' : 'clear_failed', { cause: error });
+}
+
+function enrollmentRefusal(error: unknown): DeviceEnrollmentClearError {
+  if (error instanceof DeviceEnrollmentClearError) return error;
+  const code = error instanceof DeviceStoreBindingMismatchError ? 'store_not_bound' : 'clear_failed';
+  return new DeviceEnrollmentClearError(code, { cause: error });
+}
+
+/**
+ * Checks for a store owner or another store's enrollment or staged pairing
+ * attempt before {@link clearDeviceEnrollment}. Uses the calling process's OS
+ * credential set. Takes no store lease or enrollment gate and changes no files
+ * or credentials. Inspection failures reject, including an unreadable
+ * enrollment or invalid `device.json` (`DeviceEnrollmentClearError` with code
+ * `clear_failed`).
+ *
+ * This is a point-in-time hint. `ok: true` means neither refusal was observed.
+ * During store path gate operations, including after the mutex binds and before
+ * ownership is published, the owner check can pass. Ownership or enrollment can
+ * change before the clear. The clear acquires its own lease and checks enrollment
+ * again under the productId gate.
+ */
+export async function inspectDeviceEnrollmentClear(
+  options: DeviceEnrollmentStatusOptions & { readonly storeDir: string },
+  overrides?: { readonly deviceCredentials?: DeviceCredentialBackend },
+): Promise<{ ok: true } | { ok: false; code: 'store_owned' | 'store_not_bound' }> {
+  const { store, provider } = composeClearStore(options, overrides, 'inspectDeviceEnrollmentClear');
+  try {
+    await assertDaemonOwnerAvailable(provider.storeDir);
+  } catch (error) {
+    const refusal = ownerRefusal(error);
+    if (refusal.code === 'store_owned') return { ok: false, code: refusal.code };
+    throw refusal;
+  }
+  try {
+    await readClearableEnrollment(store, () => readCurrentEnrollment(store));
+  } catch (error) {
+    const refusal = enrollmentRefusal(error);
+    if (refusal.code === 'store_not_bound') return { ok: false, code: refusal.code };
+    throw refusal;
+  }
+  return { ok: true };
 }
 
 /**
@@ -139,36 +215,23 @@ export async function clearDeviceEnrollment(
   options: DeviceEnrollmentStatusOptions & { readonly storeDir: string },
   overrides?: { readonly deviceCredentials?: DeviceCredentialBackend },
 ): Promise<void> {
-  const { productId, storeDir: configuredStoreDir, deviceCredentials, nativeAssetRoot } = readEnrollmentOptions(options);
-  if (configuredStoreDir === undefined || configuredStoreDir.length === 0) {
-    throw new TypeError('clearDeviceEnrollment requires a non-empty storeDir');
-  }
-  const injected = overrides?.deviceCredentials;
-  const storeDir = DeviceStore.resolveDir(productId, configuredStoreDir);
-  const provider = { productId, storeDir, deviceCredentials, nativeAssetRoot };
+  const { store, provider, injected } = composeClearStore(options, overrides, 'clearDeviceEnrollment');
   // Composition only reads once the lease is held. An injected backend has
   // no member custody, as in a daemon built with one.
   const custody: EnrollmentCustody = {
-    store: new DeviceStore(productId, storeDir, injected ?? createDeviceCredentialStore(provider)),
+    store,
     memberRecords: injected === undefined ? new DeviceMemberRecords(createDeviceMemberCustody(provider)) : undefined,
   };
   let lease: DaemonOwnerLease;
   try {
-    lease = await acquireDaemonOwner(storeDir, 'installer');
+    lease = await acquireDaemonOwner(provider.storeDir, 'installer');
   } catch (error) {
-    const owned = error instanceof DaemonOwnerActiveError || error instanceof DaemonOwnerReclaimingError;
-    throw new DeviceEnrollmentClearError(owned ? 'store_owned' : 'clear_failed', { cause: error });
+    throw ownerRefusal(error);
   }
   try {
-    await clearEnrollmentUnderLease(custody, async () => {
-      const read = await readStoreEnrollment(custody.store);
-      if (read.state === 're_pair_required') throw new DeviceRecordRePairRequiredError();
-      return read.state === 'paired' ? read.record : undefined;
-    });
+    await clearEnrollmentUnderLease(custody, () => readCurrentEnrollment(store));
   } catch (error) {
-    if (error instanceof DeviceEnrollmentClearError) throw error;
-    if (error instanceof DeviceStoreBindingMismatchError) throw new DeviceEnrollmentClearError('store_not_bound', { cause: error });
-    throw new DeviceEnrollmentClearError('clear_failed', { cause: error });
+    throw enrollmentRefusal(error);
   } finally {
     await lease.release();
   }

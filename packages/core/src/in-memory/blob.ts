@@ -29,11 +29,16 @@ import { registerArchiveAccess } from './archive-access.js';
 
 const DEFAULT_LIST_LIMIT = 100;
 
+type RefreshCommitted = (tenant: TenantId, hash: ContentHash) => void;
+let bindRefreshCommitted: (store: InMemoryObjectStore) => RefreshCommitted;
+
 export class InMemoryObjectStore implements ObjectStore {
   readonly #manifest = new Map<string, ObjectManifestEntry>();
   readonly #references = new Map<string, ObjectReference>();
   readonly #clock: Clock;
   readonly #deleteCursor = new Map<TenantId, string>();
+
+  static { bindRefreshCommitted = store => store.#refreshCommitted.bind(store); }
 
   constructor(clock: Clock, private readonly maintenance: { readonly ledger: InMemoryStorageLedger; readonly bytes: InMemoryObjectBytes }) {
     this.#clock = clock;
@@ -96,6 +101,16 @@ export class InMemoryObjectStore implements ObjectStore {
     }
     if (entry.state === 'committed') return entry;
     return this.#transition(tenant, entry, 'committed');
+  }
+
+  /** Refresh orphan grace without changing accounting, references, or object state. */
+  #refreshCommitted(tenant: TenantId, hash: ContentHash): void {
+    const key = tenantKey(tenant, hash);
+    const entry = this.#manifest.get(key);
+    if (entry?.state !== 'committed') {
+      throw new ByokCoreError('object_state_invalid', 'Only committed objects can refresh orphan grace.');
+    }
+    this.#manifest.set(key, { ...entry, updatedAt: this.#now() });
   }
 
   async get(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry | undefined> {
@@ -267,6 +282,9 @@ export class InMemoryObjectStore implements ObjectStore {
     return this.#clock.now().toISOString();
   }
 }
+
+// Imported only by the private embedded composition build.
+export { bindRefreshCommitted };
 
 export interface InMemoryObjectBytes {
   deleteObject(tenant: TenantId, hash: ContentHash): void;

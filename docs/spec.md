@@ -58,6 +58,27 @@ MCP handler must list the same origins in `createMcpHttpServer`'s
 `allowedOrigins`, or its own Origin check refuses them. See the
 [server README](../packages/server/README.md#browser-clients-from-loopback-origins).
 
+## Embedded task input images
+
+A trusted embedder uses `ByokServer.blobs.uploadInputImage({ bytes, contentType })`
+to commit one image to its server's tenant without device credentials. The SDK
+checks the PNG, JPEG, GIF, or WebP signature against the declared MIME and
+computes the SHA-256 and byte count. The effective limit is the smaller of the
+protocol's `INPUT_IMAGE_MAX_BYTES` (20 MiB) and the server's `maxBlobSizeBytes`.
+
+A dispatch or steer with images carries 1–16 committed refs matching this
+tenant's stored metadata. The device advertises `input-images` and the opened
+runtime must support images. A blob supplied through the device's generic
+artifact upload is checked by metadata only when used as an image. The SDK
+checks the downloaded bytes against the declared hash and length.
+
+Uploading the same bytes and MIME reuses a committed blob and refreshes its
+orphan grace. Plaintext image refs on accepted tasks and steers do not pin
+blobs. The existing orphan collector can remove the blob after the grace
+period (24 hours by default), including between task acceptance and device
+download. See the [server README](../packages/server/README.md#task-input-images)
+for error codes.
+
 ## Canonical Terms
 
 - **subscription lane** — a dispatch through the user's existing Claude Code
@@ -237,6 +258,47 @@ are refused with `PROVIDER_STORE_SCHEMA_STALE` and remain unchanged. A Host
 must explicitly provision a separate current store. Pi execution
 separately requires the declared Pi identity above; provider kind does not
 infer it.
+
+For recovery or uninstall, `@byok-sdk/keys` exposes
+`listProviderProfileSecretNames(path)`. It returns sorted, unique candidate
+entry names from recognized released profile-store layouts, including
+0.42.0–0.44.0 stores that `inspectProviderProfileStore` accepts. Names follow
+the rules of the stored layout. Profile and pending custody rows can supply
+names. Only names still evidenced by database rows are returned. Older
+releases, including 0.1.0–0.7.0 and releases such as 0.12.0 and 0.22.0 before
+custody, wrote the credential before the profile on configure and deleted the
+profile before the credential on delete. A crash between steps can leave an
+orphan credential with no database record; an empty list does not prove cleanup
+complete. The SDK opens only a private, immutable read-only copy. The operation
+does not migrate the store, query the OS credential store, or return a secret
+value. Unknown layouts fail with `PROVIDER_STORE_SCHEMA_STALE`. An offline
+store with any WAL, SHM or rollback-journal sidecar fails with
+`PROVIDER_STORE_UNAVAILABLE`, as does a store still open with WAL sidecars.
+
+The Host stops store and credential writers for the duration of cleanup. It
+uses its original credential scope and must exclude every name referenced by
+an active store in that scope before deleting any retired entry. The rule
+also protects a replacement store that reuses a profile ref. If the Host
+cannot enumerate every active store in the scope or verify credential
+ownership, it must stop cleanup and report it incomplete. Preserve the retired
+store, including any sidecars, and use the original scope's `SecretStore.delete`
+for the remaining candidates before configuring a replacement store.
+
+The Host must also check the original backend's inventory or UI for orphaned
+credentials. The default service prefix is `com.byok.keys`, native scopes
+append `.scope.<namespace>` per scope, and the entry service is
+`<prefix>.<name>`; the default account is `local-device`. Use the actual
+configured prefix, account, scope and keychain when customized. On macOS,
+search the original keychain in Keychain Access for the service prefix and
+inspect generic password accounts. On Windows, inspect generic credential
+targets and user names in Credential Manager or `cmdkey /list`. On Linux,
+Secret Service uses `service` and `account` attributes: search the exact
+account in an inventory or UI and inspect service values for the prefix.
+`secret-tool` matches attributes exactly, not by prefix, and searches can
+expose secret values. The SDK cannot enumerate orphan names. If the backend or
+available tools cannot enumerate by prefix, ask the user to inspect and clean
+the system credential manager manually and report cleanup incomplete; do not
+delete entries whose ownership or active use cannot be verified.
 
 `@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
 the client pins. The table is a checked-in generated file; a test fails until
@@ -3597,6 +3659,15 @@ current authority for each signature. Unpair executes under the daemon
 owner/stop boundary, clears
 the OS authority first, and leaves enrollment observable and fail-closed if
 that clearance cannot be confirmed.
+
+Before `clearDeviceEnrollment`, a Host can call `inspectDeviceEnrollmentClear`
+with the same options (#2398). The inspection observes published store owner
+and reclaim markers and checks whether the OS entry holds another store's
+enrollment or staged pairing attempt. It takes no lease and changes no files
+or credentials. `ok: true` can occur while the store path gate is held before
+an owner marker is published, even if the store mutex has already bound. Treat
+the inspection as a point-in-time hint. Clear still acquires the store lease
+and checks the binding again under the productId gate before deletion.
 
 Windows service composition has one additional identity invariant. Credential
 Manager selects the credential set associated with the calling process token,

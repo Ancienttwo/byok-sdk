@@ -20,7 +20,6 @@ export type { AgentExecutionInput } from '@byok-sdk/cloud';
 import { Hono } from 'hono';
 import {
   agentHomeProjectionRequestKey,
-  assertCommittedInputImages,
   capabilityDeclarationForPorts,
   createByokCloud,
   createHmacTokenSigner,
@@ -48,7 +47,9 @@ import {
   AgentContentReadPayloadSchema,
   AgentHomeProjectionPayloadSchema,
   AgentRefSchema,
+  INPUT_IMAGE_MAX_BYTES,
   InputImagesSchema,
+  type InputImageBlobRef,
   TASK_STATES,
   type AgentHomeProjectionPayload,
   type AgentRef,
@@ -61,6 +62,8 @@ import {
 import { TaskEventRelay } from './relay.js';
 import { toMachineInfo, toTaskResult, toTaskSnapshot, taskStateOf } from './snapshot.js';
 import { composeFacadeStores, serverTenantId } from './stores.js';
+import { assertEmbeddedInputImages, createImageUploads, InputImageUploadError } from './input-images.js';
+export { InputImageUploadError } from './input-images.js';
 import { approvePendingApproval, createTaskHandle, noteAbandoned, rejectPendingApproval } from './task-handle.js';
 import { readTaskEvents, type TaskEventDeps, type TaskEventFacts, type TaskEventSources } from './task-events.js';
 import type {
@@ -81,6 +84,7 @@ import type {
   TaskHandle,
   TaskResult,
   TaskSnapshot,
+  UploadInputImage,
 } from './types.js';
 
 export type {
@@ -101,6 +105,7 @@ export type {
   TaskHandle,
   TaskResult,
   TaskSnapshot,
+  UploadInputImage,
 } from './types.js';
 export { TaskEventsUnavailableError } from './types.js';
 export type { InboundRefusalReason, TaskOfferReadback } from '@byok-sdk/cloud';
@@ -320,8 +325,10 @@ export interface ByokServer {
      */
     list(query?: TaskListQuery): Promise<TaskPage>;
   };
-  /** Trusted embedder access to committed blob download grants. */
+  /** Trusted embedder access to this instance's blobs. */
   blobs: {
+    /** Upload and commit one image for dispatch or steer. No device credential is required. */
+    uploadInputImage(input: UploadInputImage): Promise<InputImageBlobRef>;
     getDownloadUrl(blobId: string): Promise<string | undefined>;
   };
   /** Reliable Agent egress receipt readback. */
@@ -440,7 +447,11 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const projectionWaiters = new ProjectionWaiters();
   // The declaration is derived from the ports passed, so the two cannot drift (#1096).
   const ports = { blobContentProxy: composition.blobContentProxy };
+  const assertImages = (scope: TenantId, images: readonly InputImageBlobRef[]) =>
+    assertEmbeddedInputImages(composition.embeddedBlobs, scope, images, maxBlobSizeBytes);
+  const uploadInputImage = createImageUploads(composition, tenant, Math.min(INPUT_IMAGE_MAX_BYTES, maxBlobSizeBytes));
   const cloud: ByokCloud = createByokCloud({
+    assertSteerImages: assertImages,
     core: composition.core,
     cloud: composition.cloud,
     ...ports,
@@ -564,7 +575,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (!parsed.success) {
       throw new ByokCloudError('coordination_input_invalid', 'Input images must contain 1–16 valid image references.');
     }
-    await assertCommittedInputImages(composition.cloud.blobs, tenant, parsed.data);
+    await assertImages(tenant, parsed.data);
     return parsed.data;
   }
 
@@ -639,13 +650,12 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     return handleFor(enqueued.taskId);
   }
 
-  // Store reads started by host readers; close() waits for them before it
-  // releases the storage they read.
+  // close() waits for tracked host operations before releasing their storage.
   const readShutdown = new AbortController();
-  const liveReads = new Set<Promise<unknown>>();
-  function track<T>(reading: Promise<T>): Promise<T> {
-    liveReads.add(reading);
-    return reading.finally(() => { liveReads.delete(reading); });
+  const liveStoreOperations = new Set<Promise<unknown>>();
+  function track<T>(operation: Promise<T>): Promise<T> {
+    liveStoreOperations.add(operation);
+    return operation.finally(() => { liveStoreOperations.delete(operation); });
   }
   async function listSteerRefusals(taskId: string, afterRevision: number, limit: number): Promise<readonly SteerRefusal[]> {
     const records = await cloud.listSteerRefusals(tenant, { taskId, afterRevision, limit });
@@ -703,7 +713,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     projectionWaiters.stop();
     return closePromise ??= Promise.all([scheduler.close(), wakes.close()])
       .finally(async () => {
-        await Promise.allSettled(liveReads);
+        await Promise.allSettled(liveStoreOperations);
         await projectionWaiters.drain();
         relay.stop();
         await composition.close();
@@ -872,6 +882,10 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     },
 
     blobs: {
+      async uploadInputImage(input) {
+        if (readShutdown.signal.aborted) throw new InputImageUploadError('server_closed');
+        return track(uploadInputImage(input));
+      },
       getDownloadUrl(blobId: string): Promise<string | undefined> {
         return composition.cloud.blobs.getDownloadUrl(tenant, blobId);
       },
