@@ -346,10 +346,10 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-A version bump does not authorize publish. The current aligned release is `0.43.0`, published on 2026-11-14 (UTC); later publication requires separate
-release authorization and registry readback. The packed and published keys
-`@byok-sdk/core` edge must be the exact current release, `0.43.0`, proven from
-an isolated standard npm install rather than the workspace graph.
+The current aligned release is `0.44.0` (candidate). Publication requires
+separate authorization and registry readback. The packed and published keys
+`@byok-sdk/core` edge must pin the same release version, `0.44.0`. Verify the
+edge in an isolated standard npm install.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
 0.28.2. Before that decision keys had its own version line, and its last
@@ -358,6 +358,13 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.44.0 is the owner-approved MINOR candidate after 0.43.0. It keeps the nine
+public packages aligned and is the first wire v7 candidate. A v6 peer cannot
+communicate with v7. Hosts must provision new server stores and re-pair devices.
+The 0.43.0 → 0.44.0 upgrade manifest has 108 breaking and 23 additive entries.
+See the [0.44.0 candidate notes](releases/v0.44.0.md) and
+[Host upgrade checklist](releases/host-upgrade-0.44.0.md).
 
 0.43.0 is the published, owner-approved MINOR after 0.42.0. Its nine public
 packages exclude archived `@byok-sdk/cloud-do` (#1959). Wire stays v6. The

@@ -56,7 +56,7 @@ again, and the Host's frozen work and outbox snapshots rotate. Upgrade the
 cloud first, then the daemons; between the two upgrades, v6 daemons halt. The
 startup checks refuse a pending row of another major
 ([SQLite startup check](#sqlite-startup-check-for-wire-major-upgrades)). The
-Host steps are in [the next MINOR Host upgrade](releases/host-upgrade-next-minor.md#wire-v7).
+Host steps are in the [0.44.0 Host upgrade checklist](releases/host-upgrade-0.44.0.md#wire-v7).
 0.43.0 is the last v6 release.
 
 History: v6 split one field: the runtime
@@ -4777,7 +4777,7 @@ An empty result confirms only the envelope-major check. It does not prove full
 payload validity or task completion. The v6 to v7 cut has no drain tool or
 upgrade precheck, and it starts on a new store anyway: move the database
 aside and start on a new store, as the
-[next MINOR Host upgrade](releases/host-upgrade-next-minor.md#wire-v7)
+[0.44.0 Host upgrade checklist](releases/host-upgrade-0.44.0.md#wire-v7)
 describes. Do not delete rows to force startup.
 A fresh server database needs fresh device enrollment. Changing only the client
 `storeDir` keeps the OS credential for the same `productId`.

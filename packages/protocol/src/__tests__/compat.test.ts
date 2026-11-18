@@ -61,8 +61,8 @@ import { type WireAddition } from '../wire-additions';
  * 6. v7 self-consistency. `golden/v7.envelopes.ndjson` and
  *    `golden/v7.http.ndjson` were generated from the frozen v6 corpora by
  *    `generate-v7-corpus.mjs`, are append-only from now on, and the
- *    current decoder reads them exactly. `golden/v7.releases.json` registers
- *    no release yet and has no floor.
+ *    current decoder reads them exactly. `golden/v7.releases.json` pins
+ *    the first v7 candidate, 0.44.0. There is no published v7 decoder floor yet.
  * 7. Published rejection oracle. `byok-protocol-previous` (0.43.0, the
  *    last v6 release) rejects every v7 corpus line and a v7 `conn.hello`: a
  *    v6 peer cannot read v7 bytes. None of its bytes is v7 evidence. It
