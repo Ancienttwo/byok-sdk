@@ -1,5 +1,28 @@
+// BYOK change: Modified from OAR 609f347 for caller-owned reader processes (Apache-2.0).
 import type { AvailableInstallation } from "./installation.js";
 import type { SessionOptions } from "./session-options.js";
+import type { AcpLineProcess } from "../shared/acp/process.js";
+import type { LineProcess } from "../runtimes/codex/app-server-client.js";
+
+export interface ReaderCommandOptions {
+  readonly env: Readonly<Record<string, string>>;
+  readonly cwd?: string;
+  readonly timeoutMs: number;
+  readonly signal?: AbortSignal;
+}
+
+export interface ReaderCommandResult {
+  readonly ok: boolean;
+  readonly exitCode: number | null;
+  readonly stdout: string;
+  readonly stderr: string;
+}
+
+export interface OwnedReaderOptions extends ReaderCommandOptions {
+  readonly spawn: (command: string, args: readonly string[], options: Pick<ReaderCommandOptions, "env" | "cwd">) => LineProcess & AcpLineProcess;
+  readonly run: (command: string, args: readonly string[], options: ReaderCommandOptions) => Promise<ReaderCommandResult>;
+  readonly redact: (text: string) => string;
+}
 
 /**
  * One model the runtime will accept as a session `model` right now.
