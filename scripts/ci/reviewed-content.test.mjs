@@ -120,7 +120,7 @@ test('CLI and aggregate revalidate content against the same trusted comparison b
   const run = base => spawnSync(process.execPath, [script], { cwd: f.cwd, input: '["packages/client/package.json"]', encoding: 'utf8', env: { ...process.env, CI_BASE: base } });
   assert.equal(run(f.base).status, 0); assert.notEqual(run('').status, 0);
   const plan = planCi({ event: 'push', sha: f.base, paths: ['packages/client/package.json'], ...f });
-  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: ['select', 'targeted', ...plan.families].includes(id) ? 'success' : 'skipped' }]));
+  const needs = Object.fromEntries(['select', 'release-bookkeeping', 'targeted', ...knownFamilies].map(id => [id, { result: ['select', 'release-bookkeeping', 'targeted', ...plan.families].includes(id) ? 'success' : 'skipped' }]));
   assert.doesNotThrow(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd));
   assert.throws(() => requireCiPlan(needs, plan, 'push', f.base, 'f'.repeat(40), f.cwd), /base mismatch/);
   f.write('packages/client/package.json', { ...f.manifest, scripts: { evil: 'true' } });
@@ -184,7 +184,7 @@ test('the Node pin admits one exact X.Y.Z and selects every routine family, neve
   f.write('.node-version', '24.22.1\n');
   const plan = planCi({ event: 'push', sha: f.base, paths: ['.node-version'], ...f });
   assert.deepEqual(plan.families, routine);
-  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: ['build-test', 'macos-client'].includes(id) ? 'skipped' : 'success' }]));
+  const needs = Object.fromEntries(['select', 'release-bookkeeping', 'targeted', ...knownFamilies].map(id => [id, { result: ['build-test', 'macos-client'].includes(id) ? 'skipped' : 'success' }]));
   assert.doesNotThrow(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd));
   needs['build-test'] = { result: 'success' };
   assert.throws(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd), /unexpectedly ran: build-test/);
@@ -419,7 +419,7 @@ function rebase(f, message) {
   f.base = git('rev-parse', 'HEAD').trim();
 }
 
-test('#2379: client admits exactly its new oar-readers import', t => {
+test('reviewed package manifests admit new #byok- imports into dist', t => {
   const f = fixture(t), path = 'packages/client/package.json';
   const manifest = { ...f.manifest, imports: { '#existing': './dist/existing.js' } };
   f.write(path, manifest); rebase(f, 'client before oar-readers');
@@ -434,6 +434,40 @@ test('#2379: client admits exactly its new oar-readers import', t => {
   write({ ...entry, default: './dist/old.js' }); rebase(f, 'client with a different oar-readers import');
   write(entry);
   assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+});
+
+test('a different package can add its first private import with local dist targets', t => {
+  const f = fixture(t), path = 'packages/core/package.json';
+  const manifest = { name: '@byok-sdk/core', version: '0.43.0' };
+  f.write(path, manifest); rebase(f, 'core with no imports');
+  const write = imports => f.write(path, { ...manifest, imports });
+  const name = '#byok-local';
+  write({ [name]: './dist/local.js', '#byok-local/tool': { types: './dist/tool.d.ts', node: { import: './dist/tool.js' } } });
+  assert.ok(selectImpact([path], f).dirs.includes('packages/core'));
+  for (const target of ['../dist/local.js', './dist/../local.js', './dist/sub/../local.js',
+    './dist/%2e%2e/local.js', './dist/..\\local.js', './dist/Node_Modules/local.js', './dist/',
+    '/dist/local.js', 'C:/dist/local.js', '@byok-sdk/client', './src/local.js', './dist/../../client/dist/local.js',
+    { types: './dist/local.d.ts', node: { import: '../client/dist/local.js' }, default: './dist/local.js' },
+    {}, ['./dist/local.js'], null]) {
+    write({ [name]: target });
+    assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/, JSON.stringify(target));
+  }
+  for (const key of ['#other-local', '#byok-', '#byok-foo/*']) {
+    write({ [key]: './dist/local.js' });
+    assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/, key);
+  }
+});
+
+test('published K8 applies the same private import rule while keeping its fixed exports', t => {
+  const { f, dir, path, manifest } = k8Fixture(t);
+  f.write(path, manifest); rebase(f, 'published K8');
+  const imports = { '#byok-local': './dist/local.js' };
+  f.write(path, { ...manifest, imports });
+  assert.ok(selectImpact([path], f).dirs.includes(dir));
+  f.write(path, { ...manifest, imports: { '#byok-local': '../client/dist/local.js' } });
+  assert.throws(() => selectImpact([path], f), /unreviewed imports/);
+  f.write(path, { ...manifest, imports, exports: { ...manifest.exports, './local': './dist/local.js' } });
+  assert.throws(() => selectImpact([path], f), /unreviewed shape/);
 });
 
 test('#2286: core admits exactly its sqlite-node entry', t => {

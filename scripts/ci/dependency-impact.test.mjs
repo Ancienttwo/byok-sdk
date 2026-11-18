@@ -97,7 +97,7 @@ test('lockfileVersion transition selects every family but stays targeted and can
   assert.ok(plan.dirs.includes('packages/client') && plan.dirs.includes('packages/ui-runtime'));
   assert.ok(needsBuild(plan));
   assert.doesNotThrow(() => assertTargetedScope(plan));
-  const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, { result: 'success' }]));
+  const needs = Object.fromEntries(['select', 'release-bookkeeping', 'targeted', ...knownFamilies].map(id => [id, { result: 'success' }]));
   assert.doesNotThrow(() => requireCiPlan(needs, plan, 'pull_request', sha, f.base, f.cwd));
   for (const id of knownFamilies) for (const result of ['failure', 'skipped', 'cancelled']) {
     assert.throws(() => requireCiPlan({ ...needs, [id]: { result } }, plan, 'pull_request', sha, f.base, f.cwd));

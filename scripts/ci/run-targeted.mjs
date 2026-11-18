@@ -29,10 +29,14 @@ for (const dir of plan.dirs) {
   const manifest = JSON.parse(readFileSync(`${dir}/package.json`, 'utf8'));
   for (const script of ['typecheck', 'test']) {
     if (!manifest.scripts?.[script]) {
-      throw new Error(`Selected workspace ${dir} has no ${script} check; add a reviewed workspace check`);
+      console.error(`Selected workspace ${dir} has no ${script} check; add a reviewed workspace check`);
+      process.exitCode ||= 1;
+      continue;
     }
     const result = spawnSync('bun', ['run', '--cwd', dir, script], { stdio: 'inherit', env: process.env });
-    if (result.error) throw result.error;
-    if (result.status !== 0) process.exit(result.status ?? 1);
+    if (result.status !== 0) {
+      console.error(`Selected workspace ${dir} ${script} failed: ${result.error?.message ?? result.signal ?? result.status}`);
+      process.exitCode ||= result.status ?? 1;
+    }
   }
 }

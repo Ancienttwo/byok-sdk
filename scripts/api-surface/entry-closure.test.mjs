@@ -27,7 +27,7 @@ function fixture(t) {
   write('README.md', '<!-- BEGIN generated: api-surface/entries.json -->\n<!-- END generated: api-surface/entries.json -->\n');
   function policies(transform = () => {}) {
     const entries = Object.fromEntries(manifestEntries(root).map(entry => [entry.id, { kind: entry.kind,
-      policy: { purpose: entry.id, budgetBytes: 10000, zod: false, codegen: false, nodeBuiltins: { workspace: true, thirdParty: true } }, facts: {} }]));
+      policy: { purpose: entry.id, budgetBytes: 10000, thirdParty: [], zod: false, codegen: false, nodeBuiltins: { workspace: true, thirdParty: true } }, facts: {} }]));
     transform(entries);
     json('api-surface/entries.json', entries);
     return entries;
@@ -324,7 +324,7 @@ test('zod injection identifies the entry and protocol specifier; --update cannot
   const f = fixture(t);
   f.loadZod();
   f.write('packages/client/dist/index.js', "import '@byok-sdk/protocol';\n");
-  f.policies(entries => { entries['@byok-sdk/protocol'].policy.zod = true; entries['@byok-sdk/protocol'].policy.codegen = true; });
+  f.policies(entries => Object.assign(entries['@byok-sdk/protocol'].policy, { zod: true, codegen: true, thirdParty: ['zod'] }));
   const before = f.read('api-surface/entries.json');
   for (const update of [false, true]) {
     const result = checkEntryClosure(f.root, { update });
@@ -350,10 +350,34 @@ test('normalized budget equality passes; one byte over cannot update facts or RE
   }
 });
 
+test('a new static third-party package needs explicit approval in every mode', t => {
+  const f = fixture(t), name = '@earendil-works/pi-ai';
+  f.json('packages/client/package.json', { name: '@byok-sdk/client', type: 'module',
+    exports: './dist/index.js', dependencies: { [name]: '*' } });
+  f.json(`node_modules/${name}/package.json`, { name, type: 'module', exports: './index.js' });
+  f.write(`node_modules/${name}/index.js`, 'export const value = 1;');
+  f.write('packages/client/dist/index.js', `export { value } from '${name}';`);
+  const policies = f.policies();
+  const file = 'api-surface/entries.json', before = f.read(file), readme = f.read('README.md');
+  for (const options of [{}, { update: true }, { update: true, calibrateReleaseBudgets: true }]) {
+    const { failures, measured } = checkEntryClosure(f.root, options);
+    const { normalizedBytes, budgetBytes } = measured.find(entry => entry.id === '@byok-sdk/client');
+    assert.ok(normalizedBytes < budgetBytes);
+    assert.match(failures.join('\n'), /@byok-sdk\/client: third-party packages absent from policy\.thirdParty: @earendil-works\/pi-ai/);
+    assert.equal(f.read(file), before);
+    assert.equal(f.read('README.md'), readme);
+  }
+  policies['@byok-sdk/client'].policy.thirdParty = [name];
+  f.json(file, policies);
+  assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
+  assert.deepEqual(JSON.parse(f.read(file))['@byok-sdk/client'].facts.thirdParty, [name]);
+  assert.deepEqual(checkEntryClosure(f.root).failures, []);
+});
+
 test('protocol negative control records third-party codegen; forbid policy rejects the same graph', t => {
   const f = fixture(t);
   f.loadZod();
-  const policies = f.policies(entries => { entries['@byok-sdk/protocol'].policy.zod = true; entries['@byok-sdk/protocol'].policy.codegen = true; });
+  const policies = f.policies(entries => Object.assign(entries['@byok-sdk/protocol'].policy, { zod: true, codegen: true, thirdParty: ['zod'] }));
   assert.deepEqual(checkEntryClosure(f.root, { update: true }).failures, []);
   const contract = JSON.parse(f.read('api-surface/entries.json'));
   assert.deepEqual(contract['@byok-sdk/protocol'].facts.thirdParty, ['zod']);
@@ -452,7 +476,8 @@ for (const allowed of [true, false]) test(`third-party builtins are reported and
   f.json('node_modules/dep/package.json', {name:'dep',type:'module',exports:'./index.js'});
   f.write('node_modules/dep/index.js', "import 'node:fs'; export const value=1;");
   f.write('packages/client/dist/index.js', "import 'dep';");
-  f.policies(entries => { entries['@byok-sdk/client'].policy.nodeBuiltins = {workspace:false,thirdParty:allowed}; });
+  f.policies(entries => Object.assign(entries['@byok-sdk/client'].policy,
+    { thirdParty: ['dep'], nodeBuiltins: { workspace: false, thirdParty: allowed } }));
   for (const update of [false,true]) {
     const result=checkEntryClosure(f.root,{update});
     if (!allowed) assert.ok(result.failures.some(error=>/forbidden in thirdParty: node:fs/.test(error)));
@@ -480,7 +505,10 @@ test('CJS lazy getter does not resolve an absent module; eager IIFE follows and 
   f.json('node_modules/dep/package.json',{name:'dep',main:'./index.cjs'});
   f.write('packages/client/dist/index.js',"import 'dep';");
   f.write('node_modules/dep/index.cjs',"Object.defineProperty(exports,'native',{get(){return require('./missing.cjs')}});");
-  f.policies(entries=>{entries['@byok-sdk/client'].policy.nodeBuiltins.thirdParty=false});
+  f.policies(entries => {
+    entries['@byok-sdk/client'].policy.thirdParty = ['dep'];
+    entries['@byok-sdk/client'].policy.nodeBuiltins.thirdParty = false;
+  });
   assert.deepEqual(checkEntryClosure(f.root,{update:true}).failures,[]);
   f.write('node_modules/dep/index.cjs',"(function(){require('./eager.cjs')})()");
   f.write('node_modules/dep/eager.cjs',"require('node:fs')");
@@ -491,7 +519,7 @@ test('optional dependency absence is recorded, and cannot prove a strict safety 
   const f=fixture(t);
   f.json('packages/client/package.json',{name:'@byok-sdk/client',type:'module',exports:{'.':{types:'./dist/index.d.ts',import:'./dist/index.js'}},optionalDependencies:{absent:'*'}});
   f.write('packages/client/dist/index.js',"import 'absent';");
-  f.policies(entries=>{entries['@byok-sdk/client'].policy.codegen=true});
+  f.policies(entries => Object.assign(entries['@byok-sdk/client'].policy, { codegen: true, thirdParty: ['absent'] }));
   assert.deepEqual(checkEntryClosure(f.root,{update:true}).failures,[]);
   const contract=JSON.parse(f.read('api-surface/entries.json'));
   assert.deepEqual(contract['@byok-sdk/client'].facts.unavailableOptional,['absent']);
@@ -518,7 +546,7 @@ test('unresolved third-party source is explicit opacity and cannot pass strict p
   f.json('node_modules/dep/package.json',{name:'dep',main:'./index.cjs'});
   f.write('packages/client/dist/index.js',"import 'dep';");
   f.write('node_modules/dep/index.cjs',"try { require('unavailable') } catch(error) {};");
-  f.policies();
+  f.policies(entries => { entries['@byok-sdk/client'].policy.thirdParty = ['dep', 'unavailable']; });
   for(const update of [false,true]) assert.ok(checkEntryClosure(f.root,{update}).failures.some(error=>/cannot prove.*unavailable/.test(error)));
   const contract=JSON.parse(f.read('api-surface/entries.json'));
   contract['@byok-sdk/client'].policy.codegen=true;
@@ -533,6 +561,6 @@ test('the actual adapters subpath rejects a protocol root injection under check 
   f.json('packages/client/package.json',{name:'@byok-sdk/client',type:'module',exports:{'.':{types:'./dist/index.d.ts',import:'./dist/index.js'},'./adapters':{types:'./dist/adapters.d.ts',import:'./dist/adapters.js'}},dependencies:{'@byok-sdk/protocol':'*'}});
   f.write('packages/client/dist/adapters.js',"import '@byok-sdk/protocol';");
   f.write('packages/client/dist/adapters.d.ts','export declare const adapter: 1;');
-  f.policies(entries=>{entries['@byok-sdk/protocol'].policy.zod=true;entries['@byok-sdk/protocol'].policy.codegen=true});
+  f.policies(entries => Object.assign(entries['@byok-sdk/protocol'].policy, { zod: true, codegen: true, thirdParty: ['zod'] }));
   for(const update of [false,true]) assert.ok(checkEntryClosure(f.root,{update}).failures.some(error=>/@byok-sdk\/client\/adapters: zod is forbidden.*@byok-sdk\/protocol/.test(error)));
 });

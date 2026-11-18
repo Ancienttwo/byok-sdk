@@ -153,6 +153,13 @@ At the 0.43.0 release, the owner deprecated published `@byok-sdk/cloud-do` versi
 
 **0.43.0 freeze:** the owner approved preparation on 2026-11-14 and publication of `d2c2b0ee24e8b01d99f924be6bd91b69c8b7f107` in t4 on 2026-11-15 (#1933, owner-local date). npm publication, tag push and the GitHub Release are complete (2026-11-14 UTC). Main stays frozen from prep merge until the publication-record PR merges, overriding the usual immediate reopening below for this release only. That PR archives the cut manifest unchanged and rebaselines to the release snapshot; later work belongs to the next release. Publication does not establish Host acceptance or production rollout.
 
+Before pinning the release candidate, run `bun run build` followed by
+`bun run check:api-surface -- --update --calibrate-release-budgets`. This sets
+each normalized closure budget to its measured size plus 10%, with the
+margin rounded up to a whole byte. Commit the resulting entry budgets and
+README table with release preparation. Regular checks and `--update` use
+the committed budgets between releases.
+
 1. Pin exact source commit and dependency lockfile; run repository typecheck/test/build, conformance, tenant-isolation I1-I9, credential audit and packageability/service smokes.
 2. Build separately for each supported OS/architecture. Sign/notarize with host-controlled keys and retain signer/audit evidence.
 3. Publish a signed manifest containing version, channel, platform, artifact digest and minimum compatible host/runtime. Host the verification key/trust metadata independently from the artifact origin.

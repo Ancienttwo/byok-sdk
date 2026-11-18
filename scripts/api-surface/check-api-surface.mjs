@@ -12,7 +12,7 @@
 // reaches are not part of the surface and are left out.
 //
 // Usage:
-//   node scripts/api-surface/check-api-surface.mjs [--update] [--package <name>] [--root <dir>]
+//   node scripts/api-surface/check-api-surface.mjs [--update [--calibrate-release-budgets]] [--package <name>] [--root <dir>]
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -34,11 +34,13 @@ const SIDE_EFFECT_IMPORT = /(?:^|[^\w$.])import\s*['"]([^'"]+)['"]/g;
 const DYNAMIC_IMPORT = /(?:^|[^\w$.])import\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
 
 export function parseArgs(argv) {
-  const options = { update: false, package: null, root: defaultRoot };
+  const options = { update: false, calibrateReleaseBudgets: false, package: null, root: defaultRoot };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--update') {
       options.update = true;
+    } else if (arg === '--calibrate-release-budgets') {
+      options.calibrateReleaseBudgets = true;
     } else if (arg === '--package') {
       options.package = argv[index + 1];
       index += 1;
@@ -52,6 +54,9 @@ export function parseArgs(argv) {
     } else {
       throw new Error(`unknown argument: ${arg}`);
     }
+  }
+  if (options.calibrateReleaseBudgets && (!options.update || options.package !== null)) {
+    throw new Error('--calibrate-release-budgets requires a full --update');
   }
   const packages = publicPackageDirectories(options.root);
   if (options.package !== null && !packages.includes(options.package)) {
@@ -428,7 +433,8 @@ export function run(argv, out = console) {
   // cross-package runtime inventory, policies and the generated Host table.
   if (options.package === null) {
     try {
-      const result = checkEntryClosure(options.root, { update: options.update && failures.length === 0 });
+      const update = options.update && failures.length === 0;
+      const result = checkEntryClosure(options.root, { update, calibrateReleaseBudgets: update && options.calibrateReleaseBudgets });
       failures.push(...result.failures);
       for (const measurement of result.measured) out.log(`entry-closure: ${measurement.id}: ${measurement.rawBytes} raw bytes; ${measurement.normalizedBytes}/${measurement.budgetBytes} normalized bytes/budget`);
     } catch (error) { failures.push(`entry-closure: ${error.message}`); }

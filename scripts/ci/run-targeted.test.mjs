@@ -16,12 +16,12 @@ const posixOnly = { skip: process.platform === 'win32' };
 // workspace check instead of running it. The CI job env carries PR evidence,
 // so the child gets an explicit push plan without it. Routing-only callers
 // also record reader execution: CI runs these contracts before install/build.
-function runTargeted(plan, cwd = root, readerExit) {
+function runTargeted(plan, cwd = root, readerExit, failScript = '') {
   const bin = mkdtempSync(path.join(tmpdir(), 'ci-run-targeted-'));
   try {
     const log = path.join(bin, 'bun.log');
     writeFileSync(log, '');
-    writeFileSync(path.join(bin, 'bun'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_BUN_LOG"\n`);
+    writeFileSync(path.join(bin, 'bun'), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_BUN_LOG"\nif [ "$4" = "$FAIL_SCRIPT" ]; then exit 17; fi\n`);
     chmodSync(path.join(bin, 'bun'), 0o755);
     const readers = path.join(bin, 'readers.jsonl');
     writeFileSync(readers, '');
@@ -41,7 +41,7 @@ function runTargeted(plan, cwd = root, readerExit) {
       syncBuiltinESMExports();
     `);
     const env = { ...process.env, READER_LOG: readers, CI_EVENT: 'push', CI_BASE: plan.base, CI_PLAN: JSON.stringify(plan),
-      FAKE_BUN_LOG: log, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+      FAKE_BUN_LOG: log, FAIL_SCRIPT: failScript, PATH: `${bin}${path.delimiter}${process.env.PATH}` };
     delete env.CI_PR_HEAD; delete env.GITHUB_SHA;
     // Under node --test the runner's own node --test child would report to this
     // test process instead of printing; CI runs the runner outside node --test.
@@ -81,6 +81,17 @@ test('dependent-only changes run every selected workspace check without the pack
     assert.deepEqual(calls, expected, changed);
     assert.deepEqual(calls.filter(call => call.startsWith('run --cwd examples/packaging ')),
       ['run --cwd examples/packaging typecheck', 'run --cwd examples/packaging test'], changed);
+  }
+});
+
+test('workspace check failures are reported across all selected workspaces', posixOnly, () => {
+  const plan = planCi({ event: 'push', sha, base, paths: ['packages/client/src/daemon/task-runner.ts'] });
+  assert.ok(plan.dirs.length > 1);
+  for (const script of ['typecheck', 'test']) {
+    const { calls, status, stderr } = runTargeted(plan, root, 0, script);
+    assert.equal(status, 17, stderr);
+    assert.deepEqual(calls, plan.dirs.flatMap(dir => ['typecheck', 'test'].map(check => `run --cwd ${dir} ${check}`)));
+    for (const dir of plan.dirs) assert.ok(stderr.includes(`Selected workspace ${dir} ${script} failed: 17`));
   }
 });
 

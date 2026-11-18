@@ -14,6 +14,36 @@ export const publicManifests = Object.freeze([
 
 const version = value => typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(value);
 const plain = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const privateImportConditions = new Set(['types', 'node', 'import', 'require', 'default']);
+const safeSegment = segment => /^[a-z0-9._-]+$/i.test(segment)
+  && !segment.endsWith('.') && segment.toLowerCase() !== 'node_modules';
+
+function privateDistTarget(value) {
+  if (typeof value === 'string') {
+    return value.startsWith('./dist/') && value.slice('./dist/'.length).split('/').every(safeSegment);
+  }
+  if (!plain(value)) return false;
+  const conditions = Object.entries(value);
+  return conditions.length > 0 && conditions.every(([condition, target]) =>
+    privateImportConditions.has(condition) && privateDistTarget(target));
+}
+
+// Built outputs need not exist during selection. Admit only new exact aliases
+// whose targets stay lexically in dist. The build gate resolves the targets.
+function admitPrivateDistImports(before, after) {
+  if ((before.imports !== undefined && !plain(before.imports)) || !plain(after.imports)) return;
+  const entries = Object.entries(after.imports);
+  let admitted = false;
+  for (const [key, value] of entries) {
+    if (key.startsWith('#byok-') && key.slice('#byok-'.length).split('/').every(safeSegment)
+      && !Object.hasOwn(before.imports ?? {}, key) && privateDistTarget(value)) {
+      delete after.imports[key];
+      admitted = true;
+    }
+  }
+  if (admitted && before.imports === undefined && Object.keys(after.imports).length === 0) delete after.imports;
+  return admitted;
+}
 
 // #793 D2 (owner O8): the private hosted (H) example. Its manifest has a fixed
 // shape. It may only reuse workspaces and dependency specs that another
@@ -289,7 +319,20 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   }
   if (path === `${K8.dir}/package.json`) {
     const before = existed ? JSON.parse(execFileSync('git', ['show', `${base}:${path}`], { cwd, encoding: 'utf8' })) : undefined;
-    verifyK8Manifest(JSON.parse(readFileSync(resolve(cwd, path), 'utf8')), { base, cwd, workspaceGraph, before });
+    let after;
+    try {
+      after = JSON.parse(readFileSync(resolve(cwd, path), 'utf8'));
+    } catch (error) {
+      throw new Error(`Reviewed CI mapping required: could not read ${path}`, { cause: error });
+    }
+    if (before?.name === K8.name && before.private !== true) {
+      admitPrivateDistImports(before, after);
+      if (!isDeepStrictEqual(before.imports, after.imports)) {
+        throw new Error('Reviewed CI mapping required: the K8 manifest has unreviewed imports');
+      }
+      delete after.imports;
+    }
+    verifyK8Manifest(after, { base, cwd, workspaceGraph, before });
     return { dirs: [K8.dir] };
   }
   if (!existed && /^examples\/[^/]+\/package\.json$/.test(path)) {
@@ -401,12 +444,8 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
     delete before.version; delete after.version;
-    // #2379: admit only the new private oar-readers import. Remove this one-time admission
-    // once the version that ships #2379 becomes the base.
-    const oarReaders = { types: './dist/runtime/oar-readers.d.ts', default: './dist/runtime/oar-readers.js' };
-    if (path === 'packages/client/package.json' && !Object.hasOwn(before.imports ?? {}, '#byok-oar-readers')
-      && isDeepStrictEqual(after.imports?.['#byok-oar-readers'], oarReaders)) {
-      delete after.imports['#byok-oar-readers'];
+    if (publicManifests.includes(path) && admitPrivateDistImports(before, after)) {
+      qualify.push(path.slice(0, -'/package.json'.length));
     }
     // #2286: core gains exactly its sqlite-node entry, from none or from part A's node-only shape. One-time: remove
     // this admission in the release that ships #2286, once that release's core manifest is the base (as #2218 did).
