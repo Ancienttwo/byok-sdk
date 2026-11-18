@@ -26,6 +26,7 @@ export type PresenceLevel = (typeof PRESENCE_LEVELS)[number];
  */
 export interface PresenceRuntimeCapabilities {
   readonly steer?: boolean;
+  readonly images?: boolean;
   readonly resume?: boolean;
   readonly approvalInteractive?: boolean;
   readonly mcpToolsets?: boolean;
@@ -68,7 +69,7 @@ export function freezePresenceRuntimeFact(runtime: PresenceRuntimeFact): Presenc
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
     ...(capabilities === undefined ? {} : {
       capabilities: Object.freeze({
-        ...definedFlags(capabilities, ['steer', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
+        ...definedFlags(capabilities, ['steer', 'images', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
         ...(capabilities.isolation === undefined ? {} : {
           isolation: Object.freeze(definedFlags(capabilities.isolation, ['userInstructions', 'userOutputStyle', 'userMemory', 'userSkills', 'userHookContext', 'userMcpServers', 'sessionPersistence'])),
         }),

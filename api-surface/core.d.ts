@@ -1127,6 +1127,7 @@ export declare const PRESENCE_LEVELS: readonly ['online', 'thinking', 'working',
 export type PresenceLevel = (typeof PRESENCE_LEVELS)[number];
 export interface PresenceRuntimeCapabilities {
     readonly steer?: boolean;
+    readonly images?: boolean;
     readonly resume?: boolean;
     readonly approvalInteractive?: boolean;
     readonly mcpToolsets?: boolean;
