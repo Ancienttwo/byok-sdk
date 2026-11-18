@@ -599,6 +599,8 @@ export type { ExecutionScratch } from './daemon/retention/scratch.js';
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release.js';
 /** The reserved name of the SDK memory MCP server in an Agent task's MCP servers. */
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp.js';
+/** Reserved server and tool names for identifying SDK result submissions in MCP events. */
+export { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from './sdk-reserved-mcp.js';
 /** Whether `name` is the name of an MCP server the SDK owns in a task's MCP servers. */
 export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
 

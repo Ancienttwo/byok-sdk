@@ -11,6 +11,8 @@
 //   AGENT_MEMORY_MCP_SERVER_NAME -> dist/sdk-reserved-mcp.d.ts
 //   AGENT_MEMORY_OUTBOX_FILENAME -> dist/daemon/agent-memory.d.ts
 //   AGENT_PAYLOAD_ENTRY -> dist/lifecycle/agent-service.d.ts
+//   AGENT_RESULT_MCP_SERVER_NAME -> dist/sdk-reserved-mcp.d.ts
+//   AGENT_RESULT_TOOL_NAME -> dist/sdk-reserved-mcp.d.ts
 //   APPROVAL_REQUIRES_HOST -> dist/daemon/approvals.d.ts
 //   AdmissionRecord -> dist/daemon/journal/journal.d.ts
 //   AgentContentAuditReceipt -> dist/daemon/agent-content-read.d.ts
@@ -4361,6 +4363,7 @@ export { createExecutionScratch, ScratchRootPathError } from './daemon/retention
 export type { ExecutionScratch } from './daemon/retention/scratch.js';
 export { copyAgentMemoryHelperAssets, type CopyAgentMemoryHelperAssetsOptions } from './util/agent-memory-helper-release.js';
 export { AGENT_MEMORY_MCP_SERVER_NAME } from './sdk-reserved-mcp.js';
+export { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from './sdk-reserved-mcp.js';
 export { isReservedMcpServerName } from './sdk-reserved-mcp.js';
 export { copySdkNativeAssets, sdkNativeAssetTargets, sdkDistributionManifest, sdkPackagingAssetLayout, sdkPackagingFormats, type CopySdkNativeAssetsOptions, type SdkDistributionBin, type SdkDistributionBinRole, type SdkPackagingFormat } from './sdk-native-assets.js';
 export { resolveSdkHosting, SdkHostingAssetsMissingError, type SdkHosting, type SdkHostingOptions } from './sdk-hosting.js';
@@ -5720,6 +5723,8 @@ export declare function bundledSdkHelperHost(): SdkHelperHostConfig & {
 };
 // ==== @byok-sdk/client dist/sdk-reserved-mcp.d.ts ====
 export declare const AGENT_MEMORY_MCP_SERVER_NAME = "byokagentmemory";
+export declare const AGENT_RESULT_MCP_SERVER_NAME = "byokagentresult";
+export declare const AGENT_RESULT_TOOL_NAME = "submit_result";
 export declare function isReservedMcpServerName(name: string): boolean;
 // ==== @byok-sdk/client dist/service-payload-manifest.d.ts ====
 import type { JsonObject } from '@byok-sdk/core';

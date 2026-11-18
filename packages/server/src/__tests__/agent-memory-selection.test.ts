@@ -1,8 +1,8 @@
 import type { Server as HttpServer } from 'node:http';
-import type { AgentEgressPolicy } from '@byok-sdk/protocol';
+import { createEnvelope, type AgentEgressPolicy } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createByokServer, type ByokServer } from '../index';
-import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, TEST_AGENT_DISPATCH } from './test-support';
+import { claimAndStart, connectFakeDaemonLongPoll, nextEnvelope, sendOne, startServer, stopServer, TEST_AGENT_DISPATCH, TEST_CLAIMED_EXECUTOR } from './test-support';
 
 const PRODUCT_ID = 'acme';
 const AGENT_REF = { agentId: 'memory-agent', profileRevision: 'profile-r1' } as const;
@@ -36,6 +36,33 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
     byok = instance;
     return { byok: instance, baseUrl: started.baseUrl };
   }
+
+  it('projects reader memory evidence and leaves it absent for a writer terminal', async () => {
+    const started = await start();
+    const daemon = await connectFakeDaemonLongPoll(started.baseUrl, started.byok, {
+      productId: PRODUCT_ID, capabilities: [...ALL_CAPABILITIES, 'agent-memory-read-write-if-admitted'],
+    });
+    for (const pass of [
+      { homeAccess: 'memory-reader' as const, agentMemory: 'read' as const, change: { outcome: 'reader-attributed' as const, paths: ['MEMORY.md'] } },
+      { homeAccess: 'writer' as const, agentMemory: 'read-write-if-admitted' as const, change: undefined },
+    ]) {
+      const handle = await started.byok.dispatch({
+        ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'memory pass',
+        ...(pass.homeAccess === 'memory-reader' ? { homeAccess: pass.homeAccess } : {}), agentMemory: pass.agentMemory,
+      });
+      await claimAndStart(started.byok, daemon, handle, TEST_CLAIMED_EXECUTOR);
+      const terminal = createEnvelope('task.complete', {
+        executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_DISPATCH.agentRef, summary: 'done', sessionRef: TEST_AGENT_DISPATCH.sessionRef,
+        ...(pass.change === undefined ? {} : { agentHomeMemoryChange: pass.change }),
+      }, { taskId: handle.taskId });
+      expect(await sendOne(daemon, terminal)).toMatchObject({ status: 200, body: { accepted: 1 } });
+      const result = await handle.result();
+      const recorded = await started.byok.tasks.deviceTerminal(handle.taskId);
+      expect(recorded?.envelope.payload).toEqual(terminal.payload);
+      expect(Object.hasOwn(result, 'agentHomeMemoryChange')).toBe(pass.change !== undefined);
+      if (pass.change !== undefined) expect(result.agentHomeMemoryChange).toEqual(terminal.payload.agentHomeMemoryChange);
+    }
+  });
 
   it('refuses an agentMemory dispatch to a device without agent-memory-selection before creating the task', async () => {
     const started = await start();

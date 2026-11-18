@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "aa079097dcfbb80a3f0d5d116f1de7459c94f3f4b019ccf12eadb535db84586a"
+    "snapshotSha256": "059c644d12054fe92da4ad7d59f0ab100df4badf892a920c9656d30a028429b8"
   },
   "configFields": {
     "status": "tracked",
@@ -44,9 +44,38 @@
       "items": [
         "export:@byok-sdk/keys#listProviderProfileSecretNames"
       ]
+    },
+    {
+      "id": "result-mcp-identifiers",
+      "impact": "additive",
+      "summary": "Hosts can import AGENT_RESULT_MCP_SERVER_NAME and AGENT_RESULT_TOOL_NAME from @byok-sdk/client to identify result submissions in event.mcp.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2393",
+      "items": [
+        "export:@byok-sdk/client#AGENT_RESULT_MCP_SERVER_NAME",
+        "export:@byok-sdk/client#AGENT_RESULT_TOOL_NAME"
+      ]
+    },
+    {
+      "id": "task-result-memory-change",
+      "impact": "additive",
+      "summary": "Hosts can read TaskResult.agentHomeMemoryChange from @byok-sdk/server for memory-reader evidence reported in the terminal frame; it is absent for writer passes.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2394",
+      "items": [
+        "export:@byok-sdk/server#TaskResult"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#AGENT_RESULT_MCP_SERVER_NAME",
+      "change": "added",
+      "entry": "result-mcp-identifiers"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_RESULT_TOOL_NAME",
+      "change": "added",
+      "entry": "result-mcp-identifiers"
+    },
     {
       "item": "export:@byok-sdk/client#BlobClient",
       "change": "changed",
@@ -111,6 +140,11 @@
       "item": "export:@byok-sdk/server#InputImageUploadError",
       "change": "added",
       "entry": "embedded-input-image-upload"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskResult",
+      "change": "changed",
+      "entry": "task-result-memory-change"
     },
     {
       "item": "export:@byok-sdk/server#UploadInputImage",

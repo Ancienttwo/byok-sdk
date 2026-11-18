@@ -1079,7 +1079,7 @@ export declare class SteerRejectedError extends Error {
 }
 // ==== @byok-sdk/server dist/types.d.ts ====
 import type { HarnessInfo } from '@byok-sdk/protocol';
-import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, InputImageBlobRef, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
+import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, InputImageBlobRef, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types.js';
@@ -1164,6 +1164,7 @@ export interface TaskResult {
     finalMessage?: string;
     sessionRef?: string;
     artifactRefs?: BlobRef[];
+    agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
     reason?: string;
     code?: TaskDeclineCodeReading['code'];
     reportedCode?: string;
