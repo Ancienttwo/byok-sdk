@@ -419,6 +419,23 @@ function rebase(f, message) {
   f.base = git('rev-parse', 'HEAD').trim();
 }
 
+test('#2379: client admits exactly its new oar-readers import', t => {
+  const f = fixture(t), path = 'packages/client/package.json';
+  const manifest = { ...f.manifest, imports: { '#existing': './dist/existing.js' } };
+  f.write(path, manifest); rebase(f, 'client before oar-readers');
+  const entry = { types: './dist/runtime/oar-readers.d.ts', default: './dist/runtime/oar-readers.js' };
+  const write = (value, extra = {}) => f.write(path, { ...manifest, ...extra, imports: { ...manifest.imports, '#byok-oar-readers': value } });
+  write(entry);
+  assert.doesNotThrow(() => selectImpact([path], f));
+  write({ ...entry, extra: './dist/extra.js' });
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  write(entry, { description: 'unreviewed' });
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  write({ ...entry, default: './dist/old.js' }); rebase(f, 'client with a different oar-readers import');
+  write(entry);
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+});
+
 test('#2286: core admits exactly its sqlite-node entry', t => {
   const f = fixture(t), path = 'packages/core/package.json';
   const manifest = { name: '@byok-sdk/core', version: '0.43.0', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
