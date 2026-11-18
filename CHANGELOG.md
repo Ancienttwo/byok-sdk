@@ -2,9 +2,24 @@
 
 ## Unreleased
 
-- **Updated (client)**. OAR 0.120.0 adds optional native Codex service tier labels and descriptions. OpenCode ACP startup now queues within one SDK process when sessions share a data directory. Queueing counts toward the 60-second initialize budget and can return a retryable startup failure.
+## 0.44.1 — 2026-11-18 (candidate)
 
+[Candidate notes](docs/releases/v0.44.1.md)
+
+- **Added (server, protocol, client; #2395)** — A trusted embedded Host can commit an input image with `server.blobs.uploadInputImage` and pass its ref to dispatch, fresh execution, or steer. The upload checks the image signature and honors both the 20 MiB image limit and the server blob limit.
+- **Added (client; #2393)** — Import `AGENT_RESULT_MCP_SERVER_NAME` and `AGENT_RESULT_TOOL_NAME` to match structured `event.mcp` identifiers for result submissions.
+- **Added (server; #2394)** — `TaskResult.agentHomeMemoryChange` carries memory-reader evidence when the terminal includes it.
+- **Added (client; #2398)** — Call `inspectDeviceEnrollmentClear` for a read-only precheck before clearing device enrollment. The clear rechecks under its own lease.
 - **Added (keys; #2397)** — `listProviderProfileSecretNames` finds credential entry names in recognized offline provider stores. Hosts can clean up retired credentials through the original `SecretStore` scope while preserving names used by active stores. See the [credential recovery steps](packages/keys/README.md#recover-provider-credentials-from-an-offline-store).
+
+- **Security guidance (client; #2391, #2098)** — npm Hosts using Pi 1.5.2 need the dependency-chain override for undici 8.12.4 and may need to remove a stale nested lock entry. [Override and verification steps](docs/releases/v0.44.1.md#undici-override-for-hosts)
+- **Fixed (cloud, server; #2400)** — The cloud kernel always checks committed blobs for steer images. The embedded server checks ref metadata internally and retries uploader initialization on the next call after a failed load.
+
+### OAR 0.120.0
+
+- **Changed (client)** — OpenCode ACP startups queue by canonical data directory within one SDK process. Queueing, spawn, and `initialize` share 60 seconds. A queue timeout is a `RuntimeExecutionFailure` with `phase: start` and `retry: retryable`. The startup lock lives in memory.
+- **Added (client/adapters)** — `RuntimeModelEntry.serviceTierDetails` optionally carries native Codex tier labels and descriptions.
+- **SDK projection** — The SDK still probes versions independently of OAR’s `installation()` cache. Claude retains its existing exit order and record redaction. Upstream Cursor peer, Claude `skills()` view, and OpenCode skills provenance changes are outside the SDK projection. [Host upgrade notes](docs/releases/v0.44.1.md#oar-01200)
 
 ## 0.44.0 — 2026-11-18 (published)
 

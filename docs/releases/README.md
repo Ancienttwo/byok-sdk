@@ -12,11 +12,13 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
-The [0.44.0 release](v0.44.0.md) carries the 0.43.0 → 0.44.0 manifest and
-[Host upgrade checklist](host-upgrade-0.44.0.md). The publication record
-archives the cut manifest at `packages/client/upgrade-history/0.43.0-0.44.0.json`
-and rebaselines to the published snapshot.
-Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
+The 0.44.1 candidate carries the 0.44.0 → 0.44.1 manifest. Its six additive
+entries and Host steps are in the [0.44.1 candidate notes](v0.44.1.md). The
+publication record archives the cut manifest and rebaselines to the published
+snapshot. Keep using the [0.44.0 Host upgrade checklist](host-upgrade-0.44.0.md)
+when migrating from wire v6. The 0.43.0 → 0.44.0 manifest is archived at
+`packages/client/upgrade-history/0.43.0-0.44.0.json`. Changes planned for the
+next MINOR belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
 The published 0.42.0 → 0.43.0 manifest remains in
 `packages/client/upgrade-history/0.42.0-0.43.0.json`.
 
@@ -28,7 +30,8 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 7 ([Wire v7](host-upgrade-0.44.0.md#wire-v7)).
 0.43.0 is the last v6 release. `golden/v7.releases.json` pins the first v7
-release, 0.44.0. A published v7 decoder has not yet been pinned as an oracle.
+release, 0.44.0, and the 0.44.1 candidate. A published v7 decoder has not yet
+been pinned as an oracle.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -56,9 +59,9 @@ never released; their cases are in the v7 corpus.
 
 v7 evidence. `golden/v7.envelopes.ndjson` and `golden/v7.http.ndjson` are
 produced by `packages/protocol/src/__tests__/generate-v7-corpus.mjs` from the frozen
-v6 corpora plus the v7 lines it appends. The 0.44.0 registration pins its
-507 envelope and 40 HTTP lines. The covered prefixes are now immutable, and
-further lines are append-only.
+v6 corpora plus the v7 lines it appends. Both the 0.44.0 and 0.44.1
+registrations pin the same 507 envelope and 40 HTTP lines. The covered
+prefixes are immutable, and further lines are append-only.
 `golden/v7.releases.json` records each stable v7 release's corpus line counts
 and SHA-256 prefixes; each entry pins both `envelopes` and `http`.
 Prereleases are not registered and are outside the guarantee.
@@ -85,9 +88,9 @@ the "released" decoder the current source.
    line is corrected by a new line.
 
 Feature PRs leave the package manifest at the current train. An intentional
-public API change is recorded under CHANGELOG `Unreleased`, with its required
-next MINOR release; do not bump/register that future version just to add corpus
-coverage. Release preparation owns the manifest bump and corpus registration.
+public API change is recorded under CHANGELOG `Unreleased`. A breaking entry
+requires a MINOR. Release preparation owns the version bump and corpus
+registration.
 
 ### Published v7 decoder baseline
 

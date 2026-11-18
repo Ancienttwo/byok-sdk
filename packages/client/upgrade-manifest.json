@@ -6,8 +6,8 @@
     "snapshotSha256": "74c716ac94443d12518252898dfa368791a7090bdf1dec4cd84440b5ca6bd77c"
   },
   "to": {
-    "version": "0.44.0",
-    "snapshotSha256": "f77f12d41d374ac152ab1a1994fa8e8a3fc5c4c9f92a7060f45ebbe722324414"
+    "version": "0.44.1",
+    "snapshotSha256": "9fd69dfc3fe57c07d629b6b90a91008776de0972fe10739df9de49e6705edd26"
   },
   "configFields": {
     "status": "tracked",
@@ -28,7 +28,7 @@
       "id": "inspect-device-enrollment-clear",
       "impact": "additive",
       "summary": "Hosts can call inspectDeviceEnrollmentClear with the same options as clearDeviceEnrollment to check published store ownership and another store's enrollment or staged pairing attempt. The result is a point-in-time hint and the clear checks again under its own lease.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2398",
+      "migration": "docs/releases/v0.44.1.md#enrollment-clear-precheck",
       "items": [
         "export:@byok-sdk/client#inspectDeviceEnrollmentClear"
       ]
@@ -37,7 +37,7 @@
       "id": "embedded-input-image-upload",
       "impact": "additive",
       "summary": "A trusted Host can upload a committed input image through ByokServer.blobs.uploadInputImage and pass the returned ref to dispatch or steer. Use images up to 20 MiB and respect any lower server blob limit.",
-      "migration": "packages/server/README.md#task-input-images",
+      "migration": "docs/releases/v0.44.1.md#embedded-input-image-upload",
       "items": [
         "export:@byok-sdk/client#BlobClient",
         "export:@byok-sdk/protocol#INPUT_IMAGE_MAX_BYTES",
@@ -50,7 +50,7 @@
       "id": "offline-provider-secret-recovery",
       "impact": "additive",
       "summary": "List provider credential entry names from a recognized offline store. Before deleting obsolete credentials, exclude names used by active stores in the same credential scope.",
-      "migration": "packages/keys/README.md#recover-provider-credentials-from-an-offline-store",
+      "migration": "docs/releases/v0.44.1.md#offline-provider-credential-recovery",
       "items": [
         "export:@byok-sdk/keys#listProviderProfileSecretNames"
       ]
@@ -59,7 +59,7 @@
       "id": "result-mcp-identifiers",
       "impact": "additive",
       "summary": "Hosts can import AGENT_RESULT_MCP_SERVER_NAME and AGENT_RESULT_TOOL_NAME from @byok-sdk/client to identify result submissions in event.mcp.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2393",
+      "migration": "docs/releases/v0.44.1.md#result-mcp-identifiers",
       "items": [
         "export:@byok-sdk/client#AGENT_RESULT_MCP_SERVER_NAME",
         "export:@byok-sdk/client#AGENT_RESULT_TOOL_NAME"
@@ -69,7 +69,7 @@
       "id": "task-result-memory-change",
       "impact": "additive",
       "summary": "Hosts can read TaskResult.agentHomeMemoryChange from @byok-sdk/server for memory-reader evidence reported in the terminal frame; it is absent for writer passes.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2394",
+      "migration": "docs/releases/v0.44.1.md#memory-change-evidence-on-taskresult",
       "items": [
         "export:@byok-sdk/server#TaskResult"
       ]

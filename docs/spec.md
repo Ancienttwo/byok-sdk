@@ -408,10 +408,11 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-The current aligned release is `0.44.0`, published on 2026-11-18 (UTC)
-with registry readback for all nine packages. The packed and published keys
-`@byok-sdk/core` edge must pin the same release version, `0.44.0`. Verify the
-edge in an isolated standard npm install.
+The current aligned release is `0.44.1` (candidate). The stable npm release is `0.44.0`,
+published on 2026-11-18 (UTC) with registry readback for all nine packages.
+The packed and published keys `@byok-sdk/core` edge must pin the corresponding
+release version. Verify the candidate edge at `0.44.1` in an isolated standard
+npm install.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
 0.28.2. Before that decision keys had its own version line, and its last
@@ -420,6 +421,11 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.44.1 is the owner-approved PATCH candidate after 0.44.0. It keeps the nine
+public packages aligned on wire v7 and carries six additive upgrade-manifest
+entries. Hosts upgrading from 0.44.0 can reuse their stores and enrollment.
+[0.44.1 candidate notes](releases/v0.44.1.md)
 
 0.44.0 is the published owner-approved MINOR after 0.43.0. It keeps the nine
 public packages aligned and is the first wire v7 release. A v6 peer cannot
