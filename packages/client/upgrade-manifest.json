@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.43.0",
-    "snapshotSha256": "0373f43b43991c2cc371c4b2caace62f141be775eab65a6aaa9a1590d1d0d6b1"
+    "snapshotSha256": "d94ba8cce18878d3775901f14b9925fea4bcb59838036a1eb08ca6564d0324ab"
   },
   "configFields": {
     "status": "tracked",
@@ -1833,6 +1833,111 @@
       "items": [
         "behavior:service-uninstall-releases-agent-home-leases"
       ]
+    },
+    {
+      "id": "runtime-native-readers",
+      "impact": "additive",
+      "summary": "@byok-sdk/client RuntimeAdapter adds optional listModels and accountUsage reads; Agy, Claude, Codex, Dsh, Grok and OpenCode adapters expose native readers where supported. The adapters entry exports catalog, model, read options, account usage, quota window and unsupported-version types. RuntimeObservation adds optional unsupportedVersion; DaemonRecord excludes that local detail from its runtime audit projection. Hosts need no changes; call supported readers on demand and handle their result variants. Custom adapters may omit both methods.",
+      "migration": "docs/upgrade-manifest.md#items",
+      "items": [
+        "export:@byok-sdk/client#AgyAdapter",
+        "export:@byok-sdk/client#ClaudeAdapter",
+        "export:@byok-sdk/client#CodexAdapter",
+        "export:@byok-sdk/client#DshAdapter",
+        "export:@byok-sdk/client#GrokAdapter",
+        "export:@byok-sdk/client#OpenCodeAdapter",
+        "export:@byok-sdk/client#RuntimeAdapter",
+        "export:@byok-sdk/client#RuntimeObservation",
+        "export:@byok-sdk/client#DaemonRecord",
+        "export:@byok-sdk/client/adapters#AgyAdapter",
+        "export:@byok-sdk/client/adapters#ClaudeAdapter",
+        "export:@byok-sdk/client/adapters#CodexAdapter",
+        "export:@byok-sdk/client/adapters#DshAdapter",
+        "export:@byok-sdk/client/adapters#GrokAdapter",
+        "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+        "export:@byok-sdk/client/adapters#RuntimeAdapter",
+        "export:@byok-sdk/client/adapters#RuntimeObservation",
+        "export:@byok-sdk/client/adapters#RuntimeAccountUsage",
+        "export:@byok-sdk/client/adapters#RuntimeAccountUsageUnsupportedReason",
+        "export:@byok-sdk/client/adapters#RuntimeAccountUsageWindow",
+        "export:@byok-sdk/client/adapters#RuntimeListModelsOptions",
+        "export:@byok-sdk/client/adapters#RuntimeModelCatalog",
+        "export:@byok-sdk/client/adapters#RuntimeModelEntry",
+        "export:@byok-sdk/client/adapters#RuntimeReadOptions",
+        "export:@byok-sdk/client/adapters#RuntimeUnsupportedVersion"
+      ]
+    },
+    {
+      "id": "runtime-image-input-and-options",
+      "impact": "additive",
+      "summary": "@byok-sdk/client adds RuntimeInputImage and RuntimeInputOptions, optional images on instruction starts, image capabilities and Session.steer options, and the optional supportsTaskExecutionOptions descriptor flag. Protocol and core runtime capability projections include optional images; protocol exports image blob reference schemas and the input-images and task-execution-options capability constants. Hosts need no changes for text-only use; use these fields only when supported. Custom adapters that opt into images or task execution options must consume them or refuse unsupported requests before prompting.",
+      "migration": "docs/upgrade-manifest.md#items",
+      "items": [
+        "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client#RuntimeCapabilities",
+        "export:@byok-sdk/client#RuntimeInputImage",
+        "export:@byok-sdk/client#RuntimeInputOptions",
+        "export:@byok-sdk/client#RuntimeOperationStartInput",
+        "export:@byok-sdk/client#Session",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+        "export:@byok-sdk/client/adapters#RuntimeCapabilities",
+        "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+        "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+        "export:@byok-sdk/protocol#HarnessInventorySchema",
+        "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+        "export:@byok-sdk/protocol#INPUT_IMAGES_CAPABILITY",
+        "export:@byok-sdk/protocol#InputImageBlobRef",
+        "export:@byok-sdk/protocol#InputImageBlobRefSchema",
+        "export:@byok-sdk/protocol#InputImagesSchema",
+        "export:@byok-sdk/protocol#TASK_EXECUTION_OPTIONS_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#INPUT_IMAGES_CAPABILITY",
+        "export:@byok-sdk/protocol/constants#TASK_EXECUTION_OPTIONS_CAPABILITY"
+      ]
+    },
+    {
+      "id": "cloud-committed-input-images",
+      "impact": "additive",
+      "summary": "@byok-sdk/cloud exports assertCommittedInputImages to validate image blob references against committed tenant blobs. Hosts need no changes; call it when implementing image-bearing input handling that needs this validation.",
+      "migration": "docs/upgrade-manifest.md#items",
+      "items": [
+        "export:@byok-sdk/cloud#assertCommittedInputImages"
+      ]
+    },
+    {
+      "id": "provider-model-discovery",
+      "impact": "additive",
+      "summary": "@byok-sdk/keys adds discoverProviderModels and the ModelDiscoveryConnection and DiscoveredModel types for listing models from OpenAI-compatible or Anthropic endpoints. Hosts need no changes; call the function on demand and handle provider errors if offering model discovery.",
+      "migration": "docs/upgrade-manifest.md#items",
+      "items": [
+        "export:@byok-sdk/keys#DiscoveredModel",
+        "export:@byok-sdk/keys#ModelDiscoveryConnection",
+        "export:@byok-sdk/keys#discoverProviderModels"
+      ]
+    },
+    {
+      "id": "reasoning-effort-token",
+      "impact": "additive",
+      "summary": "@byok-sdk/protocol exports ReasoningEffort and ReasoningEffortSchema for bounded non-whitespace ASCII effort tokens. Hosts need no changes; validate and pass an effort when using per-task execution options.",
+      "migration": "docs/upgrade-manifest.md#items",
+      "items": [
+        "export:@byok-sdk/protocol#ReasoningEffort",
+        "export:@byok-sdk/protocol#ReasoningEffortSchema"
+      ]
+    },
+    {
+      "id": "subagent-progress-events",
+      "impact": "additive",
+      "summary": "@byok-sdk/protocol AgentEvent and task progress gain subagent_start and subagent_end variants with agentPath, plus optional agentPath on progress, tool, error and usage events. Cloud activity and timeline schemas accept the expanded events. Hosts consuming events should handle the new variants in exhaustive switches and may use agentPath to group child activity; other consumers need no changes.",
+      "migration": "docs/upgrade-manifest.md#items",
+      "items": [
+        "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+        "export:@byok-sdk/protocol#AgentEventSchema",
+        "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+        "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+        "export:@byok-sdk/cloud#TimelineEventSchema",
+        "union:agent-event#subagent_end",
+        "union:agent-event#subagent_start"
+      ]
     }
   ],
   "changes": [
@@ -2129,6 +2234,11 @@
       "entry": "remove-task-terminal-read"
     },
     {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
       "item": "export:@byok-sdk/client#AuthResponseInvalidError",
       "change": "changed",
       "entry": "wire-v7-client-pairing-errors"
@@ -2137,6 +2247,16 @@
       "item": "export:@byok-sdk/client#BlobClient",
       "change": "changed",
       "entry": "wire-v7-auth-manager-pair"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
     },
     {
       "item": "export:@byok-sdk/client#DAEMON_HALT_REASONS",
@@ -2194,6 +2314,11 @@
       "entry": "journal-test-fault-seams-removed"
     },
     {
+      "item": "export:@byok-sdk/client#DaemonRecord",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
       "item": "export:@byok-sdk/client#DeviceCredentialBackend",
       "change": "changed",
       "entry": "wire-v7-device-credential-attempt"
@@ -2219,6 +2344,11 @@
       "entry": "runtime-status-inline"
     },
     {
+      "item": "export:@byok-sdk/client#DshAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
       "item": "export:@byok-sdk/client#ExpiringClassId",
       "change": "changed",
       "entry": "grok-session-store"
@@ -2227,6 +2357,11 @@
       "item": "export:@byok-sdk/client#FirstPairingAttemptRefusedError",
       "change": "removed",
       "entry": "wire-v7-client-pairing-errors"
+    },
+    {
+      "item": "export:@byok-sdk/client#GrokAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
     },
     {
       "item": "export:@byok-sdk/client#GrokAdapterOptions",
@@ -2259,6 +2394,11 @@
       "entry": "remove-truth-memory-client"
     },
     {
+      "item": "export:@byok-sdk/client#OpenCodeAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
       "item": "export:@byok-sdk/client#PairingAttemptRefusedError",
       "change": "added",
       "entry": "wire-v7-client-pairing-errors"
@@ -2289,6 +2429,21 @@
       "entry": "agent-home-lease-release"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeCapabilities",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeDetectResult",
       "change": "changed",
       "entry": "runtime-version-verdict-only"
@@ -2304,9 +2459,29 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeInputImage",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeInputOptions",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeObservation",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeOperationManifest",
       "change": "changed",
       "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeTaskInput",
@@ -2337,6 +2512,11 @@
       "item": "export:@byok-sdk/client#ServiceUninstallResult",
       "change": "added",
       "entry": "agent-home-lease-release"
+    },
+    {
+      "item": "export:@byok-sdk/client#Session",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
     },
     {
       "item": "export:@byok-sdk/client#SqliteLocalTaskJournalOptions",
@@ -2459,9 +2639,39 @@
       "entry": "remove-service-exit-disposition"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#GrokAdapterOptions",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
     },
     {
       "item": "export:@byok-sdk/client/adapters#PiRuntimeConfig",
@@ -2469,9 +2679,39 @@
       "entry": "pi-agent-skill-paths-config"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAccountUsage",
+      "change": "added",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAccountUsageUnsupportedReason",
+      "change": "added",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAccountUsageWindow",
+      "change": "added",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapter",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
       "change": "changed",
       "entry": "grok-agent-user-context"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeCapabilities",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeDetectResult",
@@ -2489,9 +2729,44 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#RuntimeListModelsOptions",
+      "change": "added",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeModelCatalog",
+      "change": "added",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeModelEntry",
+      "change": "added",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeObservation",
+      "change": "changed",
+      "entry": "runtime-native-readers"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
       "change": "changed",
       "entry": "wire-v7-client-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeOperationStartInput",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeReadOptions",
+      "change": "added",
+      "entry": "runtime-native-readers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeUnsupportedVersion",
+      "change": "added",
+      "entry": "runtime-native-readers"
     },
     {
       "item": "export:@byok-sdk/client/adapters#taskRuntimeTarget",
@@ -2507,6 +2782,11 @@
       "item": "export:@byok-sdk/client/testing#InMemoryDeviceCredentialBackend",
       "change": "changed",
       "entry": "wire-v7-device-credential-attempt"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#ActivityAppendRequestSchema",
+      "change": "changed",
+      "entry": "subagent-progress-events"
     },
     {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
@@ -2817,6 +3097,16 @@
       "item": "export:@byok-sdk/cloud#TerminalResult",
       "change": "changed",
       "entry": "wire-v7-cloud-executor"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#TimelineEventSchema",
+      "change": "changed",
+      "entry": "subagent-progress-events"
+    },
+    {
+      "item": "export:@byok-sdk/cloud#assertCommittedInputImages",
+      "change": "added",
+      "entry": "cloud-committed-input-images"
     },
     {
       "item": "export:@byok-sdk/cloud#createAuthPlane",
@@ -3367,6 +3657,11 @@
       "item": "export:@byok-sdk/core#PROVIDER_SECRET_PAD_BLOCK_BYTES",
       "change": "removed",
       "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/core#PresenceRuntimeCapabilities",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
     },
     {
       "item": "export:@byok-sdk/core#PresenceStore",
@@ -3934,9 +4229,19 @@
       "entry": "retire-compatibility-apis"
     },
     {
+      "item": "export:@byok-sdk/keys#DiscoveredModel",
+      "change": "added",
+      "entry": "provider-model-discovery"
+    },
+    {
       "item": "export:@byok-sdk/keys#MacOsKeychainSecretStoreOptions",
       "change": "changed",
       "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ModelDiscoveryConnection",
+      "change": "added",
+      "entry": "provider-model-discovery"
     },
     {
       "item": "export:@byok-sdk/keys#PROVIDER_PROFILE_TRUTH_RECORD_KEY",
@@ -3957,6 +4262,11 @@
       "item": "export:@byok-sdk/keys#TruthStoreProviderProfileStoreOptions",
       "change": "removed",
       "entry": "retire-compatibility-apis"
+    },
+    {
+      "item": "export:@byok-sdk/keys#discoverProviderModels",
+      "change": "added",
+      "entry": "provider-model-discovery"
     },
     {
       "item": "export:@byok-sdk/keys#migrateProviderProfileStore",
@@ -4102,6 +4412,16 @@
       "item": "export:@byok-sdk/protocol#AgentEgressLaneSchema",
       "change": "removed",
       "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventOrUnknownSchema",
+      "change": "changed",
+      "entry": "subagent-progress-events"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#AgentEventSchema",
+      "change": "changed",
+      "entry": "subagent-progress-events"
     },
     {
       "item": "export:@byok-sdk/protocol#AgentEventSpill",
@@ -4644,6 +4964,11 @@
       "entry": "narrow-protocol-core-public-api"
     },
     {
+      "item": "export:@byok-sdk/protocol#HarnessInventorySchema",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
       "item": "export:@byok-sdk/protocol#HostOfferPlainPayloadSchema",
       "change": "changed",
       "entry": "wire-v7-execution-target"
@@ -4652,6 +4977,26 @@
       "item": "export:@byok-sdk/protocol#HostOfferSealedPayloadSchema",
       "change": "changed",
       "entry": "wire-v7-execution-target"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#INPUT_IMAGES_CAPABILITY",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputImageBlobRef",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputImageBlobRefSchema",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#InputImagesSchema",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
     },
     {
       "item": "export:@byok-sdk/protocol#InputPreparationAccountingPolicyRef",
@@ -5104,6 +5449,16 @@
       "entry": "agent-user-context-unavailable-cause"
     },
     {
+      "item": "export:@byok-sdk/protocol#ReasoningEffort",
+      "change": "added",
+      "entry": "reasoning-effort-token"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ReasoningEffortSchema",
+      "change": "added",
+      "entry": "reasoning-effort-token"
+    },
+    {
       "item": "export:@byok-sdk/protocol#ResultDocumentCheck",
       "change": "removed",
       "entry": "narrow-protocol-core-public-api"
@@ -5169,6 +5524,11 @@
       "entry": "narrow-protocol-core-public-api"
     },
     {
+      "item": "export:@byok-sdk/protocol#RuntimeCapabilitiesSchema",
+      "change": "changed",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
       "item": "export:@byok-sdk/protocol#RuntimeFailureClass",
       "change": "changed",
       "entry": "narrow-protocol-core-public-api"
@@ -5232,6 +5592,11 @@
       "item": "export:@byok-sdk/protocol#SteerRefusalReasonReading",
       "change": "added",
       "entry": "wire-v7-steer-refused"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TASK_EXECUTION_OPTIONS_CAPABILITY",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
     },
     {
       "item": "export:@byok-sdk/protocol#TASK_STEER_TEXT_MAX_BYTES",
@@ -5362,6 +5727,11 @@
       "item": "export:@byok-sdk/protocol#TaskProgressPayload",
       "change": "removed",
       "entry": "narrow-protocol-core-public-api"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#TaskProgressPayloadSchema",
+      "change": "changed",
+      "entry": "subagent-progress-events"
     },
     {
       "item": "export:@byok-sdk/protocol#TaskProgressSealedPayload",
@@ -5564,6 +5934,11 @@
       "entry": "wire-v7-retired-flags-and-bounds"
     },
     {
+      "item": "export:@byok-sdk/protocol/constants#INPUT_IMAGES_CAPABILITY",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
+    },
+    {
       "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
       "change": "changed",
       "entry": "wire-v7"
@@ -5577,6 +5952,11 @@
       "item": "export:@byok-sdk/protocol/constants#RUNTIME_UNAVAILABLE_CAUSES",
       "change": "changed",
       "entry": "agent-user-context-unavailable-cause"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#TASK_EXECUTION_OPTIONS_CAPABILITY",
+      "change": "added",
+      "entry": "runtime-image-input-and-options"
     },
     {
       "item": "export:@byok-sdk/protocol/constants#canTransition",
@@ -5695,6 +6075,16 @@
       "before": "schema_version=9",
       "after": "schema_version=10",
       "entry": "wire-v7-server-sqlite-store"
+    },
+    {
+      "item": "union:agent-event#subagent_end",
+      "change": "added",
+      "entry": "subagent-progress-events"
+    },
+    {
+      "item": "union:agent-event#subagent_start",
+      "change": "added",
+      "entry": "subagent-progress-events"
     },
     {
       "item": "union:wire#task.steer_refused",
