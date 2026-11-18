@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "2837e3d68d8173257e70836ef2df59bbc0e9dd24b52e083845e91fcf0157209f"
+    "snapshotSha256": "f77f12d41d374ac152ab1a1994fa8e8a3fc5c4c9f92a7060f45ebbe722324414"
   },
   "configFields": {
     "status": "tracked",
@@ -40,7 +40,6 @@
       "migration": "packages/server/README.md#task-input-images",
       "items": [
         "export:@byok-sdk/client#BlobClient",
-        "export:@byok-sdk/cloud#ByokCloudOptions",
         "export:@byok-sdk/protocol#INPUT_IMAGE_MAX_BYTES",
         "export:@byok-sdk/server#ByokServer",
         "export:@byok-sdk/server#InputImageUploadError",
@@ -101,11 +100,6 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeModelEntry",
       "change": "changed",
       "entry": "codex-service-tier-details"
-    },
-    {
-      "item": "export:@byok-sdk/cloud#ByokCloudOptions",
-      "change": "changed",
-      "entry": "embedded-input-image-upload"
     },
     {
       "item": "export:@byok-sdk/keys#listProviderProfileSecretNames",

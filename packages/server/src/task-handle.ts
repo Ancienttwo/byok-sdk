@@ -4,9 +4,8 @@ import {
   type SteerRejectionCode,
   type TaskAbandonCause,
   type TaskAttempt,
-  type TenantId,
 } from '@byok-sdk/cloud';
-import type { ClaimedExecutor, TaskState } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, InputImageBlobRef, TaskState } from '@byok-sdk/protocol';
 import type { TaskEventRelay } from './relay.js';
 import { readTaskEvents, type TaskEventDeps } from './task-events.js';
 import type { ServerTaskEvent, TaskHandle, TaskResult } from './types.js';
@@ -104,6 +103,7 @@ function refusalCode(kernelCode: SteerRejectionCode, state: TaskState): SteerRej
 
 export interface TaskHandleDeps extends TaskEventDeps {
   readonly cloud: ByokCloud;
+  readonly readInputImages: (input: readonly InputImageBlobRef[]) => Promise<readonly InputImageBlobRef[]>;
   /**
    * The task's current `TaskSnapshot.state`, `updatedAt` and
    * `claimedExecutor`, or `undefined` when the attempt is gone. The snapshot
@@ -197,7 +197,8 @@ export function createTaskHandle(taskId: string, deps: TaskHandleDeps): TaskHand
 
     async steer(text, { images } = {}): Promise<{ readonly messageId: string }> {
       try {
-        const { envelope } = await deps.cloud.steerTask(deps.tenant, taskId, { text, ...(images === undefined ? {} : { images }) });
+        const refs = images === undefined ? undefined : await deps.readInputImages(images);
+        const { envelope } = await deps.cloud.steerTask(deps.tenant, taskId, { text, ...(refs === undefined ? {} : { images: refs }) });
         return { messageId: envelope.id };
       } catch (caught) {
         if (!(caught instanceof KernelSteerRejectedError)) throw caught;

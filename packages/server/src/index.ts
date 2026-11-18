@@ -40,7 +40,6 @@ import {
   type PendingApproval,
   type SteerRefusalRecord,
   type TaskAttempt,
-  type TenantId,
   type TerminalResult,
 } from '@byok-sdk/cloud';
 import {
@@ -72,8 +71,6 @@ import type {
   AgentHomeProjectionRequest,
   AgentHomeProjectionStatusReadback,
   AgentEgressReceipt,
-  ByokServerStorage,
-  AgentResumeDispatchInput,
   CreateByokServerOptions,
   DispatchInput,
   HubStats,
@@ -82,7 +79,6 @@ import type {
   SteerRefusal,
   TaskEventEntry,
   TaskHandle,
-  TaskResult,
   TaskSnapshot,
   UploadInputImage,
 } from './types.js';
@@ -447,11 +443,8 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
   const projectionWaiters = new ProjectionWaiters();
   // The declaration is derived from the ports passed, so the two cannot drift (#1096).
   const ports = { blobContentProxy: composition.blobContentProxy };
-  const assertImages = (scope: TenantId, images: readonly InputImageBlobRef[]) =>
-    assertEmbeddedInputImages(composition.embeddedBlobs, scope, images, maxBlobSizeBytes);
   const uploadInputImage = createImageUploads(composition, tenant, Math.min(INPUT_IMAGE_MAX_BYTES, maxBlobSizeBytes));
   const cloud: ByokCloud = createByokCloud({
-    assertSteerImages: assertImages,
     core: composition.core,
     cloud: composition.cloud,
     ...ports,
@@ -575,7 +568,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     if (!parsed.success) {
       throw new ByokCloudError('coordination_input_invalid', 'Input images must contain 1–16 valid image references.');
     }
-    await assertImages(tenant, parsed.data);
+    await assertEmbeddedInputImages(composition.embeddedBlobs, tenant, parsed.data, maxBlobSizeBytes);
     return parsed.data;
   }
 
@@ -676,6 +669,7 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
       ...eventDeps,
       tenant,
       cloud,
+      readInputImages,
       readState: readTaskState,
       readResult: async (id) => toTaskResult(await readTerminal(id)),
     });

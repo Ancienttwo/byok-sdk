@@ -63,10 +63,7 @@ export function createSteeringApi({
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     const required = requiredReceiverCapabilities('task.steer', steer);
     if (required.length > 0) await assertAgentCapabilities(tenant, ownerDeviceId, required);
-    if (images !== undefined) {
-      const assertImages = options.assertSteerImages ?? ((scope, refs) => assertCommittedInputImages(options.cloud.blobs, scope, refs));
-      await assertImages(tenant, images);
-    }
+    if (images !== undefined) await assertCommittedInputImages(options.cloud.blobs, tenant, images);
     const messageId = options.crypto.randomUuid();
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
       createEnvelope('task.steer', steer, { id: messageId, taskId, seq }),
