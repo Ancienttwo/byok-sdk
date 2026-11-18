@@ -218,6 +218,24 @@ describe('Codex persistent app-server adapter', () => {
       { type: 'turn_end' },
     ]);
   });
+  it('passes native local image paths on prompt and steer', async () => {
+    const resources = await ctx({ FAKE_CODEX_HANG: '1' });
+    const receipt = path.join(resources.workspaceDir, 'images-rpc.jsonl');
+    const imagePath = path.join(resources.workspaceDir, 'fixture.png');
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+    await fs.writeFile(imagePath, Buffer.from(base64, 'base64'));
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    const images = [{ path: imagePath, mediaType: 'image/png' }];
+    const session = await open(adapter(), { ...task, images }, resources);
+    await session.steer('look again', { images });
+    const raw = await fs.readFile(receipt, 'utf8');
+    const frames = raw.trim().split('\n').map(line => JSON.parse(line));
+    for (const method of ['turn/start', 'turn/steer']) {
+      expect(frames.find(frame => frame.method === method)?.params.input).toContainEqual({ type: 'localImage', path: imagePath });
+    }
+    expect(raw).not.toContain(base64);
+  });
+
   it.each([undefined, 'fake-thread-1'])('applies the exact effort before prompting (resume=%s)', async sessionRef => {
     const resources = await ctx();
     const receipt = path.join(resources.workspaceDir, 'effort-rpc.jsonl');

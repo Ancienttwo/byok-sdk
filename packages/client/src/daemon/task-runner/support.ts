@@ -136,7 +136,7 @@ export interface ActiveTask {
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
   /** The elected installation can refine its adapter's static steering declaration. */
-  steer?: boolean;
+  readonly steer: boolean;
   session: Session;
   /** What the daemon reads instead of `session.<member>?.()`; see `daemon/session-contract.ts`. */
   sessionMembers: DeclaredSessionMembers;

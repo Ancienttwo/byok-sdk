@@ -37,7 +37,10 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
     { enabled: config.nativeSessions, sessionDir: config.piByokLauncher?.sessionDir },
     config.runtimeAllowlist,
   );
-  if ([...run.runtimes, ...run.harnesses].some(({ capabilities }) => capabilities?.images !== false)) {
+  // An undeclared image value can be negotiated at open (ACP). A known false
+  // cannot. Exclude installations the daemon is configured not to select.
+  if ([...run.runtimes, ...run.harnesses].some(({ id, capabilities }) => capabilities?.images !== false
+    && (config.runtimeAllowlist === undefined || config.runtimeAllowlist.includes(id)))) {
     capabilities.push(INPUT_IMAGES_CAPABILITY);
   }
   const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true

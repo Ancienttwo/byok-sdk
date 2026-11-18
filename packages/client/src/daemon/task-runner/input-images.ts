@@ -17,7 +17,7 @@ export async function materializeInputImages(
     signal.throwIfAborted();
     const bytes = await blobClient.downloadBlob(blob, { signal });
     signal.throwIfAborted();
-    const path = join(scratch.runtimeDir, `${randomUUID()}.${extension[mediaType]}`);
+    const path = join(scratch.sdkDir, `${randomUUID()}.${extension[mediaType]}`);
     await writeFile(path, bytes, { mode: 0o600, flag: 'wx', signal });
     files.push({ path, mediaType });
   }

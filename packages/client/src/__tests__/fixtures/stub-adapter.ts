@@ -1,7 +1,7 @@
 import { testRuntimeEnvironment } from './runtime-env';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import type { RuntimeEnvironment } from '../../runtime/environment';
-import type { RuntimeTaskInput } from '../../types';
+import type { RuntimeInputOptions, RuntimeTaskInput } from '../../types';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import {
   freezeRuntimeAdapterDescriptor,
@@ -25,6 +25,8 @@ export class StubSession implements Session {
   interruptCalled = false;
   closeCalled = false;
   readonly steerCalls: string[] = [];
+  readonly steerImageCalls: NonNullable<RuntimeInputOptions['images']>[] = [];
+  capabilities?: { images: boolean };
   readonly followUpCalls: RuntimeTaskInput[] = [];
   /** Every approval outcome {@link requestApproval} received, in order. */
   readonly approvalResults: Array<{ approved: boolean; reason?: string }> = [];
@@ -113,7 +115,7 @@ export class StubSession implements Session {
     };
   }
 
-  async steer(text: string): Promise<void> {
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
     this.steerAttempts += 1;
     if (this.steerErrorPersistent) {
       throw this.steerErrorPersistent;
@@ -125,6 +127,7 @@ export class StubSession implements Session {
     }
     if (this.steerGate) await this.steerGate;
     this.steerCalls.push(text);
+    if (options?.images !== undefined) this.steerImageCalls.push(options.images);
   }
 
   async followUp(task: RuntimeTaskInput): Promise<void> {
@@ -337,6 +340,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     this.startCalls.push({
       task: {
         instruction: startInput.instruction,
+        ...(startInput.images === undefined ? {} : { images: startInput.images }),
         target: startInput.manifest.modelTarget ?? { lane: 'auto' },
         ...(startInput.manifest.sessionRef === undefined ? {} : { sessionRef: startInput.manifest.sessionRef }),
       },

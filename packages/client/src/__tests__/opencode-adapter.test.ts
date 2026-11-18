@@ -115,7 +115,12 @@ for (const version of ['1.18.35', 'opencode v2.0.26']) {
       await collect(await box.start('permission'));
       expect(box.facts().find(fact => fact.kind === 'permission')?.reply).toEqual({ outcome: { outcome: 'cancelled' } });
       const held = await box.start('hold');
-      await expect(held.steer('no')).rejects.toThrow(/unsupported/);
+      if (version.startsWith('1.')) {
+        await held.steer('change direction');
+        await vi.waitFor(() => expect(box.facts().some(fact => fact.kind === 'prompt' && fact.text === 'change direction')).toBe(true));
+      } else {
+        await expect(held.steer('no')).rejects.toMatchObject({ name: 'SteerUnsupportedError' });
+      }
       await held.interrupt();
       expect((await collect(held)).at(-1)).toEqual({ type: 'turn_end' });
       await held.close();
@@ -175,6 +180,17 @@ it('cleans a detached descendant before reporting success', async () => {
   await collect(await box.start(`agy-daemon:${pidFile}`));
   const pid = Number(readFileSync(pidFile, 'utf8'));
   expect(() => process.kill(pid, 0)).toThrow();
+});
+
+it('distinguishes declared v1 steering from v2 negotiation', async () => {
+  expect(await setup().adapter.detect()).toMatchObject({ kind: 'available', sessionCapabilities: { steer: true } });
+  const box = setup('opencode v2.3.0', { FAKE_ACP_STEERING: '1', FAKE_ACP_IMAGES: '1' });
+  expect(await box.adapter.detect()).toMatchObject({ kind: 'available', sessionCapabilities: {} });
+  const session = await box.start('hold');
+  expect(session.capabilities?.images).toBe(true);
+  await session.steer('change direction');
+  expect(box.facts().find(fact => fact.kind === 'steer')?.params.prompt).toEqual([{ type: 'text', text: 'change direction' }]);
+  await session.interrupt();
 });
 
 it('registers an opt-in adapter with truthful capabilities', async () => {

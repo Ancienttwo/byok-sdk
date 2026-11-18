@@ -57,6 +57,26 @@ async function turn(session: AdapterSession, records: RawEvent[], input: string)
 }
 
 describe('vendored OAR ACP session over SDK-owned processes', () => {
+  it.each([true, false])('enforces opened image support and records paths only (images=%s)', async imagesSupported => {
+    const { dir, log } = workspace();
+    const pathToImage = path.join(dir, 'fixture.png');
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+    writeFileSync(pathToImage, Buffer.from(base64, 'base64'));
+    const session = await open({ PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log, FAKE_ACP_IMAGES: imagesSupported ? '1' : '0', FAKE_ACP_ECHO_IMAGE: '1' }, dir);
+    expect(session.capabilities.images).toBe(imagesSupported);
+    const delivered = await session.prompt('image test', { images: [{ path: pathToImage, mediaType: 'image/png' }] });
+    if (!imagesSupported) {
+      expect(delivered.response.body).toMatchObject({ kind: 'rejected', code: 'unsupported' });
+      expect(facts(log).some(fact => fact.kind === 'prompt')).toBe(false);
+      return;
+    }
+    expect(delivered.response.body.kind).toBe('accepted');
+    await vi.waitFor(() => expect(JSON.stringify(session.records())).toContain('[redacted]'));
+    expect(facts(log).find(fact => fact.kind === 'images')?.images).toEqual([expect.objectContaining({ data: base64, mimeType: 'image/png' })]);
+    const records = JSON.stringify(session.records());
+    expect(records).toContain(pathToImage);
+    expect(records).not.toContain(base64);
+  });
   it.each(['spawn', 'dispatch'].flatMap(wait => ['settlement', 'interrupt'].map(transition => ({ wait, transition }))))('rejects a steer waiting on $wait after $transition', async ({ wait, transition }) => {
     const gate = Promise.withResolvers<void>();
     const reply = Promise.withResolvers<{ stopReason: string }>();
@@ -74,7 +94,7 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     } as unknown as AcpProcess;
     const kernel = createSessionKernel('race');
     const turns = createAcpTurns({ kernel, runtime, profile: antigravityAcpProfile,
-      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, protectImage: vi.fn(), promptUsage: () => null });
     expect(turns.begin(null, 'first').kind).toBe('accepted');
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     const state = turns.active()!;
@@ -197,7 +217,7 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     } as unknown as AcpProcess;
     const kernel = createSessionKernel('answered');
     const turns = createAcpTurns({ kernel, runtime, profile: antigravityAcpProfile,
-      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, protectImage: vi.fn(), promptUsage: () => null });
     expect(turns.begin(null, 'first').kind).toBe('accepted');
     const state = turns.active()!;
     await vi.waitFor(() => expect(state.pending.size).toBe(1));

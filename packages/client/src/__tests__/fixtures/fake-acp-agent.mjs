@@ -94,6 +94,11 @@ let childUpdates = false;
 async function prompt(message) {
   const full = promptText(message.params);
   log({ kind: 'prompt', text: full });
+  const images = message.params?.prompt?.filter(block => block.type === 'image') ?? [];
+  if (images.length > 0) {
+    log({ kind: 'images', images });
+    if (process.env.FAKE_ACP_ECHO_IMAGE === '1') text(images[0].data);
+  }
   // Grok reports the prompt it runs under the `_meta.promptId` the client named.
   const promptId = message.params?._meta?.promptId;
   if (typeof promptId === 'string') send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: promptId, entries: [] } });
@@ -363,11 +368,11 @@ function request(message) {
       result(message.id, {
         protocolVersion: 1,
         agentCapabilities: {
-          loadSession: true, sessionCapabilities: { resume: {}, close: {}, ...(agy ? { list: {} } : {}) }, promptCapabilities: { image: false }, mcpCapabilities: { http: true },
+          loadSession: true, sessionCapabilities: { resume: {}, close: {}, ...(agy ? { list: {} } : {}) }, promptCapabilities: { image: process.env.FAKE_ACP_IMAGES === '1' }, mcpCapabilities: { http: true },
           ...(agy ? { _meta: { antigravity: { systemPrompt: { append: true } } } } : {}),
         },
         authMethods: [{ id: 'cached_token', name: 'Cached login' }],
-        _meta: { defaultAuthMethodId: 'cached_token' },
+        _meta: { defaultAuthMethodId: 'cached_token', ...(process.env.FAKE_ACP_STEERING === '1' ? { steering: { supported: true } } : {}) },
       });
       return;
     case 'authenticate':
@@ -426,6 +431,10 @@ function request(message) {
       return;
     case 'session/prompt':
       void prompt(message);
+      return;
+    case '_session/steering':
+      log({ kind: 'steer', params: message.params });
+      result(message.id, { outcome: 'injected' });
       return;
     case 'session/close':
       log({ kind: 'close' });

@@ -1,4 +1,3 @@
-import { readFile } from 'node:fs/promises';
 import { requireImageInput } from '../input-images.js';
 import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import { PI_MEMORY_LANE } from './memory-lane-contract.js';
@@ -46,7 +45,7 @@ import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
 } from '../../input-preparation.js';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { clientPackageRoot, readClientPiRuntimePin } from './client-manifest.js';
 import { PI_VERSION_POLICY } from './pi-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
@@ -823,9 +822,11 @@ export class PiAdapter implements RuntimeAdapter {
                 startInput.signal.addEventListener('abort', onAbort, { once: true });
                 if (startInput.signal.aborted) onAbort();
               });
+              const imageFields = await piImageFields(startInput.images);
+              startInput.signal?.throwIfAborted();
               // `followUp`: a run an extension started is not a refusal; the
               // input joins that run, and its settlement ends this turn.
-              response = await Promise.race([rpc.send({ type: 'prompt', message: startInput.instruction, streamingBehavior: 'followUp', ...await piImageFields(startInput.images) },
+              response = await Promise.race([rpc.send({ type: 'prompt', message: startInput.instruction, streamingBehavior: 'followUp', ...imageFields },
                 count => { promptFrames = count; }), interrupted]);
               if (memoryLane && startInput.signal?.aborted) {
                 await abortMemoryLane();
@@ -1350,7 +1351,7 @@ async function piImageFields(images: readonly RuntimeInputImage[] | undefined) {
   return { images: await Promise.all(images.map(async image => ({
     type: 'image' as const,
     mimeType: image.mediaType,
-    data: (await readFile(image.path)).toString('base64'),
+    data: (await fs.readFile(image.path)).toString('base64'),
   }))) };
 }
 

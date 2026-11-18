@@ -117,6 +117,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     expect(hello.payload.clientVersion).toBe('0.0.0-test');
     const runtimes = hello.payload.runtimes ?? [];
     expect(hello.payload.capabilities).toContain('toolset-selection');
+    expect(hello.payload.capabilities).toContain('input-images');
     expect(hello.payload.configuredToolsets).toEqual(['crm.readonly', 'salesko.connectors']);
     expect(JSON.stringify(hello.payload)).not.toContain('/private/device/salesko-connector');
     expect(JSON.stringify(hello.payload)).not.toContain('/private/device/crm-connector');
@@ -127,6 +128,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     // pi: the only bundled runtime that can express mid-turn steering; its
     // task-scoped pi-mcp-adapter bridge also consumes selected MCP toolsets.
     expect(byId.get('pi')).toEqual({
+      images: true,
       steer: true,
       resume: true,
       mcpToolsets: true,
@@ -140,6 +142,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
 
     // Claude still supports plan; its private confirm/approval MCP path has been removed.
     expect(byId.get('claude')).toEqual({
+      images: true,
       steer: false,
       resume: true,
       approvalInteractive: false,
@@ -152,6 +155,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
     expect(byId.get('codex')).toEqual({
+      images: true,
       steer: true,
       resume: true,
       approvalInteractive: false,

@@ -1,7 +1,7 @@
 // The scripted runtime of the sealed zero-hit run (#654 E6). No model runs: the test drives each session's events, and
 // the session records the instruction and the steer texts it received, as the device opened them.
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult,
-  type RuntimeOperationStartInput } from '@byok-sdk/client';
+  type RuntimeOperationStartInput, type RuntimeInputOptions } from '@byok-sdk/client';
 import { BotStubAdapter, BotStubSession } from '../../basic/goal-btw.test-support';
 
 export class ZeroHitSession extends BotStubSession {
@@ -11,8 +11,7 @@ export class ZeroHitSession extends BotStubSession {
   get instruction(): string { return this.start.kind === 'instruction' ? this.start.instruction : ''; }
   /** The task's run directory, where the daemon reads an artifact the session names. */
   get workspaceDir(): string { return this.start.manifest.cwd!; }
-  // The base stub takes no text, so the override keeps that arity and reads the text the daemon passes.
-  override async steer(...texts: string[]): Promise<void> { this.steers.push(...texts); }
+  override async steer(text?: string, _options?: RuntimeInputOptions): Promise<void> { if (text !== undefined) this.steers.push(text); }
 }
 
 export class ZeroHitAdapter extends BotStubAdapter {
