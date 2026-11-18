@@ -22,6 +22,8 @@ export type ClaudeAppRequest = (message: ClaudeStreamMessage, respond: (reply: R
 export interface ClaudeStreamSessionOptions {
   /** The requested `--resume` id; a fresh session learns its id from `system/init`. */
   resume?: string;
+  /** Exact reasoning effort passed to the child as `--effort`. */
+  effort?: string;
   env: Readonly<Record<string, string>>;
   /** The kernel's retention limit: past it the oldest native payloads are elided. */
   maxRetainedBytes: number;
@@ -49,6 +51,8 @@ export class ClaudeStreamSession {
   readonly sessionRef: Promise<string>;
   hooksApplied: boolean | undefined;
   #raw: RawClaudeSession | undefined;
+  #effort: string | undefined;
+  get effort(): string | undefined { return this.#effort; }
   #inputWrites: Promise<void>[] | undefined;
   #withdraw!: NonNullable<RawClaudeSession['withdraw']>;
   /** Input ids of the follow-ups OAR holds for after a Claude-own turn; an interrupt withdraws them first. */
@@ -71,6 +75,7 @@ export class ClaudeStreamSession {
 
   /** Spawn and adoption settle before the first protocol write; the open writes `initialize` when asked. */
   async open(options: ClaudeStreamSessionOptions): Promise<void> {
+    this.#effort = options.effort;
     await this.child.spawned;
     // A start halted during adoption writes nothing to the adopted process.
     if (this.#fatal !== undefined) throw this.#fatal;

@@ -79,6 +79,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
 
   get descriptor() {
     return freezeRuntimeAdapterDescriptor({ id: 'opencode', supportsDispatchSelection: false,
+      supportsTaskExecutionOptions: true,
       // `platforms` is OS-grained: `darwin` covers x64 and arm64; `win32` is x64. Each has the lifecycle contract on both lines (#1593).
       platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES,
       ...(this.policy === undefined ? {} : { versionPolicy: this.policy }),
@@ -115,10 +116,12 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     if (probe.detected.kind !== 'available' || probe.command === undefined || probe.version === undefined)
       return { kind: 'reject', reason: `opencode installation refused: ${probe.detected.kind}`, retryable: false };
     const { command, version } = probe;
-    return { kind: 'prepared', operation: { start: input => this.start(input, command, version) } };
+    const { modelId, effort } = input.offer;
+    const models = modelId === undefined ? this.options.models : [modelId];
+    return { kind: 'prepared', operation: { start: input => this.start(input, command, version, models, effort) } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string, version: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, version: string, models: readonly string[], effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('opencode requires a resolved instruction');
     if (!input.manifest.cwd) throw authority('opencode requires a sealed cwd');
     if (version.startsWith('2.') && input.manifest.homeAccess === 'memory-reader')
@@ -126,7 +129,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     const persona = input.manifest.homeAccess === 'memory-reader'
       ? await agentPersona('opencode', input.manifest, { reappliesOnResume: true }) : undefined;
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
-    const session = new OpenCodeSession(input, this.options, command, version, mcpServers, this.options.maxRetainedBytes, this.options.interruptTimeoutMs, persona);
+    const session = new OpenCodeSession(input, this.options, command, version, models, effort, mcpServers, this.options.maxRetainedBytes, this.options.interruptTimeoutMs, persona);
     try {
       await session.start();
       return session;
@@ -162,6 +165,7 @@ class OpenCodeSession implements Session {
 
   constructor(private readonly input: RuntimeOperationStartInput & { kind: 'instruction' }, private readonly options: OpenCodeAdapterOptions,
     private readonly command: string, private readonly version: string,
+    private readonly models: readonly string[], private readonly effort: string | undefined,
     private readonly mcpServers: readonly { name: string; command: string; args?: readonly string[]; env?: Readonly<Record<string, string>> }[],
     private readonly maxRetainedBytes: number, private readonly interruptTimeoutMs: number, private readonly persona?: string) {}
 
@@ -214,7 +218,8 @@ class OpenCodeSession implements Session {
       return spawnTerminal(invocation.command, [...invocation.args, ...args], opts);
     },
     { kind: 'available', via: 'executable', command: this.command, version: this.version }, {
-      cwd: this.input.manifest.cwd!, env: { ...this.input.env, ...this.input.scratch.env }, retainedBytes: this.maxRetainedBytes, model: this.options.models[index]!,
+      cwd: this.input.manifest.cwd!, env: { ...this.input.env, ...this.input.scratch.env }, retainedBytes: this.maxRetainedBytes, model: this.models[index]!,
+      ...(this.effort === undefined ? {} : { effort: this.effort }),
       ...(this.mcpServers.length === 0 ? {} : { mcpServers: this.mcpServers }),
       ...(expected === undefined ? {} : { resume: expected }),
       ...(this.persona === undefined ? {} : { appendSystemPrompt: this.persona }),
@@ -228,7 +233,7 @@ class OpenCodeSession implements Session {
       // Omitted permission hook cancels every unsupported request in the maintained ACP boundary.
     });
     if (this.failure) throw this.failure;
-    if (this.model !== this.options.models[index]) throw authority('opencode session model readback does not match the Host selected model');
+    if (this.model !== this.models[index]) throw authority('opencode session model readback does not match the Host selected model');
   }
 
   private record(record: AcpRecord, index: number): void {
@@ -240,7 +245,7 @@ class OpenCodeSession implements Session {
           const event = object(value);
           if (event?.kind === 'model' && typeof event.model === 'string') {
             this.model = event.model;
-            if (this.prompting && this.model !== this.options.models[index]) throw authority('opencode changed the selected model');
+            if (this.prompting && this.model !== this.models[index]) throw authority('opencode changed the selected model');
           }
         }
       }
@@ -272,7 +277,7 @@ class OpenCodeSession implements Session {
       if (outcome.kind === 'failed') {
         const failure = (cause?: unknown) => new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: outcome.reason ?? 'opencode turn failed',
           failure: { class: outcome.fromText ? 'unknown' : runtimeFailureClassOf(outcome.failure) } }, { cause });
-        if (!this.cancelled && !outcome.fromText && outcome.failure === 'rate_limited' && !this.projection?.output && index === 0 && this.options.models.length > 1) {
+        if (!this.cancelled && !outcome.fromText && outcome.failure === 'rate_limited' && !this.projection?.output && index === 0 && this.models.length > 1) {
           // Resume the admitted native identity and apply the next model through ACP; never create a replacement session.
           try { await this.open(1); }
           catch (error) {
@@ -280,7 +285,7 @@ class OpenCodeSession implements Session {
             throw failure(error);
           }
           if (this.closing || this.cancelled) return;
-          this.queue.push({ type: 'error', message: JSON.stringify({ event: 'model_switch', from: this.options.models[0], to: this.options.models[1], reason: 'rate_limited' }) });
+          this.queue.push({ type: 'error', message: JSON.stringify({ event: 'model_switch', from: this.models[0], to: this.models[1], reason: 'rate_limited' }) });
           await this.prompt();
           await this.finish(1);
           return;

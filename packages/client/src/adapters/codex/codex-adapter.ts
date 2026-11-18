@@ -162,6 +162,7 @@ export class CodexAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
+    supportsTaskExecutionOptions: true,
     progressMessageBoundary: 'event',
     platforms: ['darwin', 'linux', 'win32'],
     mcpToolApprovals: true,
@@ -257,6 +258,7 @@ export class CodexAdapter implements RuntimeAdapter {
   async prepare(
     input: RuntimeAdapterPrepareInput,
   ): Promise<RuntimeAdapterPrepareResult> {
+    const { effort } = input.offer;
     let model: string | undefined;
     try {
       model = subscriptionModel(modelLaneTarget(input.offer.target));
@@ -284,7 +286,7 @@ export class CodexAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (start) => this.start(start, invocation, model),
+        start: (start) => this.start(start, invocation, model, effort),
       },
     };
   }
@@ -292,6 +294,7 @@ export class CodexAdapter implements RuntimeAdapter {
     input: RuntimeOperationStartInput,
     invocation: RuntimeInvocation,
     model: string | undefined,
+    effort: string | undefined,
   ): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
@@ -339,6 +342,7 @@ export class CodexAdapter implements RuntimeAdapter {
           env: { ...input.env, ...input.scratch.env, ...codexHome } as Record<string, string>,
           retainedBytes: this.maxRetainedBytes,
           ...(model === undefined ? {} : { model }),
+          ...(effort === undefined ? {} : { effort }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           launchArgs: [

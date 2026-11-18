@@ -31,6 +31,7 @@ export declare function codexSession(
     retainedBytes: number;
     resume?: string;
     model?: string;
+    effort?: string;
     approvalPolicy?: "never" | "on-request";
     sandboxMode?: "read-only" | "workspace-write" | "danger-full-access" | "inherit";
     /** OAR SessionOptions.launchArgs: host `app-server` arguments after the sandbox override and before `--listen`. */

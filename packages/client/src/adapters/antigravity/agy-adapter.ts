@@ -5,7 +5,7 @@ import { antigravityVersionRefusal } from '../../runtime/oar-version-floors.js';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { agyStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
@@ -129,6 +129,7 @@ export class AgyAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'agy',
       supportsDispatchSelection: false,
+      supportsTaskExecutionOptions: true,
       requiresMcpToolsetToolObservation: true,
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: AGY_RUNTIME_CAPABILITIES,
@@ -184,7 +185,8 @@ export class AgyAdapter implements RuntimeAdapter {
     }
   }
 
-  async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { effort, modelId = this.options.model } = input.offer;
     const detected = await this.detect();
     if (detected.kind !== 'available') {
       return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };
@@ -193,11 +195,11 @@ export class AgyAdapter implements RuntimeAdapter {
     const command = resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(base)).bin.command;
     return { kind: 'prepared', operation: {
       acquireSessionLease: (sessionRef) => acquireAgySessionRetention(agyStoreDir(this.root), sessionRef),
-      start: (start) => this.start(start, command),
+      start: (start) => this.start(start, command, modelId, effort),
     } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, model: string | undefined, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('agy requires a resolved instruction');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('agy manifest has no sealed cwd');
@@ -244,7 +246,8 @@ export class AgyAdapter implements RuntimeAdapter {
           // Without it agy reports to play.googleapis.com, the one host beside the model endpoint it contacts.
           launchArgs: ['--disable-telemetry'],
           ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
-          ...(this.options.model === undefined ? {} : { model: this.options.model }),
+          ...(model === undefined ? {} : { model }),
+          ...(effort === undefined ? {} : { effort }),
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(resume === undefined ? {} : { resume }),
         },
@@ -265,7 +268,7 @@ export class AgyAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      throw runtimeStartFailure(session.halted ?? thrown, { classify: agyStartClassifier(acp), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'agy' });
+      throw runtimeStartFailure(session.halted ?? thrown, { classify: oarStartClassifier(acp), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'agy' });
     }
   }
 }

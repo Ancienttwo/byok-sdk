@@ -80,6 +80,7 @@ export type StartAcpSession = (
     retainedBytes: number;
     resume?: string;
     model?: string;
+    effort?: string;
     /** OAR SessionOptions.appendSystemPrompt: session-local instructions added to the runtime's built-in ones. */
     appendSystemPrompt?: string;
     /** OAR SessionOptions.launchArgs: joined to the profile's argv where the profile places them. */

@@ -25,6 +25,10 @@ export type { AgentRef } from './agent-home.js';
  */
 export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> & {
   instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
+  /** Exact per-task reasoning effort, interpreted by the selected runtime. */
+  effort?: string;
+  /** Exact per-task model selector for the harness lane. */
+  modelId?: string;
   /** The runtime session to resume (`session.mode: 'resume'` on the offer); absent for a fresh session. */
   sessionRef?: string;
 };
@@ -351,6 +355,8 @@ export interface RuntimeAdapterDescriptor {
   readonly versionPolicy?: RuntimeVersionPolicy;
   /** Explicit opt-in to the authoritative model lanes of `task.offer.target` (`subscription`, `byok`, `byok-profile`). */
   readonly supportsDispatchSelection: boolean;
+  /** Consumes explicit per-task execution options or refuses them before prompting. */
+  readonly supportsTaskExecutionOptions?: boolean;
   /**
    * Whether this adapter actually CONSUMES
    * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
@@ -729,6 +735,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     id: descriptor.id,
     ...(descriptor.memoryLane === undefined ? {} : { memoryLane: descriptor.memoryLane }),
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
+    ...(descriptor.supportsTaskExecutionOptions === true ? { supportsTaskExecutionOptions: true } : {}),
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.mcpToolApprovals === true ? { mcpToolApprovals: true } : {}),
     ...(descriptor.progressMessageBoundary === undefined ? {} : { progressMessageBoundary: progressMessageBoundaryOf(descriptor.progressMessageBoundary) }),

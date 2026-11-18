@@ -157,6 +157,7 @@ export class GrokAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'grok',
     supportsDispatchSelection: false,
+    supportsTaskExecutionOptions: true,
     // Windows has no Grok evidence (`docs/adapter-capabilities.md`).
     platforms: ['darwin', 'linux'],
     capabilities: {
@@ -224,7 +225,8 @@ export class GrokAdapter implements RuntimeAdapter {
     }
   }
 
-  async prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+  async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { effort, modelId = this.options.model } = input.offer;
     const detected = await this.detect();
     if (detected.kind !== 'available')
       return {
@@ -233,10 +235,10 @@ export class GrokAdapter implements RuntimeAdapter {
         retryable: false,
       };
     const command = (this.options.resolveBin ?? resolveGrokBin)().command;
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command) } };
+    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, modelId, effort) } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, model: string | undefined, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('grok requires a resolved instruction');
     const cwd = input.manifest.cwd;
@@ -278,7 +280,7 @@ export class GrokAdapter implements RuntimeAdapter {
     const acp = await import('#byok-acp-runtime');
     const session = new GrokSession(
       input.scratch,
-      this.options.model,
+      model,
       this.interruptTimeoutMs,
       input.manifest.sessionRef,
     );
@@ -297,7 +299,8 @@ export class GrokAdapter implements RuntimeAdapter {
           ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
           env,
           retainedBytes: this.maxRetainedBytes,
-          ...(this.options.model === undefined ? {} : { model: this.options.model }),
+          ...(model === undefined ? {} : { model }),
+          ...(effort === undefined ? {} : { effort }),
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(input.manifest.sessionRef === undefined ? {} : { resume: input.manifest.sessionRef }),
         },

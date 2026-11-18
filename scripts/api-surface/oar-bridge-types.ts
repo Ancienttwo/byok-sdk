@@ -31,7 +31,7 @@ type BridgeArgs = Parameters<typeof Bridge.codexSession>;
 type Executable = Extract<VendorArgs[1], { via: 'executable' }>;
 type BridgeInstallation = Mutable<Pick<Executable, 'kind' | 'via' | 'command'>>;
 type BridgeOptions = Mutable<
-  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
+  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'effort' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
 >;
 type VendorHooks = NonNullable<VendorArgs[4]>;
 type BridgeHooks = Mutable<Omit<VendorHooks, 'onRecord'>> & {
@@ -153,7 +153,7 @@ import type { antigravitySession as vendorAntigravitySession } from '../../packa
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
-  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'appendSystemPrompt' | 'launchArgs' | 'mcpServers'> & Required<Pick<AcpSessionOptions, 'retainedBytes'>>
+  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'effort' | 'appendSystemPrompt' | 'launchArgs' | 'mcpServers'> & Required<Pick<AcpSessionOptions, 'retainedBytes'>>
 >;
 type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord' | 'onPermission'>> & {
   onRecord?: (record: AcpBridge.AcpRecord) => void;
@@ -239,7 +239,7 @@ import type { DshLineProcess } from '../../packages/client/vendor/oar/609f347/ru
 
 type VendorDshArgs = Parameters<typeof vendorDshSession>;
 type DshBridgeArgs = Parameters<typeof DshBridge.dshSession>;
-type DshBridgeOptions = { cwd: string; model: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> }; retainedBytes: number; appendSystemPrompt?: string };
+type DshBridgeOptions = { cwd: string; model: string; effort?: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> }; retainedBytes: number; appendSystemPrompt?: string };
 type DshVendorSession = Awaited<ReturnType<typeof vendorDshSession>>;
 type DshBridgeSession = {
   readonly id: AdapterSession['id'];
@@ -285,6 +285,8 @@ export type CheckDshModelConfirmation = Assert<Equal<DshBridge.ModelConfirmation
 // The Claude bridge: the vendored stream-json session and the Claude projection
 // profile. The adapter assembles the session profile; the fold stays opaque.
 import type * as ClaudeBridge from '../../packages/client/src/runtime/claude-session-runtime.js';
+import type { ClaudeStreamSessionOptions } from '../../packages/client/src/adapters/claude/stream-session.js';
+export type CheckClaudeEffort = Assert<Equal<Pick<ClaudeStreamSessionOptions, 'effort'>, Pick<VendorArgs[2], 'effort'>>>;
 import type { streamJsonSession as vendorStreamJsonSession, StreamJsonSessionHooks } from '../../packages/client/vendor/oar/609f347/shared/stream-json/session.js';
 import type { StreamJsonSessionProfile } from '../../packages/client/vendor/oar/609f347/shared/stream-json/profile.js';
 import type { claudeProjectionProfile as vendorClaudeProfile, ClaudeProjectionState as VendorClaudeState } from '../../packages/client/vendor/oar/609f347/runtimes/claude/projection.js';

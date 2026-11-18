@@ -178,6 +178,7 @@ export class DshAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'dsh',
       supportsDispatchSelection: false,
+      supportsTaskExecutionOptions: true,
       // dsh ships no win32 build of its native addon (docs/researches/2026-11-01-dsh-adapter.md §1.9).
       platforms: ['darwin', 'linux'],
       capabilities: DSH_RUNTIME_CAPABILITIES,
@@ -250,6 +251,13 @@ export class DshAdapter implements RuntimeAdapter {
 
   /** Cheap admission: the version probe only. The acp profile probe belongs to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { modelId, effort } = input.offer;
+    const route = dshRoute(this.options.model);
+    const prefix = `${route}/`;
+    if (modelId !== undefined && (!modelId.startsWith(prefix) || modelId.length === prefix.length)) {
+      return { kind: 'reject', reason: `model_rejected: dsh modelId must select the configured ${route} route`, retryable: false };
+    }
+    const selection = modelId === undefined ? this.options.model : { ...this.options.model, model: modelId.slice(prefix.length) };
     try {
       dshMcpRows(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');
     } catch (error) {
@@ -261,10 +269,10 @@ export class DshAdapter implements RuntimeAdapter {
     if (version.kind !== 'available') {
       return { kind: 'reject', reason: `dsh installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
     }
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command) } };
+    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, selection, effort) } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, selection: DshModelSelection, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('dsh requires a resolved instruction');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('dsh manifest has no sealed cwd');
@@ -275,7 +283,7 @@ export class DshAdapter implements RuntimeAdapter {
     const persona = input.manifest.homeAccess === 'memory-reader'
       ? await agentPersona('dsh', input.manifest, { reappliesOnResume: true })
       : undefined;
-    const model = `${dshRoute(this.options.model)}/${this.options.model.model}`;
+    const model = `${dshRoute(selection)}/${selection.model}`;
     const session = new DshSession(
       input.scratch,
       this.interruptTimeoutMs,
@@ -286,7 +294,7 @@ export class DshAdapter implements RuntimeAdapter {
       const workspace = await fs.realpath(cwd);
       await this.ensureRoot();
       const patch = path.join(input.scratch.sdkDir, PATCH_FILE);
-      await fs.writeFile(patch, dshPatch(this.options.model), { mode: 0o600 });
+      await fs.writeFile(patch, dshPatch(selection), { mode: 0o600 });
       const env = dshEnvironment({ ...input.env, ...input.scratch.env }, this.root, this.sandbox);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp' });
@@ -301,6 +309,7 @@ export class DshAdapter implements RuntimeAdapter {
         {
           cwd: workspace,
           model,
+          ...(effort === undefined ? {} : { effort }),
           // The process runs in the scratch directory, so dsh reads no workspace `.env`; the workspace stays the session cwd.
           launch: { directory: input.scratch.sdkDir, patches: [patch], env },
           retainedBytes: this.maxRetainedBytes,

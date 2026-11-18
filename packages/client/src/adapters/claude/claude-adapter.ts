@@ -206,6 +206,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
       supportsDispatchSelection: true,
+      supportsTaskExecutionOptions: true,
       // `progress` events are complete text blocks, never deltas, and
       // `progressStartsMessage` joins the blocks of one message, so the
       // closing reply is the last assistant message. A run that repeats its
@@ -253,6 +254,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { effort } = input.offer;
     let modelId: string | undefined;
     try {
       modelId = subscriptionModel(modelLaneTarget(input.offer.target), 'claude');
@@ -275,7 +277,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, modelId, invocation),
+        start: (startInput) => this.startPrepared(startInput, modelId, invocation, effort),
       },
     };
   }
@@ -284,6 +286,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     startInput: RuntimeOperationStartInput,
     modelId: string | undefined,
     invocation: RuntimeInvocation,
+    effort: string | undefined,
   ): Promise<Session> {
     const signal = startInput.signal;
     const cancellationFailure = () => new RuntimeExecutionFailure({
@@ -401,6 +404,25 @@ export class ClaudeAdapter implements RuntimeAdapter {
           reason: 'prepared claude operation received a manifest without a sealed cwd',
         });
       }
+      let launchModel = manifestModelId;
+      if (effort !== undefined) {
+        let catalog: RuntimeModelCatalog;
+        try {
+          catalog = await this.listModels({ signal });
+        } catch (cause) {
+          throwIfCancelled();
+          throw claudeEffortRefusal('claude_effort_catalog_unavailable', cause);
+        }
+        throwIfCancelled();
+        if (catalog.kind !== 'ok') throw claudeEffortRefusal('claude_effort_catalog_unavailable');
+        const model = manifestModelId === undefined
+          ? catalog.models.find(entry => entry.default === true || entry.id === 'default')
+          : catalog.models.find(entry => entry.id === manifestModelId) ?? catalog.models.find(entry => entry.resolvedId === manifestModelId);
+        if (model?.effortLevels === undefined || model.disabled !== undefined) throw claudeEffortRefusal('claude_effort_menu_unavailable');
+        if (!model.effortLevels.includes(effort)) throw claudeEffortRefusal('claude_effort_unsupported');
+        // Pin the model whose menu admitted the effort, including on resume.
+        launchModel ??= model.resolvedId ?? model.id;
+      }
       const args = [
         '-p',
         '--input-format',
@@ -415,7 +437,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // Text deltas for the display-only draft (`stream_event` frames).
         '--include-partial-messages',
         ...(persistSession ? [] : ['--no-session-persistence']),
-        ...(manifestModelId ? ['--model', manifestModelId] : []),
+        ...(launchModel === undefined ? [] : ['--model', launchModel]),
+        ...(effort === undefined ? [] : ['--effort', effort]),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
         // YOLO by default, as in OAR (`runtimes/claude/session.ts`). Native
         // interactions need the stdio prompt tool to relay AskUserQuestion;
@@ -450,6 +473,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throwIfCancelled();
       try {
         await Promise.race([opened.open({
+          effort,
           ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
           env,
           maxRetainedBytes: this.maxRetainedBytes,
@@ -565,6 +589,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
   private resolveBin(): ResolvedBin {
     return (this.options.resolveBin ?? resolveClaudeBin)();
   }
+}
+
+function claudeEffortRefusal(reason: string, cause?: unknown): RuntimeExecutionFailure {
+  return new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason, failure: { class: 'invalid_request' } }, { cause });
 }
 
 function subscriptionModel(
@@ -772,6 +800,9 @@ class ClaudeSession implements Session {
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
+    }
+    if (task.effort !== undefined && task.effort !== this.stream.effort) {
+      throw new PolicyUnsupportedError('claude persistent session cannot change effort');
     }
     const requestedModel = subscriptionModel(modelLaneTarget(task.target), 'claude');
     if (requestedModel !== undefined && requestedModel !== this.modelId) {

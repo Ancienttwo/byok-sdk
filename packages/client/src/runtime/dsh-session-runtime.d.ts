@@ -57,6 +57,7 @@ export declare function dshSession(
   options: {
     cwd: string;
     model: string;
+    effort?: string;
     resume?: string;
     mcpServers?: readonly (
       | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }

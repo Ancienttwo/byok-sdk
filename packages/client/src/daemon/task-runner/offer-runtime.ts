@@ -39,6 +39,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
         resume: offered.sessionRef !== undefined,
         dispatchSelection: modelLaneTarget(target) !== undefined,
         preparedInput: preparation !== undefined,
+        taskExecutionOptions: offered.effort !== undefined || offered.modelId !== undefined,
       },
       blobAbort.signal,
     );
@@ -56,6 +57,10 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       retryable: pick.retryable,
       ...(pick.runtimeUnavailable === undefined ? {} : { code: 'runtime_unavailable', runtimeUnavailable: pick.runtimeUnavailable }),
     });
+    return undefined;
+  }
+  if (preparation !== undefined && offered.effort !== undefined) {
+    decline({ reason: 'invalid_request: per-task effort cannot change a frozen prepared request', code: 'invalid_request', retryable: false });
     return undefined;
   }
   if (payload.nativeSessions !== undefined && pick.descriptor.memoryLane === undefined) {

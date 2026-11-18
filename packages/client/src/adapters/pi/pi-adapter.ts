@@ -53,6 +53,7 @@ import { resolvePiBin, type ResolvedBin } from './resolve-bin.js';
 import { runtimeExecutableFields } from '../runtime-executable.js';
 import { mapPiContextUsage, mapPiMessageToAgentEvent, piAssistantError, ROUTINE_PI_EVENT_TYPES } from './events.js';
 import { boundFailureReason } from '@byok-sdk/protocol/constants';
+import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client.js';
 import { abortPiRpcAndSettle } from './interrupt-settlement.js';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame.js';
@@ -252,6 +253,7 @@ export class PiAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
     supportsDispatchSelection: true,
+    supportsTaskExecutionOptions: true,
     // Pi registers ONE tool per observed MCP tool, carrying that tool's real
     // schema (`./mcp-extension.ts`), so it consumes the daemon's observation
     // exactly like claude and codex do. It previously declared nothing here
@@ -414,6 +416,7 @@ export class PiAdapter implements RuntimeAdapter {
     // creates a missing session. BYOK deliberately uses `--session` so a
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
+    const { effort } = input.offer;
     const selection = modelLaneTarget(input.offer.target);
     const pinnedSelection: ModelLaneTarget | undefined = selection === undefined
       ? undefined
@@ -572,6 +575,10 @@ export class PiAdapter implements RuntimeAdapter {
           // `pi --mode rpc` can never consume a prepared request, so this branch
           // launches the SDK-owned in-process host instead
           // (`../../bin/byok-pi-prepared.ts`).
+          if (effort !== undefined && (runtimeLaunch.kind !== 'pi-rpc' || !(MODEL_THINKING_LEVELS as readonly string[]).includes(effort))) {
+            throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable',
+              reason: 'pi cannot apply the requested effort on this execution lane', failure: { class: 'invalid_request' } });
+          }
           if (this.options.durableLane === true) {
             if (startInput.kind !== 'instruction' || launcherArgs === undefined || this.options.byokLauncher === undefined) throw authorityFailure('durable Pi requires ordinary custody launch');
             if (startInput.durableContext === undefined) throw authorityFailure('durable Pi requires replica and journal context');
@@ -732,6 +739,7 @@ export class PiAdapter implements RuntimeAdapter {
             }, { cause });
           }
           const piArgs = ['--config', hostConfigPath, '--mode', 'rpc',
+            ...(effort === undefined ? [] : ['--thinking', effort]),
             ...(resumeSessionId === undefined ? [] : ['--session', resumeSessionId])];
           const launch = piLaunchCommand(runtimeLaunch, 'pi-rpc', hostConfigDigest, piArgs,
             launcherArgs === undefined ? undefined : {
@@ -783,7 +791,7 @@ export class PiAdapter implements RuntimeAdapter {
           // retains admission too, before allowing the first prompt.
           let sessionRef: string;
           try {
-            sessionRef = await resolveAuthoritativeSessionId(rpc, startInput.signal);
+            sessionRef = await resolveAuthoritativeSessionId(rpc, startInput.signal, effort);
             await readiness;
             if (memoryLane && (readyCount !== 1 || readySessionId !== sessionRef)) throw authorityFailure('memory_lane_tool_set_mismatch');
             if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
@@ -1290,7 +1298,7 @@ function sameModelTarget(
  * `PiRpcClient.buildExitError`), exactly like any other adapter start()
  * failure `task-runner.ts` already knows how to report as `task.fail`.
  */
-async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSignal | undefined): Promise<string> {
+async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSignal | undefined, effort: string | undefined): Promise<string> {
   let state: PiRpcMessage;
   try {
     state = await untilStartAborted(rpc.send({ type: 'get_state' }), signal);
@@ -1315,7 +1323,11 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSign
     });
   }
 
-  const data = state.data as { sessionId?: unknown } | undefined;
+  const data = state.data as { sessionId?: unknown; thinkingLevel?: unknown } | undefined;
+  if (effort !== undefined && data?.thinkingLevel !== effort) {
+    throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable',
+      reason: 'pi did not confirm the requested effort', failure: { class: 'invalid_request' } });
+  }
   if (typeof data?.sessionId === 'string' && data.sessionId.length > 0) {
     return data.sessionId;
   }

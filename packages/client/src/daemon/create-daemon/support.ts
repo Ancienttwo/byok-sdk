@@ -1,5 +1,6 @@
 import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal.js';
+import { TASK_EXECUTION_OPTIONS_CAPABILITY } from '@byok-sdk/protocol/constants';
 import { encodeEnvelope, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types.js';
 import type { DaemonConfigIssue } from '../config-schema/validate.js';
@@ -179,6 +180,7 @@ export function computeCapabilities(
   nativeSessions?: { enabled?: boolean; platform?: NodeJS.Platform; sessionDir?: string },
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
+  if (adapters.some(adapter => adapter.descriptor.supportsTaskExecutionOptions === true)) flags.push(TASK_EXECUTION_OPTIONS_CAPABILITY);
   if (nativeSessions?.enabled === true
     && ['darwin', 'linux'].includes(nativeSessions.platform ?? process.platform)
     && nativeSessions.sessionDir !== undefined
