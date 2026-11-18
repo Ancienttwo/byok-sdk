@@ -1,7 +1,6 @@
 import type { spawn as nodeSpawn } from 'node:child_process';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
-import { opencodeListModels } from '../../runtime/oar-readers.js';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
@@ -58,7 +57,10 @@ export class OpenCodeAdapter implements RuntimeAdapter {
   }
 
   listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
-    return this.readers.listModels(options, opencodeListModels);
+    return this.readers.listModels(options, async (installation, reader) => {
+      const { opencodeListModels } = await import('#byok-oar-readers');
+      return opencodeListModels(installation, reader);
+    });
   }
 
   private readonly options: OpenCodeAdapterOptions & { maxRetainedBytes: number; interruptTimeoutMs: number };

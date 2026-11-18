@@ -329,6 +329,7 @@ export type CheckRuntimeSessionCapabilitiesOmitted = Assert<Equal<VendorRuntime[
 
 // The SDK supplies both the filtered environment and every reader transport.
 import type * as Readers from '../../packages/client/src/runtime/oar-readers.js';
+import type * as VersionFloors from '../../packages/client/src/runtime/oar-version-floors.js';
 import type { OwnedReaderOptions as SdkReaderOptions } from '../../packages/client/src/runtime/oar-reader-contract.js';
 import type { OwnedReaderOptions as VendorReaderOptions, ListModelsResult } from '../../packages/client/vendor/oar/609f347/contracts/list-models.js';
 import type { AccountUsageSnapshot } from '../../packages/client/vendor/oar/609f347/contracts/account-usage.js';
@@ -348,9 +349,9 @@ export type Check_opencodeListModels = Assert<Assignable<typeof V_opencodeListMo
 import type { antigravityAccountUsage as V_antigravityAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/account-usage.js';
 export type Check_antigravityAccountUsage = Assert<Assignable<typeof V_antigravityAccountUsage, typeof Readers.antigravityAccountUsage>>;
 import type { antigravityVersionRefusal as V_antigravityVersionRefusal } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/version.js';
-export type Check_antigravityVersionRefusal = Assert<Assignable<typeof V_antigravityVersionRefusal, typeof Readers.antigravityVersionRefusal>>;
+export type Check_antigravityVersionRefusal = Assert<Assignable<typeof V_antigravityVersionRefusal, typeof VersionFloors.antigravityVersionRefusal>>;
 import type { dshVersionUnsupported as V_dshVersionUnsupported } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/version.js';
-export type Check_dshVersionUnsupported = Assert<Assignable<typeof V_dshVersionUnsupported, typeof Readers.dshVersionUnsupported>>;
+export type Check_dshVersionUnsupported = Assert<Assignable<typeof V_dshVersionUnsupported, typeof VersionFloors.dshVersionUnsupported>>;
 import type { grokListModels as V_grokListModels } from '../../packages/client/vendor/oar/609f347/runtimes/grok/list-models.js';
 import type { grokAccountUsage as V_grokAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/grok/account-usage.js';
 import type { antigravityListModels as V_antigravityListModels } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/list-models.js';

@@ -131,6 +131,16 @@ assert.equal(new adapters.DshAdapter({ home: '/tmp/byok-dsh-entry-check', model:
 // The ACP stack and its protocol SDK are a private lazy entry, never part of this one.
 assert.doesNotMatch(bundledEntry, /@agentclientprotocol\/sdk/);
 
+// Inspect the emitted graph as well as the import spelling. A reader re-export
+// can be accidentally inlined even if a different reader still loads lazily.
+const readerSource = /\/vendor\/oar\/[^/]+\/runtimes\/[^/]+\/(?:list-models|account-usage|account-request|model-menus|auth-status)\.ts$/;
+for (const target of ['index.js', 'adapters/index.js', 'bin/byok-agent.js']) {
+  const url = new URL(`../dist/${target}`, import.meta.url);
+  assert.match(readFileSync(url, 'utf8'), /import\(["']#byok-oar-readers["']\)/, `${target} must load the native readers on demand`);
+  const { sources } = JSON.parse(readFileSync(new URL(`${url.href}.map`), 'utf8'));
+  assert.deepEqual(sources.filter(source => readerSource.test(source)), [], `${target} bundles native reader sources`);
+}
+
 // The SDK root must not evaluate the prepared-input compile graph just because
 // it was imported. The compile calls the official public entry
 // `@earendil-works/pi-ai/api/openai-completions`, which statically loads the
@@ -154,7 +164,17 @@ if (native().length > 0) {
   console.error('the SDK root eagerly loaded the prepared-input compile graph: ' + native().join(', '));
   process.exit(1);
 }
-// And the lazy load still resolves: absent-because-broken would pass the test above.
+await import(${JSON.stringify(new URL('../dist/adapters/index.js', import.meta.url).href)});
+if (loaded.some(url => url.endsWith('/dist/runtime/oar-readers.js'))) {
+  console.error('a public client entry eagerly loaded the private native readers');
+  process.exit(1);
+}
+const readers = await import('#byok-oar-readers');
+if (typeof readers.codexListModels !== 'function' || !loaded.some(url => url.endsWith('/dist/runtime/oar-readers.js'))) {
+  console.error('the private native readers did not load on demand');
+  process.exit(1);
+}
+// And the lazy compile still resolves: absent-because-broken would pass the test above.
 await import('@earendil-works/pi-ai/api/openai-completions');
 if (native().length === 0) {
   console.error('the official compile entry did not load on demand');

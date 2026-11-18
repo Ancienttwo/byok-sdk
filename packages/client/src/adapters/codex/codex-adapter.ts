@@ -1,7 +1,6 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
-import { codexListModels, codexAccountUsage } from '../../runtime/oar-readers.js';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
@@ -147,11 +146,17 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 
   listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
-    return this.readers.listModels(options, codexListModels);
+    return this.readers.listModels(options, async (installation, reader) => {
+      const { codexListModels } = await import('#byok-oar-readers');
+      return codexListModels(installation, reader);
+    });
   }
 
   accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
-    return this.readers.accountUsage(options, codexAccountUsage);
+    return this.readers.accountUsage(options, async (installation, reader) => {
+      const { codexAccountUsage } = await import('#byok-oar-readers');
+      return codexAccountUsage(installation, reader);
+    });
   }
 
   get descriptor() { return freezeRuntimeAdapterDescriptor({

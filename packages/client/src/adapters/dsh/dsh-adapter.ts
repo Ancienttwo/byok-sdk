@@ -1,7 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
-import { dshListModels, dshVersionUnsupported } from '../../runtime/oar-readers.js';
+import { dshVersionUnsupported } from '../../runtime/oar-version-floors.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -158,6 +158,7 @@ export class DshAdapter implements RuntimeAdapter {
       try {
         const patch = path.join(directory, PATCH_FILE);
         await fs.writeFile(patch, dshPatch(this.options.model), { mode: 0o600 });
+        const { dshListModels } = await import('#byok-oar-readers');
         return await dshListModels(installation, reader, { directory, patches: [patch], env: reader.env });
       } finally {
         await fs.rm(directory, { recursive: true, force: true });

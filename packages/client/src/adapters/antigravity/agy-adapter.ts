@@ -1,7 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
-import { antigravityAccountUsage, antigravityVersionRefusal } from '../../runtime/oar-readers.js';
+import { antigravityVersionRefusal } from '../../runtime/oar-version-floors.js';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -112,7 +112,10 @@ export class AgyAdapter implements RuntimeAdapter {
   }
 
   accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
-    return this.readers.accountUsage(options, antigravityAccountUsage);
+    return this.readers.accountUsage(options, async (installation, reader) => {
+      const { antigravityAccountUsage } = await import('#byok-oar-readers');
+      return antigravityAccountUsage(installation, reader);
+    });
   }
 
   private readonly root: string;

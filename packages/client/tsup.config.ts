@@ -27,6 +27,7 @@ export default defineConfig({
     'src/bin/pi-subagent-gate.ts',
     'src/bin/pi-subagent-file-scope.ts',
     'src/runtime/acp-session-runtime.js',
+    'src/runtime/oar-readers.js',
     'src/bin/byok-agent-message-mcp.ts',
     'src/bin/byok-agent-result-mcp.ts',
     'src/bin/byok-agent-memory-mcp.ts',
@@ -69,7 +70,7 @@ export default defineConfig({
   // non-win32 install (where the addon may be absent) never has it inlined,
   // and so the win32 branch loads the host's own prebuilt addon.
   external: [
-    'koffi', '#byok-acp-runtime', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
+    'koffi', '#byok-acp-runtime', '#byok-oar-readers', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
     /^typebox(?:\/|$)/,
     'undici',
   ],
