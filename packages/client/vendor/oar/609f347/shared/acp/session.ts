@@ -112,11 +112,21 @@ async function openAcpRuntimeSession(
     const usageGate = createUsageUpdateGate();
     const nativeTurns = createAcpNativeTurnTracker(profile.nativeTurns);
     const tokenUsage = createAcpTokenUsage(profile, nativeTurns?.sentByOar);
+    // BYOK change: a child ledger is an attributed observation and never enters the root accumulator.
+    const childLedgers = new Map<string, ReturnType<typeof createAcpTokenUsage>>();
+    const childTokenUsage = profile.spontaneousTokenUsage === undefined ? undefined : (sessionId: string) => {
+      let ledger = childLedgers.get(sessionId);
+      if (ledger === undefined) {
+        ledger = createAcpTokenUsage(profile);
+        childLedgers.set(sessionId, ledger);
+      }
+      return ledger;
+    };
     const opening = createAcpOpening();
     const configUpdates = createAcpConfigUpdates();
     // BYOK change: a child's own update projects events only when it was read while a prompt awaited its answer (records.ts).
     const promptAnswers = createAcpPromptAnswers();
-    const recorder = createAcpRecorder(usageGate, profile.attributeUpdate, tokenUsage, undefined, profile.projectUpdate, profile.projectExtension, nativeTurns, { ...profile, whilePromptAwaited: promptAnswers.whilePromptAwaited });
+    const recorder = createAcpRecorder(usageGate, profile.attributeUpdate, tokenUsage, undefined, profile.projectUpdate, profile.projectExtension, nativeTurns, { ...profile, whilePromptAwaited: promptAnswers.whilePromptAwaited, childTokenUsage });
     const client = createAcpClientApp(terminalHost, {
       update: (notification, receivedAt) => {
         recorder.update(notification, receivedAt);

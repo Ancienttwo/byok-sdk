@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.115.0`, commit `1f9e2da811d328ee8d785936a7e61279a99c9f49` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.115.0`, commit `a77185677e8195c378b68c2c2df8114144343b87` (the manifest's `fork`).
 
 For #2380, `51335c02` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
@@ -38,6 +38,8 @@ Bump to upstream tag `vX.Y.Z`:
 `source-manifest.json` records the release identity and hash for each selected upstream file. The npm identity covers the upstream base, not the maintained BYOK deltas.
 
 ## Maintained deltas
+
+The ACP recorder projects Grok’s linked child terminal ledgers with per-session counters and replay protection. The root prompt ledger remains the billing observation because it may already include child usage. Upstream: planned contribution (#2381).
 
 Policy: follow upstream. A file is maintained only where the SDK's ownership of the process, environment or interaction policy requires it. Operation deadlines live in the SDK adapters, not in this fork. The retained-record limit is the upstream kernel's `retainedBytes`, which each SDK adapter sets from its `maxRetainedBytes`. Each modified file starts with an Apache-2.0 change notice, and `BYOK change` comments mark its seams. Everything else keeps upstream bytes, including type-only contracts that the closure pulls in. New code in the fork goes into new files. An upstream file changes only for an invariant listed below. Each entry names its upstream route: `Upstream: none` is BYOK policy that stays in the fork; `Upstream: draft Dn` names an issue draft, kept in the #1852 PR description, that asks upstream for the injection point or option that would let the delta go. Once upstream ships it, the next bump drops the commit.
 

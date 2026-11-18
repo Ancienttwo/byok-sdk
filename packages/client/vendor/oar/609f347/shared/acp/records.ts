@@ -74,7 +74,7 @@ export function acpLineageOf(params: JsonRecord): { readonly parent: string; rea
   return null;
 }
 
-export function createAcpRecorder(usageGate: UsageUpdateGate, attributeUpdate?: AcpSessionProfile["attributeUpdate"], tokenUsage?: AcpTokenUsage, associations?: (method: string, params: JsonRecord) => readonly { readonly parent: string; readonly child: string }[], projectUpdate?: AcpSessionProfile["projectUpdate"], projectExtension?: AcpSessionProfile["projectExtension"], nativeTurns?: { project: (method: string, params: JsonRecord, rootId: string, afterOpen: boolean) => readonly RuntimeEventBody[] }, derived: Pick<AcpDerivedSessionHooks, "childNotification" | "spawnedSessions"> & { readonly whilePromptAwaited?: (params: object) => boolean } = {}): AcpRecorder {
+export function createAcpRecorder(usageGate: UsageUpdateGate, attributeUpdate?: AcpSessionProfile["attributeUpdate"], tokenUsage?: AcpTokenUsage, associations?: (method: string, params: JsonRecord) => readonly { readonly parent: string; readonly child: string }[], projectUpdate?: AcpSessionProfile["projectUpdate"], projectExtension?: AcpSessionProfile["projectExtension"], nativeTurns?: { project: (method: string, params: JsonRecord, rootId: string, afterOpen: boolean) => readonly RuntimeEventBody[] }, derived: Pick<AcpDerivedSessionHooks, "childNotification" | "spawnedSessions"> & { readonly whilePromptAwaited?: (params: object) => boolean; readonly childTokenUsage?: (sessionId: string) => AcpTokenUsage } = {}): AcpRecorder {
   const hostRequests = new Map<string, string>();
   // Children reported on an extension channel: their standard copies stay native-only.
   const notifiedChildren = new Set<string>();
@@ -180,7 +180,10 @@ export function createAcpRecorder(usageGate: UsageUpdateGate, attributeUpdate?: 
         const lineage = acpLineageOf(params);
         const links = associations?.(method, params) ?? (lineage === null ? [] : [lineage]);
         const events: RuntimeEventBody[] = newSessionLinks(kernel, links.map(({ parent, child }) => ({ parent, child, via: "tool_call" })));
-        const usage = sessionId === kernel.sessionId ? tokenUsage?.extension(method, params, afterOpen ?? false) : null;
+        // BYOK change: use the linked child's own cumulative counters and deduplication state.
+        const ledger = sessionId === kernel.sessionId ? tokenUsage : foreign && kernel.graph().edges.some(edge => edge.child === sessionId)
+          ? derived.childTokenUsage?.(sessionId) : undefined;
+        const usage = ledger?.extension(method, params, afterOpen ?? false);
         if (usage !== null && usage !== undefined) { events.push(usage); }
         events.push(...projectExtension?.(method, params) ?? [], ...nativeTurns?.project(method, params, kernel.sessionId, afterOpen ?? false) ?? []);
         kernel.frame({ type: method, native: params, events }, { ...(foreign ? { sessionId } : {}), ...(receivedAt === undefined ? {} : { receivedAt }) });

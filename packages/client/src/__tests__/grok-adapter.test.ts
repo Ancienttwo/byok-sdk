@@ -183,7 +183,7 @@ describe('GrokAdapter sessions', () => {
       { type: 'progress', text: 'child-says-hi', agentPath },
       { type: 'tool_use', tool: 'read_file', toolCallId, agentPath, input: {} },
       { type: 'tool_result', tool: 'read_file', toolCallId, agentPath, output: {} },
-      { type: 'usage', contextTokens: 17, contextWindow: 1000, contextSource: 'provider', agentPath },
+      { type: 'usage', inputTokens: 12, outputTokens: 3, contextTokens: 17, contextWindow: 1000, contextSource: 'provider', agentPath },
       { type: 'subagent_end', agentPath },
       { type: 'progress', text: 'parent-answer' }, usage, { type: 'turn_end' },
     ]);
@@ -351,11 +351,13 @@ describe('GrokAdapter sessions', () => {
   it('a replayed queue report naming another prompt does not stop the interrupt cancel (#1942)', async () => {
     const resources = await ctx();
     const s = await open(adapter(), { target: GROK_TARGET, instruction: 'replayed-queue' }, resources);
-    const projection = (s as unknown as { projection: { sdkPromptSuperseded: boolean; text: string } }).projection;
-    // The text frame follows the replayed report, so the projection has read the report.
-    await vi.waitFor(() => expect(projection.text).toContain('first'));
+    const events = s.events[Symbol.asyncIterator]();
+    // The draft follows the replayed report, so reading it proves the report was consumed.
+    expect((await events.next()).value).toMatchObject({ type: 'message_draft_delta', text: 'first' });
+    const projection = (s as unknown as { projection: GrokProjection }).projection;
     expect(projection.sdkPromptSuperseded).toBe(false);
     await s.interrupt();
+    await events.return?.();
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(true);
   });
   it('cancels a held follow-up that the drain already sent', async () => {

@@ -305,6 +305,10 @@ async function prompt(message) {
     update({ sessionUpdate: 'tool_call', toolCallId: 'child-call', title: 'read_file', status: 'pending', rawInput: {} }, 'fake-child');
     update({ sessionUpdate: 'tool_call_update', toolCallId: 'child-call', status: 'completed', content: [] }, 'fake-child');
     update({ sessionUpdate: 'usage_update', used: 17, size: 1000 }, 'fake-child');
+    const childLedger = { method: '_x.ai/session_notification', params: { sessionId: 'fake-child', _meta: { eventId: 'child-usage-1' },
+      update: { sessionUpdate: 'turn_completed', prompt_id: 'child-prompt', usage: { inputTokens: 12, outputTokens: 3 } } } };
+    send(childLedger);
+    send(childLedger);
     vendor({ sessionUpdate: 'subagent_finished', subagent_id: 'fake-child', child_session_id: 'fake-child', status: 'completed' });
     text('parent-answer');
     result(message.id, answer());
