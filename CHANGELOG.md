@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.44.0 — 2026-11-18 (candidate)
+## 0.44.0 — 2026-11-18 (published)
 
-[Candidate notes](docs/releases/v0.44.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.44.0.md)
+[Release notes](docs/releases/v0.44.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.44.0.md)
 
 - **Breaking (wire and stores; #1757, #2330)** — Wire v7 replaces the v6 execution routing fields with `target` and records the claim's `executor`. Upgrade cloud first, then daemons and CLI together. Provision fresh cloud stores and K4/K8 ledgers and re-pair every device. Export needed history with the 0.43.0 build first.
 

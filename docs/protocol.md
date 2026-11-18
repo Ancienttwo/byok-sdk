@@ -165,8 +165,8 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 `PROTOCOL_VERSION` is `7`. Every v7 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-not by author judgment. No v7 release is published yet, so no published v7
-decoder is pinned as an oracle: until one is, the suite proves v7
+not by author judgment. 0.44.0 is the first published v7 release; no published v7
+decoder is pinned as an oracle yet: until one is, the suite proves v7
 self-consistency only and cross-release gates are unproven (see the evidence
 list below).
 
@@ -275,9 +275,8 @@ token and reads it as `unknown`.
   type, every `WIRE_ADDITIONS` entry, a result-document `task.offer` with
   `schema` for each offer lane (resume, resume with `egressPolicy`, fresh,
   prepared), and an `approvalId` on every approval request and decision.
-  `golden/v7.releases.json` registers no release yet and has no `floor`. Each
-  registered v7 entry will pin both corpus prefixes, and the lines it covers
-  are immutable.
+  `golden/v7.releases.json` registers 0.44.0 and pins both corpus prefixes;
+  the lines it covers are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.43.0 registry tarball, the last v6 release. It rejects every v7
   corpus line and a v7 `conn.hello`: a v6 peer cannot read v7 bytes. Nothing it

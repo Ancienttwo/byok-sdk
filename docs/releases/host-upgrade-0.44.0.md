@@ -10,7 +10,7 @@ Before upgrading, finish or explicitly abandon in-flight collaboration work.
 See [Host ledgers](#host-ledgers-record-their-format-2286).
 
 Sources below name PRs and entry ids in the
-[`upgrade-manifest.json`](../../packages/client/upgrade-manifest.json).
+[archived upgrade manifest](../../packages/client/upgrade-history/0.43.0-0.44.0.json).
 Missing dedicated entries are stated explicitly.
 
 ## Before upgrading
@@ -151,7 +151,7 @@ The result remains `InMemoryBlobs`.
 
 Sources: [#2288]. Manifest entries: `daemon-config-unknown-fields-fail-closed`, `daemon-config-unknown-field-rejected`.
 
-Run the **candidate build's** `byok-agent config check` against each config.
+Run the **0.44.0 build's** `byok-agent config check` against each config.
 Delete every unknown field, including formerly removed `workspaceRoot`,
 `gitWorkspace`, `strictAgentOnly`, and `hostedJournal`. Embedded construction
 refuses them too: `DaemonConfigInvalidError`, `unknown_field`.
@@ -426,7 +426,7 @@ objects named `sqliteX…` because `_` matches any character in `LIKE`.
   in [WAL-only format metadata](#wal-only-format-metadata). Keep every Host
   object in a separate database file that the Host opens itself.
 - Released journals and replicas are current. Export or preserve refused
-  stores before starting the candidate.
+  stores before starting 0.44.0.
 - Copy-and-own Desktop `HostStore`, basic Clarification and goal/btw stores,
   and MCP `BetaLedger` follow the check-before-write rule above: they decide
   an existing file's format before any write. The basic stores share a database
@@ -445,7 +445,7 @@ or mismatched layer, or tables without format metadata, raises
 
 All previously released ledgers lack this table and are refused. Complete or
 abandon collaboration work and export needed history with the old build; open
-a new ledger at a new path for the candidate.
+a new ledger at a new path for 0.44.0.
 
 - `HostLedgerOptions.expectedFormats` names layers besides `k4`;
   `ledger.formats` exposes the rows. Open Bot ledgers with
@@ -498,12 +498,12 @@ Export needed history with the old build, and follow
 Rotate the Host's frozen work as well. A K4 or K8 ledger freezes each
 intent's complete execution template and keeps outbox rows that dispatch it. A
 v6 template names `runtime` or `dispatchSelection` where v7 requires `target`,
-and the candidate refuses every previously released ledger
+and 0.44.0 refuses every previously released ledger
 ([Host ledgers record their format](#host-ledgers-record-their-format-2286)).
 
 1. With the old build, let pending intents and outbox rows settle, or abandon
    them. Record the work that must run again.
-2. With the candidate, open a new ledger at a new path, and enqueue that work
+2. With 0.44.0, open a new ledger at a new path, and enqueue that work
    again with v7 execution templates.
 
 Archive or remove an Agent home's version 2 memory outbox before deployment
@@ -1219,7 +1219,7 @@ These entries linked to separate docs/issues; include them in the Host review to
 1. Keep old writers stopped. Initialize the [wire v7 stores](#new-store)
    and the [K4/K8 and hosted stores](#host-ledgers-record-their-format-2286)
    prepared before deployment. Sources: [#2283], [#2291], [#2309].
-2. Deploy cloud first, then daemons and CLI from the **same candidate release**.
+2. Deploy cloud first, then daemons and CLI from the **same 0.44.0 release**.
    Plan downtime: v6 and v7 peers cannot communicate, and their cloud processes
    must never share a database. Sources: [#2277], [#2291], [#2303]; entries
    `wire-v7`, `wire-v7-dataplane-store-epoch`, `wire-v7-client-negotiation-halt`.
@@ -1230,7 +1230,7 @@ These entries linked to separate docs/issues; include them in the Host review to
 
 ## After the upgrade
 
-Before restoring traffic, verify these paths with the candidate release:
+Before restoring traffic, verify these paths with the 0.44.0 release:
 
 - Run config check, `status` and `doctor` from the daemon's release. Check
   pairing, provider access and the [inline runtime status](#runtime-status-carries-every-observation-field-inline).
@@ -1262,7 +1262,7 @@ above, including Host ledgers, keys and the v7 server, and to a local task
 journal whose Host index, trigger or view is only in WAL. New stores checkpoint
 immediately after schema creation to shorten this window.
 
-Preserve the main file **and sidecars together** before trying the candidate
+Preserve the main file **and sidecars together** before trying 0.44.0
 if an untouched artifact is required.
 
 ### Grok login preserved during excluded tasks
@@ -1312,8 +1312,8 @@ does not ship a Bun runtime. Source: [#2347].
 
 ### Integration and adoption evidence
 
-Verify the candidate's store refusals, pairing and v6 handshake halts against
-its manifest before release. This guide is not evidence that those checks
+Verify 0.44.0's store refusals, pairing and v6 handshake halts against
+its manifest before Host adoption. This guide is not evidence that those checks
 passed. Sources: [#2295], [#2309], [#2287], [#2303].
 
 [#2095]: https://github.com/Ancienttwo/byok-sdk/pull/2095
