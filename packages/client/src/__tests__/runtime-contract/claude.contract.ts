@@ -2,6 +2,8 @@ import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
 import { ClaudeAdapter, type ClaudeAdapterOptions } from '../../adapters/claude/claude-adapter';
+import { ClaudeStreamSession } from '../../adapters/claude/stream-session';
+import { memoryClaude } from '../fixtures/memory-claude';
 import { QUALIFIED_CLAUDE_VERSION } from '../../adapters/claude/claude-version';
 import { CLAUDE_ABSENT_ISOLATION_SOURCES } from '../../adapters/claude/claude-capabilities';
 import { createAutoToolAuthorizationGate } from '../../tool-authorization';
@@ -271,6 +273,40 @@ const ownTurn = once(async () => {
 });
 
 defineRuntimeCases(`claude runtime contract: claude cases (${target.mode} ${target.expectedVersion})`, {
+  streamSettlement: ['retains redacted replies, settles interrupts before the result and records exit before refusals', check(async () => {
+    const cli = memoryClaude();
+    const stream = new ClaudeStreamSession(cli.child as never);
+    const secret = 'claude-contract-fake-key';
+    const replies: Promise<void>[] = [];
+    await stream.open({ env: { ANTHROPIC_API_KEY: secret }, maxRetainedBytes: 64 * 1024, mcpServers: {},
+      onFrame: () => {}, onExit: () => {},
+      onAppRequest: (_request, respond) => { replies.push(respond({ type: 'control_response', response: { request_id: 'permission', subtype: 'success', response: { secret } } })); },
+    });
+    expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
+    cli.send({ type: 'control_request', request_id: 'permission', request: { subtype: 'can_use_tool', secret } });
+    expect(replies).toHaveLength(1);
+    await replies[0];
+    expect(JSON.stringify(cli.written)).toContain(secret);
+    expect(JSON.stringify(stream.raw.records())).toContain('[redacted]');
+    expect(JSON.stringify(stream.raw.records())).not.toContain(secret);
+
+    const result = { type: 'result', subtype: 'success', is_error: false, usage: {} };
+    const first = stream.raw.abort();
+    cli.send(result);
+    expect(stream.raw.records().some(record => JSON.stringify(record.body).includes('turn_ended'))).toBe(false);
+    cli.send({ type: 'control_response', response: { request_id: 'interrupt-1', subtype: 'success', response: {} } });
+    expect((await first).response.body.kind).toBe('accepted');
+    expect(stream.raw.records().some(record => JSON.stringify(record.body).includes('turn_ended'))).toBe(true);
+
+    expect((await stream.raw.prompt('again')).response.body.kind).toBe('accepted');
+    const second = stream.raw.abort();
+    cli.send(result);
+    const beforeExit = stream.raw.records().length;
+    cli.exit(1);
+    expect((await second).response.body.kind).toBe('rejected');
+    const tail = stream.raw.records().slice(beforeExit).map(record => record.body as { kind?: string });
+    expect(tail.map(body => body.kind)).toEqual([undefined, 'exited', 'rejected']);
+  })],
   ownTurn: ['a follow-up sent during a turn Claude runs on its own is held until that turn ends, and adds no turn end of its own', check(async () => {
     const { events, followUpAt, requests } = await ownTurn();
     const ends = events.flatMap((event, index) => event.type === 'turn_end' ? [index] : []);

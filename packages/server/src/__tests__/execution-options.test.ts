@@ -151,6 +151,17 @@ describe('embedded execution options and images (#2383)', () => {
       .toMatchObject({ committedObjectBytes: BigInt(PNG.length), objectCount: 1n, reservedBytes: 0n });
   });
 
+  it('retries lazy uploader initialization after a failed module load', async () => {
+    const instance = byok = createByokServer({ productId: PRODUCT_ID });
+    vi.doMock('../input-image-upload.js', () => { throw new Error('uploader load failed'); });
+    try {
+      await expect(instance.blobs.uploadInputImage(IMAGE)).rejects.toMatchObject({ code: 'blob_upload_failed' });
+    } finally {
+      vi.doUnmock('../input-image-upload.js');
+    }
+    await expect(instance.blobs.uploadInputImage(IMAGE)).resolves.toMatchObject({ mediaType: 'image/png' });
+  });
+
   it('releases the quota hold on a failed write and permits a retry', async () => {
     const compose = stores.composeFacadeStores;
     let composition!: ReturnType<typeof compose>;
@@ -284,6 +295,9 @@ describe('embedded execution options and images (#2383)', () => {
     await claimAndStart(instance, daemon, handle, TEST_CLAIMED_EXECUTOR, { steer: true, images: true });
     const images = [await upload()];
     if (advertised) {
+      await expect(handle.steer('inspect a wrong image ref', {
+        images: images.map(image => ({ ...image, blob: { ...image.blob, size: image.blob.size + 1 } })),
+      })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
       const { messageId } = await handle.steer('inspect another image', { images });
       expect(await nextEnvelope(daemon)).toMatchObject({ id: messageId, type: 'task.steer', task_id: handle.taskId,
         payload: { text: 'inspect another image', images } });

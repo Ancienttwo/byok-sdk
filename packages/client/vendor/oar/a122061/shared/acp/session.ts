@@ -26,6 +26,7 @@ import {
 } from "./profile.js";
 import { acpLaunchArgs } from "./launch-args.js";
 import { startAcpProcess, type SpawnAcpLineProcess } from "./process.js";
+import { acpRequestTimeoutError } from "./errors.js";
 import { createAcpRecorder } from "./records.js";
 import { createAcpTerminalHost, type SpawnAcpTerminal } from "./terminal.js";
 import { createAcpTurns, type ActiveTurn } from "./turns.js";
@@ -62,6 +63,8 @@ export interface AcpSessionHooks {
   readonly onRecord?: (record: RawEvent) => void;
   /** BYOK change: answers each `session/request_permission`. Absent, every request is cancelled. */
   readonly onPermission?: AcpClientHooks["permission"];
+  /** Cancels a queued startup before it can launch an owned process. */
+  readonly startupSignal?: AbortSignal;
 }
 
 // BYOK change: the caller owns the agent process, every hosted terminal process and the environment.
@@ -144,18 +147,32 @@ async function openAcpRuntimeSession(
       extensionNotifications: profile.extensionNotifications ?? [],
       ...(hooks.onPermission === undefined ? {} : { permission: hooks.onPermission }),
     });
-    const runtime = startAcpProcess(spawnLineProcess, installation.command, args, client, { cwd: options.cwd, env: environment, redact: credentials.redact, opening: withAcpPromptAnswers(opening, promptAnswers) });
-    const release = async (): Promise<void> => {
-      runtime.kill();
-      await runtime.exited;
-      await terminalHost.dispose();
-    };
-    const opened = await openAcpSession(runtime, profile, options, (step) => {
-      recorder.step(step.method, step.response);
-    }, configUpdates).catch(async (error: unknown) => {
-      await release();
-      throw withoutCredentials(error);
-    });
+    const initializeTimeoutMs = profile.initializeTimeoutMs ?? 60_000;
+    const initializeStartedAt = profile.acquireStartup === undefined ? undefined : performance.now();
+    const releaseStartup = profile.acquireStartup === undefined ? undefined : await profile.acquireStartup(options, initializeTimeoutMs, hooks.startupSignal);
+    const { opened, runtime, release } = await (async () => {
+      try {
+        hooks.startupSignal?.throwIfAborted();
+        if (initializeStartedAt !== undefined && performance.now() - initializeStartedAt >= initializeTimeoutMs) {
+          throw acpRequestTimeoutError("startup queue", initializeTimeoutMs);
+        }
+        const runtime = startAcpProcess(spawnLineProcess, installation.command, args, client, { cwd: options.cwd, env: environment, redact: credentials.redact, opening: withAcpPromptAnswers(opening, promptAnswers) });
+        if (releaseStartup !== undefined) { void runtime.exited.then(releaseStartup, releaseStartup); }
+        const release = async (): Promise<void> => {
+          runtime.kill();
+          await runtime.exited;
+          await terminalHost.dispose();
+        };
+        const opened = await openAcpSession(runtime, profile, options, (step) => {
+          if (step.method === "initialize") { releaseStartup?.(); }
+          recorder.step(step.method, step.response);
+        }, configUpdates, initializeStartedAt).catch(async (error: unknown) => {
+          await release();
+          throw withoutCredentials(error);
+        });
+        return { opened, runtime, release };
+      } finally { releaseStartup?.(); }
+    })();
     // BYOK change: the record consumer observes from seq 0: it registers before the recorder binds.
     const kernel = createSessionKernel(opened.sessionId, credentials.redactValue, options.retainedBytes);
     if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);

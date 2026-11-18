@@ -1,20 +1,20 @@
-# OAR 609f347 private runtime fork
+# OAR a122061 private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.115.0, fixed commit `609f3478ccc4328ba965f1aa9077c0c18948f797`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.120.0, fixed commit `a12206106fa12b7e11c09c4ff6d60c322712018e`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
-`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 178 source files plus LICENSE. Source rows with BYOK changes are marked by `delta`. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the ACP derived-session lineage (`shared/acp/derived-sessions.ts`), the Codex goal-event projection, the manual-compaction operation that the Codex session composes, and the typed open refusals (`contracts/model-confirmation-error.ts`, `contracts/resume-cwd-error.ts`). The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`, with its native-turn reader `runtimes/grok/native-turns.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options,state-directory,model-selection}.ts`) with their import closure, which includes the shared ACP model configuration (`shared/acp/model-configuration.ts`). The OpenCode session and its prompt, attribution, compaction, steering and version helpers are also selected, with shared environment and private-temp helpers. The shared stream-json session (`shared/stream-json/`, 9 files) and the Claude projection with its import closure (`runtimes/claude/{projection,context-usage,failure,service-tier,tasks,token-usage}.ts`) are selected for the Claude adapter; the Claude launch, settings readback, compaction, MCP config and prompt files are not. No Cursor, CLI, arena, executable manager or branded resources are included. The on-demand model, usage and auth-status readers are selected for #2379. The executable manager, login, logout and usage reset operations are excluded.
+`source-manifest.json` lists each selected upstream path and its original and maintained SHA256. The fork keeps 180 source files plus LICENSE. Source rows with BYOK changes are marked by `delta`. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the ACP derived-session lineage (`shared/acp/derived-sessions.ts`), the Codex goal-event projection, the manual-compaction operation that the Codex session composes, and the typed open refusals (`contracts/model-confirmation-error.ts`, `contracts/resume-cwd-error.ts`). The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`, with its native-turn reader `runtimes/grok/native-turns.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options,state-directory,model-selection}.ts`) with their import closure, which includes the shared ACP model configuration (`shared/acp/model-configuration.ts`). The OpenCode session and its prompt, attribution, compaction, steering, startup gate and version helpers are also selected, with shared environment and private-temp helpers. The shared stream-json session (`shared/stream-json/`, 9 files) and the Claude projection with its import closure (`runtimes/claude/{projection,context-usage,failure,service-tier,tasks,token-usage}.ts`) are selected for the Claude adapter; the Claude launch, settings readback, compaction, MCP config and prompt files are not. No Cursor, CLI, arena, executable manager or branded resources are included. The on-demand model, usage and auth-status readers are selected for #2379. The executable manager, login, logout and usage reset operations are excluded.
 
 Upstream's native dsh runtime is selected through `runtimes/dsh/`: `bridge.ts` with its embedded prompt source `bridge-prompt.ts`, `jobs.ts`, `mcp.ts`, `options.ts` and `projection.ts` keep upstream bytes, and `launch.ts`, `control.ts` and `session.ts` carry BYOK changes. `version.ts`, `install.ts`, `installation.ts`, `list-models.ts` and `index.ts` are not selected: the SDK adapter owns version reading, installation and model selection.
 
-The OpenCode closure is selected from OAR 0.115.0 at the same pinned commit. Its three maintained deltas keep SDK process ownership, the explicit environment and the SDK-probed version; native profile behavior stays upstream-owned.
+OpenCode uses the SDK-owned process, explicit environment and SDK-probed version. The startup gate uses the same filtered environment to key a process-local queue by canonical data directory. The queue, spawn and initialize share a 60-second budget. The lock releases on initialize, exit or failed open. Cancellation removes the waiter before spawn. Directory resolution failures and timeouts remain typed.
 
 The SDK typechecks this source with the ES2024 library (`packages/client/tsconfig.json`, `scripts/api-surface/tsconfig.oar-bridge.json`). The emit target stays ES2022, and the Node 24 engine floor provides the ES2023/ES2024 built-ins upstream uses (`Array.prototype.toSorted`, `Promise.withResolvers`).
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.115.0`, commit `a77185677e8195c378b68c2c2df8114144343b87` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.120.0`, commit `ebcde2e54df56b92d542e85aa734c9874a8a7c39` (the manifest's `fork`).
 
-For #2380, `51335c02` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
+For #2380, `053354a4` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
 This directory is a projection of that branch. `scripts/ci/oar-sync.mjs` writes every file the manifest lists, and the manifest's `packageVersion`, `commit`, `fork` and hash columns; nobody edits them by hand. The manifest's path list, `release` binding, `delta` texts and `upstreamCommit` fields, and this file, stay hand-authored. A row with `upstreamCommit` takes its upstream hash from that commit instead of the base (a file carried from an upstream PR). Required CI fetches nothing: it checks the vendor bytes against the manifest hashes (`src/__tests__/oar-app-server-client.test.ts`). That the script's output equals this tree is the operator's check during a bump. A published `byok/*` branch is never force-pushed, so an older pin stays reproducible.
 
@@ -33,11 +33,14 @@ Bump to upstream tag `vX.Y.Z`:
 
 ## Authoritative release binding
 
-`@botiverse/oar@0.115.0` is the public npm release of commit `609f3478ccc4328ba965f1aa9077c0c18948f797`. Registry metadata and the downloaded tarball agree on integrity `sha512-licwKUPX+9FBsuuQNZ7J9tpyVD/dhEwroYLs27KnDDa7kYnV3Uz/LZZ5dqtIYpeJ9Ox47I/L1C2HTf4zpHrNQA==`. The npm publish and SLSA attestations name this package and the same SHA-512 digest. The SLSA resolved dependency names `refs/heads/main` at the commit above; the `v0.115.0` tag and upstream package version agree. Attestations: https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.115.0.
+`@botiverse/oar@0.120.0` is the public npm release of commit `a12206106fa12b7e11c09c4ff6d60c322712018e`. Registry metadata and the downloaded tarball agree on integrity `sha512-QcYXeNh6EJWJ48aR8hZLnrrANinodI5h1I6HNSbXaEfOiEzitsTC4XWQr6sRYGUWATtzhDKItferbYeeifGVOA==`. Sigstore verified both the npm publish and SLSA signatures. Both statements bind the same package and SHA-512 digest. SLSA resolves `refs/heads/main` at the commit above, which agrees with `v0.120.0`. Attestations are published by npm at https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.120.0.
 
 `source-manifest.json` records the release identity and hash for each selected upstream file. The npm identity covers the upstream base, not the maintained BYOK deltas.
 
 ## Maintained deltas
+
+- `runtimes/opencode/startup-gate.ts`, `shared/acp/{errors,profile,session}.ts`. Keep the gate inside the caller-owned launch. Derive the key from the same filtered environment as the child, forward startup cancellation and report typed path-free directory errors. Upstream: draft D1.
+- `shared/stream-json/session.ts`. Preserve the Claude interrupt barrier, acknowledged host replies and redaction while carrying upstream receipt timestamps and root result recognition. The Qwen context readback and upstream automatic permission handler stay outside this selected closure. Upstream: draft D1.
 
 The ACP recorder projects Grok’s linked child terminal ledgers with per-session counters and replay protection. The root prompt ledger remains the billing observation because it may already include child usage. Upstream: planned contribution (#2381).
 
@@ -85,6 +88,54 @@ Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared
 ## History
 
 The sections below record each step as it was made. Deltas they describe may since have returned to upstream bytes; the list above is the current inventory.
+
+### 0.120.0 rebase
+
+The 40 maintained commits were replayed. None were dropped. ACP and stream-json session conflicts retained the caller-owned assemblies. OpenCode adopts the startup gate and normalized release token. Codex adopts optional `serviceTierDetails` with the caller-owned reader. The SDK retains its own executable probes and excludes OAR installation caching.
+
+```text
+c5e88126 The SDK kernel owns current typed records only
+37575064 Strip-only TypeScript loads the process-table reader; host PATH cannot hide ps
+e3e6886a A failure class that a text rule chose is marked fromText
+1e4c8131 The caller owns the Codex app-server process
+9059e0bf Codex interaction is opt-in through approvalPolicy
+db6d95b8 The caller owns the Codex process and environment; native facts are retained first; no permissive server-request fallback
+8bda8ad3 ACP process diagnostics stay with the caller
+095e89b0 The caller owns the ACP agent process
+b24b0b75 Every ACP terminal process is inside the caller's process-tree authority
+37492f40 No ACP permission request gets a permissive fallback
+1aef6270 The caller owns ACP processes and environment; the record consumer sees every record
+f1d2dd3e A failed prompt reads its frames after earlier notifications; abort records descendants first
+42daede8 Grok persona injection does not grant folder trust or replace built-in instructions
+346e3241 The caller owns the dsh process, its directory and the environment
+f39e7905 One selected OpenCode executable and one version probe
+6887fba8 OpenCode query processes see only the explicit runtime environment
+303a1e8e Every OpenCode CLI or prompt query uses the caller's process-tree authority
+3ada9356 The caller owns the stream-json process; the record consumer sees every record; no runtime request gets a permissive default
+900f9aa9 The caller bounds the stream-json session's retained records
+bd1cc94a A failed ACP cancel write leaves the turn as it was
+d9c8fea8 A prompt that ends during a pending cancel write waits for that write before it reads the abort mark
+26b9d3e9 An abort after the prompt answer is decoded sends no session-wide cancel
+87d141de A cancel write that does not complete is bounded, and dispose does not wait for it
+86310765 Stream-json attribution remembers only tool uses inside an agent
+b859fcf4 One retained-record limit elides request and reply payloads too, and every session takes it
+83ad4ec7 A root tool use that reuses a remembered id removes its attribution entry
+798f77c4 Record retention elides requests and replies after the newest frame too
+a1d12f49 A refused or unwritten Claude interrupt leaves the turn as it was
+7d58a4f1 A Claude interrupt is written with a bounded acknowledgement, and a root result waits for every pending interrupt to settle
+c6f758d0 An unacknowledged Claude interrupt write counts as written, and the kill fallback dispatches nothing more
+a2cb7a6f Text and reasoning have their own retained limit, so a task with much text never elides the native frames a failure scan reads
+a20f8cf9 A child's own update read after the prompt answer projects nothing
+60b76f90 On-demand readers use caller-owned processes and explicit environments
+eef70b21 Reader refusals keep a known floor and omit untrusted native diagnostics
+d0492758 Codex usage waits for process adoption before sending requests
+2c63c285 Type native reasoning effort refusals
+053354a4 Share pre-open capabilities and redact echoed image inputs
+b4e539dc Restore isolated Codex turn process cleanup
+fbc91d5a Keep Claude root context across child results
+46d35dcf Project linked Grok child turn ledgers independently
+ebcde2e5 Keep OAR startup and stream settlement within caller ownership
+```
 
 ### Typed effort refusals (#2378)
 

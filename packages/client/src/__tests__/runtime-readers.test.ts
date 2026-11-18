@@ -36,7 +36,9 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   const replies = {
     initialize: {},
     'model/list': { data: [{ model: 'test-model', displayName: 'display-' + key,
-      supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'low' }] },
+      supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'low',
+      serviceTiers: [{ id: 'priority', name: 'Priority', description: 'tier-' + key },
+        { id: 'priority', name: 'Duplicate' }, { id: 'fast' }] }] },
     'config/read': { config: { model: 'test-model' } },
     'account/read': { account: { type: 'chatgpt' } },
     'account/rateLimits/read': { rateLimits: { limitId: 'codex', planType: 'test-plan', primary: { usedPercent: 25 } } },
@@ -74,7 +76,8 @@ it('queries the catalog and quota in process using only the filtered runtime env
   const { adapter, environments } = codexHarness();
   vi.stubEnv('BYOK_TOOL_AUTHORIZATION_GATE', 'private-gate-credential');
   await expect(adapter.listModels()).resolves.toEqual({ kind: 'ok', models: [{ id: 'test-model', displayName: 'display-[redacted]',
-    effortLevels: ['low', 'high'], defaultEffort: 'low', default: true }] });
+    effortLevels: ['low', 'high'], defaultEffort: 'low', default: true, serviceTiers: ['priority', 'fast'],
+    serviceTierDetails: [{ id: 'priority', displayName: 'Priority', description: 'tier-[redacted]' }, { id: 'fast' }] }] });
   await expect(adapter.accountUsage()).resolves.toMatchObject({ kind: 'available', plan: 'test-plan', windows: [{ usedRatio: 0.25 }] });
   const { env } = await adapter.runtimeEnvironment();
   expect(env.READER_API_KEY).toBe(credential);

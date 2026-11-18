@@ -363,7 +363,7 @@ async function prompt(message) {
   result(message.id, answer());
 }
 
-function request(message) {
+async function request(message) {
   switch (message.method) {
     case 'initialize':
       log({ kind: 'initialize', params: message.params });
@@ -371,6 +371,9 @@ function request(message) {
       if (process.env.FAKE_ACP_INITIALIZE === 'exit') process.exit(1);
       if (process.env.FAKE_ACP_INITIALIZE === 'auth') { error(message.id, -32000, 'Authentication required'); return; }
       if (process.env.FAKE_ACP_INITIALIZE === 'error') { error(message.id, -32603, 'Internal error'); return; }
+      while (process.env.FAKE_ACP_INITIALIZE_GATE && !existsSync(process.env.FAKE_ACP_INITIALIZE_GATE)) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
       result(message.id, {
         protocolVersion: 1,
         agentCapabilities: {
@@ -472,5 +475,5 @@ createInterface({ input: process.stdin }).on('line', (line) => {
     }
     return;
   }
-  request(message);
+  void request(message);
 });

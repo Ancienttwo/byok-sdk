@@ -21,7 +21,12 @@ export function createImageUploads(composition: FacadeStoreComposition, tenant: 
     }
     const snapshot = new Uint8Array(bytes);
     try {
-      uploader ??= import('./input-image-upload.js').then(module => module.createImageUploader(composition, tenant));
+      uploader ??= import('./input-image-upload.js')
+        .then(module => module.createImageUploader(composition, tenant))
+        .catch(cause => {
+          uploader = undefined;
+          throw cause;
+        });
       return await (await uploader)(snapshot, contentType);
     } catch (cause) {
       if (isCoreError(cause)) throw cause;

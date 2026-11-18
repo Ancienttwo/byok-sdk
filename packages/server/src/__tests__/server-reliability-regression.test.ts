@@ -149,6 +149,7 @@ describe('issues #141-#144 server reliability regressions', () => {
     const handle = createTaskHandle('task-terminal-before-handle', {
       tenant: TENANT,
       cloud: {} as ByokCloud,
+      readInputImages: async () => { throw new Error('unexpected image input'); },
       relay,
       sources: { readFacts: async () => undefined, readActivity: async () => undefined, readSteerRefusals: async () => [] },
       wake: createInProcessTaskEventsWake(),
