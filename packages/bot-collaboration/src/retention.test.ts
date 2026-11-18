@@ -28,7 +28,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-it('refuses published ledger fixtures, written before host_store_format, without modifying their files (#2032, #2286)', () => {
+it('checks published ledger fixtures without modifying their files (#2032, #2286)', () => {
   const directory = fileURLToPath(new URL('../../../scripts/release/fixtures/stores/', import.meta.url));
   const index = JSON.parse(readFileSync(join(directory, 'index.json'), 'utf8')) as {
     fixtures: Record<string, { ledgerTenant?: string; stores: Record<string, string>; expected?: Record<string, string> }>;
@@ -38,10 +38,11 @@ it('refuses published ledger fixtures, written before host_store_format, without
   for (const [label, fixture] of Object.entries(index.fixtures)) {
     if (!fixture.stores[store]) continue;
     expect(fixture.ledgerTenant, label).toBe('store-fixture');
-    expect(fixture.expected?.[store], label).toBe('rejected');
+    if (label === '0.42.0' || label === '0.43.0') expect(fixture.expected?.[store], label).toBe('rejected');
     const file = join(directory, fixture.stores[store]);
     const before = readFileSync(file), names = readdirSync(join(directory, label)).sort();
-    expect(inspectLedger(file, fixture.ledgerTenant!)).toMatchObject({ store, verdict: fixture.expected![store], code: 'host_store_format_unsupported' });
+    const expected = fixture.expected![store];
+    expect(inspectLedger(file, fixture.ledgerTenant!)).toMatchObject({ store, verdict: expected, ...(expected === 'rejected' ? { code: 'host_store_format_unsupported' } : {}) });
     const database = new DatabaseSync(file, { readOnly: true });
     try {
       const row = database.prepare('SELECT body FROM host_ledger WHERE tenant = ?').get(fixture.ledgerTenant!) as { body: string };

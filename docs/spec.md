@@ -346,8 +346,8 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-The current aligned release is `0.44.0` (candidate). Publication requires
-separate authorization and registry readback. The packed and published keys
+The current aligned release is `0.44.0`, published on 2026-11-18 (UTC)
+with registry readback for all nine packages. The packed and published keys
 `@byok-sdk/core` edge must pin the same release version, `0.44.0`. Verify the
 edge in an isolated standard npm install.
 
@@ -359,11 +359,11 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.44.0 is the owner-approved MINOR candidate after 0.43.0. It keeps the nine
-public packages aligned and is the first wire v7 candidate. A v6 peer cannot
+0.44.0 is the published owner-approved MINOR after 0.43.0. It keeps the nine
+public packages aligned and is the first wire v7 release. A v6 peer cannot
 communicate with v7. Hosts must provision new server stores and re-pair devices.
 The 0.43.0 → 0.44.0 upgrade manifest has 108 breaking and 23 additive entries.
-See the [0.44.0 candidate notes](releases/v0.44.0.md) and
+See the [0.44.0 release notes](releases/v0.44.0.md) and
 [Host upgrade checklist](releases/host-upgrade-0.44.0.md).
 
 0.43.0 is the published, owner-approved MINOR after 0.42.0. Its nine public
@@ -375,7 +375,7 @@ current payload before their first upgrade. This cut adds no Postgres
 migration or embedded-server SQLite schema version. See the
 [0.43.0 release notes](releases/v0.43.0.md) and
 [Host upgrade checklist](releases/host-upgrade-0.43.0.md). All nine packages were
-published on 2026-11-14 (UTC); registry readback reports `latest` 0.43.0 for all nine.
+published on 2026-11-14 (UTC); registry readback then reported `latest` 0.43.0 for all nine.
 The publication record archived the cut manifest unchanged and started the current
 manifest empty from the release snapshot.
 Publication does not establish Host acceptance or production rollout.
@@ -503,7 +503,7 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry read of 2026-11-14 (UTC) reports `latest` 0.43.0 for all nine
+The registry read of 2026-11-18 (UTC) reports `latest` 0.44.0 for all nine
 packages in the release train; cloud-do remains archived at 0.42.0. The earlier
 published versions include 0.42.0 (2026-11-13, UTC), 0.41.0, 0.40.0, 0.39.0, 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for

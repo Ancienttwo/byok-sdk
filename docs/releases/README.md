@@ -12,9 +12,10 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
-The [0.44.0 candidate](v0.44.0.md) carries the 0.43.0 → 0.44.0 manifest and
+The [0.44.0 release](v0.44.0.md) carries the 0.43.0 → 0.44.0 manifest and
 [Host upgrade checklist](host-upgrade-0.44.0.md). The publication record
-archives the cut manifest and rebaselines to the published snapshot.
+archives the cut manifest at `packages/client/upgrade-history/0.43.0-0.44.0.json`
+and rebaselines to the published snapshot.
 Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
 The published 0.42.0 → 0.43.0 manifest remains in
 `packages/client/upgrade-history/0.42.0-0.43.0.json`.
@@ -27,7 +28,7 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 7 ([Wire v7](host-upgrade-0.44.0.md#wire-v7)).
 0.43.0 is the last v6 release. `golden/v7.releases.json` pins the first v7
-candidate, 0.44.0. The published v7 decoder baseline still awaits publication.
+release, 0.44.0. A published v7 decoder has not yet been pinned as an oracle.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
