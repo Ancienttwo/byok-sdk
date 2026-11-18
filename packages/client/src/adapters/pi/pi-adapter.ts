@@ -55,7 +55,6 @@ import { resolvePiBin, type ResolvedBin } from './resolve-bin.js';
 import { runtimeExecutableFields } from '../runtime-executable.js';
 import { mapPiContextUsage, mapPiMessageToAgentEvent, piAssistantError, ROUTINE_PI_EVENT_TYPES } from './events.js';
 import { boundFailureReason } from '@byok-sdk/protocol/constants';
-import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client.js';
 import { abortPiRpcAndSettle } from './interrupt-settlement.js';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame.js';
@@ -577,7 +576,9 @@ export class PiAdapter implements RuntimeAdapter {
           // `pi --mode rpc` can never consume a prepared request, so this branch
           // launches the SDK-owned in-process host instead
           // (`../../bin/byok-pi-prepared.ts`).
-          if (effort !== undefined && (runtimeLaunch.kind !== 'pi-rpc' || !(MODEL_THINKING_LEVELS as readonly string[]).includes(effort))) {
+          if (effort !== undefined && (runtimeLaunch.kind !== 'pi-rpc' || !(
+            (await import('@earendil-works/pi-ai/providers/model-schema')).MODEL_THINKING_LEVELS as readonly string[]
+          ).includes(effort))) {
             throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable',
               reason: 'pi cannot apply the requested effort on this execution lane', failure: { class: 'invalid_request' } });
           }

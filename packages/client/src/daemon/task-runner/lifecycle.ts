@@ -307,7 +307,8 @@ export async function handleSteer(this: TaskRunner, taskId: string, steerMessage
     await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
     return;
   }
-  if (!active.steer) {
+  // A stale relay can still send a steer after the runtime disables its channel.
+  if (!active.steer || !active.adapter.descriptor.capabilities.steer) {
     console.error(
       `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${active.adapter.descriptor.id}" declares no steering channel — acked without retry; this envelope should have been gated server-side`,
     );
