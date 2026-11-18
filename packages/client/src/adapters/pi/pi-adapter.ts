@@ -310,7 +310,7 @@ export class PiAdapter implements RuntimeAdapter {
     // Windows waits for validated parent-death Job Object recovery.
     // The durable worker re-resolves the scope on every spawn and swaps its
     // native file tools for the SDK scoped ones.
-    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, memoryLane: undefined, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], fileScope: { lanes: ['durable'] }, capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
+    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, supportsTaskExecutionOptions: false, memoryLane: undefined, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], fileScope: { lanes: ['durable'] }, capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
@@ -851,7 +851,7 @@ export class PiAdapter implements RuntimeAdapter {
           }
 
           return new PiSession(sessionRef, rpc, manifestSelection, scratch, disposition === 'handled' ? 'handled' : promptFrames,
-            undefined, mcpEventIdentities(startInput.mcpToolsetTools, startInput.mcpServers), memoryLane ? abortMemoryLane : undefined);
+            undefined, mcpEventIdentities(startInput.mcpToolsetTools, startInput.mcpServers), memoryLane ? abortMemoryLane : undefined, effort);
         },
       },
     };
@@ -1388,6 +1388,7 @@ class PiSession implements Session {
     private readonly hostContextWindow?: number,
     private readonly identities?: McpEventIdentities,
     private readonly abortMemoryLane?: () => Promise<void>,
+    private readonly effort?: string,
   ) {
     this.pendingTurnEnd = firstTurn === 'handled';
     if (firstTurn !== 'handled') this.turnStarts.push(firstTurn);
@@ -1517,6 +1518,9 @@ class PiSession implements Session {
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('pi adapter only supports string instructions in M0 (no blob-ref fetch yet)');
+    }
+    if (task.effort !== undefined && task.effort !== this.effort) {
+      throw new PolicyUnsupportedError('pi persistent session cannot change effort');
     }
     const requestedSelection = modelLaneTarget(task.target);
     if (requestedSelection !== undefined && (

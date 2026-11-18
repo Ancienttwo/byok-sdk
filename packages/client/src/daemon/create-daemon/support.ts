@@ -178,9 +178,11 @@ export function computeCapabilities(
   agentMemoryIntentsProven = false,
   agentMemoryBackendProven = false,
   nativeSessions?: { enabled?: boolean; platform?: NodeJS.Platform; sessionDir?: string },
+  runtimeAllowlist?: readonly string[],
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
-  if (adapters.some(adapter => adapter.descriptor.supportsTaskExecutionOptions === true)) flags.push(TASK_EXECUTION_OPTIONS_CAPABILITY);
+  if (adapters.some(({ descriptor }) => descriptor.supportsTaskExecutionOptions === true
+    && (runtimeAllowlist === undefined || runtimeAllowlist.includes(descriptor.id)))) flags.push(TASK_EXECUTION_OPTIONS_CAPABILITY);
   if (nativeSessions?.enabled === true
     && ['darwin', 'linux'].includes(nativeSessions.platform ?? process.platform)
     && nativeSessions.sessionDir !== undefined

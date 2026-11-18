@@ -187,11 +187,11 @@ it('registers an opt-in adapter with truthful capabilities', async () => {
 
 it.each([undefined, 'ses_opencode_fixture'])('applies OpenCode task options and never falls back from a task model (resume=%s)', async sessionRef => {
   const box = setup('1.19.5', { FAKE_ACP_EFFORT_MENU: '1' });
-  const session = await startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, modelId: 'fixture/first', effort: 'high',
+  const session = await startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, modelId: 'fixture/task', effort: 'high',
     instruction: 'opencode-limit-always', sessionRef }, { workspaceDir: box.cwd, env: box.env });
   sessions.push(session);
   await expect(collect(session)).rejects.toMatchObject({ retry: 'non-retryable', failure: { class: 'rate_limited' } });
-  expect(box.facts().filter(row => row.kind === 'config').map(row => row.params.value)).toEqual(['fixture/first', 'high']);
+  expect(box.facts().filter(row => row.kind === 'config').map(row => row.params.value)).toEqual(['fixture/task', 'high']);
   expect(box.facts().filter(row => row.kind === 'open')).toHaveLength(1);
 });
 

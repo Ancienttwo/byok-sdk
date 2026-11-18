@@ -34,6 +34,7 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
     agentMemoryIntentBackend !== undefined,
     agentMemoryBackend !== undefined,
     { enabled: config.nativeSessions, sessionDir: config.piByokLauncher?.sessionDir },
+    config.runtimeAllowlist,
   );
   const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
     ? new AgentHomeProjectionCompletionClient({

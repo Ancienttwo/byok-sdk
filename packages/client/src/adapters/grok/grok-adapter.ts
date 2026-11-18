@@ -281,6 +281,7 @@ export class GrokAdapter implements RuntimeAdapter {
     const session = new GrokSession(
       input.scratch,
       model,
+      effort,
       this.interruptTimeoutMs,
       input.manifest.sessionRef,
     );
@@ -361,6 +362,7 @@ class GrokSession implements Session {
   constructor(
     private readonly scratch: ExecutionScratch,
     private readonly model: string | undefined,
+    private readonly effort: string | undefined,
     private readonly interruptMs: number,
     private readonly expectedSessionRef?: string,
   ) {}
@@ -471,6 +473,9 @@ class GrokSession implements Session {
   }
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('grok requires a string instruction');
+    if ((task.modelId !== undefined && task.modelId !== this.model) || (task.effort !== undefined && task.effort !== this.effort)) {
+      throw new PolicyUnsupportedError('grok persistent session cannot change model or effort');
+    }
     if (modelLaneTarget(task.target) !== undefined) throw new PolicyUnsupportedError(`grok persistent session runs ${this.model ?? 'the default model'} and takes no dispatch selection`);
     await this.prompt(task.instruction);
   }

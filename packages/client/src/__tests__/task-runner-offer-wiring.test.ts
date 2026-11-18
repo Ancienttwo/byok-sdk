@@ -14,6 +14,7 @@ import { testScratchOwner } from './fixtures/execution-scratch';
 import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import type { BlobResolver } from '../daemon/blob-client';
+import { RuntimeExecutionFailure } from '../runtime-failure';
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => { throw new Error('not used in this test'); },
@@ -98,6 +99,28 @@ describe('TaskRunner offer/admission host wiring (S3)', () => {
     expect(archived?.phase).toBe('declined');
     expect(archived?.terminal?.reason).toBe('Agent egress offer policy is not exactly enabled by this daemon');
     expect(hostFor(runner).current(taskId)).toBeUndefined();
+    forgetHost(runner);
+  });
+
+  it.each([true, false])('honors the runtime execution-options opt-in (%s)', async supported => {
+    const sent: Envelope[] = [];
+    const stub = new StubRuntimeAdapter('grok');
+    const prepare = vi.fn<RuntimeAdapter['prepare']>(async ({ offer }) => {
+      expect(offer).toMatchObject({ modelId: 'task-model', effort: 'high' });
+      return { kind: 'prepared', operation: { start: async () => {
+        throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason: 'model_rejected', failure: { class: 'model_unavailable' } });
+      } } };
+    });
+    const runner = makeRunner(sent, { adapters: [{
+      descriptor: { ...stub.descriptor, supportsTaskExecutionOptions: supported },
+      detect: () => stub.detect(), runtimeEnvironment: () => stub.runtimeEnvironment(), prepare,
+    }] });
+    await offer(runner, 'task-options', { target: { lane: 'harness', harnessId: 'grok', modelId: 'task-model', effort: 'high' } });
+    expect(prepare).toHaveBeenCalledTimes(supported ? 1 : 0);
+    expect(sent.some(envelope => envelope.type === 'task.claim')).toBe(supported);
+    expect(sent.find(envelope => envelope.type === (supported ? 'task.fail' : 'task.decline'))?.payload).toMatchObject(supported
+      ? { reason: 'model_rejected', retryable: false, failure: { class: 'model_unavailable' } }
+      : { retryable: false });
     forgetHost(runner);
   });
 

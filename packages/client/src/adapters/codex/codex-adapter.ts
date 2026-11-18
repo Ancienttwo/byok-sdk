@@ -317,6 +317,7 @@ export class CodexAdapter implements RuntimeAdapter {
       input.scratch,
       workspace,
       model,
+      effort,
       this.interruptTimeoutMs,
       this.options.operationTimeoutMs ?? DEFAULT_OPERATION_MS,
       input.manifest.sessionRef === undefined,
@@ -440,6 +441,7 @@ class CodexSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly workspace: string,
     private readonly model: string | undefined,
+    private readonly effort: string | undefined,
     private readonly interruptMs: number,
     private readonly operationMs: number,
     private readonly fresh: boolean,
@@ -586,6 +588,9 @@ class CodexSession implements Session {
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string')
       throw new PolicyUnsupportedError('codex requires a string instruction');
+    if (task.effort !== undefined && task.effort !== this.effort) {
+      throw new PolicyUnsupportedError('codex persistent session cannot change effort');
+    }
     const model = subscriptionModel(modelLaneTarget(task.target));
     if (model !== undefined && model !== this.model)
       throw new PolicyUnsupportedError(
