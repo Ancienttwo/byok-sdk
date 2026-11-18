@@ -90,6 +90,7 @@ describe('GrokAdapter detection', () => {
     vi.stubEnv('XAI_API_KEY', 'xai-fixture-key');
     expect(await adapter().detect()).toEqual({
       kind: 'available', version: 'grok 1.0.62 (fixture)', authPresent: true,
+      sessionCapabilities: { images: true, steer: false },
       executablePath: fixture, executableSource: 'config',
       versionVerdict: { state: 'warn', qualifiedVersion: '1.0.77' },
     });
@@ -102,6 +103,7 @@ describe('GrokAdapter detection', () => {
     vi.stubEnv('FAKE_ACP_VERSION', 'grok 1.0.77 (fixture)');
     expect(await adapter().detect()).toEqual({
       kind: 'available', version: 'grok 1.0.77 (fixture)', authPresent: false,
+      sessionCapabilities: { images: true, steer: false },
       executablePath: fixture, executableSource: 'config',
       versionVerdict: { state: 'allow', qualifiedVersion: '1.0.77' },
     });

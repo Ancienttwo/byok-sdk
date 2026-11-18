@@ -16,6 +16,7 @@ import type { RuntimeAdapter, RuntimeCapabilities } from '../types';
 
 const MATRIX_FIELDS = [
   'steer',
+  'images',
   'resume',
   'approvalInteractive',
   'mcpToolsets',
@@ -84,7 +85,7 @@ describe('runtime capability matrix projection to conn.hello / presence', () => 
   it('omits every field the adapter does not declare instead of inventing false', () => {
     const wire = toRuntimeInfoCapabilities({ steer: false, resume: true, approvalInteractive: false });
     expect(wire).toEqual({ steer: false, resume: true, approvalInteractive: false });
-    for (const field of ['mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane', 'isolation'] as const) {
+    for (const field of ['images', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane', 'isolation'] as const) {
       expect(field in wire, field).toBe(false);
     }
   });
