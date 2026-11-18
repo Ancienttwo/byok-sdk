@@ -45,6 +45,28 @@ describe.skipIf(SKIP_DATAPLANE)('object finalize over a createByokPool pool [pos
       const finalized = await core.quota.finalizeReservation(tenant, { reservationId: 'sealed-output', ...observed! });
       expect(finalized.reservation.state).toBe('committed');
       expect((await core.objects.get(tenant, hash))?.state).toBe('committed');
+
+      const declaration = { reservationId: 'sealed-output', kind: 'object' as const, expectedBytes: 573_456n,
+        contentHash: hash, contentType: 'application/octet-stream', ttlMs: 60_000 };
+      const usage = await core.quota.readUsage(tenant);
+      const replay = await core.quota.reserve(tenant, declaration);
+      expect(replay.state).toBe('committed');
+      const replayGrant = await blobs.createUpload(tenant, replay);
+      expect(replayGrant.blobId).toBe(grant.blobId);
+      const overwrite = await fetch(replayGrant.uploadUrl, { method: 'PUT', headers: { 'content-type': declaration.contentType }, body: bytes });
+      expect(overwrite.ok).toBe(false);
+      const downloadUrl = await blobs.getDownloadUrl(tenant, replayGrant.blobId);
+      expect(downloadUrl).toBeDefined();
+      const downloaded = await fetch(downloadUrl!);
+      expect(new Uint8Array(await downloaded.arrayBuffer())).toEqual(bytes);
+      expect(await core.quota.readUsage(tenant)).toEqual(usage);
+      for (const changed of [
+        { expectedBytes: declaration.expectedBytes + 1n },
+        { contentHash: contentHash(`sha256:${'a'.repeat(64)}`) },
+        { contentType: 'text/plain' },
+      ]) {
+        await expect(core.quota.reserve(tenant, { ...declaration, ...changed })).rejects.toMatchObject({ code: 'storage_integrity_mismatch' });
+      }
     } finally {
       await scope.dispose();
     }

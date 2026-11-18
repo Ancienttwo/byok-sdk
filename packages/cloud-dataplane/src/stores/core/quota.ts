@@ -618,7 +618,7 @@ export class PostgresQuotaStore implements QuotaStore {
     );
     const held = existing.rows[0];
     if (held !== undefined) {
-      if (held.state === 'reserved') {
+      if (held.state === 'reserved' || (held.state === 'committed' && held.kind === 'object')) {
         if (
           held.kind !== input.kind ||
           held.expected_bytes !== input.expectedBytes ||
