@@ -998,6 +998,7 @@ const __executionScratch = await testExecutionScratch();
     const adapter = fakePiAdapter();
     expect(adapter.descriptor.capabilities).toEqual({
       steer: true,
+      images: true,
       resume: true,
       mcpToolsets: true,
       messageDraft: true,
