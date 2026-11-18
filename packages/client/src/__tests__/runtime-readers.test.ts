@@ -7,7 +7,8 @@ import { AgyAdapter, CodexAdapter, createRuntimeAdapters } from '../adapters/ind
 import { findRuntimeCommandOnPath, runtimeInvocationHost } from '../adapters/runtime-invocation.js';
 import { detectRuntimes } from '../daemon/create-daemon/support.js';
 import { createDaemonRecordProjector } from '../daemon/daemon-record.js';
-import { formatRuntimeLines } from '../diagnostics/format.js';
+import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper.js';
+import { formatLiveStatusLines } from '../diagnostics/format.js';
 import { parseControlStatusRuntimes } from '../runtime-detection.js';
 
 const dirs: string[] = [];
@@ -178,7 +179,14 @@ it.skipIf(process.platform === 'win32')('keeps native version floor evidence loc
   const { observations, ...hello } = await detectRuntimes([adapter]);
   const versions = { installedVersion: '1.4.9', requiredVersion: '1.5.0' };
   expect(parseControlStatusRuntimes({ runtimes: observations })?.[0]?.unsupportedVersion).toEqual(versions);
-  expect(formatRuntimeLines(observations)).toEqual(['agy: refused:version_unsupported installedVersion=1.4.9 requiredVersion=1.5.0']);
+  const lines = formatLiveStatusLines({
+    pid: 1, uptimeMs: 1, paired: true, lifecycle: { phase: 'running', connection: 'open' }, runtimes: observations,
+    toolsets: { revision: '1', toolsets: [] },
+    outbound: { accepted: 0, duplicate: 0, rejected: 0, rejectedTerminals: 0, droppedEphemeral: 0, rejectedByReason: {} },
+    operationalHealth: { availability: 'available', state: 'healthy', failureCount: 0, failureThreshold: 1, windowMs: 1000, crashCount: 0 },
+    activeTasks: [], approvals: [], approvalsPending: 0, queueWatermarks: [], storage: unmeasuredRetentionSnapshot(),
+  });
+  expect(lines).toContain('live-runtimes: agy=refused:version_unsupported(installedVersion=1.4.9 requiredVersion=1.5.0)');
   const audit = createDaemonRecordProjector().project({ kind: 'runtimes-detected', ts: new Date().toISOString(), runtimes: observations });
   for (const projection of [hello, audit]) {
     expect(JSON.stringify(projection)).not.toMatch(/installedVersion|requiredVersion|1\.4\.9|1\.5\.0/);

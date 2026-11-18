@@ -256,8 +256,6 @@ export function formatUnsupportedRuntimeVersion(runtime: Pick<RuntimeObservation
 export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): string[] {
   if (runtimes.length === 0) return ['(no runtimes configured — check runtimeAllowlist)'];
   return runtimes.map((r) => {
-    const unsupported = formatUnsupportedRuntimeVersion(r);
-    if (unsupported !== undefined) return `${r.id}: refused:version_unsupported ${unsupported}`;
     if (!r.present) return `${r.id}: ${r.outcome}${r.outcome === 'refused' ? `:${refusalText(r)}` : ''}`;
     const caps: string[] = [];
     if (r.steer) caps.push('steer');
