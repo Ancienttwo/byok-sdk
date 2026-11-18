@@ -133,6 +133,7 @@ const FLAG_TAKES_VALUE = {
   '--no-extensions': false,
   '--mode': true,
   '--session': true,
+  '--thinking': true,
   '--extension': true,
   '--tools': true,
   '--exclude-tools': true,
@@ -251,7 +252,7 @@ async function handleCommand(msg) {
         command: 'get_state',
         success: true,
         id: msg.id,
-        data: { model: { id: 'fake-model' }, thinkingLevel: 'off', isStreaming: false, sessionId },
+        data: { model: { id: 'fake-model' }, thinkingLevel: process.env.FAKE_PI_EFFORT_READBACK ?? (argv.includes('--thinking') ? argv[argv.indexOf('--thinking') + 1] : 'off'), isStreaming: false, sessionId },
       });
       break;
 

@@ -440,7 +440,7 @@ export function runtimeTaskInput(payload: AcceptedOfferPayload): RuntimeTaskInpu
   void egressPolicy;
   void messageEgress;
   void preparation;
-  const { effort } = offer.target;
+  const effort = offer.target.lane === 'auto' ? undefined : offer.target.effort;
   const modelId = offer.target.lane === 'harness' ? offer.target.modelId : undefined;
   return { ...offer,
     ...(session.mode === 'resume' ? { sessionRef: session.sessionRef } : {}),

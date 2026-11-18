@@ -578,6 +578,15 @@ const __executionScratch = await testExecutionScratch();
     expect(session.sessionRef).toBe('fixture-minted-session-xyz');
   });
 
+  it.each([undefined, 'fake-session-1'])('requires Pi to confirm the exact effort (resume=%s)', async sessionRef => {
+    const task = { ...baseTask, effort: 'high', sessionRef };
+    const live = await startAdapter(fakePiAdapter(), task, await makeCtx());
+    openSessions.push(live);
+    expect(live.sessionRef).toBe('fake-session-1');
+    await expect(startAdapter(fakePiAdapter(), task, await makeCtx({ ...process.env, FAKE_PI_EFFORT_READBACK: 'low' })))
+      .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+  });
+
   it('fails closed (never a fabricated UUID) when get_state cannot yield an authoritative session id (finding F8)', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_GET_STATE_FAIL: '1' });

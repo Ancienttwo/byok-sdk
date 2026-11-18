@@ -4,6 +4,7 @@ import { asRecord, type JsonRecord } from "../json.js";
 import { acpReportedEffort, acpThoughtLevelOption } from "./model.js";
 import { type AcpProcess, withAcpDeadline } from "./process.js";
 import type { AcpConfigUpdates } from "./config-updates.js";
+import { acpOpenFailure, rpcErrorCode } from "./failure.js";
 
 function setConfigOption(
   process: AcpProcess, sessionId: string, configId: string, value: string,
@@ -66,13 +67,19 @@ export async function applyAcpEffort(
   try {
     answer = await setConfigOption(process, opened.sessionId, configId, effort, context);
   } catch (error) {
-    throw new Error(`${method} ${configId}=${effort} was refused: ${rpcErrorText(error)}`, { cause: error });
+    if (error instanceof UnsupportedOptionError) {
+      throw new UnsupportedOptionError("effort", `${method} ${configId}=${effort} was refused: ${error.message}`);
+    }
+    if (rpcErrorCode(error) === null) { throw error; }
+    const classified = acpOpenFailure(error, "open");
+    if (classified !== error) { throw classified; }
+    throw new UnsupportedOptionError("effort", `${method} ${configId}=${effort} was refused: ${rpcErrorText(error)}`);
   }
   const response = asRecord(answer) ?? {};
   context.observe({ method, response });
   const applied = acpReportedEffort(response);
   if (applied !== effort) {
-    throw new Error(`${method} left ${configId} at ${applied ?? "an unreported value"} although effort ${effort} was requested`);
+    throw new UnsupportedOptionError("effort", `${method} left ${configId} at ${applied ?? "an unreported value"} although effort ${effort} was requested`);
   }
   return response;
 }

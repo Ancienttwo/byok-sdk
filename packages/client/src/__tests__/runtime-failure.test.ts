@@ -9,7 +9,7 @@ import {
 import type { RuntimeFailurePhase } from '../runtime-failure';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { agyStartClassifier, oarStartClassifier, runtimeStartFailure } from '../adapters/runtime-start-failure';
+import { oarStartClassifier, runtimeStartFailure } from '../adapters/runtime-start-failure';
 import { SessionNotFoundError } from '../../vendor/oar/609f347/contracts/session-not-found-error';
 import { SessionUnavailableError } from '../../vendor/oar/609f347/contracts/session-unavailable-error';
 import { UnsupportedOptionError } from '../../vendor/oar/609f347/contracts/errors';
@@ -127,7 +127,8 @@ describe('runtime start failures', () => {
     [new SessionUnavailableError('id', 'archived', { ...details, reason: 'archived' }), 'non-retryable', 'unknown', 'archived'],
     [new SessionUnavailableError('id', 'in use', { ...details, reason: 'in_use' }), 'retryable', 'unknown', 'in use'],
     [new UnsupportedOptionError('model', 'unsupported'), 'non-retryable', 'unknown', 'unsupported'],
-    [new ModelConfirmationError('kept', { requested: 'a', reported: 'b' }), 'non-retryable', 'unknown', 'kept'],
+    [new UnsupportedOptionError('effort', 'effort refused'), 'non-retryable', 'invalid_request', 'effort refused'],
+    [new ModelConfirmationError('kept', { requested: 'a', reported: 'b' }), 'non-retryable', 'model_unavailable', 'model_rejected'],
     [new RuntimeFailureError('auth', 'login'), 'non-retryable', 'auth', 'login'],
     [new Error('exit'), 'retryable', 'runtime_exited', 'exit'],
   ])('classifies %s', (error, retry, failureClass, message) => {
@@ -140,7 +141,6 @@ describe('runtime start failures', () => {
   });
 
   // OAR 0.111 refuses these agy selectors from the native catalog, before any model request; 0.110 sent them and agy refused them as model_unavailable (#2361).
-  const agy = agyStartClassifier({ SessionNotFoundError, SessionUnavailableError, UnsupportedOptionError, ModelConfirmationError, RuntimeFailureError });
   const catalog = (models: string[]) => ({ configOptions: [{ id: 'model', currentValue: models[0], options: models.map(value => ({ value })) }] });
   it.each([
     ['an unknown model', ['gemini-3-pro', 'gemini-3-flash'], 'claude-opus', undefined],
@@ -154,13 +154,7 @@ describe('runtime start failures', () => {
     expect(refusal).toBeInstanceOf(ModelConfirmationError);
     expect(setModel).toHaveBeenCalledTimes(menu === undefined ? 0 : 1);
     expect(setEffort).not.toHaveBeenCalled();
-    const before = runtimeStartFailure(new RuntimeFailureError('model_unavailable', 'refused'), { classify: agy, exitedOnItsOwn: false, runtime: 'agy' });
-    const after = runtimeStartFailure(refusal, { classify: agy, exitedOnItsOwn: false, runtime: 'agy' });
-    expect(after).toMatchObject({ phase: 'start', retry: before.retry, failure: before.failure });
-    expect(after.failure).toEqual({ class: 'model_unavailable' });
-  });
-  it('keeps an agy confirmation failure without a catalog as unknown', () => {
-    const result = runtimeStartFailure(new ModelConfirmationError('left at b', { requested: 'a', reported: 'b' }), { classify: agy, exitedOnItsOwn: false, runtime: 'agy' });
-    expect(result).toMatchObject({ retry: 'non-retryable', failure: { class: 'unknown' } });
+    const after = runtimeStartFailure(refusal, { classify, exitedOnItsOwn: false, runtime: 'agy' });
+    expect(after).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'model_unavailable' }, message: 'model_rejected' });
   });
 });

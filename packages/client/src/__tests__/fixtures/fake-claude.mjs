@@ -414,6 +414,7 @@ function runProbeOrTurnFlow() {
     '--verbose': false,
     '--include-partial-messages': false,
     '--model': true,
+    '--effort': true,
     '--tools': true,
     '--resume': true,
     '--dangerously-skip-permissions': false,

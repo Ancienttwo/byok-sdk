@@ -792,7 +792,7 @@ export declare class AgyAdapter implements RuntimeAdapter {
     constructor(options: AgyAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
-    prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
@@ -964,7 +964,7 @@ export declare class GrokAdapter implements RuntimeAdapter {
     constructor(options?: GrokAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
-    prepare(_input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
@@ -5901,6 +5901,8 @@ import type { AgentRef } from './agent-home.js';
 import type { McpToolsetServerObservation } from './mcp/observation.js';
 export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> & {
     instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
+    effort?: string;
+    modelId?: string;
     sessionRef?: string;
 };
 // support
@@ -6051,6 +6053,7 @@ export interface RuntimeAdapterDescriptor {
     readonly capabilities: RuntimeCapabilities;
     readonly versionPolicy?: RuntimeVersionPolicy;
     readonly supportsDispatchSelection: boolean;
+    readonly supportsTaskExecutionOptions?: boolean;
     readonly requiresMcpToolsetToolObservation?: boolean;
     readonly mcpToolApprovals?: boolean;
     readonly progressMessageBoundary?: 'event' | 'session';

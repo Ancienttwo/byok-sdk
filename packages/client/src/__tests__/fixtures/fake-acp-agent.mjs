@@ -84,6 +84,12 @@ function promptText(params) {
 }
 
 let opencodeModel;
+let effort = 'low';
+const effortId = agy || process.env.FAKE_ACP_OPENCODE === '1' ? 'thought_level' : 'reasoning_effort';
+const agyModels = () => agy && process.env.FAKE_ACP_MODEL_CATALOG ? [modelCatalog(process.env.FAKE_ACP_MODEL_CATALOG.split(','))] : [];
+const effortMenu = () => process.env.FAKE_ACP_EFFORT_MENU !== '1' ? [] : [
+  { id: effortId, category: 'thought_level', name: 'Effort', type: 'select', currentValue: effort, options: ['low', 'high'].map(value => ({ value, name: value })) },
+];
 let childUpdates = false;
 async function prompt(message) {
   const full = promptText(message.params);
@@ -375,7 +381,7 @@ function request(message) {
       }
       log({ kind: 'open', method: message.method, params: message.params });
       log({ kind: 'native-session', sessionId: SESSION });
-      result(message.id, { sessionId: SESSION, ...(agy && process.env.FAKE_ACP_MODEL_CATALOG ? { configOptions: [modelCatalog(process.env.FAKE_ACP_MODEL_CATALOG.split(','))] } : {}) });
+      result(message.id, { sessionId: SESSION, configOptions: [...agyModels(), ...effortMenu()] });
       return;
     case 'session/resume':
       if (sessionStore && savedSession()?.id === message.params?.sessionId) SESSION = savedSession().id;
@@ -383,7 +389,7 @@ function request(message) {
       if (process.env.FAKE_ACP_REFUSE_RESUME === '1') { error(message.id, -32601, 'session/resume unavailable'); return; }
       if (process.env.FAKE_ACP_OPENCODE === '1') text('historical replay');
       if (message.params?.sessionId !== SESSION) { error(message.id, -32603, 'session not found', { code: 'FS_NOT_FOUND' }); return; }
-      result(message.id, {});
+      result(message.id, { configOptions: [...agyModels(), ...effortMenu()] });
       return;
     case 'session/list':
       if (sessionStore) {
@@ -398,11 +404,19 @@ function request(message) {
       result(message.id, { _meta: { modelId: message.params?.modelId } });
       return;
     case 'session/set_config_option':
+      if (message.params?.configId === effortId) {
+        log({ kind: 'config', params: message.params });
+        if (message.params.value === 'refused') { error(message.id, -32602, 'effort refused'); return; }
+        effort = message.params.value;
+        const configOptions = effortMenu();
+        update({ sessionUpdate: 'config_option_update', configOptions });
+        result(message.id, { configOptions }); return;
+      }
       if (process.env.FAKE_ACP_OPENCODE === '1') {
         log({ kind: 'config', params: message.params });
         if (process.env.FAKE_ACP_REFUSE_MODEL === message.params?.value) { error(message.id, -32602, 'selected model unavailable'); return; }
         opencodeModel = message.params?.value;
-        const configOptions = [{ id: 'model', name: 'Model', type: 'select', currentValue: process.env.FAKE_ACP_MODEL_READBACK ?? opencodeModel, options: [{ value: opencodeModel, name: opencodeModel }] }];
+        const configOptions = [{ id: 'model', name: 'Model', type: 'select', currentValue: process.env.FAKE_ACP_MODEL_READBACK ?? opencodeModel, options: [{ value: opencodeModel, name: opencodeModel }] }, ...effortMenu()];
         update({ sessionUpdate: 'config_option_update', configOptions });
         result(message.id, { configOptions }); return;
       }

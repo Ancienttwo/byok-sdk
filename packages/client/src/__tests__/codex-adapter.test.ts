@@ -218,6 +218,29 @@ describe('Codex persistent app-server adapter', () => {
       { type: 'turn_end' },
     ]);
   });
+  it.each([undefined, 'fake-thread-1'])('applies the exact effort before prompting (resume=%s)', async sessionRef => {
+    const resources = await ctx();
+    const receipt = path.join(resources.workspaceDir, 'effort-rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    await turn(await open(adapter(), { ...task, effort: 'high', sessionRef }, resources));
+    const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const method = sessionRef ? 'thread/settings/update' : 'thread/start';
+    const applied = frames.findIndex(frame => frame.method === method);
+    expect(applied).toBeGreaterThanOrEqual(0);
+    expect(applied).toBeLessThan(frames.findIndex(frame => frame.method === 'turn/start'));
+    expect(frames[applied].params).toMatchObject(sessionRef ? { threadId: sessionRef, effort: 'high' } : { config: { model_reasoning_effort: 'high' } });
+  });
+
+  it.each([undefined, 'fake-thread-1'])('fails before prompting when Codex reports a different effort (resume=%s)', async sessionRef => {
+    const resources = await ctx({ FAKE_CODEX_EFFORT_READBACK: 'low' });
+    const receipt = path.join(resources.workspaceDir, 'effort-rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    await expect(open(adapter(), { ...task, effort: 'high', sessionRef }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+    });
+    expect(await fs.readFile(receipt, 'utf8')).not.toContain('turn/start');
+  });
+
   it('uses thread/resume without migrating thread identity', async () => {
     const s = await open(adapter(), { ...task, sessionRef: 'fake-thread-1' });
     expect(s.sessionRef).toBe('fake-thread-1');

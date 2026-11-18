@@ -161,6 +161,29 @@ describe('DshAdapter detect and prepare', () => {
 });
 
 describe('DshAdapter sessions', () => {
+  it('uses the task model and effort on fresh and resumed DSH sessions', async () => {
+    const box = await setup();
+    const request = { target: DSH_TARGET, instruction: 'hello', modelId: 'byok-custom/task-model', effort: 'high' };
+    const fresh = await box.open(request);
+    await turn(fresh);
+    const sessionRef = fresh.sessionRef;
+    await fresh.close();
+    await turn(await box.open({ ...request, sessionRef }));
+    const log = await box.facts();
+    const expected = { provider: 'byok-custom', model: 'task-model', reasoningEffort: 'high' };
+    expect(log.filter(fact => ['open', 'resume'].includes(fact.method)).map(row => row.request.agentOptions)).toEqual([expected, expected]);
+    expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch({ ...MODEL, model: 'task-model' })));
+    await expect(box.adapter.prepare({ offer: { ...request, modelId: 'other-route/task-model' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [] }))
+      .resolves.toMatchObject({ kind: 'reject', retryable: false, reason: expect.stringMatching(/^model_rejected:/) });
+  });
+
+  it('fails before prompt when DSH reports a different effort', async () => {
+    const box = await setup({}, { FAKE_DSH_EFFORT_READBACK: 'low' });
+    await expect(box.open({ target: DSH_TARGET, instruction: 'hello', effort: 'high' }))
+      .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+    expect((await box.facts()).some(row => row.method === 'prompt')).toBe(false);
+  });
+
   it('launches dsh in the scratch directory with the SDK patch, home and switches', async () => {
     const { open, facts, root, workspaceDir } = await setup();
     const session = await open();

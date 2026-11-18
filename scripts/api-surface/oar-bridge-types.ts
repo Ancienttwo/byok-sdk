@@ -286,7 +286,7 @@ export type CheckDshModelConfirmation = Assert<Equal<DshBridge.ModelConfirmation
 // profile. The adapter assembles the session profile; the fold stays opaque.
 import type * as ClaudeBridge from '../../packages/client/src/runtime/claude-session-runtime.js';
 import type { ClaudeStreamSessionOptions } from '../../packages/client/src/adapters/claude/stream-session.js';
-export type CheckClaudeEffort = Assert<Equal<Pick<ClaudeStreamSessionOptions, 'effort'>, Pick<VendorArgs[2], 'effort'>>>;
+export type CheckClaudeEffort = Assert<Equal<Pick<ClaudeStreamSessionOptions, 'effort'>, Mutable<Pick<VendorArgs[2], 'effort'>>>>;
 import type { streamJsonSession as vendorStreamJsonSession, StreamJsonSessionHooks } from '../../packages/client/vendor/oar/609f347/shared/stream-json/session.js';
 import type { StreamJsonSessionProfile } from '../../packages/client/vendor/oar/609f347/shared/stream-json/profile.js';
 import type { claudeProjectionProfile as vendorClaudeProfile, ClaudeProjectionState as VendorClaudeState } from '../../packages/client/vendor/oar/609f347/runtimes/claude/projection.js';

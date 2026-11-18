@@ -337,12 +337,11 @@ async function openCodexSession(
     const timer = setTimeout(() => {
       resolve(null);
     }, CODEX_SETTINGS_REPORT_MS);
-    let refusal: string | null = null;
     try {
-      const update = await updateThreadEffort(client, threadId, requested, version);
-      refusal = codexResumeEffortRefusal(requested, update, update === null ? await reported : null);
+      await updateThreadEffort(client, threadId, requested, version);
+      const refusal = codexResumeEffortRefusal(requested, await reported);
+      if (refusal !== null) { throw refusal; }
     } finally { clearTimeout(timer); settingsWaiter = null; }
-    if (refusal !== null) { throw new Error(refusal); }
   }
   // Last, so an open refused above leaves the user's thread unrenamed.
   await nameThread(client, threadId, codexThreadName(openMethod, options, started), (native) => { kernel.frame({ type: "thread/name/set/error", native, events: [] }); });

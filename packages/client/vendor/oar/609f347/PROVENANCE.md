@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.115.0`, commit `51c7555ab64d3d38abb6555fd63f76aed0f51801` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.115.0`, commit `4c25b9d174f3fe6f62ff25f71497e2c097b51403` (the manifest's `fork`).
 
 This directory is a projection of that branch. `scripts/ci/oar-sync.mjs` writes every file the manifest lists, and the manifest's `packageVersion`, `commit`, `fork` and hash columns; nobody edits them by hand. The manifest's path list, `release` binding, `delta` texts and `upstreamCommit` fields, and this file, stay hand-authored. A row with `upstreamCommit` takes its upstream hash from that commit instead of the base (a file carried from an upstream PR). Required CI fetches nothing: it checks the vendor bytes against the manifest hashes (`src/__tests__/oar-app-server-client.test.ts`). That the script's output equals this tree is the operator's check during a bump. A published `byok/*` branch is never force-pushed, so an older pin stays reproducible.
 
@@ -79,6 +79,10 @@ Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared
 ## History
 
 The sections below record each step as it was made. Deltas they describe may since have returned to upstream bytes; the list above is the current inventory.
+
+### Typed effort refusals (#2378)
+
+Fork commit `4c25b9d1` types explicit Codex and ACP effort refusals so the client can fail them without retry. Transport failures and missing notifications keep their existing behavior. Upstream: planned contribution.
 
 ### On-demand readers (#2379)
 

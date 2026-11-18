@@ -203,6 +203,35 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     })).rejects.toThrow(/persistent session cannot change model/);
   });
 
+  it.each([undefined, 'resume-me-123'])('passes the effort from the selected Claude model menu (resume=%s)', async sessionRef => {
+    const calls: string[][] = [];
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      spawnFn: ((command: string, args: string[], options: object) => { calls.push([...args]); return realSpawn(command, args, options); }) as never });
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [
+      { id: 'sonnet', effortLevels: ['low'] }, { id: 'opus', effortLevels: ['future-level'] },
+    ] });
+    const session = await startAdapter(adapter, {
+      ...baseTask, target: { lane: 'subscription', runtimeId: 'claude', modelId: 'opus' }, effort: 'future-level', sessionRef,
+    }, await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: 'resume-me-123' }));
+    openSessions.push(session);
+    expect(calls[0]).toEqual(expect.arrayContaining(['--model', 'opus', '--effort', 'future-level']));
+    if (sessionRef) expect(calls[0]).toEqual(expect.arrayContaining(['--resume', sessionRef]));
+  });
+
+  it.each([
+    [{ kind: 'unauthenticated' }, 'claude_effort_catalog_unavailable'],
+    [{ kind: 'ok', models: [{ id: 'opus' }] }, 'claude_effort_menu_unavailable'],
+    [{ kind: 'ok', models: [{ id: 'opus', effortLevels: ['low'] }, { id: 'sonnet', effortLevels: ['high'] }] }, 'claude_effort_unsupported'],
+  ] as const)('fails before Claude starts when the catalog does not admit effort (%s)', async (catalog, message) => {
+    const spawnFn = vi.fn((command: string, args: string[], options: object) => realSpawn(command, args, options));
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn: spawnFn as never });
+    vi.spyOn(adapter, 'listModels').mockResolvedValue(catalog);
+    await expect(startAdapter(adapter, {
+      ...baseTask, target: { lane: 'subscription', runtimeId: 'claude', modelId: 'opus' }, effort: 'high',
+    }, await makeCtx())).rejects.toMatchObject({ message, phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
   it('a task.offer carrying a known sessionRef resumes via the real --resume flag, matching session_id', async () => {
     const adapter = fakeClaudeAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: 'resume-me-123' });

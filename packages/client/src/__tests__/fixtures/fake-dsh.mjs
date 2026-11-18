@@ -91,12 +91,13 @@ function prompt(sessionId, text) {
   end({ kind: 'completed' });
 }
 
+const modelReadback = ({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort: process.env.FAKE_DSH_EFFORT_READBACK ?? reasoningEffort });
 const commands = {
   open(request) {
     route = `${request.agentOptions.provider}/${request.agentOptions.model}`;
     mkdirSync(sessions, { recursive: true });
     writeFileSync(path.join(sessions, request.sessionId), request.cwd);
-    return { sessionId: request.sessionId, methods: { followup: true, steer: process.env.FAKE_DSH_NO_STEER !== '1', cancel: true }, inboxMethods: { remove: true } };
+    return { sessionId: request.sessionId, model: modelReadback(request.agentOptions), methods: { followup: true, steer: process.env.FAKE_DSH_NO_STEER !== '1', cancel: true }, inboxMethods: { remove: true } };
   },
   peek(request) {
     const file = path.join(sessions, request.sessionId);
@@ -105,7 +106,7 @@ const commands = {
   },
   resume(request) {
     route = `${request.agentOptions.provider}/${request.agentOptions.model}`;
-    return { sessionId: request.sessionId, methods: { followup: true, steer: true, cancel: true }, inboxMethods: { remove: true } };
+    return { sessionId: request.sessionId, model: modelReadback(request.agentOptions), methods: { followup: true, steer: true, cancel: true }, inboxMethods: { remove: true } };
   },
   prompt(request) {
     setImmediate(() => prompt(request.sessionId, request.text));

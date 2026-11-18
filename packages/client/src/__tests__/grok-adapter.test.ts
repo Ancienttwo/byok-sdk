@@ -121,7 +121,7 @@ describe('GrokAdapter sessions', () => {
   it('declares resume and MCP toolsets, no steer, no approvals and no dispatch selection', async () => {
     const a = adapter();
     expect(a.descriptor).toEqual({
-      id: 'grok', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
+      id: 'grok', supportsDispatchSelection: false, supportsTaskExecutionOptions: true, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
       versionPolicy: { qualifiedVersion: '1.0.77', unqualified: 'warn' },
       capabilities: {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
@@ -212,6 +212,23 @@ describe('GrokAdapter sessions', () => {
     const missing = await startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'again', sessionRef: 'gone' }, await ctx()).catch(error => error);
     expect(missing).toBeInstanceOf(RuntimeExecutionFailure);
     expect(missing).toMatchObject({ phase: 'start', retry: 'non-retryable' });
+  });
+
+  it.each([undefined, 'fake-grok-session'])('selects the per-task Grok model and effort before prompt (resume=%s)', async sessionRef => {
+    const resources = await ctx({ FAKE_ACP_EFFORT_MENU: '1' });
+    const runtime = adapter({ model: 'boot-model' });
+    await turn(await open(runtime, { target: GROK_TARGET, instruction: 'hello', modelId: 'task-model', effort: 'high', sessionRef }, resources));
+    const log = facts(resources.log);
+    expect(log.find(row => row.kind === 'model')?.params.modelId).toBe('task-model');
+    expect(log.find(row => row.kind === 'config')?.params).toMatchObject({ configId: 'reasoning_effort', value: 'high' });
+    expect(log.findIndex(row => row.kind === 'config')).toBeLessThan(log.findIndex(row => row.kind === 'prompt'));
+  });
+
+  it.each([undefined, 'fake-grok-session'])('fails before prompting when Grok refuses effort (resume=%s)', async sessionRef => {
+    const resources = await ctx({ FAKE_ACP_EFFORT_MENU: '1' });
+    await expect(open(adapter(), { target: GROK_TARGET, instruction: 'hello', effort: 'refused', sessionRef }, resources))
+      .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+    expect(facts(resources.log).some(row => row.kind === 'prompt')).toBe(false);
   });
 
   it('selects the adapter model and fails closed on a refused model or login', async () => {
@@ -766,6 +783,15 @@ describe('AgyAdapter', () => {
     const failure = await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, { ...await agyCtx(), mcpServers: { host: { command: 'server', env: { TOKEN: 'x' } } } }).catch(error => error);
     expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     expect(String(failure.message)).toContain('it attaches no entry with env or headers');
+  });
+
+  it.each([undefined, 'fake-grok-session'])('uses the per-task Antigravity model and effort (resume=%s)', async sessionRef => {
+    const home = await agyVersion('1.5.1');
+    const resources = await agyCtx({ FAKE_ACP_MODEL_CATALOG: 'boot-model,task-model', FAKE_ACP_EFFORT_MENU: '1' });
+    resources.env.FAKE_ACP_LISTED_CWD = resources.workspaceDir;
+    const runtime = agy(home, { model: 'boot-model' });
+    await turn(await open(runtime, { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'hello', modelId: 'task-model', effort: 'high', sessionRef }, resources));
+    expect(facts(resources.log).filter(row => row.kind === 'config').map(row => row.params.value)).toEqual(['task-model', 'high']);
   });
 
   it('resumes only on a listed saved cwd', async () => {

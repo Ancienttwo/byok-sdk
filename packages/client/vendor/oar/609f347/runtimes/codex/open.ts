@@ -1,5 +1,6 @@
 // BYOK change: Modified from OAR bc1b2ac for explicit native interaction approval policy (Apache-2.0).
 import { sessionCredentialRedactor } from "../../shared/credential-redactor.js";
+import { UnsupportedOptionError } from "../../contracts/errors.js";
 import { ModelConfirmationError } from "../../contracts/model-confirmation-error.js";
 import path from "node:path";
 import { resolvedAdditionalDirectories } from "../../shared/additional-directories.js";
@@ -178,7 +179,7 @@ export function codexOpenReadback(
   method: CodexOpenMethod,
   options: SessionOptions,
   reply: JsonRecord,
-): { readonly events: readonly RuntimeEventBody[]; readonly refusal: string | ModelConfirmationError | null; readonly resumeEffort: string | null } {
+): { readonly events: readonly RuntimeEventBody[]; readonly refusal: string | ModelConfirmationError | UnsupportedOptionError | null; readonly resumeEffort: string | null } {
   const model = typeof reply.model === "string" ? reply.model : null;
   const effort = effortIn(reply);
   const events: RuntimeEventBody[] = [
@@ -205,7 +206,7 @@ export function codexOpenReadback(
     return { events, refusal: null, resumeEffort: options.effort };
   }
   const said = "reasoningEffort" in reply ? `kept effort ${effort ?? "none (the model's default)"}` : "reports no reasoningEffort";
-  return { events, refusal: `codex ${method} ${said} although effort ${options.effort} was requested`, resumeEffort: null };
+  return { events, refusal: new UnsupportedOptionError("effort", `codex ${method} ${said} although effort ${options.effort} was requested`), resumeEffort: null };
 }
 
 /** How long a resume waits for codex's `thread/settings/updated` after its `thread/settings/update`. */
@@ -215,22 +216,18 @@ export const CODEX_SETTINGS_REPORT_MS = 10_000;
  * Why the resumed thread does not run `requested` after
  * `thread/settings/update {effort}` ([env] 0.155.1: answered `{}`, then
  * `thread/settings/updated` with the thread's settings), or null when codex
- * reports exactly that level. `update` is the RPC's outcome, `settings` the
- * notification's params, or null when none came.
+ * reports exactly that level. `settings` is the notification's params,
+ * or null when none came.
  */
 export function codexResumeEffortRefusal(
   requested: string,
-  update: { readonly error: string } | null,
   settings: JsonRecord | null,
-): string | null {
-  if (update !== null) {
-    return `codex thread/settings/update effort=${requested} failed: ${update.error}`;
-  }
+): Error | null {
   if (settings === null) {
-    return `codex reported no thread/settings/updated within ${String(CODEX_SETTINGS_REPORT_MS)} ms, so effort ${requested} cannot be confirmed`;
+    return new Error(`codex reported no thread/settings/updated within ${String(CODEX_SETTINGS_REPORT_MS)} ms, so effort ${requested} cannot be confirmed`);
   }
   const effort = effortIn(asRecord(settings.threadSettings));
-  return effort === requested ? null : `codex thread/settings/update left effort ${effort ?? "none (the model's default)"} although ${requested} was requested`;
+  return effort === requested ? null : new UnsupportedOptionError("effort", `codex thread/settings/update left effort ${effort ?? "none (the model's default)"} although ${requested} was requested`);
 }
 
 /** Null explicitly means no tier; an absent field is no evidence. */

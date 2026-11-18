@@ -60,7 +60,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     return undefined;
   }
   if (preparation !== undefined && offered.effort !== undefined) {
-    decline({ reason: 'invalid_request: per-task effort cannot change a frozen prepared request', code: 'invalid_request', retryable: false });
+    decline({ reason: 'invalid_request: per-task effort cannot change a frozen prepared request', code: 'bad_request', retryable: false });
     return undefined;
   }
   if (payload.nativeSessions !== undefined && pick.descriptor.memoryLane === undefined) {

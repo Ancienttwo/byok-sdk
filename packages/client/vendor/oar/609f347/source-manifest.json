@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.115.0",
-    "commit": "51c7555ab64d3d38abb6555fd63f76aed0f51801"
+    "commit": "4c25b9d174f3fe6f62ff25f71497e2c097b51403"
   },
   "release": {
     "ecosystem": "npm",
@@ -457,8 +457,8 @@
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
       "upstreamSha256": "85e12031e418620c6134b4b31ccb916f0315b3119446add859d0649c6c4f5f07",
-      "vendoredSha256": "2604f390e77b1a4c56164dea93e3ca6c82556570367ea3b8722ebbb734df6d65",
-      "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\"."
+      "vendoredSha256": "e4f99e3656d3dffff69f6e2748fb4d0a2b47be385af04b44a6b8d40a2c55ac5d",
+      "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\". Type explicit fresh and resumed effort readback mismatches as UnsupportedOptionError(effort). Upstream: planned contribution (#2378)."
     },
     {
       "path": "runtimes/codex/options.ts",
@@ -494,14 +494,15 @@
       "path": "runtimes/codex/rpc-control.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/rpc-control.ts",
       "upstreamSha256": "d04362ef15b29999eb30ef5ea5208a8a08c81b6d7ebf567db14400efd57deb51",
-      "vendoredSha256": "d04362ef15b29999eb30ef5ea5208a8a08c81b6d7ebf567db14400efd57deb51"
+      "vendoredSha256": "1de66a95f6af81e7b0a09723b980b07db9ee55351e8db831fff55ffa02a5c2f2",
+      "delta": "Type native Codex settings RPC effort refusals while preserving transport and runtime-outdated classification. Upstream: planned contribution (#2378)."
     },
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "9d72aa98a2997751a97b051867b2dc84316ab8b621937b59104a004ace182383",
-      "vendoredSha256": "28c751b5f6ba41b596b8cc63af5ed4a1b08327d49e24de9edbfe3dd897b7b195",
-      "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort is omitted from the signature; the caller's retainedBytes goes to the upstream kernel's record retention."
+      "vendoredSha256": "a10e8f4e93996069f6e8b2e95b2e9bbc1ef5d126869386f2b3771fa950b2bd03",
+      "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort is omitted from the signature; the caller's retainedBytes goes to the upstream kernel's record retention. Propagate the typed resume effort refusal. Upstream: planned contribution (#2378)."
     },
     {
       "path": "runtimes/codex/task-control.ts",
@@ -755,7 +756,8 @@
       "path": "shared/acp/config-updates.ts",
       "sourcePath": "packages/oar/src/shared/acp/config-updates.ts",
       "upstreamSha256": "dd94ab29de00b2dac9852b20c8020459be10d83d495cc34fd576e78fc315785d",
-      "vendoredSha256": "dd94ab29de00b2dac9852b20c8020459be10d83d495cc34fd576e78fc315785d"
+      "vendoredSha256": "a4dc15d33bfce656aefb973f14aa81350be5a9bd25628327f8be8b0360851b40",
+      "delta": "Type conflicting effort notifications while preserving transport timeouts. Upstream: planned contribution (#2378)."
     },
     {
       "path": "shared/acp/derived-sessions.ts",
@@ -767,7 +769,8 @@
       "path": "shared/acp/effort.ts",
       "sourcePath": "packages/oar/src/shared/acp/effort.ts",
       "upstreamSha256": "08b5f38dab53559e1d4f7944b26f63b96a9788a1931876a1d3e6ffe81b1457f0",
-      "vendoredSha256": "08b5f38dab53559e1d4f7944b26f63b96a9788a1931876a1d3e6ffe81b1457f0"
+      "vendoredSha256": "5bb8149e9995ca7854f2a9ad5bc6aca673811532c1e565657f771fb2780d7ee4",
+      "delta": "Type native effort RPC refusals and wrong readback while preserving auth and transport classification. Upstream: planned contribution (#2378)."
     },
     {
       "path": "shared/acp/errors.ts",

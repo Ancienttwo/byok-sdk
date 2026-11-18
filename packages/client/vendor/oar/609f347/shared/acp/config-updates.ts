@@ -2,6 +2,7 @@ import { asRecord, asRecordList, type JsonRecord } from "../json.js";
 import { ModelConfirmationError } from "../../contracts/model-confirmation-error.js";
 import { acpReportedEffort } from "./model.js";
 import { AcpError } from "./errors.js";
+import { UnsupportedOptionError } from "../../contracts/errors.js";
 
 type WaitForConfirmation = (signal: AbortSignal) => Promise<void>;
 
@@ -55,7 +56,7 @@ export function createAcpConfigUpdates(): AcpConfigUpdates {
         // until the request's existing deadline runs out.
         if (error instanceof AcpError && error.kind === "timeout" && state.observed && state.current !== value) {
           const message = `ACP config_option_update left ${configId} at ${String(state.current)} although ${value} was requested${configId === "model" && typeof state.effort === "string" ? ` (native thought_level=${state.effort})` : ""}`;
-          throw configId === "model" ? new ModelConfirmationError(message, { requested: value, reported: typeof state.current === "string" ? state.current : null }) : new Error(message);
+          throw configId === "model" ? new ModelConfirmationError(message, { requested: value, reported: typeof state.current === "string" ? state.current : null }) : new UnsupportedOptionError("effort", message);
         }
         throw error;
       } finally {

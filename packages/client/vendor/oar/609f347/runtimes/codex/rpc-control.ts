@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { UnsupportedOptionError } from "../../contracts/errors.js";
 import { SessionNotFoundError } from "../../contracts/session-not-found-error.js";
 import { SessionUnavailableError, type SessionUnavailableReason } from "../../contracts/session-unavailable-error.js";
 import { emptyInputRefusal } from "../../shared/control-input.js";
@@ -143,18 +144,19 @@ export async function openThread(
 }
 
 /**
- * A resume's `thread/settings/update {effort}`: null when codex took it, its
- * error otherwise. A codex that does not know the method (before 0.133.0)
- * fails the open as `runtime_outdated`.
+ * A resume's `thread/settings/update {effort}`. A native refusal names
+ * the option, and a codex that does not know the method (before 0.133.0)
+ * fails the open as `runtime_outdated`. Transport errors retain their type.
  */
-export async function updateThreadEffort(client: AppServerClient, threadId: string, effort: string, version: string | null): Promise<{ readonly error: string } | null> {
+export async function updateThreadEffort(client: AppServerClient, threadId: string, effort: string, version: string | null): Promise<void> {
   try {
     await client.request("thread/settings/update", { threadId, effort });
-    return null;
   } catch (error) {
-    const outdated = codexOpenFailure("thread/settings/update", asRecord(asRecord(error instanceof Error ? error.cause : undefined)?.native), { version });
-    if (outdated !== null) { throw outdated; }
-    return { error: error instanceof Error ? error.message : String(error) };
+    const native = asRecord(asRecord(error instanceof Error ? error.cause : undefined)?.native);
+    const failure = codexOpenFailure("thread/settings/update", native, { version });
+    if (failure !== null) { throw failure; }
+    if (native === null) { throw error; }
+    throw new UnsupportedOptionError("effort", `codex thread/settings/update effort=${effort} failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 

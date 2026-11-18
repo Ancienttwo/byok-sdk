@@ -366,7 +366,7 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
             ? {}
             : { id: process.env.FAKE_CODEX_REPORTED_THREAD_ID ?? threadId },
         model: params.model ?? userConfig.model ?? 'fake-model',
-        reasoningEffort: null,
+        reasoningEffort: method === 'thread/resume' ? null : (process.env.FAKE_CODEX_EFFORT_READBACK ?? params.config?.model_reasoning_effort ?? null),
         approvalPolicy: params.approvalPolicy,
       },
     });
@@ -383,6 +383,11 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
           last: null,
         },
       });
+    return;
+  }
+  if (method === 'thread/settings/update') {
+    send({ id, result: {} });
+    notify('thread/settings/updated', { threadId, threadSettings: { effort: process.env.FAKE_CODEX_EFFORT_READBACK ?? params.effort } });
     return;
   }
   if (method === 'turn/start') {
