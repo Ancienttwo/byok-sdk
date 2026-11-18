@@ -1,4 +1,6 @@
 import type { spawn as nodeSpawn } from 'node:child_process';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
@@ -43,6 +45,24 @@ const infrastructure = (reason: string) => new RuntimeExecutionFailure({ phase: 
 
 /** Native OpenCode ACP, addressed through harnessId `opencode`; never touches user configuration or login storage. */
 export class OpenCodeAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (env) => resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env)).bin.command,
+      version: opencodeVersionToken,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => {
+      const { opencodeListModels } = await import('#byok-oar-readers');
+      return opencodeListModels(installation, reader);
+    });
+  }
+
   private readonly options: OpenCodeAdapterOptions & { maxRetainedBytes: number; interruptTimeoutMs: number };
   private readonly environment: RuntimeEnvironmentPolicy;
   private readonly policy?: RuntimeVersionPolicy;

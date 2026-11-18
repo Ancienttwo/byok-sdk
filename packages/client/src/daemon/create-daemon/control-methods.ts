@@ -15,6 +15,8 @@ import { toHttpBase } from '../url.js';
 import { HOST_MCP_TASK_CONTEXT_CAPABILITY } from '@byok-sdk/protocol';
 import type { DaemonScope } from './scope.js';
 import { RUNTIMES_ENVIRONMENT_METHOD, type ControlRuntimeEnvironment, type ControlRuntimesEnvironmentResult } from '../control-protocol.js';
+import { RUNTIMES_MODELS_METHOD, RUNTIMES_USAGE_METHOD, parseRuntimeReadParams } from '../control-protocol.js';
+import { boundRuntimeRead } from '../../runtime/runtime-readers.js';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
 import type { RuntimeAdapter } from '../../types.js';
 
@@ -28,6 +30,7 @@ export function createControlMethods(daemonScope: DaemonScope): ControlMethods {
       ...deviceAssertionControlMethods(daemonScope),
       ...taskAssertionControlMethods(daemonScope),
       [RUNTIMES_ENVIRONMENT_METHOD]: () => describeRuntimeEnvironments(daemonScope.adapters),
+      ...runtimeReaderMethods(daemonScope.adapters),
       shutdown: (params) => {
         // Plan `device-assertion-broker` (codex F1): arm the minting latch
         // SYNCHRONOUSLY, as the very first statement of this handler, BEFORE
@@ -79,10 +82,31 @@ export function createControlMethods(daemonScope: DaemonScope): ControlMethods {
   };
 }
 
-/**
- * #1095: each adapter builds its environment now, under its own policy, and
- * only the report leaves this process: names and sources, never a value.
- */
+function runtimeReaderMethods(adapters: readonly RuntimeAdapter[]): ControlMethods['unary'] {
+  function adapterFor(runtimeId: string): RuntimeAdapter {
+    const adapter = adapters.find(candidate => candidate.descriptor.id === runtimeId);
+    if (adapter === undefined) throw new ControlError('bad_request', 'runtime is not configured');
+    return adapter;
+  }
+  return {
+    [RUNTIMES_MODELS_METHOD]: (params, signal) => {
+      const { runtimeId, refresh } = parseRuntimeReadParams(params, true);
+      const adapter = adapterFor(runtimeId);
+      if (!adapter.listModels) return { kind: 'unsupported', reason: 'model listing unavailable' };
+      const listModels = adapter.listModels.bind(adapter);
+      return boundRuntimeRead(signal, readSignal => listModels({ signal: readSignal, ...(refresh === undefined ? {} : { refresh }) }));
+    },
+    [RUNTIMES_USAGE_METHOD]: (params, signal) => {
+      const { runtimeId } = parseRuntimeReadParams(params, false);
+      const adapter = adapterFor(runtimeId);
+      if (!adapter.accountUsage) return { kind: 'unsupported', reason: 'capability_unavailable' };
+      const accountUsage = adapter.accountUsage.bind(adapter);
+      return boundRuntimeRead(signal, readSignal => accountUsage({ signal: readSignal }));
+    },
+  };
+}
+
+/** #1095: forward environment names and sources only. */
 async function describeRuntimeEnvironments(adapters: readonly RuntimeAdapter[]): Promise<ControlRuntimesEnvironmentResult> {
   const runtimes = await Promise.all(adapters.map(async (adapter): Promise<ControlRuntimeEnvironment> => {
     const runtimeId = adapter.descriptor.id;

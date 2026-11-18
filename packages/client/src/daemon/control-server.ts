@@ -53,7 +53,7 @@ export interface ControlMethodContext {
   signal: AbortSignal;
 }
 
-export type UnaryMethod = (params: unknown) => Promise<unknown> | unknown;
+export type UnaryMethod = (params: unknown, signal: AbortSignal) => Promise<unknown> | unknown;
 export type StreamMethod = (params: unknown, ctx: ControlMethodContext) => Promise<void>;
 
 export interface ControlMethods {
@@ -155,9 +155,7 @@ function handleConnection(
   onHandshakeSettled: () => void,
 ): void {
   const reader = new NdjsonLineReader();
-  type ActiveRequest =
-    | { kind: 'unary' }
-    | { kind: 'stream'; controller: AbortController };
+  type ActiveRequest = { controller: AbortController };
   const activeRequests = new Map<string, ActiveRequest>();
   let phase: 'client-hello' | 'client-auth' | 'ready' = 'client-hello';
   let serverNonce = '';
@@ -185,7 +183,7 @@ function handleConnection(
     const requests = [...activeRequests.values()];
     activeRequests.clear();
     for (const request of requests) {
-      if (request.kind === 'stream' && !request.controller.signal.aborted) request.controller.abort();
+      request.controller.abort();
     }
     if (!socket.destroyed) socket.destroy();
   }
@@ -314,10 +312,10 @@ function handleConnection(
     const { unary: unaryMethods, stream: streamMethods } = methods();
     const unary = unaryMethods[method];
     if (unary) {
-      const record: ActiveRequest = { kind: 'unary' };
+      const record: ActiveRequest = { controller: new AbortController() };
       if (!registerRequest(id, record)) return;
       Promise.resolve()
-        .then(() => unary(params))
+        .then(() => unary(params, record.controller.signal))
         .then((result) => {
           if (!releaseRequest(id, record)) return;
           sendFrame({ v: 1, id, ok: true, result });
@@ -331,7 +329,7 @@ function handleConnection(
     const stream = streamMethods[method];
     if (stream) {
       const controller = new AbortController();
-      const record: ActiveRequest = { kind: 'stream', controller };
+      const record: ActiveRequest = { controller };
       if (!registerRequest(id, record)) return;
       Promise.resolve()
         .then(() => stream(params, { emit: (event) => sendFrame({ v: 1, id, event }), signal: controller.signal }))

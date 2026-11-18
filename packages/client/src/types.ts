@@ -1,5 +1,6 @@
 import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 import type { RuntimeEnvironment } from './runtime/environment.js';
+import type { RuntimeAccountUsage, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
 import type { ExecutionScratch } from './daemon/retention/scratch.js';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions.js';
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
@@ -110,7 +111,8 @@ export type RuntimeDetectResult =
     readonly executableSource?: RuntimeExecutableSource;
   }
   | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
-  | { readonly kind: 'refused'; readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'> }
+  | { readonly kind: 'refused'; readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable' | 'acp_unavailable'> }
+  | { readonly kind: 'refused'; readonly reason: 'acp_unavailable'; readonly unsupportedVersion?: RuntimeUnsupportedVersion }
   | { readonly kind: 'refused'; readonly reason: 'runtime_environment_unavailable'; readonly code: ServiceEnvironmentUnavailableCode };
 
 /**
@@ -693,6 +695,10 @@ export interface RuntimeAdapter {
   readonly descriptor: RuntimeAdapterDescriptor;
   /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
   detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+  /** Explicit native catalog read. Absent when the adapter does not support it. */
+  listModels?(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
+  /** Explicit local account quota read. Absent when the adapter does not support it. */
+  accountUsage?(options?: RuntimeReadOptions): Promise<RuntimeAccountUsage>;
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
   /**
    * The environment every child process of this runtime's tasks receives

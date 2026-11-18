@@ -128,6 +128,10 @@
       "types": "./dist/runtime/acp-session-runtime.d.ts",
       "default": "./dist/runtime/acp-session-runtime.js"
     },
+    "#byok-oar-readers": {
+      "types": "./dist/runtime/oar-readers.d.ts",
+      "default": "./dist/runtime/oar-readers.js"
+    },
     "#byok-pi-runtime-host": {
       "types": "./dist/bin/pi-runtime-host.d.ts",
       "default": "./dist/bin/pi-runtime-host.js"

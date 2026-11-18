@@ -57,6 +57,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
@@ -353,6 +354,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
@@ -516,6 +518,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
@@ -626,6 +629,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "koffi",
         "node:http"
       ],
@@ -997,6 +1001,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "koffi",
         "node:http"
       ],
@@ -1094,6 +1099,48 @@
           "rule": "Function reference"
         }
       ]
+    }
+  },
+  "@byok-sdk/client#byok-oar-readers": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private on-demand OAR runtime readers",
+      "budgetBytes": 61234,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/runtime/oar-readers.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/runtime/oar-readers.d.ts"
+      ],
+      "bareImports": [
+        "node:crypto",
+        "node:fs/promises",
+        "node:path",
+        "node:url"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "node:crypto",
+          "node:fs/promises",
+          "node:path",
+          "node:url"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
     }
   },
   "@byok-sdk/client#byok-pi-runtime-host": {
@@ -2635,6 +2682,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",

@@ -1,4 +1,6 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
@@ -15,7 +17,6 @@ import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
   freezeRuntimeAdapterDescriptor,
-  type McpStdioServerConfig,
   type MessageDraftDelta,
   type RuntimeAdapter,
   type RuntimeDetectResult,
@@ -25,7 +26,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types.js';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
@@ -160,6 +161,31 @@ const claudeEnvironmentConflicts: RuntimeEnvironmentConflictRule = (passed) =>
     : [];
 
 export class ClaudeAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin).bin.command,
+      version: claudeVersionToken,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => {
+      const { claudeListModels } = await import('#byok-oar-readers');
+      return claudeListModels(installation, reader);
+    });
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, async (installation, reader) => {
+      const { claudeAccountUsage } = await import('#byok-oar-readers');
+      return claudeAccountUsage(installation, reader);
+    });
+  }
+
   readonly descriptor;
   private readonly nativeOptions?: NativeInteractionHostOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;

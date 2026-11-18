@@ -1,4 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
+import { dshVersionUnsupported } from '../../runtime/oar-version-floors.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -132,6 +135,37 @@ function probeAcpProfile(command: string, root: string, env: Record<string, stri
  * custom-harness identity (`harnessId: 'dsh'`).
  */
 export class DshAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveDshBin).bin.command,
+      version: dshVersionToken,
+      versionRefusal: dshVersionUnsupported,
+      environment: async env => {
+        await this.ensureRoot();
+        return { env: dshEnvironment(env, this.root, this.sandbox) };
+      },
+      credentialName: this.options.model.keyEnv,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-dsh-catalog-'));
+      try {
+        const patch = path.join(directory, PATCH_FILE);
+        await fs.writeFile(patch, dshPatch(this.options.model), { mode: 0o600 });
+        const { dshListModels } = await import('#byok-oar-readers');
+        return await dshListModels(installation, reader, { directory, patches: [patch], env: reader.env });
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+
   private readonly root: string;
   private readonly options: DshAdapterOptions;
   private readonly sandbox: DshSandboxMode;
@@ -195,6 +229,11 @@ export class DshAdapter implements RuntimeAdapter {
       const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, env);
       if (version.kind !== 'available') return version;
       const token = dshVersionToken(version.stdout);
+      const unsupported = dshVersionUnsupported(token);
+      if (unsupported !== null) {
+        const { installedVersion, requiredVersion } = unsupported;
+        return { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion } };
+      }
       if (!await probeAcpProfile(command, this.root, env)) return { kind: 'refused', reason: 'acp_unavailable' };
       const key = base[this.options.model.keyEnv];
       return {

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import type { ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
@@ -24,6 +25,8 @@ export interface RuntimeObservation {
   /** With `reason: 'runtime_environment_unavailable'`: why the login-shell capture or, on win32, the logon registry read failed. */
   code?: ServiceEnvironmentUnavailableCode;
   version?: string;
+  /** Native release floor refusal, for local status and doctor only. */
+  unsupportedVersion?: RuntimeUnsupportedVersion;
   /**
    * The qualified version of a `warn` verdict, and only of one. Audit keeps
    * this projection of the warning while it drops the verdict itself.
@@ -73,6 +76,8 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
     present: detected.kind === 'available',
     outcome: detected.kind,
     ...(detected.kind === 'refused' ? { reason: detected.reason } : {}),
+    ...(detected.kind === 'refused' && detected.reason === 'acp_unavailable' && detected.unsupportedVersion !== undefined
+      ? { unsupportedVersion: detected.unsupportedVersion } : {}),
     ...(detected.kind === 'refused' && detected.reason === 'runtime_environment_unavailable' ? { code: detected.code } : {}),
     ...(detected.kind === 'available' && detected.version !== undefined ? { version: bounded(detected.version, 256) } : {}),
     ...(verdict?.state === 'warn' ? { qualifiedVersion: verdict.qualifiedVersion } : {}),
@@ -88,7 +93,7 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
 /** Keys of the redacted audit observation; see `DaemonRecord` `runtimes-detected`. */
 const AUDIT_OBSERVATION_KEYS: readonly string[] = Object.freeze(['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume']);
 /** Live status adds the local-only evidence audit never holds. */
-const STATUS_OBSERVATION_KEYS: readonly string[] = Object.freeze([...AUDIT_OBSERVATION_KEYS, 'versionVerdict', 'versionChange', 'executablePath', 'executableSource']);
+const STATUS_OBSERVATION_KEYS: readonly string[] = Object.freeze([...AUDIT_OBSERVATION_KEYS, 'versionVerdict', 'versionChange', 'executablePath', 'executableSource', 'unsupportedVersion']);
 
 /** Side arrays an earlier daemon's control `status` sent beside `runtimes[]`. */
 const REMOVED_STATUS_SIDE_ARRAYS: readonly string[] = Object.freeze(['runtimeVersionVerdicts', 'runtimeVersionChanges', 'runtimeExecutables']);
@@ -133,6 +138,7 @@ export function parseRuntimeObservations(value: unknown, source: 'audit' | 'stat
       detected = validateRuntimeDetectResult({
         kind: r.outcome,
         ...(r.reason === undefined ? {} : { reason: r.reason }),
+        ...(r.unsupportedVersion === undefined ? {} : { unsupportedVersion: r.unsupportedVersion }),
         ...(r.code === undefined ? {} : { code: r.code }),
         ...(r.version === undefined ? {} : { version: r.version }),
         ...(r.authPresent === undefined ? {} : { authPresent: r.authPresent }),
@@ -243,6 +249,16 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
   if (kind === 'refused' && result.reason === 'runtime_environment_unavailable') {
     if (Object.keys(result).length !== 3 || !ENVIRONMENT_CODES.includes(result.code as string)) throw new TypeError('invalid runtime detection result');
     return Object.freeze({ kind, reason: 'runtime_environment_unavailable', code: result.code as ServiceEnvironmentUnavailableCode });
+  }
+  if (kind === 'refused' && result.reason === 'acp_unavailable' && result.unsupportedVersion !== undefined) {
+    const fields = result.unsupportedVersion as Partial<RuntimeUnsupportedVersion> | null;
+    if (Object.keys(result).length !== 3 || !fields || typeof fields !== 'object'
+      || Object.keys(fields).some(key => key !== 'installedVersion' && key !== 'requiredVersion')
+      || !isVersionText(fields.requiredVersion) || (fields.installedVersion !== undefined && !isVersionText(fields.installedVersion))) {
+      throw new TypeError('invalid runtime detection result');
+    }
+    return Object.freeze({ kind, reason: 'acp_unavailable', unsupportedVersion: Object.freeze({ requiredVersion: fields.requiredVersion,
+      ...(fields.installedVersion === undefined ? {} : { installedVersion: fields.installedVersion }) }) });
   }
   if (kind === 'refused') {
     if (Object.keys(result).length !== 2 || !Object.hasOwn(result, 'reason')
