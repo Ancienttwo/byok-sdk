@@ -370,10 +370,71 @@ root `package.json`, reinstall and check the resolved tree:
 
 | Manager | Setting | Verification |
 | --- | --- | --- |
-| npm | `"overrides": { "undici": "8.12.4" }` | `npm ls undici --all` |
+| npm | See the root or workspace example below | `npm ls undici --all` exits 0, with no `invalid` or `ELSPROBLEMS` and no version other than 8.12.4 |
 | Bun | `"overrides": { "undici": "8.12.4" }` | `bun pm why undici` |
 | pnpm | `"pnpm": { "overrides": { "undici": "8.12.4" } }` | `pnpm why -r undici` |
 | Yarn | `"resolutions": { "undici": "8.12.4" }` | `yarn why undici` |
+
+For npm 11.16.0, include both the global override and the dependency chain to
+pi-coding-agent. If `@byok-sdk/client` is a direct root dependency, merge this
+into the root `package.json`:
+
+```json
+"overrides": {
+  "undici": "8.12.4",
+  "@byok-sdk/client": {
+    "@earendil-works/pi-coding-agent": { "undici": "8.12.4" }
+  }
+}
+```
+
+If the client is a dependency of a workspace package, use its actual package
+name (from that workspace's `package.json`) in place of `<workspace-package>`:
+
+```json
+"overrides": {
+  "undici": "8.12.4",
+  "<workspace-package>": {
+    "@byok-sdk/client": {
+      "@earendil-works/pi-coding-agent": { "undici": "8.12.4" }
+    }
+  }
+}
+```
+
+Add a chain for each workspace that depends on the client. A global override or
+one scoped only to pi-coding-agent does not reliably cover its exact 8.12.3
+dependency through a workspace. Existing lock entries can also retain the old
+version after adding the chain.
+
+When upgrading an npm Host, check `package-lock.json` for
+`node_modules/@earendil-works/pi-coding-agent/node_modules/undici`. If that entry
+is 8.12.3, remove it and its installed copy before regenerating the lock. From
+the Host root, this removes that one entry and directory:
+
+```sh
+node <<'NODE'
+const fs = require('node:fs');
+const file = 'package-lock.json';
+const entry = 'node_modules/@earendil-works/pi-coding-agent/node_modules/undici';
+const lock = JSON.parse(fs.readFileSync(file, 'utf8'));
+delete lock.packages[entry];
+fs.writeFileSync(file, JSON.stringify(lock, null, 2) + '\n');
+fs.rmSync(entry, { recursive: true, force: true });
+NODE
+```
+
+After setting the override and removing any such stale entry, regenerate and
+verify the lock from the Host root:
+
+```sh
+npm install --ignore-scripts
+npm ci --ignore-scripts
+npm ls undici --all
+```
+
+Check that `npm ci` succeeds, `npm ls` exits 0 without `invalid` or
+`ELSPROBLEMS`, and every listed undici is 8.12.4. Review the lockfile changes.
 
 Rebuild shipped artifacts after confirming that every listed undici version is
 8.12.4. Update Node's built-in undici and other prebundled copies through their
