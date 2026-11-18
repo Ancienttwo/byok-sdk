@@ -1,4 +1,5 @@
 // BYOK change: Modified from OAR bc1b2ac for injected processes, native-first recording, bounded request refusal, caller-selected sandbox, caller-owned open steps and session credential redaction without sealSession (Apache-2.0).
+import { codexTurnProcesses, type CodexProcessReader } from "./turn-processes.js";
 import { codexTaskControl } from "./task-control.js";
 
 // BYOK change: the narrow bridge reads the same declaration as Runtime.sessionCapabilities.
@@ -62,7 +63,7 @@ export async function codexSession(
   spawnLineProcess: SpawnLineProcess,
   installation: AvailableInstallation,
   // BYOK change: the caller passes the complete filtered environment, so a value is never a null removal.
-  options: Omit<SessionOptions, "env" | "goals" | "endTurnProcessesOnAbort"> & {
+  options: Omit<SessionOptions, "env" | "goals"> & {
     readonly env?: Readonly<Record<string, string>>;
     readonly approvalPolicy?: "never" | "on-request"; // BYOK change: explicit local interactive opt-in.
     // BYOK change: the caller passes OAR_CODEX_SANDBOX semantics explicitly.
@@ -71,6 +72,7 @@ export async function codexSession(
   serverRequestTimeoutMs = 1_000,
   hooks: { // BYOK change: the record consumer is registered before any record is appended.
     readonly onReady?: (threadId: string) => void;
+    readonly turnProcessReader?: CodexProcessReader;
     readonly onRecord?: (record: import("../../contracts/session.js").RawEvent) => void;
     // BYOK change: caller-owned, bounded native request lifecycle; no permissive fallback.
     readonly onServerRequest?: (id: string | number, method: string, params: JsonRecord, reply: {
@@ -102,6 +104,9 @@ async function openCodexSession(
 ): Promise<CodexAdapterSession> {
   if (installation.via !== "executable") {
     throw new Error("The codex session adapter needs an executable installation");
+  }
+  if (options.endTurnProcessesOnAbort === true && process.platform !== "win32" && hooks.turnProcessReader === undefined) {
+    throw new Error("Codex turn process cleanup requires the isolated process reader");
   }
   // Threads persist so a later SessionOptions.resume can reattach; the thread
   // id is the runtime-native identity and becomes Session.id (open.ts builds
@@ -192,6 +197,7 @@ async function openCodexSession(
   const compaction = manualCompaction(kernel, { busy: codexCompactionBusy(kernel, nativeBusy), busyReason: "Codex manual compaction requires an idle session without an active goal or queued input", create: () => { compactOperation = codexCompaction(client, threadId); return compactOperation; } });
   const busy = (): boolean => nativeBusy() || compaction.busy();
   const abortFallback = createAbortFallback(() => { client.kill(); });
+  const turnProcesses = codexTurnProcesses(kernel, options.endTurnProcessesOnAbort === true ? hooks.turnProcessReader : undefined);
   let disposeRequest: RequestRecord | null = null;
   // A resume's effort update in flight: codex's thread/settings/updated answers it.
   let settingsWaiter: ((params: JsonRecord) => void) | null = null;
@@ -250,6 +256,7 @@ async function openCodexSession(
           break;
       }
     }
+    if (isRoot && method === "turn/completed") { turnProcesses.turnCompleted(params); }
     if (isRoot && method === "thread/settings/updated") { settingsWaiter?.(params); }
     } catch (error) {
       client.kill(); // BYOK change: A required fold failure is visible and terminates the session.
@@ -324,6 +331,7 @@ async function openCodexSession(
   client.handle({ onNotification, onServerRequest });
   client.onExit((code, reason) => {
     abortFallback.clear();
+    turnProcesses.exited();
     // The exit is an outcome only oar observes: it answers our dispose when
     // we caused it, and stands alone when the app-server died on its own.
     kernel.respond(disposeRequest?.id ?? "", { kind: "exited", code, ...(reason === undefined ? {} : { reason }) });
@@ -444,11 +452,11 @@ async function openCodexSession(
     id: kernel.sessionId,
     capabilities,
     compact: guard(compaction.compact, true),
-    prompt: guard(via(promptPlan)),
+    prompt: guard(via(turnProcesses.prompting(promptPlan))),
     steer: guard(via(steerPlan)),
     queue: guard(via(queuePlan)),
     // No withdraw: the queue is codex's own, and thread/queue/delete is experimental and not live-verified (docs/runtimes/input-cancellation.md).
-    abort: guard(via(abortPlan)),
+    abort: guard(via(turnProcesses.aborting(abortPlan))),
     stopTask: guard(tasks.stop),
     rawEvents: (observer, cursor) => kernel.rawEvents(observer, cursor),
     records: () => kernel.records(),

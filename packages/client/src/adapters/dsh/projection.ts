@@ -1,4 +1,5 @@
 import { accumulateUsage, objectRecord as record, projectProviderContext } from '../shared-rules.js';
+import { AcpChildTurns } from '../acp-turn-buffer.js';
 import { BufferedToolUse } from '../buffered-tool-use.js';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
@@ -49,7 +50,7 @@ function messageText(native: unknown): string {
  * native frame. Text comes from the durable `assistant/message`: one `progress`
  * per committed message, so a failed attempt's stream adds nothing. OAR reports
  * each session's tokens cumulatively from open; usage sums their differences.
- * Context occupancy and all other events belong to the root session only.
+ * The terminal usage remains the session-wide total with the root context.
  */
 export class DshProjection {
   private readonly tools = new Map<string, string>();
@@ -57,45 +58,55 @@ export class DshProjection {
   private readonly billed = new Map<string, Tokens>();
   private pending?: Usage;
 
-  constructor(private readonly rootSessionId: string, private readonly model: string) {}
+  private readonly children: AcpChildTurns;
+
+  constructor(private readonly rootSessionId: string, private readonly model: string) {
+    this.children = new AcpChildTurns(rootSessionId);
+  }
 
   /** Events for one record; `outcome` receives the root turn end, after its events. */
   consume(input: DshRecord, emit: (event: AgentEvent) => void, outcome: (turn: DshTurnOutcome) => void): void {
     if (input.kind !== 'frame') return;
-    const root = input.sessionId === this.rootSessionId && input.agentPath.length === 0;
     const body = record(input.body);
-    if (root && body?.type === 'session/event:assistant/message') {
-      const text = messageText(body.native);
-      if (text.length > 0) emit({ type: 'progress', text });
-    }
     const events = body?.events;
     if (!Array.isArray(events)) return;
+    this.children.link(events);
+    const path = this.children.path(input.sessionId, input.agentPath);
+    const root = input.sessionId === this.rootSessionId && input.agentPath.length === 0;
+    const attribution = path === undefined || root ? {} : { agentPath: [...path] };
+    const identify = (id: string) => root ? id : JSON.stringify([input.sessionId, path, id]);
+    if (path !== undefined && body?.type === 'session/event:assistant/message') {
+      const text = messageText(body.native);
+      if (text.length > 0) emit({ type: 'progress', text, ...attribution });
+    }
     let ended: Record<string, unknown> | undefined;
     for (const value of events) {
       const event = record(value);
       if (event?.kind === 'usage') {
-        this.usage(record(event.usage), input.sessionId, root);
+        this.usage(record(event.usage), input.sessionId, root, attribution.agentPath, emit);
         continue;
       }
-      if (!root) continue;
+      if (path === undefined) continue;
       switch (event?.kind) {
         case 'model':
           // The SDK patch and the open name this route; a request on another one means they did not apply.
-          if (event.model !== this.model) throw authority('dsh session does not run the configured provider route and model');
+          if (root && event.model !== this.model) throw authority('dsh session does not run the configured provider route and model');
           break;
         case 'tool_call_started':
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
-          this.tools.set(event.callId, event.tool);
-          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, input: toolInput(body?.native) });
-          this.buffered.observe(event.callId, undefined, false, true, emit);
+          const callId = identify(event.callId);
+          this.tools.set(callId, event.tool);
+          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: callId, input: toolInput(body?.native), ...attribution });
+          this.buffered.observe(callId, undefined, false, true, emit);
           break;
         case 'tool_call_ended': {
           if (typeof event.callId !== 'string') break;
-          const tool = this.tools.get(event.callId) ?? 'tool';
-          this.buffered.finish(event.callId, emit);
-          this.tools.delete(event.callId);
+          const callId = identify(event.callId);
+          const tool = this.tools.get(callId) ?? 'tool';
+          this.buffered.finish(callId, emit);
+          this.tools.delete(callId);
           emit({
-            type: 'tool_result', tool, toolCallId: event.callId,
+            type: 'tool_result', tool, toolCallId: callId, ...attribution,
             output: { ...(event.content === undefined ? {} : { content: event.content }) },
             ...(event.result === 'failed' ? { isError: true } : {}),
           });
@@ -108,7 +119,8 @@ export class DshProjection {
           break;
       }
     }
-    if (ended !== undefined) this.endTurn(ended, emit, outcome);
+    if (path !== undefined) this.children.lifecycle(input.sessionId, path, events, emit);
+    if (root && ended !== undefined) this.endTurn(ended, emit, outcome);
   }
 
   /** A transport close cannot invent a turn outcome, but must keep the observed usage. */
@@ -133,13 +145,20 @@ export class DshProjection {
     outcome({ kind: turn.kind === 'aborted' ? 'aborted' : 'completed' });
   }
 
-  private usage(report: Record<string, unknown> | undefined, sessionId: string, root: boolean): void {
+  private usage(report: Record<string, unknown> | undefined, sessionId: string, root: boolean, agentPath: string[] | undefined, emit: (event: AgentEvent) => void): void {
     if (report === undefined) return;
     const next: Usage = { ...(this.pending ?? { type: 'usage' }) };
     const context = root ? record(report.context) : undefined;
     projectProviderContext(next, context);
-    const tokens = accumulateUsage(next, record(report.tokens), this.billed.get(sessionId));
+    const baseline = this.billed.get(sessionId);
+    const tokens = accumulateUsage(next, record(report.tokens), baseline);
     if (tokens !== undefined) this.billed.set(sessionId, tokens);
+    if (agentPath !== undefined) {
+      const child: Usage = { type: 'usage' };
+      projectProviderContext(child, record(report.context));
+      accumulateUsage(child, tokens, baseline);
+      if (Object.keys(child).length > 1) emit({ ...child, agentPath });
+    }
     if (Object.keys(next).length > 1) this.pending = next;
   }
 }

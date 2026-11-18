@@ -21,7 +21,7 @@ interface StreamState {
    * Bounded in practice: a consumer failure halts the adapter (`CodexSession.record`), so no later record arrives to add an entry.
    */
   readonly unfinished: Map<number, { readonly events: readonly CodexEvent[]; next: number }>;
-  readonly active: Map<string, { tool: string; toolCallId: string; mcp?: { server: string; tool: string } }>;
+  readonly active: Map<string, { tool: string; toolCallId: string; agentPath?: string[]; mcp?: { server: string; tool: string } }>;
   lastUsage?: Extract<AgentEvent, { type: 'usage' }>;
   activeTurnId?: string;
   baseline: Record<string, unknown> | null;
@@ -122,8 +122,9 @@ export class CodexProjection {
       params.turnId !== state.activeTurnId
     )
       return [];
+    const attribution = input.agentPath.length > 0 ? { agentPath: [...input.agentPath] } : !isRoot ? { agentPath: [sessionId] } : {};
     if (method === 'item/agentMessage/delta') {
-      if (typeof params.delta !== 'string') return [];
+      if (!isRoot || typeof params.delta !== 'string') return [];
       const startsMessage = params.itemId !== state.draftItem && params.delta.trim() !== '';
       if (startsMessage) state.draftItem = params.itemId;
       return [{ type: 'message_draft_delta', text: params.delta, startsMessage }];
@@ -234,11 +235,11 @@ export class CodexProjection {
     const started = method === 'item/started';
     if (item.type === 'agentMessage')
       return !started && typeof item.text === 'string'
-        ? [{ type: 'progress', text: item.text }]
+        ? [{ type: 'progress', text: item.text, ...attribution }]
         : [];
     if (item.type === 'error')
       return typeof item.message === 'string'
-        ? [{ type: 'error', message: item.message }]
+        ? [{ type: 'error', message: item.message, ...attribution }]
         : [];
     const names: Record<string, string> = {
       commandExecution: 'command_execution',
@@ -281,7 +282,7 @@ export class CodexProjection {
             : { query: item.query };
     const mcp = item.type === 'mcpToolCall' && typeof item.server === 'string' && item.server.length > 0
       && typeof item.tool === 'string' && item.tool.length > 0 ? { server: item.server, tool: item.tool } : undefined;
-    const identity = mcp === undefined ? {} : { mcp };
+    const identity = { ...attribution, ...(mcp === undefined ? {} : { mcp }) };
     if (started) {
       state.active.set(activeKey, { tool, toolCallId, ...identity });
       return [{ type: 'tool_use', tool, toolCallId, input: inputValue, ...identity }];

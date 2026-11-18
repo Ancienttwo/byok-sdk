@@ -31,7 +31,7 @@ type BridgeArgs = Parameters<typeof Bridge.codexSession>;
 type Executable = Extract<VendorArgs[1], { via: 'executable' }>;
 type BridgeInstallation = Mutable<Pick<Executable, 'kind' | 'via' | 'command'>>;
 type BridgeOptions = Mutable<
-  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'effort' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
+  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'effort' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers' | 'endTurnProcessesOnAbort'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
 >;
 type VendorHooks = NonNullable<VendorArgs[4]>;
 type BridgeHooks = Mutable<Omit<VendorHooks, 'onRecord'>> & {

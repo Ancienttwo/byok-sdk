@@ -570,7 +570,13 @@ describe('Claude context window reserved for S4', () => {
     claude.send({ type: 'system', subtype: 'init', model: 'child-model', session_id: 'session-1', parent_tool_use_id: 'toolu_task' });
     claude.send({ type: 'result', subtype: 'success', is_error: false, usage: {},
       modelUsage: { 'child-model': { contextWindow: 200000 }, 'root-model': { contextWindow: 1000000 } } });
-    expect(stream.contextWindow).toBe(1000000);
+    const iterator = stream.frames[Symbol.asyncIterator]();
+    const [root, child, result] = [await iterator.next(), await iterator.next(), await iterator.next()];
+    expect(root.value.agentPath).toEqual([]);
+    expect(child.value.agentPath).toEqual(['toolu_task']);
+    expect(mapClaudeMessageToAgentEvents(result.value.native, { toolNameByUseId: new Map() }, {
+      workspaceDir: '/workspace', initModel: stream.initModel, context: result.value.context,
+    }).events).toEqual([{ type: 'usage', contextWindow: 1000000, contextSource: 'provider' }, { type: 'turn_end' }]);
     expect(await stream.sessionRef).toBe('session-1');
   });
   it('elides old frame payloads past the retention budget while the session runs and every frame is read whole', async () => {

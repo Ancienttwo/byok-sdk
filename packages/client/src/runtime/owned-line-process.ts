@@ -142,6 +142,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     });
     return {
       spawned, exited, kill,
+      get pid() { return child.pid; },
       dispose: (): Promise<void> => { terminationRequested = true; return cleanup(); },
       get exitedOnItsOwn() { return exitedOnItsOwn; },
       /** Before an ACP native cancel: its tools stay killable at disposal after the cancel orphans them. */

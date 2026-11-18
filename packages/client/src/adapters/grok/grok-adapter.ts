@@ -548,6 +548,7 @@ class GrokSession implements Session {
     });
   }
   private flushPendingUsage(): void {
+    this.projection?.flushChildUsage(event => this.queue.push(event));
     const usage = this.projection?.takePendingUsage();
     if (usage) this.queue.push(usage);
   }

@@ -2,6 +2,7 @@ import type { RuntimeInputOptions } from '../types';
 import type { RuntimeFailureClass } from '@byok-sdk/protocol';
 import type { CodexRecord } from '../adapters/codex/projection';
 import type { spawnOwnedLineProcess } from './owned-line-process';
+import type { ProcessTable } from './oar-process-tree';
 export interface CodexControl {
   // ControlResult also permits an exit response with a numeric or null code.
   response: { body: { kind: string; code?: string | number | null; reason?: string } };
@@ -34,6 +35,7 @@ export declare function codexSession(
     env: Readonly<Record<string, string>>;
     /** OAR SessionOptions.retainedBytes: past it the kernel elides the oldest native payloads. */
     retainedBytes: number;
+    endTurnProcessesOnAbort?: boolean;
     resume?: string;
     model?: string;
     effort?: string;
@@ -50,6 +52,7 @@ export declare function codexSession(
   timeout?: number,
   hooks?: {
     onReady?: (threadId: string) => void;
+    turnProcessReader?: { rootPid(): number | undefined; readProcessTable(): ProcessTable };
     onRecord?: (record: CodexRecord) => void;
     onServerRequest?: (id: string | number, method: string, params: Record<string, unknown>, reply: {
       respond(value: Record<string, unknown>): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;

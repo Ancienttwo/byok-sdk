@@ -37,6 +37,7 @@ import {
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { readProcessTable } from '../../runtime/oar-process-tree.js';
 import { codexFailure } from '../../runtime/oar-failure-runtime.js';
 import { CodexProjection, type CodexRecord } from './projection.js';
 import { AsyncQueue } from '../../util/async-queue.js';
@@ -327,12 +328,15 @@ export class CodexAdapter implements RuntimeAdapter {
       this.options.nativeInteractions,
       input.manifest.sessionRef,
     );
+    let rootPid: number | undefined;
+    const cleanupOnAbort = process.platform !== 'win32';
     try {
       const codexHome = excludeUserContext ? { CODEX_HOME: await createCodexAgentHome(input.env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {};
       // The open deadline covers spawn, initialize, the thread open and its read-back.
       const raw = await session.within('open', retryable, codexRuntime.codexSession(
         (bin, args, options) => {
           const child = spawned(bin, [...invocation.args, ...args], options);
+          rootPid = child.pid;
           session.own(child);
           void child.exited.then(
             () => session.exited(),
@@ -345,6 +349,7 @@ export class CodexAdapter implements RuntimeAdapter {
           cwd,
           env: { ...input.env, ...input.scratch.env, ...codexHome } as Record<string, string>,
           retainedBytes: this.maxRetainedBytes,
+          endTurnProcessesOnAbort: cleanupOnAbort,
           ...(model === undefined ? {} : { model }),
           ...(effort === undefined ? {} : { effort }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
@@ -363,6 +368,10 @@ export class CodexAdapter implements RuntimeAdapter {
         },
         1000,
         {
+          ...(cleanupOnAbort ? { turnProcessReader: {
+            rootPid: () => rootPid,
+            readProcessTable: () => readProcessTable('ps'),
+          } } : {}),
           onReady: (id) => session.ready(id),
           beforeOpen: async (request, params) => {
             const effective = excludeUserMcp || excludeUserContext ? await request('config/read', { cwd, includeLayers: false }) : undefined;

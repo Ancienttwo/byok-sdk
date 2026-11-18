@@ -7,7 +7,7 @@ import {
   claudeSessionCapabilities, claudeProjectionProfile, initialClaudeProjection, resumedClaudeProjection, sessionCredentialRedactor, streamJsonSession,
   type ClaudeControl, type ClaudeRecord, type RawClaudeSession,
 } from '../../runtime/claude-session-runtime.js';
-import { claudeRecordFrame, parseClaudeContextWindow, type ClaudeStreamMessage } from './projection.js';
+import { claudeRecordFrame, type ClaudeFrame, type ClaudeStreamMessage } from './projection.js';
 
 /** The SDK stdio handshake answers within this deadline or the start fails. */
 const INITIALIZE_TIMEOUT_MS = 60_000;
@@ -47,7 +47,7 @@ interface PendingControl { id: string; settle(response: Record<string, unknown> 
  * the event frame queue and the session identity from `system/init`.
  */
 export class ClaudeStreamSession {
-  readonly frames = new AsyncQueue<ClaudeStreamMessage>();
+  readonly frames = new AsyncQueue<ClaudeFrame>();
   readonly sessionRef: Promise<string>;
   hooksApplied: boolean | undefined;
   #raw: RawClaudeSession | undefined;
@@ -61,7 +61,6 @@ export class ClaudeStreamSession {
   #controls = new Map<string, PendingControl>();
   #ended = false;
   #initModel: string | undefined;
-  #contextWindow: number | null = null;
   #results = 0;
   #resultWaiters = new Set<() => void>();
   #unmapped = new Map<string, number>();
@@ -84,7 +83,7 @@ export class ClaudeStreamSession {
     // the owned transport's receipt for the SDK input call that issued a write.
     const owned = this.child;
     const child: OwnedLineProcess = {
-      spawned: owned.spawned, exited: owned.exited,
+      pid: owned.pid, spawned: owned.spawned, exited: owned.exited,
       kill: () => owned.kill(), dispose: () => owned.dispose(),
       get exitedOnItsOwn() { return owned.exitedOnItsOwn; },
       observeDescendants: () => owned.observeDescendants(), exitError: () => owned.exitError(),
@@ -163,7 +162,7 @@ export class ClaudeStreamSession {
   }
 
   /** Context window of the latest `result`, by the model its turn's `system/init` named. */
-  get contextWindow(): number | null { return this.#contextWindow; }
+  get initModel(): string | undefined { return this.#initModel; }
 
   /** The process ended on its own, before any kill, disposal or transport failure. */
   get processExited(): boolean { return this.#fatal === undefined && this.child.exitedOnItsOwn; }
@@ -239,19 +238,19 @@ export class ClaudeStreamSession {
     const native = record.kind === 'frame' ? (record.body as { native?: unknown }).native as ClaudeStreamMessage | undefined : undefined;
     // A runtime request reaches the bridges once, through onAppRequest.
     if (native !== undefined && native.type !== 'control_request') onFrame(native);
-    const frame = claudeRecordFrame(record);
-    if (frame === undefined) return;
-    const root = frame.parent_tool_use_id === undefined || frame.parent_tool_use_id === null;
+    const projected = claudeRecordFrame(record);
+    if (projected === undefined) return;
+    const { native: frame, agentPath } = projected;
+    const root = agentPath.length === 0;
     if (frame.type === 'system' && frame.subtype === 'init' && root) {
       if (typeof frame.model === 'string') this.#initModel = frame.model;
       if (typeof frame.session_id === 'string' && frame.session_id.length > 0) this.#resolveRef(frame.session_id);
     }
-    if (frame.type === 'result') {
-      this.#contextWindow = parseClaudeContextWindow(frame.modelUsage, this.#initModel);
+    if (frame.type === 'result' && root) {
       this.#results += 1;
       for (const release of this.#resultWaiters) release();
     }
-    this.frames.push(frame);
+    this.frames.push(projected);
   }
 
   #consume(message: Record<string, unknown>): boolean {

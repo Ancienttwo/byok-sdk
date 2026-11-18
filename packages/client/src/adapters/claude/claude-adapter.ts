@@ -34,7 +34,7 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import { ClaudeToolAuthorizationBridge } from './tool-authorization.js';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
-import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
+import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeFrame, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
 import { ClaudeFailureEvidence } from './failure-evidence.js';
 import { requireImageInput } from '../input-images.js';
 import { claudeSessionCapabilities } from '../../runtime/claude-session-runtime.js';
@@ -722,7 +722,7 @@ class ClaudeSession implements Session {
                 return { value: undefined as never, done: true };
               }
 
-              let raw: IteratorResult<ClaudeStreamMessage>;
+              let raw: IteratorResult<ClaudeFrame>;
               try {
                 raw = await inner.next();
               } catch (cause) {
@@ -732,7 +732,7 @@ class ClaudeSession implements Session {
                   reason: 'claude runtime event transport failed',
                 }, { cause });
               }
-              const { value, done } = raw;
+              const { value: frame, done } = raw;
               if (done) {
                 throw new RuntimeExecutionFailure({
                   phase: 'run',
@@ -742,8 +742,10 @@ class ClaudeSession implements Session {
                 }, { cause: stream.terminalError });
               }
 
-              if (value.type === 'result') turnSettled = true;
-              failureEvidence.observe(value);
+              const { native: value, agentPath, context } = frame;
+              const root = agentPath.length === 0;
+              if (root && value.type === 'result') turnSettled = true;
+              if (root) failureEvidence.observe(value);
 
               if (callsUnresolvedMcpTool(value, correlation)) {
                 // Asked at the first MCP call, when Claude has connected its
@@ -751,21 +753,19 @@ class ClaudeSession implements Session {
                 // tools. One lookup per process; a failure leaves `mcp` absent.
                 await mcpIdentity.observe();
               }
-              const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
-              servedModel.observe(value);
-              if (value.type === 'result') {
-                const model = servedModel.takeTurnModel();
-                if (stream.contextWindow !== null || model !== undefined) {
-                  const observed = {
-                    ...(stream.contextWindow === null ? {} : { contextWindow: stream.contextWindow, contextSource: 'provider' as const }),
-                    ...(model === undefined ? {} : { model }),
-                  };
-                  const usage = mapped.events.find(event => event.type === 'usage');
-                  if (usage?.type === 'usage') Object.assign(usage, observed);
-                  else mapped.events.unshift({ type: 'usage', ...observed });
+              const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir, agentPath, context, initModel: root ? stream.initModel : undefined });
+              if (root) {
+                servedModel.observe(value);
+                if (value.type === 'result') {
+                  const model = servedModel.takeTurnModel();
+                  if (model !== undefined) {
+                    const usage = mapped.events.find(event => event.type === 'usage');
+                    if (usage?.type === 'usage') usage.model = model;
+                    else mapped.events.unshift({ type: 'usage', model });
+                  }
                 }
+                assistantMessages.observe(value, mapped.events);
               }
-              assistantMessages.observe(value, mapped.events);
               if (mapped.terminalFailure !== undefined) terminalFailure = failureEvidence.attach(value, mapped.terminalFailure);
               if (mapped.unmappedLabel) {
                 stream.recordUnmappedFrame(mapped.unmappedLabel);

@@ -98,7 +98,7 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
         return;
       }
 
-      if (event.type === 'usage') {
+      if (event.type === 'usage' && event.agentPath === undefined) {
         // Terminal usage is last-observed, not an accumulator. The bundled
         // Codex/Claude adapters emit their runtime terminal observation
         // before turn_end/error; a custom adapter that emits several keeps
@@ -121,11 +121,12 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
       // The session hook can be stateful. Share one decision with both text lanes.
       // `progressStartsMessage` is bound exactly for a `'session'` boundary.
       const boundary = active.adapter.descriptor.progressMessageBoundary;
-      const startsMessage = event.type === 'progress' && event.text.trim() !== ''
+      const attributed = 'agentPath' in event && event.agentPath !== undefined;
+      const startsMessage = !attributed && event.type === 'progress' && event.text.trim() !== ''
         && (boundary === 'event' || (active.sessionMembers.progressStartsMessage !== undefined
           && active.sessionMembers.progressStartsMessage(event)));
-      active.messageDraft?.push(event, startsMessage);
-      if (event.type === 'tool_use' || event.type === 'tool_result') {
+      if (!attributed) active.messageDraft?.push(event, startsMessage);
+      if (!attributed && (event.type === 'tool_use' || event.type === 'tool_result')) {
         // A tool interaction ends the current text run: whatever the model
         // said before it was narration about what it was ABOUT to do, not
         // its answer. See `ActiveTask.finalTextParts` for why `usage`,
@@ -137,7 +138,7 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
         await pumpTurnEnd.call(this, active, event);
         return;
       }
-      if (event.type === 'progress') {
+      if (!attributed && event.type === 'progress') {
         active.summaryParts.push(event.text);
         // A blank whole message must not erase the reply that came before it.
         if (startsMessage) {
