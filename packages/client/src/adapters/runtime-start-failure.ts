@@ -2,7 +2,7 @@ import type * as OarErrors from '../runtime/acp-session-runtime.js';
 import { RuntimeExecutionFailure, isRuntimeExecutionFailure, runtimeFailureClassOf, type RuntimeExecutionFailureInput } from '../runtime-failure.js';
 
 /** A runtime's own error types, mapped before the untyped fallback; `undefined` leaves the error untyped. */
-export type RuntimeStartClassifier = (error: unknown) => Omit<RuntimeExecutionFailureInput, 'phase' | 'reason'> | undefined;
+export type RuntimeStartClassifier = (error: unknown) => Omit<RuntimeExecutionFailureInput, 'phase' | 'reason'> & { readonly reason?: string } | undefined;
 
 /** The one start-failure table: typed failures keep their axes, then the runtime classifier, then the owned-process exit decides. */
 export function runtimeStartFailure(error: unknown, context: { readonly classify?: RuntimeStartClassifier; readonly exitedOnItsOwn: boolean; readonly runtime: string }): RuntimeExecutionFailure {
@@ -26,25 +26,17 @@ export interface OarStartErrorClasses {
 
 export function oarStartClassifier(classes: OarStartErrorClasses): RuntimeStartClassifier {
   return (error) => {
-    if (error instanceof classes.SessionNotFoundError || error instanceof classes.UnsupportedOptionError || error instanceof classes.ModelConfirmationError || error instanceof classes.SessionUnavailableError) {
+    if (error instanceof classes.UnsupportedOptionError && error.option === 'effort') {
+      return { retry: 'non-retryable', failure: { class: 'invalid_request' } };
+    }
+    if (error instanceof classes.ModelConfirmationError) {
+      return { retry: 'non-retryable', failure: { class: 'model_unavailable' }, reason: 'model_rejected' };
+    }
+    if (error instanceof classes.SessionNotFoundError || error instanceof classes.UnsupportedOptionError || error instanceof classes.SessionUnavailableError) {
       const retryable = error instanceof classes.SessionUnavailableError && error.reason === 'in_use';
       return { retry: retryable ? 'retryable' : 'non-retryable' };
     }
     if (error instanceof classes.RuntimeFailureError) return { retry: 'non-retryable', failure: { class: runtimeFailureClassOf(error.failure) } };
     return undefined;
   };
-}
-
-/**
- * agy refuses a model selector its native catalog does not resolve (an unknown
- * model, an ambiguous model-effort selector, or an effort outside that model's
- * menu) before any model request, with the catalog it read (OAR 0.111, #2361).
- * Earlier the request itself was refused as `model_unavailable`; the start keeps
- * that outcome. A confirmation failure without a catalog stays as it was.
- */
-export function agyStartClassifier(classes: OarStartErrorClasses): RuntimeStartClassifier {
-  const oar = oarStartClassifier(classes);
-  return (error) => error instanceof classes.ModelConfirmationError && error.catalogSelectorIds !== undefined
-    ? { retry: 'non-retryable', failure: { class: 'model_unavailable' } }
-    : oar(error);
 }

@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest';
 import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
+import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
 import type { MessageDraftDelta } from '../types';
 import { mcpEventIdentities } from '../mcp/event-identity';
 import { mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from '../adapters/claude/projection';
@@ -54,6 +55,18 @@ it('annotates both durable Pi tool events from the exact observed toolset name o
     expect(withMcpIdentity({ type: 'tool_use', tool, toolCallId: 'other', input: {} }, identities)).not.toHaveProperty('mcp');
   }
   expect(withMcpIdentity({ type: 'progress', text: name }, identities)).toEqual({ type: 'progress', text: name });
+});
+
+it('annotates Pi and durable Pi helper events only when the SDK configured the helper', () => {
+  const helper = { server: AGENT_RESULT_MCP_SERVER_NAME, tool: AGENT_RESULT_TOOL_NAME };
+  const configured = mcpEventIdentities({}, { [AGENT_RESULT_MCP_SERVER_NAME]: { command: 'helper' } });
+  const start = { type: 'tool_execution_start', toolName: AGENT_RESULT_TOOL_NAME, toolCallId: 'call', args: {} };
+  const end = { type: 'tool_execution_end', toolName: AGENT_RESULT_TOOL_NAME, toolCallId: 'call', result: {}, isError: false };
+  expect(mapPiMessageToAgentEvent(start, configured)).toMatchObject({ type: 'tool_use', mcp: helper });
+  expect(mapPiMessageToAgentEvent(end, configured)).toMatchObject({ type: 'tool_result', mcp: helper });
+  expect(withMcpIdentity({ type: 'tool_use', tool: AGENT_RESULT_TOOL_NAME, toolCallId: 'call', input: {} }, configured)).toHaveProperty('mcp', helper);
+  expect(withMcpIdentity(projectDurableEvent({ type: 'tool_end', tool: AGENT_RESULT_TOOL_NAME, callId: 'call' })[0]!, configured)).toHaveProperty('mcp', helper);
+  expect(mapPiMessageToAgentEvent(start, mcpEventIdentities())).not.toHaveProperty('mcp');
 });
 
 it('assigns Grok no MCP identity from its collapsed tool name', () => {

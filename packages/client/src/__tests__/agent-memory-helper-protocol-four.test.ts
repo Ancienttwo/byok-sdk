@@ -266,8 +266,8 @@ describe('recoverable daemon memory proof (#2200)', () => {
     return { selected, abort, refreshHello, fetch, acquire, root };
   }
   function lanes(selected: DaemonScope) {
-    // SAFETY: only record/sealedRun and the explicitly supplied runner callbacks are used.
-    const run = { record: { tenantId: 'tenant', deviceId: 'device' }, sealedRun: {}, agentMemoryBackend: undefined, agentMemoryIntentBackend: undefined } as unknown as StartRun;
+    // SAFETY: only the fields used by lane composition and the supplied runner callbacks are needed.
+    const run = { record: { tenantId: 'tenant', deviceId: 'device' }, sealedRun: {}, runtimes: [], harnesses: [], agentMemoryBackend: undefined, agentMemoryIntentBackend: undefined } as unknown as StartRun;
     const result = composeStartLanes(selected, run);
     const { deps } = composeStartRunnerDeps(selected, { ...run, ...result, sendEnvelope: vi.fn(), withReplyTransition: async work => work(), recordReplyState: vi.fn(), awaitClaimSettlement: vi.fn() });
     return { ...result, deps };

@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2844817,
+      "budgetBytes": 2889961,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -57,10 +57,12 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
@@ -290,7 +292,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3290941,
+      "budgetBytes": 3337814,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -353,10 +355,12 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
@@ -468,7 +472,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2515608,
+      "budgetBytes": 2560768,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -516,10 +520,12 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
@@ -589,7 +595,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 574944,
+      "budgetBytes": 611606,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -626,6 +632,8 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
+        "@earendil-works/pi-ai/providers/model-schema",
         "koffi",
         "node:http"
       ],
@@ -659,7 +667,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 84606,
+      "budgetBytes": 84740,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -886,7 +894,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4769,
+      "budgetBytes": 4902,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -960,7 +968,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 535535,
+      "budgetBytes": 569109,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -997,6 +1005,8 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
+        "@earendil-works/pi-ai/providers/model-schema",
         "koffi",
         "node:http"
       ],
@@ -1030,7 +1040,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 137385,
+      "budgetBytes": 159147,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1096,11 +1106,53 @@
       ]
     }
   },
+  "@byok-sdk/client#byok-oar-readers": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private on-demand OAR runtime readers",
+      "budgetBytes": 61234,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      }
+    },
+    "facts": {
+      "target": "packages/client/dist/runtime/oar-readers.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/runtime/oar-readers.d.ts"
+      ],
+      "bareImports": [
+        "node:crypto",
+        "node:fs/promises",
+        "node:path",
+        "node:url"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "node:crypto",
+          "node:fs/promises",
+          "node:path",
+          "node:url"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/client#byok-pi-runtime-host": {
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 591125,
+      "budgetBytes": 594040,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2238,7 +2290,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Schema-free protocol values",
-      "budgetBytes": 8782,
+      "budgetBytes": 8916,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2298,7 +2350,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 695061,
+      "budgetBytes": 698594,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2590,7 +2642,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2528378,
+      "budgetBytes": 2574215,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2635,10 +2687,12 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
         "@earendil-works/pi-ai",
         "@earendil-works/pi-ai/api/openai-completions",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@earendil-works/pi-coding-agent",
         "@earendil-works/pi-durable/storage/sqlite",
         "@earendil-works/pi-durable/storage/sqlite/node",
@@ -2709,7 +2763,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 46403,
+      "budgetBytes": 46785,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2750,7 +2804,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 46407,
+      "budgetBytes": 46789,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2791,7 +2845,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 46403,
+      "budgetBytes": 46785,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2832,7 +2886,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 46373,
+      "budgetBytes": 46755,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -2933,7 +2987,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 185339,
+      "budgetBytes": 185348,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

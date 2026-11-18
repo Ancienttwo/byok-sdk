@@ -128,7 +128,7 @@ describe('DshAdapter detect and prepare', () => {
   it('reads the version, resolves the acp profile in the SDK root, and reports the key variable', async () => {
     const { adapter, root } = await setup();
     setAmbient('TEST_DSH_PROVIDER_KEY', 'test-key');
-    expect(await adapter.detect()).toEqual({ kind: 'available', version: QUALIFIED_DSH_VERSION, authPresent: true, executablePath: fixture, executableSource: 'config', versionVerdict: { state: 'allow', qualifiedVersion: QUALIFIED_DSH_VERSION } });
+    expect(await adapter.detect()).toEqual({ kind: 'available', version: QUALIFIED_DSH_VERSION, authPresent: true, sessionCapabilities: { images: false }, executablePath: fixture, executableSource: 'config', versionVerdict: { state: 'allow', qualifiedVersion: QUALIFIED_DSH_VERSION } });
     await expect(fs.stat(path.join(root, 'profiles', 'acp'))).resolves.toBeDefined();
     await expect(fs.readdir(path.join(root, 'byok-agents-home'))).resolves.toEqual([]);
   });
@@ -161,6 +161,29 @@ describe('DshAdapter detect and prepare', () => {
 });
 
 describe('DshAdapter sessions', () => {
+  it('uses the task model and effort on fresh and resumed DSH sessions', async () => {
+    const box = await setup();
+    const request = { target: DSH_TARGET, instruction: 'hello', modelId: 'byok-custom/task-model', effort: 'high' };
+    const fresh = await box.open(request);
+    await turn(fresh);
+    const sessionRef = fresh.sessionRef;
+    await fresh.close();
+    await turn(await box.open({ ...request, sessionRef }));
+    const log = await box.facts();
+    const expected = { provider: 'byok-custom', model: 'task-model', reasoningEffort: 'high' };
+    expect(log.filter(fact => ['open', 'resume'].includes(fact.method)).map(row => row.request.agentOptions)).toEqual([expected, expected]);
+    expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch({ ...MODEL, model: 'task-model' })));
+    await expect(box.adapter.prepare({ offer: { ...request, modelId: 'other-route/task-model' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [] }))
+      .resolves.toMatchObject({ kind: 'reject', retryable: false, reason: expect.stringMatching(/^model_rejected:/) });
+  });
+
+  it('fails before prompt when DSH reports a different effort', async () => {
+    const box = await setup({}, { FAKE_DSH_EFFORT_READBACK: 'low' });
+    await expect(box.open({ target: DSH_TARGET, instruction: 'hello', effort: 'high' }))
+      .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+    expect((await box.facts()).some(row => row.method === 'prompt')).toBe(false);
+  });
+
   it('launches dsh in the scratch directory with the SDK patch, home and switches', async () => {
     const { open, facts, root, workspaceDir } = await setup();
     const session = await open();
@@ -237,13 +260,20 @@ describe('DshAdapter sessions', () => {
     ]);
   });
 
-  it('sums interleaved subagent usage while keeping context and other events root-only', async () => {
+  it('attributes linked DSH child events and keeps the session-wide terminal totals', async () => {
     const { open } = await setup();
+    const agentPath = ['child-1'];
+    const toolCallId = JSON.stringify(['child-1', agentPath, 'call_1']);
     expect(await turn(await open({ target: DSH_TARGET, instruction: 'subagent-usage' }))).toEqual([
       { type: 'progress', text: 'first message: subagent-usage' },
       { type: 'tool_use', tool: 'bash', toolCallId: 'call_1', input: { command: 'ls' } },
       { type: 'tool_result', tool: 'bash', toolCallId: 'call_1', output: { content: [{ type: 'text', text: 'a.txt\n' }] } },
+      { type: 'progress', text: 'child reply', agentPath },
+      { type: 'usage', agentPath, inputTokens: 13, outputTokens: 2, cachedInputTokens: 3, reasoningTokens: 1, contextTokens: 15, contextWindow: 5000, contextSource: 'provider' },
+      { type: 'tool_use', agentPath, tool: 'bash', toolCallId, input: { command: 'ls' } },
+      { type: 'tool_result', agentPath, tool: 'bash', toolCallId, output: {} },
       { type: 'progress', text: 'final answer' },
+      { type: 'usage', agentPath, inputTokens: 24, outputTokens: 3, cachedInputTokens: 4, reasoningTokens: 2, contextTokens: 27, contextWindow: 5000, contextSource: 'provider' },
       { type: 'usage', inputTokens: 252, outputTokens: 18, cachedInputTokens: 27, reasoningTokens: 3, contextTokens: 127, contextSource: 'provider', contextWindow: 1000 },
       { type: 'turn_end' },
     ]);

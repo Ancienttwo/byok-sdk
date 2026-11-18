@@ -6,6 +6,7 @@ import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-read
 import type { OfferPhaseContext } from './support.js';
 import { outboundErrorMessage } from '../outbound-error.js';
 import { hostDeclineSender, settledOrWithdrawn } from './support.js';
+import { INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
 import type { TaskRunner } from '../task-runner.js';
 import type { AcceptedOfferPayload } from './support.js';
 import type { OfferAdmissionTiming } from './offer-admission-timing.js';
@@ -223,7 +224,12 @@ export async function handleSealedOffer(this: TaskRunner, envelope: Envelope, ad
       this['declineSealedOffer'](taskId, admission, agentRef, opened.code);
       return;
     }
-    await this['handleOffer'](taskId, opened.offer.payload as AcceptedOfferPayload, admission);
+    const payload = opened.offer.payload as AcceptedOfferPayload;
+    if (payload.images !== undefined && !this['deps'].advertisedCapabilities().includes(INPUT_IMAGES_CAPABILITY)) {
+      declineStrict.call(this, taskId, admission, agentRef, { reason: 'this daemon does not advertise input-images', code: 'offer_capability_missing' }, true);
+      return;
+    }
+    await this['handleOffer'](taskId, payload, admission);
   } finally {
     this['sealedOpening'].delete(taskId);
   }

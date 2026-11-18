@@ -1,5 +1,6 @@
 import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 import type { RuntimeEnvironment } from './runtime/environment.js';
+import type { RuntimeAccountUsage, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
 import type { ExecutionScratch } from './daemon/retention/scratch.js';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions.js';
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
@@ -18,12 +19,27 @@ import { freezeRuntimeVersionPolicy } from './runtime-version-policy.js';
 
 export type { AgentRef } from './agent-home.js';
 
+export interface RuntimeInputImage {
+  readonly path: string;
+  readonly mediaType?: string;
+}
+
+export interface RuntimeInputOptions {
+  readonly inputId?: string;
+  readonly images?: readonly RuntimeInputImage[];
+}
+
 /**
  * The offer fields a runtime adapter receives. The client owns this shape;
  * the daemon projects each wire offer onto it.
  */
 export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> & {
   instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
+  images?: readonly RuntimeInputImage[];
+  /** Exact per-task reasoning effort, interpreted by the selected runtime. */
+  effort?: string;
+  /** Exact per-task model selector for the harness lane. */
+  modelId?: string;
   /** The runtime session to resume (`session.mode: 'resume'` on the offer); absent for a fresh session. */
   sessionRef?: string;
 };
@@ -102,6 +118,8 @@ export type RuntimeExecutableSource = 'config' | 'path' | 'env';
 export type RuntimeDetectResult =
   | {
     readonly kind: 'available'; readonly version?: string;
+    /** Pure pre-open facts for this installation. Omitted facts are unmeasured. */
+    readonly sessionCapabilities?: { readonly steer?: boolean; readonly images?: boolean };
     /** Verbatim local version probe output; never an admission token. */
     readonly rawVersion?: string; readonly authPresent?: boolean; readonly versionVerdict?: RuntimeVersionVerdict;
     /** The absolute executable this probe ran (#1103 O10). Local-only and user-path sensitive: never on the wire, in audit or in a support bundle. */
@@ -110,7 +128,8 @@ export type RuntimeDetectResult =
     readonly executableSource?: RuntimeExecutableSource;
   }
   | { readonly kind: Exclude<typeof RUNTIME_DETECTION_FAILURE_KINDS[number], 'refused'> }
-  | { readonly kind: 'refused'; readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable'> }
+  | { readonly kind: 'refused'; readonly reason: Exclude<RuntimeDetectionRefusalReason, 'runtime_environment_unavailable' | 'acp_unavailable'> }
+  | { readonly kind: 'refused'; readonly reason: 'acp_unavailable'; readonly unsupportedVersion?: RuntimeUnsupportedVersion }
   | { readonly kind: 'refused'; readonly reason: 'runtime_environment_unavailable'; readonly code: ServiceEnvironmentUnavailableCode };
 
 /**
@@ -155,6 +174,8 @@ export type RuntimeIsolationAbsentSources = Readonly<Partial<Record<RuntimeIsola
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+  /** Static image input support. Omission defers to detection and the opened session. */
+  readonly images?: boolean;
   /**
    * Enforces the `auto` tool authorization gate before every tool call on each
    * lane the adapter runs. Omission means `auto` tasks are declined for this
@@ -299,7 +320,9 @@ export interface Session {
    */
   progressStartsMessage?(event: Extract<AgentEvent, { type: 'progress' }>): boolean;
   /** Inject steering text into a running turn (mid-stream). */
-  steer(text: string): Promise<void>;
+  steer(text: string, options?: RuntimeInputOptions): Promise<void>;
+  /** Opened-session image support. An image-bearing steer requires explicit support. */
+  readonly capabilities?: { readonly images: boolean };
   /** Send a new instruction on the same session after it has gone idle. */
   followUp(task: RuntimeTaskInput): Promise<void>;
   /** Best-effort abort of the current turn (used for `task.cancel`). */
@@ -349,6 +372,8 @@ export interface RuntimeAdapterDescriptor {
   readonly versionPolicy?: RuntimeVersionPolicy;
   /** Explicit opt-in to the authoritative model lanes of `task.offer.target` (`subscription`, `byok`, `byok-profile`). */
   readonly supportsDispatchSelection: boolean;
+  /** Consumes explicit per-task execution options or refuses them before prompting. */
+  readonly supportsTaskExecutionOptions?: boolean;
   /**
    * Whether this adapter actually CONSUMES
    * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
@@ -626,6 +651,7 @@ interface RuntimeOperationStartBase {
 export interface RuntimeOperationInstructionStartInput extends RuntimeOperationStartBase {
   readonly kind: 'instruction';
   readonly instruction: string;
+  readonly images?: readonly RuntimeInputImage[];
 }
 
 /**
@@ -693,6 +719,10 @@ export interface RuntimeAdapter {
   readonly descriptor: RuntimeAdapterDescriptor;
   /** Readiness probing must not mutate an Agent home or allocate execution ownership. */
   detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+  /** Explicit native catalog read. Absent when the adapter does not support it. */
+  listModels?(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
+  /** Explicit local account quota read. Absent when the adapter does not support it. */
+  accountUsage?(options?: RuntimeReadOptions): Promise<RuntimeAccountUsage>;
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
   /**
    * The environment every child process of this runtime's tasks receives
@@ -723,6 +753,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     id: descriptor.id,
     ...(descriptor.memoryLane === undefined ? {} : { memoryLane: descriptor.memoryLane }),
     supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
+    ...(descriptor.supportsTaskExecutionOptions === true ? { supportsTaskExecutionOptions: true } : {}),
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.mcpToolApprovals === true ? { mcpToolApprovals: true } : {}),
     ...(descriptor.progressMessageBoundary === undefined ? {} : { progressMessageBoundary: progressMessageBoundaryOf(descriptor.progressMessageBoundary) }),
@@ -753,6 +784,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
         }),
       }),
       steer: descriptor.capabilities.steer === true,
+      ...(descriptor.capabilities.images === undefined ? {} : { images: descriptor.capabilities.images === true }),
       resume: descriptor.capabilities.resume === true,
       approvalInteractive: descriptor.capabilities.approvalInteractive === true,
       ...(descriptor.capabilities.mcpToolsets === undefined ? {} : { mcpToolsets: descriptor.capabilities.mcpToolsets === true }),

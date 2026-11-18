@@ -1,4 +1,4 @@
-import type { HostOfferPlainPayload } from '@byok-sdk/protocol';
+import type { HostOfferPlainPayload, InputImageBlobRef } from '@byok-sdk/protocol';
 import { createTenantApi } from './api/tenant.js';
 import { createTaskReadsApi } from './api/task-reads.js';
 import { createTaskCancellationApi } from './api/task-cancellation.js';
@@ -756,18 +756,19 @@ export interface ByokCloud {
     opts?: RejectTaskOptions,
   ): Promise<EnqueuedAgentControl>;
   /**
-   * Host control plane: inject steering text into a RUNNING task, by enqueueing
-   * `task.steer` to the device that claimed it.
+   * Host control plane: inject steering text and optional images into a RUNNING
+   * task by enqueueing `task.steer` to the device that claimed it.
    *
-   * Gated on the claim-time capability snapshot and on nothing else — see
-   * `steer-control.ts` for why that is the only admissible input and why an
-   * absent snapshot refuses. Gate order mirrors the old
+   * Runtime steer support is gated on the claim-time capability snapshot (see
+   * `steer-control.ts`). Images require a durable `input-images` declaration
+   * and committed blobs in the tenant. Gate order mirrors the old
    * reference server's `ConnectionHub.steerTask`, and every gate is evaluated
    * in full before a mailbox row is allocated, so a refused call has
    * zero side effects:
    *
    *   0. a text over `TASK_STEER_TEXT_MAX_BYTES` (65,536) UTF-8 bytes ->
-   *      `coordination_input_invalid` ({@link ByokCloudError});
+   *      `coordination_input_invalid` ({@link ByokCloudError}). Optional
+   *      images are also schema-validated before reading the task;
    *   1. no such task for this tenant -> `task_not_found` ({@link ByokCloudError});
    *   2. terminal attempt -> {@link SteerRejectedError} `task_terminal`,
    *      checked BEFORE the running check so a steer racing a terminal
@@ -776,7 +777,9 @@ export interface ByokCloud {
    *      {@link SteerRejectedError} `task_not_running`;
    *   4. the claim snapshot does not positively say `steer: true` ->
    *      {@link SteerRejectedError} `steer_unsupported_runtime`, including when
-   *      there is no snapshot at all.
+   *      there is no snapshot at all;
+   *   5. for images, a device missing `input-images` -> `agent_capability_missing`.
+   *      An uncommitted or foreign blob -> `coordination_input_invalid`.
    *
    * Delivery is the same best-effort notification every control message has:
    * the enqueued envelope is durable. A device that does not deliver it to the
@@ -786,7 +789,7 @@ export interface ByokCloud {
   steerTask(
     tenant: TenantId,
     taskId: string,
-    payload: { readonly text: string },
+    payload: { readonly text: string; readonly images?: readonly InputImageBlobRef[] },
   ): Promise<EnqueuedAgentControl>;
   /**
    * The sealed lane of {@link steerTask} (#654): the sealed `task.steer`, with the

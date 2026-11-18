@@ -23,6 +23,7 @@
 //   DeviceSealingKey -> dist/device-sealing-key.d.ts
 //   DeviceSealingKeyStore -> dist/device-sealing-key.d.ts
 //   DeviceSealingSecretName -> dist/device-sealing-key.d.ts
+//   DiscoveredModel -> dist/model-discovery.d.ts
 //   EnvelopeScopedSecretStore -> dist/secret-scope.d.ts
 //   ExactProviderProfileBinding -> dist/provider-profile-binding.d.ts
 //   InMemoryProviderProfileStore -> dist/profile-store.d.ts
@@ -35,6 +36,7 @@
 //   MODEL_PROVIDER_VENDOR_IDS -> dist/provider-catalog.d.ts
 //   MacOsKeychainSecretStore -> dist/macos-keychain.d.ts
 //   MacOsKeychainSecretStoreOptions -> dist/macos-keychain.d.ts
+//   ModelDiscoveryConnection -> dist/model-discovery.d.ts
 //   ModelProviderAdapter -> dist/provider-profile.d.ts
 //   ModelProviderClient -> dist/registry.d.ts
 //   ModelProviderClientOptions -> dist/openai-client.d.ts
@@ -118,6 +120,7 @@
 //   checkProviderKey -> dist/provider-key-check.d.ts
 //   classifyModelProviderHttpError -> dist/http.d.ts
 //   decodeStrictBase64Utf8 -> dist/secret-store.d.ts
+//   discoverProviderModels -> dist/model-discovery.d.ts
 //   exactProviderProfileBinding -> dist/provider-profile-binding.d.ts
 //   fetchWithProviderGuards -> dist/http.d.ts
 //   inspectProviderProfileStore -> dist/store-compatibility.d.ts
@@ -344,6 +347,12 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly KEYCHAIN_UNAVAILABLE: 'KEYCHAIN_UNAVAILABLE';
     readonly KEYCHAIN_WRITE_FAILED: 'KEYCHAIN_WRITE_FAILED';
     readonly LOCAL_ACCOUNT_SCOPE_INVALID: 'LOCAL_ACCOUNT_SCOPE_INVALID';
+    readonly MODEL_LIST_AUTH_FAILED: 'MODEL_LIST_AUTH_FAILED';
+    readonly MODEL_LIST_HTTP_ERROR: 'MODEL_LIST_HTTP_ERROR';
+    readonly MODEL_LIST_INVALID_IDENTIFIER: 'MODEL_LIST_INVALID_IDENTIFIER';
+    readonly MODEL_LIST_INVALID_PAGINATION: 'MODEL_LIST_INVALID_PAGINATION';
+    readonly MODEL_LIST_INVALID_RESPONSE: 'MODEL_LIST_INVALID_RESPONSE';
+    readonly MODEL_LIST_UNSUPPORTED: 'MODEL_LIST_UNSUPPORTED';
     readonly MODEL_PROVIDER_AUTH_FAILED: 'MODEL_PROVIDER_AUTH_FAILED';
     readonly MODEL_PROVIDER_BALANCE_INSUFFICIENT: 'MODEL_PROVIDER_BALANCE_INSUFFICIENT';
     readonly MODEL_PROVIDER_HTTP_ERROR: 'MODEL_PROVIDER_HTTP_ERROR';
@@ -440,6 +449,8 @@ export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-seal
 export type { DeviceSealingEnrollment, DeviceSealingKey, DeviceSealingSecretName, } from './device-sealing-key.js';
 export { PROVIDER_PROVISIONING_MAX_CLOCK_SKEW_MS, applySealedProviderProvisioning, readSealedProvisioningResult, } from './sealed-provisioning.js';
 export type { ApplySealedProviderProvisioningOptions, ProviderProvisioningIdentitySnapshot, SealedProvisioningReadback, ProviderProvisioningCutPoint, ProviderProvisioningFaultSeam, } from './sealed-provisioning.js';
+export { discoverProviderModels } from './model-discovery.js';
+export type { DiscoveredModel, ModelDiscoveryConnection } from './model-discovery.js';
 export { PROVIDER_KEY_CHECK_TIMEOUT_MS, checkProviderKey } from './provider-key-check.js';
 export type { ProviderKeyCheckOptions } from './provider-key-check.js';
 export { ProviderRegistry } from './registry.js';
@@ -491,6 +502,20 @@ export declare class MacOsKeychainSecretStore<TName extends string = string> imp
     scope(namespace: string): SecretStore<TName>;
     set(name: TName, secret: string): Promise<void>;
 }
+// ==== @byok-sdk/keys dist/model-discovery.d.ts ====
+import { type ProviderFetch } from './http.js';
+import type { ModelProviderKind, ProviderAuthMode } from './provider-profile.js';
+export interface ModelDiscoveryConnection {
+    adapter: 'openai_compatible' | 'anthropic';
+    authMode: ProviderAuthMode;
+    baseUrl: string;
+    providerKind: ModelProviderKind;
+}
+export interface DiscoveredModel {
+    id: string;
+    name: string;
+}
+export declare function discoverProviderModels(connection: ModelDiscoveryConnection, secret: string | undefined, fetchImpl?: ProviderFetch): Promise<DiscoveredModel[]>;
 // ==== @byok-sdk/keys dist/model-route.d.ts ====
 import type { PiCatalogModelInput, PiModelCatalogTable } from './pi-model-catalog.js';
 import { type PiModelApi, type PiThinkingLevel } from './pi-model-config.js';

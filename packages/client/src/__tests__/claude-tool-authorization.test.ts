@@ -134,9 +134,11 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
     expect(verdicts).toEqual(['allow']);
     expect(requestAuthorization).not.toHaveBeenCalled();
     expect(await fs.readFile(path.join(workspace, 'tool-1.txt'), 'utf8')).toBe('actual fixture write');
-    // Helper identity authorizes the call; tool events still carry none (#633).
+    const server = toolName === `mcp__${AGENT_RESULT_MCP_SERVER_NAME}__${AGENT_RESULT_TOOL_NAME}` ? AGENT_RESULT_MCP_SERVER_NAME
+      : toolName === `mcp__${AGENT_MESSAGE_MCP_SERVER_NAME}__${AGENT_MESSAGE_TOOL_NAME}` ? AGENT_MESSAGE_MCP_SERVER_NAME : AGENT_MEMORY_MCP_SERVER_NAME;
+    const tool = SDK_RESERVED_MCP_TOOL_NAMES[server][0];
     for (const event of events.filter(event => event.type === 'tool_use' || event.type === 'tool_result')) {
-      expect(event).not.toHaveProperty('mcp');
+      expect(event).toHaveProperty('mcp', { server, tool });
     }
   });
 
@@ -156,7 +158,7 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
     await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
   });
 
-  it('never asks for mcp_status without an MCP selector, so a silent Claude cannot deny a helper', async () => {
+  it('does not consult mcp_status for authorization without an MCP selector', async () => {
     const workspace = await tempRoot();
     const receipt = path.join(workspace, 'status-receipt');
     const requestAuthorization = vi.fn(async () => ({ approved: false }));
@@ -166,12 +168,13 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
       onDecision: ({ verdict }) => { verdicts.push(verdict.decision === 'deny' ? verdict.code : 'allow'); },
     });
     const { salesko: _salesko, ...helpersOnly } = helperServers;
-    const session = await start(workspace, gate, { ...process.env, FAKE_MCP_STATUS_NO_ACK: '1', FAKE_MCP_STATUS_RECEIPT: receipt,
+    const session = await start(workspace, gate, { ...process.env, FAKE_MCP_STATUS_RECEIPT: receipt,
       FAKE_TOOL_NAME: `mcp__${AGENT_RESULT_MCP_SERVER_NAME}__${AGENT_RESULT_TOOL_NAME}` }, helpersOnly);
+    await vi.waitFor(() => expect(verdicts).toEqual(['allow']));
+    await expect(fs.access(receipt)).rejects.toThrow();
     await takeTurn(session);
     expect(verdicts).toEqual(['allow']);
     expect(requestAuthorization).not.toHaveBeenCalled();
-    await expect(fs.access(receipt)).rejects.toThrow();
     expect(await fs.readFile(path.join(workspace, 'tool-1.txt'), 'utf8')).toBe('actual fixture write');
   });
 

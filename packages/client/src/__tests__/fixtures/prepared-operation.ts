@@ -85,6 +85,7 @@ export async function startPreparedOperation(
       mcpEnv: projectPiMcpEnvironment(resources.env),
       manifest,
       instruction: offer.instruction,
+      ...(offer.images === undefined ? {} : { images: offer.images }),
       env: resources.env,
       ...(resources.mcpServers === undefined ? {} : { mcpServers: resources.mcpServers }),
       ...(resources.mcpToolApprovals === undefined ? {} : { mcpToolApprovals: resources.mcpToolApprovals }),

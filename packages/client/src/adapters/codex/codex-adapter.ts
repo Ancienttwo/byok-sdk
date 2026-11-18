@@ -1,6 +1,10 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
 import { CodexNativeInteractions } from './native-interactions.js';
@@ -33,6 +37,7 @@ import {
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { readProcessTable } from '../../runtime/oar-process-tree.js';
 import { codexFailure } from '../../runtime/oar-failure-runtime.js';
 import { CodexProjection, type CodexRecord } from './projection.js';
 import { AsyncQueue } from '../../util/async-queue.js';
@@ -132,9 +137,35 @@ const READER_PROJECT_ROOT_ARGS = Object.freeze(['-c', 'project_root_markers=[".b
 
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export class CodexAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin).bin.command,
+      version: codexVersionToken,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => {
+      const { codexListModels } = await import('#byok-oar-readers');
+      return codexListModels(installation, reader);
+    });
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, async (installation, reader) => {
+      const { codexAccountUsage } = await import('#byok-oar-readers');
+      return codexAccountUsage(installation, reader);
+    });
+  }
+
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
     supportsDispatchSelection: true,
+    supportsTaskExecutionOptions: true,
     progressMessageBoundary: 'event',
     platforms: ['darwin', 'linux', 'win32'],
     mcpToolApprovals: true,
@@ -213,9 +244,12 @@ export class CodexAdapter implements RuntimeAdapter {
         });
         // Codex reports configured credentials with exit 0; its display text is not a contract.
         authPresent = true;
-      } catch {}
+      } catch {
+          // An unreadable credential store leaves auth presence unconfirmed.
+        }
       return {
         kind: 'available',
+        sessionCapabilities: codexRuntime.codexSessionCapabilities(),
         version: text,
         authPresent,
         ...runtimeExecutableFields(resolved, executable),
@@ -228,6 +262,7 @@ export class CodexAdapter implements RuntimeAdapter {
   async prepare(
     input: RuntimeAdapterPrepareInput,
   ): Promise<RuntimeAdapterPrepareResult> {
+    const { effort } = input.offer;
     let model: string | undefined;
     try {
       model = subscriptionModel(modelLaneTarget(input.offer.target));
@@ -255,7 +290,7 @@ export class CodexAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (start) => this.start(start, invocation, model),
+        start: (start) => this.start(start, invocation, model, effort),
       },
     };
   }
@@ -263,6 +298,7 @@ export class CodexAdapter implements RuntimeAdapter {
     input: RuntimeOperationStartInput,
     invocation: RuntimeInvocation,
     model: string | undefined,
+    effort: string | undefined,
   ): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
@@ -285,18 +321,22 @@ export class CodexAdapter implements RuntimeAdapter {
       input.scratch,
       workspace,
       model,
+      effort,
       this.interruptTimeoutMs,
       this.options.operationTimeoutMs ?? DEFAULT_OPERATION_MS,
       input.manifest.sessionRef === undefined,
       this.options.nativeInteractions,
       input.manifest.sessionRef,
     );
+    let rootPid: number | undefined;
+    const cleanupOnAbort = process.platform !== 'win32';
     try {
       const codexHome = excludeUserContext ? { CODEX_HOME: await createCodexAgentHome(input.env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {};
       // The open deadline covers spawn, initialize, the thread open and its read-back.
       const raw = await session.within('open', retryable, codexRuntime.codexSession(
         (bin, args, options) => {
           const child = spawned(bin, [...invocation.args, ...args], options);
+          rootPid = child.pid;
           session.own(child);
           void child.exited.then(
             () => session.exited(),
@@ -309,7 +349,9 @@ export class CodexAdapter implements RuntimeAdapter {
           cwd,
           env: { ...input.env, ...input.scratch.env, ...codexHome } as Record<string, string>,
           retainedBytes: this.maxRetainedBytes,
+          endTurnProcessesOnAbort: cleanupOnAbort,
           ...(model === undefined ? {} : { model }),
+          ...(effort === undefined ? {} : { effort }),
           sandboxMode: this.options.sandbox ?? 'danger-full-access',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           launchArgs: [
@@ -326,6 +368,10 @@ export class CodexAdapter implements RuntimeAdapter {
         },
         1000,
         {
+          ...(cleanupOnAbort ? { turnProcessReader: {
+            rootPid: () => rootPid,
+            readProcessTable: () => readProcessTable('ps'),
+          } } : {}),
           onReady: (id) => session.ready(id),
           beforeOpen: async (request, params) => {
             const effective = excludeUserMcp || excludeUserContext ? await request('config/read', { cwd, includeLayers: false }) : undefined;
@@ -352,7 +398,7 @@ export class CodexAdapter implements RuntimeAdapter {
         throw authority('codex resume returned a different thread id');
       if (input.signal?.aborted)
         throw infrastructure('codex start was aborted');
-      await session.prompt(input.instruction);
+      await session.prompt(input.instruction, input.images);
       return session;
     } catch (thrown) {
       try {
@@ -407,6 +453,7 @@ class CodexSession implements Session {
     private readonly scratch: ExecutionScratch,
     private readonly workspace: string,
     private readonly model: string | undefined,
+    private readonly effort: string | undefined,
     private readonly interruptMs: number,
     private readonly operationMs: number,
     private readonly fresh: boolean,
@@ -536,13 +583,16 @@ class CodexSession implements Session {
       if (self.failure) throw self.failure;
     })();
   }
-  async prompt(input: string): Promise<void> {
+  get capabilities() { return { images: this.raw?.capabilities.images === true }; }
+
+  async prompt(input: string, images?: readonly RuntimeInputImage[]): Promise<void> {
     if (!this.raw) throw infrastructure('codex session is not open');
+    requireImageInput(images, this.capabilities.images);
     if (this.active) throw infrastructure('codex turn is already active');
     this.active = true;
     this.native?.beginTurn();
     try {
-      const result = await this.within('prompt', infrastructure, this.raw.prompt(input));
+      const result = await this.within('prompt', infrastructure, this.raw.prompt(input, { images }));
       if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'codex prompt refused');
     } catch (error) {
       this.active = false;
@@ -553,15 +603,18 @@ class CodexSession implements Session {
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string')
       throw new PolicyUnsupportedError('codex requires a string instruction');
+    if (task.effort !== undefined && task.effort !== this.effort) {
+      throw new PolicyUnsupportedError('codex persistent session cannot change effort');
+    }
     const model = subscriptionModel(modelLaneTarget(task.target));
     if (model !== undefined && model !== this.model)
       throw new PolicyUnsupportedError(
         'codex persistent session cannot change model',
       );
-    await this.prompt(task.instruction);
+    await this.prompt(task.instruction, task.images);
   }
-  async steer(text: string): Promise<void> {
-    const result = this.raw === undefined ? undefined : await this.within('steer', infrastructure, this.raw.steer(text));
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
+    const result = this.raw === undefined ? undefined : await this.within('steer', infrastructure, this.raw.steer(text, options));
     if (result?.response.body.kind !== 'accepted')
       throw infrastructure(
         result?.response.body.reason ?? 'codex steer refused',

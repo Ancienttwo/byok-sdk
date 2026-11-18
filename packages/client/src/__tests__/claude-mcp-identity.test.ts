@@ -43,24 +43,24 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
     await source.observe();
     expect(fetch).toHaveBeenCalledOnce();
   });
-  it('resolves an SDK helper for authorization without adding it to event identity', async () => {
+  it('resolves an SDK helper for authorization and event identity', async () => {
     const source = createClaudeMcpIdentityResolver(async () => status(
       { name: 'market', tools: ['quote'] },
       { name: AGENT_MESSAGE_MCP_SERVER_NAME, tools: ['send_agent_message'] },
     ), configured('market', AGENT_MESSAGE_MCP_SERVER_NAME));
     await expect(source.resolve(`mcp__${AGENT_MESSAGE_MCP_SERVER_NAME}__send_agent_message`))
       .resolves.toEqual({ server: AGENT_MESSAGE_MCP_SERVER_NAME, tool: 'send_agent_message' });
-    expect([...source.identities.keys()]).toEqual(['mcp__market__quote']);
+    expect([...source.identities.keys()]).toEqual(['mcp__market__quote', `mcp__${AGENT_MESSAGE_MCP_SERVER_NAME}__send_agent_message`]);
   });
 
-  it('resolves helpers when the task has no toolset server, and skips the event lookup', async () => {
+  it('observes helpers when the task has no toolset server', async () => {
     const fetch = vi.fn(async () => status({ name: AGENT_MESSAGE_MCP_SERVER_NAME, tools: ['send_agent_message'] }));
     const source = createClaudeMcpIdentityResolver(fetch, configured(AGENT_MESSAGE_MCP_SERVER_NAME));
     await source.observe();
-    expect(fetch).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledOnce();
     await expect(source.resolve(`mcp__${AGENT_MESSAGE_MCP_SERVER_NAME}__send_agent_message`))
       .resolves.toEqual({ server: AGENT_MESSAGE_MCP_SERVER_NAME, tool: 'send_agent_message' });
-    expect(source.identities.size).toBe(0);
+    expect(source.identities.size).toBe(1);
   });
 
   it('maps Claude runtime names to the configured server and original tool names', () => {

@@ -20,7 +20,7 @@ import { createRuntimeAdapters } from '../adapters/runtime-adapters';
 import { resolveRuntimeInvocation } from '../adapters/runtime-invocation';
 import { npmNodeShim } from './fixtures/npm-node-shim';
 import { check, defineRuntimeCases } from './runtime-contract/contract';
-import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/bc1b2ac/runtimes/opencode/session';
+import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/609f347/runtimes/opencode/session';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -115,7 +115,12 @@ for (const version of ['1.18.35', 'opencode v2.0.26']) {
       await collect(await box.start('permission'));
       expect(box.facts().find(fact => fact.kind === 'permission')?.reply).toEqual({ outcome: { outcome: 'cancelled' } });
       const held = await box.start('hold');
-      await expect(held.steer('no')).rejects.toThrow(/unsupported/);
+      if (version.startsWith('1.')) {
+        await held.steer('change direction');
+        await vi.waitFor(() => expect(box.facts().some(fact => fact.kind === 'prompt' && fact.text === 'change direction')).toBe(true));
+      } else {
+        await expect(held.steer('no')).rejects.toMatchObject({ name: 'SteerUnsupportedError' });
+      }
       await held.interrupt();
       expect((await collect(held)).at(-1)).toEqual({ type: 'turn_end' });
       await held.close();
@@ -134,10 +139,14 @@ it('keeps v2 child calls distinct and execute opaque, and emits only native usag
   const events = await collect(await box.start('opencode-child'));
   expect(events.filter(event => event.type === 'tool_use')).toEqual([
     { type: 'tool_use', tool: 'shell', toolCallId: 'same-id', input: { code: 'host.lookup()' } },
-    { type: 'tool_use', tool: 'execute', toolCallId: 'native-child:same-id', input: { code: 'host.lookup()' } },
+    { type: 'tool_use', tool: 'execute', toolCallId: 'native-child:same-id', agentPath: ['native-child'], input: { code: 'host.lookup()' } },
   ]);
   expect(events).toContainEqual({ type: 'usage', contextTokens: 321, contextWindow: 1000 });
-  expect(events.filter(event => event.type === 'progress')).toEqual([{ type: 'progress', text: 'done' }]);
+  expect(events.filter(event => event.type === 'progress')).toEqual([
+    { type: 'progress', text: 'child private text', agentPath: ['native-child'] },
+    { type: 'progress', text: 'done' },
+  ]);
+  expect(events.filter(event => event.type === 'turn_end')).toEqual([{ type: 'turn_end' }]);
 });
 
 // #2188: 2.2.7 is the standard channel (no child-session-updates, as OAR 0.103 opened 2.3.0); 2.3.0 is child_update with OAR's fence.
@@ -152,8 +161,8 @@ it('delivers the same background child events on both OpenCode child channels an
     }
     expect(runs[1]).toEqual(runs[0]);
     expect(runs[0]).toEqual([
-      { type: 'tool_use', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', input: { filePath: 'in-call.md' } },
-      { type: 'tool_result', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', output: [{ type: 'text', text: 'in-call read' }] },
+      { type: 'tool_use', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', agentPath: ['ses_bg_child'], input: { filePath: 'in-call.md' } },
+      { type: 'tool_result', tool: 'read', toolCallId: 'ses_bg_child:ses_bg_child:in-call', agentPath: ['ses_bg_child'], output: [{ type: 'text', text: 'in-call read' }] },
       { type: 'progress', text: 'done' },
       { type: 'turn_end' },
     ]);
@@ -177,12 +186,33 @@ it('cleans a detached descendant before reporting success', async () => {
   expect(() => process.kill(pid, 0)).toThrow();
 });
 
+it('distinguishes declared v1 steering from v2 negotiation', async () => {
+  expect(await setup().adapter.detect()).toMatchObject({ kind: 'available', sessionCapabilities: { steer: true } });
+  const box = setup('opencode v2.3.0', { FAKE_ACP_STEERING: '1', FAKE_ACP_IMAGES: '1' });
+  expect(await box.adapter.detect()).toMatchObject({ kind: 'available', sessionCapabilities: {} });
+  const session = await box.start('hold');
+  expect(session.capabilities?.images).toBe(true);
+  await session.steer('change direction');
+  expect(box.facts().find(fact => fact.kind === 'steer')?.params.prompt).toEqual([{ type: 'text', text: 'change direction' }]);
+  await session.interrupt();
+});
+
 it('registers an opt-in adapter with truthful capabilities', async () => {
   const box = setup();
   const [adapter] = createRuntimeAdapters({ runtimeAllowlist: ['opencode'], runtimes: { opencode: { models, executable: fake } } });
   expect(adapter!.descriptor).toEqual(expect.objectContaining({ id: 'opencode', platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES, versionPolicy: { qualifiedVersion: '2.3.0', unqualified: 'warn' } }));
   expect(validateRuntimeDetectResult(await box.adapter.detect())).toMatchObject({ kind: 'available', version: '1.18.35', rawVersion: '1.18.35\n', executableSource: 'config' });
   expect(OPENCODE_RUNTIME_CAPABILITIES.mcpToolsets).toBe(true);
+});
+
+it.each([undefined, 'ses_opencode_fixture'])('applies OpenCode task options and never falls back from a task model (resume=%s)', async sessionRef => {
+  const box = setup('1.19.5', { FAKE_ACP_EFFORT_MENU: '1' });
+  const session = await startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, modelId: 'fixture/task', effort: 'high',
+    instruction: 'opencode-limit-always', sessionRef }, { workspaceDir: box.cwd, env: box.env });
+  sessions.push(session);
+  await expect(collect(session)).rejects.toMatchObject({ retry: 'non-retryable', failure: { class: 'rate_limited' } });
+  expect(box.facts().filter(row => row.kind === 'config').map(row => row.params.value)).toEqual(['fixture/task', 'high']);
+  expect(box.facts().filter(row => row.kind === 'open')).toHaveLength(1);
 });
 
 it.each(['1.19.5', 'opencode v2.3.0'])('passes admitted MCP servers on new and resumed %s sessions', async version => {
@@ -563,6 +593,47 @@ it.each(['aborted', 'failed', 'completed'])('drains pending ACP calls once with 
     expect(events.filter(event => event.type === 'tool_use')).toEqual([
       { type: 'tool_use', tool: 'shell', toolCallId: 'running', input },
       { type: 'tool_use', tool: 'shell', toolCallId: 'pending', input },
+    ]);
+  }
+});
+
+it('isolates interleaved Grok and Antigravity child turn state', async () => {
+  const { GrokProjection } = await import('../adapters/grok/projection');
+  const { AgyProjection } = await import('../adapters/antigravity/projection');
+  for (const projection of [new GrokProjection('root'), new AgyProjection('root', new Map())]) {
+    const events: AgentEvent[] = [];
+    const end = vi.fn();
+    const consume = (agentPath: string[], events: object[], update?: object) => projection.consume({
+      kind: 'frame', seq: 1, sessionId: 'root', agentPath, body: { events, native: { update } },
+    }, event => { if (event.type !== 'message_draft_delta') collected.push(event); }, end);
+    const collected = events;
+    const root: string[] = [], a = ['outer', 'a'], b = ['outer', 'b'];
+    const delta = (text: string) => ({ kind: 'text_delta', text });
+    const usage = (input: number) => ({ kind: 'usage', usage: { tokens: { input, output: 1 } } });
+    const ended = { kind: 'turn_ended', outcome: { kind: 'completed' } };
+    const call = (tool: string) => ({ kind: 'tool_call_started', callId: 'same', tool });
+    const result = { kind: 'tool_call_ended', callId: 'same' };
+    consume(root, [delta('root '), usage(100)]);
+    consume(a, [delta('first '), call('read')], { toolCallId: 'same', rawInput: { file: 'a' }, status: 'in_progress' });
+    consume(b, [call('write')], { toolCallId: 'same', rawInput: { file: 'b' }, status: 'in_progress' });
+    consume(a, [result, delta('child a'), usage(20), ended]);
+    expect(end).not.toHaveBeenCalled();
+    expect(events.filter(event => event.type === 'tool_result')).toEqual([
+      { type: 'tool_result', tool: 'read', toolCallId: JSON.stringify([a, 'same']), agentPath: a, output: {} },
+    ]);
+    consume(b, [result, delta('child b'), usage(30), ended]);
+    consume(root, [delta('reply'), usage(120), ended]);
+    expect(end).toHaveBeenCalledOnce();
+    expect(events.filter(event => event.type === 'progress')).toEqual([
+      { type: 'progress', text: 'first ', agentPath: a },
+      { type: 'progress', text: 'child a', agentPath: a },
+      { type: 'progress', text: 'child b', agentPath: b },
+      { type: 'progress', text: 'root reply' },
+    ]);
+    expect(events.filter(event => event.type === 'usage')).toEqual([
+      { type: 'usage', inputTokens: 20, outputTokens: 1, agentPath: a },
+      { type: 'usage', inputTokens: 30, outputTokens: 1, agentPath: b },
+      { type: 'usage', inputTokens: 120, outputTokens: 1 },
     ]);
   }
 });

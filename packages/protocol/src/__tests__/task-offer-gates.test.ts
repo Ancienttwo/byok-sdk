@@ -13,6 +13,8 @@ import * as v6Release from 'byok-protocol-previous';
 
 import {
   ExecutionTargetSchema,
+  ReasoningEffortSchema,
+  TASK_EXECUTION_OPTIONS_CAPABILITY,
   readDeclineCode,
   HostOfferPlainPayloadSchema,
   HostOfferSealedPayloadSchema,
@@ -68,6 +70,15 @@ function decoderWithout(row: OfferRow, payload: Json): z.ZodType {
   const { shape } = payload.sealing === undefined ? TaskOfferPlainPayloadSchema : TaskOfferSealedPayloadSchema;
   const top = row.field.split('.')[0]!;
   const { [top]: known, ...rest } = shape as Record<string, z.ZodType>;
+  if (row.field === 'target.effort' || row.field === 'target.modelId') {
+    const field = row.field.split('.')[1]!;
+    const target = z.union(ExecutionTargetSchema.options.map((option) => {
+      if (row.when !== undefined && option.shape.lane.value !== row.when.value) return option;
+      const { [field]: _omitted, ...fields } = option.shape as Record<string, z.ZodType>;
+      return z.strictObject(fields);
+    }));
+    return z.strictObject({ ...rest, target });
+  }
   if (row.value === undefined) return z.strictObject(rest);
   if (row.field === 'agentMemory') {
     return z.strictObject({ ...rest, agentMemory: AgentMemorySelectionSchema.exclude([row.value as never]).optional() });
@@ -89,12 +100,14 @@ describe('task.offer gates: an unknown gated field stops the daemon (Q4)', () =>
     'a decoder that does not know %s refuses every corpus offer that carries it',
     (_name, row) => {
       const lines = corpusOffers.filter((payload) => {
+        if (row.when !== undefined && fieldOf(payload, row.when.field) !== row.when.value) return false;
         const value = fieldOf(payload, row.field);
         return value !== undefined && (row.value === undefined || (Array.isArray(value) ? value.includes(row.value) : value === row.value));
       });
       expect(lines.length, 'the v7 corpus carries the row').toBeGreaterThan(0);
       for (const payload of lines) {
         expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(payload).success).toBe(true);
+        expect(requiredReceiverCapabilities('task.offer', payload)).toContain(row.capability);
         expect(decoderWithout(row, payload).safeParse(payload).success).toBe(false);
       }
     },
@@ -113,11 +126,52 @@ describe('task.offer gates: the published v6 oracle, with dispatchSelection move
   });
 });
 
+describe('per-task execution options (#2377)', () => {
+  it.each(['xhigh', 'max', 'vendor:next', 'a'.repeat(64)])('accepts runtime-enumerated effort %j', (effort) => {
+    expect(ReasoningEffortSchema.parse(effort)).toBe(effort);
+  });
+
+  it.each(['', 'a'.repeat(65), ' high', 'low high', 'xhigh\n', 'low\t', 'é', '\x7f'])('refuses invalid effort %j', (effort) => {
+    expect(ReasoningEffortSchema.safeParse(effort).success).toBe(false);
+  });
+
+  it.each([
+    { lane: 'auto', effort: 'max' },
+    { lane: 'auto', modelId: 'model' },
+    { lane: 'harness', harnessId: 'grok', modelId: '' },
+    { lane: 'harness', harnessId: 'grok', modelId: 'm'.repeat(161) },
+    { lane: 'harness', harnessId: 'grok', modelId: 'model\r\n' },
+  ])('refuses invalid target %j', (target) => {
+    expect(ExecutionTargetSchema.safeParse(target).success).toBe(false);
+  });
+
+  it.each([
+    [{ lane: 'runtime', runtimeId: 'codex', effort: 'max' }, true],
+    [{ lane: 'harness', harnessId: 'grok', modelId: 'grok-code' }, true],
+    [{ lane: 'harness', harnessId: 'grok', modelId: 'grok-code', effort: 'max' }, true],
+    [{ lane: 'harness', harnessId: 'grok' }, false],
+    [{ lane: 'subscription', runtimeId: 'codex', modelId: 'gpt-5' }, false],
+    [{ lane: 'byok', runtimeId: 'pi', providerId: 'vendor', modelId: 'model' }, false],
+  ] as const)('derives the added gate only when needed by %j', (target, needsFlag) => {
+    const variants = [
+      [HostOfferPlainPayloadSchema, corpusOffers.find(p => p.sealing === undefined && p.preparation === undefined)!],
+      [HostOfferSealedPayloadSchema, corpusOffers.find(p => p.sealed !== undefined)!],
+    ] as const;
+    for (const [host, base] of variants) {
+      const payload = host.parse({ ...base, target });
+      expect(payload.target).toEqual(target);
+      expect(requiredReceiverCapabilities('task.offer', payload).filter(flag => flag === TASK_EXECUTION_OPTIONS_CAPABILITY))
+        .toEqual(needsFlag ? [TASK_EXECUTION_OPTIONS_CAPABILITY] : []);
+    }
+  });
+});
+
 describe('WIRE_ADDITIONS', () => {
   it('names each gate once', () => {
     const keys = WIRE_ADDITIONS.map((entry) => JSON.stringify([
       entry.surface, entry.field ?? null,
       entry.value ?? null,
+      entry.when ?? null,
       entry.capability,
     ]));
     expect(keys.filter((key, index) => keys.indexOf(key) !== index)).toEqual([]);

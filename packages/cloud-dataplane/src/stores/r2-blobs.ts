@@ -298,10 +298,9 @@ export class R2CloudBlobStore implements CloudBlobStore {
    * two tenants holding identical bytes hold two independent objects, and
    * neither can learn of the other's.
    *
-   * Idempotence stops at `committed`, and that boundary is the point: a
-   * committed object is what a truth record is allowed to reference, so it has
-   * to be immutable, and re-issuing a write grant for one is the only way this
-   * adapter could make it otherwise.
+   * A committed reservation can be replayed with a read-only URL; it must
+   * never receive a new PUT grant. A committed object is immutable because
+   * truth records may already reference it.
    */
   async createUpload(
     tenant: TenantId,
@@ -315,6 +314,18 @@ export class R2CloudBlobStore implements CloudBlobStore {
     // point — but a tenant whose id can never address a key should not get to
     // reserve a row on the way to being refused.
     assertKeySegmentTenant(tenant);
+
+    if (reservation.state === 'committed') {
+      const entry = await this.#objects.get(tenant, hash);
+      if (entry?.state !== 'committed' || entry.byteSize !== byteSize || entry.contentType !== reservation.contentType) {
+        throw new ByokCoreError('object_state_invalid', `Committed reservation ${reservation.reservationId} has no matching committed object.`);
+      }
+      const downloadUrl = await this.getDownloadUrl(tenant, hash);
+      if (downloadUrl === undefined) {
+        throw new ByokCoreError('object_state_invalid', `Object ${hash} is no longer committed.`);
+      }
+      return { blobId: hash, uploadUrl: downloadUrl };
+    }
 
     const entry = await this.#objects.putManifest(tenant, {
       hash,
@@ -556,14 +567,14 @@ export class R2CloudBlobStore implements CloudBlobStore {
     if (
       reservation.tenantId === tenant &&
       reservation.kind === 'object' &&
-      reservation.state === 'reserved' &&
+      (reservation.state === 'reserved' || reservation.state === 'committed') &&
       reservation.expectedBytes >= 0n
     ) {
       return;
     }
     throw new ByokCoreError(
       'storage_integrity_mismatch',
-      'An upload grant requires a reserved object reservation owned by this tenant.',
+      'An upload requires an active or committed object reservation owned by this tenant.',
     );
   }
 }

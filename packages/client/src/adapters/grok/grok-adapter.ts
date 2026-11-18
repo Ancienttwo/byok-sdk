@@ -1,6 +1,10 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import { modelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -132,9 +136,30 @@ export interface GrokAdapterOptions {
  * selection; the model is the adapter's `model` option.
  */
 export class GrokAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin).bin.command,
+      version: grokVersionToken,
+      environment: env => ({ env: { ...env, ...AUTO_UPDATE_OFF } }),
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => (await import('#byok-acp-runtime')).grokListModels(installation, reader));
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, async (installation, reader) => (await import('#byok-acp-runtime')).grokAccountUsage(installation, reader));
+  }
+
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'grok',
     supportsDispatchSelection: false,
+    supportsTaskExecutionOptions: true,
     // Windows has no Grok evidence (`docs/adapter-capabilities.md`).
     platforms: ['darwin', 'linux'],
     capabilities: {
@@ -192,6 +217,7 @@ export class GrokAdapter implements RuntimeAdapter {
       }
       return {
         kind: 'available',
+        sessionCapabilities: { ...(await import('#byok-acp-runtime')).grokSessionCapabilities(), steer: this.descriptor.capabilities.steer },
         version: text,
         authPresent: grokAuthPresent(env),
         ...runtimeExecutableFields(resolved, command),
@@ -203,6 +229,7 @@ export class GrokAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { effort, modelId = this.options.model } = input.offer;
     const detected = await this.detect();
     if (detected.kind !== 'available')
       return {
@@ -211,10 +238,10 @@ export class GrokAdapter implements RuntimeAdapter {
         retryable: false,
       };
     const command = (this.options.resolveBin ?? resolveGrokBin)().command;
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command) } };
+    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, modelId, effort) } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, model: string | undefined, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('grok requires a resolved instruction');
     const cwd = input.manifest.cwd;
@@ -256,7 +283,8 @@ export class GrokAdapter implements RuntimeAdapter {
     const acp = await import('#byok-acp-runtime');
     const session = new GrokSession(
       input.scratch,
-      this.options.model,
+      model,
+      effort,
       this.interruptTimeoutMs,
       input.manifest.sessionRef,
     );
@@ -275,7 +303,8 @@ export class GrokAdapter implements RuntimeAdapter {
           ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
           env,
           retainedBytes: this.maxRetainedBytes,
-          ...(this.options.model === undefined ? {} : { model: this.options.model }),
+          ...(model === undefined ? {} : { model }),
+          ...(effort === undefined ? {} : { effort }),
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(input.manifest.sessionRef === undefined ? {} : { resume: input.manifest.sessionRef }),
         },
@@ -287,7 +316,7 @@ export class GrokAdapter implements RuntimeAdapter {
       );
       session.bind(raw);
       if (input.signal?.aborted) throw infrastructure('grok start was aborted');
-      await session.prompt(input.instruction);
+      await session.prompt(input.instruction, input.images);
       return session;
     } catch (thrown) {
       try {
@@ -336,6 +365,7 @@ class GrokSession implements Session {
   constructor(
     private readonly scratch: ExecutionScratch,
     private readonly model: string | undefined,
+    private readonly effort: string | undefined,
     private readonly interruptMs: number,
     private readonly expectedSessionRef?: string,
   ) {}
@@ -414,14 +444,17 @@ class GrokSession implements Session {
       if (self.failure) throw self.failure;
     })();
   }
-  async prompt(input: string): Promise<void> {
+  get capabilities() { return { images: this.raw?.capabilities.images === true }; }
+
+  async prompt(input: string, images?: readonly RuntimeInputImage[]): Promise<void> {
     if (!this.raw) throw infrastructure('grok session is not open');
+    requireImageInput(images, this.capabilities.images);
     if (this.active) throw infrastructure('grok turn is already active');
     this.active = true;
     const inputId = randomUUID();
     this.projection?.beginSdkTurn(inputId);
     // Marked from the first await: an interrupt in the same tick must not cancel a Grok turn OAR adopted meanwhile.
-    const sending = this.send(this.raw, input, inputId);
+    const sending = this.send(this.raw, input, { inputId, images });
     this.sending = sending;
     try {
       await sending;
@@ -433,21 +466,24 @@ class GrokSession implements Session {
       this.sending = undefined;
     }
   }
-  private async send(raw: RawAcpSession, input: string, inputId: string): Promise<void> {
+  private async send(raw: RawAcpSession, input: string, options: RuntimeInputOptions & { inputId: string }): Promise<void> {
     const grokTurnsClosed = this.projection?.grokTurnsClosed;
-    let result = await raw.prompt(input, { inputId });
+    let result = await raw.prompt(input, options);
     // OAR adopted a turn Grok runs on its own and refuses the prompt as busy: hold it until that turn closes.
     // A Grok turn that closed while the busy answer was in flight still holds: the drain then sends it at once.
     if (result.response.body.code === 'busy' && (this.projection?.grokTurnOpen === true || this.projection?.grokTurnsClosed !== grokTurnsClosed)) {
-      result = await raw.queue(input, { inputId });
-      if (result.response.body.kind === 'accepted') this.held = inputId;
+      result = await raw.queue(input, options);
+      if (result.response.body.kind === 'accepted') this.held = options.inputId;
     }
     if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'grok prompt refused');
   }
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('grok requires a string instruction');
+    if ((task.modelId !== undefined && task.modelId !== this.model) || (task.effort !== undefined && task.effort !== this.effort)) {
+      throw new PolicyUnsupportedError('grok persistent session cannot change model or effort');
+    }
     if (modelLaneTarget(task.target) !== undefined) throw new PolicyUnsupportedError(`grok persistent session runs ${this.model ?? 'the default model'} and takes no dispatch selection`);
-    await this.prompt(task.instruction);
+    await this.prompt(task.instruction, task.images);
   }
   async steer(): Promise<void> {
     // The bridge exposes no Grok steer: OAR's `_x.ai/interject` steer is not qualified for the SDK.
@@ -512,6 +548,7 @@ class GrokSession implements Session {
     });
   }
   private flushPendingUsage(): void {
+    this.projection?.flushChildren(event => this.queue.push(event));
     const usage = this.projection?.takePendingUsage();
     if (usage) this.queue.push(usage);
   }

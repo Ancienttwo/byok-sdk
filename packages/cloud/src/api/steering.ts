@@ -1,6 +1,7 @@
 import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl } from '../cloud.js';
 import { type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
 import {
+  InputImagesSchema,
   TASK_STEER_TEXT_MAX_BYTES,
   TaskSteerSealedPayloadSchema,
   createEnvelope,
@@ -8,6 +9,7 @@ import {
   type TaskSteerSealedPayload,
 } from '@byok-sdk/protocol';
 import { ByokCloudError } from '../errors.js';
+import { assertCommittedInputImages } from '../input-images.js';
 import { uuidFromSha256 } from '@byok-sdk/protocol';
 import { releaseSealedCiphertext, sealedCiphertextRef } from '../sealed-ciphertext.js';
 import { sameSealedProjection } from '../sealed-comparison.js';
@@ -44,23 +46,29 @@ export function createSteeringApi({
    * The steer gate. See {@link ByokCloud.steerTask} for the order and
    * `steer-control.ts` for why the claim snapshot is the only input.
    */
-  async function steerTask(
-    tenant: TenantId,
-    taskId: string,
-    payload: { readonly text: string },
-  ): Promise<EnqueuedAgentControl> {
+  const steerTask: ByokCloud['steerTask'] = async (tenant, taskId, payload) => {
     refuseSealedFields(payload, ['sealing', 'sealed', 'steerId'], 'steerSealedTask');
     // C1 (wire v7): refuse an oversized text here, before a mailbox row
     // exists, rather than as an envelope the device could never accept.
-    if (new TextEncoder().encode(payload.text).length > TASK_STEER_TEXT_MAX_BYTES) {
+    const { text } = payload;
+    if (new TextEncoder().encode(text).length > TASK_STEER_TEXT_MAX_BYTES) {
       throw new ByokCloudError('coordination_input_invalid', `Steer text exceeds ${TASK_STEER_TEXT_MAX_BYTES} UTF-8 bytes.`);
     }
+    const parsed = payload.images === undefined ? undefined : InputImagesSchema.safeParse(payload.images);
+    if (parsed?.success === false) {
+      throw new ByokCloudError('coordination_input_invalid', 'Input images must contain 1–16 valid image references.');
+    }
+    const images = parsed?.data;
+    const steer = { text, ...(images === undefined ? {} : { images }) };
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
+    const required = requiredReceiverCapabilities('task.steer', steer);
+    if (required.length > 0) await assertAgentCapabilities(tenant, ownerDeviceId, required);
+    if (images !== undefined) await assertCommittedInputImages(options.cloud.blobs, tenant, images);
     const messageId = options.crypto.randomUuid();
     return enqueueAgentControlEnvelope(tenant, ownerDeviceId, messageId, (seq) =>
-      createEnvelope('task.steer', { text: payload.text }, { id: messageId, taskId, seq }),
+      createEnvelope('task.steer', steer, { id: messageId, taskId, seq }),
     );
-  }
+  };
 
   /** The sealed steer: the same gates, then the device flag. See {@link ByokCloud.steerSealedTask}. */
   async function steerSealedTask(
@@ -68,7 +76,11 @@ export function createSteeringApi({
     taskId: string,
     payload: TaskSteerSealedPayload,
   ): Promise<EnqueuedAgentControl> {
-    const sealed = TaskSteerSealedPayloadSchema.parse(payload);
+    const parsed = TaskSteerSealedPayloadSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new ByokCloudError('coordination_input_invalid', 'Invalid sealed steer payload.');
+    }
+    const sealed = parsed.data;
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     await assertAgentCapabilities(tenant, ownerDeviceId, requiredReceiverCapabilities('task.steer', sealed));
     await assertSealedCiphertext(tenant, sealed);

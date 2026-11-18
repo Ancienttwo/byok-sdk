@@ -13,6 +13,7 @@ import type {
   BlobRef,
   ClaimedExecutor,
   ExecutionTarget,
+  InputImageBlobRef,
   RuntimeCapabilities,
   SteerRefusalReasonReading,
   TaskApprovalResolvedPayload,
@@ -140,9 +141,12 @@ interface DispatchInputBase {
   instruction: string;
   /**
    * What the device runs: a built-in runtime, a model lane, a custom harness,
-   * or `{ lane: 'auto' }` for the device's own preference order.
+   * or `{ lane: 'auto' }` for the device's own preference order. Per-task
+   * `target.effort` and harness `target.modelId` require `task-execution-options`.
    */
   target: ExecutionTarget;
+  /** Committed input blob refs. Requires a device advertising `input-images`. */
+  images?: InputImageBlobRef[];
   /** Explicit target; registered offline devices may receive queued work. */
   deviceId: string;
   /** Logical device-local MCP toolsets required for this task; never executable definitions. */
@@ -380,9 +384,10 @@ export interface TaskHandle {
    * Enqueue a `task.steer` and resolve with its envelope id, the id a
    * `steer_refused` event names. The kernel refuses text over
    * `TASK_STEER_TEXT_MAX_BYTES` UTF-8 bytes with `ByokCloudError`
-   * `coordination_input_invalid` before anything is enqueued.
+   * `coordination_input_invalid` before anything is enqueued. Images must
+   * name committed blobs, and the device must advertise `input-images`.
    */
-  steer(text: string): Promise<{ readonly messageId: string }>;
+  steer(text: string, options?: { readonly images?: readonly InputImageBlobRef[] }): Promise<{ readonly messageId: string }>;
   result(): Promise<TaskResult>;
 }
 

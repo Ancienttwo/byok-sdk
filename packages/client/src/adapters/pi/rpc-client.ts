@@ -1,3 +1,4 @@
+import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { createJsonlLineDecoder } from '../../util/jsonl-lines.js';
@@ -73,6 +74,8 @@ const DIALOG_UI_METHODS = new Set(['select', 'confirm', 'input', 'editor']);
  */
 export class PiRpcClient {
   private readonly child: ChildProcessWithoutNullStreams;
+  private readonly inputRedactor = sessionCredentialRedactor({});
+  private hasImageInput = false;
   private readonly lines = createJsonlLineDecoder({ onLine: (line) => this.onLine(line) });
   private nextId = 1;
   private readonly pending = new Map<
@@ -156,6 +159,11 @@ export class PiRpcClient {
       throw this.exitError ?? new Error('pi process is closed');
     }
     const id = command.id ?? `req-${this.nextId++}`;
+    if (Array.isArray(command.images) && command.images.length > 0) {
+      this.hasImageInput = true;
+      this.stderrRing.length = 0;
+      for (const image of command.images) this.inputRedactor.addImage(image.data);
+    }
     const full = { ...command, id };
     return new Promise((resolve, reject) => {
       this.pending.set(id, { resolve, reject, ...(framesBefore === undefined ? {} : { framesBefore }) });
@@ -294,7 +302,7 @@ export class PiRpcClient {
       this.decodeDroppedLines += 1; // not an RPC frame; see `decodeDropped`
       return;
     }
-    const msg = parsed as PiRpcMessage;
+    const msg = this.inputRedactor.redactValue(parsed as PiRpcMessage);
     this.options.onFrame?.(msg);
     if (msg.type === 'response' && typeof msg.id === 'string' && this.pending.has(msg.id)) {
       const waiter = this.pending.get(msg.id);
@@ -347,6 +355,8 @@ export class PiRpcClient {
   }
 
   private onStderr(chunk: string): void {
+    // Chunks can split an echoed base64 string. Do not retain them for image turns.
+    if (this.hasImageInput) return;
     for (const rawLine of chunk.split('\n')) {
       const line = rawLine.trim();
       if (line.length === 0) continue;

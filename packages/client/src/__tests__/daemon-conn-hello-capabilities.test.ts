@@ -117,6 +117,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     expect(hello.payload.clientVersion).toBe('0.0.0-test');
     const runtimes = hello.payload.runtimes ?? [];
     expect(hello.payload.capabilities).toContain('toolset-selection');
+    expect(hello.payload.capabilities).toContain('input-images');
     expect(hello.payload.configuredToolsets).toEqual(['crm.readonly', 'salesko.connectors']);
     expect(JSON.stringify(hello.payload)).not.toContain('/private/device/salesko-connector');
     expect(JSON.stringify(hello.payload)).not.toContain('/private/device/crm-connector');
@@ -127,6 +128,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     // pi: the only bundled runtime that can express mid-turn steering; its
     // task-scoped pi-mcp-adapter bridge also consumes selected MCP toolsets.
     expect(byId.get('pi')).toEqual({
+      images: true,
       steer: true,
       resume: true,
       mcpToolsets: true,
@@ -140,6 +142,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
 
     // Claude still supports plan; its private confirm/approval MCP path has been removed.
     expect(byId.get('claude')).toEqual({
+      images: true,
       steer: false,
       resume: true,
       approvalInteractive: false,
@@ -152,6 +155,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
     expect(byId.get('codex')).toEqual({
+      images: true,
       steer: true,
       resume: true,
       approvalInteractive: false,
@@ -200,7 +204,17 @@ describe('conn.hello.capabilities', () => {
   });
 
   it('advertises exactly the connection flags, with no approval flag', async () => {
-    const pi = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }) });
+    const pi: RuntimeAdapter = {
+      runtimeEnvironment: async () => testRuntimeEnvironment(),
+      descriptor: freezeRuntimeAdapterDescriptor({
+        id: 'pi',
+        supportsTaskExecutionOptions: true,
+        supportsDispatchSelection: true,
+        capabilities: { images: true, mcpToolsets: true, steer: false, resume: false, approvalInteractive: false },
+      }),
+      async detect() { return { kind: 'available' }; },
+      async prepare() { return { kind: 'reject', reason: 'not used by capability handshake test', retryable: false }; },
+    };
 
     const storeDir = await tmpDir('byok-conn-hello-capflags-store-');
     daemon = createDaemonWithAdapters(
@@ -213,7 +227,7 @@ describe('conn.hello.capabilities', () => {
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
-    expect(hello.payload.capabilities).toEqual(['dispatch-selection', 'toolset-selection']);
+    expect(hello.payload.capabilities).toEqual(['task-execution-options', 'dispatch-selection', 'toolset-selection', 'input-images']);
   });
 
   it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {
@@ -246,6 +260,7 @@ describe('conn.hello.capabilities', () => {
     const hello = await server.waitFor((event) => event.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
     expect(hello.payload.capabilities).not.toContain('dispatch-selection');
+    expect(hello.payload.capabilities).not.toContain('task-execution-options');
   });
 
   it('withholds dispatch-selection when no selectable runtime adapter is configured', async () => {

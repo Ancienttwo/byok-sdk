@@ -1,9 +1,10 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { WIRE_ADDITIONS, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type MessageType } from '@byok-sdk/protocol';
+import { INPUT_IMAGES_CAPABILITY, TASK_EXECUTION_OPTIONS_CAPABILITY, WIRE_ADDITIONS, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type MessageType, type TaskSteerSealedPayload } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
-import { AgentExecutionInputSchema, SealedAgentExecutionInputSchema } from '../agent-execution';
+import { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput } from '../agent-execution';
+import type { ByokCloud } from '../cloud';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
 import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
@@ -33,7 +34,9 @@ type Enqueue = (harness: CloudHarness, deviceId: string, payload: never) => Prom
  * still see no `gated` attempt and no pending mailbox row when the steer is
  * refused.
  */
-async function steerSealedRunningTask(harness: CloudHarness, deviceId: string, payload: never): Promise<unknown> {
+type HostedSteerPayload = Parameters<ByokCloud['steerTask']>[2] | TaskSteerSealedPayload;
+
+async function steerRunningTask(harness: CloudHarness, deviceId: string, payload: HostedSteerPayload): Promise<unknown> {
   await grantAgentHome(harness, TENANT_A, deviceId);
   const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { taskId: 'steer-target', payload: offerPayload('steer me') });
   const stores = tenantStoresFor(
@@ -48,7 +51,9 @@ async function steerSealedRunningTask(harness: CloudHarness, deviceId: string, p
   }
   await harness.core.mailbox.recordDelivery(TENANT_A, { deviceId, deliveredSeq: offer.seq });
   await harness.core.mailbox.advanceCursor(TENANT_A, { deviceId, ackedSeq: offer.seq });
-  return harness.cloud.steerSealedTask(TENANT_A, offer.taskId, payload);
+  return 'sealed' in payload
+    ? harness.cloud.steerSealedTask(TENANT_A, offer.taskId, payload)
+    : harness.cloud.steerTask(TENANT_A, offer.taskId, payload);
 }
 
 type OfferVariant = 'resume' | 'resume with egress' | 'fresh execution' | 'prepared' | 'sealed execution';
@@ -99,7 +104,7 @@ const ENQUEUE: Partial<Record<MessageType, Enqueue>> = {
   'agent.input.preparation': (h, d, payload) => h.cloud.enqueueInputPreparation(TENANT_A, d, payload),
   'agent.memory.intent.available': (h, d, payload) => h.cloud.enqueueAgentMemoryIntentNotice(TENANT_A, d, payload),
   'e2ee.key_package.available': (h, d, payload) => h.cloud.enqueueScopeKeyPackageNotice(TENANT_A, d, payload),
-  'task.steer': steerSealedRunningTask,
+  'task.steer': steerRunningTask,
 };
 
 /**
@@ -130,6 +135,33 @@ const gatedLines = readFileSync(corpusPath, 'utf8')
   .filter((entry) => isServerToDaemonType(entry.type) && entry.flags.length > 0 && !CLOUD_EMITTED.includes(entry.type)
     && !NOT_HOSTED.includes(entry.type) && !(entry.type === 'task.offer' && entry.variant === undefined));
 
+const freshBase = {
+  ...offerPayload(),
+  session: { mode: 'fresh' },
+  terminalProjection: { mode: 'none' },
+  egressPolicy: {
+    policyRevision: 'policy-r1',
+    activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
+    reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
+    transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
+  },
+} satisfies AgentExecutionInput['payload'];
+
+/** The wire corpus exercises these fields on resume offers. Give them fresh Host inputs too. */
+const hostedFresh = [
+  { field: 'effort', flag: TASK_EXECUTION_OPTIONS_CAPABILITY, fields: { target: { lane: 'runtime', runtimeId: 'codex', effort: 'high' } } },
+  { field: 'harness modelId', flag: TASK_EXECUTION_OPTIONS_CAPABILITY, fields: { target: { lane: 'harness', harnessId: 'grok', modelId: 'grok-code' } } },
+  { field: 'images', flag: INPUT_IMAGES_CAPABILITY, fields: { images: [{
+    mediaType: 'image/png',
+    blob: { blobId: 'fresh-image', contentHash: `sha256:${'a'.repeat(64)}`, size: 32, contentType: 'image/png' },
+  }] } },
+] satisfies { field: string; flag: string; fields: Partial<AgentExecutionInput['payload']> }[];
+
+const hostedFreshCases = hostedFresh.map(({ field, flag, fields }) => {
+  const payload = { ...freshBase, ...fields };
+  return { field, flag, payload, variant: 'fresh execution' as const, flags: requiredReceiverCapabilities('task.offer', payload) };
+});
+
 /** Keep every corpus row's gates exercised with valid Host selections (#1671). */
 function hostCopy(entry: (typeof gatedLines)[number]) {
   if (entry.type !== 'task.offer') return entry;
@@ -139,7 +171,7 @@ function hostCopy(entry: (typeof gatedLines)[number]) {
 }
 
 /** Only fresh execution's terminalProjection requirement excludes corpus rows from gate checks. */
-const submitExpressible = (entry: (typeof gatedLines)[number]): boolean => {
+const submitExpressible = (entry: Pick<(typeof gatedLines)[number], 'variant' | 'payload'>): boolean => {
   if (entry.variant === 'fresh execution') return AgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
   if (entry.variant === 'sealed execution') return SealedAgentExecutionInputSchema.shape.payload.safeParse(entry.payload).success;
   return true;
@@ -188,8 +220,8 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
   });
 
   it('every fresh-execution flag stays exercised through the hosted API', () => {
-    const union = (entries: readonly (typeof gatedLines)[number][]) => new Set(entries.flatMap((entry) => entry.flags));
-    const fresh = gatedLines.filter((entry) => entry.variant === 'fresh execution');
+    const union = (entries: readonly Pick<(typeof gatedLines)[number], 'flags'>[]) => new Set(entries.flatMap((entry) => entry.flags));
+    const fresh = [...gatedLines.filter((entry) => entry.variant === 'fresh execution'), ...hostedFreshCases];
     const table = new Set(
       WIRE_ADDITIONS.flatMap((entry) => (
         entry.surface === 'task.offer'
@@ -206,6 +238,23 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     const harnessOnly = fresh.filter((entry) => harnessTargetOf(entry.payload) !== undefined);
     expect(harnessOnly.length).toBeGreaterThan(0);
     expect(harnessOnly.filter(submitExpressible)).toEqual(harnessOnly);
+  });
+
+  it.each(hostedFreshCases)('gates fresh execution $field and preserves it in the admitted offer', async ({ flag, flags, payload }) => {
+    const harnessId = harnessTargetOf(payload);
+    const { harness, deviceId } = await deviceWith(flags.filter((candidate) => candidate !== flag), harnessId);
+    const submit = () => harness.cloud.submitAgentExecution(TENANT_A, { taskId: 'gated', deviceId, payload });
+
+    await expect(submit()).rejects.toMatchObject({
+      code: 'agent_capability_missing',
+      message: expect.stringContaining(flag),
+    });
+    expect(await harness.cloud.readTaskAttempt(TENANT_A, 'gated')).toBeUndefined();
+    expect((await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0 })).messages).toEqual([]);
+
+    const advertised = await harness.stores.devices.get(TENANT_A, deviceId);
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId, capabilities: flags, harnesses: advertised?.harnesses });
+    await expect(submit()).resolves.toMatchObject({ envelope: { type: 'task.offer', payload } });
   });
 
   // Wire v7: one offer `target` cannot contradict itself, so the only pinned
@@ -238,6 +287,7 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
       const { type } = entry;
       const { harness, deviceId } = await deviceWith(entry.flags.filter((candidate) => candidate !== flag));
       const capabilityReads = vi.spyOn(harness.stores.devices, 'get');
+      const blobReads = vi.spyOn(harness.stores.blobs, 'getDownloadUrl');
 
       const host = hostCopy(entry);
       const run = ENQUEUE[type]!(harness, deviceId, host.payload as never);
@@ -250,6 +300,7 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
         await expectTerminalProjectionRequired(run);
         expect(capabilityReads).toHaveBeenCalledTimes(0);
       }
+      if (type === 'task.steer' && flag === INPUT_IMAGES_CAPABILITY) expect(blobReads).not.toHaveBeenCalled();
       expect(await harness.cloud.readTaskAttempt(TENANT_A, 'gated')).toBeUndefined();
       const page = await harness.core.mailbox.readAfter(TENANT_A, { deviceId, afterSeq: 0, limit: 10 });
       expect(page.messages).toEqual([]);

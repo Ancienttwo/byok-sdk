@@ -49,7 +49,7 @@ const fields = {
   },
   offer: { taskId: true, deviceId: true, messageId: true, type: true, payload: true, recordedAt: true, delivered: true },
   offerPayload: {
-    sealed: false, sealing: false, routineRef: false, instruction: false, agentRef: true,
+    sealed: false, sealing: false, routineRef: false, instruction: false, images: false, agentRef: true,
     nativeSessions: false, session: true, preparation: false, agentMemory: false, agentMemoryCommit: false, homeAccess: false, requiredToolsets: false,
     target: true, terminalProjection: false,
     limits: false, egressPolicy: false, messageEgress: false,

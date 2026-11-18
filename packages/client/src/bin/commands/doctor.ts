@@ -9,7 +9,7 @@ import {
 import { resolveStoreDir } from '../config.js';
 import { serviceLogDir } from '../../daemon/host-layout.js';
 import type { ServiceEnvironmentRecord } from '../../login-shell-environment.js';
-import { formatAgentHomeLeaseLines, formatRuntimeEnvironmentLines, formatRuntimeExecutable, formatServiceEnvironment } from '../../diagnostics/format.js';
+import { formatAgentHomeLeaseLines, formatRuntimeEnvironmentLines, formatRuntimeExecutable, formatUnsupportedRuntimeVersion, formatServiceEnvironment } from '../../diagnostics/format.js';
 import { repairDeviceEnrollmentMetadata, DeviceMetadataRepairError, resetDeviceCursor, DeviceCursorResetError } from '../../diagnostics/device-doctor.js';
 
 export interface DoctorOptions extends CollectDiagnosticsOptions {
@@ -60,6 +60,10 @@ function formatDoctorLines(diagnostics: DoctorDiagnostics, logDir: string, envir
       ];
       if (verdict.state === 'block') details.push('blocked by the device version policy');
       return [details.join(' ')];
+    }),
+    ...snapshot.runtimes.flatMap(runtime => {
+      const version = formatUnsupportedRuntimeVersion(runtime);
+      return version === undefined ? [] : [`runtime-version: ${runtime.idHash} state=version_unsupported ${version}`];
     }),
     // #1103 §2.6: a restart comparison is local-only evidence. Both upgrade
     // and downgrade are reported; a downgrade says why it matters.

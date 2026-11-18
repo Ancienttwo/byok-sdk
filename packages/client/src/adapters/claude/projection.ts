@@ -1,4 +1,4 @@
-import { BASE_CONTENT_TYPES } from '../shared-rules.js';
+import { BASE_CONTENT_TYPES, objectRecord as object, projectProviderContext } from '../shared-rules.js';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -29,12 +29,27 @@ const CONTROL_FRAMES: ReadonlySet<unknown> = new Set(['control_request', 'contro
  * frame with its `native` line, except the control responses the adapter's
  * profile consumes; requests and responses are their own records.
  */
-export function claudeRecordFrame(record: ClaudeRecord): ClaudeStreamMessage | undefined {
+export interface ClaudeFrame {
+  readonly native: ClaudeStreamMessage;
+  readonly agentPath: readonly string[];
+  readonly context?: Record<string, unknown>;
+}
+
+export function claudeRecordFrame(record: ClaudeRecord): ClaudeFrame | undefined {
   if (record.kind !== 'frame') return undefined;
-  const native = (record.body as { native?: unknown }).native;
+  const body = object(record.body);
+  const native = body?.native;
   if (native === null || typeof native !== 'object' || Array.isArray(native)) return undefined;
   const frame = native as ClaudeStreamMessage;
-  return CONTROL_FRAMES.has(frame.type) ? undefined : frame;
+  if (CONTROL_FRAMES.has(frame.type)) return undefined;
+  let context: Record<string, unknown> | undefined;
+  if (Array.isArray(body?.events)) {
+    for (const value of body.events) {
+      const event = object(value);
+      if (event?.kind === 'usage') context = object(object(event.usage)?.context);
+    }
+  }
+  return { native: frame, agentPath: record.agentPath, context };
 }
 
 /** The context window of the model `system/init` named, else the one window `result.modelUsage` reports. */
@@ -76,6 +91,9 @@ export interface ToolUseCorrelation {
 export interface MapClaudeMessageOptions {
   /** `ctx.workspaceDir` for the task — used only to compute a workspace-relative `name` for a possible `artifact` AgentEvent (see `tryBuildArtifactEvent`'s doc comment). */
   workspaceDir: string;
+  context?: Record<string, unknown>;
+  initModel?: string;
+  agentPath?: readonly string[];
 }
 
 export interface MapClaudeMessageResult {
@@ -383,12 +401,11 @@ function tryRealpath(candidate: string): string | undefined {
  * not end the read loop the same way, so the ordering there is for
  * consistency rather than a delivery requirement.
  */
-function mapResult(msg: ClaudeStreamMessage): MapClaudeMessageResult {
-  const contextWindow = parseClaudeContextWindow(msg.modelUsage);
-  const cost = extractClaudeUsageEvent(msg.usage);
-  const usageEvent: AgentEvent | undefined = contextWindow === null ? cost : {
-    ...(cost ?? { type: 'usage' as const }), contextWindow, contextSource: 'provider',
-  };
+function mapResult(msg: ClaudeStreamMessage, options: MapClaudeMessageOptions): MapClaudeMessageResult {
+  const usage = extractClaudeUsageEvent(msg.usage) ?? { type: 'usage' as const };
+  const contextWindow = parseClaudeContextWindow(msg.modelUsage, options.initModel);
+  projectProviderContext(usage, { contextWindow, ...options.context });
+  const usageEvent = Object.keys(usage).length > 1 ? usage : undefined;
   // Cross-model review finding: success must require `is_error === false`
   // EXPLICITLY — the previous `!== true` check treated a MISSING or
   // non-boolean `is_error` (a malformed/future `result` frame) as success
@@ -554,6 +571,20 @@ export function mapClaudeMessageToAgentEvents(
   correlation: ToolUseCorrelation,
   options: MapClaudeMessageOptions,
 ): MapClaudeMessageResult {
+  const mapped = mapClaudeMessage(msg, correlation, options);
+  const path = options.agentPath;
+  if (path === undefined || path.length === 0) return mapped;
+  return { unmappedLabel: mapped.unmappedLabel, events: mapped.events.flatMap((event): AgentEvent[] => {
+    switch (event.type) {
+      case 'progress': case 'tool_use': case 'tool_result': case 'usage': case 'error':
+        return [{ ...event, agentPath: [...path] }];
+      default:
+        return [];
+    }
+  }) };
+}
+
+function mapClaudeMessage(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, options: MapClaudeMessageOptions): MapClaudeMessageResult {
   switch (msg.type) {
     case 'stream_event':
       return { events: mapStreamEvent(msg) };
@@ -562,7 +593,7 @@ export function mapClaudeMessageToAgentEvents(
     case 'user':
       return mapUser(msg, correlation, options);
     case 'result':
-      return mapResult(msg);
+      return mapResult(msg, options);
     case 'system': {
       const subtype = typeof msg.subtype === 'string' ? msg.subtype : undefined;
       if (subtype && ROUTINE_CLAUDE_SYSTEM_SUBTYPES.has(subtype)) return { events: [] };

@@ -84,10 +84,21 @@ function promptText(params) {
 }
 
 let opencodeModel;
+let effort = 'low';
+const effortId = agy || process.env.FAKE_ACP_OPENCODE === '1' ? 'thought_level' : 'reasoning_effort';
+const agyModels = () => agy && process.env.FAKE_ACP_MODEL_CATALOG ? [modelCatalog(process.env.FAKE_ACP_MODEL_CATALOG.split(','))] : [];
+const effortMenu = () => process.env.FAKE_ACP_EFFORT_MENU !== '1' ? [] : [
+  { id: effortId, category: 'thought_level', name: 'Effort', type: 'select', currentValue: effort, options: ['low', 'high'].map(value => ({ value, name: value })) },
+];
 let childUpdates = false;
 async function prompt(message) {
   const full = promptText(message.params);
   log({ kind: 'prompt', text: full });
+  const images = message.params?.prompt?.filter(block => block.type === 'image') ?? [];
+  if (images.length > 0) {
+    log({ kind: 'images', images });
+    if (process.env.FAKE_ACP_ECHO_IMAGE === '1') text(images[0].data);
+  }
   // Grok reports the prompt it runs under the `_meta.promptId` the client named.
   const promptId = message.params?._meta?.promptId;
   if (typeof promptId === 'string') send({ method: '_x.ai/queue/changed', params: { sessionId: SESSION, runningPromptId: promptId, entries: [] } });
@@ -292,6 +303,12 @@ async function prompt(message) {
     vendor({ sessionUpdate: 'subagent_spawned', subagent_id: 'fake-child', parent_session_id: SESSION, child_session_id: 'fake-child' });
     text('child-says-hi', 'fake-child');
     update({ sessionUpdate: 'tool_call', toolCallId: 'child-call', title: 'read_file', status: 'pending', rawInput: {} }, 'fake-child');
+    update({ sessionUpdate: 'tool_call_update', toolCallId: 'child-call', status: 'completed', content: [] }, 'fake-child');
+    update({ sessionUpdate: 'usage_update', used: 17, size: 1000 }, 'fake-child');
+    const childLedger = { method: '_x.ai/session_notification', params: { sessionId: 'fake-child', _meta: { eventId: 'child-usage-1' },
+      update: { sessionUpdate: 'turn_completed', prompt_id: 'child-prompt', usage: { inputTokens: 12, outputTokens: 3 } } } };
+    send(childLedger);
+    send(childLedger);
     vendor({ sessionUpdate: 'subagent_finished', subagent_id: 'fake-child', child_session_id: 'fake-child', status: 'completed' });
     text('parent-answer');
     result(message.id, answer());
@@ -357,11 +374,11 @@ function request(message) {
       result(message.id, {
         protocolVersion: 1,
         agentCapabilities: {
-          loadSession: true, sessionCapabilities: { resume: {}, close: {}, ...(agy ? { list: {} } : {}) }, promptCapabilities: { image: false }, mcpCapabilities: { http: true },
+          loadSession: true, sessionCapabilities: { resume: {}, close: {}, ...(agy ? { list: {} } : {}) }, promptCapabilities: { image: process.env.FAKE_ACP_IMAGES === '1' }, mcpCapabilities: { http: true },
           ...(agy ? { _meta: { antigravity: { systemPrompt: { append: true } } } } : {}),
         },
         authMethods: [{ id: 'cached_token', name: 'Cached login' }],
-        _meta: { defaultAuthMethodId: 'cached_token' },
+        _meta: { defaultAuthMethodId: 'cached_token', ...(process.env.FAKE_ACP_STEERING === '1' ? { steering: { supported: true } } : {}) },
       });
       return;
     case 'authenticate':
@@ -375,7 +392,7 @@ function request(message) {
       }
       log({ kind: 'open', method: message.method, params: message.params });
       log({ kind: 'native-session', sessionId: SESSION });
-      result(message.id, { sessionId: SESSION, ...(agy && process.env.FAKE_ACP_MODEL_CATALOG ? { configOptions: [modelCatalog(process.env.FAKE_ACP_MODEL_CATALOG.split(','))] } : {}) });
+      result(message.id, { sessionId: SESSION, configOptions: [...agyModels(), ...effortMenu()] });
       return;
     case 'session/resume':
       if (sessionStore && savedSession()?.id === message.params?.sessionId) SESSION = savedSession().id;
@@ -383,7 +400,7 @@ function request(message) {
       if (process.env.FAKE_ACP_REFUSE_RESUME === '1') { error(message.id, -32601, 'session/resume unavailable'); return; }
       if (process.env.FAKE_ACP_OPENCODE === '1') text('historical replay');
       if (message.params?.sessionId !== SESSION) { error(message.id, -32603, 'session not found', { code: 'FS_NOT_FOUND' }); return; }
-      result(message.id, {});
+      result(message.id, { configOptions: [...agyModels(), ...effortMenu()] });
       return;
     case 'session/list':
       if (sessionStore) {
@@ -398,11 +415,19 @@ function request(message) {
       result(message.id, { _meta: { modelId: message.params?.modelId } });
       return;
     case 'session/set_config_option':
+      if (message.params?.configId === effortId) {
+        log({ kind: 'config', params: message.params });
+        if (message.params.value === 'refused') { error(message.id, -32602, 'effort refused'); return; }
+        effort = message.params.value;
+        const configOptions = effortMenu();
+        update({ sessionUpdate: 'config_option_update', configOptions });
+        result(message.id, { configOptions }); return;
+      }
       if (process.env.FAKE_ACP_OPENCODE === '1') {
         log({ kind: 'config', params: message.params });
         if (process.env.FAKE_ACP_REFUSE_MODEL === message.params?.value) { error(message.id, -32602, 'selected model unavailable'); return; }
         opencodeModel = message.params?.value;
-        const configOptions = [{ id: 'model', name: 'Model', type: 'select', currentValue: process.env.FAKE_ACP_MODEL_READBACK ?? opencodeModel, options: [{ value: opencodeModel, name: opencodeModel }] }];
+        const configOptions = [{ id: 'model', name: 'Model', type: 'select', currentValue: process.env.FAKE_ACP_MODEL_READBACK ?? opencodeModel, options: [{ value: opencodeModel, name: opencodeModel }] }, ...effortMenu()];
         update({ sessionUpdate: 'config_option_update', configOptions });
         result(message.id, { configOptions }); return;
       }
@@ -412,6 +437,10 @@ function request(message) {
       return;
     case 'session/prompt':
       void prompt(message);
+      return;
+    case '_session/steering':
+      log({ kind: 'steer', params: message.params });
+      result(message.id, { outcome: 'injected' });
       return;
     case 'session/close':
       log({ kind: 'close' });

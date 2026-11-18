@@ -317,6 +317,7 @@
 //   agentHomeProjectionCompletionKey -> dist/agent-home-projections.d.ts
 //   agentHomeProjectionRequestKey -> dist/agent-home-projections.d.ts
 //   approvalTimelineCursor -> dist/approval-timeline.d.ts
+//   assertCommittedInputImages -> dist/input-images.d.ts
 //   assertTaskAttemptListLimit -> dist/coordination.d.ts
 //   authenticateBearer -> dist/auth/bearer.d.ts
 //   authenticateDeviceProof -> dist/auth/device-proof.d.ts
@@ -380,8 +381,10 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
     events: z.ZodArray<z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
         type: z.ZodLiteral<"progress">;
         text: z.ZodString;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_use">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         tool: z.ZodString;
         mcp: z.ZodOptional<z.ZodObject<{
             server: z.ZodString;
@@ -408,6 +411,7 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         tool: z.ZodString;
         mcp: z.ZodOptional<z.ZodObject<{
             server: z.ZodString;
@@ -442,8 +446,16 @@ export declare const ActivityAppendRequestSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
         message: z.ZodString;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"subagent_start">;
+        agentPath: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"subagent_end">;
+        agentPath: z.ZodArray<z.ZodString>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"usage">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         inputTokens: z.ZodOptional<z.ZodNumber>;
         cachedInputTokens: z.ZodOptional<z.ZodNumber>;
         outputTokens: z.ZodOptional<z.ZodNumber>;
@@ -473,8 +485,10 @@ export declare const TimelineEventSchema: z.ZodObject<{
     event: z.ZodUnion<readonly [z.ZodDiscriminatedUnion<[z.ZodObject<{
         type: z.ZodLiteral<"progress">;
         text: z.ZodString;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_use">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         tool: z.ZodString;
         mcp: z.ZodOptional<z.ZodObject<{
             server: z.ZodString;
@@ -501,6 +515,7 @@ export declare const TimelineEventSchema: z.ZodObject<{
         }, z.core.$strict>>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"tool_result">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         tool: z.ZodString;
         mcp: z.ZodOptional<z.ZodObject<{
             server: z.ZodString;
@@ -535,8 +550,16 @@ export declare const TimelineEventSchema: z.ZodObject<{
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"error">;
         message: z.ZodString;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"subagent_start">;
+        agentPath: z.ZodArray<z.ZodString>;
+    }, z.core.$strip>, z.ZodObject<{
+        type: z.ZodLiteral<"subagent_end">;
+        agentPath: z.ZodArray<z.ZodString>;
     }, z.core.$strip>, z.ZodObject<{
         type: z.ZodLiteral<"usage">;
+        agentPath: z.ZodOptional<z.ZodArray<z.ZodString>>;
         inputTokens: z.ZodOptional<z.ZodNumber>;
         cachedInputTokens: z.ZodOptional<z.ZodNumber>;
         outputTokens: z.ZodOptional<z.ZodNumber>;
@@ -648,6 +671,21 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        images: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            blob: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            mediaType: z.ZodEnum<{
+                "image/gif": "image/gif";
+                "image/jpeg": "image/jpeg";
+                "image/png": "image/png";
+                "image/webp": "image/webp";
+            }>;
+        }, z.core.$strict>>>;
         agentMemory: z.ZodOptional<z.ZodEnum<{
             none: "none";
             read: "read";
@@ -666,6 +704,7 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -673,11 +712,13 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                 codex: "codex";
             }>;
             modelId: z.ZodString;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok">;
             runtimeId: z.ZodLiteral<"pi">;
             providerId: z.ZodString;
             modelId: z.ZodString;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok-profile">;
             runtimeId: z.ZodLiteral<"pi">;
@@ -690,9 +731,12 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"harness">;
             harnessId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
@@ -775,6 +819,21 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
             agentId: z.ZodString;
             profileRevision: z.ZodString;
         }, z.core.$strict>;
+        images: z.ZodOptional<z.ZodArray<z.ZodObject<{
+            blob: z.ZodObject<{
+                blobId: z.ZodString;
+                contentHash: z.ZodString;
+                size: z.ZodNumber;
+                contentType: z.ZodString;
+                url: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>;
+            mediaType: z.ZodEnum<{
+                "image/gif": "image/gif";
+                "image/jpeg": "image/jpeg";
+                "image/png": "image/png";
+                "image/webp": "image/webp";
+            }>;
+        }, z.core.$strict>>>;
         agentMemory: z.ZodOptional<z.ZodEnum<{
             none: "none";
             read: "read";
@@ -793,6 +852,7 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 codex: "codex";
                 pi: "pi";
             }>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"subscription">;
             runtimeId: z.ZodEnum<{
@@ -800,11 +860,13 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 codex: "codex";
             }>;
             modelId: z.ZodString;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok">;
             runtimeId: z.ZodLiteral<"pi">;
             providerId: z.ZodString;
             modelId: z.ZodString;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"byok-profile">;
             runtimeId: z.ZodLiteral<"pi">;
@@ -817,9 +879,12 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"harness">;
             harnessId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
+            effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
             mode: z.ZodLiteral<"none">;
@@ -1373,7 +1438,7 @@ export declare function capabilityDeclarationForPorts(ports: CapabilityPorts, ve
 export declare function fullCapabilityDeclaration(version?: number, options?: FullCapabilityDeclarationOptions): CapabilityDeclaration;
 export declare function declares(declaration: CapabilityDeclaration, capability: CloudCapability): boolean;
 // ==== @byok-sdk/cloud dist/cloud.d.ts ====
-import type { HostOfferPlainPayload } from '@byok-sdk/protocol';
+import type { HostOfferPlainPayload, InputImageBlobRef } from '@byok-sdk/protocol';
 import { z } from 'zod';
 import { type AgentMessageDraftCursor, type AgentMessageDraftReadback } from './agent-message-draft.js';
 import { type MaintenanceInput, type MaintenanceReport, type ProofReceiptRetentionOptions } from './maintenance.js';
@@ -1591,6 +1656,7 @@ export interface ByokCloud {
     rejectTask(tenant: TenantId, taskId: string, opts?: RejectTaskOptions): Promise<EnqueuedAgentControl>;
     steerTask(tenant: TenantId, taskId: string, payload: {
         readonly text: string;
+        readonly images?: readonly InputImageBlobRef[];
     }): Promise<EnqueuedAgentControl>;
     steerSealedTask(tenant: TenantId, taskId: string, payload: TaskSteerSealedPayload): Promise<EnqueuedAgentControl>;
     readSteerRefusal(tenant: TenantId, taskId: string, steerMessageId: string): Promise<SteerRefusalRecord | undefined>;
@@ -2028,6 +2094,7 @@ export declare function handleInboundEnvelope(stores: TenantStores, deviceId: st
 export { isTenantId, tenantId } from '@byok-sdk/core';
 export type { TenantId } from '@byok-sdk/core';
 export { createByokCloud } from './cloud.js';
+export { assertCommittedInputImages } from './input-images.js';
 export type { TaskAgentMessage } from './task-agent-message.js';
 export type { AgentMessageConsumers, AgentMessageConsumeInput, AgentMessageDecision } from './agent-message-disposition.js';
 export type { ByokCloud, ByokCloudOptions, LimitedPublicRoute, PublicRouteLimiter, AgentDispatchInput, AgentEgressDispatchInput, AgentContentReadInput, AgentHomeProjectionInput, AgentMemoryIntentNoticeInput, AgentHomeProjectionStatusInput, InputPreparationInput, InputPreparationStatusInput, ApproveTaskOptions, RejectTaskOptions, EnqueuedAgentControl, EnqueuedAgentHomeProjection, EnqueuedInputPreparation, EnqueuedOffer, TaskOfferReadback, } from './cloud.js';
@@ -2103,6 +2170,11 @@ export type { TaskEventsWake, TaskEventsWakeSubscription } from './task-events-w
 export { createInProcessMailboxWake, createInProcessTaskEventsWake, DEFAULT_MAILBOX_WAKE_FALLBACK_MS, DEFAULT_TASK_EVENTS_WAKE_FALLBACK_MS, } from './stores/in-memory/mailbox-wake.js';
 export type { InProcessMailboxWakeOptions, InProcessTaskEventsWakeOptions } from './stores/in-memory/mailbox-wake.js';
 export type { AgentMessageDraftStore, AgentMessageDraftRow, AgentMessageDraftCursor, AgentMessageDraftApplyInput, AgentMessageDraftApplyResult, AgentMessageDraftReadback } from './agent-message-draft.js';
+// ==== @byok-sdk/cloud dist/input-images.d.ts ====
+import type { TenantId } from '@byok-sdk/core';
+import type { InputImageBlobRef } from '@byok-sdk/protocol';
+import type { CloudBlobStore } from './stores/ports.js';
+export declare function assertCommittedInputImages(blobs: Pick<CloudBlobStore, 'getDownloadUrl'>, tenant: TenantId, images: readonly InputImageBlobRef[]): Promise<void>;
 // ==== @byok-sdk/cloud dist/input-preparations.d.ts ====
 import { type AgentInputPreparationPayload, type InputPreparationCompletionRequest, type InputPreparationReadback } from '@byok-sdk/protocol';
 import type { TenantId } from '@byok-sdk/core';

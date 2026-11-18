@@ -66,15 +66,19 @@ export const AgentEventSpillSchema = z
 
 export type AgentEventSpill = z.infer<typeof AgentEventSpillSchema>;
 
+const AgentPathSchema = z.array(z.string().min(1).max(128)).min(1).max(16);
+const agentPath = AgentPathSchema.optional();
+
 /**
  * Normalized event shape that every runtime adapter (pi / claude / codex)
  * translates its native JSONL output into. This is the interior of a
- * `task.progress` payload's `events` array.
+ * `task.progress` payload's `events` array. A root event omits `agentPath`.
  */
 export const AgentEventSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('progress'), text: z.string() }),
+  z.object({ type: z.literal('progress'), text: z.string(), agentPath }),
   z.object({
     type: z.literal('tool_use'),
+    agentPath,
     tool: z.string(),
     /** Authoritative MCP identity, absent when the adapter cannot resolve it. */
     mcp: z.object({ server: z.string().min(1), tool: z.string().min(1) }).strict().optional(),
@@ -85,6 +89,7 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({
     type: z.literal('tool_result'),
+    agentPath,
     tool: z.string(),
     /** Authoritative MCP identity, absent when the adapter cannot resolve it. */
     mcp: z.object({ server: z.string().min(1), tool: z.string().min(1) }).strict().optional(),
@@ -96,7 +101,9 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
   }),
   z.object({ type: z.literal('artifact'), name: z.string(), contentType: z.string() }),
   z.object({ type: z.literal('turn_end') }),
-  z.object({ type: z.literal('error'), message: z.string() }),
+  z.object({ type: z.literal('error'), message: z.string(), agentPath }),
+  z.object({ type: z.literal('subagent_start'), agentPath: AgentPathSchema }),
+  z.object({ type: z.literal('subagent_end'), agentPath: AgentPathSchema }),
   /**
    * Token usage reported by a runtime turn — maps from codex
    * `turn.completed.usage` and claude `result` usage (adapters wired up in a
@@ -105,6 +112,7 @@ export const AgentEventSchema = z.discriminatedUnion('type', [
    */
   z.object({
     type: z.literal('usage'),
+    agentPath,
     inputTokens: z.number().int().nonnegative().optional(),
     cachedInputTokens: z.number().int().nonnegative().optional(),
     outputTokens: z.number().int().nonnegative().optional(),

@@ -115,6 +115,7 @@ async function start(options: {
   e2ee?: false | 'no-kem-epoch';
   /** `false`: the daemon has no Agent egress, so it advertises none of the egress flags. */
   egress?: false;
+  imageSupport?: boolean;
   beforeStart?: (storeDir: string, deviceId: string, member: ScopeMember, device: { readonly memberId: string }) => Promise<void>;
 } = {}) {
   // Each daemon is its own machine: one productId's OS entry belongs to one storeDir (#1094).
@@ -122,7 +123,7 @@ async function start(options: {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-sealed-daemon-'));
   dirs.push(root);
   server ??= await TestServer.start();
-  const adapter = new StubRuntimeAdapter('pi');
+  const adapter = new StubRuntimeAdapter('pi', { kind: 'available', sessionCapabilities: options.imageSupport === undefined ? undefined : { images: options.imageSupport } });
   const storeDir = path.join(root, 'store');
   const config = {
     storage: { scratchRoot: testScratchRoot() },
@@ -181,14 +182,14 @@ async function sealedMember(member: ScopeMember, plaintext: Record<string, unkno
 
 async function sealedOffer(
   member: ScopeMember, taskId: string, seq: number, deviceId: string, instruction: unknown, sealing = BOTH,
-  options: { plain?: Record<string, unknown>; boundSealing?: TaskSealing } = {},
+  options: { plain?: Record<string, unknown>; sealedFields?: Record<string, unknown>; boundSealing?: TaskSealing } = {},
 ): Promise<Envelope> {
   const plain = options.plain ?? {};
   if (!sealing.categories.includes('task-input')) {
     return createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: agentOf(taskId), ...FRESH_OFFER, ...plain, instruction, sealing } as never, { taskId, seq });
   }
   const bound = binding('task.offer', 'server-to-daemon', { taskId }, deviceId, options.boundSealing ?? sealing);
-  const { header, ciphertext } = await sealedMember(member, { instruction }, bound);
+  const { header, ciphertext } = await sealedMember(member, { instruction, ...options.sealedFields }, bound);
   return createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: agentOf(taskId), ...FRESH_OFFER, ...plain, sealing, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never, { taskId, seq });
 }
 
@@ -539,6 +540,36 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
     const refused = await server.waitFor((envelope) => envelope.type === 'task.steer_refused' && envelope.task_id === 'not-active');
     expect(refused.id).toBe(await steerRefusalEnvelopeId(steer.id));
     expect(refused.payload).toEqual({ steerMessageId: steer.id, reason: 'task_not_active' });
+  });
+
+  it.each([true, false])('checks image capability after opening an offer (advertised=%s)', async advertised => {
+    const { server, adapter, deviceId, member } = await start({ imageSupport: advertised });
+    adapter.decorateSession = session => { session.capabilities = { images: true }; };
+    const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64');
+    const images = [{ mediaType: 'image/png', blob: { blobId: 'sealed-image', size: bytes.length,
+      contentType: 'image/png', contentHash: 'sha256:' + createHash('sha256').update(bytes).digest('hex') } }];
+    server.seedBlob('sealed-image', bytes, 'image/png');
+    const taskId = 'sealed-vision';
+    const offer = await sealedOffer(member, taskId, server.nextSeq(), deviceId, 'look', BOTH, { sealedFields: { images } });
+    expect(offer.payload).not.toHaveProperty('images');
+    expect(JSON.stringify(offer)).not.toContain('sealed-image');
+    server.send(offer);
+    if (!advertised) {
+      const decline = await server.waitFor(e => wireForm(e) === 'task.decline_sealed' && e.task_id === taskId);
+      expect(await openOutput(member, decline, deviceId)).toEqual({ reason: expect.stringContaining('input-images') });
+      expect(adapter.startCalls).toHaveLength(0);
+      expect(server.httpRequests.some(req => req.pathname.includes('/sealed-image/'))).toBe(false);
+      return;
+    }
+    await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
+    expect(await fs.readFile(adapter.startCalls[0]!.task.images![0]!.path)).toEqual(bytes);
+    const steerId = randomUUID();
+    const { header, ciphertext } = await sealedMember(member, { text: 'see this too', images },
+      binding('task.steer', 'server-to-daemon', { taskId, steerId }, deviceId, BOTH));
+    server.send(createEnvelope('task.steer', { steerId, sealed: { ...header, ciphertext: Buffer.from(ciphertext).toString('base64url') } } as never,
+      { taskId, seq: server.nextSeq() }));
+    await vi.waitFor(() => expect(adapter.sessions[0]!.steerImageCalls).toHaveLength(1), BUDGET_MS);
+    expect(await fs.readFile(adapter.sessions[0]!.steerImageCalls[0]![0]!.path)).toEqual(bytes);
   });
 
   it('applies a sealed steer once per steerId', async () => {

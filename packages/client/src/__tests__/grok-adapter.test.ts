@@ -90,6 +90,7 @@ describe('GrokAdapter detection', () => {
     vi.stubEnv('XAI_API_KEY', 'xai-fixture-key');
     expect(await adapter().detect()).toEqual({
       kind: 'available', version: 'grok 1.0.62 (fixture)', authPresent: true,
+      sessionCapabilities: { images: true, steer: false },
       executablePath: fixture, executableSource: 'config',
       versionVerdict: { state: 'warn', qualifiedVersion: '1.0.77' },
     });
@@ -102,6 +103,7 @@ describe('GrokAdapter detection', () => {
     vi.stubEnv('FAKE_ACP_VERSION', 'grok 1.0.77 (fixture)');
     expect(await adapter().detect()).toEqual({
       kind: 'available', version: 'grok 1.0.77 (fixture)', authPresent: false,
+      sessionCapabilities: { images: true, steer: false },
       executablePath: fixture, executableSource: 'config',
       versionVerdict: { state: 'allow', qualifiedVersion: '1.0.77' },
     });
@@ -121,7 +123,7 @@ describe('GrokAdapter sessions', () => {
   it('declares resume and MCP toolsets, no steer, no approvals and no dispatch selection', async () => {
     const a = adapter();
     expect(a.descriptor).toEqual({
-      id: 'grok', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
+      id: 'grok', supportsDispatchSelection: false, supportsTaskExecutionOptions: true, requiresMcpToolsetToolObservation: false, platforms: ['darwin', 'linux'],
       versionPolicy: { qualifiedVersion: '1.0.77', unqualified: 'warn' },
       capabilities: {
         steer: false, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true, preparedLane: false,
@@ -172,9 +174,19 @@ describe('GrokAdapter sessions', () => {
     ]);
   });
 
-  it('keeps sub-agent text and tools out of the parent reply', async () => {
+  it('attributes the Grok subagent lifecycle and keeps its text distinct from the parent reply', async () => {
     const s = await open(adapter(), { target: GROK_TARGET, instruction: 'child' }, await ctx());
-    expect(await turn(s)).toEqual([{ type: 'progress', text: 'parent-answer' }, usage, { type: 'turn_end' }]);
+    const agentPath = ['fake-child'];
+    const toolCallId = JSON.stringify([agentPath, 'child-call']);
+    expect(await turn(s)).toEqual([
+      { type: 'subagent_start', agentPath },
+      { type: 'progress', text: 'child-says-hi', agentPath },
+      { type: 'tool_use', tool: 'read_file', toolCallId, agentPath, input: {} },
+      { type: 'tool_result', tool: 'read_file', toolCallId, agentPath, output: {} },
+      { type: 'usage', inputTokens: 12, outputTokens: 3, contextTokens: 17, contextWindow: 1000, contextSource: 'provider', agentPath },
+      { type: 'subagent_end', agentPath },
+      { type: 'progress', text: 'parent-answer' }, usage, { type: 'turn_end' },
+    ]);
   });
 
   it('runs a hosted terminal command and attaches task MCP servers on open', async () => {
@@ -212,6 +224,23 @@ describe('GrokAdapter sessions', () => {
     const missing = await startPreparedOperation(adapter(), { target: GROK_TARGET, instruction: 'again', sessionRef: 'gone' }, await ctx()).catch(error => error);
     expect(missing).toBeInstanceOf(RuntimeExecutionFailure);
     expect(missing).toMatchObject({ phase: 'start', retry: 'non-retryable' });
+  });
+
+  it.each([undefined, 'fake-grok-session'])('selects the per-task Grok model and effort before prompt (resume=%s)', async sessionRef => {
+    const resources = await ctx({ FAKE_ACP_EFFORT_MENU: '1' });
+    const runtime = adapter({ model: 'boot-model' });
+    await turn(await open(runtime, { target: GROK_TARGET, instruction: 'hello', modelId: 'task-model', effort: 'high', sessionRef }, resources));
+    const log = facts(resources.log);
+    expect(log.find(row => row.kind === 'model')?.params.modelId).toBe('task-model');
+    expect(log.find(row => row.kind === 'config')?.params).toMatchObject({ configId: 'reasoning_effort', value: 'high' });
+    expect(log.findIndex(row => row.kind === 'config')).toBeLessThan(log.findIndex(row => row.kind === 'prompt'));
+  });
+
+  it.each([undefined, 'fake-grok-session'])('fails before prompting when Grok refuses effort (resume=%s)', async sessionRef => {
+    const resources = await ctx({ FAKE_ACP_EFFORT_MENU: '1' });
+    await expect(open(adapter(), { target: GROK_TARGET, instruction: 'hello', effort: 'refused', sessionRef }, resources))
+      .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+    expect(facts(resources.log).some(row => row.kind === 'prompt')).toBe(false);
   });
 
   it('selects the adapter model and fails closed on a refused model or login', async () => {
@@ -322,11 +351,13 @@ describe('GrokAdapter sessions', () => {
   it('a replayed queue report naming another prompt does not stop the interrupt cancel (#1942)', async () => {
     const resources = await ctx();
     const s = await open(adapter(), { target: GROK_TARGET, instruction: 'replayed-queue' }, resources);
-    const projection = (s as unknown as { projection: { sdkPromptSuperseded: boolean; text: string } }).projection;
-    // The text frame follows the replayed report, so the projection has read the report.
-    await vi.waitFor(() => expect(projection.text).toContain('first'));
+    const events = s.events[Symbol.asyncIterator]();
+    // The draft follows the replayed report, so reading it proves the report was consumed.
+    expect((await events.next()).value).toMatchObject({ type: 'message_draft_delta', text: 'first' });
+    const projection = (s as unknown as { projection: GrokProjection }).projection;
     expect(projection.sdkPromptSuperseded).toBe(false);
     await s.interrupt();
+    await events.return?.();
     expect(facts(resources.log).some(fact => fact.kind === 'cancel')).toBe(true);
   });
   it('cancels a held follow-up that the drain already sent', async () => {
@@ -701,11 +732,11 @@ describe('AgyAdapter', () => {
 
   it('detect refuses a CLI without native ACP, a prerelease and an extra notice, and writes the native settings', async () => {
     const home = await agyVersion('1.4.9');
-    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion: '1.4.9', requiredVersion: '1.5.0' } });
     vi.stubEnv('FAKE_ACP_VERSION', '1.5.0-rc.1');
-    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion: '1.5.0-rc.1', requiredVersion: '1.5.0' } });
     vi.stubEnv('FAKE_ACP_VERSION', '1.5.0\nupdate available');
-    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable' });
+    expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { requiredVersion: '1.5.0' } });
     vi.stubEnv('FAKE_ACP_VERSION', '1.5.0');
     expect(await agy(home).detect()).toMatchObject({ kind: 'available', version: '1.5.0' });
     expect(JSON.parse(readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8')))
@@ -766,6 +797,15 @@ describe('AgyAdapter', () => {
     const failure = await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, { ...await agyCtx(), mcpServers: { host: { command: 'server', env: { TOKEN: 'x' } } } }).catch(error => error);
     expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     expect(String(failure.message)).toContain('it attaches no entry with env or headers');
+  });
+
+  it.each([undefined, 'fake-grok-session'])('uses the per-task Antigravity model and effort (resume=%s)', async sessionRef => {
+    const home = await agyVersion('1.5.1');
+    const resources = await agyCtx({ FAKE_ACP_MODEL_CATALOG: 'boot-model,task-model', FAKE_ACP_EFFORT_MENU: '1' });
+    resources.env.FAKE_ACP_LISTED_CWD = resources.workspaceDir;
+    const runtime = agy(home, { model: 'boot-model' });
+    await turn(await open(runtime, { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'hello', modelId: 'task-model', effort: 'high', sessionRef }, resources));
+    expect(facts(resources.log).filter(row => row.kind === 'config').map(row => row.params.value)).toEqual(['task-model', 'high']);
   });
 
   it('resumes only on a listed saved cwd', async () => {

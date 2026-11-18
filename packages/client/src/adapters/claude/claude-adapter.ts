@@ -1,4 +1,6 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
@@ -15,7 +17,6 @@ import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
   freezeRuntimeAdapterDescriptor,
-  type McpStdioServerConfig,
   type MessageDraftDelta,
   type RuntimeAdapter,
   type RuntimeDetectResult,
@@ -25,7 +26,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types.js';
-import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
+import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
@@ -33,8 +34,10 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import { ClaudeToolAuthorizationBridge } from './tool-authorization.js';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
-import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
+import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeFrame, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
 import { ClaudeFailureEvidence } from './failure-evidence.js';
+import { requireImageInput } from '../input-images.js';
+import { claudeSessionCapabilities } from '../../runtime/claude-session-runtime.js';
 import { ClaudeStreamSession } from './stream-session.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import type { spawn } from 'node:child_process';
@@ -160,6 +163,31 @@ const claudeEnvironmentConflicts: RuntimeEnvironmentConflictRule = (passed) =>
     : [];
 
 export class ClaudeAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin).bin.command,
+      version: claudeVersionToken,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => {
+      const { claudeListModels } = await import('#byok-oar-readers');
+      return claudeListModels(installation, reader);
+    });
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, async (installation, reader) => {
+      const { claudeAccountUsage } = await import('#byok-oar-readers');
+      return claudeAccountUsage(installation, reader);
+    });
+  }
+
   readonly descriptor;
   private readonly nativeOptions?: NativeInteractionHostOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
@@ -180,6 +208,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
       supportsDispatchSelection: true,
+      supportsTaskExecutionOptions: true,
       // `progress` events are complete text blocks, never deltas, and
       // `progressStartsMessage` joins the blocks of one message, so the
       // closing reply is the last assistant message. A run that repeats its
@@ -218,6 +247,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const authPresent = await this.probeAuthPresent(invocation, env);
       return {
         kind: 'available', version, authPresent,
+        sessionCapabilities: { ...claudeSessionCapabilities(), steer: this.descriptor.capabilities.steer },
         ...runtimeExecutableFields(resolved, invocation.executable),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, claudeVersionToken(version)),
       };
@@ -227,6 +257,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { effort } = input.offer;
     let modelId: string | undefined;
     try {
       modelId = subscriptionModel(modelLaneTarget(input.offer.target), 'claude');
@@ -249,7 +280,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, modelId, invocation),
+        start: (startInput) => this.startPrepared(startInput, modelId, invocation, effort),
       },
     };
   }
@@ -258,6 +289,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     startInput: RuntimeOperationStartInput,
     modelId: string | undefined,
     invocation: RuntimeInvocation,
+    effort: string | undefined,
   ): Promise<Session> {
     const signal = startInput.signal;
     const cancellationFailure = () => new RuntimeExecutionFailure({
@@ -375,6 +407,25 @@ export class ClaudeAdapter implements RuntimeAdapter {
           reason: 'prepared claude operation received a manifest without a sealed cwd',
         });
       }
+      let launchModel = manifestModelId;
+      if (effort !== undefined) {
+        let catalog: RuntimeModelCatalog;
+        try {
+          catalog = await this.listModels({ signal });
+        } catch (cause) {
+          throwIfCancelled();
+          throw claudeEffortRefusal('claude_effort_catalog_unavailable', cause);
+        }
+        throwIfCancelled();
+        if (catalog.kind !== 'ok') throw claudeEffortRefusal('claude_effort_catalog_unavailable');
+        const model = manifestModelId === undefined
+          ? catalog.models.find(entry => entry.default === true || entry.id === 'default')
+          : catalog.models.find(entry => entry.id === manifestModelId) ?? catalog.models.find(entry => entry.resolvedId === manifestModelId);
+        if (model?.effortLevels === undefined || model.disabled !== undefined) throw claudeEffortRefusal('claude_effort_menu_unavailable');
+        if (!model.effortLevels.includes(effort)) throw claudeEffortRefusal('claude_effort_unsupported');
+        // Pin the model whose menu admitted the effort, including on resume.
+        launchModel ??= model.resolvedId ?? model.id;
+      }
       const args = [
         '-p',
         '--input-format',
@@ -389,7 +440,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // Text deltas for the display-only draft (`stream_event` frames).
         '--include-partial-messages',
         ...(persistSession ? [] : ['--no-session-persistence']),
-        ...(manifestModelId ? ['--model', manifestModelId] : []),
+        ...(launchModel === undefined ? [] : ['--model', launchModel]),
+        ...(effort === undefined ? [] : ['--effort', effort]),
         ...(resumeSessionId ? ['--resume', resumeSessionId] : []),
         // YOLO by default, as in OAR (`runtimes/claude/session.ts`). Native
         // interactions need the stdio prompt tool to relay AskUserQuestion;
@@ -424,6 +476,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       throwIfCancelled();
       try {
         await Promise.race([opened.open({
+          effort,
           ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
           env,
           maxRetainedBytes: this.maxRetainedBytes,
@@ -454,7 +507,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // after it carries the session id.
       let sessionRef: string;
       try {
-        const prompted = await Promise.race([opened.prompt(startInput.instruction), cancelled]);
+        requireImageInput(startInput.images, opened.raw.capabilities.images === true);
+        const prompted = await Promise.race([opened.prompt(startInput.instruction, startInput.images), cancelled]);
         if (prompted.response.body.kind !== 'accepted') {
           throw new RuntimeExecutionFailure({
             phase: 'start', retry: 'retryable',
@@ -539,6 +593,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
   private resolveBin(): ResolvedBin {
     return (this.options.resolveBin ?? resolveClaudeBin)();
   }
+}
+
+function claudeEffortRefusal(reason: string, cause?: unknown): RuntimeExecutionFailure {
+  return new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason, failure: { class: 'invalid_request' } }, { cause });
 }
 
 function subscriptionModel(
@@ -664,7 +722,7 @@ class ClaudeSession implements Session {
                 return { value: undefined as never, done: true };
               }
 
-              let raw: IteratorResult<ClaudeStreamMessage>;
+              let raw: IteratorResult<ClaudeFrame>;
               try {
                 raw = await inner.next();
               } catch (cause) {
@@ -674,7 +732,7 @@ class ClaudeSession implements Session {
                   reason: 'claude runtime event transport failed',
                 }, { cause });
               }
-              const { value, done } = raw;
+              const { value: frame, done } = raw;
               if (done) {
                 throw new RuntimeExecutionFailure({
                   phase: 'run',
@@ -684,8 +742,10 @@ class ClaudeSession implements Session {
                 }, { cause: stream.terminalError });
               }
 
-              if (value.type === 'result') turnSettled = true;
-              failureEvidence.observe(value);
+              const { native: value, agentPath, context } = frame;
+              const root = agentPath.length === 0;
+              if (root && value.type === 'result') turnSettled = true;
+              if (root) failureEvidence.observe(value);
 
               if (callsUnresolvedMcpTool(value, correlation)) {
                 // Asked at the first MCP call, when Claude has connected its
@@ -693,21 +753,19 @@ class ClaudeSession implements Session {
                 // tools. One lookup per process; a failure leaves `mcp` absent.
                 await mcpIdentity.observe();
               }
-              const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir });
-              servedModel.observe(value);
-              if (value.type === 'result') {
-                const model = servedModel.takeTurnModel();
-                if (stream.contextWindow !== null || model !== undefined) {
-                  const observed = {
-                    ...(stream.contextWindow === null ? {} : { contextWindow: stream.contextWindow, contextSource: 'provider' as const }),
-                    ...(model === undefined ? {} : { model }),
-                  };
-                  const usage = mapped.events.find(event => event.type === 'usage');
-                  if (usage?.type === 'usage') Object.assign(usage, observed);
-                  else mapped.events.unshift({ type: 'usage', ...observed });
+              const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir, agentPath, context, initModel: root ? stream.initModel : undefined });
+              if (root) {
+                servedModel.observe(value);
+                if (value.type === 'result') {
+                  const model = servedModel.takeTurnModel();
+                  if (model !== undefined) {
+                    const usage = mapped.events.find(event => event.type === 'usage');
+                    if (usage?.type === 'usage') usage.model = model;
+                    else mapped.events.unshift({ type: 'usage', model });
+                  }
                 }
+                assistantMessages.observe(value, mapped.events);
               }
-              assistantMessages.observe(value, mapped.events);
               if (mapped.terminalFailure !== undefined) terminalFailure = failureEvidence.attach(value, mapped.terminalFailure);
               if (mapped.unmappedLabel) {
                 stream.recordUnmappedFrame(mapped.unmappedLabel);
@@ -747,6 +805,9 @@ class ClaudeSession implements Session {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
     }
+    if (task.effort !== undefined && task.effort !== this.stream.effort) {
+      throw new PolicyUnsupportedError('claude persistent session cannot change effort');
+    }
     const requestedModel = subscriptionModel(modelLaneTarget(task.target), 'claude');
     if (requestedModel !== undefined && requestedModel !== this.modelId) {
       throw new PolicyUnsupportedError(
@@ -759,11 +820,12 @@ class ClaudeSession implements Session {
     // process is killed. OAR refuses a prompt as busy while Claude runs a
     // turn of its own (a background task wake); OAR then holds it and
     // sends it when that turn ends.
+    requireImageInput(task.images, this.stream.raw.capabilities.images === true);
     let refusal: unknown;
     try {
       this.native?.beginTurn();
-      let prompted = await this.stream.prompt(task.instruction);
-      if (prompted.response.body.code === 'busy') prompted = await this.stream.queue(task.instruction);
+      let prompted = await this.stream.prompt(task.instruction, task.images);
+      if (prompted.response.body.code === 'busy') prompted = await this.stream.queue(task.instruction, task.images);
       if (prompted.response.body.kind === 'accepted') return;
       refusal = prompted.response.body;
     } catch (cause) {

@@ -2,6 +2,8 @@ import { constants as fsConstants, promises as fs } from 'node:fs';
 import net from 'node:net';
 import {
   CONTROL_PROTOCOL_VERSION,
+  RUNTIMES_MODELS_METHOD,
+  RUNTIMES_USAGE_METHOD,
   ControlError,
   HANDSHAKE_TIMEOUT_MS,
   NdjsonLineReader,
@@ -17,6 +19,8 @@ import {
   timingSafeEqualHex,
 } from './control-protocol.js';
 import { sameContent } from '../util/file-state.js';
+import { RUNTIME_READ_TIMEOUT_MS } from '../runtime/runtime-readers.js';
+import type { RuntimeAccountUsage, RuntimeModelCatalog } from '../runtime/runtime-reader-types.js';
 
 /**
  * M4 Phase 2: the CLI-side half of the control socket — connects, performs
@@ -50,6 +54,14 @@ export interface ControlClient {
   subscribe(method: string, params: unknown, onEvent: (event: unknown) => void): { close: () => void };
   /** Closes the underlying connection. Safe to call more than once. */
   close(): void;
+}
+
+export function requestRuntimeModels(client: ControlClient, runtimeId: string, refresh?: boolean): Promise<RuntimeModelCatalog> {
+  return client.request(RUNTIMES_MODELS_METHOD, { runtimeId, refresh });
+}
+
+export function requestRuntimeUsage(client: ControlClient, runtimeId: string): Promise<RuntimeAccountUsage> {
+  return client.request(RUNTIMES_USAGE_METHOD, { runtimeId });
 }
 
 export type ConnectControlResult = { ok: true; client: ControlClient } | { ok: false; reason: string };
@@ -333,7 +345,8 @@ function createControlClient(socket: net.Socket, reader: NdjsonLineReader, opts:
     async request<T>(method: string, params?: unknown): Promise<T> {
       if (closed) throw new Error('control connection is closed');
       const { promise } = send(method, params);
-      const result = await withTimeout(promise, opts.requestTimeoutMs ?? 10_000, `control request "${method}" timed out`);
+      const defaultTimeout = method === RUNTIMES_MODELS_METHOD || method === RUNTIMES_USAGE_METHOD ? RUNTIME_READ_TIMEOUT_MS + 1_000 : 10_000;
+      const result = await withTimeout(promise, opts.requestTimeoutMs ?? defaultTimeout, `control request "${method}" timed out`);
       return result as T;
     },
     subscribe(method, params, onEvent) {

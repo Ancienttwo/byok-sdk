@@ -14,8 +14,8 @@ import {
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { memoryClaude } from './fixtures/memory-claude';
-import { foldStreamJsonStdout } from '../../vendor/oar/bc1b2ac/shared/stream-json/projection';
-import { claudeProjectionProfile, initialClaudeProjection } from '../../vendor/oar/bc1b2ac/runtimes/claude/projection';
+import { foldStreamJsonStdout } from '../../vendor/oar/609f347/shared/stream-json/projection';
+import { claudeProjectionProfile, initialClaudeProjection } from '../../vendor/oar/609f347/runtimes/claude/projection';
 
 async function tmpWorkspace(): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-events-test-'));
@@ -568,9 +568,24 @@ describe('Claude context window reserved for S4', () => {
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     claude.send({ type: 'system', subtype: 'init', model: 'root-model', session_id: 'session-1' });
     claude.send({ type: 'system', subtype: 'init', model: 'child-model', session_id: 'session-1', parent_tool_use_id: 'toolu_task' });
-    claude.send({ type: 'result', subtype: 'success', is_error: false, usage: {},
+    claude.send({ type: 'assistant', message: { model: 'root-model', usage: { input_tokens: 11, cache_read_input_tokens: 23, cache_creation_input_tokens: 7 }, content: [] } });
+    claude.send({ type: 'assistant', parent_tool_use_id: 'toolu_task', message: { model: 'child-model', usage: { input_tokens: 50 }, content: [{ type: 'text', text: 'child text' }] } });
+    claude.send({ type: 'result', subtype: 'success', is_error: false, parent_tool_use_id: 'toolu_task', usage: { input_tokens: 50 } });
+    claude.send({ type: 'result', subtype: 'success', is_error: false, usage: { input_tokens: 200 },
       modelUsage: { 'child-model': { contextWindow: 200000 }, 'root-model': { contextWindow: 1000000 } } });
-    expect(stream.contextWindow).toBe(1000000);
+    const iterator = stream.frames[Symbol.asyncIterator]();
+    const frames = [];
+    for (let i = 0; i < 6; i++) frames.push((await iterator.next()).value);
+    const correlation = { toolNameByUseId: new Map() };
+    const events = frames.flatMap(frame => mapClaudeMessageToAgentEvents(frame.native, correlation, {
+      workspaceDir: '/workspace', initModel: stream.initModel, context: frame.context, agentPath: frame.agentPath,
+    }).events);
+    expect(events).toEqual([
+      { type: 'progress', text: 'child text', agentPath: ['toolu_task'] },
+      { type: 'usage', inputTokens: 50, agentPath: ['toolu_task'] },
+      { type: 'usage', inputTokens: 200, contextTokens: 41, contextWindow: 1000000, contextSource: 'provider' },
+      { type: 'turn_end' },
+    ]);
     expect(await stream.sessionRef).toBe('session-1');
   });
   it('elides old frame payloads past the retention budget while the session runs and every frame is read whole', async () => {

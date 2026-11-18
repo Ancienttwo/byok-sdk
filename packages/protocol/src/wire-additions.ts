@@ -9,7 +9,8 @@
  *   durably advertised `capability`. A field entry applies when the payload
  *   carries the field (and, with `value`, when the field equals it, or when
  *   the field is an array that includes it); a dotted field names a nested
- *   field, for example `sealed.ciphertextRef`. A type entry applies to every
+ *   field, for example `sealed.ciphertextRef`. `when` limits a field gate to
+ *   a matching payload discriminator. A type entry applies to every
  *   message of that type. Only server-to-daemon surfaces are gated, each by a
  *   device flag: the server advertises nothing (wire v7).
  *
@@ -22,7 +23,13 @@
  * another. This module imports no runtime code except the plain-data split
  * table, so it stays free of zod.
  */
-import { AGENT_INPUT_PREPARATION_CAPABILITY, SEALED_PAYLOAD_CAPABILITY, SEALED_PAYLOAD_V2_CAPABILITY } from './capability-constants.js';
+import {
+  AGENT_INPUT_PREPARATION_CAPABILITY,
+  INPUT_IMAGES_CAPABILITY,
+  SEALED_PAYLOAD_CAPABILITY,
+  SEALED_PAYLOAD_V2_CAPABILITY,
+  TASK_EXECUTION_OPTIONS_CAPABILITY,
+} from './capability-constants.js';
 import type { MessageType } from './messages.js';
 import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table.js';
 import type { CapabilityFlag } from './version.js';
@@ -32,6 +39,7 @@ export interface WireAddition {
   readonly surface: MessageType;
   readonly field?: string;
   readonly value?: string;
+  readonly when?: { readonly field: string; readonly value: string };
   readonly capability: CapabilityFlag;
 }
 
@@ -44,8 +52,9 @@ const offerRow = (field: string | undefined, capability: CapabilityFlag, value?:
 /**
  * Sealed payload (#654, #1045): the marker of each server-to-daemon sealed
  * branch is gated on its category's device flag. The sealed branch shares
- * every other row of its type, and a field it moves or drops is absent from
- * it, so sealing never removes a gate that the same fields would need.
+ * every other row of its type that applies to its visible fields. Moved input
+ * fields (e.g. `images`) are checked before sealing and after opening, via
+ * the same rows. Dropped fields are absent from the sealed branch.
  * A daemon-to-server sealed branch needs no flag: the server accepts it by the
  * task's frozen `sealing`.
  */
@@ -76,6 +85,13 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   offerRow('target.lane', 'dispatch-selection', 'subscription'),
   offerRow('target.lane', 'dispatch-selection', 'byok'),
   offerRow('target.lane', 'dispatch-selection', 'byok-profile'),
+  offerRow('target.effort', TASK_EXECUTION_OPTIONS_CAPABILITY),
+  {
+    surface: 'task.offer', field: 'target.modelId', when: { field: 'target.lane', value: 'harness' },
+    capability: TASK_EXECUTION_OPTIONS_CAPABILITY,
+  },
+  offerRow('images', INPUT_IMAGES_CAPABILITY),
+  { surface: 'task.steer', field: 'images', capability: INPUT_IMAGES_CAPABILITY },
   offerRow('requiredToolsets', 'toolset-selection'),
   offerRow('homeAccess', 'agent-home-readers'),
   offerRow('agentMemory', 'agent-memory-selection'),
@@ -111,24 +127,32 @@ export const WIRE_ADDITIONS: readonly WireAddition[] = Object.freeze([
   ...SEALED_V2_ROWS,
 ] satisfies readonly WireAddition[]);
 
+interface FieldMatch {
+  readonly field: string;
+  readonly value?: string;
+}
+
+function matchesField(payload: unknown, { field, value }: FieldMatch): boolean {
+  const actual = field.split('.').reduce<unknown>(
+    (parent, segment) => (parent !== null && typeof parent === 'object' ? (parent as Record<string, unknown>)[segment] : undefined),
+    payload,
+  );
+  return actual !== undefined && (value === undefined || (Array.isArray(actual) ? actual.includes(value) : actual === value));
+}
+
 /**
  * Every capability the receiver must have durably advertised before a sender
  * may emit this message. Deduplicated, in table order. A sender refuses (before
  * creating the task or appending to the mailbox) when any is missing.
+ * For fields moved into ciphertext, pass the logical payload before sealing
+ * or after opening to derive their gates as well.
  */
 export function requiredReceiverCapabilities(type: MessageType, payload: unknown): CapabilityFlag[] {
-  const fields = payload !== null && typeof payload === 'object' ? (payload as Record<string, unknown>) : {};
   const required: CapabilityFlag[] = [];
   for (const entry of WIRE_ADDITIONS) {
     if (entry.surface !== type) continue;
-    if (entry.field !== undefined) {
-      const value = entry.field.split('.').reduce<unknown>(
-        (parent, segment) => (parent !== null && typeof parent === 'object' ? (parent as Record<string, unknown>)[segment] : undefined),
-        fields,
-      );
-      if (value === undefined) continue;
-      if (entry.value !== undefined && !(Array.isArray(value) ? value.includes(entry.value) : value === entry.value)) continue;
-    }
+    if (entry.when !== undefined && !matchesField(payload, entry.when)) continue;
+    if (entry.field !== undefined && !matchesField(payload, { field: entry.field, value: entry.value })) continue;
     if (!required.includes(entry.capability)) required.push(entry.capability);
   }
   return required;

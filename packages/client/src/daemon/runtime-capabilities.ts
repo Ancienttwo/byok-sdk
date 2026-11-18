@@ -24,6 +24,7 @@ export function toRuntimeInfoCapabilities(caps: RuntimeCapabilities): ProtocolRu
   return {
     steer: caps.steer,
     resume: caps.resume,
+    ...(caps.images === undefined ? {} : { images: caps.images }),
     approvalInteractive: caps.approvalInteractive,
     ...(caps.mcpToolsets === undefined ? {} : { mcpToolsets: caps.mcpToolsets }),
     ...(caps.messageDraft === undefined ? {} : { messageDraft: caps.messageDraft }),

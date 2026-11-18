@@ -364,6 +364,18 @@ export interface ControlStorageStatus extends RetentionSnapshot {
 /** The `runtimes.environment` method (#1095): every adapter's runtime environment names, built on demand. */
 export const RUNTIMES_ENVIRONMENT_METHOD = 'runtimes.environment';
 
+export const RUNTIMES_MODELS_METHOD = 'runtimes.models';
+export const RUNTIMES_USAGE_METHOD = 'runtimes.usage';
+
+export function parseRuntimeReadParams(value: unknown, allowRefresh: boolean): { runtimeId: string; refresh?: boolean } {
+  if (!isRecord(value) || typeof value.runtimeId !== 'string' || value.runtimeId.length === 0 || value.runtimeId.length > 128
+    || Object.keys(value).some(key => key !== 'runtimeId' && !(allowRefresh && key === 'refresh'))
+    || (value.refresh !== undefined && typeof value.refresh !== 'boolean')) {
+    throw new ControlError('bad_request', allowRefresh ? 'runtimes.models requires {runtimeId, refresh?}' : 'runtimes.usage requires {runtimeId}');
+  }
+  return { runtimeId: value.runtimeId, ...(value.refresh === undefined ? {} : { refresh: value.refresh }) };
+}
+
 /**
  * One adapter's entry in {@link ControlRuntimesEnvironmentResult}: the report
  * of a build (names and sources, never values), the login-shell capture's

@@ -1,8 +1,11 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
+import { antigravityVersionRefusal } from '../../runtime/oar-version-floors.js';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
-import { agyStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
+import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
@@ -21,6 +24,8 @@ import {
 } from '../../types.js';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import type { AcpControl, AcpPermissionRequest, AcpPermissionResponse, AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
@@ -38,7 +43,7 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { AGY_RUNTIME_CAPABILITIES } from './agy-capabilities.js';
 import { agyEnvironment, agyNativeHome, agyStoreDir, ensureAgyHome } from './agy-profile.js';
-import { AGY_VERSION_POLICY, agyHasNativeAcp, agyVersionToken } from './agy-version.js';
+import { AGY_VERSION_POLICY, agyVersionToken } from './agy-version.js';
 import { AgyProjection, agyMcpEventIdentities, type AgyTurnOutcome } from './projection.js';
 import { resolveAgyBin } from './resolve-bin.js';
 
@@ -86,6 +91,35 @@ const refused = (body: AcpControl['response']['body'] | undefined, fallback: str
  * custom-harness identity (`harnessId: 'agy'`).
  */
 export class AgyAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (env) => resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(env)).bin.command,
+      version: agyVersionToken,
+      versionRefusal: antigravityVersionRefusal,
+      environment: async env => {
+        await ensureAgyHome(this.root);
+        const apiKey = env.GEMINI_API_KEY;
+        const proxy = apiKey ? await startAgyGeminiProxy({ apiKey, environment: env, upstreamOrigin: agyEndpointOf(this) }) : undefined;
+        return { env: agyEnvironment(env, this.root, proxy), close: proxy === undefined ? undefined : () => proxy.close() };
+      },
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => (await import('#byok-acp-runtime')).antigravityListModels(installation, reader));
+  }
+
+  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+    return this.readers.accountUsage(options, async (installation, reader) => {
+      const { antigravityAccountUsage } = await import('#byok-oar-readers');
+      return antigravityAccountUsage(installation, reader);
+    });
+  }
+
   private readonly root: string;
   private readonly options: AgyAdapterOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
@@ -97,6 +131,7 @@ export class AgyAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'agy',
       supportsDispatchSelection: false,
+      supportsTaskExecutionOptions: true,
       requiresMcpToolsetToolObservation: true,
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: AGY_RUNTIME_CAPABILITIES,
@@ -135,9 +170,14 @@ export class AgyAdapter implements RuntimeAdapter {
       const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, agyEnvironment(base, this.root));
       if (version.kind !== 'available') return version;
       const token = agyVersionToken(version.stdout);
-      if (!agyHasNativeAcp(token)) return { kind: 'refused', reason: 'acp_unavailable' };
+      const unsupported = antigravityVersionRefusal(token);
+      if (unsupported !== null) {
+        const { installedVersion, requiredVersion } = unsupported;
+        return { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion } };
+      }
       return {
         kind: 'available',
+        sessionCapabilities: (await import('#byok-acp-runtime')).antigravitySessionCapabilities(),
         version: token,
         authPresent: Boolean(base.GEMINI_API_KEY),
         ...runtimeExecutableFields(resolved, command),
@@ -149,6 +189,7 @@ export class AgyAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { effort, modelId = this.options.model } = input.offer;
     const detected = await this.detect();
     if (detected.kind !== 'available') {
       return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };
@@ -157,11 +198,11 @@ export class AgyAdapter implements RuntimeAdapter {
     const command = resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(base)).bin.command;
     return { kind: 'prepared', operation: {
       acquireSessionLease: (sessionRef) => acquireAgySessionRetention(agyStoreDir(this.root), sessionRef),
-      start: (start) => this.start(start, command),
+      start: (start) => this.start(start, command, modelId, effort),
     } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, model: string | undefined, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('agy requires a resolved instruction');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('agy manifest has no sealed cwd');
@@ -177,7 +218,6 @@ export class AgyAdapter implements RuntimeAdapter {
     const reader = readerScope(input.manifest);
     const session = new AgySession(
       input.scratch,
-      this.options.model,
       this.interruptTimeoutMs,
       agyMcpEventIdentities(input.mcpToolsetTools),
       resume,
@@ -209,7 +249,8 @@ export class AgyAdapter implements RuntimeAdapter {
           // Without it agy reports to play.googleapis.com, the one host beside the model endpoint it contacts.
           launchArgs: ['--disable-telemetry'],
           ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
-          ...(this.options.model === undefined ? {} : { model: this.options.model }),
+          ...(model === undefined ? {} : { model }),
+          ...(effort === undefined ? {} : { effort }),
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(resume === undefined ? {} : { resume }),
         },
@@ -222,7 +263,7 @@ export class AgyAdapter implements RuntimeAdapter {
       );
       session.bind(raw);
       if (input.signal?.aborted) throw infrastructure('agy start was aborted');
-      await session.prompt(input.instruction);
+      await session.prompt(input.instruction, input.images);
       return session;
     } catch (thrown) {
       try {
@@ -230,7 +271,7 @@ export class AgyAdapter implements RuntimeAdapter {
       } catch (disposal) {
         throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal });
       }
-      throw runtimeStartFailure(session.halted ?? thrown, { classify: agyStartClassifier(acp), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'agy' });
+      throw runtimeStartFailure(session.halted ?? thrown, { classify: oarStartClassifier(acp), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'agy' });
     }
   }
 }
@@ -263,7 +304,6 @@ class AgySession implements Session {
 
   constructor(
     private readonly scratch: ExecutionScratch,
-    private readonly model: string | undefined,
     private readonly interruptMs: number,
     private readonly identities: McpEventIdentities,
     private readonly expectedSessionRef?: string,
@@ -389,12 +429,15 @@ class AgySession implements Session {
       if (self.failure) throw self.failure;
     })();
   }
-  async prompt(input: string): Promise<void> {
+  get capabilities() { return { images: this.raw?.capabilities.images === true }; }
+
+  async prompt(input: string, images?: readonly RuntimeInputImage[]): Promise<void> {
     if (!this.raw) throw infrastructure('agy session is not open');
+    requireImageInput(images, this.capabilities.images);
     if (this.active) throw infrastructure('agy turn is already active');
     this.active = true;
     try {
-      const result = await this.raw.prompt(input);
+      const result = await this.raw.prompt(input, { images });
       if (result.response.body.kind !== 'accepted') throw refused(result.response.body, 'agy prompt refused');
     } catch (error) {
       this.active = false;
@@ -404,8 +447,8 @@ class AgySession implements Session {
   async followUp(): Promise<void> {
     throw new PolicyUnsupportedError('agy runs one turn per process; a later turn resumes the session');
   }
-  async steer(text: string): Promise<void> {
-    const result = await this.raw?.steer?.(text);
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
+    const result = await this.raw?.steer?.(text, options);
     if (result?.response.body.kind !== 'accepted') throw refused(result?.response.body, 'agy steer refused');
   }
   async interrupt(): Promise<void> {

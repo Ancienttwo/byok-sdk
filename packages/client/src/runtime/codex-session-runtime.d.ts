@@ -1,15 +1,21 @@
+import type { RuntimeInputOptions } from '../types';
 import type { RuntimeFailureClass } from '@byok-sdk/protocol';
 import type { CodexRecord } from '../adapters/codex/projection';
 import type { spawnOwnedLineProcess } from './owned-line-process';
+import type { ProcessTable } from './oar-process-tree';
 export interface CodexControl {
   // ControlResult also permits an exit response with a numeric or null code.
   response: { body: { kind: string; code?: string | number | null; reason?: string } };
 }
 /** OAR 0.25.0 Codex always implements steer. The bridge retains this required member. */
+export declare function codexSessionCapabilities(): { readonly steer: true; readonly images: true };
+
 export interface RawCodexSession {
   readonly id: string;
-  prompt(input: string): Promise<CodexControl>;
-  steer(input: string): Promise<CodexControl>;
+  readonly capabilities: { readonly images: boolean };
+  prompt(input: string, options?: RuntimeInputOptions): Promise<CodexControl>;
+  steer(input: string, options?: RuntimeInputOptions): Promise<CodexControl>;
+  queue(input: string, options?: RuntimeInputOptions): Promise<CodexControl>;
   abort(): Promise<CodexControl>;
   records(): readonly CodexRecord[];
   dispose(): Promise<void>;
@@ -29,8 +35,10 @@ export declare function codexSession(
     env: Readonly<Record<string, string>>;
     /** OAR SessionOptions.retainedBytes: past it the kernel elides the oldest native payloads. */
     retainedBytes: number;
+    endTurnProcessesOnAbort?: boolean;
     resume?: string;
     model?: string;
+    effort?: string;
     approvalPolicy?: "never" | "on-request";
     sandboxMode?: "read-only" | "workspace-write" | "danger-full-access" | "inherit";
     /** OAR SessionOptions.launchArgs: host `app-server` arguments after the sandbox override and before `--listen`. */
@@ -44,6 +52,7 @@ export declare function codexSession(
   timeout?: number,
   hooks?: {
     onReady?: (threadId: string) => void;
+    turnProcessReader?: { rootPid(): number | undefined; readProcessTable(): ProcessTable };
     onRecord?: (record: CodexRecord) => void;
     onServerRequest?: (id: string | number, method: string, params: Record<string, unknown>, reply: {
       respond(value: Record<string, unknown>): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;

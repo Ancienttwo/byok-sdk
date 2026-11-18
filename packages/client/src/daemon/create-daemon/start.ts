@@ -43,7 +43,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   const {
     capabilities, agentHomeProjectionCompletion, processProviderProvisioningNotice,
     processAgentMemoryIntentNotice, handleRemoteInputPreparation, opened,
-  } = composeStartLanes(daemonScope, { agentMemoryBackend, agentMemoryIntentBackend, record, blobClient, sealedRun });
+  } = composeStartLanes(daemonScope, { agentMemoryBackend, agentMemoryIntentBackend, record, blobClient, sealedRun, runtimes, harnesses });
 
   const {
     sendEnvelope, replaceRefusedTerminal, refuseOverBoundEnvelope, withReplyTransition,

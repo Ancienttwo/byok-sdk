@@ -24,7 +24,7 @@ interface SpawnDependencies {
 // Structural return types keep the BYOK source declaration build independent of the unconnected vendor tree.
 export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
   const label = deps.label ?? 'codex app-server';
-  return (command: string, args: readonly string[], options: { readonly env: Readonly<Record<string, string>>; readonly cwd?: string }) => {
+  return (command: string, args: readonly string[], options: { readonly env: Readonly<Record<string, string>>; readonly cwd?: string; readonly onOutput?: (stream: 'stdout' | 'stderr', chunk: Buffer) => void }) => {
     if (options.env === undefined) throw new Error('owned line process requires an explicit filtered environment');
     assertNoNulSpawnInput(command, args, options.env, options.cwd);
     let child: ChildProcessWithoutNullStreams;
@@ -103,9 +103,16 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       const ready = held.splice(0); heldBytes = 0;
       for (const line of ready) deliver(line);
     };
-    child.stdout.on('data', (chunk: Buffer) => { if (!closed && failure === undefined) lines.push(chunk); });
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (closed || failure !== undefined) return;
+      if (options.onOutput === undefined) lines.push(chunk);
+      else options.onOutput('stdout', chunk);
+    });
     // Drain stderr without retaining unbounded output or inheriting daemon stdio.
-    child.stderr.on('data', (chunk: Buffer) => { stderrTail = Buffer.concat([stderrTail,chunk]).subarray(-64*1024); });
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (options.onOutput !== undefined) options.onOutput('stderr', chunk);
+      else stderrTail = Buffer.concat([stderrTail,chunk]).subarray(-64*1024);
+    });
     child.stdin.on('error', fail);
     child.stdout.on('error', fail);
     child.stderr.on('error', fail);
@@ -135,6 +142,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     });
     return {
       spawned, exited, kill,
+      get pid() { return child.pid; },
       dispose: (): Promise<void> => { terminationRequested = true; return cleanup(); },
       get exitedOnItsOwn() { return exitedOnItsOwn; },
       /** Before an ACP native cancel: its tools stay killable at disposal after the cancel orphans them. */

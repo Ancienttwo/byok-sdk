@@ -1,12 +1,12 @@
 import { daemonMemoryInstruction, freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { createHash } from 'node:crypto';
-import { promises as fs, symlinkSync, unlinkSync } from 'node:fs';
+import { existsSync, promises as fs, symlinkSync, unlinkSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createEnvelope } from '@byok-sdk/protocol';
+import { createEnvelope, type InputImageBlobRef } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import type { RuntimeAdapter } from '../types';
@@ -34,16 +34,89 @@ describe('blob client (protocol §7)', () => {
     await server.close();
   });
 
-  async function setupDaemon(adapter: RuntimeAdapter): Promise<Daemon> {
+  async function setupDaemon(...adapters: RuntimeAdapter[]): Promise<Daemon> {
     const storeDir = await tmpDir('byok-client-store-');
     daemon = createDaemonWithAdapters(
       {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
-      [adapter],
+      adapters,
     );
     await daemon.pair('code');
     await daemon.start();
     return daemon;
   }
+
+  const imageBytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==', 'base64');
+  const inputImage: InputImageBlobRef = { mediaType: 'image/png', blob: { blobId: 'image-1', contentType: 'image/png',
+    size: imageBytes.length, contentHash: 'sha256:' + createHash('sha256').update(imageBytes).digest('hex') } };
+
+  it.each(['complete', 'cancel'] as const)('delivers verified task and steer images and removes their files on %s', async terminal => {
+    const adapter = new StubRuntimeAdapter();
+    adapter.decorateSession = session => { session.capabilities = { images: true }; };
+    server.seedBlob(inputImage.blob.blobId, imageBytes, inputImage.mediaType);
+    await setupDaemon(adapter);
+    const taskId = 'image-task';
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },
+      instruction: 'see the image', images: [inputImage] }, { taskId, seq: server.nextSeq() }));
+    await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
+    const first = adapter.startCalls[0]!.task.images![0]!.path;
+    expect(await fs.readFile(first)).toEqual(imageBytes);
+    if (process.platform !== 'win32') {
+      expect((await fs.stat(path.dirname(first))).mode & 0o777).toBe(0o700);
+      expect((await fs.stat(first)).mode & 0o777).toBe(0o600);
+    }
+    const active = adapter.sessions[0]!;
+    server.send(createEnvelope('task.steer', { text: 'compare this', images: [inputImage] }, { taskId, seq: server.nextSeq() }));
+    await vi.waitFor(() => expect(active.steerImageCalls).toHaveLength(1));
+    const second = active.steerImageCalls[0]![0]!.path;
+    expect(second).not.toBe(first);
+    expect(path.dirname(second)).toBe(path.dirname(first));
+    expect(await fs.readFile(second)).toEqual(imageBytes);
+    if (terminal === 'complete') active.emit({ type: 'turn_end' });
+    else server.send(createEnvelope('task.cancel', {}, { taskId, seq: server.nextSeq() }));
+    await server.waitFor(e => e.type === (terminal === 'complete' ? 'task.complete' : 'task.cancelled') && e.task_id === taskId);
+    await vi.waitFor(() => expect(existsSync(path.dirname(first))).toBe(false));
+    expect(JSON.stringify(server.received)).not.toContain(imageBytes.toString('base64'));
+  });
+
+  it('rejects a task whose image does not match its SHA-256 before invoking the runtime', async () => {
+    const adapter = new StubRuntimeAdapter();
+    server.seedBlob(inputImage.blob.blobId, Buffer.alloc(imageBytes.length, 42), inputImage.mediaType);
+    await setupDaemon(adapter);
+    const taskId = 'image-integrity';
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },
+      instruction: 'see the image', images: [inputImage] }, { taskId, seq: server.nextSeq() }));
+    const failed = await server.waitFor(e => e.type === 'task.fail' && e.task_id === taskId);
+    expect(failed.payload).toMatchObject({ retryable: false, failure: { class: 'invalid_request' } });
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
+  it('declines before claim when the selected installation declares no image support', async () => {
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available', sessionCapabilities: { images: false } });
+    await setupDaemon(adapter, new StubRuntimeAdapter('codex', { kind: 'available', sessionCapabilities: { images: true } }));
+    const taskId = 'image-runtime-unsupported';
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'runtime', runtimeId: 'pi' },
+      instruction: 'see this', images: [inputImage] }, { taskId, seq: server.nextSeq() }));
+    const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
+    expect(declined.payload).toMatchObject({ retryable: false, code: 'bad_request', reason: 'selected execution lane does not support image input' });
+    expect(adapter.startCalls).toHaveLength(0);
+    expect(server.received.some(e => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
+    expect(server.httpRequests.some(req => req.pathname.includes(inputImage.blob.blobId))).toBe(false);
+  });
+
+  it('refuses image steers with no session image support before downloading a blob', async () => {
+    const adapter = new StubRuntimeAdapter();
+    adapter.decorateSession = session => { session.capabilities = { images: false }; };
+    await setupDaemon(adapter);
+    const taskId = 'image-steer-unsupported';
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'auto' },
+      instruction: 'text only' }, { taskId, seq: server.nextSeq() }));
+    await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
+    const steer = createEnvelope('task.steer', { text: 'see this', images: [inputImage] }, { taskId, seq: server.nextSeq() });
+    server.send(steer);
+    expect((await server.waitFor(e => e.type === 'task.steer_refused')).payload).toEqual({ steerMessageId: steer.id, reason: 'steer_unsupported' });
+    expect(adapter.sessions[0]!.steerAttempts).toBe(0);
+    expect(server.httpRequests.some(req => req.pathname.includes(inputImage.blob.blobId))).toBe(false);
+  });
 
   it('resolves an instruction blobRef via GET /byok/blobs/:id/url + fetch, instead of failing closed', async () => {
     const bigInstruction = 'do the big thing: '.repeat(1000); // large enough to plausibly need a blob

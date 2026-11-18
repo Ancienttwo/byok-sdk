@@ -6,6 +6,7 @@ import { createProviderProvisioningNoticeProcessor } from '../provider-provision
 import { createAgentMemoryIntentProcessor } from '../agent-memory-intent.js';
 import { InputPreparationCompletionClient } from '../input-preparation-completion-client.js';
 import { createRemoteInputPreparationHandler } from '../input-preparation-remote.js';
+import { INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
 import { BlobClient } from '../blob-client.js';
 import { SealedTasks } from '../sealed-task.js';
 import type { DaemonScope } from './scope.js';
@@ -16,7 +17,7 @@ import type { StartRun } from './start-run.js';
  * hello capabilities and builds the notice processors, the input-preparation
  * lane, the sealed upload client and this start's sealed-task lane.
  */
-export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 'agentMemoryBackend' | 'agentMemoryIntentBackend' | 'record' | 'blobClient' | 'sealedRun'>) {
+export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 'agentMemoryBackend' | 'agentMemoryIntentBackend' | 'record' | 'blobClient' | 'sealedRun' | 'runtimes' | 'harnesses'>) {
   const {
     adapters, config, agentHomeManager, agentContentReadPolicies, daemonState, observer,
     inputPreparationLimits, sealIdentityOf,
@@ -34,7 +35,14 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
     agentMemoryIntentBackend !== undefined,
     agentMemoryBackend !== undefined,
     { enabled: config.nativeSessions, sessionDir: config.piByokLauncher?.sessionDir },
+    config.runtimeAllowlist,
   );
+  // An undeclared image value can be negotiated at open (ACP). A known false
+  // cannot. Exclude installations the daemon is configured not to select.
+  if ([...run.runtimes, ...run.harnesses].some(({ id, capabilities }) => capabilities?.images !== false
+    && (config.runtimeAllowlist === undefined || config.runtimeAllowlist.includes(id)))) {
+    capabilities.push(INPUT_IMAGES_CAPABILITY);
+  }
   const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
     ? new AgentHomeProjectionCompletionClient({
         serverUrl: config.serverUrl,

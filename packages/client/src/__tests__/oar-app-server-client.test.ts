@@ -5,10 +5,10 @@ import path from 'node:path';
 import {
   startAppServerClient,
   type LineProcess, type SpawnLineProcess,
-} from '../../vendor/oar/bc1b2ac/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/bc1b2ac/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/bc1b2ac/shared/session-kernel.js';
-import { sessionCredentialRedactor } from '../../vendor/oar/bc1b2ac/shared/credential-redactor.js';
+} from '../../vendor/oar/609f347/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/609f347/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/609f347/shared/session-kernel.js';
+import { sessionCredentialRedactor } from '../../vendor/oar/609f347/shared/credential-redactor.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -186,7 +186,7 @@ describe('OAR session kernel record redaction', () => {
 });
 
 it('accounts for every vendored file and the maintained source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/bc1b2ac');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/609f347');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     packageVersion: string;
     commit: string;
@@ -204,11 +204,71 @@ it('accounts for every vendored file and the maintained source deltas', () => {
   }
   expect(manifest.release).toEqual({
     ecosystem: 'npm', name: '@botiverse/oar', version: manifest.packageVersion,
-    integrity: 'sha512-nPebze7r0FV+BPIRMasfhLmGdFmzKNqr2KyBhFeITRcbLTP8S/QSCXjVSDe8OqYrjGDM+C20syHMlGJEDLswUw==',
+    integrity: 'sha512-licwKUPX+9FBsuuQNZ7J9tpyVD/dhEwroYLs27KnDDa7kYnV3Uz/LZZ5dqtIYpeJ9Ox47I/L1C2HTf4zpHrNQA==',
     gitCommit: manifest.commit,
-    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.112.0',
+    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.115.0',
   });
   expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: `byok/${manifest.packageVersion}`, commit: expect.stringMatching(/^[0-9a-f]{40}$/) });
-  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual(['contracts/failure.ts', 'contracts/records.ts', 'contracts/session-options.ts', 'observe/events.ts', 'runtimes/codex/app-server-client.ts', 'runtimes/codex/failure.ts', 'runtimes/codex/open.ts', 'runtimes/codex/session.ts', 'runtimes/dsh/control.ts', 'runtimes/dsh/launch.ts', 'runtimes/dsh/session.ts', 'runtimes/grok/session.ts', 'runtimes/opencode/prompt-config.ts', 'runtimes/opencode/session.ts', 'runtimes/opencode/version.ts', 'shared/acp/client-app.ts', 'shared/acp/errors.ts', 'shared/acp/failure.ts', 'shared/acp/opening.ts', 'shared/acp/process.ts', 'shared/acp/records.ts', 'shared/acp/session.ts', 'shared/acp/terminal.ts', 'shared/acp/turns.ts', 'shared/executable/process-tree.ts', 'shared/failure-class.ts', 'shared/record-retention.ts', 'shared/stream-json/compaction.ts', 'shared/stream-json/projection.ts', 'shared/stream-json/session.ts', 'shared/stream-json/state.ts', 'shared/stream-json/task-control.ts']);
+  expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual([
+    'contracts/failure.ts',
+    'contracts/list-models.ts',
+    'contracts/records.ts',
+    'contracts/session-options.ts',
+    'observe/events.ts',
+    'runtimes/antigravity/account-usage.ts',
+    'runtimes/antigravity/auth.ts',
+    'runtimes/antigravity/list-models.ts',
+    'runtimes/antigravity/session.ts',
+    'runtimes/antigravity/version.ts',
+    'runtimes/claude/account-usage.ts',
+    'runtimes/claude/auth-status.ts',
+    'runtimes/claude/environment.ts',
+    'runtimes/claude/list-models.ts',
+    'runtimes/claude/projection.ts',
+    'runtimes/codex/account-request.ts',
+    'runtimes/codex/account-usage.ts',
+    'runtimes/codex/app-server-client.ts',
+    'runtimes/codex/failure.ts',
+    'runtimes/codex/list-models.ts',
+    'runtimes/codex/login.ts',
+    'runtimes/codex/open.ts',
+    'runtimes/codex/rpc-control.ts',
+    'runtimes/codex/session.ts',
+    'runtimes/codex/turn-processes.ts',
+    'runtimes/dsh/control.ts',
+    'runtimes/dsh/launch.ts',
+    'runtimes/dsh/list-models.ts',
+    'runtimes/dsh/session.ts',
+    'runtimes/dsh/version.ts',
+    'runtimes/grok/account-usage.ts',
+    'runtimes/grok/auth.ts',
+    'runtimes/grok/list-models.ts',
+    'runtimes/grok/session.ts',
+    'runtimes/opencode/list-models.ts',
+    'runtimes/opencode/prompt-config.ts',
+    'runtimes/opencode/session.ts',
+    'runtimes/opencode/version.ts',
+    'shared/acp/client-app.ts',
+    'shared/acp/config-updates.ts',
+    'shared/acp/effort.ts',
+    'shared/acp/errors.ts',
+    'shared/acp/failure.ts',
+    'shared/acp/opening.ts',
+    'shared/acp/process.ts',
+    'shared/acp/records.ts',
+    'shared/acp/session.ts',
+    'shared/acp/steer-request.ts',
+    'shared/acp/terminal.ts',
+    'shared/acp/turns.ts',
+    'shared/credential-redactor.ts',
+    'shared/executable/process-tree.ts',
+    'shared/failure-class.ts',
+    'shared/record-retention.ts',
+    'shared/stream-json/compaction.ts',
+    'shared/stream-json/projection.ts',
+    'shared/stream-json/session.ts',
+    'shared/stream-json/state.ts',
+    'shared/stream-json/task-control.ts',
+  ]);
   expect(readFileSync(path.join(root, 'LICENSE'), 'utf8')).toContain('Apache License');
 });

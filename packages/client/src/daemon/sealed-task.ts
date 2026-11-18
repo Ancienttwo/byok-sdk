@@ -22,6 +22,8 @@ import {
   SEALED_PAYLOAD_MAX_CONTENT_LENGTH,
   SEALED_SPLIT_TABLE,
   createEnvelope,
+  InputImagesSchema,
+  type InputImageBlobRef,
   isSealedPayload,
   isSealedTaskPlainOutput,
   sealedAgentMessageMaxContentLength,
@@ -225,7 +227,7 @@ export class SealedTasks {
    * authenticated one. A failed apply does not count, so a redelivery is
    * applied. Anything else is dropped with a log line.
    */
-  async applySteer(envelope: Envelope, apply: (text: string) => Promise<void>): Promise<void> {
+  async applySteer(envelope: Envelope, apply: (text: string, images?: readonly InputImageBlobRef[]) => Promise<void>): Promise<void> {
     const taskId = envelope.task_id;
     const task = taskId === undefined ? undefined : this.#tasks.get(taskId);
     const drop = (why: string): undefined => {
@@ -236,12 +238,13 @@ export class SealedTasks {
     const { steerId, sealed } = envelope.payload as { steerId: string; sealed: JsonObject };
     const opened = await this.#open(sealed, this.#binding('task.steer', 'server-to-daemon', { taskId, steerId }, task.sealing, task.agentRef), task.sealing);
     if (!opened.ok) return drop(opened.code);
-    const { text, ...rest } = opened.plaintext;
-    if (typeof text !== 'string' || Object.keys(rest).length > 0) return drop('sealed_open_failed');
+    const { text, images, ...rest } = opened.plaintext;
+    const parsed = InputImagesSchema.optional().safeParse(images);
+    if (typeof text !== 'string' || !parsed.success || Object.keys(rest).length > 0) return drop('sealed_open_failed');
     if (task.steerIds.has(steerId)) return drop(`steer ${steerId} was already applied`);
     task.steerIds.add(steerId);
     try {
-      await apply(text);
+      await apply(text, parsed.data);
     } catch (error) {
       task.steerIds.delete(steerId);
       throw error;

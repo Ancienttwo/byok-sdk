@@ -24,7 +24,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/bc1b2ac/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/609f347/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
 const fixture = fileURLToPath(
@@ -100,6 +100,7 @@ describe('Codex persistent app-server adapter', () => {
       kind: 'available',
       version: 'codex-cli 0.160.0',
       authPresent: true,
+      sessionCapabilities: { images: true, steer: true },
       executablePath: fixture,
       executableSource: 'config',
       versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
@@ -218,6 +219,47 @@ describe('Codex persistent app-server adapter', () => {
       { type: 'turn_end' },
     ]);
   });
+  it('passes native local image paths on prompt and steer', async () => {
+    const resources = await ctx({ FAKE_CODEX_HANG: '1' });
+    const receipt = path.join(resources.workspaceDir, 'images-rpc.jsonl');
+    const imagePath = path.join(resources.workspaceDir, 'fixture.png');
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+    await fs.writeFile(imagePath, Buffer.from(base64, 'base64'));
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    const images = [{ path: imagePath, mediaType: 'image/png' }];
+    const session = await open(adapter(), { ...task, images }, resources);
+    await session.steer('look again', { images });
+    const raw = await fs.readFile(receipt, 'utf8');
+    const frames = raw.trim().split('\n').map(line => JSON.parse(line));
+    for (const method of ['turn/start', 'turn/steer']) {
+      expect(frames.find(frame => frame.method === method)?.params.input).toContainEqual({ type: 'localImage', path: imagePath });
+    }
+    expect(raw).not.toContain(base64);
+  });
+
+  it.each([undefined, 'fake-thread-1'])('applies the exact effort before prompting (resume=%s)', async sessionRef => {
+    const resources = await ctx();
+    const receipt = path.join(resources.workspaceDir, 'effort-rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    await turn(await open(adapter(), { ...task, effort: 'high', sessionRef }, resources));
+    const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    const method = sessionRef ? 'thread/settings/update' : 'thread/start';
+    const applied = frames.findIndex(frame => frame.method === method);
+    expect(applied).toBeGreaterThanOrEqual(0);
+    expect(applied).toBeLessThan(frames.findIndex(frame => frame.method === 'turn/start'));
+    expect(frames[applied].params).toMatchObject(sessionRef ? { threadId: sessionRef, effort: 'high' } : { config: { model_reasoning_effort: 'high' } });
+  });
+
+  it.each([undefined, 'fake-thread-1'])('fails before prompting when Codex reports a different effort (resume=%s)', async sessionRef => {
+    const resources = await ctx({ FAKE_CODEX_EFFORT_READBACK: 'low' });
+    const receipt = path.join(resources.workspaceDir, 'effort-rpc.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    await expect(open(adapter(), { ...task, effort: 'high', sessionRef }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+    });
+    expect(await fs.readFile(receipt, 'utf8')).not.toContain('turn/start');
+  });
+
   it('uses thread/resume without migrating thread identity', async () => {
     const s = await open(adapter(), { ...task, sessionRef: 'fake-thread-1' });
     expect(s.sessionRef).toBe('fake-thread-1');
@@ -525,6 +567,28 @@ describe('Codex persistent app-server adapter', () => {
         output: expect.objectContaining({ status: 'interrupted' }),
       }),
     );
+  });
+  it.skipIf(process.platform === 'win32')('reaps the aborted turn child and keeps the attached stdio MCP process for follow-up', async () => {
+    const resources = await ctx();
+    const receipt = path.join(resources.workspaceDir, 'turn-processes.json');
+    const audit = path.join(resources.workspaceDir, 'mcp.jsonl');
+    resources.env.FAKE_CODEX_ABORT_TREE = receipt;
+    resources.mcpServers = { host: { command: process.execPath, args: [fileURLToPath(new URL('./fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit] } };
+    // Readiness is part of thread open. The fixture receives the follow-up on the same app-server.
+    const s = await open(adapter(), task, resources);
+    await expect.poll(async () => fs.stat(receipt).then(() => true, () => false)).toBe(true);
+    const pids = JSON.parse(await fs.readFile(receipt, 'utf8')) as { child: number; mcp: number };
+    expect(gone(pids.child)).toBe(false);
+    expect(gone(pids.mcp)).toBe(false);
+    await s.interrupt();
+    expect(await turn(s)).toContainEqual({ type: 'turn_end' });
+    await expect.poll(() => gone(pids.child)).toBe(true);
+    expect(gone(pids.mcp)).toBe(false);
+    await s.followUp(task);
+    expect(await turn(s)).toContainEqual(expect.objectContaining({ type: 'tool_result', toolCallId: 'mcp-after-abort',
+      output: expect.objectContaining({ result: expect.objectContaining({ content: [{ type: 'text', text: 'byok-echo:after abort' }] }) }),
+    }));
+    expect(gone(pids.mcp)).toBe(false);
   });
   it('late interrupt has a deadline and terminates the affected session', async () => {
     const s = await open(

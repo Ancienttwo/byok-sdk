@@ -1,5 +1,10 @@
+import type { RuntimeInputOptions } from '../types';
 import type { spawnOwnedLineProcess } from './owned-line-process';
 import type { spawnOwnedTerminalProcess } from './owned-terminal-process';
+import type { ModelReader, UsageReader } from './oar-reader-contract.js';
+export declare const grokListModels: ModelReader;
+export declare const grokAccountUsage: UsageReader;
+export declare const antigravityListModels: ModelReader;
 // Self-contained: the build copies this declaration to dist for the private `#byok-acp-runtime` import.
 /** A resume of a missing native session: the vendored typed error, never matched by name or message. */
 export declare class SessionNotFoundError extends Error {
@@ -38,15 +43,20 @@ export interface AcpRecord {
   readonly body: unknown;
 }
 /** The vendored ACP AdapterSession, narrowed to what the SDK calls. */
+export declare function antigravitySessionCapabilities(): { readonly steer: true };
+export declare function grokSessionCapabilities(): { readonly steer: true; readonly images: true };
+export declare function opencodeSessionCapabilities(installation: { kind: 'available'; via: 'executable'; command: string; version?: string }): { readonly steer?: boolean; readonly images?: boolean };
+
 export interface RawAcpSession {
   readonly id: string;
+  readonly capabilities: { readonly images: boolean };
   /** `inputId` names the prompt, so a runtime with native turns (Grok) reports its turn with that id. */
-  prompt(input: string, options?: { inputId?: string }): Promise<AcpControl>;
+  prompt(input: string, options?: RuntimeInputOptions): Promise<AcpControl>;
   /** Held by the session until the active turn (also the runtime's own) closes, then sent as a prompt carrying `inputId`. */
-  queue(input: string, options: { inputId: string }): Promise<AcpControl>;
+  queue(input: string, options?: RuntimeInputOptions): Promise<AcpControl>;
   /** Takes held input back before it is sent; `not_queued` once the drain sent it. Every vendored ACP session has it. */
   withdraw?(inputId: string): Promise<AcpControl>;
-  steer?(input: string): Promise<AcpControl>;
+  steer?(input: string, options?: RuntimeInputOptions): Promise<AcpControl>;
   abort(): Promise<AcpControl>;
   records(): readonly AcpRecord[];
   dispose(): Promise<void>;
@@ -76,6 +86,7 @@ export type StartAcpSession = (
     retainedBytes: number;
     resume?: string;
     model?: string;
+    effort?: string;
     /** OAR SessionOptions.appendSystemPrompt: session-local instructions added to the runtime's built-in ones. */
     appendSystemPrompt?: string;
     /** OAR SessionOptions.launchArgs: joined to the profile's argv where the profile places them. */

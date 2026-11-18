@@ -401,6 +401,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
     delete before.version; delete after.version;
+    // #2379: admit only the new private oar-readers import. Remove this one-time admission
+    // once the version that ships #2379 becomes the base.
+    const oarReaders = { types: './dist/runtime/oar-readers.d.ts', default: './dist/runtime/oar-readers.js' };
+    if (path === 'packages/client/package.json' && !Object.hasOwn(before.imports ?? {}, '#byok-oar-readers')
+      && isDeepStrictEqual(after.imports?.['#byok-oar-readers'], oarReaders)) {
+      delete after.imports['#byok-oar-readers'];
+    }
     // #2286: core gains exactly its sqlite-node entry, from none or from part A's node-only shape. One-time: remove
     // this admission in the release that ships #2286, once that release's core manifest is the base (as #2218 did).
     const sqliteNode = { types: './dist/sqlite-node.d.ts', default: './dist/sqlite-node.js' };

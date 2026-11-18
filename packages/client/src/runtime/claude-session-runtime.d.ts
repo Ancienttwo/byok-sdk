@@ -1,3 +1,4 @@
+import type { RuntimeInputOptions } from '../types';
 import type { spawnOwnedLineProcess } from './owned-line-process';
 /** Structural SPI: one complete kernel record of a Claude stream-json session. */
 export interface ClaudeRecord {
@@ -12,11 +13,14 @@ export interface ClaudeControl {
   response: { body: { kind: string; code?: string | number | null; reason?: string } };
 }
 /** The vendored stream-json AdapterSession, narrowed to what the SDK calls. Claude `steer` stays off. */
+export declare function claudeSessionCapabilities(): { readonly steer: true; readonly images: true };
+
 export interface RawClaudeSession {
   readonly id: string;
-  prompt(input: string): Promise<ClaudeControl>;
+  readonly capabilities: { readonly images: boolean };
+  prompt(input: string, options?: RuntimeInputOptions): Promise<ClaudeControl>;
   /** Input for after the turn Claude runs on its own; OAR holds it and sends it when that turn ends. */
-  queue(input: string, options: { inputId: string }): Promise<ClaudeControl>;
+  queue(input: string, options?: RuntimeInputOptions): Promise<ClaudeControl>;
   /** Takes a held input back before OAR sends it; `not_queued` once it was sent. The stream-json session always has it. */
   withdraw?(inputId: string): Promise<ClaudeControl>;
   abort(): Promise<ClaudeControl>;
@@ -33,6 +37,7 @@ export declare const resumedClaudeProjection: ClaudeProjectionState;
 export interface ClaudeCredentialRedactor {
   values(this: void): readonly string[];
   add(this: void, value: string | undefined): void;
+  addImage(this: void, data: string): void;
   redact(this: void, text: string): string;
   redactValue<T>(this: void, value: T): T;
 }
@@ -43,7 +48,7 @@ export declare function sessionCredentialRedactor(options: {
 export interface ClaudeSessionProfile {
   readonly projection: ClaudeProjectionProfile;
   readonly initial: ClaudeProjectionState;
-  readonly capabilities: { readonly queue: { readonly durable: false }; readonly attribution: 'attributed'; readonly images: false };
+  readonly capabilities: { readonly queue: { readonly durable: false }; readonly attribution: 'attributed'; readonly images: true };
   readonly steer: false;
   /** Private control responses are consumed before the fold records them. */
   readonly consume: (message: Record<string, unknown>) => boolean;

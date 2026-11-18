@@ -3,16 +3,16 @@ type ErrorExports<M> = Extract<keyof M, `${string}Error`>;
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
-import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/codex/session.js';
-import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/bc1b2ac/contracts/session.js';
-import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/codex/app-server-client.js';
+import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/609f347/runtimes/codex/session.js';
+import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/609f347/contracts/session.js';
+import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/609f347/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnvironment } from '../../packages/client/src/runtime/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
-import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/bc1b2ac/contracts/session-not-found-error.js';
-import type { SessionUnavailableError as VendorSessionUnavailableError } from '../../packages/client/vendor/oar/bc1b2ac/contracts/session-unavailable-error.js';
+import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/609f347/contracts/session-not-found-error.js';
+import type { SessionUnavailableError as VendorSessionUnavailableError } from '../../packages/client/vendor/oar/609f347/contracts/session-unavailable-error.js';
 import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
-import type * as VendorTree from '../../packages/client/vendor/oar/bc1b2ac/shared/executable/process-tree.js';
+import type * as VendorTree from '../../packages/client/vendor/oar/609f347/shared/executable/process-tree.js';
 
 type Assert<T extends true> = T;
 type Equal<A, B> =
@@ -31,7 +31,7 @@ type BridgeArgs = Parameters<typeof Bridge.codexSession>;
 type Executable = Extract<VendorArgs[1], { via: 'executable' }>;
 type BridgeInstallation = Mutable<Pick<Executable, 'kind' | 'via' | 'command'>>;
 type BridgeOptions = Mutable<
-  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
+  Pick<VendorArgs[2], 'cwd' | 'resume' | 'model' | 'effort' | 'approvalPolicy' | 'sandboxMode' | 'launchArgs' | 'mcpServers' | 'endTurnProcessesOnAbort'> & Required<Pick<VendorArgs[2], 'env' | 'retainedBytes'>>
 >;
 type VendorHooks = NonNullable<VendorArgs[4]>;
 type BridgeHooks = Mutable<Omit<VendorHooks, 'onRecord'>> & {
@@ -61,11 +61,15 @@ type BridgeRecord = Pick<RawEvent, 'seq' | 'sessionId' | 'agentPath'> & {
   readonly kind: WidenString<RawEvent['kind']>;
   readonly body: unknown;
 };
-type FirstInput<T extends (...args: never[]) => unknown> = [Parameters<T>[0]];
+type BridgeInput<T extends (...args: never[]) => unknown> = [input: Parameters<T>[0], options?: Pick<NonNullable<Parameters<T>[1]>, 'inputId' | 'images'>];
+import type { RuntimeInputOptions } from '../../packages/client/src/types.js';
+export type CheckInputOptions = Assert<Equal<RuntimeInputOptions, NonNullable<BridgeInput<AdapterSession['prompt']>[1]>>>;
 type BridgeSession = {
+  readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
   readonly id: CodexAdapterSession['id'];
-  prompt(...args: FirstInput<CodexAdapterSession['prompt']>): Promise<Bridge.CodexControl>;
-  steer(...args: FirstInput<CodexAdapterSession['steer']>): Promise<Bridge.CodexControl>;
+  prompt(...args: BridgeInput<CodexAdapterSession['prompt']>): Promise<Bridge.CodexControl>;
+  steer(...args: BridgeInput<CodexAdapterSession['steer']>): Promise<Bridge.CodexControl>;
+  queue(...args: BridgeInput<CodexAdapterSession['queue']>): Promise<Bridge.CodexControl>;
   abort(...args: Parameters<CodexAdapterSession['abort']>): Promise<Bridge.CodexControl>;
   records(): readonly CodexRecord[];
   dispose: CodexAdapterSession['dispose'];
@@ -73,7 +77,7 @@ type BridgeSession = {
 
 // Exact checks catch removed members, extra members, and wider local types.
 // Named aliases identify the failed seam in compiler output.
-export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | keyof OarStartErrorClasses>>;
+export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | 'codexSessionCapabilities' | keyof OarStartErrorClasses>>;
 export type CheckNotFoundInstance = Assert<Equal<Bridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 export type CheckNotFoundConstructor = Assert<Equal<
   ConstructorParameters<typeof Bridge.SessionNotFoundError>,
@@ -96,7 +100,7 @@ export type CheckSession = Assert<Equal<Bridge.RawCodexSession, BridgeSession>>;
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 manual compaction) is omitted on purpose: exposing it is a separate product decision.
 export type CheckSessionMembers = Assert<Equal<
-  Exclude<keyof CodexAdapterSession, 'capabilities' | 'goal' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
+  Exclude<keyof CodexAdapterSession, 'goal' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof Bridge.RawCodexSession
 >>;
 export type CheckReturn = Assert<Equal<ReturnType<typeof Bridge.codexSession>, Promise<Bridge.RawCodexSession>>>;
@@ -110,7 +114,7 @@ export type CheckVendorRecords = Assert<Equal<ReturnType<CodexAdapterSession['re
 export type CheckVendorHook = Assert<Equal<NonNullable<VendorHooks['onRecord']>, (record: RawEvent) => void>>;
 
 // Check the real transport, env producer, and record consumer too.
-export type CheckSpawnParameters = Assert<Equal<Parameters<typeof spawnOwnedLineProcess>, Parameters<SpawnLineProcess>>>;
+export type CheckSpawnParameters = Assert<Assignable<typeof spawnOwnedLineProcess, SpawnLineProcess>>;
 export type CheckVendorSpawnParameter = Assert<Equal<VendorArgs[0], SpawnLineProcess>>;
 export type CheckSpawn = Assert<Assignable<typeof spawnOwnedLineProcess, SpawnLineProcess>>;
 export type CheckLineProcess = Assert<Equal<
@@ -140,39 +144,39 @@ export type CheckTreeParsePs = Assert<Equal<typeof TreeBridge.parseProcessPs, ty
 // The ACP bridge: one start signature for every vendored ACP runtime, with
 // the SDK-owned agent process, terminal processes and explicit environment.
 import type * as AcpBridge from '../../packages/client/src/runtime/acp-session-runtime.js';
-import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/bc1b2ac/shared/acp/session.js';
-import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/bc1b2ac/shared/acp/process.js';
-import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/bc1b2ac/shared/acp/terminal.js';
-import type { AdapterSession } from '../../packages/client/vendor/oar/bc1b2ac/contracts/session.js';
-import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/bc1b2ac/contracts/runtime-failure-error.js';
-import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/bc1b2ac/contracts/errors.js';
-import type { ModelConfirmationError as VendorModelConfirmationError } from '../../packages/client/vendor/oar/bc1b2ac/contracts/model-confirmation-error.js';
+import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/609f347/shared/acp/session.js';
+import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/609f347/shared/acp/process.js';
+import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/609f347/shared/acp/terminal.js';
+import type { AdapterSession } from '../../packages/client/vendor/oar/609f347/contracts/session.js';
+import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/609f347/contracts/runtime-failure-error.js';
+import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/609f347/contracts/errors.js';
+import type { ModelConfirmationError as VendorModelConfirmationError } from '../../packages/client/vendor/oar/609f347/contracts/model-confirmation-error.js';
 import type { spawnOwnedTerminalProcess } from '../../packages/client/src/runtime/owned-terminal-process.js';
-import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/grok/session.js';
-import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/antigravity/session.js';
+import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/609f347/runtimes/grok/session.js';
+import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/session.js';
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
-  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'appendSystemPrompt' | 'launchArgs' | 'mcpServers'> & Required<Pick<AcpSessionOptions, 'retainedBytes'>>
+  Pick<AcpSessionOptions, 'cwd' | 'env' | 'resume' | 'model' | 'effort' | 'appendSystemPrompt' | 'launchArgs' | 'mcpServers'> & Required<Pick<AcpSessionOptions, 'retainedBytes'>>
 >;
 type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord' | 'onPermission'>> & {
   onRecord?: (record: AcpBridge.AcpRecord) => void;
   onPermission?: (request: AcpBridge.AcpPermissionRequest) => AcpBridge.AcpPermissionResponse;
 };
-// The input id names a prompt to a runtime with native turns (Grok), so its turn is told from the runtime's own.
-type AcpInputId = { inputId?: string };
+
 type AcpBridgeSession = {
+  readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
   readonly id: AdapterSession['id'];
-  prompt(input: Parameters<AdapterSession['prompt']>[0], options?: AcpInputId): Promise<AcpBridge.AcpControl>;
-  queue(input: Parameters<AdapterSession['queue']>[0], options: Required<AcpInputId>): Promise<AcpBridge.AcpControl>;
+  prompt(...args: BridgeInput<AdapterSession['prompt']>): Promise<AcpBridge.AcpControl>;
+  queue(...args: BridgeInput<AdapterSession['queue']>): Promise<AcpBridge.AcpControl>;
   withdraw?(...args: Parameters<NonNullable<AdapterSession['withdraw']>>): Promise<AcpBridge.AcpControl>;
-  steer?(...args: FirstInput<NonNullable<AdapterSession['steer']>>): Promise<AcpBridge.AcpControl>;
+  steer?(...args: BridgeInput<NonNullable<AdapterSession['steer']>>): Promise<AcpBridge.AcpControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<AcpBridge.AcpControl>;
   records(): readonly AcpBridge.AcpRecord[];
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'grokSession' | 'antigravitySession' | 'opencodeSession'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'grokSession' | 'antigravitySession' | 'opencodeSession' | 'grokSessionCapabilities' | 'antigravitySessionCapabilities' | 'opencodeSessionCapabilities' | 'grokListModels' | 'grokAccountUsage' | 'antigravityListModels'>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckAcpUnsupportedOption = Assert<Assignable<VendorUnsupportedOptionError, AcpBridge.UnsupportedOptionError>>;
@@ -192,7 +196,7 @@ export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSes
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 generic contract) is omitted on purpose, as for Codex.
 export type CheckAcpSessionMembers = Assert<Equal<
-  Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
+  Exclude<keyof AdapterSession, 'goal' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof AcpBridge.RawAcpSession
 >>;
 export type CheckAcpPermissionHook = Assert<Assignable<NonNullable<AcpBridgeHooks['onPermission']>, NonNullable<AcpSessionHooks['onPermission']>>>;
@@ -216,9 +220,9 @@ export type CheckAcpEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildR
 // The failure bridge (#869): the vendored OAR failure tables, typed with the
 // protocol's class. The protocol enum and OAR's `FailureClass` are one set.
 import type * as FailureBridge from '../../packages/client/src/runtime/oar-failure-runtime.js';
-import type { codexFailure as vendorCodexFailure } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/codex/failure.js';
-import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/bc1b2ac/shared/failure-class.js';
-import type { FailureClass } from '../../packages/client/vendor/oar/bc1b2ac/contracts/failure.js';
+import type { codexFailure as vendorCodexFailure } from '../../packages/client/vendor/oar/609f347/runtimes/codex/failure.js';
+import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/609f347/shared/failure-class.js';
+import type { FailureClass } from '../../packages/client/vendor/oar/609f347/contracts/failure.js';
 import type { RuntimeFailureClass } from '../../packages/protocol/src/messages.js';
 
 export type CheckRuntimeFailureClass = Assert<Equal<RuntimeFailureClass, FailureClass>>;
@@ -231,25 +235,27 @@ export type CheckCodexFailureFromText = Assert<Equal<ReturnType<typeof FailureBr
 export type CheckCodexFailureVendor = Assert<Assignable<typeof vendorCodexFailure, typeof FailureBridge.codexFailure>>;
 
 // The dsh bridge: the vendored native runtime, narrowed to what the SDK calls.
-// 'queue' and 'withdraw' are omitted on purpose, as for Codex. The runtime reports steer; the vendored session always returns it for the qualified dsh.
+// 'withdraw' is omitted on purpose, as for Codex. The runtime reports steer; the vendored session always returns it for the qualified dsh.
 import type * as DshBridge from '../../packages/client/src/runtime/dsh-session-runtime.js';
-import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/dsh/session.js';
-import type { dshMcpRows as vendorDshMcpRows } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/dsh/mcp.js';
-import type { DshLineProcess } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/dsh/launch.js';
+import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/session.js';
+import type { dshMcpRows as vendorDshMcpRows } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/mcp.js';
+import type { DshLineProcess } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/launch.js';
 
 type VendorDshArgs = Parameters<typeof vendorDshSession>;
 type DshBridgeArgs = Parameters<typeof DshBridge.dshSession>;
-type DshBridgeOptions = { cwd: string; model: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> }; retainedBytes: number; appendSystemPrompt?: string };
+type DshBridgeOptions = { cwd: string; model: string; effort?: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> }; retainedBytes: number; appendSystemPrompt?: string };
 type DshVendorSession = Awaited<ReturnType<typeof vendorDshSession>>;
 type DshBridgeSession = {
+  readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
   readonly id: AdapterSession['id'];
-  prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<DshBridge.DshControl>;
-  steer(...args: FirstInput<DshVendorSession['steer']>): Promise<DshBridge.DshControl>;
+  prompt(...args: BridgeInput<AdapterSession['prompt']>): Promise<DshBridge.DshControl>;
+  steer(...args: BridgeInput<DshVendorSession['steer']>): Promise<DshBridge.DshControl>;
+  queue(...args: BridgeInput<DshVendorSession['queue']>): Promise<DshBridge.DshControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<DshBridge.DshControl>;
   records(): readonly DshBridge.DshRecord[];
   dispose: AdapterSession['dispose'];
 };
-export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'dshMcpRows' | keyof OarStartErrorClasses>>;
+export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'dshSessionCapabilities' | 'dshMcpRows' | keyof OarStartErrorClasses>>;
 export type CheckDshMcpRows = Assert<Equal<typeof DshBridge.dshMcpRows, typeof vendorDshMcpRows>>;
 export type CheckDshOptions = Assert<Equal<Mutable<DshBridgeArgs[2]>, DshBridgeOptions>>;
 export type CheckDshVendorOptions = Assert<Assignable<DshBridgeArgs[2], VendorDshArgs[2]>>;
@@ -259,14 +265,14 @@ export type CheckDshControl = Assert<Equal<DshBridge.DshControl, BridgeControl>>
 export type CheckDshRecord = Assert<Equal<DshBridge.DshRecord, Flatten<BridgeRecord>>>;
 export type CheckDshSession = Assert<Equal<DshBridge.RawDshSession, DshBridgeSession>>;
 export type CheckDshSessionMembers = Assert<Equal<
-  Exclude<keyof DshVendorSession, 'capabilities' | 'goal' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
+  Exclude<keyof DshVendorSession, 'goal' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof DshBridge.RawDshSession
 >>;
 export type CheckDshVendorSession = Assert<Assignable<DshVendorSession, DshBridge.RawDshSession>>;
 export type CheckDshSpawn = Assert<Assignable<ReturnType<typeof spawnOwnedLineProcess>, DshLineProcess>>;
 export type CheckDshNotFound = Assert<Equal<DshBridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 
-import type { opencodeSession as vendorOpenCodeSession } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/opencode/session.js';
+import type { opencodeSession as vendorOpenCodeSession } from '../../packages/client/vendor/oar/609f347/runtimes/opencode/session.js';
 export type CheckOpenCodeVendor = Assert<Equal<typeof vendorOpenCodeSession, VendorStartAcp>>;
 export type CheckOpenCodeBridge = Assert<Equal<typeof AcpBridge.opencodeSession, AcpBridge.StartAcpSession>>;
 
@@ -285,19 +291,22 @@ export type CheckDshModelConfirmation = Assert<Equal<DshBridge.ModelConfirmation
 // The Claude bridge: the vendored stream-json session and the Claude projection
 // profile. The adapter assembles the session profile; the fold stays opaque.
 import type * as ClaudeBridge from '../../packages/client/src/runtime/claude-session-runtime.js';
-import type { streamJsonSession as vendorStreamJsonSession, StreamJsonSessionHooks } from '../../packages/client/vendor/oar/bc1b2ac/shared/stream-json/session.js';
-import type { StreamJsonSessionProfile } from '../../packages/client/vendor/oar/bc1b2ac/shared/stream-json/profile.js';
-import type { claudeProjectionProfile as vendorClaudeProfile, ClaudeProjectionState as VendorClaudeState } from '../../packages/client/vendor/oar/bc1b2ac/runtimes/claude/projection.js';
-import type { sessionCredentialRedactor as vendorRedactor, CredentialRedactor } from '../../packages/client/vendor/oar/bc1b2ac/shared/credential-redactor.js';
+import type { ClaudeStreamSessionOptions } from '../../packages/client/src/adapters/claude/stream-session.js';
+export type CheckClaudeEffort = Assert<Equal<Pick<ClaudeStreamSessionOptions, 'effort'>, Mutable<Pick<VendorArgs[2], 'effort'>>>>;
+import type { streamJsonSession as vendorStreamJsonSession, StreamJsonSessionHooks } from '../../packages/client/vendor/oar/609f347/shared/stream-json/session.js';
+import type { StreamJsonSessionProfile } from '../../packages/client/vendor/oar/609f347/shared/stream-json/profile.js';
+import type { claudeProjectionProfile as vendorClaudeProfile, ClaudeProjectionState as VendorClaudeState } from '../../packages/client/vendor/oar/609f347/runtimes/claude/projection.js';
+import type { sessionCredentialRedactor as vendorRedactor, CredentialRedactor } from '../../packages/client/vendor/oar/609f347/shared/credential-redactor.js';
 
 type ClaudeVendorArgs = Parameters<typeof vendorStreamJsonSession<VendorClaudeState>>;
 type ClaudeVendorProfile = StreamJsonSessionProfile<VendorClaudeState>;
 type ClaudeBridgeArgs = Parameters<typeof ClaudeBridge.streamJsonSession>;
 type ClaudeVendorSession = Awaited<ReturnType<typeof vendorStreamJsonSession>>;
 type ClaudeBridgeSession = {
+  readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
   readonly id: AdapterSession['id'];
-  prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<ClaudeBridge.ClaudeControl>;
-  queue(input: Parameters<AdapterSession['queue']>[0], options: { inputId: string }): Promise<ClaudeBridge.ClaudeControl>;
+  prompt(...args: BridgeInput<AdapterSession['prompt']>): Promise<ClaudeBridge.ClaudeControl>;
+  queue(...args: BridgeInput<AdapterSession['queue']>): Promise<ClaudeBridge.ClaudeControl>;
   withdraw?(...args: Parameters<NonNullable<AdapterSession['withdraw']>>): Promise<ClaudeBridge.ClaudeControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<ClaudeBridge.ClaudeControl>;
   records(): readonly ClaudeBridge.ClaudeRecord[];
@@ -305,7 +314,7 @@ type ClaudeBridgeSession = {
 };
 type ClaudeSharedProfileKeys = 'capabilities' | 'steer' | 'consume' | 'open' | 'exited' | 'disposing';
 export type CheckClaudeExports = Assert<Equal<keyof typeof ClaudeBridge,
-  'streamJsonSession' | 'claudeProjectionProfile' | 'initialClaudeProjection' | 'resumedClaudeProjection' | 'sessionCredentialRedactor'>>;
+  'streamJsonSession' | 'claudeSessionCapabilities' | 'claudeProjectionProfile' | 'initialClaudeProjection' | 'resumedClaudeProjection' | 'sessionCredentialRedactor'>>;
 export type CheckClaudeControl = Assert<Equal<ClaudeBridge.ClaudeControl, BridgeControl>>;
 export type CheckClaudeRecord = Assert<Equal<ClaudeBridge.ClaudeRecord, Flatten<BridgeRecord>>>;
 export type CheckClaudeSession = Assert<Equal<ClaudeBridge.RawClaudeSession, ClaudeBridgeSession>>;
@@ -322,5 +331,43 @@ export type CheckClaudeRetention = Assert<Equal<ClaudeBridgeArgs[5], ClaudeVendo
 // 'Runtime.minVersion' (OAR 0.110 runtime contract) is omitted on purpose: no bridge exports an OAR Runtime
 // (runtimes/*/index.ts is not selected), and each SDK adapter's RuntimeVersionPolicy owns its version gate.
 // The check fails when the vendored member changes or goes away, so the omission is revisited then.
-import type { Runtime as VendorRuntime } from '../../packages/client/vendor/oar/bc1b2ac/contracts/runtime.js';
+import type { Runtime as VendorRuntime } from '../../packages/client/vendor/oar/609f347/contracts/runtime.js';
 export type CheckRuntimeMinVersionOmitted = Assert<Equal<VendorRuntime['minVersion'], string | undefined>>;
+// The pre-open declaration is intentionally deferred until the SDK consumes it.
+export type CheckRuntimeSessionCapabilitiesOmitted = Assert<Equal<VendorRuntime['sessionCapabilities'], ((installation: import('../../packages/client/vendor/oar/609f347/contracts/installation.js').AvailableInstallation) => import('../../packages/client/vendor/oar/609f347/contracts/runtime.js').SessionCapabilityDeclaration) | undefined>>;
+
+// The SDK supplies both the filtered environment and every reader transport.
+import type * as Readers from '../../packages/client/src/runtime/oar-readers.js';
+import type * as VersionFloors from '../../packages/client/src/runtime/oar-version-floors.js';
+import type { OwnedReaderOptions as SdkReaderOptions } from '../../packages/client/src/runtime/oar-reader-contract.js';
+import type { OwnedReaderOptions as VendorReaderOptions, ListModelsResult } from '../../packages/client/vendor/oar/609f347/contracts/list-models.js';
+import type { AccountUsageSnapshot } from '../../packages/client/vendor/oar/609f347/contracts/account-usage.js';
+import type { RuntimeAccountUsage, RuntimeModelCatalog } from '../../packages/client/src/runtime/runtime-reader-types.js';
+import type { codexListModels as V_codexListModels } from '../../packages/client/vendor/oar/609f347/runtimes/codex/list-models.js';
+export type Check_codexListModels = Assert<Assignable<typeof V_codexListModels, typeof Readers.codexListModels>>;
+import type { codexAccountUsage as V_codexAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/codex/account-usage.js';
+export type Check_codexAccountUsage = Assert<Assignable<typeof V_codexAccountUsage, typeof Readers.codexAccountUsage>>;
+import type { claudeListModels as V_claudeListModels } from '../../packages/client/vendor/oar/609f347/runtimes/claude/list-models.js';
+export type Check_claudeListModels = Assert<Assignable<typeof V_claudeListModels, typeof Readers.claudeListModels>>;
+import type { claudeAccountUsage as V_claudeAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/claude/account-usage.js';
+export type Check_claudeAccountUsage = Assert<Assignable<typeof V_claudeAccountUsage, typeof Readers.claudeAccountUsage>>;
+import type { dshListModels as V_dshListModels } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/list-models.js';
+export type Check_dshListModels = Assert<Assignable<typeof V_dshListModels, typeof Readers.dshListModels>>;
+import type { opencodeListModels as V_opencodeListModels } from '../../packages/client/vendor/oar/609f347/runtimes/opencode/list-models.js';
+export type Check_opencodeListModels = Assert<Assignable<typeof V_opencodeListModels, typeof Readers.opencodeListModels>>;
+import type { antigravityAccountUsage as V_antigravityAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/account-usage.js';
+export type Check_antigravityAccountUsage = Assert<Assignable<typeof V_antigravityAccountUsage, typeof Readers.antigravityAccountUsage>>;
+import type { antigravityVersionRefusal as V_antigravityVersionRefusal } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/version.js';
+export type Check_antigravityVersionRefusal = Assert<Assignable<typeof V_antigravityVersionRefusal, typeof VersionFloors.antigravityVersionRefusal>>;
+import type { dshVersionUnsupported as V_dshVersionUnsupported } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/version.js';
+export type Check_dshVersionUnsupported = Assert<Assignable<typeof V_dshVersionUnsupported, typeof VersionFloors.dshVersionUnsupported>>;
+import type { grokListModels as V_grokListModels } from '../../packages/client/vendor/oar/609f347/runtimes/grok/list-models.js';
+import type { grokAccountUsage as V_grokAccountUsage } from '../../packages/client/vendor/oar/609f347/runtimes/grok/account-usage.js';
+import type { antigravityListModels as V_antigravityListModels } from '../../packages/client/vendor/oar/609f347/runtimes/antigravity/list-models.js';
+export type CheckGrokListModels = Assert<Assignable<typeof V_grokListModels, typeof AcpBridge.grokListModels>>;
+export type CheckGrokAccountUsage = Assert<Assignable<typeof V_grokAccountUsage, typeof AcpBridge.grokAccountUsage>>;
+export type CheckAntigravityListModels = Assert<Assignable<typeof V_antigravityListModels, typeof AcpBridge.antigravityListModels>>;
+export type CheckReaderEnvironment = Assert<Assignable<SdkReaderOptions, VendorReaderOptions>>;
+export type CheckModelCatalog = Assert<Equal<RuntimeModelCatalog, ListModelsResult>>;
+export type CheckUsageSnapshot = Assert<Assignable<AccountUsageSnapshot, RuntimeAccountUsage>>;
+export type CheckUsageKinds = Assert<Equal<AccountUsageSnapshot['kind'], RuntimeAccountUsage['kind']>>;

@@ -45,6 +45,9 @@ export function formatAgentEvent(event: AgentEvent): string {
       return 'turn_end';
     case 'error':
       return `error: ${quote(event.message)}`;
+    case 'subagent_start':
+    case 'subagent_end':
+      return `${event.type}: ${JSON.stringify(event.agentPath)}`;
     case 'usage': {
       const parts: string[] = [];
       if (event.inputTokens !== undefined) parts.push(`in=${event.inputTokens}`);
@@ -248,6 +251,11 @@ export function formatTaskListLines(tasks: readonly (DaemonTaskInfo | DerivedTas
   return tasks.map(formatTaskLine);
 }
 
+export function formatUnsupportedRuntimeVersion(runtime: Pick<RuntimeObservation, 'unsupportedVersion'>): string | undefined {
+  const versions = runtime.unsupportedVersion;
+  return versions === undefined ? undefined : `installedVersion=${versions.installedVersion ?? '(unknown)'} requiredVersion=${versions.requiredVersion}`;
+}
+
 export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): string[] {
   if (runtimes.length === 0) return ['(no runtimes configured — check runtimeAllowlist)'];
   return runtimes.map((r) => {
@@ -385,6 +393,8 @@ function formatRuntimeObservations(runtimes: readonly RuntimeObservation[]): str
       ? ''
       : `:versionChange=${runtime.versionChange.direction}(${runtime.versionChange.fromVersion}->${runtime.versionChange.toVersion})`;
     const executable = formatRuntimeExecutable(runtime);
+    const unsupported = formatUnsupportedRuntimeVersion(runtime);
+    if (unsupported !== undefined) return `${runtime.id}=refused:version_unsupported(${unsupported})`;
     return `${runtime.id}=${outcome}${runtime.versionVerdict?.state === 'block' ? ':blocked' : ''}${change}${executable === undefined ? '' : `:${executable}`}`;
   }).join(' ') || '(none)';
 }

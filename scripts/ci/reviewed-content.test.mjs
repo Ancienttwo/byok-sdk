@@ -109,9 +109,9 @@ test('a bin API entry selects the package that declares the bin; an undeclared b
   assert.throws(() => selectImpact(['api-surface/entries.json'], f), /unmapped API entry bin:byok-unknown/);
 });
 test('reviewed vendor and registry paths map explicitly, siblings still refuse', () => {
-  assert.ok(selectImpact(['packages/client/vendor/oar/bc1b2ac/runtimes/grok/session.ts']).dirs.includes('packages/client'));
+  assert.ok(selectImpact(['packages/client/vendor/oar/609f347/runtimes/grok/session.ts']).dirs.includes('packages/client'));
   assert.deepEqual(selectImpact(['scripts/release/registry-contract.test.mjs', 'scripts/release/registry-expectations.json']).dirs, []);
-  assert.throws(() => selectImpact(['packages/client/vendor/oar/bc1b2ac/unreviewed.ts']));
+  assert.throws(() => selectImpact(['packages/client/vendor/oar/609f347/unreviewed.ts']));
   assert.throws(() => selectImpact(['scripts/release/registry-contract.mjs']));
 });
 test('CLI and aggregate revalidate content against the same trusted comparison base', t => {
@@ -418,6 +418,23 @@ function rebase(f, message) {
   git('add', '.'); git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', message);
   f.base = git('rev-parse', 'HEAD').trim();
 }
+
+test('#2379: client admits exactly its new oar-readers import', t => {
+  const f = fixture(t), path = 'packages/client/package.json';
+  const manifest = { ...f.manifest, imports: { '#existing': './dist/existing.js' } };
+  f.write(path, manifest); rebase(f, 'client before oar-readers');
+  const entry = { types: './dist/runtime/oar-readers.d.ts', default: './dist/runtime/oar-readers.js' };
+  const write = (value, extra = {}) => f.write(path, { ...manifest, ...extra, imports: { ...manifest.imports, '#byok-oar-readers': value } });
+  write(entry);
+  assert.doesNotThrow(() => selectImpact([path], f));
+  write({ ...entry, extra: './dist/extra.js' });
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  write(entry, { description: 'unreviewed' });
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  write({ ...entry, default: './dist/old.js' }); rebase(f, 'client with a different oar-readers import');
+  write(entry);
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+});
 
 test('#2286: core admits exactly its sqlite-node entry', t => {
   const f = fixture(t), path = 'packages/core/package.json';

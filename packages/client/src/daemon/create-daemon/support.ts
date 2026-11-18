@@ -1,10 +1,11 @@
 import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal.js';
+import { TASK_EXECUTION_OPTIONS_CAPABILITY } from '@byok-sdk/protocol/constants';
 import { encodeEnvelope, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types.js';
 import type { DaemonConfigIssue } from '../config-schema/validate.js';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
-import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection.js';
+import { type RuntimeObservation, detectedRuntimeCapabilities, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection.js';
 import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
 import { runtimeVersionPolicyProjection } from '../../runtime-version-policy.js';
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities.js';
@@ -137,10 +138,11 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
     // Absence of a verdict means the adapter declares no policy: omit the
     // field rather than inventing `allow` (#1103 D8/D9).
     const versionPolicy = runtimeVersionPolicyProjection(detected.versionVerdict);
+    const capabilities = toRuntimeInfoCapabilities(detectedRuntimeCapabilities(adapter.descriptor, detected));
     if (!isWireRuntimeId(adapter.descriptor.id)) {
       harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
         ...(detected.version === undefined ? {} : { version: detected.version }),
-        capabilities: toRuntimeInfoCapabilities(adapter.descriptor.capabilities),
+        capabilities,
         ...(versionPolicy === undefined ? {} : { versionPolicy }) });
       continue;
     }
@@ -151,7 +153,7 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
     // surfaces this adapter descriptor's capabilities into
     // the per-runtime wire field — see `toRuntimeInfoCapabilities`'s doc
     // comment.
-    info.capabilities = toRuntimeInfoCapabilities(adapter.descriptor.capabilities);
+    info.capabilities = capabilities;
     if (versionPolicy !== undefined) info.versionPolicy = versionPolicy;
     runtimes.push(info);
   }
@@ -177,8 +179,11 @@ export function computeCapabilities(
   agentMemoryIntentsProven = false,
   agentMemoryBackendProven = false,
   nativeSessions?: { enabled?: boolean; platform?: NodeJS.Platform; sessionDir?: string },
+  runtimeAllowlist?: readonly string[],
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
+  if (adapters.some(({ descriptor }) => descriptor.supportsTaskExecutionOptions === true
+    && (runtimeAllowlist === undefined || runtimeAllowlist.includes(descriptor.id)))) flags.push(TASK_EXECUTION_OPTIONS_CAPABILITY);
   if (nativeSessions?.enabled === true
     && ['darwin', 'linux'].includes(nativeSessions.platform ?? process.platform)
     && nativeSessions.sessionDir !== undefined

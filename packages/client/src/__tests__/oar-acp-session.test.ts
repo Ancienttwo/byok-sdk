@@ -3,19 +3,19 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { acpSession, type AcpSessionHooks } from '../../vendor/oar/bc1b2ac/shared/acp/session';
-import type { AcpSessionProfile } from '../../vendor/oar/bc1b2ac/shared/acp/profile';
-import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/bc1b2ac/contracts/session';
-import { grokFailureOutcome } from '../../vendor/oar/bc1b2ac/runtimes/grok/failure';
+import { acpSession, type AcpSessionHooks } from '../../vendor/oar/609f347/shared/acp/session';
+import type { AcpSessionProfile } from '../../vendor/oar/609f347/shared/acp/profile';
+import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/609f347/contracts/session';
+import { grokFailureOutcome } from '../../vendor/oar/609f347/runtimes/grok/failure';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
-import { createAcpTurns } from '../../vendor/oar/bc1b2ac/shared/acp/turns';
-import { createUsageUpdateGate } from '../../vendor/oar/bc1b2ac/shared/acp/profile';
-import type { AcpProcess } from '../../vendor/oar/bc1b2ac/shared/acp/process';
-import { createSessionKernel } from '../../vendor/oar/bc1b2ac/shared/session-kernel';
-import { recordRetention } from '../../vendor/oar/bc1b2ac/shared/record-retention';
-import { antigravityAcpProfile } from '../../vendor/oar/bc1b2ac/runtimes/antigravity/session';
+import { createAcpTurns } from '../../vendor/oar/609f347/shared/acp/turns';
+import { createUsageUpdateGate } from '../../vendor/oar/609f347/shared/acp/profile';
+import type { AcpProcess } from '../../vendor/oar/609f347/shared/acp/process';
+import { createSessionKernel } from '../../vendor/oar/609f347/shared/session-kernel';
+import { recordRetention } from '../../vendor/oar/609f347/shared/record-retention';
+import { antigravityAcpProfile } from '../../vendor/oar/609f347/runtimes/antigravity/session';
 
 const FAKE = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 // A runtime-neutral profile: the shared stack under test, not a vendor's.
@@ -57,6 +57,26 @@ async function turn(session: AdapterSession, records: RawEvent[], input: string)
 }
 
 describe('vendored OAR ACP session over SDK-owned processes', () => {
+  it.each([true, false])('enforces opened image support and records paths only (images=%s)', async imagesSupported => {
+    const { dir, log } = workspace();
+    const pathToImage = path.join(dir, 'fixture.png');
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+    writeFileSync(pathToImage, Buffer.from(base64, 'base64'));
+    const session = await open({ PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log, FAKE_ACP_IMAGES: imagesSupported ? '1' : '0', FAKE_ACP_ECHO_IMAGE: '1' }, dir);
+    expect(session.capabilities.images).toBe(imagesSupported);
+    const delivered = await session.prompt('image test', { images: [{ path: pathToImage, mediaType: 'image/png' }] });
+    if (!imagesSupported) {
+      expect(delivered.response.body).toMatchObject({ kind: 'rejected', code: 'unsupported' });
+      expect(facts(log).some(fact => fact.kind === 'prompt')).toBe(false);
+      return;
+    }
+    expect(delivered.response.body.kind).toBe('accepted');
+    await vi.waitFor(() => expect(JSON.stringify(session.records())).toContain('[redacted]'));
+    expect(facts(log).find(fact => fact.kind === 'images')?.images).toEqual([expect.objectContaining({ data: base64, mimeType: 'image/png' })]);
+    const records = JSON.stringify(session.records());
+    expect(records).toContain(pathToImage);
+    expect(records).not.toContain(base64);
+  });
   it.each(['spawn', 'dispatch'].flatMap(wait => ['settlement', 'interrupt'].map(transition => ({ wait, transition }))))('rejects a steer waiting on $wait after $transition', async ({ wait, transition }) => {
     const gate = Promise.withResolvers<void>();
     const reply = Promise.withResolvers<{ stopReason: string }>();
@@ -74,7 +94,7 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     } as unknown as AcpProcess;
     const kernel = createSessionKernel('race');
     const turns = createAcpTurns({ kernel, runtime, profile: antigravityAcpProfile,
-      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, protectImage: vi.fn(), promptUsage: () => null });
     expect(turns.begin(null, 'first').kind).toBe('accepted');
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(1));
     const state = turns.active()!;
@@ -104,7 +124,7 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     const usageGate = createUsageUpdateGate();
     const settle = vi.spyOn(usageGate, 'settleAfterPrompt');
     const turns = createAcpTurns({ kernel, runtime, profile: { ...antigravityAcpProfile, abortTimeoutMs },
-      usageGate, capabilities: { images: false }, promptUsage: () => null });
+      usageGate, capabilities: { images: false }, protectImage: vi.fn(), promptUsage: () => null });
     expect(turns.begin(null, 'first').kind).toBe('accepted');
     const state = turns.active()!;
     const ended = async () => {
@@ -197,7 +217,7 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     } as unknown as AcpProcess;
     const kernel = createSessionKernel('answered');
     const turns = createAcpTurns({ kernel, runtime, profile: antigravityAcpProfile,
-      usageGate: createUsageUpdateGate(), capabilities: { images: false }, promptUsage: () => null });
+      usageGate: createUsageUpdateGate(), capabilities: { images: false }, protectImage: vi.fn(), promptUsage: () => null });
     expect(turns.begin(null, 'first').kind).toBe('accepted');
     const state = turns.active()!;
     await vi.waitFor(() => expect(state.pending.size).toBe(1));

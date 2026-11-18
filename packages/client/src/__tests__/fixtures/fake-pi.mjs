@@ -133,6 +133,7 @@ const FLAG_TAKES_VALUE = {
   '--no-extensions': false,
   '--mode': true,
   '--session': true,
+  '--thinking': true,
   '--extension': true,
   '--tools': true,
   '--exclude-tools': true,
@@ -228,6 +229,10 @@ rl.on('line', (line) => {
 });
 
 async function handleCommand(msg) {
+  const imageLog = process.env.FAKE_PI_IMAGE_RECEIPT;
+  if (imageLog && (msg.type === 'prompt' || msg.type === 'steer')) {
+    writeFileSync(imageLog, JSON.stringify({ type: msg.type, images: msg.images }) + '\n', { flag: 'a' });
+  }
   switch (msg.type) {
     case 'get_session_stats':
       send({ type: 'response', command: 'get_session_stats', id: msg.id, success: true, data: { contextUsage: JSON.parse(process.env.FAKE_PI_CONTEXT_USAGE ?? '{"tokens":0,"contextWindow":1000000,"percent":0}') } });
@@ -251,7 +256,7 @@ async function handleCommand(msg) {
         command: 'get_state',
         success: true,
         id: msg.id,
-        data: { model: { id: 'fake-model' }, thinkingLevel: 'off', isStreaming: false, sessionId },
+        data: { model: { id: 'fake-model', input: process.env.FAKE_PI_IMAGES === '1' ? ['text', 'image'] : ['text'] }, thinkingLevel: process.env.FAKE_PI_EFFORT_READBACK ?? (argv.includes('--thinking') ? argv[argv.indexOf('--thinking') + 1] : 'off'), isStreaming: false, sessionId },
       });
       break;
 

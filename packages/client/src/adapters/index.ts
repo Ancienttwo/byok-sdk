@@ -14,6 +14,10 @@ export type {
   RuntimeDetectResult,
   RuntimeDetectionRefusalReason,
 } from '../types.js';
+export type {
+  RuntimeAccountUsage, RuntimeAccountUsageUnsupportedReason, RuntimeAccountUsageWindow,
+  RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeModelEntry, RuntimeReadOptions, RuntimeUnsupportedVersion,
+} from '../runtime/runtime-reader-types.js';
 export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
 export type { RuntimeObservation } from '../runtime-detection.js';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure.js';

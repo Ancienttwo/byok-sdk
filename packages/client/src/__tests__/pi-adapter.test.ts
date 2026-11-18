@@ -578,6 +578,38 @@ const __executionScratch = await testExecutionScratch();
     expect(session.sessionRef).toBe('fixture-minted-session-xyz');
   });
 
+  it.each([true, false])('delivers prompt and steer images only when Pi confirms model support (images=%s)', async supported => {
+    const resources = await makeCtx({ ...process.env, FAKE_PI_IMAGES: supported ? '1' : '0', FAKE_PI_HANG_AFTER_TOOL: '1' });
+    const scratch = await testExecutionScratch();
+    const imagePath = path.join(scratch.runtimeDir, 'fixture.png');
+    const base64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==';
+    await fs.writeFile(imagePath, Buffer.from(base64, 'base64'));
+    const receipt = path.join(resources.workspaceDir, 'images.jsonl');
+    resources.env.FAKE_PI_IMAGE_RECEIPT = receipt;
+    const images = [{ path: imagePath, mediaType: 'image/png' }];
+    const started = startAdapter(fakePiAdapter(), { ...baseTask, images }, { ...resources, scratch });
+    if (!supported) {
+      await expect(started).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+      await expect(fs.stat(receipt)).rejects.toMatchObject({ code: 'ENOENT' });
+      return;
+    }
+    const session = await started;
+    openSessions.push(session);
+    expect(session.capabilities?.images).toBe(true);
+    await session.steer('look again', { images });
+    const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
+    expect(frames).toEqual(['prompt', 'steer'].map(type => ({ type, images: [{ type: 'image', mimeType: 'image/png', data: base64 }] })));
+  });
+
+  it.each([undefined, 'fake-session-1'])('requires Pi to confirm the exact effort (resume=%s)', async sessionRef => {
+    const task = { ...baseTask, effort: 'high', sessionRef };
+    const live = await startAdapter(fakePiAdapter(), task, await makeCtx());
+    openSessions.push(live);
+    expect(live.sessionRef).toBe('fake-session-1');
+    await expect(startAdapter(fakePiAdapter(), task, await makeCtx({ ...process.env, FAKE_PI_EFFORT_READBACK: 'low' })))
+      .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+  });
+
   it('fails closed (never a fabricated UUID) when get_state cannot yield an authoritative session id (finding F8)', async () => {
     const adapter = fakePiAdapter();
     const ctx = await makeCtx({ ...process.env, FAKE_PI_GET_STATE_FAIL: '1' });
@@ -966,6 +998,7 @@ const __executionScratch = await testExecutionScratch();
     const adapter = fakePiAdapter();
     expect(adapter.descriptor.capabilities).toEqual({
       steer: true,
+      images: true,
       resume: true,
       mcpToolsets: true,
       messageDraft: true,

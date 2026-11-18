@@ -1,9 +1,10 @@
+import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
 import { classifyToolCall } from '../tool-authorization';
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta } from '../types';
 import { CodexProjection } from '../adapters/codex/projection';
-import { createSessionKernel } from '../../vendor/oar/bc1b2ac/shared/session-kernel';
+import { createSessionKernel } from '../../vendor/oar/609f347/shared/session-kernel';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 function setup() {
   const kernel = createSessionKernel('root');
@@ -14,9 +15,10 @@ function setup() {
     native: unknown,
     origin = 'byok-native',
     sessionId = 'root',
+    agentPath: readonly string[] = [],
   ) => {
     const body = { type, native, events: [], origin };
-    const frame = kernel.frame(body, { sessionId });
+    const frame = kernel.frame(body, { sessionId, agentPath });
     projection.consume(kernel, frame, (e) => output.push(e));
     return frame;
   };
@@ -109,6 +111,7 @@ describe('required Codex native projection', () => {
         },
         'byok-native',
         threadId,
+        threadId === 'root' ? [] : ['outer', 'child'],
       );
     s.feed(
       'turn/completed',
@@ -118,7 +121,8 @@ describe('required Codex native projection', () => {
     );
     expect(
       s.output.map((e) => ('toolCallId' in e ? e.toolCallId : null)),
-    ).toEqual(['same', '["child",[],"same"]']);
+    ).toEqual(['same', '["child",["outer","child"],"same"]']);
+    expect(s.output[1]).toMatchObject({ agentPath: ['outer', 'child'] });
     expect(s.output.some((e) => e.type === 'turn_end')).toBe(false);
   });
   it('replay identity includes the stream instance and each derived ordinal', () => {
@@ -317,6 +321,15 @@ it('retains native MCP identity on start, completion and interrupted closure wit
   const native = setup();
   native.feed('item/started', { item: { type: 'commandExecution', id: 'shell', command: 'mcp__market__feed__get__quote' } });
   expect(native.output[0]).not.toHaveProperty('mcp');
+});
+
+it('retains the agent-result helper identity in Codex tool events', () => {
+  const s = setup();
+  const item = { type: 'mcpToolCall', id: 'result', server: AGENT_RESULT_MCP_SERVER_NAME, tool: AGENT_RESULT_TOOL_NAME, arguments: {} };
+  s.feed('item/started', { item });
+  s.feed('item/completed', { item: { ...item, result: {}, status: 'completed' } });
+  expect(s.output).toHaveLength(2);
+  for (const event of s.output) expect(event).toHaveProperty('mcp', { server: AGENT_RESULT_MCP_SERVER_NAME, tool: AGENT_RESULT_TOOL_NAME });
 });
 
 it('uses native MCP completion metadata even without a matching start', () => {

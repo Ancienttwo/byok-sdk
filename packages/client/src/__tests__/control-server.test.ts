@@ -309,6 +309,29 @@ describe('control-server: RPC dispatch', () => {
     connB.client.close();
   });
 
+  it('aborts an active unary request when its authenticated client disconnects', async () => {
+    const storeDir = await tmpDir('byok-ctl-unary-abort-');
+    const started = Promise.withResolvers<AbortSignal>();
+    const ended = Promise.withResolvers<void>();
+    handle = await startControlServer({ storeDir, productId: 'acme', methods: {
+      unary: { wait: async (_params, signal) => {
+        signal.addEventListener('abort', () => ended.resolve(), { once: true });
+        started.resolve(signal);
+        await ended.promise;
+        return 'done';
+      } }, stream: {},
+    } });
+    const conn = await connectControlClient({ storeDir, productId: 'acme' });
+    if (!conn.ok) throw new Error('expected reachable');
+    const request = expect(conn.client.request('wait')).rejects.toThrow('control connection closed');
+    const signal = await started.promise;
+    expect(signal.aborted).toBe(false);
+    conn.client.close();
+    await request;
+    await ended.promise;
+    expect(signal.aborted).toBe(true);
+  });
+
   it('a streaming method emits event frames live and cleans up (aborts) once the client disconnects', async () => {
     const storeDir = await tmpDir('byok-ctl-stream-');
     let aborted = false;

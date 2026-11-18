@@ -1,8 +1,13 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
+import { dshVersionUnsupported } from '../../runtime/oar-version-floors.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputOptions } from '../../types.js';
 import * as dshRuntime from '../../runtime/dsh-session-runtime.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
@@ -132,6 +137,37 @@ function probeAcpProfile(command: string, root: string, env: Record<string, stri
  * custom-harness identity (`harnessId: 'dsh'`).
  */
 export class DshAdapter implements RuntimeAdapter {
+  #runtimeReaders?: ReturnType<typeof createRuntimeReaders>;
+
+  private get readers() {
+    return this.#runtimeReaders ??= createRuntimeReaders(this, {
+      nativeAssetRoot: this.options.nativeAssetRoot,
+      spawnFn: this.options.spawnFn,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveDshBin).bin.command,
+      version: dshVersionToken,
+      versionRefusal: dshVersionUnsupported,
+      environment: async env => {
+        await this.ensureRoot();
+        return { env: dshEnvironment(env, this.root, this.sandbox) };
+      },
+      credentialName: this.options.model.keyEnv,
+    });
+  }
+
+  listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    return this.readers.listModels(options, async (installation, reader) => {
+      const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-dsh-catalog-'));
+      try {
+        const patch = path.join(directory, PATCH_FILE);
+        await fs.writeFile(patch, dshPatch(this.options.model), { mode: 0o600 });
+        const { dshListModels } = await import('#byok-oar-readers');
+        return await dshListModels(installation, reader, { directory, patches: [patch], env: reader.env });
+      } finally {
+        await fs.rm(directory, { recursive: true, force: true });
+      }
+    });
+  }
+
   private readonly root: string;
   private readonly options: DshAdapterOptions;
   private readonly sandbox: DshSandboxMode;
@@ -144,6 +180,7 @@ export class DshAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'dsh',
       supportsDispatchSelection: false,
+      supportsTaskExecutionOptions: true,
       // dsh ships no win32 build of its native addon (docs/researches/2026-11-01-dsh-adapter.md §1.9).
       platforms: ['darwin', 'linux'],
       capabilities: DSH_RUNTIME_CAPABILITIES,
@@ -195,10 +232,16 @@ export class DshAdapter implements RuntimeAdapter {
       const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, env);
       if (version.kind !== 'available') return version;
       const token = dshVersionToken(version.stdout);
+      const unsupported = dshVersionUnsupported(token);
+      if (unsupported !== null) {
+        const { installedVersion, requiredVersion } = unsupported;
+        return { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion } };
+      }
       if (!await probeAcpProfile(command, this.root, env)) return { kind: 'refused', reason: 'acp_unavailable' };
       const key = base[this.options.model.keyEnv];
       return {
         kind: 'available',
+        sessionCapabilities: dshRuntime.dshSessionCapabilities(),
         version: token,
         authPresent: typeof key === 'string' && key.length > 0,
         ...runtimeExecutableFields(resolved, command),
@@ -211,6 +254,13 @@ export class DshAdapter implements RuntimeAdapter {
 
   /** Cheap admission: the version probe only. The acp profile probe belongs to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { modelId, effort } = input.offer;
+    const route = dshRoute(this.options.model);
+    const prefix = `${route}/`;
+    if (modelId !== undefined && (!modelId.startsWith(prefix) || modelId.length === prefix.length)) {
+      return { kind: 'reject', reason: `model_rejected: dsh modelId must select the configured ${route} route`, retryable: false };
+    }
+    const selection = modelId === undefined ? this.options.model : { ...this.options.model, model: modelId.slice(prefix.length) };
     try {
       dshMcpRows(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');
     } catch (error) {
@@ -222,10 +272,10 @@ export class DshAdapter implements RuntimeAdapter {
     if (version.kind !== 'available') {
       return { kind: 'reject', reason: `dsh installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
     }
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command) } };
+    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, selection, effort) } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, selection: DshModelSelection, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('dsh requires a resolved instruction');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('dsh manifest has no sealed cwd');
@@ -236,7 +286,7 @@ export class DshAdapter implements RuntimeAdapter {
     const persona = input.manifest.homeAccess === 'memory-reader'
       ? await agentPersona('dsh', input.manifest, { reappliesOnResume: true })
       : undefined;
-    const model = `${dshRoute(this.options.model)}/${this.options.model.model}`;
+    const model = `${dshRoute(selection)}/${selection.model}`;
     const session = new DshSession(
       input.scratch,
       this.interruptTimeoutMs,
@@ -247,7 +297,7 @@ export class DshAdapter implements RuntimeAdapter {
       const workspace = await fs.realpath(cwd);
       await this.ensureRoot();
       const patch = path.join(input.scratch.sdkDir, PATCH_FILE);
-      await fs.writeFile(patch, dshPatch(this.options.model), { mode: 0o600 });
+      await fs.writeFile(patch, dshPatch(selection), { mode: 0o600 });
       const env = dshEnvironment({ ...input.env, ...input.scratch.env }, this.root, this.sandbox);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp' });
@@ -262,6 +312,7 @@ export class DshAdapter implements RuntimeAdapter {
         {
           cwd: workspace,
           model,
+          ...(effort === undefined ? {} : { effort }),
           // The process runs in the scratch directory, so dsh reads no workspace `.env`; the workspace stays the session cwd.
           launch: { directory: input.scratch.sdkDir, patches: [patch], env },
           retainedBytes: this.maxRetainedBytes,
@@ -277,6 +328,7 @@ export class DshAdapter implements RuntimeAdapter {
       );
       session.bind(raw);
       if (input.signal?.aborted) throw infrastructure('dsh start was aborted');
+      requireImageInput(input.images, raw.capabilities.images === true);
       await session.prompt(input.instruction);
       return session;
     } catch (thrown) {
@@ -431,7 +483,10 @@ class DshSession implements Session {
   async followUp(): Promise<void> {
     throw new PolicyUnsupportedError('dsh runs one turn per process; a later turn resumes the session');
   }
-  async steer(text: string): Promise<void> {
+  readonly capabilities = dshRuntime.dshSessionCapabilities();
+
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
+    requireImageInput(options?.images, this.capabilities.images);
     const result = await this.raw?.steer(text);
     if (result?.response.body.kind !== 'accepted') throw infrastructure(result?.response.body.reason ?? 'dsh steer refused');
   }

@@ -124,3 +124,9 @@ export function isPreparedAgentMemoryMode(value: unknown): value is (typeof PREP
  * `nativeSessions` only to a device that advertises it.
  */
 export const NATIVE_SESSIONS_CAPABILITY = 'native-sessions' as const;
+
+/** Admits per-task reasoning effort and per-task harness model selection. */
+export const TASK_EXECUTION_OPTIONS_CAPABILITY = 'task-execution-options' as const;
+
+/** Admits image blob references in task offers and steers. */
+export const INPUT_IMAGES_CAPABILITY = 'input-images' as const;

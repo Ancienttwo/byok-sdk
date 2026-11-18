@@ -1,5 +1,5 @@
 import { objectRecord as record } from '../shared-rules.js';
-import { BufferedToolUse } from '../buffered-tool-use.js';
+import { AcpChildTurns, AcpTurnBuffer } from '../acp-turn-buffer.js';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
 import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity.js';
 import { runtimeFailureClassOf } from '../../runtime-failure.js';
@@ -37,84 +37,35 @@ function toolInput(tool: string, input: Record<string, unknown>): Record<string,
   return input;
 }
 
-/**
- * Root-session ACP records to `AgentEvent`s, from the runtime-neutral events
- * OAR derived beside each native frame. agy has no verified child identity, so
- * only root frames exist here. Streamed text is buffered and emitted as one
- * `progress` per text run. agy reports no usage events.
- */
+/** Projects ACP records per conversation. Only the root can settle the SDK turn. */
 export class AgyProjection {
-  private text = '';
-  private readonly tools = new Map<string, string>();
-  private readonly buffered = new BufferedToolUse();
+  private readonly root = new AcpTurnBuffer();
+  private readonly children: AcpChildTurns;
 
-  constructor(private readonly rootSessionId: string, private readonly identities: McpEventIdentities) {}
-
-  /** Events for one record; `outcome` receives the root turn end, after its events. The session owns `turn_end`. */
-  consume(input: AcpRecord, emit: (event: AgentEvent) => void, outcome: (turn: AgyTurnOutcome) => void): void {
-    if (input.kind !== 'frame' || input.sessionId !== this.rootSessionId || input.agentPath.length > 0) return;
-    const body = record(input.body);
-    const events = body?.events;
-    if (!Array.isArray(events)) return;
-    const update = record(record(body?.native)?.update);
-    const updateId = typeof update?.toolCallId === 'string' ? update.toolCallId : undefined;
-    const observe = () => {
-      if (updateId === undefined) return;
-      const raw = record(update?.rawInput);
-      const tool = this.tools.get(updateId);
-      const input = raw === undefined || tool === undefined ? raw : toolInput(tool, raw);
-      this.buffered.observe(updateId, input, update?.rawInput !== undefined, events.some(value => record(value)?.kind === 'tool_call_input') || ['in_progress', 'completed', 'failed', 'cancelled'].includes(String(update?.status)), emit);
-    };
-    if (!events.some(value => record(value)?.kind === 'tool_call_ended')) observe();
-    let ended: Record<string, unknown> | undefined;
-    for (const value of events) {
-      const event = record(value);
-      switch (event?.kind) {
-        case 'text_delta':
-          if (typeof event.text === 'string') this.text += event.text;
-          break;
-        case 'tool_call_started': {
-          if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
-          this.flush(emit);
-          this.tools.set(event.callId, event.tool);
-          const mcp = this.identities.get(event.tool);
-          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: event.callId, ...(mcp === undefined ? {} : { mcp }) });
-          observe();
-          break;
-        }
-        case 'tool_call_ended': {
-          if (typeof event.callId !== 'string') break;
-          this.flush(emit);
-          observe();
-          const tool = this.tools.get(event.callId) ?? 'tool';
-          this.buffered.finish(event.callId, emit);
-          this.tools.delete(event.callId);
-          const mcp = this.identities.get(tool);
-          emit({
-            type: 'tool_result', tool, toolCallId: event.callId,
-            output: { ...(event.content === undefined ? {} : { content: event.content }), ...(event.exitCode === undefined ? {} : { exitCode: event.exitCode }) },
-            ...(event.result === 'failed' ? { isError: true } : {}),
-            ...(mcp === undefined ? {} : { mcp }),
-          });
-          break;
-        }
-        case 'turn_ended':
-          ended = record(event.outcome) ?? {};
-          break;
-        default:
-          break;
-      }
-    }
-    if (ended !== undefined) this.endTurn(ended, emit, outcome);
+  constructor(rootSessionId: string, private readonly identities: McpEventIdentities) {
+    this.children = new AcpChildTurns(rootSessionId);
   }
 
-  private endTurn(turn: Record<string, unknown>, emit: (event: AgentEvent) => void, outcome: (turn: AgyTurnOutcome) => void): void {
-    this.flush(emit);
-    for (const [toolCallId, tool] of this.tools) {
-      this.buffered.finish(toolCallId, emit);
-      emit({ type: 'tool_result', tool, toolCallId, output: { status: turn.kind === 'aborted' ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' } });
+  consume(input: AcpRecord, emit: (event: AgentEvent) => void, outcome: (turn: AgyTurnOutcome) => void): void {
+    if (input.kind !== 'frame') return;
+    const body = record(input.body);
+    if (!Array.isArray(body?.events)) return;
+    const events = body.events;
+    this.children.link(events);
+    const path = this.children.path(input.sessionId, input.agentPath);
+    if (path === undefined) return;
+    const root = path.length === 0;
+    const buffer = root ? this.root : this.children.buffer(input.sessionId, path);
+    const turn = buffer.consume(events, record(record(body.native)?.update), emit, {
+      input: toolInput, mcp: tool => this.identities.get(tool),
+    });
+    if (turn !== undefined) {
+      buffer.end(emit, turn.kind === 'aborted');
+      buffer.flushUsage(emit);
     }
-    this.tools.clear();
+    this.children.lifecycle(input.sessionId, path, events, emit);
+    if (!root || turn === undefined) return;
+    this.children.flush(emit);
     if (turn.kind === 'failed') {
       // The vendored OAR outcome owns the class and marks one a text rule chose; the SDK adds no rule of its own.
       outcome({
@@ -126,10 +77,4 @@ export class AgyProjection {
     outcome({ kind: turn.kind === 'aborted' ? 'aborted' : 'completed' });
   }
 
-  private flush(emit: (event: AgentEvent) => void): void {
-    if (this.text.length === 0) return;
-    const text = this.text;
-    this.text = '';
-    emit({ type: 'progress', text });
-  }
 }

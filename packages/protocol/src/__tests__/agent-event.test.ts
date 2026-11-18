@@ -145,6 +145,32 @@ describe('unknown AgentEvent variant tolerance', () => {
   });
 });
 
+describe('subagent attribution (#2377)', () => {
+  const child = ['child-1', 'child-2'];
+
+  it('partitions child lifecycle events as known and keeps descendant attribution', () => {
+    const events = [
+      { type: 'subagent_start', agentPath: child },
+      { type: 'usage', outputTokens: 7, agentPath: child },
+      { type: 'subagent_end', agentPath: child },
+      { type: 'turn_end' },
+    ];
+    expect(partitionAgentEvents(events.map(event => AgentEventOrUnknownSchema.parse(event)))).toEqual({ known: events, unknown: [] });
+    expect(AgentEventSchema.parse({ type: 'progress', text: 'root' })).toEqual({ type: 'progress', text: 'root' });
+  });
+
+  it.each([[], [''], ['p'.repeat(129)], Array.from({ length: 17 }, () => 'p')].map(agentPath => ({ agentPath })))(
+    'refuses invalid paths on both attributed and lifecycle events', ({ agentPath }) => {
+      expect(AgentEventOrUnknownSchema.safeParse({ type: 'usage', agentPath }).success).toBe(false);
+      expect(AgentEventOrUnknownSchema.safeParse({ type: 'subagent_start', agentPath }).success).toBe(false);
+    },
+  );
+
+  it('refuses a lifecycle event without its child path', () => {
+    expect(AgentEventOrUnknownSchema.safeParse({ type: 'subagent_end' }).success).toBe(false);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Tool observation fields (additive)
 // ---------------------------------------------------------------------------

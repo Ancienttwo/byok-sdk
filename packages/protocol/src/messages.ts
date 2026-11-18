@@ -102,6 +102,7 @@ export const ProtocolVersionNumberSchema = z
  */
 export const RuntimeCapabilitiesSchema = z.object({
   steer: z.boolean().optional(),
+  images: z.boolean().optional(),
   resume: z.boolean().optional(),
   approvalInteractive: z.boolean().optional(),
   /** Whether this runtime can project a locally configured MCP toolset into one task. */
@@ -317,11 +318,24 @@ export type ConnHelloPayload = z.infer<typeof ConnHelloPayloadSchema>;
  */
 const InstructionBlobRefSchema = z.object({ blobRef: BlobRefSchema }).strict();
 
+/** A model-specific reasoning effort reported by a runtime's catalog. */
+export const ReasoningEffortSchema = z.string().min(1).max(64).regex(/^[\x21-\x7e]+$/u, 'reasoning effort must be a non-whitespace ASCII token');
+export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
+
+export const InputImageBlobRefSchema = z.strictObject({
+  blob: BlobRefSchema,
+  mediaType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
+});
+export type InputImageBlobRef = z.infer<typeof InputImageBlobRefSchema>;
+export const InputImagesSchema = z.array(InputImageBlobRefSchema).min(1).max(16);
+
 const DispatchTargetIdSchema = z
   .string()
   .min(1)
   .max(160)
   .regex(/^[^\u0000\r\n]+$/u, 'dispatch target ids must not contain control line breaks');
+
+const effort = ReasoningEffortSchema.optional();
 
 /**
  * What a `task.offer` asks the device to run (wire v7): one discriminated
@@ -331,16 +345,18 @@ const DispatchTargetIdSchema = z
  * with the device's model; the three model lanes carry a model selection and
  * fix which runtime may hold it (subscription credentials belong to the
  * vendor CLIs, a BYOK provider runs only through Pi); `harness` names a
- * custom harness. The field is required: absence carries no meaning.
+ * custom harness and may select its model. Each explicit lane can request a
+ * reasoning effort. The field is required: absence carries no meaning.
  */
 export const ExecutionTargetSchema = z.discriminatedUnion('lane', [
   z.object({ lane: z.literal('auto') }).strict(),
-  z.object({ lane: z.literal('runtime'), runtimeId: RuntimeIdSchema }).strict(),
+  z.object({ lane: z.literal('runtime'), runtimeId: RuntimeIdSchema, effort }).strict(),
   z
     .object({
       lane: z.literal('subscription'),
       runtimeId: z.enum(['claude', 'codex']),
       modelId: DispatchTargetIdSchema,
+      effort,
     })
     .strict(),
   z
@@ -349,6 +365,7 @@ export const ExecutionTargetSchema = z.discriminatedUnion('lane', [
       runtimeId: z.literal('pi'),
       providerId: DispatchTargetIdSchema,
       modelId: DispatchTargetIdSchema,
+      effort,
     })
     .strict(),
   z
@@ -356,9 +373,10 @@ export const ExecutionTargetSchema = z.discriminatedUnion('lane', [
       lane: z.literal('byok-profile'),
       runtimeId: z.literal('pi'),
       providerProfile: ProviderProfileBindingSchema,
+      effort,
     })
     .strict(),
-  z.object({ lane: z.literal('harness'), harnessId: HarnessIdSchema }).strict(),
+  z.object({ lane: z.literal('harness'), harnessId: HarnessIdSchema, modelId: DispatchTargetIdSchema.optional(), effort }).strict(),
 ]);
 export type ExecutionTarget = z.infer<typeof ExecutionTargetSchema>;
 
@@ -457,6 +475,7 @@ export type SessionSelection = z.infer<typeof SessionSelectionSchema>;
 const OFFER_FIELDS = {
   agentRef: AgentRefSchema,
   session: SessionSelectionSchema,
+  images: InputImagesSchema.optional(),
   preparation: InputPreparationOfferBindingSchema.optional(),
   agentMemory: AgentMemorySelectionSchema.optional(),
   agentMemoryCommit: AgentMemoryCommitSchema.optional(),
@@ -478,6 +497,7 @@ const OFFER_FIELDS = {
 
 type OfferRuleInput = {
   readonly instruction?: unknown;
+  readonly images?: unknown;
   readonly session: SessionSelection;
   readonly preparation?: unknown;
   readonly agentMemory?: AgentMemorySelection;
@@ -489,8 +509,8 @@ type OfferRuleInput = {
 /**
  * The cross-field rules of a `task.offer`, for `superRefine`:
  *
- * - A prepared offer (`preparation`) carries no `instruction`: the user request
- *   is already inside the frozen envelope the prepared record retained. It
+ * - A prepared offer (`preparation`) carries neither `instruction` nor `images`.
+ *   The frozen envelope in the prepared record already owns the request. It
  *   never resumes, and it selects a prepared `agentMemory` mode.
  * - A plaintext offer that is not prepared carries an `instruction`. A sealed
  *   offer's instruction is checked by {@link sealedOfferRule}.
@@ -500,9 +520,10 @@ type OfferRuleInput = {
  * Structural rules live here; a violation stops the receiving cursor. Semantic cross-field rules live only in `offerSelectionViolation`, which the Host offer schemas and the daemon both run.
  */
 function offerRule(payload: OfferRuleInput, ctx: z.RefinementCtx, plaintext: boolean): void {
-  const { instruction, session, preparation, agentMemory, egressPolicy, messageEgress, routineRef } = payload;
+  const { instruction, images, session, preparation, agentMemory, egressPolicy, messageEgress, routineRef } = payload;
   if (preparation !== undefined) {
     if (instruction !== undefined) ctx.addIssue({ code: 'custom', path: ['instruction'], message: 'a prepared offer carries no instruction' });
+    if (images !== undefined) ctx.addIssue({ code: 'custom', path: ['images'], message: 'a prepared offer carries no images' });
     if (session.mode !== 'fresh') ctx.addIssue({ code: 'custom', path: ['session'], message: 'a prepared offer never resumes' });
     if (!PreparedAgentMemoryModeSchema.safeParse(agentMemory).success) {
       ctx.addIssue({ code: 'custom', path: ['agentMemory'], message: 'a prepared offer selects a prepared agentMemory mode' });
@@ -586,9 +607,9 @@ const TaskOfferPlainFields = z
 /**
  * The sealed branch of `task.offer`, before its rules. `sealing` marks it: the
  * task's frozen sealing policy. When the policy includes `task-input`,
- * `instruction` moves into `sealed` (or `sealed` is a routine template named by
- * `routineRef`); otherwise `instruction` stays plaintext and only the output is
- * sealed. A prepared Execution is never sealed (`SEALED_SPLIT_TABLE` forbids
+ * `instruction` and `images` move into `sealed` (or `sealed` is a routine
+ * template named by `routineRef`); otherwise the input stays plaintext and
+ * only the output is sealed. A prepared Execution is never sealed (`SEALED_SPLIT_TABLE` forbids
  * `preparation`).
  */
 const TaskOfferSealedFields = z
@@ -1033,12 +1054,13 @@ export const TaskCancelPayloadSchema = z.object({
  */
 export const TASK_STEER_TEXT_MAX_BYTES = 65_536;
 
-/** server -> daemon: inject steering text into a running task. */
+/** server -> daemon: inject steering text and optional image refs into a running task. */
 const TaskSteerPlainPayloadSchema = z.object({
   ...NO_SEALED_MEMBER,
   text: z.string().refine((text) => new TextEncoder().encode(text).length <= TASK_STEER_TEXT_MAX_BYTES, {
     message: `task.steer text is at most ${TASK_STEER_TEXT_MAX_BYTES} UTF-8 bytes`,
   }),
+  images: InputImagesSchema.optional(),
 });
 
 // ---------------------------------------------------------------------------
