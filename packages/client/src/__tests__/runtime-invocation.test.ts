@@ -86,6 +86,14 @@ describe('resolveRuntimeInvocation', () => {
     });
   });
 
+  it('runs the native executable targeted by an npm cmd-shim', () => {
+    const entry = 'node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe';
+    const shim = '@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n'
+      + `"%dp0%\\${entry}"   %*\r\n`;
+    const { host } = windows({ 'C:\\npm\\claude.cmd': shim });
+    expect(resolveRuntimeInvocation('claude', host)).toEqual({ command: `C:\\npm\\${entry}`, args: [], executable: 'C:\\npm\\claude.cmd' });
+  });
+
   it('accepts the npm 12 shim form', () => {
     const { host } = windows({ 'C:\\npm\\claude.cmd': npm12NodeShim(CLAUDE_ENTRY), 'C:\\node\\node.exe': '' });
     expect(resolveRuntimeInvocation('claude', host)).toEqual({

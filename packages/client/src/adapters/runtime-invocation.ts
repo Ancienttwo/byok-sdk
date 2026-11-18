@@ -68,9 +68,12 @@ export function resolveRuntimeInvocation(command: string, host: RuntimeInvocatio
   const extension = path.win32.extname(file).toLowerCase();
   if (NATIVE.has(extension)) return { command: file, args: [], executable: file };
   if (!BATCH.has(extension)) return { command, args: [], executable: command };
-  const entry = extension === '.cmd' ? npmNodeShimEntry(readShim(host, file)) : undefined;
-  if (entry === undefined) throw spawnError('ENOEXEC', 'the runtime command is a batch file that is not an npm node shim; only cmd.exe can run it');
+  const shim = extension === '.cmd' ? readShim(host, file) : '';
   const shimDir = path.win32.dirname(file);
+  const nativeEntry = npmNativeShimEntry(shim);
+  if (nativeEntry !== undefined) return { command: path.win32.join(shimDir, nativeEntry), args: [], executable: file };
+  const entry = npmNodeShimEntry(shim);
+  if (entry === undefined) throw spawnError('ENOEXEC', 'the runtime command is a batch file that is not an npm shim; only cmd.exe can run it');
   const localNode = path.win32.join(shimDir, 'node.exe');
   const node = host.isFile(localNode) ? localNode : findWindowsCommand('node', host, ['.com', '.exe']);
   if (node === undefined) throw spawnError('ENOENT', 'node was not found for the runtime command npm shim');
@@ -138,6 +141,15 @@ function npmNodeShims(entry: string): string[] {
 function npmNodeShimEntry(text: string): string | undefined {
   const entry = /"%dp0%\\([^"%\r\n]+)" %\*\r\n$/.exec(text)?.[1];
   return entry !== undefined && npmNodeShims(entry).includes(text) ? entry : undefined;
+}
+
+/** A native npm bin shim, restricted to executables within the shim directory. */
+function npmNativeShimEntry(text: string): string | undefined {
+  const match = /^@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT \/b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n"%dp0%\\([^"%\r\n]+)"   %\*\r\n$/.exec(text);
+  const entry = match?.[1];
+  if (entry === undefined || !NATIVE.has(path.win32.extname(entry).toLowerCase())
+    || path.win32.isAbsolute(entry) || entry.includes(':') || entry.split(/[\\/]/).some(part => part === '..' || part === '')) return undefined;
+  return entry;
 }
 
 function spawnError(code: string, message: string): NodeJS.ErrnoException {
