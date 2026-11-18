@@ -292,7 +292,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3337678,
+      "budgetBytes": 3337814,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2350,7 +2350,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 698458,
+      "budgetBytes": 698594,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

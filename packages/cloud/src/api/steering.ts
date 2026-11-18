@@ -76,7 +76,11 @@ export function createSteeringApi({
     taskId: string,
     payload: TaskSteerSealedPayload,
   ): Promise<EnqueuedAgentControl> {
-    const sealed = TaskSteerSealedPayloadSchema.parse(payload);
+    const parsed = TaskSteerSealedPayloadSchema.safeParse(payload);
+    if (!parsed.success) {
+      throw new ByokCloudError('coordination_input_invalid', 'Invalid sealed steer payload.');
+    }
+    const sealed = parsed.data;
     const ownerDeviceId = await runningSteerTarget(tenant, taskId);
     await assertAgentCapabilities(tenant, ownerDeviceId, requiredReceiverCapabilities('task.steer', sealed));
     await assertSealedCiphertext(tenant, sealed);

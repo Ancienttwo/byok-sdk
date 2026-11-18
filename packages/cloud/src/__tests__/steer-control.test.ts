@@ -225,7 +225,7 @@ describe('steerTask (GAP-2)', () => {
     const task = await running(harness, device, { capabilities: { steer: true } });
     await deviceStores(harness, device).devices.recordCapabilities({ capabilities: ['agent-home-contract', 'input-images'] });
     const image = { mediaType: 'image/png' as const, blob: { blobId: 'missing', contentHash: `sha256:${'a'.repeat(64)}`, size: 1, contentType: 'image/png' } };
-    for (const images of [[], Array(17).fill(image)]) {
+    for (const images of [[], Array<typeof image>(17).fill(image), [{ ...image, blob: { ...image.blob, size: -1 } }]]) {
       await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'look', images }))
         .rejects.toMatchObject({ name: 'ByokCloudError', code: 'coordination_input_invalid' });
     }
@@ -233,6 +233,20 @@ describe('steerTask (GAP-2)', () => {
       .rejects.toMatchObject({ code: 'coordination_input_invalid' });
     const textOnly = await harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'continue' });
     expect((await poll(harness, device, task.seq)).events.map(({ id }) => id)).toEqual([textOnly.envelope.id]);
+  });
+
+  it('enqueues a plaintext steer with a committed image when the device advertises input-images', async () => {
+    const harness = createHarness();
+    const device = await harness.pairDevice(TENANT_A);
+    const task = await running(harness, device, { capabilities: { steer: true } });
+    const mediaType = 'image/png';
+    const blob = await uploadCiphertext(harness, device, Uint8Array.of(137, 80, 78, 71), { contentType: mediaType });
+    const payload = { text: 'look', images: [{ blob, mediaType }] } as const;
+
+    await deviceStores(harness, device).devices.recordCapabilities({ capabilities: ['agent-home-contract', 'input-images'] });
+    const enqueued = await harness.cloud.steerTask(TENANT_A, task.taskId, payload);
+    expect((await poll(harness, device, task.seq)).events).toEqual([enqueued.envelope]);
+    expect(enqueued.envelope).toMatchObject({ type: 'task.steer', task_id: task.taskId, payload });
   });
 
   it('steerSealedTask delivers the sealed task.steer only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
@@ -256,6 +270,8 @@ describe('steerTask (GAP-2)', () => {
       await expect(harness.cloud.steerTask(TENANT_A, task.taskId, payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     }
     await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, { ...sealedSteer, text: 'plaintext' } as never), 'no plaintext next to the sealed member').rejects.toThrow();
+    await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, { ...sealedSteer, images: [] } as never), 'no plaintext images next to the sealed member')
+      .rejects.toMatchObject({ name: 'ByokCloudError', code: 'coordination_input_invalid' });
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
     await harness.cloud.steerSealedTask(TENANT_A, task.taskId, sealedSteer);
     const page = await poll(harness, device, task.seq);
