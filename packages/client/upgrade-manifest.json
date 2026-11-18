@@ -7,13 +7,49 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "74c716ac94443d12518252898dfa368791a7090bdf1dec4cd84440b5ca6bd77c"
+    "snapshotSha256": "5fc265e21cbd4f0a974072a9b728665ffa5590c77e7c19c0984700034fb3572b"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "result-mcp-identifiers",
+      "impact": "additive",
+      "summary": "Hosts can import AGENT_RESULT_MCP_SERVER_NAME and AGENT_RESULT_TOOL_NAME from @byok-sdk/client to identify result submissions in event.mcp.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2393",
+      "items": [
+        "export:@byok-sdk/client#AGENT_RESULT_MCP_SERVER_NAME",
+        "export:@byok-sdk/client#AGENT_RESULT_TOOL_NAME"
+      ]
+    },
+    {
+      "id": "task-result-memory-change",
+      "impact": "additive",
+      "summary": "Hosts can read TaskResult.agentHomeMemoryChange from @byok-sdk/server for memory-reader evidence reported in the terminal frame; it is absent for writer passes.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2394",
+      "items": [
+        "export:@byok-sdk/server#TaskResult"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/client#AGENT_RESULT_MCP_SERVER_NAME",
+      "change": "added",
+      "entry": "result-mcp-identifiers"
+    },
+    {
+      "item": "export:@byok-sdk/client#AGENT_RESULT_TOOL_NAME",
+      "change": "added",
+      "entry": "result-mcp-identifiers"
+    },
+    {
+      "item": "export:@byok-sdk/server#TaskResult",
+      "change": "changed",
+      "entry": "task-result-memory-change"
+    }
+  ]
 }

@@ -23,6 +23,7 @@ import type {
   TaskState,
   ToolsetId,
   TerminalProjectionSelection,
+  TerminalAgentHomeMemoryChange,
   AgentHomeAccess,
   AgentMemorySelection,
 } from '@byok-sdk/protocol';
@@ -236,6 +237,13 @@ export interface TaskResult {
   finalMessage?: string;
   sessionRef?: string;
   artifactRefs?: BlobRef[];
+  /**
+   * Memory-change evidence from the terminal frame; see
+   * `TerminalAgentHomeMemoryChange` in `@byok-sdk/protocol`. Reported only on
+   * memory-reader passes, not writer passes; also absent if the reader never
+   * became active or the device did not report it.
+   */
+  agentHomeMemoryChange?: TerminalAgentHomeMemoryChange;
   reason?: string;
   /**
    * The decline code (`agent_home_writer_busy` / `agent_home_reader_busy`).

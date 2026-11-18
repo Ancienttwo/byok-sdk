@@ -65,6 +65,7 @@ export function toTaskResult(terminal: TerminalResult | undefined): TaskResult |
     sessionRef: terminal.sessionRef,
     artifactRefs: terminal.artifactRefs === undefined ? undefined : [...terminal.artifactRefs],
     ...(terminal.document === undefined ? {} : { document: terminal.document }),
+    ...(terminal.agentHomeMemoryChange === undefined ? {} : { agentHomeMemoryChange: terminal.agentHomeMemoryChange }),
     ...(terminal.reason === undefined ? {} : { reason: terminal.reason }),
     ...(terminal.code === undefined ? {} : { code: terminal.code }),
     ...(terminal.reportedCode === undefined ? {} : { reportedCode: terminal.reportedCode }),
