@@ -9,8 +9,9 @@ import { requireCiPlan } from './require-ci-plan.mjs';
 import { knownFamilies, reviewedScripts } from './select-impact.mjs';
 const sha = 'a'.repeat(40);
 const ref = 'refs/heads/main';
-const results = plan => Object.fromEntries(['select', 'targeted', ...knownFamilies].map(id => [id, {
-  result: id === 'select' || (id === 'targeted' && plan.mode === 'targeted') || plan.families.includes(id) ? 'success' : 'skipped',
+const targetedJobs = ['release-bookkeeping', 'targeted'];
+const results = plan => Object.fromEntries(['select', ...targetedJobs, ...knownFamilies].map(id => [id, {
+  result: id === 'select' || (targetedJobs.includes(id) && plan.mode === 'targeted') || plan.families.includes(id) ? 'success' : 'skipped',
 }]));
 test('only exact approved dispatch selects the complete release matrix', () => {
   const plan = planCi({ event: 'workflow_dispatch', sha, approvedSha: sha, ref });
@@ -29,6 +30,7 @@ test('nightly main selects every family without becoming release evidence', () =
   for (const badRef of [undefined, 'refs/heads/release/0.32', 'refs/heads/feature', 'refs/pull/1/merge']) {
     assert.throws(() => planCi({ event: 'schedule', sha, ref: badRef }), /only on main/);
   }
+  assert.throws(() => requireCiPlan({ ...results(plan), 'release-bookkeeping': { result: 'success' } }, plan, 'schedule', sha), /Unselected CI job/);
   for (const id of knownFamilies) for (const result of ['skipped', 'failure', 'cancelled']) {
     assert.throws(() => requireCiPlan({ ...results(plan), [id]: { result } }, plan, 'schedule', sha));
   }
@@ -38,9 +40,11 @@ test('routine docs select no matrix, but mandatory scope checks must succeed', (
     const plan = planCi({ event, sha, paths: ['README.md'] });
     assert.deepEqual(plan.families, []);
     assert.doesNotThrow(() => requireCiPlan(results(plan), plan, event, sha));
-    for (const id of ['select', 'targeted']) for (const result of ['skipped', 'cancelled', 'failure']) {
+    for (const id of ['select', ...targetedJobs]) for (const result of ['skipped', 'cancelled', 'failure']) {
       assert.throws(() => requireCiPlan({ ...results(plan), [id]: { result } }, plan, event, sha));
     }
+    const missing = results(plan); delete missing['release-bookkeeping'];
+    assert.throws(() => requireCiPlan(missing, plan, event, sha), /inventory mismatch/);
     assert.throws(() => requireCiPlan(results(plan), { ...plan, families: ['build-test'] }, event, sha));
     assert.throws(() => requireCiPlan({ ...results(plan), 'build-test': { result: 'success' } }, plan, event, sha));
   }

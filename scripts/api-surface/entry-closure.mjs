@@ -11,6 +11,7 @@ const posix = value => value.split(path.sep).join('/');
 const sorted = values => [...new Set(values)].sort();
 const inside = (directory, file) => file === directory || file.startsWith(directory + path.sep);
 const packageName = specifier => specifier.startsWith('@') ? specifier.split('/').slice(0, 2).join('/') : specifier.split('/')[0];
+const exactPackageName = /^(?:@[a-z0-9._~-]+\/)?[a-z0-9._~-]+$/;
 const runtimeFields = ['dependencies', 'optionalDependencies', 'peerDependencies'];
 const START = '<!-- BEGIN generated: api-surface/entries.json -->';
 const END = '<!-- END generated: api-surface/entries.json -->';
@@ -295,8 +296,11 @@ export function createWalker(root) {
         if (pkg.workspace && !edge.specifier.startsWith('.')) bare.push(edge.specifier);
         if (isBuiltin(edge.specifier)) builtins[pkg.workspace ? 'workspace' : 'thirdParty'].push(edge.specifier);
         const resolved = resolve(file, pkg, edge);
-        if (resolved?.unavailableOptional) unavailableOptional.push(resolved.unavailableOptional);
-        else if (resolved?.opaqueImport) {
+        if (resolved?.unavailableOptional) {
+          unavailableOptional.push(resolved.unavailableOptional);
+          third.push(packageName(resolved.unavailableOptional));
+        } else if (resolved?.opaqueImport) {
+          third.push(packageName(resolved.opaqueImport));
           opaqueImports.push(`${display}: ${resolved.opaqueImport}`);
           codegen.push({ file: display, line: 0, rule: `unresolved external dependency ${resolved.opaqueImport}` });
         }
@@ -317,7 +321,8 @@ export function renderEntryTable(contract) {
   return `${START}\n\nWorkspace static closure budgets exclude third-party bytes, sourcemaps and literal lazy imports.\nBudgets use normalized bytes: private top-level binding decimal suffixes cost one byte; all other source bytes are preserved. The check also reports raw bytes.\nThird-party dependencies and code-generation evidence follow static dependency edges; these are build facts, not a CSP sandbox guarantee.\n\n| Import / command | Purpose | Third-party dependencies | Zod | Normalized budget |\n| --- | --- | --- | --- | ---: |\n${rows.join('\n')}\n\n${END}`;
 }
 
-export function checkEntryClosure(root, { update = false } = {}) {
+export function checkEntryClosure(root, { update = false, calibrateReleaseBudgets = false } = {}) {
+  if (calibrateReleaseBudgets && !update) throw new Error('Release budget calibration requires update mode');
   const file = path.join(root, 'api-surface', 'entries.json');
   if (!existsSync(file)) throw new Error('api-surface/entries.json is missing; author entry policies before --update');
   const contract = readJson(file), entries = manifestEntries(root), walk = createWalker(root), failures = [], measured = [], updated = {};
@@ -330,6 +335,8 @@ export function checkEntryClosure(root, { update = false } = {}) {
       const policy = record.policy;
       if (!policy || typeof policy.purpose !== 'string' || !policy.purpose.trim()
         || !Number.isSafeInteger(policy.budgetBytes) || policy.budgetBytes < 0
+        || !Array.isArray(policy.thirdParty) || policy.thirdParty.some(name => typeof name !== 'string' || !exactPackageName.test(name))
+        || new Set(policy.thirdParty).size !== policy.thirdParty.length
         || ['zod', 'codegen'].some(key => typeof policy[key] !== 'boolean')
         || !policy.nodeBuiltins || ['workspace', 'thirdParty'].some(key => typeof policy.nodeBuiltins[key] !== 'boolean')
         || (policy.nodeBuiltins.forbidden !== undefined && (!Array.isArray(policy.nodeBuiltins.forbidden)
@@ -339,7 +346,8 @@ export function checkEntryClosure(root, { update = false } = {}) {
         if (!inside(path.join(entry.pkg.directory, 'dist'), target) || !existsSync(target)) throw new Error(`missing or escaped declaration target ${type}`);
       }
       const result = walk(entry);
-      measured.push({ id: entry.id, rawBytes: result.rawBytes, normalizedBytes: result.normalizedBytes, budgetBytes: policy.budgetBytes });
+      const budgetBytes = calibrateReleaseBudgets ? result.normalizedBytes + Math.ceil(result.normalizedBytes / 10) : policy.budgetBytes;
+      measured.push({ id: entry.id, rawBytes: result.rawBytes, normalizedBytes: result.normalizedBytes, budgetBytes });
       const via = result.bareImports.join(', ');
       if (!policy.zod && [...result.thirdParty, ...result.unavailableOptional.map(packageName)].includes('zod')) throw new Error(`zod is forbidden; specifiers: ${via}`);
       if ((result.unavailableOptional.length || result.opaqueImports.length) && (!policy.codegen || !policy.nodeBuiltins.thirdParty)) throw new Error(`strict policy cannot prove optional dependency safety: ${[...result.unavailableOptional, ...result.opaqueImports].join(', ')}`);
@@ -350,9 +358,11 @@ export function checkEntryClosure(root, { update = false } = {}) {
         const denied = result.nodeBuiltins[layer].filter(name => forbidden.has(name.replace(/^node:/, '')));
         if (denied.length) throw new Error(`Node builtins are forbidden in ${layer}: ${denied.join(', ')}`);
       }
-      if (result.normalizedBytes > policy.budgetBytes) throw new Error(`closure ${result.normalizedBytes} normalized bytes exceeds budget ${policy.budgetBytes} (${result.rawBytes} raw bytes)`);
+      const unapproved = result.thirdParty.filter(name => !policy.thirdParty.includes(name));
+      if (unapproved.length) throw new Error(`third-party packages absent from policy.thirdParty: ${unapproved.join(', ')}; specifiers: ${via}`);
+      if (result.normalizedBytes > budgetBytes) throw new Error(`closure ${result.normalizedBytes} normalized bytes exceeds budget ${budgetBytes} (${result.rawBytes} raw bytes)`);
       const { rawBytes: _rawBytes, normalizedBytes: _normalizedBytes, ...facts } = result;
-      const next = { kind: entry.kind, policy, facts: { target: posix(path.relative(root, entry.target)), conditions: entry.conditions, types: entry.types, ...facts } };
+      const next = { kind: entry.kind, policy: { ...policy, budgetBytes }, facts: { target: posix(path.relative(root, entry.target)), conditions: entry.conditions, types: entry.types, ...facts } };
       updated[entry.id] = next;
       if (!update && JSON.stringify(record) !== JSON.stringify(next)) throw new Error('entry facts drifted; review then run check:api-surface -- --update');
     } catch (error) { failures.push(`${entry.id}: ${error.message}`); }

@@ -3,7 +3,8 @@ import { knownFamilies, selectImpact } from './select-impact.mjs';
 import { requireCiSuccess } from './require-ci-success.mjs';
 
 export function requireCiPlan(needs, plan, event, sha, base, cwd) {
-  const inventory = ['select', 'targeted', ...knownFamilies];
+  const targetedJobs = ['release-bookkeeping', 'targeted'];
+  const inventory = ['select', ...targetedJobs, ...knownFamilies];
   if (!needs || JSON.stringify(Object.keys(needs).sort()) !== JSON.stringify(inventory.sort())) throw new Error('CI inventory mismatch');
   if (needs.select.result !== 'success' || !plan || plan.sha !== sha) throw new Error('Missing successful exact-SHA selection');
   const mode = event === 'workflow_dispatch' ? 'release' : event === 'schedule' ? 'nightly' : 'targeted';
@@ -12,7 +13,7 @@ export function requireCiPlan(needs, plan, event, sha, base, cwd) {
   if (!full && plan.base !== base) throw new Error('CI comparison base mismatch');
   const families = full ? knownFamilies : selectImpact(plan.files, { base, cwd }).families;
   if (JSON.stringify([...families].sort()) !== JSON.stringify([...plan.families].sort())) throw new Error('CI selection mismatch');
-  const required = ['select', ...(full ? [] : ['targeted']), ...families];
+  const required = ['select', ...(full ? [] : targetedJobs), ...families];
   for (const id of inventory) {
     if (!required.includes(id) && needs[id].result !== 'skipped') throw new Error(`Unselected CI job unexpectedly ran: ${id}`);
   }

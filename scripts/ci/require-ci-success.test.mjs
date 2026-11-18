@@ -36,6 +36,22 @@ test('CLI fails closed when result JSON is absent or malformed', () => {
     assert.equal(run.status, 1, run.stdout);
   }
 });
+test('release bookkeeping runs independently of affected workspace checks', () => {
+  const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const job = id => workflow.split(`\n  ${id}:\n`)[1].split(/\n  [a-z][a-z0-9-]+:/)[0];
+  const bookkeeping = job('release-bookkeeping'), targeted = job('targeted');
+  for (const block of [bookkeeping, targeted]) {
+    assert.match(block, /^    needs: select$/m);
+    assert.match(block, /^    if: needs\.select\.outputs\.mode == 'targeted'$/m);
+  }
+  for (const check of ['check-upgrade-manifest', 'check-version-authority', 'check-retired-identities']) {
+    assert.ok(bookkeeping.includes(`/${check}.mjs`));
+    assert.ok(!targeted.includes(check));
+  }
+  assert.doesNotMatch(bookkeeping, /continue-on-error/);
+  assert.match(targeted, /run-targeted\.mjs[\s\S]*outcome == 'success'[^\n]*\n        run: bun run check:api-surface[\s\S]*outcome == 'success'[^\n]*\n        run: bun run check:release-graph/);
+});
+
 test('main pushes cannot cancel the scheduled full matrix', () => {
   const workflow = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
   assert.match(workflow, /^  group: ci-\$\{\{ github\.workflow \}\}-\$\{\{ github\.event_name \}\}-/m);
@@ -50,7 +66,7 @@ test('workflow separates targeted, nightly and approved release validation', () 
   assert.doesNotMatch(workflow, /pull_request_target:/);
   const jobs = workflow.split('\njobs:\n')[1];
   const ids = [...jobs.matchAll(/^  ([a-z][a-z0-9-]+):$/gm)].map(match => match[1]);
-  assert.deepEqual(ids, ['select', 'targeted', ...families, 'ci-required']);
+  assert.deepEqual(ids, ['select', 'release-bookkeeping', 'targeted', ...families, 'ci-required']);
   for (const family of families) {
     const block = jobs.slice(jobs.indexOf(`  ${family}:`)).split(/\n  [a-z][a-z0-9-]+:/)[0];
     assert.match(block, /^    needs: select$/m);
@@ -59,7 +75,7 @@ test('workflow separates targeted, nightly and approved release validation', () 
   const aggregate = jobs.slice(jobs.indexOf('  ci-required:'));
   assert.match(aggregate, /^    name: CI required$/m);
   assert.match(aggregate, /^    if: \$\{\{ always\(\) \}\}$/m);
-  assert.deepEqual(JSON.parse(aggregate.match(/^    needs: (.*)$/m)[1]), ['select', 'targeted', ...families]);
+  assert.deepEqual(JSON.parse(aggregate.match(/^    needs: (\[[^\]]*\])$/m)[1]), ['select', 'release-bookkeeping', 'targeted', ...families]);
   const macos = jobs.slice(jobs.indexOf('  macos-client:')).split(/\n  [a-z][a-z0-9-]+:/)[0];
   assert.match(macos, /runs-on: macos-latest/);
   assert.match(macos, /run: bun run --filter @byok-sdk\/client test\n/);

@@ -50,7 +50,7 @@ test('full CLI reports raw and normalized bytes and refuses normalized overflow 
   mkdirSync(path.join(root, 'api-surface'));
   const entriesPath = path.join(root, 'api-surface/entries.json'), readmePath = path.join(root, 'README.md');
   writeFileSync(entriesPath, JSON.stringify(Object.fromEntries(manifestEntries(root).map(entry => [entry.id, {
-    kind: entry.kind, policy: { purpose: entry.id, budgetBytes: budget, zod: false, codegen: false,
+    kind: entry.kind, policy: { purpose: entry.id, budgetBytes: budget, thirdParty: [], zod: false, codegen: false,
       nodeBuiltins: { workspace: false, thirdParty: false } }, facts: {},
   }]))));
   writeFileSync(readmePath, '<!-- BEGIN generated: api-surface/entries.json -->\n<!-- END generated: api-surface/entries.json -->\n');
@@ -69,6 +69,25 @@ test('full CLI reports raw and normalized bytes and refuses normalized overflow 
     assert.ok(failed.stderr.includes(`closure ${budget + 1} normalized bytes exceeds budget ${budget} (${raw + 1} raw bytes)`));
     assert.equal(readFileSync(entriesPath, 'utf8'), entries);
     assert.equal(readFileSync(readmePath, 'utf8'), readme);
+  }
+  const calibrate = '--calibrate-release-budgets';
+  for (const args of [[calibrate], ['--update', calibrate, '--package', 'core']]) {
+    const failed = full(args);
+    assert.equal(failed.status, 1);
+    assert.match(failed.stderr, /requires a full --update/);
+    assert.equal(readFileSync(entriesPath, 'utf8'), entries);
+  }
+  const calibration = full(['--update', calibrate]);
+  assert.equal(calibration.status, 0, calibration.stderr);
+  const calibrated = readFileSync(entriesPath, 'utf8');
+  const calibratedBudget = budget + 1 + Math.ceil((budget + 1) / 10);
+  assert.equal(JSON.parse(calibrated)['@byok-sdk/core'].policy.budgetBytes, calibratedBudget);
+  assert.match(readFileSync(readmePath, 'utf8'), new RegExp(`\\| ${calibratedBudget} B \\|`));
+  writeFileSync(path.join(root, 'packages/core/dist/index.js'), source + '\n\n');
+  for (const args of [[], ['--update']]) {
+    const result = full(args);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(entriesPath, 'utf8'), calibrated);
   }
 });
 

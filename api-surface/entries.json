@@ -3,13 +3,22 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 2889961,
+      "budgetBytes": 3178958,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "eventsource",
+        "eventsource-parser",
+        "pkce-challenge",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/bot-collaboration/dist/index.js",
@@ -135,7 +144,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client",
-      "budgetBytes": 611685,
+      "budgetBytes": 599700,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -145,7 +154,11 @@
           "fs",
           "path"
         ]
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/bot-collaboration/dist/host-kit.js",
@@ -205,13 +218,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 2086,
+      "budgetBytes": 2295,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/bot-collaboration/package.json",
@@ -233,13 +247,17 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 pure rules; Worker-safe, no node:sqlite",
-      "budgetBytes": 248602,
+      "budgetBytes": 270635,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": false
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/bot-collaboration/dist/rules/index.js",
@@ -292,13 +310,29 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3337814,
+      "budgetBytes": 3671596,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@hono/node-server",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "chai",
+        "eventsource",
+        "eventsource-parser",
+        "expect-type",
+        "hono",
+        "pkce-challenge",
+        "tinybench",
+        "vite",
+        "vitest",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/bot-collaboration/dist/testing.js",
@@ -472,13 +506,22 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 2560768,
+      "budgetBytes": 2816845,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "eventsource",
+        "eventsource-parser",
+        "pkce-challenge",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/client/dist/index.js",
@@ -595,13 +638,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 611606,
+      "budgetBytes": 672767,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/adapters/index.js",
@@ -667,13 +711,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Embedded Agent memory service",
-      "budgetBytes": 84740,
+      "budgetBytes": 93214,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/agent-memory/index.js",
@@ -713,13 +758,16 @@
     "kind": "exports",
     "policy": {
       "purpose": "Task/device assertions; core includes protected Zod probes",
-      "budgetBytes": 128330,
+      "budgetBytes": 136108,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/client/dist/assertion-client/index.js",
@@ -784,13 +832,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pure Host directory layout for shells and installers; no client daemon or runtime SDKs",
-      "budgetBytes": 4171,
+      "budgetBytes": 4589,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/host-layout.js",
@@ -824,13 +873,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP server",
-      "budgetBytes": 13144,
+      "budgetBytes": 14459,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/mcp-server/index.js",
@@ -856,13 +906,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Tools-only MCP Streamable HTTP framing",
-      "budgetBytes": 28447,
+      "budgetBytes": 31292,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/mcp-server/http.js",
@@ -894,13 +945,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 4902,
+      "budgetBytes": 5393,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/package.json",
@@ -922,13 +974,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Single-file Host build: esbuild packaging plugin and SDK asset copy",
-      "budgetBytes": 34699,
+      "budgetBytes": 38169,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/adapters/packaging.js",
@@ -968,13 +1021,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 569109,
+      "budgetBytes": 626020,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/testing/index.js",
@@ -1040,13 +1094,17 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 159147,
+      "budgetBytes": 175062,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@agentclientprotocol/sdk",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/client/dist/runtime/acp-session-runtime.js",
@@ -1110,13 +1168,14 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private on-demand OAR runtime readers",
-      "budgetBytes": 61234,
+      "budgetBytes": 67358,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/runtime/oar-readers.js",
@@ -1152,13 +1211,65 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 594040,
+      "budgetBytes": 653444,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@earendil-works/chord",
+        "@earendil-works/pi-agent-core",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-codemode",
+        "@earendil-works/pi-coding-agent",
+        "@earendil-works/pi-durable",
+        "@earendil-works/pi-mcp",
+        "@earendil-works/pi-schema",
+        "@earendil-works/pi-telemetry",
+        "@earendil-works/pi-tui",
+        "@isaacs/nonrecursive-glob-match",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "balanced-match",
+        "brace-expansion",
+        "chalk",
+        "cross-spawn",
+        "diff",
+        "eventsource",
+        "eventsource-parser",
+        "get-east-asian-width",
+        "graceful-fs",
+        "highlight.js",
+        "hosted-git-info",
+        "ignore",
+        "isexe",
+        "lovely-mermaid",
+        "lru-cache",
+        "marked",
+        "marked-cjk-friendly",
+        "minimatch",
+        "openai",
+        "p-limit",
+        "partial-json",
+        "path-key",
+        "pi-web-access",
+        "pkce-challenge",
+        "proper-lockfile",
+        "retry",
+        "semver",
+        "shebang-command",
+        "shebang-regex",
+        "signal-exit",
+        "typebox",
+        "undici",
+        "which",
+        "yaml",
+        "yocto-queue",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/client/dist/bin/pi-runtime-host.js",
@@ -1449,13 +1560,14 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private pure todo runtime",
-      "budgetBytes": 372588,
+      "budgetBytes": 409847,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/bin/pi-todo-runtime.js",
@@ -1491,13 +1603,18 @@
     "kind": "exports",
     "policy": {
       "purpose": "Cloud coordination and HTTP handlers",
-      "budgetBytes": 547284,
+      "budgetBytes": 595402,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "hono",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/cloud/dist/index.js",
@@ -1549,13 +1666,39 @@
     "kind": "exports",
     "policy": {
       "purpose": "Postgres stores and Node operations",
-      "budgetBytes": 782903,
+      "budgetBytes": 855422,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@nodable/entities",
+        "anynum",
+        "aws4fetch",
+        "fast-xml-builder",
+        "fast-xml-parser",
+        "hono",
+        "is-unsafe",
+        "path-expression-matcher",
+        "pg",
+        "pg-connection-string",
+        "pg-int8",
+        "pg-native",
+        "pg-pool",
+        "pg-protocol",
+        "pg-types",
+        "postgres-array",
+        "postgres-bytea",
+        "postgres-date",
+        "postgres-interval",
+        "strnum",
+        "xml-naming",
+        "xtend",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/cloud-dataplane/dist/index.js",
@@ -1594,6 +1737,7 @@
         "pg",
         "pg-connection-string",
         "pg-int8",
+        "pg-native",
         "pg-pool",
         "pg-protocol",
         "pg-types",
@@ -1651,13 +1795,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1794,
+      "budgetBytes": 1974,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/cloud-dataplane/package.json",
@@ -1679,13 +1824,39 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker online stores; pg requires nodejs_compat",
-      "budgetBytes": 751853,
+      "budgetBytes": 821267,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@nodable/entities",
+        "anynum",
+        "aws4fetch",
+        "fast-xml-builder",
+        "fast-xml-parser",
+        "hono",
+        "is-unsafe",
+        "path-expression-matcher",
+        "pg",
+        "pg-connection-string",
+        "pg-int8",
+        "pg-native",
+        "pg-pool",
+        "pg-protocol",
+        "pg-types",
+        "postgres-array",
+        "postgres-bytea",
+        "postgres-date",
+        "postgres-interval",
+        "strnum",
+        "xml-naming",
+        "xtend",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/cloud-dataplane/dist/runtime.js",
@@ -1720,6 +1891,7 @@
         "pg",
         "pg-connection-string",
         "pg-int8",
+        "pg-native",
         "pg-pool",
         "pg-protocol",
         "pg-types",
@@ -1772,13 +1944,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1272,
+      "budgetBytes": 1400,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/cloud/package.json",
@@ -1800,13 +1973,16 @@
     "kind": "exports",
     "policy": {
       "purpose": "Shared contracts and validation",
-      "budgetBytes": 101150,
+      "budgetBytes": 105937,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": [
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/core/dist/index.js",
@@ -1852,13 +2028,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1655,
+      "budgetBytes": 1821,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/core/package.json",
@@ -1880,13 +2057,16 @@
     "kind": "exports",
     "policy": {
       "purpose": "Sealed payload v1 byte rules",
-      "budgetBytes": 160733,
+      "budgetBytes": 171173,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": [
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/core/dist/sealed-payload/index.js",
@@ -1933,13 +2113,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Read-only SQLite format admission for Node stores",
-      "budgetBytes": 1827,
+      "budgetBytes": 2010,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/core/dist/sqlite-node.js",
@@ -1965,13 +2146,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Trusted system tools for Node hosts",
-      "budgetBytes": 2710,
+      "budgetBytes": 2981,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/core/dist/system-tool.js",
@@ -2004,13 +2186,16 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 241009,
+      "budgetBytes": 263342,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/keys/dist/index.js",
@@ -2072,13 +2257,16 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 323388,
+      "budgetBytes": 355727,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": [
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/keys/dist/model-route.js",
@@ -2124,13 +2312,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1607,
+      "budgetBytes": 1768,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/keys/package.json",
@@ -2152,13 +2341,16 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pinned pi-ai catalog lookup for pi_model",
-      "budgetBytes": 295693,
+      "budgetBytes": 325263,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": [
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/keys/dist/pi-catalog.js",
@@ -2204,13 +2396,17 @@
     "kind": "exports",
     "policy": {
       "purpose": "Wire schemas and codecs; codegen negative control",
-      "budgetBytes": 154436,
+      "budgetBytes": 167138,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/protocol/dist/index.js",
@@ -2258,13 +2454,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Agent memory Host contract; schema-free",
-      "budgetBytes": 1418,
+      "budgetBytes": 1560,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/protocol/dist/agent-memory.js",
@@ -2290,13 +2487,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Schema-free protocol values",
-      "budgetBytes": 8916,
+      "budgetBytes": 9808,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/protocol/dist/constants.js",
@@ -2322,13 +2520,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1532,
+      "budgetBytes": 1686,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/protocol/package.json",
@@ -2350,13 +2549,19 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 698594,
+      "budgetBytes": 768454,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@hono/node-server",
+        "hono",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/server/dist/index.js",
@@ -2427,13 +2632,17 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 415855,
+      "budgetBytes": 393408,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/server/dist/execution-core/index.js",
@@ -2491,13 +2700,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Worker-safe canonical JSON hash",
-      "budgetBytes": 574,
+      "budgetBytes": 632,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/server/dist/execution-core/canonical.js",
@@ -2527,13 +2737,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1761,
+      "budgetBytes": 1938,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/server/package.json",
@@ -2555,13 +2766,18 @@
     "kind": "exports",
     "policy": {
       "purpose": "UI folds; current cloud/Hono/Zod closure",
-      "budgetBytes": 571018,
+      "budgetBytes": 621509,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "hono",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/ui-runtime/dist/index.js",
@@ -2614,13 +2830,14 @@
     "kind": "exports",
     "policy": {
       "purpose": "Package metadata",
-      "budgetBytes": 1215,
+      "budgetBytes": 1337,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": false,
         "thirdParty": false
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/ui-runtime/package.json",
@@ -2642,13 +2859,22 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 2574215,
+      "budgetBytes": 2831637,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "@cfworker/json-schema",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "eventsource",
+        "eventsource-parser",
+        "pkce-challenge",
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-agent.js",
@@ -2763,13 +2989,14 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent memory MCP helper",
-      "budgetBytes": 46785,
+      "budgetBytes": 51464,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-agent-memory-mcp.js",
@@ -2804,13 +3031,14 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent message MCP helper",
-      "budgetBytes": 46789,
+      "budgetBytes": 51468,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-agent-message-mcp.js",
@@ -2845,13 +3073,14 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound structured outcome MCP helper",
-      "budgetBytes": 46785,
+      "budgetBytes": 51464,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-agent-result-mcp.js",
@@ -2886,13 +3115,14 @@
     "kind": "bin",
     "policy": {
       "purpose": "Agent team MCP helper",
-      "budgetBytes": 46755,
+      "budgetBytes": 51431,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-agent-team-mcp.js",
@@ -2927,13 +3157,14 @@
     "kind": "bin",
     "policy": {
       "purpose": "Pi durable launcher; host loads lazily",
-      "budgetBytes": 405,
+      "budgetBytes": 446,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-pi-durable.js",
@@ -2957,13 +3188,14 @@
     "kind": "bin",
     "policy": {
       "purpose": "Pi prepared launcher; host loads lazily",
-      "budgetBytes": 470,
+      "budgetBytes": 517,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-pi-prepared.js",
@@ -2987,13 +3219,16 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 185348,
+      "budgetBytes": 203883,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": [
+        "zod"
+      ]
     },
     "facts": {
       "target": "packages/keys/dist/bin/pi-provider-launcher.js",
@@ -3051,13 +3286,14 @@
     "kind": "bin",
     "policy": {
       "purpose": "Pi RPC launcher; host loads lazily",
-      "budgetBytes": 450,
+      "budgetBytes": 495,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
         "workspace": true,
         "thirdParty": true
-      }
+      },
+      "thirdParty": []
     },
     "facts": {
       "target": "packages/client/dist/bin/byok-pi-rpc.js",

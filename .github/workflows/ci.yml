@@ -75,6 +75,25 @@ jobs:
           CI_REF: ${{ github.ref }}
         run: node scripts/ci/plan-ci.mjs
 
+  release-bookkeeping:
+    name: Release bookkeeping
+    needs: select
+    if: needs.select.outputs.mode == 'targeted'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .node-version
+      - name: Upgrade manifest
+        run: node scripts/release/check-upgrade-manifest.mjs
+      - name: Version authority
+        run: node scripts/api-surface/check-version-authority.mjs
+      - name: Retired package identities
+        run: node scripts/release/check-retired-identities.mjs
+
   targeted:
     name: Affected workspace checks
     needs: select
@@ -161,21 +180,13 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
       - name: Workflow and selector contracts
         run: bun run test:scripts:ci
-      - name: Version authority
-        run: node scripts/api-surface/check-version-authority.mjs
-      - name: Upgrade manifest
-        run: node scripts/release/check-upgrade-manifest.mjs
-      - name: Retired package identities
-        run: node scripts/release/check-retired-identities.mjs
       - name: Install dependencies
         if: needs.select.outputs.build == 'true'
         run: bun ci
       - name: Build dependency artifacts
+        id: build
         if: needs.select.outputs.build == 'true'
         run: bun run build
-      - name: Check API and version contracts
-        if: needs.select.outputs.build == 'true'
-        run: bun run check:api-surface && bun run check:version-authority && bun run check:release-graph
       - name: Install isolated credential-provider test dependencies
         if: needs.select.outputs.build == 'true'
         run: |
@@ -199,6 +210,12 @@ jobs:
       - name: Check scoped tests cleaned their scratch directories
         if: ${{ always() && steps.tmpdir-snapshot.outcome == 'success' }}
         run: node scripts/ci/check-tmpdir-leaks.mjs verify "$RUNNER_TEMP/tmpdir-before.txt"
+      - name: Check API surface goldens
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: bun run check:api-surface
+      - name: Check release dependency graph
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        run: bun run check:release-graph
 
   build-test:
     needs: select
@@ -2524,7 +2541,15 @@ jobs:
   ci-required:
     name: CI required
     if: ${{ always() }}
-    needs: ["select", "targeted", "build-test", "macos-client", "agent-memory-export-linux", "agent-memory-helper-non-darwin", "agent-memory-helper", "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane", "windows-client", "packageability-smoke", "packaging-consistency", "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke", "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke", "credential-isolation-audit", "agy-real-windows", "opencode-real-windows", "runtime-contract", "desktop"]
+    needs: ["select", "release-bookkeeping", "targeted", "build-test",
+            "macos-client", "agent-memory-export-linux",
+            "agent-memory-helper-non-darwin", "agent-memory-helper",
+            "execution-recovery-native", "adapter-lifecycle-smoke", "dataplane",
+            "windows-client", "packageability-smoke", "packaging-consistency",
+            "npm-release-pack", "release-pack-migrate", "service-upgrade-smoke",
+            "linux-systemd-smoke", "windows-service-smoke", "ipc-smoke",
+            "credential-isolation-audit", "agy-real-windows",
+            "opencode-real-windows", "runtime-contract", "desktop"]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

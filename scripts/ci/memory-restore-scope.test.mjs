@@ -16,8 +16,8 @@ for (const file of [
     assert.deepEqual(selectImpact([file]).families, ['adapter-lifecycle-smoke', id, 'dataplane']);
     for (const event of ['push', 'pull_request']) {
       const plan = planCi({ event, sha, paths: [file] });
-      const needs = Object.fromEntries(['select', 'targeted', ...knownFamilies].map(key => [key, {
-        result: ['select', 'targeted', ...plan.families].includes(key) ? 'success' : 'skipped',
+      const needs = Object.fromEntries(['select', 'release-bookkeeping', 'targeted', ...knownFamilies].map(key => [key, {
+        result: ['select', 'release-bookkeeping', 'targeted', ...plan.families].includes(key) ? 'success' : 'skipped',
       }]));
       assert.doesNotThrow(() => requireCiPlan(needs, plan, event, sha));
       for (const result of ['failure', 'cancelled', 'skipped', undefined]) {
