@@ -1,3 +1,6 @@
+import { readFile } from 'node:fs/promises';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import { PI_MEMORY_LANE } from './memory-lane-contract.js';
 import { parsePiHostReadyEvent, warnPiHostDiagnostic } from './host-ready.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, sdkLaneReport, type RuntimeEnvironment, type RuntimeEnvironmentLaneReport, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
@@ -581,6 +584,7 @@ export class PiAdapter implements RuntimeAdapter {
           }
           if (this.options.durableLane === true) {
             if (startInput.kind !== 'instruction' || launcherArgs === undefined || this.options.byokLauncher === undefined) throw authorityFailure('durable Pi requires ordinary custody launch');
+            requireImageInput(startInput.images, false);
             if (startInput.durableContext === undefined) throw authorityFailure('durable Pi requires replica and journal context');
             return await startDurablePi({ input: startInput, runtimeLaunch, replicaRoot: startInput.durableContext.replicaRoot,
               launcher: this.options.byokLauncher, launcherArgs, nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn });
@@ -790,8 +794,10 @@ export class PiAdapter implements RuntimeAdapter {
           // The host owns its writer lease before serving get_state. The parent
           // retains admission too, before allowing the first prompt.
           let sessionRef: string;
+          let imagesSupported: boolean;
           try {
-            sessionRef = await resolveAuthoritativeSessionId(rpc, startInput.signal, effort);
+            ({ sessionRef, images: imagesSupported } = await resolveAuthoritativeSessionId(rpc, startInput.signal, effort));
+            requireImageInput(startInput.images, imagesSupported);
             await readiness;
             if (memoryLane && (readyCount !== 1 || readySessionId !== sessionRef)) throw authorityFailure('memory_lane_tool_set_mismatch');
             if (resumeSessionId !== undefined && sessionRef !== resumeSessionId) {
@@ -819,7 +825,7 @@ export class PiAdapter implements RuntimeAdapter {
               });
               // `followUp`: a run an extension started is not a refusal; the
               // input joins that run, and its settlement ends this turn.
-              response = await Promise.race([rpc.send({ type: 'prompt', message: startInput.instruction, streamingBehavior: 'followUp' },
+              response = await Promise.race([rpc.send({ type: 'prompt', message: startInput.instruction, streamingBehavior: 'followUp', ...await piImageFields(startInput.images) },
                 count => { promptFrames = count; }), interrupted]);
               if (memoryLane && startInput.signal?.aborted) {
                 await abortMemoryLane();
@@ -851,7 +857,7 @@ export class PiAdapter implements RuntimeAdapter {
           }
 
           return new PiSession(sessionRef, rpc, manifestSelection, scratch, disposition === 'handled' ? 'handled' : promptFrames,
-            undefined, mcpEventIdentities(startInput.mcpToolsetTools, startInput.mcpServers), memoryLane ? abortMemoryLane : undefined, effort);
+            undefined, mcpEventIdentities(startInput.mcpToolsetTools, startInput.mcpServers), memoryLane ? abortMemoryLane : undefined, effort, imagesSupported);
         },
       },
     };
@@ -1298,7 +1304,7 @@ function sameModelTarget(
  * `PiRpcClient.buildExitError`), exactly like any other adapter start()
  * failure `task-runner.ts` already knows how to report as `task.fail`.
  */
-async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSignal | undefined, effort: string | undefined): Promise<string> {
+async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSignal | undefined, effort: string | undefined): Promise<{ sessionRef: string; images: boolean }> {
   let state: PiRpcMessage;
   try {
     state = await untilStartAborted(rpc.send({ type: 'get_state' }), signal);
@@ -1323,13 +1329,13 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSign
     });
   }
 
-  const data = state.data as { sessionId?: unknown; thinkingLevel?: unknown } | undefined;
+  const data = state.data as { sessionId?: unknown; thinkingLevel?: unknown; model?: { input?: unknown } } | undefined;
   if (effort !== undefined && data?.thinkingLevel !== effort) {
     throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable',
       reason: 'pi did not confirm the requested effort', failure: { class: 'invalid_request' } });
   }
   if (typeof data?.sessionId === 'string' && data.sessionId.length > 0) {
-    return data.sessionId;
+    return { sessionRef: data.sessionId, images: Array.isArray(data.model?.input) && data.model.input.includes('image') };
   }
 
   throw new RuntimeExecutionFailure({
@@ -1337,6 +1343,15 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSign
     retry: 'non-retryable',
     reason: 'pi get_state reported no authoritative session id',
   });
+}
+
+async function piImageFields(images: readonly RuntimeInputImage[] | undefined) {
+  if (images === undefined) return {};
+  return { images: await Promise.all(images.map(async image => ({
+    type: 'image' as const,
+    mimeType: image.mediaType,
+    data: (await readFile(image.path)).toString('base64'),
+  }))) };
 }
 
 /** How Pi accepted a `prompt`; undefined for a response that names none of the three. */
@@ -1367,6 +1382,7 @@ function piPromptDisposition(response: PiRpcMessage): 'started' | 'queued' | 'ha
  *   run's settlement ends the turn, with the rest of that run's output.
  */
 class PiSession implements Session {
+  readonly capabilities: { readonly images: boolean };
   private pendingTurnEnd: boolean;
   private closeAttempt: Promise<void> | undefined;
   /** Whether the frames being read belong to one of this task's turns. */
@@ -1389,7 +1405,9 @@ class PiSession implements Session {
     private readonly identities?: McpEventIdentities,
     private readonly abortMemoryLane?: () => Promise<void>,
     private readonly effort?: string,
+    images = false,
   ) {
+    this.capabilities = { images };
     this.pendingTurnEnd = firstTurn === 'handled';
     if (firstTurn !== 'handled') this.turnStarts.push(firstTurn);
   }
@@ -1510,9 +1528,11 @@ class PiSession implements Session {
     };
   }
 
-  async steer(text: string): Promise<void> {
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
     if (this.abortMemoryLane !== undefined) throw authorityFailure('memory lane cannot steer');
-    await this.rpc.send({ type: 'steer', message: text });
+    requireImageInput(options?.images, this.capabilities.images);
+    const response = await this.rpc.send({ type: 'steer', message: text, ...await piImageFields(options?.images) });
+    if (response.success === false) throw new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: 'pi rejected the steer' });
   }
 
   async followUp(task: RuntimeTaskInput): Promise<void> {
@@ -1535,7 +1555,8 @@ class PiSession implements Session {
       );
     }
     if (this.abortMemoryLane !== undefined) throw authorityFailure('memory lane cannot follow up');
-    await this.rpc.send({ type: 'prompt', message: task.instruction, streamingBehavior: 'followUp' },
+    requireImageInput(task.images, this.capabilities.images);
+    await this.rpc.send({ type: 'prompt', message: task.instruction, streamingBehavior: 'followUp', ...await piImageFields(task.images) },
       (count, message) => {
         // Recorded as the response is decoded, before any later frame is read. A
         // `handled` follow-up starts no run, so it opens no turn.

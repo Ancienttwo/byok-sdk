@@ -36,6 +36,8 @@ import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES }
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
 import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
 import { ClaudeFailureEvidence } from './failure-evidence.js';
+import { requireImageInput } from '../input-images.js';
+import { claudeSessionCapabilities } from '../../runtime/claude-session-runtime.js';
 import { ClaudeStreamSession } from './stream-session.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import type { spawn } from 'node:child_process';
@@ -245,6 +247,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const authPresent = await this.probeAuthPresent(invocation, env);
       return {
         kind: 'available', version, authPresent,
+        sessionCapabilities: { ...claudeSessionCapabilities(), steer: this.descriptor.capabilities.steer },
         ...runtimeExecutableFields(resolved, invocation.executable),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, claudeVersionToken(version)),
       };
@@ -504,7 +507,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // after it carries the session id.
       let sessionRef: string;
       try {
-        const prompted = await Promise.race([opened.prompt(startInput.instruction), cancelled]);
+        requireImageInput(startInput.images, opened.raw.capabilities.images === true);
+        const prompted = await Promise.race([opened.prompt(startInput.instruction, startInput.images), cancelled]);
         if (prompted.response.body.kind !== 'accepted') {
           throw new RuntimeExecutionFailure({
             phase: 'start', retry: 'retryable',
@@ -816,11 +820,12 @@ class ClaudeSession implements Session {
     // process is killed. OAR refuses a prompt as busy while Claude runs a
     // turn of its own (a background task wake); OAR then holds it and
     // sends it when that turn ends.
+    requireImageInput(task.images, this.stream.raw.capabilities.images === true);
     let refusal: unknown;
     try {
       this.native?.beginTurn();
-      let prompted = await this.stream.prompt(task.instruction);
-      if (prompted.response.body.code === 'busy') prompted = await this.stream.queue(task.instruction);
+      let prompted = await this.stream.prompt(task.instruction, task.images);
+      if (prompted.response.body.code === 'busy') prompted = await this.stream.queue(task.instruction, task.images);
       if (prompted.response.body.kind === 'accepted') return;
       refusal = prompted.response.body;
     } catch (cause) {

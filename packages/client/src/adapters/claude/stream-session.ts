@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
-import type { McpStdioServerConfig } from '../../types.js';
+import type { McpStdioServerConfig, RuntimeInputImage } from '../../types.js';
 import type { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import {
-  claudeProjectionProfile, initialClaudeProjection, resumedClaudeProjection, sessionCredentialRedactor, streamJsonSession,
+  claudeSessionCapabilities, claudeProjectionProfile, initialClaudeProjection, resumedClaudeProjection, sessionCredentialRedactor, streamJsonSession,
   type ClaudeControl, type ClaudeRecord, type RawClaudeSession,
 } from '../../runtime/claude-session-runtime.js';
 import { claudeRecordFrame, parseClaudeContextWindow, type ClaudeStreamMessage } from './projection.js';
@@ -107,7 +107,7 @@ export class ClaudeStreamSession {
     this.#raw = await streamJsonSession(child, options.resume ?? randomUUID(), sessionCredentialRedactor({ env: options.env, mcpServers }), {
       projection: claudeProjectionProfile,
       initial: options.resume === undefined ? initialClaudeProjection : resumedClaudeProjection,
-      capabilities: { queue: { durable: false }, attribution: 'attributed', images: false },
+      capabilities: { queue: { durable: false }, attribution: 'attributed', images: claudeSessionCapabilities().images },
       steer: false,
       consume: message => this.#consume(message),
       open: async () => {
@@ -144,15 +144,15 @@ export class ClaudeStreamSession {
     return Promise.all([result, Promise.all(writes)]).then(([prompted]) => prompted);
   }
 
-  prompt(input: string): Promise<ClaudeControl> {
-    return this.#input(() => this.raw.prompt(input));
+  prompt(input: string, images?: readonly RuntimeInputImage[]): Promise<ClaudeControl> {
+    return this.#input(() => this.raw.prompt(input, { images }));
   }
 
   /** Input for after the turn Claude runs on its own, held by OAR under an input id the interrupt can withdraw. */
-  async queue(input: string): Promise<ClaudeControl> {
+  async queue(input: string, images?: readonly RuntimeInputImage[]): Promise<ClaudeControl> {
     const inputId = randomUUID();
     this.#held.add(inputId);
-    const queued = await this.#input(() => this.raw.queue(input, { inputId }));
+    const queued = await this.#input(() => this.raw.queue(input, { inputId, images }));
     if (queued.response.body.kind !== 'accepted') this.#held.delete(inputId);
     return queued;
   }

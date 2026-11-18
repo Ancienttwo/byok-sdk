@@ -104,7 +104,7 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     const usageGate = createUsageUpdateGate();
     const settle = vi.spyOn(usageGate, 'settleAfterPrompt');
     const turns = createAcpTurns({ kernel, runtime, profile: { ...antigravityAcpProfile, abortTimeoutMs },
-      usageGate, capabilities: { images: false }, promptUsage: () => null });
+      usageGate, capabilities: { images: false }, protectImage: vi.fn(), promptUsage: () => null });
     expect(turns.begin(null, 'first').kind).toBe('accepted');
     const state = turns.active()!;
     const ended = async () => {

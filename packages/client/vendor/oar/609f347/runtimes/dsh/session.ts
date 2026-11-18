@@ -2,6 +2,9 @@
 /* oxlint-disable import/max-dependencies -- Native launch, controls, projection and the credential boundary meet here. */
 /* oxlint-disable eslint/require-await -- Session controls return kernel promises directly. */
 import { randomUUID } from "node:crypto";
+
+// BYOK change: the narrow bridge reads the same declaration as Runtime.sessionCapabilities.
+export const dshSessionCapabilities = () => ({ images: false } as const);
 import type { AvailableInstallation } from "../../contracts/installation.js";
 import { UnsupportedOptionError } from "../../contracts/errors.js";
 import { ResumeCwdError } from "../../contracts/resume-cwd-error.js";

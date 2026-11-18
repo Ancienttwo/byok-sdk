@@ -1,6 +1,6 @@
 import { type ResultReplyFailure } from './result-reply-failure.js';
 import type { RuntimeTaskInput } from '../types.js';
-import type { ActivityIngress } from '@byok-sdk/protocol';
+import type { ActivityIngress, InputImageBlobRef } from '@byok-sdk/protocol';
 import type { ExecutionScratch, ScratchRoot } from './retention/scratch.js';
 import type { TaskRuntimeOwnership } from './task-settlement.js';
 import { StartupOwnership } from './startup-ownership.js';
@@ -49,7 +49,7 @@ import {
   type RuntimeDisposalStage,
 } from '../runtime-failure.js';
 import { type ApprovalDecision, type ApprovalOrigin, type ApprovalRegistry } from './approvals.js';
-import type { BlobResolver } from './blob-client.js';
+import type { BlobClient, BlobResolver } from './blob-client.js';
 import type { SealedTasks } from './sealed-task.js';
 import type {
   AgentResultDescribeParams,
@@ -218,6 +218,8 @@ export interface TaskRunnerDeps {
     | undefined
   >;
   blobClient: BlobResolver;
+  /** Verified download service for the input-images lane. */
+  inputImages?: Pick<BlobClient, 'downloadBlob'>;
   batcherOptions?: ProgressBatcherOptions;
   /** Runtime ownership facts for `Daemon.whenTaskSettled`. */
   runtimeOwnership?: TaskRuntimeOwnership;
@@ -966,7 +968,7 @@ export class TaskRunner {
             await this.refuseSteer(taskId, envelope.id, 'task_not_active');
             return;
           }
-          await this.deps.sealedTasks.applySteer(envelope, (text) => this.handleSteer(taskId, envelope.id, text));
+          await this.deps.sealedTasks.applySteer(envelope, (text, images) => this.handleSteer(taskId, envelope.id, text, images));
           return;
         }
         // #654 §6.2: a task that seals its input takes no plaintext steer.
@@ -974,7 +976,7 @@ export class TaskRunner {
           console.error(`[byok/client] plaintext task.steer for task ${taskId} dropped: the task seals its input`);
           return;
         }
-        await this.handleSteer(taskId, envelope.id, envelope.payload.text);
+        await this.handleSteer(taskId, envelope.id, envelope.payload.text, envelope.payload.images);
         return;
       }
       case 'task.approve':
@@ -1290,8 +1292,8 @@ export class TaskRunner {
    * Every steer acknowledged without delivery (no active task, no steering
    * channel, too large for the runtime) is reported as `task.steer_refused`.
    */
-  private handleSteer(taskId: string, steerMessageId: string, text: string): Promise<void> {
-    return handleSteer.call(this, taskId, steerMessageId, text);
+  private handleSteer(taskId: string, steerMessageId: string, text: string, images?: readonly InputImageBlobRef[]): Promise<void> {
+    return handleSteer.call(this, taskId, steerMessageId, text, images);
   }
 
   /** Sends the `task.steer_refused` of the steer whose envelope id is `steerMessageId`. */

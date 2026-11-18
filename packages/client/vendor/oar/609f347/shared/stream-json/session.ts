@@ -1,5 +1,8 @@
 // BYOK change: Modified from OAR bc1b2ac for a caller-owned process, a record consumer, caller-answered app requests and session credential redaction without sealSession (Apache-2.0).
 import { writeHeldInput, type HeldStreamJsonInput } from "./held-input.js";
+
+// BYOK change: the narrow bridge reads the same declaration as Runtime.sessionCapabilities.
+export const claudeSessionCapabilities = () => ({ steer: true, images: true } as const);
 import { streamJsonTaskControl } from "./task-control.js";
 import { streamJsonCompaction } from "./compaction.js";
 /* oxlint-disable import/max-dependencies -- The driver composes protocol, input and process-lifetime mechanisms. */
@@ -47,7 +50,11 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
   const kernel = createSessionKernel(sessionId, credentials.redactValue, retainedBytes);
   if (hooks.onRecord !== undefined) { kernel.rawEvents(hooks.onRecord); }
   const tasks = profile.stopTask === undefined ? undefined : streamJsonTaskControl(kernel, child, profile.stopTask);
-  const userMessage = profile.userMessage ?? streamJsonUserMessage;
+  const nativeUserMessage = profile.userMessage ?? streamJsonUserMessage;
+  const userMessage: typeof nativeUserMessage = (input, id, images) => {
+    for (const image of images ?? []) credentials.addImage(image.data);
+    return nativeUserMessage(input, id, images);
+  };
   const state: StreamJsonSessionState<S> = { child, active: null, spontaneous: false, projection: profile.initial, disposed: false };
   // Hold queues until turn end; active-turn writes may steer or become an irreversible native queue.
   const commandLifecycle = profile.projection.commandLifecycle !== false;

@@ -3,6 +3,8 @@ import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
 import { CodexNativeInteractions } from './native-interactions.js';
@@ -246,6 +248,7 @@ export class CodexAdapter implements RuntimeAdapter {
         }
       return {
         kind: 'available',
+        sessionCapabilities: codexRuntime.codexSessionCapabilities(),
         version: text,
         authPresent,
         ...runtimeExecutableFields(resolved, executable),
@@ -386,7 +389,7 @@ export class CodexAdapter implements RuntimeAdapter {
         throw authority('codex resume returned a different thread id');
       if (input.signal?.aborted)
         throw infrastructure('codex start was aborted');
-      await session.prompt(input.instruction);
+      await session.prompt(input.instruction, input.images);
       return session;
     } catch (thrown) {
       try {
@@ -571,13 +574,16 @@ class CodexSession implements Session {
       if (self.failure) throw self.failure;
     })();
   }
-  async prompt(input: string): Promise<void> {
+  get capabilities() { return { images: this.raw?.capabilities.images === true }; }
+
+  async prompt(input: string, images?: readonly RuntimeInputImage[]): Promise<void> {
     if (!this.raw) throw infrastructure('codex session is not open');
+    requireImageInput(images, this.capabilities.images);
     if (this.active) throw infrastructure('codex turn is already active');
     this.active = true;
     this.native?.beginTurn();
     try {
-      const result = await this.within('prompt', infrastructure, this.raw.prompt(input));
+      const result = await this.within('prompt', infrastructure, this.raw.prompt(input, { images }));
       if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'codex prompt refused');
     } catch (error) {
       this.active = false;
@@ -596,10 +602,10 @@ class CodexSession implements Session {
       throw new PolicyUnsupportedError(
         'codex persistent session cannot change model',
       );
-    await this.prompt(task.instruction);
+    await this.prompt(task.instruction, task.images);
   }
-  async steer(text: string): Promise<void> {
-    const result = this.raw === undefined ? undefined : await this.within('steer', infrastructure, this.raw.steer(text));
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
+    const result = this.raw === undefined ? undefined : await this.within('steer', infrastructure, this.raw.steer(text, options));
     if (result?.response.body.kind !== 'accepted')
       throw infrastructure(
         result?.response.body.reason ?? 'codex steer refused',

@@ -135,6 +135,8 @@ export interface ActiveTask {
   /** True for offers carrying egressPolicy, including prepared execution. */
   egressEnabled: boolean;
   adapter: RuntimeAdapter;
+  /** The elected installation can refine its adapter's static steering declaration. */
+  steer?: boolean;
   session: Session;
   /** What the daemon reads instead of `session.<member>?.()`; see `daemon/session-contract.ts`. */
   sessionMembers: DeclaredSessionMembers;

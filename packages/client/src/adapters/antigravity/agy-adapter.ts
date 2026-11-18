@@ -24,6 +24,8 @@ import {
 } from '../../types.js';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import type { AcpControl, AcpPermissionRequest, AcpPermissionResponse, AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
@@ -175,6 +177,7 @@ export class AgyAdapter implements RuntimeAdapter {
       }
       return {
         kind: 'available',
+        sessionCapabilities: (await import('#byok-acp-runtime')).antigravitySessionCapabilities(),
         version: token,
         authPresent: Boolean(base.GEMINI_API_KEY),
         ...runtimeExecutableFields(resolved, command),
@@ -260,7 +263,7 @@ export class AgyAdapter implements RuntimeAdapter {
       );
       session.bind(raw);
       if (input.signal?.aborted) throw infrastructure('agy start was aborted');
-      await session.prompt(input.instruction);
+      await session.prompt(input.instruction, input.images);
       return session;
     } catch (thrown) {
       try {
@@ -426,12 +429,15 @@ class AgySession implements Session {
       if (self.failure) throw self.failure;
     })();
   }
-  async prompt(input: string): Promise<void> {
+  get capabilities() { return { images: this.raw?.capabilities.images === true }; }
+
+  async prompt(input: string, images?: readonly RuntimeInputImage[]): Promise<void> {
     if (!this.raw) throw infrastructure('agy session is not open');
+    requireImageInput(images, this.capabilities.images);
     if (this.active) throw infrastructure('agy turn is already active');
     this.active = true;
     try {
-      const result = await this.raw.prompt(input);
+      const result = await this.raw.prompt(input, { images });
       if (result.response.body.kind !== 'accepted') throw refused(result.response.body, 'agy prompt refused');
     } catch (error) {
       this.active = false;
@@ -441,8 +447,8 @@ class AgySession implements Session {
   async followUp(): Promise<void> {
     throw new PolicyUnsupportedError('agy runs one turn per process; a later turn resumes the session');
   }
-  async steer(text: string): Promise<void> {
-    const result = await this.raw?.steer?.(text);
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
+    const result = await this.raw?.steer?.(text, options);
     if (result?.response.body.kind !== 'accepted') throw refused(result?.response.body, 'agy steer refused');
   }
   async interrupt(): Promise<void> {

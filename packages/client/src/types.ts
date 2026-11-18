@@ -19,12 +19,23 @@ import { freezeRuntimeVersionPolicy } from './runtime-version-policy.js';
 
 export type { AgentRef } from './agent-home.js';
 
+export interface RuntimeInputImage {
+  readonly path: string;
+  readonly mediaType?: string;
+}
+
+export interface RuntimeInputOptions {
+  readonly inputId?: string;
+  readonly images?: readonly RuntimeInputImage[];
+}
+
 /**
  * The offer fields a runtime adapter receives. The client owns this shape;
  * the daemon projects each wire offer onto it.
  */
 export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> & {
   instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
+  images?: readonly RuntimeInputImage[];
   /** Exact per-task reasoning effort, interpreted by the selected runtime. */
   effort?: string;
   /** Exact per-task model selector for the harness lane. */
@@ -107,6 +118,8 @@ export type RuntimeExecutableSource = 'config' | 'path' | 'env';
 export type RuntimeDetectResult =
   | {
     readonly kind: 'available'; readonly version?: string;
+    /** Pure pre-open facts for this installation. Omitted facts are unmeasured. */
+    readonly sessionCapabilities?: { readonly steer?: boolean; readonly images?: boolean };
     /** Verbatim local version probe output; never an admission token. */
     readonly rawVersion?: string; readonly authPresent?: boolean; readonly versionVerdict?: RuntimeVersionVerdict;
     /** The absolute executable this probe ran (#1103 O10). Local-only and user-path sensitive: never on the wire, in audit or in a support bundle. */
@@ -161,6 +174,8 @@ export type RuntimeIsolationAbsentSources = Readonly<Partial<Record<RuntimeIsola
 
 /** What a runtime adapter can do, advertised so the daemon can pick/validate adapters. */
 export interface RuntimeCapabilities {
+  /** Static image input support. Omission defers to detection and the opened session. */
+  readonly images?: boolean;
   /**
    * Enforces the `auto` tool authorization gate before every tool call on each
    * lane the adapter runs. Omission means `auto` tasks are declined for this
@@ -305,7 +320,9 @@ export interface Session {
    */
   progressStartsMessage?(event: Extract<AgentEvent, { type: 'progress' }>): boolean;
   /** Inject steering text into a running turn (mid-stream). */
-  steer(text: string): Promise<void>;
+  steer(text: string, options?: RuntimeInputOptions): Promise<void>;
+  /** Opened-session image support. An image-bearing steer requires explicit support. */
+  readonly capabilities?: { readonly images: boolean };
   /** Send a new instruction on the same session after it has gone idle. */
   followUp(task: RuntimeTaskInput): Promise<void>;
   /** Best-effort abort of the current turn (used for `task.cancel`). */
@@ -634,6 +651,7 @@ interface RuntimeOperationStartBase {
 export interface RuntimeOperationInstructionStartInput extends RuntimeOperationStartBase {
   readonly kind: 'instruction';
   readonly instruction: string;
+  readonly images?: readonly RuntimeInputImage[];
 }
 
 /**
@@ -766,6 +784,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
         }),
       }),
       steer: descriptor.capabilities.steer === true,
+      ...(descriptor.capabilities.images === undefined ? {} : { images: descriptor.capabilities.images === true }),
       resume: descriptor.capabilities.resume === true,
       approvalInteractive: descriptor.capabilities.approvalInteractive === true,
       ...(descriptor.capabilities.mcpToolsets === undefined ? {} : { mcpToolsets: descriptor.capabilities.mcpToolsets === true }),

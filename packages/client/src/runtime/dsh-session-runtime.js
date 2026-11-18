@@ -7,3 +7,4 @@ export { RuntimeFailureError } from '../../vendor/oar/609f347/contracts/runtime-
 export { UnsupportedOptionError } from '../../vendor/oar/609f347/contracts/errors.js';
 export { ModelConfirmationError } from '../../vendor/oar/609f347/contracts/model-confirmation-error.js';
 export { SessionUnavailableError } from '../../vendor/oar/609f347/contracts/session-unavailable-error.js';
+export { dshSessionCapabilities } from '../../vendor/oar/609f347/runtimes/dsh/session.js';

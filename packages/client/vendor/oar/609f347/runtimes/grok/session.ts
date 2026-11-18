@@ -1,5 +1,8 @@
 // BYOK change (Apache-2.0): route appended persona rules through documented session metadata.
 import { grokTaskViews } from "./tasks.js";
+
+// BYOK change: the narrow bridge reads the same declaration as Runtime.sessionCapabilities.
+export const grokSessionCapabilities = () => ({ steer: true, images: true } as const);
 /* oxlint-disable import/max-dependencies -- Session profiles and assembly wire the native control, projection and lifecycle helpers. */
 import { refuseSessionOptions } from "../../shared/session-options.js";
 import { grokCompaction } from "./compaction.js";

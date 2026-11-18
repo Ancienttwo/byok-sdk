@@ -7,6 +7,7 @@ import type { RuntimeCapabilities, RuntimeIsolationAbsentSources } from '../../t
  */
 export const PI_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freeze({
   steer: true,
+  images: true,
   resume: true,
   mcpToolsets: true,
   messageDraft: true,
@@ -26,6 +27,7 @@ export const PI_DURABLE_RUNTIME_CAPABILITIES: RuntimeCapabilities = Object.freez
   ...PI_RUNTIME_CAPABILITIES,
   durableLane: true,
   steer: false,
+  images: false,
   resume: false,
   preparedLane: false,
   // Agent resources (including excluded user context) only run on the RPC

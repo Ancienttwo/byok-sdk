@@ -159,7 +159,7 @@ async function openAcpRuntimeSession(
     let disposeRequest: RequestRecord | null = null;
     const capabilities = { ...profile.capabilities, images: profile.capabilities.images ?? acpTakesImages(opened.initialized) };
     let compaction: ReturnType<typeof manualCompaction> | null = null;
-    const turns = createAcpTurns({ operationBusy: () => compaction?.busy() === true, kernel, runtime, profile, usageGate, capabilities, promptMeta: profile.promptMeta?.(options), promptUsage: (result) => tokenUsage.prompt(result),
+    const turns = createAcpTurns({ operationBusy: () => compaction?.busy() === true, kernel, runtime, profile, usageGate, capabilities, protectImage: credentials.addImage, promptMeta: profile.promptMeta?.(options), promptUsage: (result) => tokenUsage.prompt(result),
       ...(nativeTurns === undefined ? {} : { native: { promptParams: (inputId: string | undefined): JsonRecord => ({ _meta: nativeTurns.name(inputId) }), afterClose: nativeTurns.afterOarTurn } }),
     });
     // The runtime's own turn is the active turn: prompt is busy, held input waits, steer and abort reach it.
@@ -234,7 +234,7 @@ async function openAcpRuntimeSession(
           if (compaction?.busy() === true) { return { kind: "rejected", code: "busy", reason: "Native compaction is still running" }; }
           // The turn running now, OAR's or the runtime's own, must still be the one running when the RPC goes out.
           const target = turns.active();
-          if (steerRequest !== undefined) { return sendAcpSteerRequest({ kernel, runtime, profile, capabilities, running: () => target !== null && turns.active() === target && !target.abortRequested }, request, input, inputOptions); }
+          if (steerRequest !== undefined) { return sendAcpSteerRequest({ kernel, runtime, profile, capabilities, protectImage: credentials.addImage, running: () => target !== null && turns.active() === target && !target.abortRequested }, request, input, inputOptions); }
           const state = turns.active();
           return state === null || steerParams === undefined
             ? { kind: "rejected", code: "no_active_turn", reason: "not_steerable: no active turn" }

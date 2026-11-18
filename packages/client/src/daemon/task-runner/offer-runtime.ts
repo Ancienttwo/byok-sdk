@@ -1,7 +1,7 @@
 // `TaskRunner` members that select the runtime adapter and prepare its
 // operation for an offer (see ./support.ts for how a member module runs).
 import { awaitAdmission } from '../admission-wait.js';
-import { observeRuntimeDetection } from '../../runtime-detection.js';
+import { detectedRuntimeCapabilities, observeRuntimeDetection } from '../../runtime-detection.js';
 import { AGENT_USER_CONTEXT_WINDOWS_REMEDY, runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
 import { freezeRuntimeAdapterDescriptor, modelLaneTarget, type RuntimeAdapter } from '../../types.js';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
@@ -57,6 +57,10 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       retryable: pick.retryable,
       ...(pick.runtimeUnavailable === undefined ? {} : { code: 'runtime_unavailable', runtimeUnavailable: pick.runtimeUnavailable }),
     });
+    return undefined;
+  }
+  if (payload.images !== undefined && (preparation !== undefined || pick.descriptor.capabilities.images === false || this['deps'].inputImages === undefined)) {
+    decline({ reason: 'selected execution lane does not support image input', code: 'bad_request', retryable: false });
     return undefined;
   }
   if (preparation !== undefined && offered.effort !== undefined) {
@@ -319,7 +323,7 @@ export async function pickAdapter(
         runtimeUnavailable,
       };
     }
-    return { ok: true, adapter, descriptor };
+    return { ok: true, adapter, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
   }
 
   const eligible = allowlist ? this['deps'].adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this['deps'].adapters;
@@ -338,7 +342,9 @@ export async function pickAdapter(
     capabilityEligible += 1;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
-    if (detected.kind === 'available' && detected.versionVerdict?.state !== 'block') return { ok: true, adapter, descriptor };
+    if (detected.kind === 'available' && detected.versionVerdict?.state !== 'block') {
+      return { ok: true, adapter, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
+    }
   }
   const phrases = (Object.keys(requirementPhrases) as (keyof RuntimeRequirements)[]).filter((key) => requirements[key]).map((key) => requirementPhrases[key]);
   const capabilityMismatch = phrases.length > 0 && eligible.length > 0 && capabilityEligible === 0;

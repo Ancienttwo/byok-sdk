@@ -6,6 +6,8 @@ import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputOptions } from '../../types.js';
 import * as dshRuntime from '../../runtime/dsh-session-runtime.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
@@ -239,6 +241,7 @@ export class DshAdapter implements RuntimeAdapter {
       const key = base[this.options.model.keyEnv];
       return {
         kind: 'available',
+        sessionCapabilities: dshRuntime.dshSessionCapabilities(),
         version: token,
         authPresent: typeof key === 'string' && key.length > 0,
         ...runtimeExecutableFields(resolved, command),
@@ -325,6 +328,7 @@ export class DshAdapter implements RuntimeAdapter {
       );
       session.bind(raw);
       if (input.signal?.aborted) throw infrastructure('dsh start was aborted');
+      requireImageInput(input.images, raw.capabilities.images === true);
       await session.prompt(input.instruction);
       return session;
     } catch (thrown) {
@@ -479,7 +483,10 @@ class DshSession implements Session {
   async followUp(): Promise<void> {
     throw new PolicyUnsupportedError('dsh runs one turn per process; a later turn resumes the session');
   }
-  async steer(text: string): Promise<void> {
+  readonly capabilities = dshRuntime.dshSessionCapabilities();
+
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
+    requireImageInput(options?.images, this.capabilities.images);
     const result = await this.raw?.steer(text);
     if (result?.response.body.kind !== 'accepted') throw infrastructure(result?.response.body.reason ?? 'dsh steer refused');
   }

@@ -33,7 +33,7 @@ const noActiveTurn: ResponseBody = { kind: "rejected", code: "no_active_turn", r
 const stale = new Error("not_steerable: no active turn");
 
 export async function sendAcpSteerRequest(
-  deps: { readonly kernel: SessionKernel; readonly runtime: AcpProcess; readonly profile: AcpSteerRequestHooks & { readonly requestTimeoutMs?: number | undefined }; readonly capabilities: Pick<SessionCapabilities, "images">; readonly running: () => boolean },
+  deps: { readonly kernel: SessionKernel; readonly runtime: AcpProcess; readonly profile: AcpSteerRequestHooks & { readonly requestTimeoutMs?: number | undefined }; readonly capabilities: Pick<SessionCapabilities, "images">; readonly protectImage: (data: string) => void; readonly running: () => boolean },
   request: RequestRecord,
   input: string,
   options: InputOptions | undefined,
@@ -47,6 +47,7 @@ export async function sendAcpSteerRequest(
   // OAR's turn or the runtime's own: an interjection with nothing running would start a turn of its own.
   if (!deps.running()) { return noActiveTurn; }
   return withInputImages(capabilities, options?.images, async (loaded): Promise<ResponseBody> => {
+    for (const image of loaded) deps.protectImage(image.data);
     const { method, params } = build({ sessionId: kernel.sessionId, input, prompt: acpPrompt(input, loaded), inputId: options?.inputId ?? request.id });
     try {
       const native = await withAcpDeadline(runtime, method, profile.requestTimeoutMs ?? 15_000,

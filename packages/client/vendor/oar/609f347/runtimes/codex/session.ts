@@ -1,5 +1,8 @@
 // BYOK change: Modified from OAR bc1b2ac for injected processes, native-first recording, bounded request refusal, caller-selected sandbox, caller-owned open steps and session credential redaction without sealSession (Apache-2.0).
 import { codexTaskControl } from "./task-control.js";
+
+// BYOK change: the narrow bridge reads the same declaration as Runtime.sessionCapabilities.
+export const codexSessionCapabilities = () => ({ steer: true, images: true } as const);
 import { manualCompaction } from "../../shared/manual-compaction.js";
 import { codexCompaction, codexCompactionBusy } from "./compaction.js";
 /* oxlint-disable import/max-dependencies -- The adapter composes protocol, input and process-lifetime mechanisms. */

@@ -1,5 +1,11 @@
 // BYOK change: Modified from OAR bc1b2ac for SDK-owned processes and explicit environments (Apache-2.0).
 import type { ExecutableInstallation } from "../../contracts/installation.js";
+
+import type { Runtime } from "../../contracts/runtime.js";
+
+// BYOK change: the narrow bridge reads the same declaration as Runtime.sessionCapabilities.
+export const opencodeSessionCapabilities: NonNullable<Runtime["sessionCapabilities"]> = (installation) =>
+  installation.via === "executable" && installation.version !== undefined && parseOpencodeRelease(installation.version)?.major === 1 ? { steer: true } : {};
 import type { SessionOptions } from "../../contracts/session.js";
 
 /** A native release's numeric version; a prerelease suffix compares as its release. */

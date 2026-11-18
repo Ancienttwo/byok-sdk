@@ -87,6 +87,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
       await activeJournal.recordAdmission({ taskId, admitted: true, claimedRuntime: runtime, decidedAt: new Date().toISOString() });
     },
     blobClient,
+    inputImages: blobClient,
     batcherOptions: egressBatcherOptions,
     agentEgress: daemonState.agentEgress,
     ...(config.agentEgress === undefined ? {} : { agentEgressPolicy: egressPolicy }),

@@ -59,6 +59,7 @@ export interface RuntimeObservation {
   authPresent?: boolean;
   steer: boolean;
   resume: boolean;
+  images?: boolean;
 }
 
 /** The daemon and explicit local probes project the same detection authority. */
@@ -71,6 +72,7 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
         ...(detected.versionVerdict.matched === undefined ? {} : { matched: bounded(detected.versionVerdict.matched, 256) }),
       }) as RuntimeVersionVerdict
     : undefined;
+  const capabilities = detectedRuntimeCapabilities(descriptor, detected);
   return {
     id: bounded(descriptor.id, 128),
     present: detected.kind === 'available',
@@ -85,13 +87,14 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
     ...(detected.kind === 'available' && detected.executablePath !== undefined ? { executablePath: detected.executablePath } : {}),
     ...(detected.kind === 'available' && detected.executableSource !== undefined ? { executableSource: detected.executableSource } : {}),
     ...(detected.kind === 'available' && detected.authPresent !== undefined ? { authPresent: detected.authPresent } : {}),
-    steer: descriptor.capabilities.steer === true,
-    resume: descriptor.capabilities.resume === true,
+    steer: capabilities.steer,
+    resume: capabilities.resume,
+    ...(capabilities.images === undefined ? {} : { images: capabilities.images }),
   };
 }
 
 /** Keys of the redacted audit observation; see `DaemonRecord` `runtimes-detected`. */
-const AUDIT_OBSERVATION_KEYS: readonly string[] = Object.freeze(['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume']);
+const AUDIT_OBSERVATION_KEYS: readonly string[] = Object.freeze(['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume', 'images']);
 /** Live status adds the local-only evidence audit never holds. */
 const STATUS_OBSERVATION_KEYS: readonly string[] = Object.freeze([...AUDIT_OBSERVATION_KEYS, 'versionVerdict', 'versionChange', 'executablePath', 'executableSource', 'unsupportedVersion']);
 
@@ -129,6 +132,7 @@ export function parseRuntimeObservations(value: unknown, source: 'audit' | 'stat
     if (Object.keys(r).some(key => !allowed.includes(key))
       || typeof r.id !== 'string' || r.id.length === 0 || r.id.length > 128 || /[\r\n\t]/.test(r.id)
       || typeof r.steer !== 'boolean' || typeof r.resume !== 'boolean'
+      || (r.images !== undefined && typeof r.images !== 'boolean')
       || r.present !== (r.outcome === 'available')
       || (r.version !== undefined && (typeof r.version !== 'string' || r.version.length > 256 || /[\r\n\t]/.test(r.version)))
       || (r.qualifiedVersion !== undefined && (typeof r.qualifiedVersion !== 'string' || r.qualifiedVersion.length > 256 || /[\r\n\t]/.test(r.qualifiedVersion)))
@@ -213,15 +217,24 @@ function isVersionVerdict(value: unknown): value is RuntimeVersionVerdict {
 }
 
 /** Reject legacy/mixed authoring shapes; copy only validated, known facts. */
+export function detectedRuntimeCapabilities(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult) {
+  return detected.kind === 'available' && detected.sessionCapabilities !== undefined
+    ? { ...descriptor.capabilities, ...detected.sessionCapabilities }
+    : descriptor.capabilities;
+}
+
 export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('invalid runtime detection result');
   }
   const result = value as Record<string, unknown>;
   if (!Object.hasOwn(result, 'kind')) throw new TypeError('invalid runtime detection result');
-  const { kind, version, rawVersion, authPresent, versionVerdict, executablePath, executableSource } = result;
+  const { kind, version, rawVersion, authPresent, versionVerdict, executablePath, executableSource, sessionCapabilities } = result;
   if (kind === 'available') {
-    if (Object.keys(result).some((key) => !['kind', 'version', 'rawVersion', 'authPresent', 'versionVerdict', 'executablePath', 'executableSource'].includes(key))
+    if (Object.keys(result).some((key) => !['kind', 'version', 'rawVersion', 'authPresent', 'versionVerdict', 'executablePath', 'executableSource', 'sessionCapabilities'].includes(key))
+      || (sessionCapabilities !== undefined && (sessionCapabilities === null || typeof sessionCapabilities !== 'object'
+        || Array.isArray(sessionCapabilities) || Object.entries(sessionCapabilities).some(([key, flag]) =>
+          (key !== 'steer' && key !== 'images') || typeof flag !== 'boolean')))
       || !isExecutableFields(executablePath, executableSource)
       || (version !== undefined && typeof version !== 'string')
       || (rawVersion !== undefined && typeof rawVersion !== 'string')
@@ -234,6 +247,7 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
       kind,
       ...(version === undefined ? {} : { version }),
       ...(rawVersion === undefined ? {} : { rawVersion }),
+      ...(sessionCapabilities === undefined ? {} : { sessionCapabilities: Object.freeze({ ...sessionCapabilities }) }),
       ...(authPresent === undefined ? {} : { authPresent }),
       ...(executablePath === undefined ? {} : { executablePath: executablePath as string }),
       ...(executableSource === undefined ? {} : { executableSource: executableSource as RuntimeExecutableSource }),

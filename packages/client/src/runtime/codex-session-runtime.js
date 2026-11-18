@@ -5,3 +5,4 @@ export { SessionUnavailableError } from '../../vendor/oar/609f347/contracts/sess
 export { RuntimeFailureError } from '../../vendor/oar/609f347/contracts/runtime-failure-error.js';
 export { UnsupportedOptionError } from '../../vendor/oar/609f347/contracts/errors.js';
 export { ModelConfirmationError } from '../../vendor/oar/609f347/contracts/model-confirmation-error.js';
+export { codexSessionCapabilities } from '../../vendor/oar/609f347/runtimes/codex/session.js';

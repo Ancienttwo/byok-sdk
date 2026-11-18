@@ -3,6 +3,8 @@ import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import { modelLaneTarget, type RuntimeTaskInput } from '../../types.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -215,6 +217,7 @@ export class GrokAdapter implements RuntimeAdapter {
       }
       return {
         kind: 'available',
+        sessionCapabilities: { ...(await import('#byok-acp-runtime')).grokSessionCapabilities(), steer: this.descriptor.capabilities.steer },
         version: text,
         authPresent: grokAuthPresent(env),
         ...runtimeExecutableFields(resolved, command),
@@ -313,7 +316,7 @@ export class GrokAdapter implements RuntimeAdapter {
       );
       session.bind(raw);
       if (input.signal?.aborted) throw infrastructure('grok start was aborted');
-      await session.prompt(input.instruction);
+      await session.prompt(input.instruction, input.images);
       return session;
     } catch (thrown) {
       try {
@@ -441,14 +444,17 @@ class GrokSession implements Session {
       if (self.failure) throw self.failure;
     })();
   }
-  async prompt(input: string): Promise<void> {
+  get capabilities() { return { images: this.raw?.capabilities.images === true }; }
+
+  async prompt(input: string, images?: readonly RuntimeInputImage[]): Promise<void> {
     if (!this.raw) throw infrastructure('grok session is not open');
+    requireImageInput(images, this.capabilities.images);
     if (this.active) throw infrastructure('grok turn is already active');
     this.active = true;
     const inputId = randomUUID();
     this.projection?.beginSdkTurn(inputId);
     // Marked from the first await: an interrupt in the same tick must not cancel a Grok turn OAR adopted meanwhile.
-    const sending = this.send(this.raw, input, inputId);
+    const sending = this.send(this.raw, input, { inputId, images });
     this.sending = sending;
     try {
       await sending;
@@ -460,14 +466,14 @@ class GrokSession implements Session {
       this.sending = undefined;
     }
   }
-  private async send(raw: RawAcpSession, input: string, inputId: string): Promise<void> {
+  private async send(raw: RawAcpSession, input: string, options: RuntimeInputOptions & { inputId: string }): Promise<void> {
     const grokTurnsClosed = this.projection?.grokTurnsClosed;
-    let result = await raw.prompt(input, { inputId });
+    let result = await raw.prompt(input, options);
     // OAR adopted a turn Grok runs on its own and refuses the prompt as busy: hold it until that turn closes.
     // A Grok turn that closed while the busy answer was in flight still holds: the drain then sends it at once.
     if (result.response.body.code === 'busy' && (this.projection?.grokTurnOpen === true || this.projection?.grokTurnsClosed !== grokTurnsClosed)) {
-      result = await raw.queue(input, { inputId });
-      if (result.response.body.kind === 'accepted') this.held = inputId;
+      result = await raw.queue(input, options);
+      if (result.response.body.kind === 'accepted') this.held = options.inputId;
     }
     if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'grok prompt refused');
   }
@@ -477,7 +483,7 @@ class GrokSession implements Session {
       throw new PolicyUnsupportedError('grok persistent session cannot change model or effort');
     }
     if (modelLaneTarget(task.target) !== undefined) throw new PolicyUnsupportedError(`grok persistent session runs ${this.model ?? 'the default model'} and takes no dispatch selection`);
-    await this.prompt(task.instruction);
+    await this.prompt(task.instruction, task.images);
   }
   async steer(): Promise<void> {
     // The bridge exposes no Grok steer: OAR's `_x.ai/interject` steer is not qualified for the SDK.

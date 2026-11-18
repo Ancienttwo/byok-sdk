@@ -61,11 +61,15 @@ type BridgeRecord = Pick<RawEvent, 'seq' | 'sessionId' | 'agentPath'> & {
   readonly kind: WidenString<RawEvent['kind']>;
   readonly body: unknown;
 };
-type FirstInput<T extends (...args: never[]) => unknown> = [Parameters<T>[0]];
+type BridgeInput<T extends (...args: never[]) => unknown> = [input: Parameters<T>[0], options?: Pick<NonNullable<Parameters<T>[1]>, 'inputId' | 'images'>];
+import type { RuntimeInputOptions } from '../../packages/client/src/types.js';
+export type CheckInputOptions = Assert<Equal<RuntimeInputOptions, NonNullable<BridgeInput<AdapterSession['prompt']>[1]>>>;
 type BridgeSession = {
+  readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
   readonly id: CodexAdapterSession['id'];
-  prompt(...args: FirstInput<CodexAdapterSession['prompt']>): Promise<Bridge.CodexControl>;
-  steer(...args: FirstInput<CodexAdapterSession['steer']>): Promise<Bridge.CodexControl>;
+  prompt(...args: BridgeInput<CodexAdapterSession['prompt']>): Promise<Bridge.CodexControl>;
+  steer(...args: BridgeInput<CodexAdapterSession['steer']>): Promise<Bridge.CodexControl>;
+  queue(...args: BridgeInput<CodexAdapterSession['queue']>): Promise<Bridge.CodexControl>;
   abort(...args: Parameters<CodexAdapterSession['abort']>): Promise<Bridge.CodexControl>;
   records(): readonly CodexRecord[];
   dispose: CodexAdapterSession['dispose'];
@@ -73,7 +77,7 @@ type BridgeSession = {
 
 // Exact checks catch removed members, extra members, and wider local types.
 // Named aliases identify the failed seam in compiler output.
-export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | keyof OarStartErrorClasses>>;
+export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | 'codexSessionCapabilities' | keyof OarStartErrorClasses>>;
 export type CheckNotFoundInstance = Assert<Equal<Bridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 export type CheckNotFoundConstructor = Assert<Equal<
   ConstructorParameters<typeof Bridge.SessionNotFoundError>,
@@ -96,7 +100,7 @@ export type CheckSession = Assert<Equal<Bridge.RawCodexSession, BridgeSession>>;
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 manual compaction) is omitted on purpose: exposing it is a separate product decision.
 export type CheckSessionMembers = Assert<Equal<
-  Exclude<keyof CodexAdapterSession, 'capabilities' | 'goal' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
+  Exclude<keyof CodexAdapterSession, 'goal' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof Bridge.RawCodexSession
 >>;
 export type CheckReturn = Assert<Equal<ReturnType<typeof Bridge.codexSession>, Promise<Bridge.RawCodexSession>>>;
@@ -159,20 +163,20 @@ type AcpBridgeHooks = Mutable<Omit<AcpSessionHooks, 'onRecord' | 'onPermission'>
   onRecord?: (record: AcpBridge.AcpRecord) => void;
   onPermission?: (request: AcpBridge.AcpPermissionRequest) => AcpBridge.AcpPermissionResponse;
 };
-// The input id names a prompt to a runtime with native turns (Grok), so its turn is told from the runtime's own.
-type AcpInputId = { inputId?: string };
+
 type AcpBridgeSession = {
+  readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
   readonly id: AdapterSession['id'];
-  prompt(input: Parameters<AdapterSession['prompt']>[0], options?: AcpInputId): Promise<AcpBridge.AcpControl>;
-  queue(input: Parameters<AdapterSession['queue']>[0], options: Required<AcpInputId>): Promise<AcpBridge.AcpControl>;
+  prompt(...args: BridgeInput<AdapterSession['prompt']>): Promise<AcpBridge.AcpControl>;
+  queue(...args: BridgeInput<AdapterSession['queue']>): Promise<AcpBridge.AcpControl>;
   withdraw?(...args: Parameters<NonNullable<AdapterSession['withdraw']>>): Promise<AcpBridge.AcpControl>;
-  steer?(...args: FirstInput<NonNullable<AdapterSession['steer']>>): Promise<AcpBridge.AcpControl>;
+  steer?(...args: BridgeInput<NonNullable<AdapterSession['steer']>>): Promise<AcpBridge.AcpControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<AcpBridge.AcpControl>;
   records(): readonly AcpBridge.AcpRecord[];
   dispose: AdapterSession['dispose'];
 };
 
-export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'grokSession' | 'antigravitySession' | 'opencodeSession' | 'grokListModels' | 'grokAccountUsage' | 'antigravityListModels'>>;
+export type CheckAcpExports = Assert<Equal<keyof typeof AcpBridge, keyof OarStartErrorClasses | 'grokSession' | 'antigravitySession' | 'opencodeSession' | 'grokSessionCapabilities' | 'antigravitySessionCapabilities' | 'opencodeSessionCapabilities' | 'grokListModels' | 'grokAccountUsage' | 'antigravityListModels'>>;
 export type CheckAcpRuntimeFailure = Assert<Assignable<VendorRuntimeFailureError, AcpBridge.RuntimeFailureError>>;
 export type CheckAcpRuntimeFailureFields = Assert<Equal<Pick<VendorRuntimeFailureError, 'name'>, Pick<AcpBridge.RuntimeFailureError, 'name'>>>;
 export type CheckAcpUnsupportedOption = Assert<Assignable<VendorUnsupportedOptionError, AcpBridge.UnsupportedOptionError>>;
@@ -192,7 +196,7 @@ export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSes
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 generic contract) is omitted on purpose, as for Codex.
 export type CheckAcpSessionMembers = Assert<Equal<
-  Exclude<keyof AdapterSession, 'capabilities' | 'goal' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
+  Exclude<keyof AdapterSession, 'goal' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof AcpBridge.RawAcpSession
 >>;
 export type CheckAcpPermissionHook = Assert<Assignable<NonNullable<AcpBridgeHooks['onPermission']>, NonNullable<AcpSessionHooks['onPermission']>>>;
@@ -231,7 +235,7 @@ export type CheckCodexFailureFromText = Assert<Equal<ReturnType<typeof FailureBr
 export type CheckCodexFailureVendor = Assert<Assignable<typeof vendorCodexFailure, typeof FailureBridge.codexFailure>>;
 
 // The dsh bridge: the vendored native runtime, narrowed to what the SDK calls.
-// 'queue' and 'withdraw' are omitted on purpose, as for Codex. The runtime reports steer; the vendored session always returns it for the qualified dsh.
+// 'withdraw' is omitted on purpose, as for Codex. The runtime reports steer; the vendored session always returns it for the qualified dsh.
 import type * as DshBridge from '../../packages/client/src/runtime/dsh-session-runtime.js';
 import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/session.js';
 import type { dshMcpRows as vendorDshMcpRows } from '../../packages/client/vendor/oar/609f347/runtimes/dsh/mcp.js';
@@ -242,14 +246,16 @@ type DshBridgeArgs = Parameters<typeof DshBridge.dshSession>;
 type DshBridgeOptions = { cwd: string; model: string; effort?: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> }; retainedBytes: number; appendSystemPrompt?: string };
 type DshVendorSession = Awaited<ReturnType<typeof vendorDshSession>>;
 type DshBridgeSession = {
+  readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
   readonly id: AdapterSession['id'];
-  prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<DshBridge.DshControl>;
-  steer(...args: FirstInput<DshVendorSession['steer']>): Promise<DshBridge.DshControl>;
+  prompt(...args: BridgeInput<AdapterSession['prompt']>): Promise<DshBridge.DshControl>;
+  steer(...args: BridgeInput<DshVendorSession['steer']>): Promise<DshBridge.DshControl>;
+  queue(...args: BridgeInput<DshVendorSession['queue']>): Promise<DshBridge.DshControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<DshBridge.DshControl>;
   records(): readonly DshBridge.DshRecord[];
   dispose: AdapterSession['dispose'];
 };
-export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'dshMcpRows' | keyof OarStartErrorClasses>>;
+export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' | 'dshSessionCapabilities' | 'dshMcpRows' | keyof OarStartErrorClasses>>;
 export type CheckDshMcpRows = Assert<Equal<typeof DshBridge.dshMcpRows, typeof vendorDshMcpRows>>;
 export type CheckDshOptions = Assert<Equal<Mutable<DshBridgeArgs[2]>, DshBridgeOptions>>;
 export type CheckDshVendorOptions = Assert<Assignable<DshBridgeArgs[2], VendorDshArgs[2]>>;
@@ -259,7 +265,7 @@ export type CheckDshControl = Assert<Equal<DshBridge.DshControl, BridgeControl>>
 export type CheckDshRecord = Assert<Equal<DshBridge.DshRecord, Flatten<BridgeRecord>>>;
 export type CheckDshSession = Assert<Equal<DshBridge.RawDshSession, DshBridgeSession>>;
 export type CheckDshSessionMembers = Assert<Equal<
-  Exclude<keyof DshVendorSession, 'capabilities' | 'goal' | 'queue' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
+  Exclude<keyof DshVendorSession, 'goal' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask'>,
   keyof DshBridge.RawDshSession
 >>;
 export type CheckDshVendorSession = Assert<Assignable<DshVendorSession, DshBridge.RawDshSession>>;
@@ -297,9 +303,10 @@ type ClaudeVendorProfile = StreamJsonSessionProfile<VendorClaudeState>;
 type ClaudeBridgeArgs = Parameters<typeof ClaudeBridge.streamJsonSession>;
 type ClaudeVendorSession = Awaited<ReturnType<typeof vendorStreamJsonSession>>;
 type ClaudeBridgeSession = {
+  readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
   readonly id: AdapterSession['id'];
-  prompt(...args: FirstInput<AdapterSession['prompt']>): Promise<ClaudeBridge.ClaudeControl>;
-  queue(input: Parameters<AdapterSession['queue']>[0], options: { inputId: string }): Promise<ClaudeBridge.ClaudeControl>;
+  prompt(...args: BridgeInput<AdapterSession['prompt']>): Promise<ClaudeBridge.ClaudeControl>;
+  queue(...args: BridgeInput<AdapterSession['queue']>): Promise<ClaudeBridge.ClaudeControl>;
   withdraw?(...args: Parameters<NonNullable<AdapterSession['withdraw']>>): Promise<ClaudeBridge.ClaudeControl>;
   abort(...args: Parameters<AdapterSession['abort']>): Promise<ClaudeBridge.ClaudeControl>;
   records(): readonly ClaudeBridge.ClaudeRecord[];
@@ -307,7 +314,7 @@ type ClaudeBridgeSession = {
 };
 type ClaudeSharedProfileKeys = 'capabilities' | 'steer' | 'consume' | 'open' | 'exited' | 'disposing';
 export type CheckClaudeExports = Assert<Equal<keyof typeof ClaudeBridge,
-  'streamJsonSession' | 'claudeProjectionProfile' | 'initialClaudeProjection' | 'resumedClaudeProjection' | 'sessionCredentialRedactor'>>;
+  'streamJsonSession' | 'claudeSessionCapabilities' | 'claudeProjectionProfile' | 'initialClaudeProjection' | 'resumedClaudeProjection' | 'sessionCredentialRedactor'>>;
 export type CheckClaudeControl = Assert<Equal<ClaudeBridge.ClaudeControl, BridgeControl>>;
 export type CheckClaudeRecord = Assert<Equal<ClaudeBridge.ClaudeRecord, Flatten<BridgeRecord>>>;
 export type CheckClaudeSession = Assert<Equal<ClaudeBridge.RawClaudeSession, ClaudeBridgeSession>>;

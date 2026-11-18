@@ -26,6 +26,8 @@ export interface CredentialRedactor {
   /** Private connection redaction input. Never put these values in records or diagnostics. */
   values(this: void): readonly string[];
   add(this: void, value: string | undefined): void;
+  /** BYOK change: suppress an echoed image payload from records and control errors. */
+  addImage(this: void, data: string): void;
   redact(this: void, text: string): string;
   redactValue<T>(this: void, value: T): T;
 }
@@ -52,7 +54,11 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     }
   }
   let values = [...known].toSorted((left, right) => right.length - left.length);
-  const redact = (text: string): string => values.reduce((result, value) => result.replaceAll(value, "[redacted]"), text);
+  const images = new Set<string>();
+  const redact = (text: string): string => {
+    for (const data of images) text = text.replaceAll(data, "[redacted]");
+    return values.reduce((result, value) => result.replaceAll(value, "[redacted]"), text);
+  };
   return {
     values: () => values,
     add(value) {
@@ -61,9 +67,13 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
         values = [...known].toSorted((left, right) => right.length - left.length);
       }
     },
+    addImage(data) {
+      if (data.length !== 0) images.add(data);
+    },
     redact,
     // Most records contain no credentials. Avoid traversing at all without known
     // values, and preserve the original object when the scan finds no match.
-    redactValue: (value) => values.length === 0 ? value : redactText(value, redact, (text) => values.some((knownValue) => text.includes(knownValue))),
+    redactValue: (value) => values.length === 0 && images.size === 0 ? value : redactText(value, redact, (text) =>
+      values.some((knownValue) => text.includes(knownValue)) || [...images].some((data) => text.includes(data))),
   };
 }

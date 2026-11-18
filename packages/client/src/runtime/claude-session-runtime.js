@@ -2,3 +2,4 @@
 export { streamJsonSession } from '../../vendor/oar/609f347/shared/stream-json/session.js';
 export { claudeProjectionProfile, initialClaudeProjection, resumedClaudeProjection } from '../../vendor/oar/609f347/runtimes/claude/projection.js';
 export { sessionCredentialRedactor } from '../../vendor/oar/609f347/shared/credential-redactor.js';
+export { claudeSessionCapabilities } from '../../vendor/oar/609f347/shared/stream-json/session.js';

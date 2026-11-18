@@ -7,6 +7,9 @@ import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecut
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
+import { requireImageInput } from '../input-images.js';
+import type { RuntimeInputOptions } from '../../types.js';
+import { SteerUnsupportedError } from '../../types.js';
 import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
 import { freezeRuntimeAdapterDescriptor, PolicyUnsupportedError, type RuntimeAdapter, type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeOperationStartInput, type RuntimeVersionPolicy, type Session } from '../../types.js';
@@ -98,6 +101,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
       if (token === undefined) return { detected: { kind: 'refused', reason: 'acp_unavailable' } };
       return { command: resolved.bin.command, version: token, detected: {
         kind: 'available', version: token, rawVersion: version.stdout,
+        sessionCapabilities: (await import('#byok-acp-runtime')).opencodeSessionCapabilities({ kind: 'available', via: 'executable', command: resolved.bin.command, version: token }),
         ...runtimeExecutableFields(resolved, invocation.executable), ...runtimeVersionDetectionFields(this.policy, token),
       } };
     } catch (error) { return { detected: classifyDetectError(error) }; }
@@ -263,9 +267,12 @@ class OpenCodeSession implements Session {
     this.haltExit = this.child?.exited;
     this.child?.kill();
   }
+  get capabilities() { return { images: this.raw?.capabilities.images === true }; }
+
   private async prompt(): Promise<void> {
+    requireImageInput(this.input.images, this.capabilities.images);
     this.prompting = true;
-    const result = await this.raw!.prompt(this.input.instruction);
+    const result = await this.raw!.prompt(this.input.instruction, { images: this.input.images });
     if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'opencode prompt refused');
   }
   private async finish(index: number): Promise<void> {
@@ -325,7 +332,12 @@ class OpenCodeSession implements Session {
       if (self.failure) throw self.failure;
     })();
   }
-  async steer(): Promise<void> { throw new PolicyUnsupportedError('opencode steer is unsupported on both release lines'); }
+  async steer(text: string, options?: RuntimeInputOptions): Promise<void> {
+    if (!this.raw?.steer) throw new SteerUnsupportedError('opencode', 'opened session has no steering channel');
+    requireImageInput(options?.images, this.capabilities.images);
+    const result = await this.raw.steer(text, options);
+    if (result.response.body.kind !== 'accepted') throw infrastructure(result.response.body.reason ?? 'opencode steer refused');
+  }
   async followUp(): Promise<void> { throw new PolicyUnsupportedError('opencode runs one turn per process; resume for a later turn'); }
   async interrupt(): Promise<void> {
     this.cancelled = true;

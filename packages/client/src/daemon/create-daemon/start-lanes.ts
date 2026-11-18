@@ -6,6 +6,7 @@ import { createProviderProvisioningNoticeProcessor } from '../provider-provision
 import { createAgentMemoryIntentProcessor } from '../agent-memory-intent.js';
 import { InputPreparationCompletionClient } from '../input-preparation-completion-client.js';
 import { createRemoteInputPreparationHandler } from '../input-preparation-remote.js';
+import { INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
 import { BlobClient } from '../blob-client.js';
 import { SealedTasks } from '../sealed-task.js';
 import type { DaemonScope } from './scope.js';
@@ -16,7 +17,7 @@ import type { StartRun } from './start-run.js';
  * hello capabilities and builds the notice processors, the input-preparation
  * lane, the sealed upload client and this start's sealed-task lane.
  */
-export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 'agentMemoryBackend' | 'agentMemoryIntentBackend' | 'record' | 'blobClient' | 'sealedRun'>) {
+export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 'agentMemoryBackend' | 'agentMemoryIntentBackend' | 'record' | 'blobClient' | 'sealedRun' | 'runtimes' | 'harnesses'>) {
   const {
     adapters, config, agentHomeManager, agentContentReadPolicies, daemonState, observer,
     inputPreparationLimits, sealIdentityOf,
@@ -36,6 +37,9 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
     { enabled: config.nativeSessions, sessionDir: config.piByokLauncher?.sessionDir },
     config.runtimeAllowlist,
   );
+  if ([...run.runtimes, ...run.harnesses].some(({ capabilities }) => capabilities?.images !== false)) {
+    capabilities.push(INPUT_IMAGES_CAPABILITY);
+  }
   const agentHomeProjectionCompletion = agentHomeManager?.supportsTaskFreeProjection() === true
     ? new AgentHomeProjectionCompletionClient({
         serverUrl: config.serverUrl,

@@ -1,6 +1,9 @@
 // `TaskRunner` members for shutdown, teardown, limits, cancel and steer
 // (see ./support.ts for how a member module runs).
-import { createEnvelope, steerRefusalEnvelopeId, type SteerRefusalReason } from '@byok-sdk/protocol';
+import { createEnvelope, steerRefusalEnvelopeId, type InputImageBlobRef, type SteerRefusalReason } from '@byok-sdk/protocol';
+import { INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
+import { BlobIntegrityError } from '../blob-client.js';
+import { materializeInputImages } from './input-images.js';
 import { SteerUnsupportedError } from '../../types.js';
 import { RuntimeDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { DAEMON_TASK_FAILURE } from '../task-failure.js';
@@ -294,17 +297,17 @@ export async function handleCancel(this: TaskRunner, taskId: string, reason: str
  * replay of one refusal is the same envelope; it carries no content, so it is
  * plaintext on a sealed task too.
  */
-export async function refuseSteer(this: TaskRunner, taskId: string, steerMessageId: string, reason: SteerRefusalReason): Promise<void> {
+export async function refuseSteer(this: TaskRunner, taskId: string, steerMessageId: string, reason: SteerRefusalReason | 'invalid_request'): Promise<void> {
   this['deps'].send(createEnvelope('task.steer_refused', { steerMessageId, reason }, { taskId, id: await steerRefusalEnvelopeId(steerMessageId) }));
 }
 
-export async function handleSteer(this: TaskRunner, taskId: string, steerMessageId: string, text: string): Promise<void> {
+export async function handleSteer(this: TaskRunner, taskId: string, steerMessageId: string, text: string, images?: readonly InputImageBlobRef[]): Promise<void> {
   const active = this['tasks'].get(taskId);
   if (!active) {
     await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
     return;
   }
-  if (active.adapter.descriptor.capabilities.steer !== true) {
+  if ((active.steer ?? active.adapter.descriptor.capabilities.steer) !== true) {
     console.error(
       `[byok/client] inbound task.steer for task ${taskId} rejected: runtime "${active.adapter.descriptor.id}" declares no steering channel — acked without retry; this envelope should have been gated server-side`,
     );
@@ -312,13 +315,35 @@ export async function handleSteer(this: TaskRunner, taskId: string, steerMessage
     return;
   }
   try {
-    await active.session.steer(text);
+    if (images === undefined) {
+      await active.session.steer(text);
+      return;
+    }
+    const { inputImages, advertisedCapabilities } = this['deps'];
+    if (inputImages === undefined || !advertisedCapabilities().includes(INPUT_IMAGES_CAPABILITY) || active.session.capabilities?.images !== true) {
+      await refuseSteer.call(this, taskId, steerMessageId, 'steer_unsupported');
+      return;
+    }
+    if (taskTerminalSelected(this, taskId)) {
+      await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
+      return;
+    }
+    const files = await materializeInputImages(images, inputImages, active.scratch, active.blobAbort.signal);
+    if (this['tasks'].get(taskId) !== active || taskTerminalSelected(this, taskId)) {
+      await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
+      return;
+    }
+    await active.session.steer(text, { images: files });
   } catch (err) {
     // A cancel runs ahead of this steer (#2304). Its teardown, from the
     // terminal it selects to retirement, closed the session under the steer,
     // so the steer never reached the runtime.
     if (this['tasks'].get(taskId) !== active || taskTerminalSelected(this, taskId)) {
       await refuseSteer.call(this, taskId, steerMessageId, 'task_not_active');
+      return;
+    }
+    if (err instanceof BlobIntegrityError) {
+      await refuseSteer.call(this, taskId, steerMessageId, 'invalid_request');
       return;
     }
     if (err instanceof SteerUnsupportedError) {

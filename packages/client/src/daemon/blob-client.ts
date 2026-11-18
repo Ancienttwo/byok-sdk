@@ -16,6 +16,8 @@ export class BlobRequestAbortedError extends Error {
   }
 }
 
+export class BlobIntegrityError extends Error {}
+
 export interface BlobClientOptions {
   /** Bound for each individual HTTP request and response-body read. Default: 15 seconds. */
   requestDeadlineMs?: number;
@@ -89,7 +91,7 @@ export class BlobClient implements BlobResolver {
     const bytes = await this.#readBody(contentRes, options.signal);
     const observedHash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
     if (observedHash !== blobRef.contentHash || bytes.length !== blobRef.size) {
-      throw new Error(
+      throw new BlobIntegrityError(
         `downloaded blob failed declared integrity: expected ${blobRef.contentHash}/${blobRef.size} bytes, observed ${observedHash}/${bytes.length} bytes`,
       );
     }

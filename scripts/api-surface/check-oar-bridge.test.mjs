@@ -25,7 +25,7 @@ const require = createRequire(import.meta.url);
 test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotFoundError', () => {
   const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/codex-session-runtime.js'), 'utf8');
   const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
-  assert.equal(body.length, 6, 'OAR JS bridge must have exactly six checked re-exports');
+  assert.equal(body.length, 7, 'OAR JS bridge must have exactly seven checked re-exports');
   const reexports = body.map((statement) => {
     assert.equal(statement.type, 'ExportNamedDeclaration');
     return [
@@ -40,6 +40,7 @@ test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotF
     ['../../vendor/oar/609f347/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
     ['../../vendor/oar/609f347/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
     ['../../vendor/oar/609f347/contracts/model-confirmation-error.js', [['ModelConfirmationError', 'ModelConfirmationError']]],
+    ['../../vendor/oar/609f347/runtimes/codex/session.js', [['codexSessionCapabilities', 'codexSessionCapabilities']]],
   ]);
 });
 
@@ -80,6 +81,9 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/609f347/runtimes/grok/list-models.js', [['grokListModels', 'grokListModels']]],
     ['../../vendor/oar/609f347/runtimes/grok/account-usage.js', [['grokAccountUsage', 'grokAccountUsage']]],
     ['../../vendor/oar/609f347/runtimes/antigravity/list-models.js', [['antigravityListModels', 'antigravityListModels']]],
+    ['../../vendor/oar/609f347/runtimes/antigravity/session.js', [['antigravitySessionCapabilities', 'antigravitySessionCapabilities']]],
+    ['../../vendor/oar/609f347/runtimes/grok/session.js', [['grokSessionCapabilities', 'grokSessionCapabilities']]],
+    ['../../vendor/oar/609f347/runtimes/opencode/version.js', [['opencodeSessionCapabilities', 'opencodeSessionCapabilities']]],
   ]);
 });
 
@@ -101,6 +105,7 @@ test('OAR dsh JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/609f347/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
     ['../../vendor/oar/609f347/contracts/model-confirmation-error.js', [['ModelConfirmationError', 'ModelConfirmationError']]],
     ['../../vendor/oar/609f347/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
+    ['../../vendor/oar/609f347/runtimes/dsh/session.js', [['dshSessionCapabilities', 'dshSessionCapabilities']]],
   ]);
 });
 
@@ -133,6 +138,7 @@ test('OAR Claude JS bridge re-exports the checked stream-json session and Claude
       ['claudeProjectionProfile', 'claudeProjectionProfile'], ['initialClaudeProjection', 'initialClaudeProjection'], ['resumedClaudeProjection', 'resumedClaudeProjection'],
     ]],
     ['../../vendor/oar/609f347/shared/credential-redactor.js', [['sessionCredentialRedactor', 'sessionCredentialRedactor']]],
+    ['../../vendor/oar/609f347/shared/stream-json/session.js', [['claudeSessionCapabilities', 'claudeSessionCapabilities']]],
   ]);
 });
 

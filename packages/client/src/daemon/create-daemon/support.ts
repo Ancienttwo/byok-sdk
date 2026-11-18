@@ -5,7 +5,7 @@ import { encodeEnvelope, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_C
 import type { RuntimeAdapter } from '../../types.js';
 import type { DaemonConfigIssue } from '../config-schema/validate.js';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
-import { type RuntimeObservation, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection.js';
+import { type RuntimeObservation, detectedRuntimeCapabilities, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection.js';
 import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
 import { runtimeVersionPolicyProjection } from '../../runtime-version-policy.js';
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities.js';
@@ -138,10 +138,11 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
     // Absence of a verdict means the adapter declares no policy: omit the
     // field rather than inventing `allow` (#1103 D8/D9).
     const versionPolicy = runtimeVersionPolicyProjection(detected.versionVerdict);
+    const capabilities = toRuntimeInfoCapabilities(detectedRuntimeCapabilities(adapter.descriptor, detected));
     if (!isWireRuntimeId(adapter.descriptor.id)) {
       harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
         ...(detected.version === undefined ? {} : { version: detected.version }),
-        capabilities: toRuntimeInfoCapabilities(adapter.descriptor.capabilities),
+        capabilities,
         ...(versionPolicy === undefined ? {} : { versionPolicy }) });
       continue;
     }
@@ -152,7 +153,7 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
     // surfaces this adapter descriptor's capabilities into
     // the per-runtime wire field — see `toRuntimeInfoCapabilities`'s doc
     // comment.
-    info.capabilities = toRuntimeInfoCapabilities(adapter.descriptor.capabilities);
+    info.capabilities = capabilities;
     if (versionPolicy !== undefined) info.versionPolicy = versionPolicy;
     runtimes.push(info);
   }

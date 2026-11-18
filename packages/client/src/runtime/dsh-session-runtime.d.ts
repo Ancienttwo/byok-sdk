@@ -1,3 +1,4 @@
+import type { RuntimeInputOptions } from '../types';
 import type { spawnOwnedLineProcess } from './owned-line-process';
 export declare function dshMcpRows(
   servers: readonly (
@@ -19,10 +20,14 @@ export interface DshRecord {
   readonly body: unknown;
 }
 /** The vendored dsh AdapterSession, narrowed to what the SDK calls. */
+export declare function dshSessionCapabilities(): { readonly images: false };
+
 export interface RawDshSession {
   readonly id: string;
-  prompt(input: string): Promise<DshControl>;
-  steer(input: string): Promise<DshControl>;
+  readonly capabilities: { readonly images: boolean };
+  prompt(input: string, options?: RuntimeInputOptions): Promise<DshControl>;
+  steer(input: string, options?: RuntimeInputOptions): Promise<DshControl>;
+  queue(input: string, options?: RuntimeInputOptions): Promise<DshControl>;
   abort(): Promise<DshControl>;
   records(): readonly DshRecord[];
   dispose(): Promise<void>;

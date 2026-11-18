@@ -11,6 +11,8 @@ import { DURABLE_REPLICA_DIRNAME } from '../../adapters/pi-durable/replica.js';
 import { claimedExecutorFor, terminalIdentity } from '../terminal-identity.js';
 import { abortedStartOf, startOwnedRuntime } from '../runtime-start.js';
 import type { DeclaredSessionMembers } from '../session-contract.js';
+import { BlobIntegrityError } from '../blob-client.js';
+import { materializeInputImages } from './input-images.js';
 import path from 'node:path';
 import { createEnvelope, type AgentMemoryStartRefusal, type TaskDeclineCode, type TaskFailure } from '@byok-sdk/protocol';
 import { readResidentMemory } from '../../resident-memory.js';
@@ -416,7 +418,23 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
       return;
     }
   }
-  return { resolvedInstruction, taskMcpServers };
+  let images;
+  if (payload.images !== undefined) {
+    const context = { binding: agentBinding, runtimeId: pick.descriptor.id };
+    try {
+      images = await materializeInputImages(payload.images, this['deps'].inputImages!, scratch, blobAbort.signal);
+    } catch (error) {
+      if (blobAbort.signal.aborted) {
+        await claimAccepted.call(this, taskId, claim.settlement, blobAbort.signal, context);
+      } else {
+        const corrupt = error instanceof BlobIntegrityError;
+        await failBeforeStart.call(this, taskId, corrupt ? 'input image blob failed integrity verification' : 'input image blob could not be materialized', !corrupt, context,
+          corrupt ? { class: 'invalid_request' } : DAEMON_TASK_FAILURE);
+      }
+      return;
+    }
+  }
+  return { resolvedInstruction, taskMcpServers, images };
 }
 
 /**
@@ -502,7 +520,7 @@ export interface OfferStartInput
   extends Pick<OfferRequest, 'ordinaryMemoryMode' | 'ordinaryMemoryMcp' | 'readerAttempt' | 'sessionRef'>,
     Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'mcpToolApprovals' | 'pick' | 'prepared' | 'scratch'>,
     Pick<OfferManifest, 'manifest' | 'preparedLaunch' | 'runtimeLaunch' | 'toolAuthorization'>,
-    Pick<OfferClaim, 'resolvedInstruction' | 'taskMcpServers'> {
+    Pick<OfferClaim, 'resolvedInstruction' | 'taskMcpServers' | 'images'> {
   readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly sessionLease: OfferWorkspace['sessionLease'];
   readonly blobAbort: AbortController;
@@ -725,6 +743,7 @@ async function startAndActivateRuntime(
     ...(preparedLaunch === undefined
       ? {
         kind: 'instruction' as const,
+        ...(input.images === undefined ? {} : { images: input.images }),
         instruction: `${memoryCommitGuidance}${prependAgentMemoryModeGuidance(resolvedInstruction, ordinaryMemoryMode, readerAttempt, injectsResidentMemory ? residentMemoryRead : undefined)}`,
       }
       : { kind: 'prepared' as const, preparation: preparedLaunch }),

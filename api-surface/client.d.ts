@@ -381,6 +381,8 @@
 //   RuntimeExecutionFailureInput -> dist/runtime-failure.d.ts
 //   RuntimeFailurePhase -> dist/runtime-failure.d.ts
 //   RuntimeFailureProjection -> dist/runtime-failure.d.ts
+//   RuntimeInputImage -> dist/types.d.ts
+//   RuntimeInputOptions -> dist/types.d.ts
 //   RuntimeIsolationCapabilities -> dist/types.d.ts
 //   RuntimeLaunchResources -> dist/types.d.ts
 //   RuntimeObservation -> dist/runtime-detection.d.ts
@@ -4221,7 +4223,7 @@ export interface FileScopeGrant {
 export { HostLayoutInputError, resolveHostLayout, type HostLayout, type HostLayoutOptions, type HostLayoutPlatform, } from './daemon/host-layout.js';
 // ==== @byok-sdk/client dist/index.d.ts ====
 export type { StoreCompatibility } from '@byok-sdk/core';
-export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
+export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeTaskInput, RuntimeInputImage, RuntimeInputOptions, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeIsolationCapabilities, RuntimeVersionPolicy, RuntimeVersionSpec, RuntimeVersionVerdict, RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, Session, MessageDraftDelta, SessionEvidence, McpStdioServerConfig, McpToolsetConfig, McpToolsetLifecycleState, McpToolsetObservation, McpToolsetStatus, McpToolsetRegistryStatus, McpToolsetReloadReceipt, AgentEgressPolicy, } from './types.js';
 export type { AgentRef } from './agent-home.js';
 export { AgentHomeError, AgentRefValidationError, AgentHomeResolutionError, AgentHomeCollisionError, AgentHomeBusyError, AgentHomeLeaseHeldError, AgentHomeForeignLeaseError, AgentHomeLeaseMarkerMismatchError, AgentHomeLeaseCorruptError, AgentHomeReaderRunMissingError, AgentHomeLayout, AgentHomeLeaseManager, AgentHomeManager, createAgentHomeProjectionConsumer, AGENT_HOME_PROJECTION_STATE_FILE, stableAgentHomeOwnerId, validateAgentRef, } from './agent-home.js';
 export { AgentSessionHandoffStore, AgentSessionHandoffStoreError, AgentSessionHandoffCorruptError, AgentSessionHandoffMismatchError, } from './daemon/agent-session-handoff-store.js';
@@ -5374,6 +5376,7 @@ export interface RuntimeObservation {
     authPresent?: boolean;
     steer: boolean;
     resume: boolean;
+    images?: boolean;
 }
 export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation;
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
@@ -5899,8 +5902,17 @@ import type { AgentEvent, ExecutionTarget, TaskOfferPlainPayload } from '@byok-s
 import type { InputPreparationModelV1 } from './input-preparation.js';
 import type { AgentRef } from './agent-home.js';
 import type { McpToolsetServerObservation } from './mcp/observation.js';
+export interface RuntimeInputImage {
+    readonly path: string;
+    readonly mediaType?: string;
+}
+export interface RuntimeInputOptions {
+    readonly inputId?: string;
+    readonly images?: readonly RuntimeInputImage[];
+}
 export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> & {
     instruction: NonNullable<TaskOfferPlainPayload['instruction']>;
+    images?: readonly RuntimeInputImage[];
     effort?: string;
     modelId?: string;
     sessionRef?: string;
@@ -5943,6 +5955,10 @@ export type RuntimeExecutableSource = 'config' | 'path' | 'env';
 export type RuntimeDetectResult = {
     readonly kind: 'available';
     readonly version?: string;
+    readonly sessionCapabilities?: {
+        readonly steer?: boolean;
+        readonly images?: boolean;
+    };
     readonly rawVersion?: string;
     readonly authPresent?: boolean;
     readonly versionVerdict?: RuntimeVersionVerdict;
@@ -5973,6 +5989,7 @@ export interface RuntimeIsolationCapabilities {
     readonly sessionPersistence: boolean;
 }
 export interface RuntimeCapabilities {
+    readonly images?: boolean;
     readonly toolAuthorizationAuto?: boolean;
     readonly messageDraft?: boolean;
     readonly nativeInteractions?: NativeInteractionCapabilities;
@@ -6036,7 +6053,10 @@ export interface Session {
     progressStartsMessage?(event: Extract<AgentEvent, {
         type: 'progress';
     }>): boolean;
-    steer(text: string): Promise<void>;
+    steer(text: string, options?: RuntimeInputOptions): Promise<void>;
+    readonly capabilities?: {
+        readonly images: boolean;
+    };
     followUp(task: RuntimeTaskInput): Promise<void>;
     interrupt(): Promise<void>;
     close(): Promise<void>;
@@ -6169,6 +6189,7 @@ interface RuntimeOperationStartBase {
 export interface RuntimeOperationInstructionStartInput extends RuntimeOperationStartBase {
     readonly kind: 'instruction';
     readonly instruction: string;
+    readonly images?: readonly RuntimeInputImage[];
 }
 // support
 export interface RuntimeOperationPreparedStartInput extends RuntimeOperationStartBase {

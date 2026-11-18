@@ -1,4 +1,7 @@
 import { configureAntigravityModel } from "./model-selection.js";
+
+// BYOK change: the narrow bridge reads the same declaration as Runtime.sessionCapabilities.
+export const antigravitySessionCapabilities = () => ({ steer: true } as const);
 import { sessionEnvironment } from "../../shared/environment.js";
 import { antigravityStateArgs } from "./state-directory.js";
 import type { SessionOptions } from "../../contracts/session.js";

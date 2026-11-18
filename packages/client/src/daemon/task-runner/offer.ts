@@ -303,13 +303,13 @@ export async function handleOffer(
       agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload, taskMcpServers, startupDeadline,
     });
     if (claimed === undefined) return;
-    const { resolvedInstruction } = claimed;
+    const { resolvedInstruction, images } = claimed;
     ({ taskMcpServers } = claimed);
 
     stage('start');
     await startOfferRuntime.call(this, phase, held, {
       agentBinding, sessionLease, ordinaryMemoryMode, ordinaryMemoryMcp, readerAttempt, sessionRef, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
-      preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
+      preparedLaunch, runtimeLaunch, resolvedInstruction, images, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
     }, {
       agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation, toolAuthorization,
       workspaceDir, blobAbort, payload, messageRequirement, terminalProjection,
