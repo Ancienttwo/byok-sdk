@@ -12,11 +12,11 @@ import type { ModelProviderSecretName } from './secret-store.js';
 // stores 0.41.0 and 0.44.0. Normal store opens never consult this allowlist.
 export const LATEST_PROVIDER_SECRET_RECOVERY_SCHEMA = 'b98adbeaf0e72ae2dd9459b961ea78f6217444aa4f95d5cb3451d0006701b834';
 const RELEASED_SCHEMAS = new Map<string, 'provider-id' | 'profile-ref' | 'custody'>([
-  ['cedb8ffb40cd05a44fa83cc480f9dc8d89cfe544a32de9245981d276becf02dd', 'provider-id'], // keys 0.3.9
+  ['cedb8ffb40cd05a44fa83cc480f9dc8d89cfe544a32de9245981d276becf02dd', 'provider-id'], // keys 0.1.0–0.3.9
   ['ccbeac2b67121214a6dfd388d37d760c446e70ee31a4050fbd0dd7f15a27b127', 'profile-ref'], // keys 0.3.10
-  ['ee4efa8773f7987882cba2676b6256b4c1ec7f30fb810e2598be343cc99677f3', 'profile-ref'], // keys 0.4.3
-  ['35a65f43af77a150d388848db0ae9f752dfa14a154ff26d6ecd27cd4d6329524', 'profile-ref'], // keys 0.7.0
-  ['2c4cc1ba7d87b14558d2d32d50987deec50309d0c146a7ff3824ee4c8d7693d0', 'custody'], // keys 0.41.0
+  ['ee4efa8773f7987882cba2676b6256b4c1ec7f30fb810e2598be343cc99677f3', 'profile-ref'], // keys 0.4.0–0.4.3
+  ['35a65f43af77a150d388848db0ae9f752dfa14a154ff26d6ecd27cd4d6329524', 'profile-ref'], // keys 0.5.0–0.7.0
+  ['2c4cc1ba7d87b14558d2d32d50987deec50309d0c146a7ff3824ee4c8d7693d0', 'custody'], // keys 0.8.0–0.41.0
   [LATEST_PROVIDER_SECRET_RECOVERY_SCHEMA, 'custody'], // keys 0.42.0–0.44.0
 ]);
 
@@ -92,7 +92,13 @@ function readNames(db: DatabaseSync): ModelProviderSecretName[] {
  *
  * Credential names can be shared by stores in the same SecretStore scope.
  * Before deleting anything, exclude the names referenced by active stores in
- * that scope. Use the original credential backend and scope.
+ * that scope. Use the original credential backend and scope. Only names still
+ * evidenced by database rows are returned: older releases could leave orphaned
+ * credentials if a process crashed between writing the credential and profile,
+ * or between deleting the profile and credential. An empty list does not prove
+ * cleanup complete. Check the original backend's inventory or UI as described
+ * in the recovery guide; if ownership cannot be verified, report cleanup
+ * incomplete.
  */
 export async function listProviderProfileSecretNames(path: string): Promise<readonly ModelProviderSecretName[]> {
   try {

@@ -264,7 +264,12 @@ For recovery or uninstall, `@byok-sdk/keys` exposes
 entry names from recognized released profile-store layouts, including
 0.42.0–0.44.0 stores that `inspectProviderProfileStore` accepts. Names follow
 the rules of the stored layout. Profile and pending custody rows can supply
-names. The SDK opens only a private, immutable read-only copy. The operation
+names. Only names still evidenced by database rows are returned. Older
+releases, including 0.1.0–0.7.0 and releases such as 0.12.0 and 0.22.0 before
+custody, wrote the credential before the profile on configure and deleted the
+profile before the credential on delete. A crash between steps can leave an
+orphan credential with no database record; an empty list does not prove cleanup
+complete. The SDK opens only a private, immutable read-only copy. The operation
 does not migrate the store, query the OS credential store, or return a secret
 value. Unknown layouts fail with `PROVIDER_STORE_SCHEMA_STALE`. An offline
 store with any WAL, SHM or rollback-journal sidecar fails with
@@ -275,9 +280,25 @@ uses its original credential scope and must exclude every name referenced by
 an active store in that scope before deleting any retired entry. The rule
 also protects a replacement store that reuses a profile ref. If the Host
 cannot enumerate every active store in the scope or verify credential
-ownership, it must stop cleanup. Preserve the retired store, including any
-sidecars, and use the original scope's `SecretStore.delete` for the remaining
-candidates before configuring a replacement store.
+ownership, it must stop cleanup and report it incomplete. Preserve the retired
+store, including any sidecars, and use the original scope's `SecretStore.delete`
+for the remaining candidates before configuring a replacement store.
+
+The Host must also check the original backend's inventory or UI for orphaned
+credentials. The default service prefix is `com.byok.keys`, native scopes
+append `.scope.<namespace>` per scope, and the entry service is
+`<prefix>.<name>`; the default account is `local-device`. Use the actual
+configured prefix, account, scope and keychain when customized. On macOS,
+search the original keychain in Keychain Access for the service prefix and
+inspect generic password accounts. On Windows, inspect generic credential
+targets and user names in Credential Manager or `cmdkey /list`. On Linux,
+Secret Service uses `service` and `account` attributes: search the exact
+account in an inventory or UI and inspect service values for the prefix.
+`secret-tool` matches attributes exactly, not by prefix, and searches can
+expose secret values. The SDK cannot enumerate orphan names. If the backend or
+available tools cannot enumerate by prefix, ask the user to inspect and clean
+the system credential manager manually and report cleanup incomplete; do not
+delete entries whose ownership or active use cannot be verified.
 
 `@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
 the client pins. The table is a checked-in generated file; a test fails until
