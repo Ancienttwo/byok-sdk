@@ -1,4 +1,3 @@
-import { isReservedMcpServerName } from '../../sdk-reserved-mcp.js';
 import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity.js';
 import type { McpStdioServerConfig } from '../../types.js';
 
@@ -56,24 +55,19 @@ export function claudeMcpEventIdentities(
 
 /**
  * One runtime observation shared by the first authorization hook and event
- * reporting. The gate resolves every SDK-written server, so a Host MCP rule
- * cannot lock out the SDK helpers by leaving them without identity. Events
- * carry only the task toolset servers: whether helper calls carry `mcp` is an
- * open owner decision (#633).
+ * reporting. Both use the same identities for SDK-written servers, including
+ * helper servers, without changing the authorization gate.
  */
 export function createClaudeMcpIdentityResolver(
   status: () => Promise<unknown>,
   configuredServers: ReadonlyMap<string, McpStdioServerConfig>,
 ) {
-  const authorized = new Map<string, McpEventIdentity>();
   const identities = new Map<string, McpEventIdentity>();
-  const hasToolsetServers = [...configuredServers.keys()].some(name => !isReservedMcpServerName(name));
   let pending: Promise<void> | undefined;
   const observe = (): Promise<void> => {
     pending ??= status().then(response => {
       for (const [name, identity] of claudeMcpEventIdentities(response, configuredServers)) {
-        authorized.set(name, identity);
-        if (!isReservedMcpServerName(identity.server)) identities.set(name, identity);
+        identities.set(name, identity);
       }
     });
     return pending;
@@ -83,10 +77,10 @@ export function createClaudeMcpIdentityResolver(
     async resolve(name: string): Promise<McpEventIdentity | undefined> {
       if (configuredServers.size === 0 || !name.startsWith('mcp__')) return undefined;
       await observe();
-      return authorized.get(name);
+      return identities.get(name);
     },
     async observe() {
-      if (hasToolsetServers) await observe();
+      if (configuredServers.size > 0) await observe();
     },
   };
 }

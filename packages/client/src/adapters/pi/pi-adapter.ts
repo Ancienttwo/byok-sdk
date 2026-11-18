@@ -843,7 +843,7 @@ export class PiAdapter implements RuntimeAdapter {
           }
 
           return new PiSession(sessionRef, rpc, manifestSelection, scratch, disposition === 'handled' ? 'handled' : promptFrames,
-            undefined, mcpEventIdentities(startInput.mcpToolsetTools), memoryLane ? abortMemoryLane : undefined);
+            undefined, mcpEventIdentities(startInput.mcpToolsetTools, startInput.mcpServers), memoryLane ? abortMemoryLane : undefined);
         },
       },
     };
@@ -1189,7 +1189,7 @@ async function startPreparedPiOperation(input: PreparedPiLaunchInput): Promise<S
 
   // The prepared host writes its own response and starts the run itself, so
   // every frame of this process belongs to the task.
-  return new PiSession(sessionRef, rpc, input.manifestSelection, scratch, 0, preparation.expected.model.contextWindow, mcpEventIdentities(input.mcpToolsetTools));
+  return new PiSession(sessionRef, rpc, input.manifestSelection, scratch, 0, preparation.expected.model.contextWindow, mcpEventIdentities(input.mcpToolsetTools, input.mcpServers));
 }
 
 /**

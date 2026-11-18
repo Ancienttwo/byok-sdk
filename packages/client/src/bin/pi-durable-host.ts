@@ -88,7 +88,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const pool = new McpServerPool(mcp, fail);
   const tools: ToolRegistration[] = [];
   const projected = projectMcpTools(mcp.observation);
-  const identities = mcpEventIdentities(mcp.observation);
+  const identities = mcpEventIdentities(mcp.observation, mcp.mcpServers);
   const reserved: McpToolProjection[] = [];
   for (const server of Object.keys(mcp.mcpServers).filter(isReservedMcpServerName).sort()) {
     for (const tool of await pool.observe(server)) reserved.push({ toolsetId: server, serverName: server, toolName: tool.name, description: tool.description, inputSchema: tool.inputSchema });
