@@ -31,6 +31,7 @@
         "@byok-sdk/server/execution-core",
         "@byok-sdk/server/execution-core/canonical",
         "@cfworker/json-schema",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
         "async_hooks",
@@ -70,6 +71,8 @@
       ],
       "thirdParty": [
         "@cfworker/json-schema",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
         "eventsource",
@@ -321,6 +324,7 @@
         "@byok-sdk/server/execution-core",
         "@byok-sdk/server/execution-core/canonical",
         "@cfworker/json-schema",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@hono/node-server",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
@@ -367,6 +371,8 @@
       ],
       "thirdParty": [
         "@cfworker/json-schema",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-schema",
         "@hono/node-server",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
@@ -495,6 +501,7 @@
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
         "fs",
@@ -531,6 +538,8 @@
       ],
       "thirdParty": [
         "@cfworker/json-schema",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
         "eventsource",
@@ -611,6 +620,7 @@
       "bareImports": [
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
+        "@earendil-works/pi-ai/providers/model-schema",
         "fs",
         "node:child_process",
         "node:crypto",
@@ -633,7 +643,10 @@
         "koffi",
         "node:http"
       ],
-      "thirdParty": [],
+      "thirdParty": [
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-schema"
+      ],
       "unavailableOptional": [],
       "opaqueImports": [],
       "nodeBuiltins": {
@@ -983,6 +996,7 @@
       "bareImports": [
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
+        "@earendil-works/pi-ai/providers/model-schema",
         "fs",
         "node:child_process",
         "node:crypto",
@@ -1005,7 +1019,10 @@
         "koffi",
         "node:http"
       ],
-      "thirdParty": [],
+      "thirdParty": [
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-schema"
+      ],
       "unavailableOptional": [],
       "opaqueImports": [],
       "nodeBuiltins": {
@@ -2658,6 +2675,7 @@
         "@byok-sdk/protocol/agent-memory",
         "@byok-sdk/protocol/constants",
         "@cfworker/json-schema",
+        "@earendil-works/pi-ai/providers/model-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/client/validators/cf-worker",
         "fs",
@@ -2695,6 +2713,8 @@
       ],
       "thirdParty": [
         "@cfworker/json-schema",
+        "@earendil-works/pi-ai",
+        "@earendil-works/pi-schema",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
         "eventsource",
