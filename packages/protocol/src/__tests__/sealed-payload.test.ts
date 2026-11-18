@@ -302,6 +302,7 @@ describe('task input images (#2377)', () => {
 
   it.each(['task.offer', 'task.steer'] as const)('applies the same image bounds to %s', (type) => {
     const plain = corpus.find(line => line.type === type && line.payload.images !== undefined && line.payload.sealing === undefined)!.payload;
+    expect(parse(type, { ...plain, images: [] })).toBe(false);
     expect(parse(type, { ...plain, images: Array.from({ length: 16 }, () => images[0]) })).toBe(true);
     expect(parse(type, { ...plain, images: Array.from({ length: 17 }, () => images[0]) })).toBe(false);
     expect(parse(type, { ...plain, images: [{ ...images[0], mediaType: 'image/svg+xml' }] })).toBe(false);

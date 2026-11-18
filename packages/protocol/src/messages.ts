@@ -327,7 +327,7 @@ export const InputImageBlobRefSchema = z.strictObject({
   mediaType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),
 });
 export type InputImageBlobRef = z.infer<typeof InputImageBlobRefSchema>;
-export const InputImagesSchema = z.array(InputImageBlobRefSchema).max(16);
+export const InputImagesSchema = z.array(InputImageBlobRefSchema).min(1).max(16);
 
 const DispatchTargetIdSchema = z
   .string()
