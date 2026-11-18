@@ -1,5 +1,5 @@
 // BYOK change: Modified from OAR bc1b2ac; native process diagnostics stay SDK-owned (Apache-2.0).
-export type AcpErrorKind = "timeout" | "process_exited";
+export type AcpErrorKind = "timeout" | "process_exited" | "startup_directory";
 
 /** One transport error class with a discriminant instead of four nominal wrappers. */
 export class AcpError extends Error {

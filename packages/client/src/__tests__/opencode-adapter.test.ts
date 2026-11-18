@@ -20,7 +20,7 @@ import { createRuntimeAdapters } from '../adapters/runtime-adapters';
 import { resolveRuntimeInvocation } from '../adapters/runtime-invocation';
 import { npmNodeShim } from './fixtures/npm-node-shim';
 import { check, defineRuntimeCases } from './runtime-contract/contract';
-import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/609f347/runtimes/opencode/session';
+import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/a122061/runtimes/opencode/session';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -53,6 +53,65 @@ function setup(version = '1.18.35', extra: Record<string, string> = {}) {
   };
   return { cwd, env, log, adapter, facts, start };
 }
+
+it('shares the OpenCode initialize budget across queued starts and reports retryable startup failures', async () => {
+  const box = setup();
+  const home = path.join(box.cwd, 'filtered-home');
+  const data = path.join(home, '.local', 'share');
+  const gate = path.join(box.cwd, 'initialized');
+  vi.stubEnv('XDG_DATA_HOME', path.join(box.cwd, 'ambient-data'));
+  const start = (env: Record<string, string>, signal?: AbortSignal) => startPreparedOperation(
+    box.adapter, { target: OPENCODE_TARGET, instruction: 'hello' },
+    { workspaceDir: box.cwd, env: { ...box.env, ...env }, ...(signal === undefined ? {} : { signal }) },
+  ).then(session => { sessions.push(session); return session; });
+  const owner = start({ HOME: home, USERPROFILE: home, FAKE_ACP_INITIALIZE_GATE: gate });
+  try {
+    await vi.waitFor(() => expect(box.facts().filter(f => f.kind === 'initialize')).toHaveLength(1));
+    const other = await start({ XDG_DATA_HOME: path.join(box.cwd, 'other-data') });
+    await other.close();
+    const nativeTimeout = globalThis.setTimeout;
+    const timeouts = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn, ms, ...args) =>
+      nativeTimeout(fn, ms === 60_000 ? 15 : ms, ...args));
+    try {
+      await expect(start({ XDG_DATA_HOME: data })).rejects.toMatchObject({
+        phase: 'start', retry: 'retryable', failure: { class: 'unknown' },
+        cause: { kind: 'timeout', method: 'startup queue', timeoutMs: 60_000 },
+      });
+    } finally { timeouts.mockRestore(); }
+    const controller = new AbortController();
+    const queued = Promise.withResolvers<void>();
+    const queueTimer = vi.spyOn(globalThis, 'setTimeout').mockImplementation((fn, ms, ...args) => {
+      if (ms === 60_000) queued.resolve();
+      return nativeTimeout(fn, ms, ...args);
+    });
+    try {
+      const cancelled = expect(start({ XDG_DATA_HOME: data }, controller.signal)).rejects.toMatchObject({ phase: 'start' });
+      await queued.promise;
+      controller.abort();
+      await cancelled;
+    } finally { queueTimer.mockRestore(); }
+    expect(box.facts().filter(f => f.kind === 'initialize')).toHaveLength(2);
+    expect(existsSync(data)).toBe(false);
+  } finally {
+    writeFileSync(gate, 'release');
+    await owner;
+  }
+  await start({ XDG_DATA_HOME: data });
+  expect(box.facts().filter(f => f.kind === 'initialize')).toHaveLength(3);
+});
+
+it('keeps non-ENOENT OpenCode data directory failures typed and path-free', async () => {
+  const box = setup();
+  const file = path.join(box.cwd, 'non-directory');
+  writeFileSync(file, 'fixture');
+  box.env.XDG_DATA_HOME = file;
+  await expect(box.start('hello')).rejects.toMatchObject({
+    phase: 'start', retry: 'retryable', failure: { class: 'unknown' }, cause: { kind: 'startup_directory' },
+    message: 'OpenCode could not resolve its startup data directory',
+  });
+  expect(existsSync(box.log)).toBe(false);
+});
+
 async function collect(session: Session) {
   const events: AgentEvent[] = [];
   for await (const event of session.events) events.push(event as AgentEvent);

@@ -5,10 +5,10 @@ import path from 'node:path';
 import {
   startAppServerClient,
   type LineProcess, type SpawnLineProcess,
-} from '../../vendor/oar/609f347/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/609f347/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/609f347/shared/session-kernel.js';
-import { sessionCredentialRedactor } from '../../vendor/oar/609f347/shared/credential-redactor.js';
+} from '../../vendor/oar/a122061/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/a122061/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/a122061/shared/session-kernel.js';
+import { sessionCredentialRedactor } from '../../vendor/oar/a122061/shared/credential-redactor.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -186,7 +186,7 @@ describe('OAR session kernel record redaction', () => {
 });
 
 it('accounts for every vendored file and the maintained source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/609f347');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/a122061');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     packageVersion: string;
     commit: string;
@@ -204,9 +204,9 @@ it('accounts for every vendored file and the maintained source deltas', () => {
   }
   expect(manifest.release).toEqual({
     ecosystem: 'npm', name: '@botiverse/oar', version: manifest.packageVersion,
-    integrity: 'sha512-licwKUPX+9FBsuuQNZ7J9tpyVD/dhEwroYLs27KnDDa7kYnV3Uz/LZZ5dqtIYpeJ9Ox47I/L1C2HTf4zpHrNQA==',
+    integrity: 'sha512-QcYXeNh6EJWJ48aR8hZLnrrANinodI5h1I6HNSbXaEfOiEzitsTC4XWQr6sRYGUWATtzhDKItferbYeeifGVOA==',
     gitCommit: manifest.commit,
-    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.115.0',
+    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.120.0',
   });
   expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: `byok/${manifest.packageVersion}`, commit: expect.stringMatching(/^[0-9a-f]{40}$/) });
   expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual([
@@ -247,6 +247,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'runtimes/opencode/list-models.ts',
     'runtimes/opencode/prompt-config.ts',
     'runtimes/opencode/session.ts',
+    'runtimes/opencode/startup-gate.ts',
     'runtimes/opencode/version.ts',
     'shared/acp/client-app.ts',
     'shared/acp/config-updates.ts',
@@ -255,6 +256,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'shared/acp/failure.ts',
     'shared/acp/opening.ts',
     'shared/acp/process.ts',
+    'shared/acp/profile.ts',
     'shared/acp/records.ts',
     'shared/acp/session.ts',
     'shared/acp/steer-request.ts',

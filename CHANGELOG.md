@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Updated (client)**. OAR 0.120.0 adds optional native Codex service tier labels and descriptions. OpenCode ACP startup now queues within one SDK process when sessions share a data directory. Queueing counts toward the 60-second initialize budget and can return a retryable startup failure.
+
 - **Added (keys; #2397)** — `listProviderProfileSecretNames` finds credential entry names in recognized offline provider stores. Hosts can clean up retired credentials through the original `SecretStore` scope while preserving names used by active stores. See the [credential recovery steps](packages/keys/README.md#recover-provider-credentials-from-an-offline-store).
 
 ## 0.44.0 — 2026-11-18 (published)

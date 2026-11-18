@@ -5504,6 +5504,11 @@ export interface RuntimeModelEntry {
     readonly defaultEffort?: string;
     readonly effortUnavailableReason?: string;
     readonly serviceTiers?: readonly string[];
+    readonly serviceTierDetails?: readonly {
+        readonly id: string;
+        readonly displayName?: string;
+        readonly description?: string;
+    }[];
     readonly defaultServiceTier?: string;
     readonly disabled?: {
         readonly reason: string;

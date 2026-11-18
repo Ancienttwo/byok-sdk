@@ -6,6 +6,12 @@ export declare const grokListModels: ModelReader;
 export declare const grokAccountUsage: UsageReader;
 export declare const antigravityListModels: ModelReader;
 // Self-contained: the build copies this declaration to dist for the private `#byok-acp-runtime` import.
+export declare class AcpError extends Error {
+  readonly kind: 'timeout' | 'process_exited' | 'startup_directory';
+  readonly exitCode: number | null;
+  readonly method: string | null;
+  readonly timeoutMs: number | null;
+}
 /** A resume of a missing native session: the vendored typed error, never matched by name or message. */
 export declare class SessionNotFoundError extends Error {
   readonly name: 'SessionNotFoundError';
@@ -98,6 +104,7 @@ export type StartAcpSession = (
     )[];
   },
   hooks?: {
+    startupSignal?: AbortSignal;
     onReady?: (sessionId: string) => void;
     onRecord?: (record: AcpRecord) => void;
     /** Answers each `session/request_permission`. Absent, every request is cancelled. */

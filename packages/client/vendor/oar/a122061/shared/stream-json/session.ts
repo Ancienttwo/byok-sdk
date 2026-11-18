@@ -75,7 +75,9 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
   // BYOK change: a root result that arrives while an interrupt's write or answer is pending waits,
   // with every later line except control responses, until each pending interrupt settles;
   // the result is then folded with the mark the accepted interrupts leave.
-  let heldLines: string[] | null = null;
+  // The SDK Claude lane has no Qwen root-result readback. Keep the interrupt
+  // barrier as the owner of the held result and preserve each line’s receipt time.
+  let heldLines: Array<{ line: string; receivedAt: number }> | null = null;
   let exited = false;
   // BYOK change: once the kill fallback fires, nothing more is dispatched to the process it kills.
   let killing = false;
@@ -83,11 +85,11 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
     if (heldLines === null || (pendingInterrupts.size > 0 && !exited)) { return; }
     const lines = heldLines;
     heldLines = null;
-    for (const [index, line] of lines.entries()) {
+    for (const [index, { line, receivedAt }] of lines.entries()) {
       // receive can hold again, for a new abort's interrupt.
-      const again = heldLines as string[] | null;
+      const again = heldLines as typeof lines | null;
       if (again !== null) { again.push(...lines.slice(index)); return; }
-      receive(line);
+      receive(line, receivedAt);
     }
   };
   let disposeRequest: RequestRecord | null = null;
@@ -106,15 +108,15 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
   }
   // The fold translates and attributes facts; this driver owns transport, busy and queue drain.
   child.onLine((line) => {
-    receive(line);
+    receive(line, Date.now());
     releaseHeld();
   });
-  function receive(line: string): void {
+  function receive(line: string, receivedAt: number): void {
     const message = asRecord(parseJson(line));
     if (message === null) { return; }
-    if (heldLines !== null && message.type !== "control_response") { heldLines.push(line); return; }
-    if (message.type === "result" && typeof message.parent_tool_use_id !== "string" && pendingInterrupts.size > 0 && !exited) {
-      heldLines = [line];
+    if (heldLines !== null && message.type !== "control_response") { heldLines.push({ line, receivedAt }); return; }
+    if (message.type === "result" && (typeof message.parent_tool_use_id !== "string" || message.parent_tool_use_id.length === 0) && pendingInterrupts.size > 0 && !exited) {
+      heldLines = [{ line, receivedAt }];
       return;
     }
     if (message.type === "system" && message.subtype === "init" && typeof message.parent_tool_use_id !== "string" && Array.isArray(message.capabilities)) {
@@ -157,7 +159,7 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
             writtenQueues.delete(cancelled.inputId);
             if (state.active !== null && cancelled.inputId === (state.active.body.kind === "compact" ? state.active.id : ("inputId" in state.active.body ? state.active.body.inputId : undefined))) { state.active = null; }
           }
-          const record = kernel.frame(correlated ? { ...command.body, responseTo: nativeResponse } : command.body, { agentPath: command.agentPath });
+          const record = kernel.frame(correlated ? { ...command.body, responseTo: nativeResponse } : command.body, { agentPath: command.agentPath, receivedAt });
           if (record.agentPath.length > 0) { break; }
           ended ||= closes;
           dropped ||= cancelled !== undefined;

@@ -17,6 +17,12 @@ export interface RuntimeModelEntry {
   readonly defaultEffort?: string;
   readonly effortUnavailableReason?: string;
   readonly serviceTiers?: readonly string[];
+  /** Native picker labels and descriptions, in the same order as serviceTiers. */
+  readonly serviceTierDetails?: readonly {
+    readonly id: string;
+    readonly displayName?: string;
+    readonly description?: string;
+  }[];
   readonly defaultServiceTier?: string;
   readonly disabled?: { readonly reason: string };
   readonly default?: true;

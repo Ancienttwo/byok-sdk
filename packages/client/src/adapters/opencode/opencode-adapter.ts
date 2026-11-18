@@ -140,7 +140,14 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     } catch (error) {
       try { await session.close(); }
       catch (disposal) { throw new RuntimeStartupDisposalFailure(() => session.close(), { cause: disposal }); }
-      throw runtimeStartFailure(error, { classify: oarStartClassifier(await import('#byok-acp-runtime')), exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'opencode' });
+      const acp = await import('#byok-acp-runtime');
+      const classify = oarStartClassifier(acp);
+      throw runtimeStartFailure(error, {
+        classify: cause => cause instanceof acp.AcpError && (cause.kind === 'timeout' || cause.kind === 'startup_directory')
+          ? { retry: 'retryable', failure: { class: 'unknown' } }
+          : classify(cause),
+        exitedOnItsOwn: session.exitedOnItsOwn, runtime: 'opencode',
+      });
     }
   }
 }
@@ -202,6 +209,8 @@ class OpenCodeSession implements Session {
     const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'opencode acp' });
     const expected = this.sessionRef || this.input.manifest.sessionRef;
     this.raw = await acp.opencodeSession((bin, args, opts) => {
+      this.input.signal?.throwIfAborted();
+      if (this.closing) throw infrastructure('opencode session is closing');
       const invocation = resolveRuntimeInvocation(bin, runtimeInvocationHost(opts.env));
       const child = spawn(invocation.command, [...invocation.args, ...args], opts);
       this.child = child;
@@ -228,6 +237,7 @@ class OpenCodeSession implements Session {
       ...(expected === undefined ? {} : { resume: expected }),
       ...(this.persona === undefined ? {} : { appendSystemPrompt: this.persona }),
     }, {
+      ...(this.input.signal === undefined ? {} : { startupSignal: this.input.signal }),
       onReady: id => {
         if (expected !== undefined && expected !== id) throw authority('opencode resume returned a different native session id');
         if (this.sessionRef === '') this.sessionRef = id;

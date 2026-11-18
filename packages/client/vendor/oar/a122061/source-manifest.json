@@ -2,21 +2,21 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.115.0",
+  "packageVersion": "0.120.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "609f3478ccc4328ba965f1aa9077c0c18948f797",
+  "commit": "a12206106fa12b7e11c09c4ff6d60c322712018e",
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
-    "branch": "byok/0.115.0",
-    "commit": "a77185677e8195c378b68c2c2df8114144343b87"
+    "branch": "byok/0.120.0",
+    "commit": "ebcde2e54df56b92d542e85aa734c9874a8a7c39"
   },
   "release": {
     "ecosystem": "npm",
     "name": "@botiverse/oar",
-    "version": "0.115.0",
-    "integrity": "sha512-licwKUPX+9FBsuuQNZ7J9tpyVD/dhEwroYLs27KnDDa7kYnV3Uz/LZZ5dqtIYpeJ9Ox47I/L1C2HTf4zpHrNQA==",
-    "gitCommit": "609f3478ccc4328ba965f1aa9077c0c18948f797",
-    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.115.0"
+    "version": "0.120.0",
+    "integrity": "sha512-QcYXeNh6EJWJ48aR8hZLnrrANinodI5h1I6HNSbXaEfOiEzitsTC4XWQr6sRYGUWATtzhDKItferbYeeifGVOA==",
+    "gitCommit": "a12206106fa12b7e11c09c4ff6d60c322712018e",
+    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.120.0"
   },
   "license": "Apache-2.0",
   "files": [
@@ -114,14 +114,14 @@
     {
       "path": "contracts/inventory.ts",
       "sourcePath": "packages/oar/src/contracts/inventory.ts",
-      "upstreamSha256": "bf2e02332b1c167cdb5b5bc44bc942efc43df0cf4c817bca1a4d8dfa038eab88",
-      "vendoredSha256": "bf2e02332b1c167cdb5b5bc44bc942efc43df0cf4c817bca1a4d8dfa038eab88"
+      "upstreamSha256": "82ef333aaa94f16029743e2d372557cc86bcd2faa6aeb0f2b05e8b5a2c9a7500",
+      "vendoredSha256": "82ef333aaa94f16029743e2d372557cc86bcd2faa6aeb0f2b05e8b5a2c9a7500"
     },
     {
       "path": "contracts/list-models.ts",
       "sourcePath": "packages/oar/src/contracts/list-models.ts",
-      "upstreamSha256": "1264ff807a321d2e923c2ab2cb09ec6e78bc2748647eac8766d5faccfec73847",
-      "vendoredSha256": "456d7ce0c53ec8f962e33791618574ee9dcea4cc3a17f4e2a5006f3f7eadc516",
+      "upstreamSha256": "c9f671f6e028cfbe46ecfdb14437facb20254b75ce4d16ee5eb8b3251550e36b",
+      "vendoredSha256": "3bbfdf3a944d74724c04a7ae296a3408c90facba9b1ffafb82e3dc512d470a6b",
       "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1."
     },
     {
@@ -438,8 +438,8 @@
     {
       "path": "runtimes/codex/list-models.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/list-models.ts",
-      "upstreamSha256": "23d04b6eb944b360b8eb9254e891859cba5b0c66b4248316dda65d779836321e",
-      "vendoredSha256": "5a815a29d714686e1b59c699ab15f834136b9a845d795e730604d7d15baf2517",
+      "upstreamSha256": "c023c1cd5fcb0ddb39c74d2641f1c80c90ca9abbd0a5bebee73bbb582de2b83e",
+      "vendoredSha256": "a9f231f11b267d7ebf9e6178b8732fd03119c838c33442d336017abaff0ac592",
       "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1."
     },
     {
@@ -725,9 +725,16 @@
     {
       "path": "runtimes/opencode/session.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/session.ts",
-      "upstreamSha256": "0af3eb12a7e5e827e8eca249d51633cb79db53b6002c7f7b40c99de769a9a2ec",
-      "vendoredSha256": "5e2771c70ca6a419017d103d53d23c9c5a335f955776d7a38ae017ea275211f1",
+      "upstreamSha256": "f1f0472b758bf99f47d51ccee25bb7eb1c7f5f88e416a61ce93f42be60c70259",
+      "vendoredSha256": "b47f7b87bf0c2270557d515f28da10ded3d698f3fed304eb785e8030158473e5",
       "delta": "Inject SDK-owned line and terminal processes, explicit environment and hooks; require the probed release token; run bounded prompt configuration queries through the owned terminal seam without sealSession. Clear the prompt-cleanup disposal cache on rejection so later disposal retries reclaim terminals, while concurrent and successful calls share the cached promise."
+    },
+    {
+      "path": "runtimes/opencode/startup-gate.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/startup-gate.ts",
+      "upstreamSha256": "2d33bdd9e246d9a3e6153107e156bb51b30e4a5b9ee26b09c24ee7146505a974",
+      "vendoredSha256": "7dc125384e9c8fcab8d8d5aca3ab098a16bfb1ae464bd95cd598e992f1834edc",
+      "delta": "Derive the process-local lock key from the exact owned child environment and type directory resolution errors without leaking paths."
     },
     {
       "path": "runtimes/opencode/steering.ts",
@@ -738,8 +745,8 @@
     {
       "path": "runtimes/opencode/version.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/version.ts",
-      "upstreamSha256": "1e691418e35294047166d6e1fa468a1100136d4e8df15d013e38a1a0c96607e5",
-      "vendoredSha256": "92f584ec5b225e6a2dbbcf97cee903d185b41270cde7a022cdc6422b8e34b47b",
+      "upstreamSha256": "054665a4d0903ebf659005e304355235b72ab17fd7202bd62215c96494379bf6",
+      "vendoredSha256": "6af17fb9bd2332be407d8c21a1acc633175baab1a8451c24fe5e0ff1cbdacbab",
       "delta": "Require the SDK-probed executable version instead of launching another version process. Share Runtime.sessionCapabilities with the narrow BYOK bridge."
     },
     {
@@ -785,8 +792,8 @@
       "path": "shared/acp/errors.ts",
       "sourcePath": "packages/oar/src/shared/acp/errors.ts",
       "upstreamSha256": "487de929844c36a0b387bc463bc91b4086fe3da72e8111609d6a5ea36a826362",
-      "vendoredSha256": "e394cdde9aa3f2cf8a6d1c5701c53c32c858f089899856812d31187002d7a589",
-      "delta": "No native diagnostic bundle: upstream optional ProcessDiagnostics and its executable-manager dependency are not imported. acpProcessExitedError(exitCode) keeps the bounded transport exit message; AcpError keeps the upstream cause field."
+      "vendoredSha256": "e2c57af5f70907f8b29009d9897d20236217f70abc72a5b9356c88af2fb6ca0c",
+      "delta": "Keep process diagnostics with the SDK and expose a typed startup directory failure."
     },
     {
       "path": "shared/acp/failure.ts",
@@ -798,8 +805,8 @@
     {
       "path": "shared/acp/initialize.ts",
       "sourcePath": "packages/oar/src/shared/acp/initialize.ts",
-      "upstreamSha256": "6d243711e3c816968b8812ab0bca6e88c0a81b54d93d5de147b637ad5a7ec0a9",
-      "vendoredSha256": "6d243711e3c816968b8812ab0bca6e88c0a81b54d93d5de147b637ad5a7ec0a9"
+      "upstreamSha256": "ec18cebe079c142ad715ca431e05a7b0a8285ed91a352a382c2aa1e7354c9941",
+      "vendoredSha256": "ec18cebe079c142ad715ca431e05a7b0a8285ed91a352a382c2aa1e7354c9941"
     },
     {
       "path": "shared/acp/input.ts",
@@ -847,15 +854,16 @@
     {
       "path": "shared/acp/process.ts",
       "sourcePath": "packages/oar/src/shared/acp/process.ts",
-      "upstreamSha256": "b7c7d8d8b205ad784010cf7c97a2298363593b1ccdf8469633df5461a906abdb",
-      "vendoredSha256": "6549eca6be6790c40cfbe4d1a600de3f4707549adb349b2576f6fc649d1618bd",
+      "upstreamSha256": "9260b93fe2656ea19fb7649b2e6c2324c06d0d458a52050ddb73c22b1cdc3558",
+      "vendoredSha256": "539a4e96e66ab19446cbb2b23fb9d3b5a1a22ef5962a6867eaa7f04cbb55ceda",
       "delta": "Caller-owned process: startAcpProcess takes an injected SpawnAcpLineProcess and passes exactly the explicit filtered env and cwd; no executable manager, killTree option, resources reader or native diagnostics. The owned process splits stdout into bounded lines; each line goes back to the official ndJsonStream with its newline, and each written message goes through the acknowledged stdin write, so the SDK keeps its own framing, parse-error answers and write order. Upstream incoming/outgoing filters and the draining-EOF input are retained around the injected streams. No prepareShutdown, markNativeStop or observeCancellation members. Instead the injected line process and AcpProcess carry one synchronous observeDescendants(): the SDK process-tree authority reads the process table and remembers the agent's descendants for its disposal, and throws when the table cannot be read. Upstream #652 child.pid spread is omitted because AcpLineProcess has no pid; AcpProcess.pid stays an unset upstream field."
     },
     {
       "path": "shared/acp/profile.ts",
       "sourcePath": "packages/oar/src/shared/acp/profile.ts",
-      "upstreamSha256": "74c5ef7be857a46b989d26a4d9be780e4399adf864f598265d8489354fad7555",
-      "vendoredSha256": "74c5ef7be857a46b989d26a4d9be780e4399adf864f598265d8489354fad7555"
+      "upstreamSha256": "6d1fe1a62b245aaf9d9ecde0d21ef07e506940b3673721aa385704ed89013d72",
+      "vendoredSha256": "0ea52c65c4d6e89f8dcc54a08e4db405223d0d19a651648fa8ae7fc806f56d44",
+      "delta": "Forward the caller’s cancellation signal to the startup gate."
     },
     {
       "path": "shared/acp/projection.ts",
@@ -885,8 +893,8 @@
     {
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
-      "upstreamSha256": "32ea4a1f797d0fb8b4436fe03c0af9c03a63a16a11e3caee1c31d96a02012f1c",
-      "vendoredSha256": "8735cd44599edaad6a14319c37768d840646d031f63a704c03f829af7a4f09af",
+      "upstreamSha256": "6759f4d5c2541638b62ac279eef5407271d4241108c5e8f641b8f77d29b42413",
+      "vendoredSha256": "04090c8e0ad88f77fda329d6422fe0393308ba23cb5dc45f8aab5f546d59f469",
       "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. OAR 0.99: the session keeps its own state construction in place of upstream session-state.ts (that module builds the terminal host without the injected spawn); it wires the upstream native-turn tracker (prompt naming, tracker-fed token usage and recorder, the recorder bound after the turn driver) and the profile steerRequest RPC through steer-request.ts; upstream turn-terminals.ts is not wired because endTurnProcessesOnAbort is omitted. endTurnProcessesOnAbort is omitted from AcpSessionOptions; the caller's retainedBytes goes to the upstream kernel's record retention. Upstream #652 agentPid wiring is omitted. Dispose starts the abort (descendant read and cancel write are synchronous) and does not wait for the write before it kills the process. The process stream observes the prompt-answer boundary with the opening boundary (shared/acp/opening.ts), and the recorder gets whilePromptAwaited (shared/acp/records.ts). Redact echoed image data before recording native output. Linked child terminal usage has its own cumulative counters and replay fence (#2381)."
     },
     {
@@ -958,6 +966,12 @@
       "sourcePath": "packages/oar/src/shared/effort-levels.ts",
       "upstreamSha256": "497c9bde36b4270872acb45769a2e41f9f357c62df8c0ccd831067c59d9c480e",
       "vendoredSha256": "497c9bde36b4270872acb45769a2e41f9f357c62df8c0ccd831067c59d9c480e"
+    },
+    {
+      "path": "shared/environment-home.ts",
+      "sourcePath": "packages/oar/src/shared/environment-home.ts",
+      "upstreamSha256": "435ad0e0aa1efdf5cbc7578ebf404c5543a672bb48b365a71b6bb43bd24ab425",
+      "vendoredSha256": "435ad0e0aa1efdf5cbc7578ebf404c5543a672bb48b365a71b6bb43bd24ab425"
     },
     {
       "path": "shared/environment.ts",
@@ -1110,8 +1124,8 @@
     {
       "path": "shared/stream-json/profile.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/profile.ts",
-      "upstreamSha256": "0340c760b8bedc805550274e41660e7b2f6c49132acfde424caee4f54417ec86",
-      "vendoredSha256": "0340c760b8bedc805550274e41660e7b2f6c49132acfde424caee4f54417ec86"
+      "upstreamSha256": "c8d9b15e2d7fea967196b7c3518045ab8bd4d9da6f5e8d81d4c71128bc91fb52",
+      "vendoredSha256": "c8d9b15e2d7fea967196b7c3518045ab8bd4d9da6f5e8d81d4c71128bc91fb52"
     },
     {
       "path": "shared/stream-json/projection.ts",
@@ -1123,8 +1137,8 @@
     {
       "path": "shared/stream-json/session.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/session.ts",
-      "upstreamSha256": "e12f056caead84ffc2857c521c71e77b5a322e153fa3308c8d35e8049401da2f",
-      "vendoredSha256": "5cf1c63925aacdf0d5f0a563217173cc8664576efb2702998b7d3522241d65c0",
+      "upstreamSha256": "e91ecfaec335dadb9b9a68d9964afbb9622f3e91ec81942d150336c450124a3f",
+      "vendoredSha256": "f33bbf0c6fd192ce99d4d3c4967dae0104d0ecaee10f25f288608e7df4065cdb",
       "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it; profile.permissionResponse is not read, and a request no hook answers stays unanswered. An optional retainedBytes goes to the upstream kernel's record retention, which elides the oldest native payloads past it after every observer has the complete record. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing. A refused or unwritten interrupt withdraws its abort mark and kill fallback: the interrupt goes through the acknowledged write, a write that throws or rejects rejects the abort with code error, a write not acknowledged within 10 s counts as written, the fallback is armed once the write is acknowledged or that bound passes unless Claude refused the interrupt, once the fallback fires the queue does not drain and the held result waits for the exit, and a root result arriving while an interrupt is pending is held, with later lines except control responses, until every pending interrupt settles. Redact echoed image data before recording native output."
     },
     {

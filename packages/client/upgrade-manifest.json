@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.0",
-    "snapshotSha256": "b215638b7df6342f63bfc75f834a963bf4df9bd6c40003cd0db9910d64b50e64"
+    "snapshotSha256": "2837e3d68d8173257e70836ef2df59bbc0e9dd24b52e083845e91fcf0157209f"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "codex-service-tier-details",
+      "impact": "additive",
+      "summary": "Hosts can read optional RuntimeModelEntry.serviceTierDetails for Codex’s native tier names and descriptions. Tier IDs and ordering match serviceTiers.",
+      "migration": "docs/adapter-capabilities.md#codex-model-catalog-service-tiers",
+      "items": [
+        "export:@byok-sdk/client/adapters#RuntimeModelEntry"
+      ]
+    },
     {
       "id": "inspect-device-enrollment-clear",
       "impact": "additive",
@@ -87,6 +96,11 @@
       "item": "export:@byok-sdk/client#inspectDeviceEnrollmentClear",
       "change": "added",
       "entry": "inspect-device-enrollment-clear"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeModelEntry",
+      "change": "changed",
+      "entry": "codex-service-tier-details"
     },
     {
       "item": "export:@byok-sdk/cloud#ByokCloudOptions",
