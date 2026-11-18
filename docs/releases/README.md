@@ -12,11 +12,12 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
-0.43.0 is published. Its 0.42.0 → 0.43.0 manifest is archived unchanged in
-`packages/client/upgrade-history/0.42.0-0.43.0.json`; the current manifest starts
-empty from the 0.43.0 release snapshot. Main stays frozen from prep merge until
-the publication-record PR merges; subsequent changes belong to the
-[next-MINOR checklist](host-upgrade-next-minor.md).
+The [0.44.0 candidate](v0.44.0.md) carries the 0.43.0 → 0.44.0 manifest and
+[Host upgrade checklist](host-upgrade-0.44.0.md). The publication record
+archives the cut manifest and rebaselines to the published snapshot.
+Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
+The published 0.42.0 → 0.43.0 manifest remains in
+`packages/client/upgrade-history/0.42.0-0.43.0.json`.
 
 A release ships `packages/client/upgrade-manifest.json` with one entry per Host-visible change since the previous release; breaking entries need a MINOR, never a PATCH (Q8). See [the upgrade manifest](../upgrade-manifest.md#release-steps).
 
@@ -24,10 +25,9 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
 from evidence, not the author's judgment (see "Freeze rule" in
-`docs/protocol.md`). The wire is at major 7 ([Wire v7](host-upgrade-next-minor.md#wire-v7)).
-0.43.0 is the last v6 release. No v7 release is published yet, so
-`golden/v7.releases.json` registers nothing and there is no published v7
-decoder to prove additions against.
+`docs/protocol.md`). The wire is at major 7 ([Wire v7](host-upgrade-0.44.0.md#wire-v7)).
+0.43.0 is the last v6 release. `golden/v7.releases.json` pins the first v7
+candidate, 0.44.0. The published v7 decoder baseline still awaits publication.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -55,9 +55,9 @@ never released; their cases are in the v7 corpus.
 
 v7 evidence. `golden/v7.envelopes.ndjson` and `golden/v7.http.ndjson` are
 produced by `packages/protocol/src/__tests__/generate-v7-corpus.mjs` from the frozen
-v6 corpora plus the v7 lines it appends. Until the first v7 release is
-registered, edit the generator and regenerate; after that the lines a
-release covers are immutable and the rest stays append-only.
+v6 corpora plus the v7 lines it appends. The 0.44.0 registration pins its
+507 envelope and 40 HTTP lines. The covered prefixes are now immutable, and
+further lines are append-only.
 `golden/v7.releases.json` records each stable v7 release's corpus line counts
 and SHA-256 prefixes; each entry pins both `envelopes` and `http`.
 Prereleases are not registered and are outside the guarantee.
