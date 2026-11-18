@@ -58,6 +58,27 @@ MCP handler must list the same origins in `createMcpHttpServer`'s
 `allowedOrigins`, or its own Origin check refuses them. See the
 [server README](../packages/server/README.md#browser-clients-from-loopback-origins).
 
+## Embedded task input images
+
+A trusted embedder uses `ByokServer.blobs.uploadInputImage({ bytes, contentType })`
+to commit one image to its server's tenant without device credentials. The SDK
+checks the PNG, JPEG, GIF, or WebP signature against the declared MIME and
+computes the SHA-256 and byte count. The effective limit is the smaller of the
+protocol's `INPUT_IMAGE_MAX_BYTES` (20 MiB) and the server's `maxBlobSizeBytes`.
+
+A dispatch or steer with images carries 1–16 committed refs matching this
+tenant's stored metadata. The device advertises `input-images` and the opened
+runtime must support images. A blob supplied through the device's generic
+artifact upload is checked by metadata only when used as an image. The SDK
+checks the downloaded bytes against the declared hash and length.
+
+Uploading the same bytes and MIME reuses a committed blob and refreshes its
+orphan grace. Plaintext image refs on accepted tasks and steers do not pin
+blobs. The existing orphan collector can remove the blob after the grace
+period (24 hours by default), including between task acceptance and device
+download. See the [server README](../packages/server/README.md#task-input-images)
+for error codes.
+
 ## Canonical Terms
 
 - **subscription lane** — a dispatch through the user's existing Claude Code

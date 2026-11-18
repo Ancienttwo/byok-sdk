@@ -31,6 +31,12 @@ import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types.js';
 import type { RateLimiterOptions } from './rate-limiter.js';
 
+/** One input image in the trusted embedder's process. */
+export interface UploadInputImage {
+  readonly bytes: Uint8Array;
+  readonly contentType: InputImageBlobRef['mediaType'];
+}
+
 /** Mutually-exclusive storage authority for the embedded reference server. */
 export type ByokServerStorage =
   | { readonly kind: 'memory' }

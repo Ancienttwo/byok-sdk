@@ -12,7 +12,7 @@ import {
   createInMemoryBlobBytes,
   createInProcessMailboxWake,
   type MailboxWake,
-  type TaskEventsWake,
+  type TaskEventsWake, type EmbeddedBlobAccess,
   createWebCrypto,
   type BlobContentProxy,
   type ProofReceiptRetentionAuthority,
@@ -87,6 +87,7 @@ export interface FacadeStoreComposition {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
+  readonly embeddedBlobs: EmbeddedBlobAccess;
   readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
@@ -118,11 +119,12 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
         )
       : undefined;
   const objectBytes = sqlite === undefined ? createInMemoryBlobBytes(clock, crypto) : undefined;
-  const inMemoryCore = objectBytes === undefined ? undefined : createInMemoryCoreStores({ clock, objectBytes }).stores;
-  const core = sqlite?.core ?? inMemoryCore!;
+  const inMemoryCore = objectBytes === undefined ? undefined : createInMemoryCoreStores({ clock, objectBytes });
+  const core = sqlite?.core ?? inMemoryCore!.stores;
   const inMemoryCloud =
     sqlite === undefined ? createInMemoryCloudStores(clock, crypto, core.objects, core.mailbox, core.presence, objectBytes!) : undefined;
   const stores = sqlite?.cloud ?? inMemoryCloud!.stores;
+  const embeddedBlobs = sqlite?.embeddedBlobs ?? objectBytes!.embeddedAccess(core.objects, inMemoryCore!.refreshCommittedObject);
   const blobContentProxy = sqlite?.blobContentProxy ?? inMemoryCloud!.blobContentProxy;
 
   const rateLimiter = createCountingInboundRateLimiter(
@@ -168,6 +170,7 @@ export function composeFacadeStores(options: FacadeStoreOptions): FacadeStoreCom
       dedup,
     },
     blobContentProxy,
+    embeddedBlobs,
     proofReceiptAuthority: sqlite?.proofReceiptAuthority ?? inMemoryCloud!.proofReceiptAuthority,
     clock,
     crypto,

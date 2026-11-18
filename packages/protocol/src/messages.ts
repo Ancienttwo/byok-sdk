@@ -322,6 +322,9 @@ const InstructionBlobRefSchema = z.object({ blobRef: BlobRefSchema }).strict();
 export const ReasoningEffortSchema = z.string().min(1).max(64).regex(/^[\x21-\x7e]+$/u, 'reasoning effort must be a non-whitespace ASCII token');
 export type ReasoningEffort = z.infer<typeof ReasoningEffortSchema>;
 
+/** Maximum bytes in one input image, independent of the deployment blob limit. */
+export const INPUT_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+
 export const InputImageBlobRefSchema = z.strictObject({
   blob: BlobRefSchema,
   mediaType: z.enum(['image/png', 'image/jpeg', 'image/gif', 'image/webp']),

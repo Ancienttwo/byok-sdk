@@ -165,6 +165,48 @@ Duplicate hints do not acknowledge messages or advance a cursor. Every read
 checks the replay floor: lost retained history produces `409 cursor_too_old`,
 including when collection happens during a hold.
 
+## Task input images
+
+A trusted embedder can upload an image directly on its server instance. The
+upload uses the instance's tenant authority and needs no device credentials or
+HTTP listener. Use the returned ref on dispatch, fresh execution, or steer.
+
+```ts
+const image = await server.blobs.uploadInputImage({ bytes, contentType: 'image/png' });
+const task = await server.dispatch({ ...dispatchInput, images: [image] });
+// Once the device has started the task:
+await task.steer('Compare this image', { images: [image] });
+```
+
+Each dispatch or steer accepts 1–16 images when the field is present. The
+device must advertise `input-images` and its runtime session must support
+images. The upload accepts PNG, JPEG, GIF, and WebP and checks that the file
+signature matches the declared MIME type. The SDK computes the SHA-256 and
+length from the bytes. The per-image limit is the smaller of 20 MiB
+(`INPUT_IMAGE_MAX_BYTES`) and `maxBlobSizeBytes`.
+
+Submission checks that refs match committed metadata in this tenant. When a
+blob uploaded through the device's generic artifact path is used as an image,
+the server checks metadata only and skips the file signature check.
+
+A matching upload reuses the committed blob and restarts its orphan grace
+period. Plaintext image refs on tasks and steers do not pin the bytes. After
+orphan grace (24 hours by default), maintenance can collect the image even
+if a task accepted it but the device has yet to download it.
+
+| Condition | Error code |
+| --- | --- |
+| Invalid bytes or unsupported MIME | `coordination_input_invalid` |
+| Image exceeds the effective limit | `storage_object_too_large` |
+| Signature, stored declaration, or upload observation mismatch | `storage_integrity_mismatch` |
+| Object pending deletion or otherwise unavailable for upload | `object_state_invalid` |
+| Quota exhausted or tenant writes suspended | `storage_quota_exceeded` or `storage_write_suspended` |
+| Storage entitlement or reservation missing | `storage_entitlement_missing` or `storage_reservation_not_found` |
+| Expired or aborted reservation | `storage_reservation_expired` |
+| Server closing or unexpected upload failure | `server_closed` or `blob_upload_failed` |
+| Invalid image refs at submission, including missing or collected blobs | `coordination_input_invalid` |
+| Device has no durable `input-images` capability | `agent_capability_missing` |
+
 ## Storage
 
 State is in memory by default. `storage: { kind: 'sqlite', path }` persists:

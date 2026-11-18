@@ -50,6 +50,7 @@ import {
   type AgentMessageAdmission,
   type AgentRef,
   type BlobContentProxy,
+  type EmbeddedBlobAccess,
   type CloudBlobStore,
   type BlobObservation,
   type BlobReadResult,
@@ -224,6 +225,7 @@ export interface SqliteEmbeddedStores {
   readonly core: CoreStores;
   readonly cloud: CloudStores;
   readonly blobContentProxy: BlobContentProxy;
+  readonly embeddedBlobs: EmbeddedBlobAccess;
   /** Prunes the used device-proof request ids that `cloud.proofReceipts` records. */
   readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
   /**
@@ -1413,37 +1415,7 @@ export class SqliteCloudBlobStore implements CloudBlobStore {
   constructor(private readonly registry: SqliteBlobRegistry) {}
 
   async createUpload(tenant: TenantId, reservation: StorageReservation): Promise<{ blobId: string; uploadUrl: string }> {
-    assertReservedObject(tenant, reservation);
-    const blobId = await this.registry.coordinator.transaction((db) => {
-      const existing = db.prepare(
-        'SELECT * FROM blob WHERE tenant_id = ? AND reservation_id = ?',
-      ).get(tenant, reservation.reservationId) as BlobRow | undefined;
-      if (existing !== undefined) {
-        const manifest = readManifest(db, tenant, reservation.contentHash);
-        if (manifest?.state === 'committed') {
-          throw new ByokCoreError('object_state_invalid', `Object ${reservation.contentHash} is already committed and immutable.`);
-        }
-        return existing.blob_id;
-      }
-      const entry = putManifest(db, this.registry.clock, tenant, {
-        hash: reservation.contentHash,
-        byteSize: reservation.expectedBytes,
-        contentType: reservation.contentType,
-      });
-      if (entry.byteSize !== reservation.expectedBytes || entry.contentType !== reservation.contentType) {
-        throw new ByokCoreError('storage_integrity_mismatch', `Object ${reservation.contentHash} already binds a different storage declaration.`);
-      }
-      if (entry.state === 'committed') {
-        throw new ByokCoreError('object_state_invalid', `Object ${reservation.contentHash} is already committed and immutable.`);
-      }
-      const created = `blob_${this.registry.crypto.randomUuid()}`;
-      db.prepare(
-        `INSERT INTO blob
-         (blob_id, tenant_id, reservation_id, content_hash, byte_size, content_type)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      ).run(created, tenant, reservation.reservationId, reservation.contentHash, String(reservation.expectedBytes), reservation.contentType);
-      return created;
-    });
+    const blobId = await this.registry.coordinator.transaction(db => registerBlob(db, this.registry, tenant, reservation));
     return { blobId, uploadUrl: await this.registry.signUrl(blobId, 'put') };
   }
 
@@ -1459,12 +1431,8 @@ export class SqliteCloudBlobStore implements CloudBlobStore {
   }
 
   async getDownloadUrl(tenant: TenantId, blobId: string): Promise<string | undefined> {
-    const found = await this.registry.coordinator.run((db) => {
-      const row = db.prepare('SELECT * FROM blob WHERE blob_id = ?').get(blobId) as BlobRow | undefined;
-      if (row === undefined || row.tenant_id !== tenant || !row.uploaded) return false;
-      return readManifest(db, tenant, row.content_hash as ContentHash)?.state === 'committed';
-    });
-    return found ? this.registry.signUrl(blobId, 'get') : undefined;
+    const found = await this.registry.coordinator.run(db => readCommittedBlob(db, tenant, blobId));
+    return found === undefined ? undefined : this.registry.signUrl(blobId, 'get');
   }
 }
 
@@ -1503,7 +1471,7 @@ export class SqliteBlobContentProxy implements BlobContentProxy {
       if (await this.registry.crypto.sha256(data) !== row.content_hash) {
         return { ok: false, reason: 'contentHash mismatch' };
       }
-      db.prepare('UPDATE blob SET data = ?, uploaded = 1 WHERE blob_id = ?').run(data, blobId);
+      sealBlobBytes(db, blobId, data);
       return { ok: true };
     });
   }
@@ -1516,6 +1484,65 @@ export class SqliteBlobContentProxy implements BlobContentProxy {
       return { ok: true, content: { data, contentType: row.content_type } };
     });
   }
+}
+
+function registerBlob(db: DatabaseSync, registry: SqliteBlobRegistry, tenant: TenantId, reservation: StorageReservation): string {
+  assertReservedObject(tenant, reservation);
+  const entry = putManifest(db, registry.clock, tenant, {
+    hash: reservation.contentHash, byteSize: reservation.expectedBytes, contentType: reservation.contentType,
+  });
+  if (entry.byteSize !== reservation.expectedBytes || entry.contentType !== reservation.contentType) {
+    throw new ByokCoreError('storage_integrity_mismatch', 'The object binds a different storage declaration.');
+  }
+  if (entry.state !== 'pending') {
+    throw new ByokCoreError('object_state_invalid', `Object ${entry.hash} is ${entry.state}.`);
+  }
+  const existing = db.prepare('SELECT blob_id FROM blob WHERE tenant_id = ? AND reservation_id = ?')
+    .get(tenant, reservation.reservationId) as { blob_id: string } | undefined;
+  if (existing !== undefined) return existing.blob_id;
+  const blobId = `blob_${registry.crypto.randomUuid()}`;
+  db.prepare(`INSERT INTO blob (blob_id, tenant_id, reservation_id, content_hash, byte_size, content_type)
+    VALUES (?, ?, ?, ?, ?, ?)`).run(blobId, tenant, reservation.reservationId, entry.hash, String(entry.byteSize), entry.contentType);
+  return blobId;
+}
+
+function sealBlobBytes(db: DatabaseSync, blobId: string, data: Uint8Array): void {
+  db.prepare('UPDATE blob SET data = ?, uploaded = 1 WHERE blob_id = ?').run(data, blobId);
+}
+
+function readCommittedBlob(db: DatabaseSync, tenant: TenantId, blobId: string) {
+  const row = db.prepare(`SELECT b.content_hash, b.byte_size, b.content_type FROM blob b
+    JOIN object_manifest m ON m.tenant_id = b.tenant_id AND m.hash = b.content_hash
+    WHERE b.tenant_id = ? AND b.blob_id = ? AND b.uploaded = 1 AND m.state = 'committed'`)
+    .get(tenant, blobId) as Pick<BlobRow, 'content_hash' | 'byte_size' | 'content_type'> | undefined;
+  return row === undefined ? undefined : { blobId, contentHash: row.content_hash, size: Number(row.byte_size), contentType: row.content_type };
+}
+
+function sqliteEmbeddedBlobAccess(registry: SqliteBlobRegistry): EmbeddedBlobAccess {
+  return {
+    readCommitted: (tenant, blobId) => registry.coordinator.run(db => readCommittedBlob(db, tenant, blobId)),
+    reuseCommitted: (tenant, hash, size, contentType) => registry.coordinator.transaction(db => {
+      const entry = readManifest(db, tenant, hash);
+      if (entry?.state === 'delete_pending') {
+        throw new ByokCoreError('object_state_invalid', 'The image object is pending deletion.');
+      }
+      if (entry?.state !== 'committed') return undefined;
+      if (entry.byteSize !== BigInt(size) || entry.contentType !== contentType) {
+        throw new ByokCoreError('storage_integrity_mismatch', 'The committed object binds a different storage declaration.');
+      }
+      const row = db.prepare('SELECT blob_id FROM blob WHERE tenant_id = ? AND content_hash = ? AND uploaded = 1 LIMIT 1')
+        .get(tenant, hash) as { blob_id: string } | undefined;
+      if (row === undefined) throw new ByokCoreError('object_state_invalid', 'The committed image object has no uploaded blob.');
+      db.prepare('UPDATE object_manifest SET updated_at = ? WHERE tenant_id = ? AND hash = ?')
+        .run(registry.clock.now().toISOString(), tenant, hash);
+      return row.blob_id;
+    }),
+    writeReserved: (tenant, reservation, bytes) => registry.coordinator.transaction(db => {
+      const blobId = registerBlob(db, registry, tenant, reservation);
+      sealBlobBytes(db, blobId, bytes);
+      return blobId;
+    }),
+  };
 }
 
 /** Embedded SQLite authorities share one coordinator; other ports remain process-local. */
@@ -1582,6 +1609,7 @@ export function createSqliteEmbeddedStores(
     core,
     cloud,
     blobContentProxy,
+    embeddedBlobs: sqliteEmbeddedBlobAccess(registry),
     proofReceiptAuthority: new SqliteProofReceiptRetentionAuthority(coordinator),
     taskEventsWake: coordinator.taskEventsWake,
     wakes: tenant => new SqliteWakeStore(coordinator, tenant),

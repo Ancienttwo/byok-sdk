@@ -98,6 +98,16 @@ export class InMemoryObjectStore implements ObjectStore {
     return this.#transition(tenant, entry, 'committed');
   }
 
+  /** Refresh orphan grace without changing accounting, references, or object state. */
+  static refreshCommitted(store: InMemoryObjectStore, tenant: TenantId, hash: ContentHash): void {
+    const key = tenantKey(tenant, hash);
+    const entry = store.#manifest.get(key);
+    if (entry?.state !== 'committed') {
+      throw new ByokCoreError('object_state_invalid', 'Only committed objects can refresh orphan grace.');
+    }
+    store.#manifest.set(key, { ...entry, updatedAt: store.#now() });
+  }
+
   async get(tenant: TenantId, hash: ContentHash): Promise<ObjectManifestEntry | undefined> {
     return this.#manifest.get(tenantKey(tenant, hash));
   }
