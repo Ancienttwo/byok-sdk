@@ -38,6 +38,7 @@ export const COLUMNS = [
 export const ROWS = [
   ['Resume a known native session', 'resume', (c) => c.resume],
   ['Redirect the active turn', 'steer', (c) => c.steer],
+  ['Image input declared by descriptor', 'images', (c) => c.images],
   ['Display-only message draft', 'messageDraft', (c) => c.messageDraft],
   ['Task-scoped MCP toolsets', 'mcpToolsets', (c) => c.mcpToolsets],
   ['Interactive approval channel', 'approvalInteractive', (c) => c.approvalInteractive],

@@ -39,12 +39,18 @@ the runtime does instead. Where a runtime keeps a source out only behind an
 adapter option, such as Claude's and Pi's `agentUserContext: 'excluded'`,
 `yes` describes Agent tasks with that option set.
 
+The image row shows the static adapter descriptor. Runtime detection also
+projects OAR declarations for Codex, Claude, Grok and DSH. Antigravity and
+OpenCode negotiate image input when the ACP session opens. Ordinary Pi
+checks the running model's image support before delivery.
+
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.5.2` | `1.5.2` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
+| Image input declared by descriptor | `images` | no | no | no | no | no | no | yes | no |
 | Display-only message draft | `messageDraft` | no | yes | yes | no | yes | no | yes | yes |
 | Task-scoped MCP toolsets | `mcpToolsets` | yes | yes | yes | yes | yes | yes | yes | yes |
 | Interactive approval channel | `approvalInteractive` | no | no | no | no | no | no | no | no |
@@ -146,7 +152,9 @@ A later turn resumes its native session in a new owned process; OAR refuses
 resume if the original cwd is different or cannot be proved. The SDK owns no
 persistent OpenCode transcript directory, so no SDK retention store is created.
 
-Steering and interactive permissions are unsupported on both lines. The ACP
+OpenCode v1 declares steering at detection. OpenCode v2 exposes steering on
+an opened session only if its ACP initialization advertises `_session/steering`.
+The daemon gates incoming steers on the claim's pre-open declaration. The ACP
 boundary cancels permission requests. V1 retains OAR's session-local appended
 persona overlay and cleanup; v2 refuses Agent-memory readers before execution
 because that appended instruction channel is unavailable. Task-scoped Host MCP
@@ -176,8 +184,7 @@ arm64 with the local loopback OpenAI Chat provider. It observed successful child
 tool use/result, excluded child text from progress, ended at the root turn end,
 and reaped the process tree while another child's shell tool was still running.
 It did not observe child frames after the root answer; the late-frame diagnostic
-and non-delivery remain fixture evidence only (research §5). OAR exposes a
-v2 `steer` through `_session/steering`; the adapter does not call it. Usage fields
+and non-delivery remain fixture evidence only (research §5). Usage fields
 are emitted only when OAR supplies native counters.
 
 Install the chosen line as an operator action. OpenCode v1 uses `opencode-ai`
