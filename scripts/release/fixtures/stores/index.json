@@ -208,7 +208,7 @@
         "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
-        "keys-profile-store": "accepted",
+        "keys-profile-store": "new-path-repair",
         "bot-collaboration-ledger": "rejected"
       }
     },
@@ -227,7 +227,7 @@
         "server-sqlite": "new-path-repair",
         "client-journal": "accepted",
         "pi-durable": "accepted",
-        "keys-profile-store": "accepted",
+        "keys-profile-store": "new-path-repair",
         "bot-collaboration-ledger": "rejected"
       }
     },
@@ -246,7 +246,7 @@
         "server-sqlite": "accepted",
         "client-journal": "accepted",
         "pi-durable": "accepted",
-        "keys-profile-store": "accepted",
+        "keys-profile-store": "new-path-repair",
         "bot-collaboration-ledger": "accepted"
       }
     },
@@ -265,7 +265,7 @@
         "server-sqlite": "accepted",
         "client-journal": "accepted",
         "pi-durable": "accepted",
-        "keys-profile-store": "accepted",
+        "keys-profile-store": "new-path-repair",
         "bot-collaboration-ledger": "accepted"
       }
     },

@@ -48,7 +48,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H room step (#793 S6)', () => {
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
-  roomVectors('H HostedCollaborationStore on Postgres', hostedRooms);
+  roomVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', hostedRooms);
 
   /** The room vectors' seed: one round whose first seat is `b`'s. */
   async function room() {

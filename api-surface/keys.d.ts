@@ -143,6 +143,7 @@
 //   providerHeaders -> dist/headers.d.ts
 //   readModelProviderResponse -> dist/http.d.ts
 //   readSealedProvisioningResult -> dist/sealed-provisioning.d.ts
+//   removeRetiredProviderCredentials -> dist/provider-secret-recovery.d.ts
 //   requiredProviderSecret -> dist/headers.d.ts
 //   runCommand -> dist/command-runner.d.ts
 //   runPiProviderLauncher -> dist/pi-provider-launcher-core.d.ts
@@ -445,7 +446,7 @@ export { isSqliteAvailable, loadSqliteModule, openSqliteDatabase, secureSqliteFi
 export { SqliteProviderProfileStore } from './sqlite-profile-store.js';
 export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
 export { inspectProviderProfileStore } from './store-compatibility.js';
-export { listProviderProfileSecretNames } from './provider-secret-recovery.js';
+export { listProviderProfileSecretNames, removeRetiredProviderCredentials } from './provider-secret-recovery.js';
 export { PROVIDER_CONFIGURATION_LOCK_WAIT_MS, PROVIDER_CUSTODY_RECEIPT_LIMIT, PROVIDER_KEY_CHECK_OUTCOMES, PROVIDER_PROVISIONING_REJECTIONS, withConfigurationLock, } from './custody.js';
 export type { ProviderConfigurationLock, ProviderCustodyCommit, ProviderCustodyOperation, ProviderCustodyPending, ProviderCustodyReceipt, ProviderKeyCheckOutcome, ProviderProvisioningBinding, ProviderProvisioningRejection, ProviderProvisioningResult, } from './custody.js';
 export { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key.js';
@@ -507,12 +508,11 @@ export declare class MacOsKeychainSecretStore<TName extends string = string> imp
 }
 // ==== @byok-sdk/keys dist/model-discovery.d.ts ====
 import { type ProviderFetch } from './http.js';
-import type { ModelProviderKind, ProviderAuthMode } from './provider-profile.js';
+import type { ProviderAuthMode } from './provider-profile.js';
 export interface ModelDiscoveryConnection {
     adapter: 'openai_compatible' | 'anthropic';
-    authMode: ProviderAuthMode;
-    baseUrl: string;
-    providerKind: ModelProviderKind;
+    auth_mode: ProviderAuthMode;
+    base_url: string;
 }
 export interface DiscoveredModel {
     id: string;
@@ -914,6 +914,7 @@ export declare const PI_DEFAULT_THINKING_LEVEL = "medium";
 import { type ProviderConfigurationLock, type ProviderCustodyCommit, type ProviderCustodyPending, type ProviderCustodyReceipt, type ProviderCustodyReservation, type ProviderKeyCheckOutcome } from './custody.js';
 import { type ModelProviderProfile, type ProviderProfileRef } from './provider-profile.js';
 export interface ProviderProfileStore {
+    readonly credentialNamespaceId: string;
     acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
     getPending(profileRef: ProviderProfileRef): Promise<ProviderCustodyPending | undefined>;
     markPending(pending: ProviderCustodyPending): Promise<void>;
@@ -932,6 +933,7 @@ export interface ProviderProfileStore {
 }
 export declare class InMemoryProviderProfileStore implements ProviderProfileStore {
     #private;
+    readonly credentialNamespaceId: string;
     close(): Promise<void>;
     getReservation(requestId: string): Promise<ProviderCustodyReservation | undefined>;
     acquireConfigurationLock(): Promise<ProviderConfigurationLock>;
@@ -1155,8 +1157,9 @@ export type ModelProviderProfile = z.infer<typeof ModelProviderProfileSchema>;
 export type ModelProviderProfileInput = z.input<typeof ModelProviderProfileSchema>;
 export declare function parseModelProviderProfile(value: unknown): ModelProviderProfile;
 // ==== @byok-sdk/keys dist/provider-secret-recovery.d.ts ====
-import type { ModelProviderSecretName } from './secret-store.js';
+import type { ModelProviderSecretName, SecretStore } from './secret-store.js';
 export declare function listProviderProfileSecretNames(path: string): Promise<readonly ModelProviderSecretName[]>;
+export declare function removeRetiredProviderCredentials(path: string, originalBaseSecretStore: SecretStore<ModelProviderSecretName>): Promise<void>;
 // ==== @byok-sdk/keys dist/registry.d.ts ====
 import { AnthropicMessagesClient } from './anthropic-client.js';
 import type { ProviderFetch } from './http.js';
@@ -1331,6 +1334,7 @@ export interface SqliteProviderProfileStoreOptions {
 }
 export declare class SqliteProviderProfileStore implements ProviderProfileStore {
     #private;
+    readonly credentialNamespaceId: string;
     constructor(options: SqliteProviderProfileStoreOptions);
     close(): Promise<void>;
     delete(profileRef: ProviderProfileRef): Promise<boolean>;

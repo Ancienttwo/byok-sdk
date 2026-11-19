@@ -42,7 +42,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H retention on real Postgres (#793 
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
-  retentionVectors('H HostedCollaborationStore on Postgres', hosted);
+  retentionVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', hosted);
 
   const execution = { ...template('device'), agentMessageContext: { destinationBinding: 'one' } };
   const consumer = () => hostedMessageConsumer(store(), { scopeOf: tenant => tenant, now: vectorClock });

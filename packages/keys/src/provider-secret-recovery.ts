@@ -4,36 +4,27 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
+import { readCredentialNamespaceId } from './credential-namespace.js';
 import { ByokKeysError } from './errors.js';
-import type { ModelProviderSecretName } from './secret-store.js';
+import { bindProviderCredentialStore } from './provider-credential-store.js';
+import type { ModelProviderSecretName, SecretStore } from './secret-store.js';
+import { secretStoreCall } from './secret-store-call.js';
 
-// Frozen signatures of the full released DDL. Reproduce the first four from
-// fixtures/provider-store-recovery-ddl.sql and the last two from the release
-// stores 0.41.0 and 0.44.0. Normal store opens never consult this allowlist.
-export const LATEST_PROVIDER_SECRET_RECOVERY_SCHEMA = 'b98adbeaf0e72ae2dd9459b961ea78f6217444aa4f95d5cb3451d0006701b834';
-const RELEASED_SCHEMAS = new Map<string, 'provider-id' | 'profile-ref' | 'custody'>([
-  ['cedb8ffb40cd05a44fa83cc480f9dc8d89cfe544a32de9245981d276becf02dd', 'provider-id'], // keys 0.1.0–0.3.9
-  ['ccbeac2b67121214a6dfd388d37d760c446e70ee31a4050fbd0dd7f15a27b127', 'profile-ref'], // keys 0.3.10
-  ['ee4efa8773f7987882cba2676b6256b4c1ec7f30fb810e2598be343cc99677f3', 'profile-ref'], // keys 0.4.0–0.4.3
-  ['35a65f43af77a150d388848db0ae9f752dfa14a154ff26d6ecd27cd4d6329524', 'profile-ref'], // keys 0.5.0–0.7.0
-  ['2c4cc1ba7d87b14558d2d32d50987deec50309d0c146a7ff3824ee4c8d7693d0', 'custody'], // keys 0.8.0–0.41.0
-  [LATEST_PROVIDER_SECRET_RECOVERY_SCHEMA, 'custody'], // keys 0.42.0–0.44.0
-]);
-
-const LEGACY_NAMES = new Map<string, ModelProviderSecretName>([
-  ['openai', 'model-openai-api-key'],
-  ['deepseek', 'model-deepseek-api-key'],
-  ['anthropic', 'model-anthropic-api-key'],
-  ['custom', 'model-custom-api-key'],
-]);
+// Frozen signature of the first namespaced layout. Normal store opens use
+// their own format check. Earlier layouts share credential addresses.
+export const LATEST_PROVIDER_SECRET_RECOVERY_SCHEMA = 'be907fc2d22c93bc27d089ba6336be5edde721b0af909857bd3c7f4305453ff6';
 const RELEASED_REF = /^[a-z0-9]+(?:[-_][a-z0-9]+)*$/u;
 const SIDECARS = ['-wal', '-shm', '-journal'] as const;
-const REF_SELECT = 'SELECT profile_ref AS ref, instr(profile_ref, char(0)) AS nul FROM main.provider_profile';
-const IDENTITIES = {
-  'provider-id': 'SELECT provider_id AS ref, instr(provider_id, char(0)) AS nul FROM main.provider_profile',
-  'profile-ref': REF_SELECT,
-  custody: `${REF_SELECT} UNION ALL SELECT profile_ref AS ref, instr(profile_ref, char(0)) AS nul FROM main.provider_custody_pending`,
-} as const;
+const REFS = `
+  SELECT profile_ref AS ref, instr(profile_ref, char(0)) AS nul FROM main.provider_profile
+  UNION ALL
+  SELECT profile_ref AS ref, instr(profile_ref, char(0)) AS nul FROM main.provider_custody_pending
+`;
+
+interface RetiredCredentials {
+  readonly namespaceId: string;
+  readonly names: readonly ModelProviderSecretName[];
+}
 
 export function providerSecretRecoverySignature(db: DatabaseSync): string {
   const rows = db.prepare(
@@ -62,45 +53,49 @@ function fileFingerprint(path: string): string {
   return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
 }
 
-function readNames(db: DatabaseSync): ModelProviderSecretName[] {
+function readRetiredCredentials(db: DatabaseSync, path: string): RetiredCredentials {
   // Extension loading is disabled by default by DatabaseSync. These pragmas
   // are connection-local and are applied before any schema or profile read.
   db.exec('PRAGMA query_only = ON; PRAGMA trusted_schema = OFF');
-  const layout = RELEASED_SCHEMAS.get(providerSecretRecoverySignature(db));
-  if (layout === undefined) throw stale();
-
+  if (providerSecretRecoverySignature(db) !== LATEST_PROVIDER_SECRET_RECOVERY_SCHEMA) throw stale();
+  const namespaceId = readCredentialNamespaceId(db, path);
   const names = new Set<ModelProviderSecretName>();
   // Reject NUL at SQLite's boundary as well, even if a binding truncates C strings.
-  for (const { ref, nul } of db.prepare(IDENTITIES[layout]).iterate()) {
-    if (typeof ref !== 'string' || nul !== 0) throw stale();
-    if (layout === 'provider-id') {
-      const name = LEGACY_NAMES.get(ref);
-      if (name === undefined) throw stale();
-      names.add(name);
-    } else {
-      if (ref.length > 64 || !RELEASED_REF.test(ref)) throw stale();
-      names.add(`model-${ref}-api-key`);
-    }
+  for (const { ref, nul } of db.prepare(REFS).iterate()) {
+    if (typeof ref !== 'string' || nul !== 0 || ref.length > 64 || !RELEASED_REF.test(ref)) throw stale();
+    names.add(`model-${ref}-api-key`);
   }
-  return [...names].sort();
+  return { namespaceId, names: [...names].sort() };
 }
 
 /**
- * List sorted, unique provider credential entry names from a known released
- * provider store. Stop its writers first. A store with SQLite sidecars must
- * finish recovery and close before this function can read it.
- *
- * Credential names can be shared by stores in the same SecretStore scope.
- * Before deleting anything, exclude the names referenced by active stores in
- * that scope. Use the original credential backend and scope. Only names still
- * evidenced by database rows are returned: older releases could leave orphaned
- * credentials if a process crashed between writing the credential and profile,
- * or between deleting the profile and credential. An empty list does not prove
- * cleanup complete. Check the original backend's inventory or UI as described
- * in the recovery guide; if ownership cannot be verified, report cleanup
- * incomplete.
+ * List sorted, unique credential names evidenced by a recognized namespaced
+ * provider store's profile or pending rows. Close the store before reading it.
+ * Use the names for diagnostics and {@link removeRetiredProviderCredentials}
+ * for cleanup. An empty list can still leave credentials without a DB record.
  */
 export async function listProviderProfileSecretNames(path: string): Promise<readonly ModelProviderSecretName[]> {
+  return readOfflineStore(path).names;
+}
+
+/**
+ * Remove the credentials evidenced by an offline, retired provider database.
+ * The Host authorizes cleanup, retires every copy of the store identity, and
+ * supplies the original base credential store with its original backend options.
+ * An unreadable or unsupported database is refused before any credential calls.
+ * Backend failures stop cleanup and may leave it partial. Retry with the same
+ * database and backend to finish it.
+ */
+export async function removeRetiredProviderCredentials(
+  path: string,
+  originalBaseSecretStore: SecretStore<ModelProviderSecretName>,
+): Promise<void> {
+  const { namespaceId, names } = readOfflineStore(path);
+  const credentials = bindProviderCredentialStore(originalBaseSecretStore, namespaceId);
+  for (const name of names) await secretStoreCall(() => credentials.delete(name));
+}
+
+function readOfflineStore(path: string): RetiredCredentials {
   try {
     if (path === ':memory:') throw unavailable();
     const input = resolve(path);
@@ -122,9 +117,9 @@ export async function listProviderProfileSecretNames(path: string): Promise<read
       copyFileSync(source, copy);
       if (fingerprint() !== before) throw unavailable();
       try {
-        const names = readSqliteFileUnchanged(copy, readNames);
-        if (names === undefined) throw unavailable();
-        return names;
+        const credentials = readSqliteFileUnchanged(copy, (db) => readRetiredCredentials(db, source));
+        if (credentials === undefined) throw unavailable();
+        return credentials;
       } finally {
         if (fingerprint() !== before) throw unavailable();
       }

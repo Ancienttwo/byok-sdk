@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DeviceSealingKeyStore } from './device-sealing-key';
 import { DEVICE, NOW, PROFILE_REF, TENANT, configureRequest, placedIdentity } from './fixtures/provisioning-requests';
 import { applySealedProviderProvisioning, readSealedProvisioningResult } from './sealed-provisioning';
+import { observeProviderCredentials } from './fixtures/observe-provider-credentials';
 import { InMemorySecretStore } from './secret-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
@@ -46,6 +47,7 @@ afterEach(async () => {
 
 async function handoffRace(readerDigest: (original: string) => string) {
   const secrets = new InMemorySecretStore();
+  const credentials = observeProviderCredentials(secrets, writer);
   const sealingKey = await new DeviceSealingKeyStore({ secretStore: secrets }).loadOrCreate({ tenantId: TENANT, deviceId: DEVICE });
   const request = await configureRequest(sealingKey, 'sk-f7-handoff', { requestId: 'handoff', generation: 1 });
   const digest = await providerProvisioningRequestDigest(request);
@@ -80,7 +82,7 @@ async function handoffRace(readerDigest: (original: string) => string) {
     await releaseReader.promise;
     return receipt;
   });
-  const set = vi.spyOn(secrets, 'set');
+  const set = vi.spyOn(credentials, 'set');
   const reading = readSealedProvisioningResult({ profileStore: reader, requestId: 'handoff', requestDigest: readerDigest(digest) });
   await readerAfterReceipt.promise;
 

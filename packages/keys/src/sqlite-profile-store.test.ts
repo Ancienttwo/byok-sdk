@@ -1,15 +1,16 @@
+import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { ByokKeysError } from './errors';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import type { ModelProviderProfile } from './provider-profile';
-import { SQLITE_USER_OBJECT } from '@byok-sdk/core/sqlite-node';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable, openSqliteDatabase } from './sqlite-support';
 
@@ -92,7 +93,7 @@ const expectSchemaStale = (open: () => SqliteProviderProfileStore): void => {
   expect((thrown as ByokKeysError).code).toBe('PROVIDER_STORE_SCHEMA_STALE');
 };
 
-const FIXTURE_0_43 = fileURLToPath(new URL('../../../scripts/release/fixtures/stores/0.43.0/keys-profile-store.db', import.meta.url));
+const FIXTURE_0_44_1 = fileURLToPath(new URL('../../../scripts/release/fixtures/stores/0.44.1/keys-profile-store.db', import.meta.url));
 const sha256 = (file: string): string => createHash('sha256').update(readFileSync(file)).digest('hex');
 const sidecars = (file: string): string[] => ['-wal', '-shm', '-journal'].filter((suffix) => existsSync(`${file}${suffix}`));
 const tableNames = (file: string): string[] => {
@@ -127,17 +128,45 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     expect(statSync(databasePath).mode & 0o777).toBe(0o600);
   });
 
-  it('persists a profile across a reopen', async () => {
+  it('persists a profile and its credential namespace across a reopen', async () => {
     const first = new SqliteProviderProfileStore({ path: databasePath });
     await first.save(profile('openai'));
     await first.close();
 
     const second = new SqliteProviderProfileStore({ path: databasePath });
+    expect(second.credentialNamespaceId).toBe(first.credentialNamespaceId);
     await expect(second.get('openai')).resolves.toMatchObject({
       model: 'gpt-5.2',
       profile_ref: 'openai',
     });
     await second.close();
+  });
+
+  it('shares one credential namespace between concurrent first writers', async () => {
+    const hook = fileURLToPath(new URL('./fixtures/register-ts-hook.mjs', import.meta.url));
+    const module = new URL('./sqlite-profile-store.ts', import.meta.url).href;
+    const open = () => promisify(execFile)(process.execPath, [
+      '--import', hook, '--input-type=module', '--eval',
+      `const { SqliteProviderProfileStore } = await import(process.argv[1]);
+       const store = new SqliteProviderProfileStore({ path: process.argv[2] });
+       await store.close();
+       console.log(store.credentialNamespaceId);`,
+      module, databasePath,
+    ]);
+    const [first, second] = await Promise.all([open(), open()]);
+    expect(first.stdout.trim()).toMatch(/^ps_[0-9a-f]{32}$/u);
+    expect(second.stdout).toBe(first.stdout);
+  });
+
+  it('assigns different identities to independently created files', async () => {
+    const first = new SqliteProviderProfileStore({ path: databasePath });
+    const second = new SqliteProviderProfileStore({ path: join(directory, 'second.sqlite') });
+    try {
+      expect(second.credentialNamespaceId).not.toBe(first.credentialNamespaceId);
+    } finally {
+      await second.close();
+      await first.close();
+    }
   });
 
   it('opens an existing profile database read-only and never creates a missing one', async () => {
@@ -146,6 +175,7 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     await writer.close();
 
     const reader = new SqliteProviderProfileStore({ path: databasePath, readOnly: true });
+    expect(reader.credentialNamespaceId).toBe(writer.credentialNamespaceId);
     expect((await reader.get('openai'))?.model).toBe('gpt-5.2');
     await reader.close();
 
@@ -348,9 +378,19 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
       'updated_at',
     ]);
   });
-  it('refuses a released store missing a custody table without writing to it', () => {
+  it('refuses the released 0.44.1 store without writing to it', () => {
     mkdirSync(join(directory, 'nested'));
-    copyFileSync(FIXTURE_0_43, databasePath);
+    copyFileSync(FIXTURE_0_44_1, databasePath);
+    const hash = sha256(databasePath);
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath, readOnly: true }));
+    expect(sha256(databasePath)).toBe(hash);
+    expect(sidecars(databasePath)).toEqual([]);
+    expect(existsSync(`${databasePath}.config-lock`)).toBe(false);
+  });
+
+  it('refuses a store missing a custody table without writing to it', async () => {
+    await new SqliteProviderProfileStore({ path: databasePath }).close();
     const raw = openSqliteDatabase(databasePath);
     raw.exec('DROP TABLE provider_custody_watermark');
     raw.exec('PRAGMA journal_mode = DELETE');
@@ -375,11 +415,10 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     expect(tableNames(databasePath)).toEqual(['sqliteX_notes']);
   });
 
-  it('refuses a stale schema held only in an un-checkpointed WAL before any DDL', async () => {
-    const source = join(directory, 'source.sqlite');
-    await new SqliteProviderProfileStore({ path: source }).close();
-    const reader = openSqliteDatabase(source, { readOnly: true });
-    const ddl = (reader.prepare(`SELECT sql FROM sqlite_master WHERE sql IS NOT NULL AND ${SQLITE_USER_OBJECT} AND name <> 'provider_custody_watermark' ORDER BY type DESC`).all() as { sql: string }[]).map((row) => row.sql);
+  it('refuses the released schema held only in an un-checkpointed WAL before any DDL', () => {
+    const reader = openSqliteDatabase(FIXTURE_0_44_1, { readOnly: true });
+    const ddl = reader.prepare("SELECT sql FROM sqlite_schema WHERE sql IS NOT NULL AND substr(name, 1, 7) <> ? ORDER BY type DESC")
+      .all('sqlite_').map((row) => String(row.sql));
     reader.close();
     const walOnly = join(directory, 'wal-only.sqlite');
     const writer = openSqliteDatabase(walOnly);
@@ -390,7 +429,49 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     copyFileSync(`${walOnly}-wal`, `${databasePath}-wal`);
     writer.close();
     expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
-    expect(tableNames(databasePath)).not.toContain('provider_custody_watermark');
+    expect(tableNames(databasePath)).toContain('provider_custody_watermark');
+    expect(tableNames(databasePath)).not.toContain('provider_store_metadata');
+  });
+
+  it('refuses to initialize an empty database in read-only mode', () => {
+    openSqliteDatabase(databasePath).close();
+    const before = sha256(databasePath);
+    expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath, readOnly: true }));
+    expect(sha256(databasePath)).toBe(before);
+    expect(tableNames(databasePath)).toEqual([]);
+  });
+
+  it.each([
+    ['missing metadata table', ['DROP TABLE provider_store_metadata']],
+    ['different metadata DDL', ['ALTER TABLE provider_store_metadata ADD COLUMN extra TEXT']],
+    ['missing singleton row', ['DELETE FROM provider_store_metadata']],
+    ['multiple metadata rows', [
+      'PRAGMA ignore_check_constraints = ON',
+      'INSERT INTO provider_store_metadata SELECT 2, credential_namespace_id FROM provider_store_metadata',
+    ]],
+    ['invalid namespace', [
+      "UPDATE provider_store_metadata SET credential_namespace_id = 'PS_' || substr(credential_namespace_id, 4)",
+      "UPDATE provider_store_metadata SET credential_namespace_id = lower(credential_namespace_id) || char(0) || 'hidden'",
+      "UPDATE provider_store_metadata SET credential_namespace_id = substr(credential_namespace_id, 1, 34)",
+      'UPDATE provider_store_metadata SET credential_namespace_id = CAST(credential_namespace_id AS BLOB)',
+    ]],
+  ])('refuses a store with %s without editing the database', async (_case, edits) => {
+    await new SqliteProviderProfileStore({ path: databasePath }).close();
+    const raw = openSqliteDatabase(databasePath);
+    try {
+      raw.exec('PRAGMA journal_mode = DELETE');
+      for (const edit of edits) {
+        raw.exec(edit);
+        if (edit.startsWith('PRAGMA')) continue;
+        const hash = sha256(databasePath);
+        expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath }));
+        expectSchemaStale(() => new SqliteProviderProfileStore({ path: databasePath, readOnly: true }));
+        expect(sha256(databasePath)).toBe(hash);
+        expect(sidecars(databasePath)).toEqual([]);
+      }
+    } finally {
+      raw.close();
+    }
   });
 
   it('checkpoints a new store so its main file holds the schema', async () => {
@@ -398,7 +479,7 @@ describe.skipIf(!sqliteReady)('SqliteProviderProfileStore on disk', () => {
     try {
       const main = new (await import('node:sqlite')).DatabaseSync(`file:${databasePath}?mode=ro&immutable=1`, { readOnly: true });
       try {
-        expect((main.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'provider_%'").all() as { name: string }[]).length).toBe(5);
+        expect((main.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'provider_%'").all() as { name: string }[]).length).toBe(6);
       } finally { main.close(); }
     } finally { await store.close(); }
   });

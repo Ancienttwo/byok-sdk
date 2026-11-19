@@ -186,6 +186,7 @@ describe('syncTurn', () => {
   it('#881: freezes a prompt with only the offered actions in both team modes, and the full prompt otherwise', () => {
     const prompt = (external: boolean, offer?: CheckedOffer) => {
       const s = state();
+      Object.assign(s.team.bots.main!, { autonomy: 'auto' });
       if (external) Object.assign(s.team, { external: { revision: 1 } });
       const step = syncTurn(s, turn(s, { status: 'queued' }), facts(), { ...OPTIONS, ...(offer ? { offer } : {}) }, () => {});
       if (step?.kind !== 'freeze') throw new Error('The Turn did not freeze');

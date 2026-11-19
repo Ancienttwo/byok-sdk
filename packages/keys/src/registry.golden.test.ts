@@ -148,7 +148,7 @@ describe.skipIf(!sqliteReady)('BYOK registry golden parity (HANDOFF §4.3)', () 
 
   it('keeps the key only in the credential store', async () => {
     await registry().configure(OPENAI, CANARY);
-    await expect(secrets.get('model-openai-api-key')).resolves.toBe(CANARY);
+    await expect(secrets.scope(profiles.credentialNamespaceId).get('model-openai-api-key')).resolves.toBe(CANARY);
   });
 
   it('locks the database file to owner-only read/write', async () => {

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "20512f8cd4fcf605fea4fd68156338bd7124a15061596337b6f4acf8ab9992ec"
+    "snapshotSha256": "6e36133a3271768e039ee307cc0c23f68757e4a6affd9380c4569fa06df7d39e"
   },
   "configFields": {
     "status": "tracked",
@@ -16,12 +16,81 @@
   },
   "entries": [
     {
+      "id": "provider-store-credential-namespace",
+      "impact": "breaking",
+      "acceptance": "new-path-repair",
+      "summary": "@byok-sdk/keys requires a credential namespace in each provider store. Existing stores return PROVIDER_STORE_SCHEMA_STALE. Preserve the old database, create a fresh store on a new path and re-enter provider keys. Automatic credential cleanup requires a recognized namespaced retired store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#provider-store-credential-namespace",
+      "items": [
+        "export:@byok-sdk/keys#InMemoryProviderProfileStore",
+        "export:@byok-sdk/keys#ProviderProfileStore",
+        "export:@byok-sdk/keys#SqliteProviderProfileStore",
+        "export:@byok-sdk/keys#removeRetiredProviderCredentials",
+        "store:keys-profile-store"
+      ]
+    },
+    {
+      "id": "provider-credential-scope-binding",
+      "impact": "breaking",
+      "summary": "ProviderRegistry, applySealedProviderProvisioning, runPiProviderLauncher and the bundled Pi launcher scope the Host's base credential store to the selected database's namespace. Pass the base scope and upgrade the Host and launcher together.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#provider-store-credential-namespace",
+      "items": [
+        "behavior:provider-credential-scope-binding"
+      ]
+    },
+    {
+      "id": "model-discovery-connection-fields",
+      "impact": "breaking",
+      "summary": "ModelDiscoveryConnection uses auth_mode and base_url to match provider profiles. Remove providerKind from the connection object and keep adapter.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#model-discovery-connection-fields",
+      "items": [
+        "export:@byok-sdk/keys#ModelDiscoveryConnection"
+      ]
+    },
+    {
       "id": "model-list-unreachable",
       "impact": "additive",
-      "summary": "Hosts can recognize an unreachable provider in discoverProviderModels by the MODEL_LIST_UNREACHABLE error code; the original transport error is available as the cause.",
+      "summary": "discoverProviderModels reports transport failures while connecting or reading a successful response body as MODEL_LIST_UNREACHABLE and preserves the original error as the cause.",
       "migration": "CHANGELOG.md#unreleased",
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
+      ]
+    },
+    {
+      "id": "bot-testing-runner-injection",
+      "impact": "breaking",
+      "summary": "Each bot-collaboration testing vector now requires the Host's describe, it and expect as its first argument. Update every vector call to pass these test runner APIs, including the asymmetric matchers.",
+      "migration": "packages/bot-collaboration/README.md#shared-vector-migration",
+      "items": [
+        "export:@byok-sdk/bot-collaboration/testing#VectorMatchers",
+        "export:@byok-sdk/bot-collaboration/testing#VectorTestApi",
+        "export:@byok-sdk/bot-collaboration/testing#cardCallVectors",
+        "export:@byok-sdk/bot-collaboration/testing#cardVectors",
+        "export:@byok-sdk/bot-collaboration/testing#coalesceVectors",
+        "export:@byok-sdk/bot-collaboration/testing#commitVectors",
+        "export:@byok-sdk/bot-collaboration/testing#deliveryVectors",
+        "export:@byok-sdk/bot-collaboration/testing#deviceVectors",
+        "export:@byok-sdk/bot-collaboration/testing#homeVectors",
+        "export:@byok-sdk/bot-collaboration/testing#replyVectors",
+        "export:@byok-sdk/bot-collaboration/testing#retentionVectors",
+        "export:@byok-sdk/bot-collaboration/testing#roomVectors",
+        "export:@byok-sdk/bot-collaboration/testing#routineVectors",
+        "export:@byok-sdk/bot-collaboration/testing#settlementVectors",
+        "export:@byok-sdk/bot-collaboration/testing#syncVectors"
+      ]
+    },
+    {
+      "id": "bot-persona-and-autonomy-context",
+      "impact": "additive",
+      "summary": "Bot collaboration Hosts can render additional persona home files and run an idempotent post-write hook; context rules now receive the Bot's optional autonomy for observe-mode instructions.",
+      "migration": "packages/bot-collaboration/README.md#persona-delivery-failures",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
+        "export:@byok-sdk/bot-collaboration#BotPersonaProjectionOptions",
+        "export:@byok-sdk/bot-collaboration#createBotPersonaProjection",
+        "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
+        "export:@byok-sdk/bot-collaboration/rules#syncTurn"
       ]
     },
     {
@@ -60,6 +129,111 @@
       "entry": "mcp-toolset-exposure-config"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
+      "change": "added",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionOptions",
+      "change": "added",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#createBotPersonaProjection",
+      "change": "changed",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
+      "change": "changed",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
+      "change": "changed",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#syncTurn",
+      "change": "changed",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#VectorMatchers",
+      "change": "added",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#VectorTestApi",
+      "change": "added",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#cardCallVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#cardVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#coalesceVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#commitVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#deliveryVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#deviceVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#homeVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#replyVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#retentionVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#roomVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#routineVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#settlementVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#syncVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
       "item": "export:@byok-sdk/client#McpToolsetConfig",
       "change": "changed",
       "entry": "mcp-toolset-exposure-config"
@@ -73,6 +247,38 @@
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "model-list-unreachable"
+    },
+    {
+      "item": "export:@byok-sdk/keys#InMemoryProviderProfileStore",
+      "change": "changed",
+      "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ModelDiscoveryConnection",
+      "change": "changed",
+      "entry": "model-discovery-connection-fields"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ProviderProfileStore",
+      "change": "changed",
+      "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/keys#SqliteProviderProfileStore",
+      "change": "changed",
+      "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/keys#removeRetiredProviderCredentials",
+      "change": "added",
+      "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "store:keys-profile-store",
+      "change": "changed",
+      "before": "ddl-sha256=7c5c4e5f67ea8b36",
+      "after": "ddl-sha256=56993ed09c60b513",
+      "entry": "provider-store-credential-namespace"
     }
   ]
 }

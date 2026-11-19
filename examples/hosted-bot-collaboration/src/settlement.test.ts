@@ -126,9 +126,9 @@ describe.skipIf(POSTGRES_URL === undefined)('H delegation settlement (#793 D2f-5
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
-  settlementVectors('H HostedCollaborationStore on Postgres', settlementSubject);
-  replyVectors('H HostedCollaborationStore on Postgres', replySubject);
-  deviceVectors('H HostedCollaborationStore on Postgres', deviceSubject);
+  settlementVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', settlementSubject);
+  replyVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', replySubject);
+  deviceVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', deviceSubject);
 
   const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
   const unit = (state: CollaborationState, id: string) => state.units[hash([id, 'B'])]!.state;

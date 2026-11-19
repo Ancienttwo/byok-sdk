@@ -19,6 +19,7 @@ import {
   type ProviderProfileRef,
   parseModelProviderProfile,
 } from './provider-profile.js';
+import { bindProviderCredentialStore } from './provider-credential-store.js';
 import { exactProviderProfileBinding } from './provider-profile-binding.js';
 import {
   type ModelProviderSecretName,
@@ -104,6 +105,7 @@ export interface ProviderRegistryOptions {
   /** Injected clock, so tests get deterministic timestamps. */
   now?: () => Date;
   profileStore: ProviderProfileStore;
+  /** Base credential store. The registry adds the profile store’s namespace. */
   secretStore: SecretStore<ModelProviderSecretName>;
 }
 
@@ -228,7 +230,7 @@ export class ProviderRegistry {
     this.#fetch = options.fetchImpl;
     this.#now = options.now ?? (() => new Date());
     this.#profiles = options.profileStore;
-    this.#secrets = options.secretStore;
+    this.#secrets = bindProviderCredentialStore(options.secretStore, options.profileStore.credentialNamespaceId);
   }
 
   async close(): Promise<void> {

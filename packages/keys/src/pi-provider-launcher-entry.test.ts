@@ -1,7 +1,12 @@
+import { execFile } from 'node:child_process';
 import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs';
 
 import type { CommandResult } from './command-runner';
 import { parseModelProviderProfile, type ModelProviderProfileInput } from './provider-profile';
@@ -16,9 +21,9 @@ import {
   runPiProviderLauncher,
 } from './index';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
-import { isSqliteAvailable } from './sqlite-support';
+import { isSqliteAvailable, openSqliteDatabase } from './sqlite-support';
 import { ByokKeysError } from './errors';
-import { InMemorySecretStore } from './secret-store';
+import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
 
 /**
  * The public launcher entry (#323) and the keyless launch (#325), through a
@@ -104,17 +109,18 @@ async function fixture(overrides: Partial<ModelProviderProfileInput> = {}) {
     '--profile-db', profileDb, '--session-dir', path.join(root, 'sessions'),
     '--provider', profile.profile_ref, '--model', profile.model,
   ];
-  const launch = (extra: string[] = []) => parsePiProviderLauncherOptions([
+  const launchArgs = (extra: string[] = []) => [
     ...base, ...extra, '--pi-cwd', root, '--pi-projection-dir', projection, '--pi-config-digest', 'a'.repeat(64),
     '--', '--config', output, '--mode', 'rpc',
-  ]);
+  ];
+  const launch = (extra?: string[]) => parsePiProviderLauncherOptions(launchArgs(extra));
   const validate = (extra: string[] = []) => parsePiProviderLauncherOptions([...base, ...extra, '--validate-only', 'true']);
   const childOutput = async () => JSON.parse(await fs.readFile(output, 'utf8')) as {
     envKey: string | null;
     receipt: { type: string; configDigest: string; secret: string | null };
     models: { providers: Record<string, { apiKey?: string; authHeader?: boolean }> };
   };
-  return { root, profile, profileDb, projection, launch, validate, childOutput };
+  return { root, profile, profileDb, projection, launch, launchArgs, validate, childOutput, namespaceId: writer.credentialNamespaceId };
 }
 
 /** A host keychain whose stored value carries the host's own storage marker. */
@@ -151,7 +157,9 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
   it('sanitizes credential store read errors', async () => {
     const f = await fixture();
     const store = new InMemorySecretStore();
-    vi.spyOn(store, 'get').mockRejectedValue(new ByokKeysError('KEYCHAIN_UNAVAILABLE', CANARY, { cause: new Error(CANARY) }));
+    const scoped = store.scope(f.namespaceId);
+    vi.spyOn(scoped, 'get').mockRejectedValue(new ByokKeysError('KEYCHAIN_UNAVAILABLE', CANARY, { cause: new Error(CANARY) }));
+    vi.spyOn(store, 'scope').mockReturnValue(scoped);
     const error = await runPiProviderLauncher(f.launch(), { createSecretStore: () => store }).catch((e: unknown) => e);
     expect(error).toBeInstanceOf(Error);
     expect(error).toMatchObject({ code: 'KEYCHAIN_UNAVAILABLE' });
@@ -167,6 +175,8 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     const createSecretStore = vi.fn(() => host.store);
     await expect(runPiProviderLauncher(f.launch(), { createSecretStore })).resolves.toBe(CHILD_EXIT_CODE);
     expect(createSecretStore).toHaveBeenCalledTimes(1);
+    const args = host.calls.find(argv => argv[0] === 'find-generic-password')!;
+    expect(args[args.indexOf('-s') + 1]).toBe(`com.byok.keys.scope.${f.namespaceId}.${modelProviderSecretName(f.profile.profile_ref)}`);
     const output = await f.childOutput();
     expect(output.envKey).toBeNull();
     expect(output.receipt).toEqual({ type: 'byok.pi.rpc.credential', configDigest: 'a'.repeat(64), secret: CANARY });
@@ -198,6 +208,41 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     expect(await fs.readdir(f.projection)).toEqual([]);
   });
 
+  it('refuses an invalid database identity at admission before the host store is built', async () => {
+    const f = await fixture();
+    const writer = openSqliteDatabase(f.profileDb);
+    try { writer.prepare('UPDATE provider_store_metadata SET credential_namespace_id = ?').run('invalid'); }
+    finally { writer.close(); }
+    const createSecretStore = vi.fn(() => new InMemorySecretStore());
+    await expect(runPiProviderLauncher(f.validate(), { createSecretStore })).rejects.toMatchObject({ code: 'PROVIDER_STORE_SCHEMA_STALE' });
+    expect(createSecretStore).not.toHaveBeenCalled();
+  });
+
+  it('reads each launched DB through the exact Linux service and account', async () => {
+    const first = await fixture();
+    const second = await fixture();
+    const basePrefix = 'byok.test.2405';
+    const account = 'test-account';
+    const name = modelProviderSecretName(first.profile.profile_ref);
+    const service = (id: string) => `${basePrefix}.scope.${id}.${name}`;
+    const values = new Map([[service(first.namespaceId), CANARY], [service(second.namespaceId), 'second-canary']]);
+    const commandRunner = vi.fn(async (command: string, args: string[]): Promise<CommandResult> => {
+      expect(command).toBe('secret-tool');
+      const [operation, serviceKey, target, accountKey, user] = args;
+      expect([operation, serviceKey, accountKey, user]).toEqual(['lookup', 'service', 'account', account]);
+      const value = values.get(target!);
+      return value === undefined
+        ? { exitCode: 1, stdout: '', stderr: '' }
+        : { exitCode: 0, stdout: `byok-b64-v1:${Buffer.from(value).toString('base64')}\n`, stderr: '' };
+    });
+    const host = { createSecretStore: () => new LinuxSecretServiceSecretStore({ servicePrefix: basePrefix, account, platform: 'linux', commandRunner }) };
+    for (const f of [first, second]) {
+      await expect(runPiProviderLauncher(f.launch(), host)).resolves.toBe(CHILD_EXIT_CODE);
+      expect((await f.childOutput()).receipt.secret).toBe(values.get(service(f.namespaceId)));
+      expect(commandRunner).toHaveBeenLastCalledWith('secret-tool', ['lookup', 'service', service(f.namespaceId), 'account', account], undefined);
+    }
+  });
+
   it('keeps the custody lock: a pending credential change refuses before the host store is built', async () => {
     const f = await fixture();
     const writer = new SqliteProviderProfileStore({ path: f.profileDb });
@@ -216,6 +261,41 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     expect(await fs.readdir(f.projection)).toEqual([]);
   });
 });
+
+// This test writes only to its disposable macOS keychain and test service prefix.
+it.skipIf(process.platform !== 'darwin' || process.env.BYOK_TEST_MACOS_PROVIDER_NAMESPACE !== '1')(
+  'the built launcher uses the selected DB identity in a real macOS Keychain', async () => {
+    const profile_ref = 'r'.repeat(64);
+    const first = await fixture({ profile_ref });
+    const second = await fixture({ profile_ref });
+    const name = modelProviderSecretName(profile_ref);
+    const prefix = `byok-test-240.scope.acct_${'1'.repeat(64)}`;
+    expect(Buffer.byteLength(`${prefix}.scope.${first.namespaceId}.${name}`)).toBe(210);
+    const keychain = await createTestKeychain();
+    const store = new MacOsKeychainSecretStore({ servicePrefix: prefix, keychainPath: keychain.path });
+    const a = store.scope(first.namespaceId);
+    const b = store.scope(second.namespaceId);
+    const bin = fileURLToPath(new URL('../dist/bin/pi-provider-launcher.js', import.meta.url));
+    const run = (f: typeof first) => promisify(execFile)(process.execPath, [bin, ...f.launchArgs([
+      '--secret-service-prefix', prefix, '--macos-keychain-path', keychain.path,
+    ])]);
+    try {
+      await a.set(name, CANARY);
+      await b.set(name, 'second-canary');
+      await store.set(name, 'base-decoy');
+      for (const [f, key] of [[first, CANARY], [second, 'second-canary']] as const) {
+        await expect(run(f)).rejects.toMatchObject({ code: CHILD_EXIT_CODE });
+        expect((await f.childOutput()).receipt.secret).toBe(key);
+      }
+      await expect(a.delete(name)).resolves.toBe(true);
+      await expect(run(first)).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('requires a secret') });
+      await expect(b.get(name)).resolves.toBe('second-canary');
+    } finally {
+      try { await Promise.all([a.delete(name), b.delete(name), store.delete(name)]); }
+      finally { await keychain.dispose(); }
+    }
+  }, 30_000,
+);
 
 describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('keyless (auth_mode none) launch', () => {
   it('projects the fixed placeholder key for the rpc entry and reads no credential', async () => {

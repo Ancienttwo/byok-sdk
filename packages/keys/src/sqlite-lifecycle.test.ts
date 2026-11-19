@@ -83,12 +83,19 @@ describe.skipIf(!(sqliteSupport.isSqliteAvailable() || process.env.BYOK_REQUIRE_
   });
 });
 
-describe('SqliteProviderProfileStore construction lifecycle', () => {
+describe.skipIf(!(sqliteSupport.isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('SqliteProviderProfileStore construction lifecycle', () => {
   it('closes the native handle when initialization after the open fails', () => {
     const error = new Error('profile file hardening failed');
     const close = vi.fn();
-    const database = { close } as unknown as DatabaseSync;
-    sqliteMocks.openSqliteDatabase.mockReturnValueOnce(database);
+    sqliteMocks.openSqliteDatabase.mockImplementationOnce((path, options) => {
+      const database: DatabaseSync = sqliteSupport.openSqliteDatabase(path, options);
+      const closeDatabase = database.close.bind(database);
+      vi.spyOn(database, 'close').mockImplementation(() => {
+        close();
+        closeDatabase();
+      });
+      return database;
+    });
     sqliteMocks.secureSqliteFilePermissions.mockImplementationOnce(() => {
       throw error;
     });

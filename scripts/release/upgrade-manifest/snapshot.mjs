@@ -123,7 +123,7 @@ export const STORES = [
   {
     id: 'keys-profile-store',
     source: 'packages/keys/src/sqlite-profile-store.ts',
-    format: (root, file) => `ddl-sha256=${ddlDigest(root, file, ['SCHEMA', 'ENABLED_INDEX'])}`,
+    format: (root, file) => `ddl-sha256=${ddlDigest(root, file, ['SCHEMA', 'ENABLED_INDEX', 'STORE_METADATA_SCHEMA'])}`,
   },
   {
     // Hosted Postgres: forward migrations authored only in deploy/sql and

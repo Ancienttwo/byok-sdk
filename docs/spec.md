@@ -259,46 +259,40 @@ must explicitly provision a separate current store. Pi execution
 separately requires the declared Pi identity above; provider kind does not
 infer it.
 
-For recovery or uninstall, `@byok-sdk/keys` exposes
-`listProviderProfileSecretNames(path)`. It returns sorted, unique candidate
-entry names from recognized released profile-store layouts, including
-0.42.0–0.44.0 stores that `inspectProviderProfileStore` accepts. Names follow
-the rules of the stored layout. Profile and pending custody rows can supply
-names. Only names still evidenced by database rows are returned. Older
-releases, including 0.1.0–0.7.0 and releases such as 0.12.0 and 0.22.0 before
-custody, wrote the credential before the profile on configure and deleted the
-profile before the credential on delete. A crash between steps can leave an
-orphan credential with no database record; an empty list does not prove cleanup
-complete. The SDK opens only a private, immutable read-only copy. The operation
-does not migrate the store, query the OS credential store, or return a secret
-value. Unknown layouts fail with `PROVIDER_STORE_SCHEMA_STALE`. An offline
-store with any WAL, SHM or rollback-journal sidecar fails with
-`PROVIDER_STORE_UNAVAILABLE`, as does a store still open with WAL sidecars.
+Each newly created provider store owns a stable `credentialNamespaceId` matching
+`ps_[0-9a-f]{32}`. SQLite creates the metadata row in the same transaction as
+the rest of the schema. Registry, provisioning and launcher calls take the
+Host's base `SecretStore` and scope it once with that store's namespace. Native
+credential addresses have the form `<base>.scope.<namespace>.<name>`. Copies
+retain the same identity and credentials. An independently provisioned store
+gets its own identity. The envelope backend does not guarantee concurrent write
+safety across stores.
 
-The Host stops store and credential writers for the duration of cleanup. It
-uses its original credential scope and must exclude every name referenced by
-an active store in that scope before deleting any retired entry. The rule
-also protects a replacement store that reuses a profile ref. If the Host
-cannot enumerate every active store in the scope or verify credential
-ownership, it must stop cleanup and report it incomplete. Preserve the retired
-store, including any sidecars, and use the original scope's `SecretStore.delete`
-for the remaining candidates before configuring a replacement store.
+Stores without a namespace return `PROVIDER_STORE_SCHEMA_STALE`. The Host
+preserves the old database, provisions a current store on a new path and asks
+the user to re-enter provider keys. Older shared-scope credentials remain in
+place. If cleanup is requested, the Host reports it as incomplete and the user
+can inspect the original backend for entries they can prove are retired.
 
-The Host must also check the original backend's inventory or UI for orphaned
-credentials. The default service prefix is `com.byok.keys`, native scopes
-append `.scope.<namespace>` per scope, and the entry service is
-`<prefix>.<name>`; the default account is `local-device`. Use the actual
-configured prefix, account, scope and keychain when customized. On macOS,
-search the original keychain in Keychain Access for the service prefix and
-inspect generic password accounts. On Windows, inspect generic credential
-targets and user names in Credential Manager or `cmdkey /list`. On Linux,
-Secret Service uses `service` and `account` attributes: search the exact
-account in an inventory or UI and inspect service values for the prefix.
-`secret-tool` matches attributes exactly, not by prefix, and searches can
-expose secret values. The SDK cannot enumerate orphan names. If the backend or
-available tools cannot enumerate by prefix, ask the user to inspect and clean
-the system credential manager manually and report cleanup incomplete; do not
-delete entries whose ownership or active use cannot be verified.
+For a recognized namespaced store, the Host obtains user approval, retires all
+copies of the DB identity and passes the original base credential store to
+`removeRetiredProviderCredentials(path, originalBaseSecretStore)`. The helper
+checks a private immutable SQLite copy for the full recognized schema, the
+store identity and all profile and pending refs. It then deletes only names
+from those rows within the namespace it just read. Unknown layouts or invalid
+identity rows report `PROVIDER_STORE_SCHEMA_STALE`. A missing, damaged or
+changing file, or a file with a WAL, SHM or rollback-journal sidecar, reports
+`PROVIDER_STORE_UNAVAILABLE`. Both errors occur before the helper calls the
+credential backend. A backend failure stops cleanup. The Host can retry with
+the same offline database and original backend after resolving the failure.
+
+`listProviderProfileSecretNames(path)` returns sorted, unique names from the same
+check. It never queries the credential backend. An empty list means there are
+no names evidenced by the copy. For orphaned entries, the user can check the
+original backend and account for the exact `<base>.scope.<retired-id>.` prefix,
+including the final dot. Linux inventory lookups use exact Secret Service
+attributes. The Host reports incomplete cleanup if the backend or ownership
+cannot be verified.
 
 `@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
 the client pins. The table is a checked-in generated file; a test fails until
@@ -382,11 +376,9 @@ The launcher accepts the adapter's bounded absolute extension paths and an
 absolute `--config` path. Provider/model/thinking selection remains local
 profile authority; delegated flags cannot override it. The Pi child gets a
 narrow inherited environment; arbitrary environment names, `BYOK_*` names and
-ambient provider credentials are excluded. The profile SQLite schema
-adds nullable `pi_model`; an older store is rejected without migration or
-deletion. Operators must preserve it and explicitly provision a separate
-current-schema store. No automatic conversion or live-store mutation is part
-of this candidate.
+ambient provider credentials are excluded. The profile SQLite schema includes
+nullable `pi_model` and the singleton store metadata table. Launch requires the
+current schema and a valid credential namespace before credential access.
 
 ## Pre-1.0 package version policy
 
@@ -4180,7 +4172,7 @@ complete ContextPack/Summary, native-runtime, migration or production acceptance
 
 Pi custody consumes the client-decided runtime launch: `--pi-bin`, optional `--pi-entry`, optional `--pi-fixed-args`, `--pi-cwd`, `--pi-projection-dir` and `--pi-config-digest`. Keys validates these fields and the projection directory before it reads credentials. The SDK-owned RPC entry receives explicit session cwd in its configuration. The installed SDK package, or the single-file product through `sdkHelperHost`, supplies the interpreter and entry. Version detection retains its existing timeout and error classification. No shell, argv0 fallback or inference from an executable suffix selects the runtime.
 
-The bundled launcher executable reads the platform OS store with its default storage options. `@byok-sdk/keys` also exports `runPiProviderLauncher(options, { createSecretStore })`, the same launcher with a host-built `SecretStore`, so a host with its own storage options supplies one launcher executable without a second store definition. On Windows the default store calls Credential Manager in process through the installed `koffi`; a packaged Host has no installed module, so it builds the store with `koffi: loadSdkKoffiAsset(nativeAssetRoot)`. Both apply the same exact profile, binding, runtime-entry and custody checks. The provider projection keeps the profile URL convention of the direct clients: for the `anthropic` adapter it projects the keys endpoint `modelApiUrl(base_url, 'messages')` without its `/v1/messages` suffix, because Pi appends that suffix, and it refuses an endpoint without that suffix with `PROVIDER_URL_INVALID`. For `auth_mode: 'none'` the `pi-rpc` projection sets the fixed non-secret `apiKey` `byok-sdk-auth-none`, because Pi refuses a request without a key; the `pi-prepared` and `pi-durable` entries require a launcher-delivered key and refuse a keyless profile with `PROVIDER_PROFILE_INVALID` at admission.
+The bundled launcher executable reads the platform OS store with its default storage options. `@byok-sdk/keys` also exports `runPiProviderLauncher(options, { createSecretStore })`, the same launcher with a host-built `SecretStore`, so a host with its own storage options supplies one launcher executable without a second store definition. On Windows the default store calls Credential Manager in process through the installed `koffi`; a packaged Host has no installed module, so it builds the store with `koffi: loadSdkKoffiAsset(nativeAssetRoot)`. Both apply the same exact profile, binding, runtime-entry and custody checks. They open the DB selected by `--profile-db` and derive the provider namespace from that DB. The factory supplies the base credential store. `--secret-service-prefix` carries the effective base prefix for the bundled launcher. Validation-only and keyless launches never call the factory. The provider projection keeps the profile URL convention of the direct clients: for the `anthropic` adapter it projects the keys endpoint `modelApiUrl(base_url, 'messages')` without its `/v1/messages` suffix, because Pi appends that suffix, and it refuses an endpoint without that suffix with `PROVIDER_URL_INVALID`. For `auth_mode: 'none'` the `pi-rpc` projection sets the fixed non-secret `apiKey` `byok-sdk-auth-none`, because Pi refuses a request without a key; the `pi-prepared` and `pi-durable` entries require a launcher-delivered key and refuse a keyless profile with `PROVIDER_PROFILE_INVALID` at admission.
 
 The ordinary `byok-pi-rpc` host launched under `credentialSource: keys-profile` receives its key the same way as the durable worker below (#385): over the launcher's private one-shot JSON IPC channel bound to the config digest, never in its environment, argv or stdio RPC. Its digest-bound launch config (`byok.pi.rpc-launch` version 11) states `credentialSource` and the optional resolved file scope; under `keys-profile` the host refuses a launch environment that carries a provider key, disconnects IPC before any extension, tool or session exists, and registers the key only in Pi's in-memory runtime credential overlay (`ModelRuntime.setRuntimeApiKey`). Its projection carries the non-secret `apiKey` marker `byok:rpc-ipc`; under `pi-auth-store` the host refuses an IPC channel it was not configured for. Conformance tests require no key in the output of Pi's real built-in bash tool running `env` and none in the host's OS-introspectable initial environment (`ps eww` / `/proc/<pid>/environ`). Pi subagents are unavailable in this lane: a pi-subagents child session opens its own model runtime from the projection, whose `apiKey` is the `byok:rpc-ipc` marker, and never sees the key held in the parent's memory, so the host does not load pi-subagents under `keys-profile`. No `subagent` tool is offered and the marker is never sent as a key. Only `byok-pi-prepared`, which registers MCP tools only, receives the key as `PI_PROVIDER_API_KEY` in its environment.
 

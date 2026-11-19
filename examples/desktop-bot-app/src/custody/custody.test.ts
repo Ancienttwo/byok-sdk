@@ -52,6 +52,21 @@ function custodyChild(secrets: SecretStore<ModelProviderSecretName>, receipts: s
   return child;
 }
 
+function observeCredentialWrites(base: SecretStore<ModelProviderSecretName>) {
+  const write = vi.fn();
+  const scope = base.scope.bind(base);
+  vi.spyOn(base, 'scope').mockImplementation(namespaceId => {
+    const credentials = scope(namespaceId);
+    const set = credentials.set.bind(credentials);
+    vi.spyOn(credentials, 'set').mockImplementation((name, value) => {
+      write();
+      return set(name, value);
+    });
+    return credentials;
+  });
+  return write;
+}
+
 describe('custody child', () => {
   it('commits the profile and key from one stdin request and returns a receipt without the secret', async () => {
     const secrets = new InMemorySecretStore<ModelProviderSecretName>();
@@ -59,7 +74,14 @@ describe('custody child', () => {
     const status = await submitToCustody(custodyChild(secrets, receipts), { op: 'configure', configuration: CONFIGURATION, secret: SECRET });
 
     expect(status).toMatchObject({ profile_ref: 'writer', secret_configured: true, configuration_pending: false });
-    expect(await secrets.get(modelProviderSecretName('writer'))).toBe(SECRET);
+    const store = new SqliteProviderProfileStore({ path: keysDb, readOnly: true });
+    const name = modelProviderSecretName('writer');
+    try {
+      expect(await secrets.scope(store.credentialNamespaceId).get(name)).toBe(SECRET);
+      expect(await secrets.get(name)).toBeUndefined();
+    } finally {
+      await store.close();
+    }
     expect(receipts.join('')).not.toContain(SECRET);
     expect((await readFile(keysDb)).includes(SECRET)).toBe(false);
 
@@ -149,7 +171,7 @@ describe('custody child', () => {
   it.each(['submit', 'list'] as const)('bounds a hung Host catalog refresh after %s without repeating a write', async operation => {
     vi.useFakeTimers();
     const secrets = new InMemorySecretStore<ModelProviderSecretName>();
-    const write = vi.spyOn(secrets, 'set');
+    const write = observeCredentialWrites(secrets);
     let notify!: () => void;
     const refreshing = new Promise<void>(resolve => { notify = resolve; });
     const handlers = keysMainHandlers({
@@ -182,7 +204,7 @@ describe('custody child', () => {
   it('rebuilds the catalog on Reload after a committed change loses its receipt, without writing the key again', async () => {
     vi.useFakeTimers();
     const secrets = new InMemorySecretStore<ModelProviderSecretName>();
-    const write = vi.spyOn(secrets, 'set');
+    const write = observeCredentialWrites(secrets);
     const profiles = new ProviderProfiles(keysDb);
     const brand = { instruction: 'reply', models: { pi: { label: 'Pi', runtime: 'pi' as const } } };
     let catalog = executionCatalog(brand, 'device', await profiles.load());

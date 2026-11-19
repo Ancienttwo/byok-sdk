@@ -81,7 +81,7 @@ const K8_EXPORTS = Object.freeze({
 const K8_SCRIPTS = Object.freeze({ build: 'tsup && tsc -p tsconfig.build.json', typecheck: 'tsc --noEmit', test: 'vitest run', clean: 'rm -rf dist' });
 const K8_RUNTIME = Object.freeze({ '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' });
 // `./testing` imports these; a Host that installs only `.` or `./rules` does not need them.
-const K8_OPTIONAL_PEERS = Object.freeze(['@hono/node-server', 'vitest']);
+const K8_OPTIONAL_PEERS = Object.freeze(['@hono/node-server']);
 /** The other workspace manifests, each with its dir. */
 function otherWorkspaceManifests(cwd, self) {
   const manifests = [];
@@ -221,8 +221,9 @@ function stableRegistryFloor(spec) {
  */
 function verifyK8DependencyUpdates(before, after) {
   for (const field of [...DEPENDENCY_FIELDS, 'peerDependencies']) {
+    const previousNames = Object.keys(before[field] ?? {}).filter(name => !(field === 'peerDependencies' && name === 'vitest' && !Object.hasOwn(after[field] ?? {}, name))).sort();
     if (!plain(before[field]) || !plain(after[field])
-      || !isDeepStrictEqual(Object.keys(before[field]).sort(), Object.keys(after[field]).sort())) {
+      || !isDeepStrictEqual(previousNames, Object.keys(after[field]).sort())) {
       throw new Error(`Reviewed CI mapping required: K8 ${field} dependency names must not change`);
     }
     for (const [name, spec] of Object.entries(after[field])) {

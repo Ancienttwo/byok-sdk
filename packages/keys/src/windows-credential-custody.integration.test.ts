@@ -19,6 +19,7 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { DEVICE_SEALING_SECRET_NAME, DeviceSealingKeyStore } from './device-sealing-key';
 import { DEVICE, NOW, PROFILE_REF, TENANT, configureRequest, deleteRequest, placedIdentity, replaceSecretRequest } from './fixtures/provisioning-requests';
+import { ProviderRegistry } from './registry';
 import { readProviderCustodySnapshot } from './pi-provider-launcher-core';
 import { exactProviderProfileBinding } from './provider-profile-binding';
 import { applySealedProviderProvisioning } from './sealed-provisioning';
@@ -39,11 +40,14 @@ const directory = ENABLED ? mkdtempSync(join(tmpdir(), 'byok-keys-wincred-')) : 
 
 describe.skipIf(!ENABLED)('sealed provisioning on Windows Credential Manager', () => {
   const secrets = new WindowsCredentialManagerSecretStore({ servicePrefix: prefix });
+  const providerScopes = new Set<string>();
 
   afterAll(async () => {
     try {
-      await secrets.delete(DEVICE_SEALING_SECRET_NAME);
-      await secrets.delete(modelProviderSecretName(PROFILE_REF));
+      await Promise.all([
+        secrets.delete(DEVICE_SEALING_SECRET_NAME),
+        ...Array.from(providerScopes, id => secrets.scope(id).delete(modelProviderSecretName(PROFILE_REF))),
+      ]);
     } finally {
       rmSync(directory, { force: true, recursive: true });
     }
@@ -198,6 +202,8 @@ namespace ByokEntryProbe {
     expect(reloaded.keyId).toBe(sealingKey.keyId);
 
     const profileStore = new SqliteProviderProfileStore({ path: join(directory, 'provider-profile.sqlite') });
+    providerScopes.add(profileStore.credentialNamespaceId);
+    const scoped = secrets.scope(profileStore.credentialNamespaceId);
     const apply = (request: unknown) => applySealedProviderProvisioning({
       request, profileStore, secretStore: secrets, sealingKey,
       resolveProfileRef: () => PROFILE_REF, readIdentity: async () => placedIdentity(), now: () => new Date(NOW),
@@ -225,7 +231,34 @@ namespace ByokEntryProbe {
 
     expect(await apply(await deleteRequest({ requestId: 'w3', generation: 3, expected: await expected() })))
       .toMatchObject({ outcome: 'applied', secretConfigured: false });
-    await expect(secrets.has(modelProviderSecretName(PROFILE_REF))).resolves.toBe(false);
+    await expect(scoped.has(modelProviderSecretName(PROFILE_REF))).resolves.toBe(false);
     await profileStore.close();
+  }, REAL_BACKEND_TIMEOUT_MS);
+
+  it('isolates independently opened provider DBs under the same native service prefix', async () => {
+    const first = new SqliteProviderProfileStore({ path: join(directory, 'namespace-first.sqlite') });
+    const second = new SqliteProviderProfileStore({ path: join(directory, 'namespace-second.sqlite') });
+    providerScopes.add(first.credentialNamespaceId).add(second.credentialNamespaceId);
+    const configuration = {
+      profile_ref: PROFILE_REF, provider_kind: 'openai', adapter: 'openai_compatible', auth_mode: 'bearer',
+      base_url: 'https://api.openai.com/v1', display_name: 'OpenAI', model: 'gpt-5.2', capabilities: [],
+    } as const;
+    const name = modelProviderSecretName(PROFILE_REF);
+    const configA = new ProviderRegistry({ profileStore: first, secretStore: secrets });
+    const configB = new ProviderRegistry({ profileStore: second, secretStore: secrets });
+    try {
+      await configA.configure(configuration, 'sk-wincred-namespace-a');
+      await configB.configure(configuration, 'sk-wincred-namespace-b');
+      for (const [store, key] of [[first, 'sk-wincred-namespace-a'], [second, 'sk-wincred-namespace-b']] as const) {
+        const profile = (await store.get(PROFILE_REF))!;
+        await expect(readProviderCustodySnapshot({ profiles: store, profile, createSecretStore: () => secrets })).resolves.toBe(key);
+      }
+      await expect(configA.delete(PROFILE_REF)).resolves.toBe(true);
+      await expect(secrets.scope(first.credentialNamespaceId).has(name)).resolves.toBe(false);
+      await expect(secrets.scope(second.credentialNamespaceId).get(name)).resolves.toBe('sk-wincred-namespace-b');
+      await expect(secrets.has(name)).resolves.toBe(false);
+    } finally {
+      await Promise.all([first.close(), second.close()]);
+    }
   }, REAL_BACKEND_TIMEOUT_MS);
 });

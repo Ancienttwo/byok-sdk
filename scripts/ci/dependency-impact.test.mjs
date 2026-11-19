@@ -78,6 +78,32 @@ test('unrelated manifest edits and lock mismatches are not hidden by a version u
   assert.throws(() => selectImpact(['bun.lock'], f), /differs from manifest/);
 });
 
+test('#2411: only K8 may remove Vitest from optionalPeers with its peer', t => {
+  const f = fixture(t), dir = 'packages/bot-collaboration';
+  const manifest = { name: '@byok-sdk/bot-collaboration', version: '0.31.0',
+    devDependencies: { vitest: '5.1.0', hono: '1.0.0' }, peerDependencies: { hono: '1.0.0' } };
+  f.write(`${dir}/package.json`, manifest);
+  f.lock.packages.vitest = ['vitest@5.1.0', '', {}]; f.lock.packages.hono = ['hono@1.0.0', '', {}];
+  f.lock.workspaces[dir] = { ...manifest, peerDependencies: { ...manifest.peerDependencies, vitest: '5.1.0' }, optionalPeers: ['hono', 'vitest'] };
+  const next = structuredClone(f.lock);
+  next.workspaces[dir] = { ...manifest, optionalPeers: ['hono'] };
+  const check = (before, after) => dependencyLockImpact(structuredClone(before), structuredClone(after), { cwd: f.cwd });
+  assert.doesNotThrow(() => check(f.lock, next));
+  for (const change of [
+    lock => { lock.workspaces[dir].optionalPeers = []; },
+    lock => { lock.workspaces[dir].optionalPeers = ['hono', 'other']; },
+    lock => { lock.workspaces[dir].other = true; },
+    lock => { lock.workspaces['packages/client'].optionalPeers = ['other']; },
+  ]) {
+    const altered = structuredClone(next); change(altered);
+    assert.throws(() => check(f.lock, altered), /lock workspace changes more than dependency fields/);
+  }
+  const otherBefore = structuredClone(f.lock), otherAfter = structuredClone(next);
+  otherBefore.workspaces['packages/client'].optionalPeers = ['vitest'];
+  otherAfter.workspaces['packages/client'].optionalPeers = [];
+  assert.throws(() => check(otherBefore, otherAfter), /lock workspace changes more than dependency fields/);
+});
+
 test('an orphan lock row is rejected even beside a valid transitive upgrade', t => {
   const f = fixture(t);
   f.lock.packages.nested[0] = 'nested@1.0.1';

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 import { canonical, hash, HostLedger, project, taskId, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf } from './model';
 import { admitUserInput } from './coalesce';
@@ -79,4 +79,4 @@ function deviceSubject(): DeviceSubject {
   };
 }
 
-deviceVectors('L HostLedger', deviceSubject);
+deviceVectors({ describe, it, expect }, 'L HostLedger', deviceSubject);

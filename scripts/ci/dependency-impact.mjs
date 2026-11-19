@@ -97,6 +97,12 @@ export function dependencyLockImpact(before, after, { cwd, admitted = [] }) {
     }
     if (!isDeepStrictEqual(specs(before.workspaces[dir]), specs(record))) roots.add(dir);
     const old = structuredClone(before.workspaces[dir]), next = structuredClone(record);
+    // #2411: only K8's removed Vitest optional peer may change this metadata.
+    if (dir === 'packages/bot-collaboration' && Array.isArray(old.optionalPeers) && Array.isArray(next.optionalPeers)
+      && Object.hasOwn(old.peerDependencies ?? {}, 'vitest') && !Object.hasOwn(next.peerDependencies ?? {}, 'vitest')) {
+      const index = old.optionalPeers.indexOf('vitest');
+      if (index !== -1) old.optionalPeers.splice(index, 1);
+    }
     for (const value of [old, next]) { delete value.version; for (const field of fields) delete value[field]; }
     if (!isDeepStrictEqual(old, next)) fail('lock workspace changes more than dependency fields');
   }

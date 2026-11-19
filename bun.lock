@@ -241,11 +241,9 @@
       },
       "peerDependencies": {
         "@hono/node-server": "^2.1.6",
-        "vitest": "^5.1.0",
       },
       "optionalPeers": [
         "@hono/node-server",
-        "vitest",
       ],
     },
     "packages/client": {
@@ -257,6 +255,7 @@
         "byok-agent-result-mcp": "./dist/bin/byok-agent-result-mcp.js",
         "byok-agent-memory-mcp": "./dist/bin/byok-agent-memory-mcp.js",
         "byok-agent-team-mcp": "./dist/bin/byok-agent-team-mcp.js",
+        "byok-mcp-hub": "./dist/bin/byok-mcp-hub.js",
         "byok-pi-durable": "./dist/bin/byok-pi-durable.js",
         "byok-pi-prepared": "./dist/bin/byok-pi-prepared.js",
         "byok-pi-rpc": "./dist/bin/byok-pi-rpc.js",

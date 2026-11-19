@@ -123,83 +123,54 @@ leave the map out.
 
 ### Recover provider credentials from an offline store
 
+Each provider store owns a stable `credentialNamespaceId`. Pass the base
+`SecretStore` to `ProviderRegistry`, `applySealedProviderProvisioning` and the
+Pi launcher. They apply the store's namespace. For direct credential tools,
+open `base.scope(profileStore.credentialNamespaceId)` and use
+`modelProviderSecretName(profileRef)` within it. Custom profile stores must
+persist a unique `ps_` identifier with 32 lowercase hexadecimal digits when
+created and keep it across opens. The envelope backend does not guarantee
+concurrent write safety across stores.
+
 If `inspectProviderProfileStore(path)` reports `new-path-repair` with
-`PROVIDER_STORE_SCHEMA_STALE`, preserve the old database. With the user's
-approval, enumerate and remove its obsolete credentials before provisioning a
-new store. `listProviderProfileSecretNames(path)` returns sorted, unique
-candidate entry names from known released layouts, including the current
-0.42.0–0.44.0 layout (reported as `accepted`), for recovery or uninstall. It
-reads an offline copy and returns only names evidenced by database rows. It
-never queries the credential store. An empty list does not prove cleanup is
-complete: older releases, including 0.1.0–0.7.0 and releases such as 0.12.0
-and 0.22.0 before custody, wrote the credential before the profile during
-configure and deleted the profile before the credential during delete. A crash
-between those steps can leave a credential with no database record.
+`PROVIDER_STORE_SCHEMA_STALE`, preserve the database, create a new store on
+another path and re-enter the provider keys. Older shared-scope databases lack
+a namespace. Report cleanup as incomplete and leave shared entries in place.
+Before upgrading, a user can remove a credential in the old version's settings
+if they can verify its ownership and that it is no longer in use.
 
-Check the original credential backend's inventory or UI for orphaned entries.
-The default service prefix is `com.byok.keys`; native `scope(namespace)`
-appends `.scope.<namespace>` (repeated for nested scopes), and each entry's
-service is `<prefix>.<name>`. The default account is `local-device`. Use the
-original configured prefix, account, scope and keychain if customized:
-
-- On macOS, search the original keychain in Keychain Access for the service
-  prefix, inspect generic password entries and their account.
-- On Windows, use Credential Manager or `cmdkey /list` to inspect generic
-  credential targets beginning with the prefix and their user name.
-- On Linux, Secret Service entries have `service` and `account` attributes.
-  Search for the exact `account` in a Secret Service inventory or UI and
-  inspect `service` values beginning with the prefix. `secret-tool` attribute
-  matching is exact, not prefix matching; searching can expose secret values.
-
-The SDK cannot list orphan names itself. If the backend or available tools
-cannot enumerate by prefix, ask the user to inspect and clean the system
-credential manager manually and report cleanup as incomplete. Never delete an
-entry whose ownership or use by an active store cannot be verified.
-
-First stop the processes that use the stores, and prevent provider changes in
-the credential scope through the end of cleanup. Any `-wal`, `-shm` or
-`-journal` file causes `PROVIDER_STORE_UNAVAILABLE`, including an open WAL
-connection. Close it normally and retry. After a crash, preserve the database
-and its sidecars together. Recover an independent backup with the old build,
-close it, and enumerate that backup once it has no sidecars. An unknown layout
-returns `PROVIDER_STORE_SCHEMA_STALE`. Use the old build's settings or the OS
-credential UI if the SDK cannot enumerate an owned store.
-
-**Protect credentials used by active stores before deleting anything.** Stores
-in the same scope can share a name such as `model-openai-api-key`. This
-includes a replacement store that has already been configured. Supply every
-store still in use in the original scope, even though its processes are stopped
-for cleanup. If any of those stores cannot be enumerated, or you cannot confirm
-the original backend, account and scope, stop and report cleanup as incomplete.
+For a store with a recognized namespace, obtain user approval, stop all writers
+and launchers for that store identity, and close its DB. Copies retain the same
+identity and credentials, so clean up only after every copy of that identity is
+retired. Provision a fresh DB to run a second, independent store.
 
 ```ts
-import { listProviderProfileSecretNames, type SecretStore } from '@byok-sdk/keys';
+import { removeRetiredProviderCredentials } from '@byok-sdk/keys';
 
-async function removeRetiredProviderCredentials(
-  retiredPath: string,
-  retainedPathsInOriginalScope: readonly string[],
-  originalScope: SecretStore,
-): Promise<void> {
-  const candidates = await listProviderProfileSecretNames(retiredPath);
-  const retained = new Set<string>();
-  for (const path of retainedPathsInOriginalScope) {
-    for (const name of await listProviderProfileSecretNames(path)) retained.add(name);
-  }
-  // This removes database-evidenced candidates only. Check the original
-  // backend separately for orphaned credentials before reporting completion.
-  for (const name of candidates) {
-    if (!retained.has(name)) await originalScope.delete(name);
-  }
-}
+await removeRetiredProviderCredentials(retiredPath, originalBaseSecretStore);
 ```
 
-Use the original OS credential account, backend, prefix and scope, including
-its keychain or envelope settings if configured. A `false` deletion result
-means the entry was already absent. A deletion error can leave a partial
-cleanup. Keep the old database and report the failure so the Host can retry.
-Report cleanup as incomplete if the backend inventory cannot be checked or
-ownership cannot be verified. Once cleanup is complete, provision a separate
-store if needed and re-enter any required credentials.
+Use the original OS user, backend, service prefix, account scope and Keychain
+settings when constructing `originalBaseSecretStore`. The helper validates an
+offline copy before calling the backend. It uses the DB's namespace and removes
+only names evidenced by profile and pending custody rows. Any `-wal`, `-shm` or
+`-journal` causes `PROVIDER_STORE_UNAVAILABLE`. After a crash, retain the DB
+and sidecars together, recover an independent backup with the old build, close
+it and retry with that copy. Unknown layouts or invalid identity rows return
+`PROVIDER_STORE_SCHEMA_STALE`. A backend failure can leave cleanup partial.
+Report it, retain the DB and retry with the same backend once the problem is
+resolved. Already absent entries are safe to retry.
+
+`listProviderProfileSecretNames(path)` returns sorted, unique names from the
+same offline check for diagnostics. An empty list means the DB contains no
+candidate names. Report cleanup as incomplete when the original backend cannot
+be verified or orphaned entries may remain. For manual cleanup of a retired
+namespace, inspect entries under the exact `<base>.scope.<retired-id>.` prefix,
+including the final dot. Verify the account and Keychain in Keychain Access on
+macOS or the user name in Credential Manager on Windows. On Linux, inspect a
+Secret Service inventory using exact `service` and `account` attributes and
+avoid exposing values. Delete only entries whose ownership and retirement are
+confirmed.
 
 ### Your own OpenAI-compatible gateway
 
@@ -663,8 +634,12 @@ the exact profile and model, the exact binding, the runtime-entry refusals,
 the custody lock, and the pending-change refusal. It calls
 `createSecretStore` only for a profile that requires a key, and only under
 the configuration lock. It forwards SIGINT and SIGTERM to the Pi child and
-resolves with the child's exit code. The host applies `secretServicePrefix`
-and `macosKeychainPath` from the parsed options when its store uses them.
+resolves with the child's exit code. The launcher adds the namespace read from
+`--profile-db` to the base store. The host applies `secretServicePrefix` and
+`macosKeychainPath` when its base store uses them. With the bundled launcher,
+`--secret-service-prefix` includes any existing native account scope. Custom
+accounts or storage markers use a Host-built factory that reconstructs the base
+store.
 
 The Pi projection keeps the profile URL convention of the direct clients.
 For the `anthropic` adapter, Pi's Anthropic SDK appends `/v1/messages` to the

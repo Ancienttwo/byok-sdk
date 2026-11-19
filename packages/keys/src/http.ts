@@ -176,8 +176,14 @@ export async function fetchWithProviderGuards(
  * before decoding each chunk: headers may be absent, false, or compressed.
  * Cancel at the first chunk crossing the ceiling without waiting for EOF.
  */
-export async function parseBoundedJsonResponse(
+export function parseBoundedJsonResponse(response: Response): Promise<unknown> {
+  return parseBoundedJsonResponseWithReadError(response);
+}
+
+/** Apply a caller's transport error mapping only to reads from the response stream. */
+export async function parseBoundedJsonResponseWithReadError(
   response: Response,
+  mapReadError?: (error: unknown) => unknown,
 ): Promise<unknown> {
   const contentLength = Number(response.headers.get('content-length'));
   if (
@@ -198,7 +204,13 @@ export async function parseBoundedJsonResponse(
     let bytes = 0;
     try {
       for (;;) {
-        const { done, value } = await reader.read();
+        let chunk;
+        try {
+          chunk = await reader.read();
+        } catch (error) {
+          throw mapReadError?.(error) ?? error;
+        }
+        const { done, value } = chunk;
         if (done) break;
         // Fetch exposes decompressed bytes. Do not decode or retain a chunk
         // that exceeds the remaining budget, even if no EOF ever arrives.

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, expect } from 'vitest';
+import { afterEach, expect, describe, it } from 'vitest';
 import { freezeRuntimeAdapterDescriptor } from '@byok-sdk/client';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 import { HostLedger } from '@byok-sdk/server/execution-core';
@@ -171,4 +171,4 @@ async function ledgerSubject(port: ChannelPort): Promise<DeliverySubject> {
     stored: () => JSON.stringify(ledger().snapshot()),
   };
 }
-deliveryVectors('L BotCollaboration', ledgerSubject);
+deliveryVectors({ describe, it, expect }, 'L BotCollaboration', ledgerSubject);

@@ -27,7 +27,8 @@ import {
   type ApplySealedProviderProvisioningOptions,
   type ProviderProvisioningIdentitySnapshot,
 } from './sealed-provisioning';
-import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
+import { observeProviderCredentials } from './fixtures/observe-provider-credentials';
+import { InMemorySecretStore, type SecretStore, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
@@ -37,6 +38,7 @@ const SECRET_NAME = modelProviderSecretName(PROFILE_REF);
 let dir: string;
 let profiles: SqliteProviderProfileStore;
 let secrets: InMemorySecretStore;
+let credentials: SecretStore;
 let keyStore: DeviceSealingKeyStore;
 let sealingKey: DeviceSealingKey;
 
@@ -44,6 +46,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'byok-keys-acceptance-'));
   profiles = new SqliteProviderProfileStore({ path: join(dir, 'provider-profile.sqlite') });
   secrets = new InMemorySecretStore();
+  credentials = observeProviderCredentials(secrets, profiles);
   keyStore = new DeviceSealingKeyStore({ secretStore: secrets });
   sealingKey = await keyStore.loadOrCreate(enrollment);
 });
@@ -81,17 +84,17 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       const newer = await replaceSecretRequest(sealingKey, 'k-newer', { requestId: 'newer', generation: 3, expected: exp });
       await apply(newer, { faults: { onCutPoint: (point) => { if (point === cut) throw new Error('boundary'); } } }).catch(() => undefined);
       await expect(profiles.getOperationWatermark(PROFILE_REF)).resolves.toBe(3);
-      const before = await secrets.get(SECRET_NAME);
-      const set = vi.spyOn(secrets, 'set');
+      const before = await credentials.get(SECRET_NAME);
+      const set = vi.spyOn(credentials, 'set');
 
       expect(await apply(older)).toMatchObject({ outcome: 'rejected', code: 'operation_generation_stale' });
       expect(await apply(newer)).toMatchObject({ outcome: 'rejected', code: 'local_commit_interrupted' });
       expect(set).not.toHaveBeenCalled();
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(before);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(before);
 
       const recovery = await replaceSecretRequest(sealingKey, 'k-recovered', { requestId: 'recover', generation: 4, expected: exp });
       expect(await apply(recovery)).toMatchObject({ outcome: 'applied' });
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe('k-recovered');
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe('k-recovered');
       await expect(profiles.getPending(PROFILE_REF)).resolves.toBeUndefined();
     });
   }
@@ -102,8 +105,8 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     const request = await configureRequest(sealingKey, 'k-placement', { requestId: 'placement', generation: 1 });
     const identity = { current: placedIdentity() as ProviderProvisioningIdentitySnapshot };
     let reads = 0;
-    const set = vi.spyOn(secrets, 'set');
-    const del = vi.spyOn(secrets, 'delete');
+    const set = vi.spyOn(credentials, 'set');
+    const del = vi.spyOn(credentials, 'delete');
     const acquire = profiles.acquireConfigurationLock.bind(profiles);
     const lock = await acquire();
     // Deterministic interleaving: the change happens only once the applier is
@@ -148,7 +151,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     expect(await apply(stalePlacement)).toMatchObject({ code: 'agent_not_placed' });
     const staleEnrollment = await configureRequest(sealingKey, 'k', { requestId: 'e', generation: 1, enrollmentRevision: 'enrollment-0' });
     expect(await apply(staleEnrollment)).toMatchObject({ code: 'enrollment_mismatch' });
-    await expect(secrets.has(SECRET_NAME)).resolves.toBe(false);
+    await expect(credentials.has(SECRET_NAME)).resolves.toBe(false);
   });
 });
 
@@ -158,7 +161,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     const first = await apply(request);
     expect(first.outcome).toBe('applied');
     const rotated = await keyStore.rotate(enrollment);
-    const set = vi.spyOn(secrets, 'set');
+    const set = vi.spyOn(credentials, 'set');
     expect(await apply(request, { sealingKey: rotated })).toEqual(first);
     expect(set).not.toHaveBeenCalled();
   });
@@ -185,11 +188,11 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
 
   it('F4 the same requestId with a different digest is a conflict and writes nothing', async () => {
     await apply(await configureRequest(sealingKey, 'k-a', { requestId: 'same-id', generation: 1 }));
-    const set = vi.spyOn(secrets, 'set');
+    const set = vi.spyOn(credentials, 'set');
     const other = await configureRequest(sealingKey, 'k-b', { requestId: 'same-id', generation: 2 });
     expect(await apply(other)).toMatchObject({ outcome: 'rejected', code: 'request_conflict' });
     expect(set).not.toHaveBeenCalled();
-    await expect(secrets.get(SECRET_NAME)).resolves.toBe('k-a');
+    await expect(credentials.get(SECRET_NAME)).resolves.toBe('k-a');
   });
 
   it('F4 a request for another tenant or device never reads local results', async () => {
