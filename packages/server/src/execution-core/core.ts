@@ -483,16 +483,12 @@ export class HostExecutionCore {
           }
         });
         const state = this.ledger.snapshot();
-        const writers: Intent[] = [], readers: Intent[] = [];
+        const open: Intent[] = [];
         for (const row of Object.values(state.outbox)) {
-          if (row.kind !== 'intent') continue;
-          const intent = state.intents[row.intentId]!;
-          if (intent.execution.payload.homeAccess === 'memory-reader') readers.push(intent);
-          else writers.push(intent);
+          if (row.kind === 'intent') open.push(state.intents[row.intentId]!);
         }
-        const heads = [...fifoHeads(writers), ...readers];
         let changed = false;
-        for (const intent of heads) {
+        for (const intent of fifoHeads(open)) {
           try { changed = await this.reconcile(intent) || changed; }
           catch (error) { if (error instanceof OutboxFullError) throw error; this.error(`intent:${intent.id}`, error); }
         }
@@ -646,14 +642,17 @@ export class HostExecutionCore {
         state.scanWake = null; return;
       }
       const now = this.now();
+      const heads = new Set(fifoHeads(open));
       // A held intent (#957) is not ready, so it arms the scan only for its expiry. A ready time would make every scan re-arm
       // at `now + 1` while it stays held. An admission that throws counts as held: the begin records its error.
       const held = (intent: Intent) => { try { return !this.admits(intent, state); } catch { return true; } };
       const due = Math.max(now + 1, notBefore, Math.min(...open.map(intent => {
         if (intent.phase === 'memory_blocked') return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
-        if ((intent.phase === 'queued' || intent.phase === 'backoff') && held(intent)) return Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
-        if (intent.phase === 'backoff') return Math.min(intent.notBefore, intent.waitUntil, intent.retryUntil ?? Infinity);
-        if (intent.phase === 'queued') return open.some(other => other.agent === intent.agent && other.sequence < intent.sequence) ? intent.waitUntil : Math.min(intent.waitUntil, intent.retryUntil ?? Infinity, readyAt);
+        if (intent.phase === 'queued' || intent.phase === 'backoff') {
+          const expiresAt = Math.min(intent.waitUntil, intent.retryUntil ?? Infinity);
+          if (!heads.has(intent) || held(intent)) return expiresAt;
+          return Math.min(expiresAt, intent.phase === 'backoff' ? intent.notBefore : readyAt);
+        }
         if (this.eventsActive && this.liveTasks.has(intent.taskId)) return Infinity;
         return Math.min(now + this.reconcileMs, state.executions[intent.taskId]!.started ? Infinity : intent.waitUntil);
       })));
