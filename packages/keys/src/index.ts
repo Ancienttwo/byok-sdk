@@ -134,7 +134,7 @@ export {
 export { SqliteProviderProfileStore } from './sqlite-profile-store.js';
 export type { SqliteProviderProfileStoreOptions } from './sqlite-profile-store.js';
 export { inspectProviderProfileStore } from './store-compatibility.js';
-export { listProviderProfileSecretNames } from './provider-secret-recovery.js';
+export { listProviderProfileSecretNames, removeRetiredProviderCredentials } from './provider-secret-recovery.js';
 
 export {
   PROVIDER_CONFIGURATION_LOCK_WAIT_MS,
