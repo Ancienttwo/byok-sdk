@@ -86,10 +86,15 @@ export class SqliteSnapshotError extends Error {
  * only until it returns. The private directory and its files are then removed.
  */
 export function readSqliteSnapshot<T>(path: string, read: (db: DatabaseSync, copyPath: string) => T): T | undefined {
-  if (path === ':memory:') return undefined;
+  if (path === ':memory:' || path === '') return undefined;
   const fs = process.getBuiltinModule('node:fs');
-  const { join, basename, resolve } = process.getBuiltinModule('node:path');
-  const file = resolve(path);
+  const { join, basename } = process.getBuiltinModule('node:path');
+  let file: string;
+  try { file = fs.realpathSync(path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new SqliteReadOnlyOpenError(path, { cause: error });
+  }
   const stat = (name: string) => {
     try { return fs.statSync(name); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
@@ -109,15 +114,29 @@ export function readSqliteSnapshot<T>(path: string, read: (db: DatabaseSync, cop
     const before = suffixes.map(fingerprint);
     const initialFingerprint = `${initial.size}:${initial.mtimeMs}:${initial.ino}`;
     if (before[0] !== initialFingerprint) throw new SqliteSnapshotError(path, 'changed');
+    const walHeader = (name: string) => {
+      const fd = fs.openSync(name, 'r');
+      try {
+        const header = Buffer.alloc(32);
+        return header.subarray(0, fs.readSync(fd, header, 0, header.length, 0));
+      } finally { fs.closeSync(fd); }
+    };
     try {
+      const beforeWal = before[1] === undefined ? undefined : walHeader(file + '-wal');
       suffixes.forEach((suffix, i) => { if (before[i] !== undefined) fs.copyFileSync(file + suffix, copy + suffix); });
+      if (beforeWal) {
+        const afterWal = walHeader(file + '-wal');
+        const copiedWal = walHeader(copy + '-wal');
+        if (!beforeWal.equals(afterWal) || !beforeWal.equals(copiedWal)) throw new SqliteSnapshotError(path, 'changed');
+      }
+      if (suffixes.some((suffix, i) => fingerprint(suffix) !== before[i])) throw new SqliteSnapshotError(path, 'changed');
     } catch (error) {
-      if (suffixes.some((suffix, i) => fingerprint(suffix) !== before[i])) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
+          suffixes.some((suffix, i) => fingerprint(suffix) !== before[i])) {
         throw new SqliteSnapshotError(path, 'changed', { cause: error });
       }
       throw error;
     }
-    if (suffixes.some((suffix, i) => fingerprint(suffix) !== before[i])) throw new SqliteSnapshotError(path, 'changed');
     // SQLite treats a journal larger than 512 bytes with a valid nonzero
     // header as hot when no writer holds the reserved lock. Do not probe locks
     // on the original: conservatively refuse this candidate even with a writer.

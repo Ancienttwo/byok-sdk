@@ -2179,7 +2179,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Read-only SQLite format admission and private snapshots for Node stores",
-      "budgetBytes": 4136,
+      "budgetBytes": 4729,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
