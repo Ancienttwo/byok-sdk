@@ -218,10 +218,13 @@ exceed 16 images. The target device and runtime must support `input-images`.
 Submit the images to K4 within the blob's orphan grace period (24 hours by
 default). Uploading the same bytes again refreshes the grace period. If K8
 is down or the Turn waits past grace and maintenance collects an image before
-submission, the Turn ends as `failed` with `settleCode: 'coordination_input_invalid'`.
-Read it in `snapshot().turns[turnId]` or the `bot-turn:<id>` projection.
-The Host needs to ask the user to resend the message so it can upload the
-images and admit a new input with a new key.
+submission, the Turn's conclusion depends on what happens first. If submission
+finds the missing image, the conclusion is `failed` with
+`settleCode: 'coordination_input_invalid'`. If the K4 intent reaches its wait
+deadline first, the conclusion is `expired`. Both are terminal and visible in
+`snapshot().turns[turnId]` or the `bot-turn:<id>` projection. In either case, the
+Host needs to ask the user to resend the message so it can upload the images
+and admit a new input with a new key.
 
 ### Input root (#1407)
 

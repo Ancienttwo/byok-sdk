@@ -1,11 +1,11 @@
-import { InputImagesSchema, type RoomFields } from '@byok-sdk/protocol';
+import { type RoomFields } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn.js';
 import { activeBot, archiveBot, inactive, profileRevision, refuseExternalRooms, refuseExternalTeam, refuseSuspended, requireMain, roomId, teamSnapshot, TeamModeError,
   type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team.js';
 import { applyRoomSnapshot, createRoom, publishSettled, roomInput, seatSettled, setMemberMentions, updateRoom, type MemberMentions,
   type Mentions } from './rooms.js';
-import { sealBatchForCancel, type InputFields } from './coalesce.js';
+import { sealBatchForCancel, validateInputImages, type InputFields } from './coalesce.js';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation.js';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome.js';
 import { acceptMessage, type MessageDisposition, type MessageFields } from './message.js';
@@ -497,7 +497,7 @@ function commandRoot(state: CommandState, command: Command, disposition: Disposi
 /** One command through the commit contract. The caller runs it inside one store transaction. A keyless command gets no record. */
 export function commitCommand(state: CommandState, request: CommitRequest<Command>, store: CommandStore, ports: CommandPorts): CommitResult {
   const input = request.command;
-  const command = input.kind === 'input' && input.images !== undefined ? { ...input, images: InputImagesSchema.parse(input.images) } : input;
+  const command = input.kind === 'input' ? validateInputImages(input) : input;
   let root: string | undefined;
   const decide = (out: (intent: OutboxIntent) => void): Disposition => {
     ports.admit?.(command);

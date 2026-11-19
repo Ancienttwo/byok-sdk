@@ -1,5 +1,5 @@
 import type { AskUserAction, ConfirmableAction, InputImageBlobRef } from '@byok-sdk/protocol';
-import { sealAtBoundary, type Authority, type BatchTurn, type CoalesceState } from './coalesce.js';
+import { sealAtBoundary, validateInputImages, type Authority, type BatchTurn, type CoalesceState } from './coalesce.js';
 
 /**
  * Turn rows and the rows that a Turn makes, as pure rules (#739 D1). The functions change only the rows
@@ -69,9 +69,10 @@ export interface TurnFields {
  * A new Turn first seals its Bot's open input batch, so the queue keeps arrival order.
  */
 export function addTurn(state: TurnsState, fields: TurnFields): Turn {
-  const sealed = state.turns[fields.id] ? undefined : sealAtBoundary(state, fields.botId);
+  const turn = validateInputImages(fields);
+  const sealed = state.turns[turn.id] ? undefined : sealAtBoundary(state, turn.botId);
   if (sealed) addBatchTurns(state, [sealed]);
-  return insertTurn(state, fields);
+  return insertTurn(state, turn);
 }
 /** One user Turn per sealed input batch, in order. A batch Turn id is new and its batch is sealed, so no boundary seal applies. */
 export function addBatchTurns(state: TurnsState, sealed: readonly BatchTurn[]): void {

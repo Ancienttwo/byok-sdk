@@ -27,6 +27,11 @@ export interface CoalescePolicy { windowMs: number; maxItems: number; maxBytes: 
 export interface InputFields {
   id: string; key: string; botId: string; request: string; images?: readonly InputImageBlobRef[]; sender: string; authority: Authority;
 }
+/** Validate image refs at K8 ingress and pass the parsed value into the rules. */
+export function validateInputImages<T extends Pick<InputFields, 'images'>>(input: T): T {
+  const { images } = input;
+  return images === undefined ? input : { ...input, images: InputImagesSchema.parse(images) };
+}
 /** The input rows that the rules read and change. Both maps appear at the first coalesced input. */
 export interface CoalesceState { inputs?: Record<string, UserInput>; inputBatches?: Record<string, InputBatch> }
 /**

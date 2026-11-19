@@ -40,12 +40,13 @@ export function projectInputBatches(state: CollaborationState, emit: (key: strin
  * Without a policy, each input keeps its own Turn, as before coalescing.
  */
 export function admitUserInput(state: CollaborationState, input: rules.InputFields, policy: rules.CoalescePolicy | undefined, now: number): string {
-  const admission = rules.admitUserInput(state, input, { bot: botFacts(state, input.botId), turn: state.turns[input.id] }, policy, now);
+  const fields = rules.validateInputImages(input);
+  const admission = rules.admitUserInput(state, fields, { bot: botFacts(state, fields.botId), turn: state.turns[fields.id] }, policy, now);
   addBatchTurns(state, admission.sealed);
   if (admission.turn) {
-    state.budgets[input.id] ??= { continuation: 0, delegation: 0 };
-    addTurn(state, { id: input.id, root: input.id, source: 'user', request: input.request, botId: input.botId, hop: 0, authority: input.authority,
-      ...(input.images === undefined ? {} : { images: input.images }) });
+    const { id, request, botId, authority, images } = fields;
+    state.budgets[id] ??= { continuation: 0, delegation: 0 };
+    addTurn(state, { id, root: id, source: 'user', request, botId, hop: 0, authority, ...(images === undefined ? {} : { images }) });
   }
   return admission.id;
 }
