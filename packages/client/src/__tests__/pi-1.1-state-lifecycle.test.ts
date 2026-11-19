@@ -8,7 +8,7 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import type { Session } from '../types';
 
-const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+const PI_TARGET = { lane: 'auto' } as const;
 
 const roots: string[] = [];
 const sessions: Session[] = [];

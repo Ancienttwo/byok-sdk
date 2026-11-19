@@ -62,7 +62,7 @@ const EPOCH = 1;
 const BOTH: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-input', 'task-output'] };
 const OUTPUT_ONLY: TaskSealing = { scopeId: SCOPE, epoch: EPOCH, categories: ['task-output'] };
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; payload: Record<string, unknown> });
@@ -482,7 +482,7 @@ describe('sealed payload v1 on the daemon (#654 E3c)', () => {
 
   it('seals the decline of a plain gate after the open', async () => {
     const { server, adapter, deviceId, member } = await start();
-    server.send(await sealedOffer(member, 'gated', server.nextSeq(), deviceId, 'never runs', BOTH, { plain: { target: { lane: 'harness', harnessId: 'acme-harness' } } }));
+    server.send(await sealedOffer(member, 'gated', server.nextSeq(), deviceId, 'never runs', BOTH, { plain: { target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } } } }));
 
     const decline = await server.waitFor((envelope) => wireForm(envelope) === 'task.decline_sealed' && envelope.task_id === 'gated');
     expect(await openOutput(member, decline, deviceId)).toEqual({ reason: expect.any(String) });
@@ -1307,7 +1307,7 @@ async function seedRefusedResult(storeDir: string, deviceId: string, member: Sco
   });
   const contentHash = `sha256:${createHash('sha256').update(ciphertext).digest('hex')}`;
   const refused = createEnvelope('task.complete', {
-    sessionRef: 'sess-refused', executor: { kind: 'runtime', runtimeId: 'pi' },
+    sessionRef: 'sess-refused', executor: { id: 'pi' },
     sealed: { ...header, ciphertextRef: { blobId: `collected-${taskId}`, contentHash, size: ciphertext.length, contentType: 'application/octet-stream' } },
   } as never, { taskId });
   const journal = new SqliteLocalTaskJournal({ storeDir });

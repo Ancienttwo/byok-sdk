@@ -189,7 +189,7 @@ describe('device route rate admission (#1118)', () => {
     });
     const hello: Envelope = createEnvelope('conn.hello', {
       deviceId: device.deviceId, productId: PRODUCT_ID, clientVersion: '0.0.0-test',
-      protocolVersions: [PROTOCOL_VERSION], runtimes: [], capabilities: [],
+      protocolVersions: [PROTOCOL_VERSION], harnesses: [], capabilities: [],
     });
     const send = () => harness.request('/byok/messages', {
       method: 'POST',

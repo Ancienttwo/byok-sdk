@@ -117,7 +117,7 @@ describe('task.decline terminal', () => {
       deviceId,
       createEnvelope(
         'task.complete',
-        { agentRef: TEST_AGENT_REF, summary: 'late terminal', sessionRef: 'session-late', executor: { kind: 'runtime', runtimeId: 'pi' } },
+        { agentRef: TEST_AGENT_REF, summary: 'late terminal', sessionRef: 'session-late', executor: { id: 'pi' } },
         { taskId },
       ),
     ).then((result) => result.outcome);
@@ -132,11 +132,11 @@ describe('task.decline terminal', () => {
 
   it('keeps a completed result when a late decline races it', async () => {
     const taskId = await offeredTask();
-    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId })).then((result) => result.outcome);
+    await handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId })).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,
       deviceId,
-      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'did the thing', sessionRef: 'session-1', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
+      createEnvelope('task.complete', { agentRef: TEST_AGENT_REF, summary: 'did the thing', sessionRef: 'session-1', executor: { id: 'pi' } }, { taskId }),
     ).then((result) => result.outcome);
     await handleInboundEnvelope(
       stores,

@@ -3,7 +3,8 @@
 import { awaitAdmission } from '../admission-wait.js';
 import { detectedRuntimeCapabilities, observeRuntimeDetection } from '../../runtime-detection.js';
 import { AGENT_USER_CONTEXT_WINDOWS_REMEDY, runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
-import { freezeRuntimeAdapterDescriptor, modelLaneTarget, type RuntimeAdapter } from '../../types.js';
+import { harnessSupportsTarget, type ExecutionTarget } from '@byok-sdk/protocol';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type RuntimeAdapterDescriptor } from '../../types.js';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
 import type { McpStdioServerConfig } from '../../types.js';
 import type { ExecutionScratch } from '../retention/scratch.js';
@@ -29,7 +30,6 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   // `auto` leaves the pick to device preference. A native-sessions offer
   // reached here only with an explicit Pi target (selection rule 3).
   const { target } = payload;
-  const requestedRuntime = target.lane === 'auto' ? undefined : target.lane === 'harness' ? target.harnessId : target.runtimeId;
   const requiresAgentMemoryMcp = preparation === undefined && ordinaryMemoryMcp;
   const mcpToolApprovals = resolvedMcp?.ok ? resolvedMcp.mcpToolApprovals : undefined;
   const searchNames = Object.keys(resolvedMcp?.ok ? resolvedMcp.searchServers : {});
@@ -37,15 +37,13 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   let pick: PickResult;
   try {
     pick = await this['pickAdapter'](
-      requestedRuntime,
+      target,
       {
         mcpToolsets: requiredToolsets !== undefined
           || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
           || requiresAgentMemoryMcp || preparedMemorySelected,
         resume: offered.sessionRef !== undefined,
-        dispatchSelection: modelLaneTarget(target) !== undefined,
         preparedInput: preparation !== undefined,
-        taskExecutionOptions: offered.effort !== undefined || offered.modelId !== undefined,
       },
       blobAbort.signal,
       searchExposure,
@@ -290,9 +288,17 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   };
 }
 
+function descriptorSupportsTarget(descriptor: RuntimeAdapterDescriptor, target: ExecutionTarget): boolean {
+  return harnessSupportsTarget({ id: descriptor.id, capabilities: {
+    selectionModes: descriptor.selectionModes,
+    effort: descriptor.supportsEffort === true,
+    byokProviderId: descriptor.byokProviderId,
+  } }, target);
+}
+
 export async function pickAdapter(
   this: TaskRunner,
-  requestedRuntime: string | undefined,
+  target: ExecutionTarget,
   requirements: RuntimeRequirements,
   signal: AbortSignal,
   searchExposure = false,
@@ -304,7 +310,10 @@ export async function pickAdapter(
     ok: false, retryable: true, reason: 'MCP search exposure is unavailable on this device for the requested runtime or version',
   };
 
-  if (requestedRuntime) {
+  const advertised = this['deps'].advertisedHarnesses();
+
+  if (target.lane === 'harness') {
+    const requestedRuntime = target.harnessId;
     if (allowlist && !allowlist.includes(requestedRuntime)) {
       return {
         ok: false,
@@ -325,6 +334,10 @@ export async function pickAdapter(
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
     const rows = searchExposure ? searchCandidates(descriptor) : [];
     if (searchExposure && rows.length === 0) return searchUnavailable;
+
+    if (!advertised.some(harness => harnessSupportsTarget(harness, target)) || !descriptorSupportsTarget(descriptor, target)) {
+      return { ok: false, reason: `runtime "${requestedRuntime}" has no advertised support for the requested selection or effort`, retryable: false };
+    }
     const unmet = unmetRequirements(descriptor, requirements);
     if (unmet.length > 0) {
       return {
@@ -361,12 +374,17 @@ export async function pickAdapter(
         runtimeUnavailable,
       };
     }
+    if (!this['deps'].advertisedHarnesses().some(harness => harnessSupportsTarget(harness, target))) {
+      return { ok: false, reason: `runtime "${requestedRuntime}" is no longer advertised for this target`, retryable: true };
+    }
     const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
     if (searchExposure && searchEvidence === undefined) return searchUnavailable;
     return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
   }
 
-  const eligible = allowlist ? this['deps'].adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this['deps'].adapters;
+  const eligible = this['deps'].adapters.filter(({ descriptor }) =>
+    (allowlist === undefined || allowlist.includes(descriptor.id)) && descriptorSupportsTarget(descriptor, target)
+    && advertised.some(harness => harness.id === descriptor.id && harnessSupportsTarget(harness, target)));
   // M5 batch-3: product decision — pi is the FALLBACK runtime, not the
   // default. Ordered independently of `deps.adapters`'s own construction
   // order (which stays whatever `buildRuntimeAdapters`/the embedder built
@@ -383,7 +401,8 @@ export async function pickAdapter(
     capabilityEligible += 1;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
-    if (detected.kind !== 'available' || detected.versionVerdict?.state === 'block') continue;
+    if (detected.kind !== 'available' || detected.versionVerdict?.state === 'block'
+      || !this['deps'].advertisedHarnesses().some(harness => harness.id === descriptor.id && harnessSupportsTarget(harness, target))) continue;
     const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
     if (!searchExposure || searchEvidence !== undefined) {
       return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };

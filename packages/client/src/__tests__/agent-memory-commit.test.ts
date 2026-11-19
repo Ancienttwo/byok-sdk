@@ -236,7 +236,7 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
     server.send(createEnvelope('task.offer', {
       instruction: 'work',
       agentRef: { agentId: 'commit', profileRevision: 'r1' },
-      target: { lane: 'runtime', runtimeId: 'pi' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       ...FRESH_OFFER,
       ...(options.commit === false ? {} : { agentMemoryCommit: 'on-success' as const }),
       ...(options.reader === true ? { homeAccess: 'memory-reader' as const } : {}),

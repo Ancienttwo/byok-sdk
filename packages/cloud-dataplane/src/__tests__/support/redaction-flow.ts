@@ -172,6 +172,7 @@ export async function pairDevice(host: RedactionHost, tenant: TenantId, extraCap
   };
   const hello = await device.send(createEnvelope('conn.hello', {
     protocolVersions: [PROTOCOL_VERSION],
+    harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }],
     capabilities: [...DEVICE_CAPABILITIES, ...extraCapabilities],
     deviceId,
     productId: PRODUCT_ID,
@@ -186,7 +187,7 @@ export function executionInput(taskId: string, deviceId: string, instruction: st
     deviceId,
     payload: {
       instruction,
-      target: { lane: 'runtime', runtimeId: 'codex' },
+      target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
       agentRef: AGENT_REF,
       session: { mode: 'fresh' },
       egressPolicy: EGRESS_POLICY,
@@ -226,7 +227,7 @@ export async function publishEnvelope(taskId: string, text: string, messageId: s
 export function completeEnvelope(taskId: string, text: string, artifactRefs: readonly unknown[] = []): Envelope {
   return createEnvelope('task.complete', {
     agentRef: AGENT_REF,
-    executor: { kind: 'runtime', runtimeId: 'codex' },
+    executor: { id: 'codex' },
     sessionRef: SESSION_REF,
     summary: `summary ${text}`,
     finalMessage: `final ${text}`,
@@ -256,7 +257,7 @@ export async function startTask(host: RedactionHost, device: Device, taskId: str
     'task.offer',
     taskId,
   ]);
-  await expectAccepted(device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId })));
+  await expectAccepted(device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { id: 'codex' } }, { taskId })));
   await expectAccepted(device.send(createEnvelope('task.started', {}, { taskId })));
   await expectAccepted(device.send(progressEnvelope(taskId, 1, canary.text)));
   const messageId = randomUUID();

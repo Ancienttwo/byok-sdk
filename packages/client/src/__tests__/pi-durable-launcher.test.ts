@@ -1,3 +1,4 @@
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, realpath, rm, readFile, stat, writeFile } from 'node:fs/promises';
@@ -57,7 +58,9 @@ const __executionScratch = await testExecutionScratch();
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
   const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [], created_at: '2026-09-10T00:00:00.000Z', updated_at: '2026-09-10T00:00:00.000Z', display_name: 'Synthetic', enabled: true, kind: 'model', model: 'test', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, contextWindow: 4096, maxTokens: 64, reasoning: false, thinkingLevel: 'off', ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } });
   const children: ChildProcess[] = [];
-  const adapter = new PiAdapter({ durableLane: true, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
+  const adapter = new PiAdapter({ durableLane: true, validateProviderProfileBinding: async binding => {
+    expect(binding).toEqual(exactProviderProfileBinding(profile));
+  }, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
     spawnFn: ((_cmd, args, options) => {
       const parsed = parsePiProviderLauncherOptions(args as string[]); expect(parsed.runtimeEntry).toBe('pi-durable');
       const delegated = buildPiPreparedArgs(parsed.piArgs);
@@ -73,7 +76,7 @@ const __executionScratch = await testExecutionScratch();
       children.push(child); return child;
     }) as typeof nativeSpawn,
   });
-  const selection = { lane: 'byok' as const, runtimeId: 'pi' as const, providerId: 'probe', modelId: 'test' };
+  const selection = { lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'byok-profile' as const, providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [] } } };
   const offer = { instruction: 'Host authority input\nHost context second line', target: selection };
   const prepared = await adapter.prepare({ offer, ...mcp } as never);
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
@@ -84,7 +87,7 @@ const __executionScratch = await testExecutionScratch();
   await writeFile(path.join(ambientAgent, 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api_key', key: 'AMBIENT_AUTH_KEY' } }));
   const env = { ...testRuntimeEnv(), HOME: root, PI_CODING_AGENT_DIR: ambientAgent };
   const launch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: home, env,  });
-  const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, modelTarget: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
+  const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, selection: selection.selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
   const journal: string[] = [];
   const toolAuthorization = await gateFor?.(home);
   const session = await prepared.operation.start({ ...mcp, ...(toolAuthorization === undefined ? {} : { toolAuthorization }), scratch: (launch).scratch,  kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { replicaRoot: path.join(store, 'durable-replicas'), tenantId: 'tenant', lifecycle: { ownsLease: () => lifecycle?.ownsLease?.() ?? true, record: async (kind,n) => { journal.push(`${kind}:${n}`); await lifecycle?.record?.(kind,n); } } } }); sessions.push(session);

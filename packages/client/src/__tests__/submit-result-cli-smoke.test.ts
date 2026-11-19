@@ -58,7 +58,7 @@ async function run(outcome: unknown) {
   await daemon.pair('pairing-code');
   await daemon.start();
   server.send(createEnvelope('task.offer', {
-    instruction: 'review and submit', target: { lane: 'runtime', runtimeId: 'codex' },
+    instruction: 'review and submit', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
     agentRef: { agentId: 'smoke-agent', profileRevision: '1' }, ...FRESH_OFFER,
     terminalProjection: { mode: 'result-document', contract: 'smoke.review.v1', schema: SCHEMA as never },
   }, { taskId: 'smoke-task', seq: server.nextSeq() }));

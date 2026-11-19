@@ -17,7 +17,7 @@ import {
 } from './loopback';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 
-const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
 
 import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('claude', QUALIFIED_CLAUDE_VERSION);

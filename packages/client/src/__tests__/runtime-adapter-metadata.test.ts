@@ -79,9 +79,9 @@ describe('selection target', () => {
     expect(descriptor.requiresMcpToolsetToolObservation).toBe(true);
   });
 
-  it('derives the wire runtime ids and the harness exclusion from one list', () => {
+  it('uses the same harness ID namespace for built-in and custom executors', () => {
     expect(RuntimeIdSchema.options).toEqual([...RUNTIME_IDS]);
-    for (const id of RUNTIME_IDS) expect(HarnessIdSchema.safeParse(id).success).toBe(false);
+    for (const id of RUNTIME_IDS) expect(HarnessIdSchema.parse(id)).toBe(id);
   });
 
   it('selects every built-in adapter exactly as RuntimeIdSchema says', async () => {
@@ -90,12 +90,12 @@ describe('selection target', () => {
       const { id } = adapter.descriptor;
       const wire = RuntimeIdSchema.safeParse(id).success;
       expect(isWireRuntimeId(id)).toBe(wire);
-      expect(taskRuntimeTarget(adapter.descriptor)).toEqual(wire ? { lane: 'runtime', runtimeId: id } : { lane: 'harness', harnessId: id });
-      if (!wire) expect(HarnessIdSchema.parse(id)).toBe(id);
+      expect(taskRuntimeTarget(adapter.descriptor)).toEqual({ lane: 'harness', harnessId: id, selection: { mode: 'device-default' } });
+      expect(HarnessIdSchema.parse(id)).toBe(id);
     }
     expect(Object.values(adapters).map(adapter => taskRuntimeTarget(adapter.descriptor))).toEqual([
-      { lane: 'runtime', runtimeId: 'claude' }, { lane: 'runtime', runtimeId: 'codex' }, { lane: 'runtime', runtimeId: 'pi' },
-      { lane: 'harness', harnessId: 'grok' }, { lane: 'harness', harnessId: 'dsh' }, { lane: 'harness', harnessId: 'agy' },
+      { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
+      { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } }, { lane: 'harness', harnessId: 'dsh', selection: { mode: 'device-default' } }, { lane: 'harness', harnessId: 'agy', selection: { mode: 'device-default' } },
     ]);
   });
 });
@@ -116,7 +116,7 @@ describe('supported platforms', () => {
   });
 
   it('a custom descriptor without platforms keeps no restriction', () => {
-    const descriptor = freezeRuntimeAdapterDescriptor({ id: 'custom', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false } });
+    const descriptor = freezeRuntimeAdapterDescriptor({ id: 'custom', selectionModes: ['device-default'], capabilities: { steer: false, resume: false, approvalInteractive: false } });
     expect(descriptor).not.toHaveProperty('platforms');
   });
 
@@ -178,12 +178,12 @@ describe('adapter-declared facts the daemon reads instead of the runtime id', ()
 
   it('a custom descriptor keeps its declarations through freezing', () => {
     const descriptor = freezeRuntimeAdapterDescriptor({
-      id: 'acme', supportsDispatchSelection: true, fileScope: { lanes: ['rpc', 'prepared'] }, providerProfileBinding: true,
+      id: 'acme', selectionModes: ['device-default', 'byok-profile'], fileScope: { lanes: ['rpc', 'prepared'] }, providerProfileBinding: true,
       capabilities: { steer: false, resume: false, approvalInteractive: false },
     });
     expect(descriptor.fileScope).toEqual({ lanes: ['rpc', 'prepared'] });
     expect(descriptor.providerProfileBinding).toBe(true);
-    expect(freezeRuntimeAdapterDescriptor({ id: 'bare', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false } }))
+    expect(freezeRuntimeAdapterDescriptor({ id: 'bare', selectionModes: ['device-default'], capabilities: { steer: false, resume: false, approvalInteractive: false } }))
       .not.toHaveProperty('fileScope');
   });
 });
@@ -219,7 +219,8 @@ describe('daemon detection authority', () => {
 
     const hello = await server.waitFor(e => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('wrong envelope');
-    expect(hello.payload.runtimes?.map(runtime => runtime.id)).toEqual(['codex']);
+    expect(hello.payload.harnesses.map(runtime => runtime.id)).toEqual(['codex']);
+    expect(hello.payload.runtimeUnavailable).toContainEqual({ id: 'claude', cause: 'platform_unsupported', retryable: true });
 
     // The public, transport-free projection equals the daemon's event, field for field.
     const detected = events.find(event => event.kind === 'runtimes-detected');
@@ -229,11 +230,11 @@ describe('daemon detection authority', () => {
     expect(detected.runtimes[0]).toMatchObject({ id: 'claude', outcome: 'refused', reason: 'platform_unsupported' });
     expect(detected.runtimes[1]).toMatchObject({ id: 'codex', version: 'codex-cli 9.9.9', qualifiedVersion: '0.169.0', authPresent: true });
 
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'no start', target: { lane: 'runtime', runtimeId: 'claude' }, ...FRESH_OFFER }, { taskId: 'platform-refused', seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'no start', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, ...FRESH_OFFER }, { taskId: 'platform-refused', seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline');
     if (declined.type !== 'task.decline' || declined.payload.sealed !== undefined) throw new Error('wrong envelope');
-    expect(declined.payload.reason).toBe(`platform_unsupported: runtime "claude" does not support ${process.platform}`);
-    expect(declined.payload.retryable).toBe(true);
+    expect(declined.payload.reason).toBe('runtime "claude" has no advertised support for the requested selection or effort');
+    expect(declined.payload.retryable).toBe(false);
     expect(refused.detect).not.toHaveBeenCalled();
   });
 });

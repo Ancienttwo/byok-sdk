@@ -71,7 +71,7 @@ import {
   type TaskCancellationStore,
 } from '@byok-sdk/cloud';
 import type { EmbeddedBlobAccess } from '../../embedded-blob-storage-contract.js';
-import { PROTOCOL_VERSION, byokBlobContentPath, type ClaimedExecutor, type RuntimeCapabilities, type RuntimeId } from '@byok-sdk/protocol';
+import { PROTOCOL_VERSION, byokBlobContentPath, type ClaimedExecutor, type RuntimeCapabilities } from '@byok-sdk/protocol';
 import type { DatabaseSync } from 'node:sqlite';
 import {
   closeSqliteDatabaseAfterInitializationFailure,
@@ -86,7 +86,7 @@ const DEFAULT_MAILBOX_READ_LIMIT = 50;
 const DEFAULT_OBJECT_LIST_LIMIT = 100;
 const DEFAULT_BLOB_URL_TTL_MS = 15 * 60_000;
 const SIGNING_SECRET_BYTES = 32;
-const SQLITE_SCHEMA_VERSION = '10';
+const SQLITE_SCHEMA_VERSION = '11';
 
 import { SqliteWakeStore, WAKE_SCHEMA } from './wakes.js';
 import { APPROVAL_TIMELINE_SCHEMA, SqliteApprovalTimelineStore } from './approval-timeline.js';
@@ -155,7 +155,6 @@ CREATE TABLE IF NOT EXISTS task_attempt (
   device_id TEXT NOT NULL,
   agent_ref_json TEXT,
   owner_device_id TEXT,
-  claimed_runtime TEXT,
   claimed_harness_id TEXT,
   claimed_runtime_capabilities_json TEXT,
   status TEXT NOT NULL,
@@ -172,8 +171,7 @@ CREATE TABLE IF NOT EXISTS task_attempt (
   archived_at TEXT,
   archive_settled_at TEXT,
   PRIMARY KEY (tenant_id, task_id),
-  -- One claimed executor (wire v7), kept as two queryable columns.
-  CHECK (claimed_runtime IS NULL OR claimed_harness_id IS NULL)
+  CHECK ((owner_device_id IS NULL) = (claimed_harness_id IS NULL))
 );
 CREATE TABLE IF NOT EXISTS agent_message_admission (
   tenant_id TEXT NOT NULL,
@@ -292,11 +290,11 @@ function currentSchemaObjects(): Map<string, string> {
 
 /**
  * The store's format check, reading only: `'empty'` for a file that holds no
- * table yet, `'current'` for a file whose metadata names schema 10 and whose
- * tables, indexes and triggers are exactly schema 10's, by name and
+ * table yet, `'current'` for a file whose metadata names schema 11 and whose
+ * tables, indexes and triggers are exactly schema 11's, by name and
  * definition. Anything else throws `SqliteSchemaError`: an older or newer
  * version, or an object this build does not know, is `SQLITE_SCHEMA_UNSUPPORTED`;
- * a missing or changed object is `SQLITE_SCHEMA_INVALID`. Wire v7 starts on a
+ * a missing or changed object is `SQLITE_SCHEMA_INVALID`. Wire v8 starts on a
  * new store, so no older file is upgraded in place and nothing is recreated.
  * It runs at open only: on the immutable handle before anything writes to the
  * file, and again inside the schema transaction as the authority for a file
@@ -472,7 +470,6 @@ interface TaskRow extends Record<string, unknown> {
   device_id: string;
   agent_ref_json: string;
   owner_device_id: string | null;
-  claimed_runtime: string | null;
   claimed_harness_id: string | null;
   claimed_runtime_capabilities_json: string | null;
   status: string;
@@ -488,12 +485,6 @@ interface TaskRow extends Record<string, unknown> {
   updated_at: string;
 }
 
-function claimedExecutorOf(row: TaskRow): { claimedExecutor?: ClaimedExecutor } {
-  if (row.claimed_runtime !== null) return { claimedExecutor: { kind: 'runtime', runtimeId: row.claimed_runtime as RuntimeId } };
-  if (row.claimed_harness_id !== null) return { claimedExecutor: { kind: 'harness', harnessId: row.claimed_harness_id } };
-  return {};
-}
-
 function taskRow(row: TaskRow): TaskAttempt {
   return {
     tenantId: row.tenant_id as TenantId,
@@ -501,7 +492,7 @@ function taskRow(row: TaskRow): TaskAttempt {
     deviceId: row.device_id,
     agentRef: JSON.parse(row.agent_ref_json) as AgentRef,
     ...(row.owner_device_id === null ? {} : { ownerDeviceId: row.owner_device_id }),
-    ...claimedExecutorOf(row),
+    ...(row.claimed_harness_id === null ? {} : { claimedExecutor: { id: row.claimed_harness_id } }),
     ...(row.claimed_runtime_capabilities_json === null
       ? {}
       : { claimedRuntimeCapabilities: JSON.parse(row.claimed_runtime_capabilities_json) as RuntimeCapabilities }),
@@ -748,14 +739,13 @@ export class SqliteTaskAttemptStore implements TaskAttemptStore {
     return this.coordinator.run((db) => {
       const now = this.#now();
       db.prepare(
-        `UPDATE task_attempt SET owner_device_id = ?, claimed_runtime = ?, claimed_harness_id = ?, claimed_runtime_capabilities_json = ?,
+        `UPDATE task_attempt SET owner_device_id = ?, claimed_harness_id = ?, claimed_runtime_capabilities_json = ?,
           status = 'claimed', claimed_at = ?, updated_at = ?
          WHERE tenant_id = ? AND task_id = ? AND device_id = ? AND owner_device_id IS NULL
            AND cancellation_requested_at IS NULL AND status = 'offered'`,
       ).run(
         input.deviceId,
-        input.executor.kind === 'runtime' ? input.executor.runtimeId : null,
-        input.executor.kind === 'harness' ? input.executor.harnessId : null,
+        input.executor.id,
         input.capabilities === undefined ? null : JSON.stringify(input.capabilities),
         now,
         now,

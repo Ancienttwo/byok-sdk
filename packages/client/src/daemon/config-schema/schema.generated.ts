@@ -780,6 +780,9 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "type": "string"
       }
     },
+    "runtimeInstallRoot": {
+      "type": "string"
+    },
     "runtimes": {
       "type": "object",
       "properties": {
@@ -990,6 +993,10 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
         "claude": {
           "type": "object",
           "properties": {
+            "byok": {
+              "x-byok-surface": "embedded-only",
+              "not": {}
+            },
             "agentUserContext": {
               "enum": [
                 "excluded",

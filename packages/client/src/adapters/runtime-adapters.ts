@@ -50,6 +50,8 @@ export interface PiRuntimeConfig {
 export interface RuntimeAdaptersRuntimes {
   pi?: PiRuntimeConfig;
   claude?: {
+    /** Catalog identity and per-spawn provider key resolver for an embedded Host. */
+    byok?: ClaudeAdapterOptions['byok'];
     /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
     agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
     /** `ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`. */
@@ -128,6 +130,8 @@ export interface RuntimeAdaptersRuntimes {
  * so only the daemon builds it.
  */
 export interface RuntimeAdaptersConfig {
+  /** SDK install root for the explicitly managed CLI copies. */
+  runtimeInstallRoot?: string;
   /** Absolute native asset root of every built adapter. */
   nativeAssetRoot?: string;
   /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
@@ -227,6 +231,9 @@ export function createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAda
  */
 export function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[] {
   const issues = [...piRuntimeConfigIssues(config), ...providerKeyResolverIssues(config.runtimes)];
+  if (config.runtimeInstallRoot !== undefined && !(typeof config.runtimeInstallRoot === 'string' && isAbsolute(config.runtimeInstallRoot))) {
+    issues.push(invalid('runtimeInstallRoot', 'DaemonConfig.runtimeInstallRoot must be an absolute path'));
+  }
   if (issues.length > 0) throw new DaemonConfigInvalidError(issues);
   const ids = config.runtimeAllowlist
     ? SDK_BUILT_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
@@ -313,14 +320,15 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
       });
     case 'claude':
       return new ClaudeAdapter({
-        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
         ...(claude?.agentUserContext === undefined ? {} : { agentUserContext: claude.agentUserContext }),
         ...(claude?.agentSessionPersistence === undefined ? {} : { agentSessionPersistence: claude.agentSessionPersistence }),
         ...(claude?.versionPolicy === undefined ? {} : { versionPolicy: claude.versionPolicy }),
+        ...(claude?.byok === undefined ? {} : { byok: claude.byok }),
       });
     case 'codex':
       return new CodexAdapter({
-        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
         ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
         ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
         ...(codex?.agentUserContext === undefined ? {} : { agentUserContext: codex.agentUserContext }),
@@ -342,7 +350,7 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
       const options = config.runtimes?.opencode;
       if (!options) throw new DaemonConfigInvalidError([invalid('runtimes.opencode', 'OpenCode requires a Host model candidate list')]);
       try {
-        return new OpenCodeAdapter({ models: options.models, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        return new OpenCodeAdapter({ models: options.models, nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
           ...(options.executable === undefined ? {} : { resolveBin: () => ({ command: options.executable!, source: 'env' as const }) }),
           ...(options.versionPolicy === undefined ? {} : { versionPolicy: options.versionPolicy }),
         });
@@ -365,7 +373,7 @@ function buildDshAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
   }
   try {
     return new DshAdapter({
-      home: dsh.home, model: dsh.model, resolveKey: dsh.resolveKey, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+      home: dsh.home, model: dsh.model, resolveKey: dsh.resolveKey, nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
       ...(dsh.sandbox === undefined ? {} : { sandbox: dsh.sandbox }),
       ...(dsh.versionPolicy === undefined ? {} : { versionPolicy: dsh.versionPolicy }),
     });

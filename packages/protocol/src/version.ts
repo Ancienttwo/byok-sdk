@@ -10,7 +10,7 @@ export const MAILBOX_READ_AHEAD_MAX_SEQS = 4096;
  * addition, under docs/protocol.md "Freeze rule". `wire-additions.ts` owns
  * receiver gates; the compatibility suite owns published-decoder evidence.
  */
-export const PROTOCOL_VERSION = 7;
+export const PROTOCOL_VERSION = 8;
 
 /**
  * The device runs `homeAccess: 'memory-reader'` Agent offers: each reader
@@ -27,18 +27,11 @@ export const AGENT_HOME_READERS_CAPABILITY = 'agent-home-readers' as const;
  * on them (`wire-additions.ts`). Additional flags may be introduced without a
  * protocol version bump; unrecognized flags must be ignored.
  *
- * `dispatch-selection` gates the model lanes of an offer `target`
- * (`subscription`, `byok`, `byok-profile`): a daemon advertises it when it is
- * configured to run a selected provider and model. Absence means reject
- * before task creation, not send an offer that could reach a different
- * provider.
- *
  * `toolset-selection` (additive-minor) means the daemon understands an
  * offer's `requiredToolsets` and can resolve its logical ids against local
  * MCP configuration.
  */
 export const CAPABILITY_FLAGS = [
-  'dispatch-selection',
   'toolset-selection',
   'agent-home-contract',
   AGENT_HOME_READERS_CAPABILITY,
@@ -62,7 +55,6 @@ export const CAPABILITY_FLAGS = [
   NATIVE_SESSIONS_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
-  TASK_EXECUTION_OPTIONS_CAPABILITY,
   INPUT_IMAGES_CAPABILITY,
 ] as const;
 
@@ -87,7 +79,6 @@ import {
   NATIVE_SESSIONS_CAPABILITY,
   AGENT_INPUT_PREPARATION_CAPABILITY,
   INPUT_IMAGES_CAPABILITY,
-  TASK_EXECUTION_OPTIONS_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
 } from './capability-constants.js';

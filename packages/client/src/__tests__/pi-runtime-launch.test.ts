@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { piLaunchCommand, resolvePiRuntimeLaunch, type PiRuntimeLaunchResources } from '../adapters/pi/runtime-launch';
 
-const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+const PI_TARGET = { lane: 'auto' } as const;
 
 const roots: string[] = [];
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map((root) => fs.rm(root,{recursive:true,force:true}))); });

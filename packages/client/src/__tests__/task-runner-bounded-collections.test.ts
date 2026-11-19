@@ -10,7 +10,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { createOfferFacts, MAX_TRACKED_TASK_IDS } from '../daemon/task-runner/state';
 import { hostFor } from '../daemon/task-runner/host';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => {
@@ -22,7 +22,7 @@ const unusedBlobClient: BlobResolver = {
 };
 
 async function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[]): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
+  const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',

@@ -97,12 +97,12 @@ it.each([
     const taskId = `same-id-${withMessageEgress ? 'message-egress' : 'result-document'}`;
     const submit = (instruction: string) => sdk.executions.submit(withMessageEgress
       ? { taskId, deviceId, payload: {
-        instruction, target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        instruction, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
         terminalProjection: { mode: 'none' },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-0' } }
       : { taskId, deviceId, payload: {
-        instruction, target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+        instruction, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         terminalProjection: { mode: 'none' },
       } });
 
@@ -144,7 +144,7 @@ it('declines a fresh Agent egress offer whose policy is not exactly the daemon p
   const daemonPolicy: AgentEgressPolicy = { ...DEFAULT_AGENT_EGRESS_POLICY, policyRevision: 'daemon-v2' };
   await withHarness(daemonPolicy, async ({ sdk, adapter, deviceId }) => {
     const taskId = 'policy-mismatch';
-    await sdk.executions.submit({ taskId, deviceId, payload: { instruction: INSTRUCTION_A, target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF,
+    await sdk.executions.submit({ taskId, deviceId, payload: { instruction: INSTRUCTION_A, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT_REF,
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' } } });
     await vi.waitFor(async () => expect(await sdk.tasks.deviceTerminal(taskId)).toMatchObject({
       envelope: { type: 'task.decline', payload: {
@@ -175,7 +175,7 @@ it('fails a fresh Agent egress offer whose instruction BlobRef cannot be resolve
       url: 'http://127.0.0.1:1/never-listening',
     };
     await sdk.executions.submit({ taskId, deviceId, payload: {
-      instruction: { blobRef }, target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      instruction: { blobRef }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       terminalProjection: { mode: 'none' },
     }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'turn-0' } });

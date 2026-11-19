@@ -27,7 +27,7 @@ import { serveAgentMemoryMcpOverStdio, serveGrantedAgentMemoryMcpOverStdio } fro
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
 
 const roots: string[] = [];
@@ -83,7 +83,7 @@ describe('Agent memory guidance', () => {
         throw new Error('not used in this test');
       },
     };
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters,
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -105,7 +105,7 @@ describe('Agent memory guidance', () => {
           'task.offer',
           {
             instruction: `agent instruction for ${runtime}`,
-            target: { lane: 'runtime', runtimeId: runtime },
+            target: { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } },
             agentRef: { agentId: `agent-${runtime}`, profileRevision: 'profile-1' },
             ...FRESH_OFFER,
           },
@@ -197,7 +197,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
   const storeDir = await makeRoot();
   const adapter = new StubRuntimeAdapter('pi', undefined, { steer: true, resume: true, approvalInteractive: true, mcpToolsets });
   const sent: Envelope[] = [];
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -226,7 +226,7 @@ async function createMemoryRunner(agentMemoryMcp: 'auto' | 'off' | undefined, mc
   const offer = (taskId: string, options: { reader?: boolean; agentId?: string; agentMemory?: AgentMemorySelection; agentMemoryCommit?: 'on-success'; sessionRef?: string } = {}) =>
     runner.handleEnvelope(createEnvelope('task.offer', {
       instruction: `instruction for ${taskId}`,
-      target: { lane: 'runtime', runtimeId: 'pi' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       agentRef: { agentId: options.agentId ?? 'agent-admission', profileRevision: 'profile-1' },
       ...(options.sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef: options.sessionRef } }),
       ...(options.reader ? { homeAccess: 'memory-reader' as const } : {}),

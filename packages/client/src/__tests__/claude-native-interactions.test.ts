@@ -12,7 +12,7 @@ import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { memoryClaude } from './fixtures/memory-claude';
 
-const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
 
 const fixture = fileURLToPath(new URL('./fixtures/claude-native-interactions.mjs', import.meta.url));
 const sessions: Session[] = [];

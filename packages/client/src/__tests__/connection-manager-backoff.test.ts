@@ -54,7 +54,7 @@ async function setup(reply: Reply) {
     },
   };
   connection = new ConnectionManager({
-    serverUrl, deviceId, productId: 'backoff-test', capabilities: [], runtimes: [], auth,
+    serverUrl, deviceId, productId: 'backoff-test', capabilities: [], harnesses: [], auth,
     cursorStore: new CursorStore(root), onEnvelope: () => {}, fleetJitter,
     longPollRetryDelayMs: 1, longPollIdleDelayMs: 1,
   });

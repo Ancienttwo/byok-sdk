@@ -55,7 +55,7 @@ it.each([
   }, wakes: { schedule: vi.fn(), cancel: vi.fn(), pending: async () => [] } } as unknown as ExecutionServer;
   const core = new HostExecutionCore(server, ledger, { now: () => 1000 });
   const input = { key: 'turn', source: 'user', waitUntil: 60_000, retry: { maxAttempts: 2, delaysMs: [10_000], retryFailures: false },
-    execution: { deviceId: 'device', payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, instruction: 'Reply.', agentRef,
+    execution: { deviceId: 'device', payload: { target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, instruction: 'Reply.', agentRef,
       ...(homeAccess === 'memory-reader' ? { homeAccess } : {}),
       egressPolicy: { policyRevision: 'v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 4096 },
         reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },

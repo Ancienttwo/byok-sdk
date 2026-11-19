@@ -16,7 +16,7 @@ import { createInProcessMailboxWake } from '@byok-sdk/cloud';
 import { generateKeyPairSync, sign } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { tenantId, type Clock, type TenantId } from '@byok-sdk/core';
-import { EventsPollResponseSchema, pairDeviceDigest, parseMessage, type Envelope, type EventsPollResponse, type PairResponse } from '@byok-sdk/protocol';
+import { EventsPollResponseSchema, ExecutionTargetSchema, pairDeviceDigest, parseMessage, type Envelope, type EventsPollResponse, type HarnessInfo, type PairResponse } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN } from '../../auth/verify';
 import { AGENT_HOME_CONTRACT_CAPABILITY } from '../../cloud';
 import { createInMemoryByokCloud, type InMemoryByokCloud, type InMemoryByokCloudOptions } from '../../composition/in-memory';
@@ -24,6 +24,22 @@ import { createInMemoryByokCloud, type InMemoryByokCloud, type InMemoryByokCloud
 export const TENANT_A = tenantId('tenant-a');
 export const TENANT_B = tenantId('tenant-b');
 export const PRODUCT_ID = 'test-product';
+
+// The in-process fake runs device-default tasks without a subprocess.
+export const TEST_HARNESSES: readonly HarnessInfo[] = ['pi', 'claude', 'codex'].map(id => ({
+  id, capabilities: { selectionModes: ['device-default'], effort: false },
+}));
+
+/** Advertise the executor named by a corpus offer used in a test about another gate. */
+export function corpusOfferInventory(payload: { target?: unknown }): readonly HarnessInfo[] {
+  const target = ExecutionTargetSchema.parse(payload.target);
+  if (target.lane === 'auto') return TEST_HARNESSES;
+  const { harnessId, selection } = target;
+  return [{ id: harnessId, capabilities: {
+    selectionModes: [selection.mode], effort: target.effort !== undefined,
+    ...(selection.mode === 'byok' ? { byokProviderId: selection.providerId } : {}),
+  } }];
+}
 
 export const CLOUD_ORIGIN = 'http://cloud.test';
 
@@ -140,9 +156,12 @@ export function offerPayload(instruction = 'do the thing') {
 
 /** Adds the Agent-home capability to the device's recorded capabilities, which `enqueueAgentOffer` admits on. */
 export async function grantAgentHome(harness: CloudHarness, tenant: TenantId, deviceId: string): Promise<void> {
-  const current = (await harness.stores.devices.get(tenant, deviceId))?.capabilities ?? [];
+  const device = await harness.stores.devices.get(tenant, deviceId);
+  const current = device?.capabilities ?? [];
   if (current.includes(AGENT_HOME_CONTRACT_CAPABILITY)) return;
-  await harness.stores.devices.recordCapabilities(tenant, { deviceId, capabilities: [...current, AGENT_HOME_CONTRACT_CAPABILITY] });
+  await harness.stores.devices.recordCapabilities(tenant, {
+    deviceId, capabilities: [...current, AGENT_HOME_CONTRACT_CAPABILITY], harnesses: device?.harnesses ?? TEST_HARNESSES,
+  });
 }
 
 /** An events page whose entries were each decoded on their own, as the daemon does (#386). */

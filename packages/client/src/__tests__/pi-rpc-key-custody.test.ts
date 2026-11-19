@@ -1,3 +1,4 @@
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { promises as fs, readFileSync } from 'node:fs';
@@ -96,11 +97,12 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     servers.push(server); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
     const profileDbPath = path.join(root, 'profile.json');
-    await fs.writeFile(profileDbPath, JSON.stringify({ controlDir: control, secret: CANARY, profile: {
+    const profile = parseModelProviderProfile({
       adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [],
       created_at: '2026-10-13T00:00:00.000Z', updated_at: '2026-10-13T00:00:00.000Z', display_name: 'Probe', enabled: true, kind: 'model',
       model: 'probe', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, reasoning: false, thinkingLevel: 'off',
-        ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } } }));
+        ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } });
+    await fs.writeFile(profileDbPath, JSON.stringify({ controlDir: control, secret: CANARY, profile }));
 
     const sessionDir = path.join(root, 'sessions');
     const scratch = await testExecutionScratch();
@@ -113,7 +115,7 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     await fs.writeFile(path.join(ambientAgent, 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api_key', key: 'AMBIENT_AUTH_KEY' } }));
     const session = await startPreparedOperation(adapter, {
       instruction,
-      target: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'probe' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [] } } },
     }, { workspaceDir: home, scratch, env: { ...testRuntimeEnv(), HOME: root, PI_CODING_AGENT_DIR: ambientAgent } });
     sessions.push(session);
     const events: Array<AgentEvent | MessageDraftDelta> = [];

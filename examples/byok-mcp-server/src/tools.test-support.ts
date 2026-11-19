@@ -46,7 +46,7 @@ export class FakeSession implements Session {
 }
 export class FakeRuntime implements RuntimeAdapter {
   // Pi projects MCP toolsets. An Agent offer carries the Agent memory MCP whenever the daemon admits it.
-  readonly descriptor = freezeRuntimeAdapterDescriptor({ id: 'pi', supportsDispatchSelection: true,
+  readonly descriptor = freezeRuntimeAdapterDescriptor({ id: 'pi', selectionModes: ['device-default'],
     capabilities: { steer: false, resume: false, mcpToolsets: true, approvalInteractive: false } });
   readonly sessions = new Map<string, FakeSession>();
   readonly offers: RuntimeAdapterPrepareInput['offer'][] = [];
@@ -72,7 +72,15 @@ export async function openHost(options: { now?: () => number } = {}) {
   const server = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 200 });
   let mcp: ReturnType<typeof createBetaMcpServer> | undefined;
   const http = serve({ hostname: '127.0.0.1', port: 0,
-    fetch: request => new URL(request.url).pathname === '/mcp' && mcp ? mcp.fetch(request) : server.hono.fetch(request) });
+    fetch: request => {
+      if (mcp) {
+        let pathname: string;
+        try { pathname = new URL(request.url).pathname; }
+        catch { return new Response('Invalid request URL', { status: 400 }); }
+        if (pathname === '/mcp') return mcp.fetch(request);
+      }
+      return server.hono.fetch(request);
+    } });
   if (!http.listening) await new Promise<void>(resolve => http.once('listening', resolve));
   const address = http.address(); if (!address || typeof address === 'string') throw new Error('Missing HTTP address');
   const origin = `http://127.0.0.1:${address.port}`;
@@ -115,7 +123,7 @@ export async function openSimulatorHost(options: { now?: () => number; capabilit
     expect(response).toMatchObject({ status: 200, body: { accepted: 1 } });
   };
   await send(createEnvelope('conn.hello', { protocolVersions: [PROTOCOL_VERSION], capabilities: [...AGENT_EXECUTION_CAPABILITIES, ...options.capabilities ?? []], productId: PRODUCT_ID,
-    deviceId: session.deviceId, runtimes: [{ id: 'pi', capabilities: { steer: false, resume: false, approvalInteractive: false } }] }));
+    deviceId: session.deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false, steer: false, resume: false, approvalInteractive: false } }] }));
   /** Declare, upload and finalize one blob as the device, through the SDK's blob routes. */
   const uploadBlob = async (content: Buffer, contentType: string): Promise<BlobRef> => {
     const contentHash = `sha256:${createHash('sha256').update(content).digest('hex')}`;
@@ -141,5 +149,9 @@ export async function call(client: Client, name: string, args: Record<string, un
   const result = await client.callTool({ name, arguments: args });
   const block = result.content[0];
   if (!block || block.type !== 'text') throw new Error('Expected JSON text');
-  return { isError: result.isError === true, value: JSON.parse(block.text) };
+  try {
+    return { isError: result.isError === true, value: JSON.parse(block.text) };
+  } catch (error) {
+    throw new Error(`Expected a JSON response from ${name}`, { cause: error });
+  }
 }

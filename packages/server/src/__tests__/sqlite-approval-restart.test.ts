@@ -48,7 +48,7 @@ describe('ByokServer.tasks.events restoring an approval written before a SQLite 
       };
       await instance.executions.submit({
         taskId: 'waiting', deviceId: daemon.deviceId,
-        payload: { instruction: 'ask first', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+        payload: { instruction: 'ask first', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
       });
       await post(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId: daemon.deviceId, agentRef: AGENT }, { taskId: 'waiting' }));
       await post(createEnvelope('task.started', {}, { taskId: 'waiting' }));

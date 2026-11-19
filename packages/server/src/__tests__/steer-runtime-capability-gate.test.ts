@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createEnvelope, TASK_STEER_TEXT_MAX_BYTES, type ClaimedExecutor, type HarnessInfo, type RuntimeCapabilities, type RuntimeInfo } from '@byok-sdk/protocol';
+import { createEnvelope, TASK_STEER_TEXT_MAX_BYTES, type ClaimedExecutor, type HarnessInfo, type RuntimeCapabilities } from '@byok-sdk/protocol';
 import { createByokServer, SteerRejectedError, type ByokServer, type TaskHandle } from '../index';
 import {
   announceHello,
@@ -21,9 +21,9 @@ import {
 const PRODUCT_ID = 'acme';
 /** Short enough that a poll deliberately expecting nothing costs ~200ms, not ~50s. */
 const SHORT_HOLD_MS = 200;
-const PI: ClaimedExecutor = { kind: 'runtime', runtimeId: 'pi' };
-const CLAUDE: ClaimedExecutor = { kind: 'runtime', runtimeId: 'claude' };
-const CODEX: ClaimedExecutor = { kind: 'runtime', runtimeId: 'codex' };
+const PI: ClaimedExecutor = { id: 'pi' };
+const CLAUDE: ClaimedExecutor = { id: 'claude' };
+const CODEX: ClaimedExecutor = { id: 'codex' };
 
 /**
  * S0 (GAP-002): steering used to be sent to ANY `Running` task. Only pi's
@@ -60,7 +60,7 @@ interface Harness {
  * independent of what any claim below reports; most tests here pass the
  * realistic set purely so the fixture resembles a real device.
  */
-async function startHarness(runtimes: RuntimeInfo[] | undefined, harnesses?: HarnessInfo[]): Promise<Harness> {
+async function startHarness(runtimes: HarnessInfo[] | undefined, harnesses?: HarnessInfo[]): Promise<Harness> {
   const byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: SHORT_HOLD_MS });
   const started = await startServer(byok);
   const daemon = await connectFakeDaemonLongPoll(started.baseUrl, byok, { productId: PRODUCT_ID, runtimes, harnesses });
@@ -268,8 +268,8 @@ describe("S0 (GAP-002): task.steer is gated by the claimed runtime's capability 
     // the client sends them ungated for exactly this reason. The gate reads
     // capabilities, never the executor, so this must steer.
     // The kernel admits a harness claim only for a harness the device declared.
-    harness = await startHarness([], [{ id: 'acme.custom', capabilities: { steer: true, resume: false } }]);
-    const custom: ClaimedExecutor = { kind: 'harness', harnessId: 'acme.custom' };
+    harness = await startHarness([], [{ id: 'acme.custom', capabilities: { steer: true, resume: false, selectionModes: ['device-default'], effort: false } }]);
+    const custom: ClaimedExecutor = { id: 'acme.custom' };
     const handle = await dispatchClaimedRunning(harness, custom, { steer: true, resume: false });
 
     expect((await harness.byok.tasks.get(handle.taskId))?.claimedExecutor).toEqual(custom);
@@ -377,7 +377,7 @@ describe('S0 (GAP-002): claim-time capability snapshot on the task record', () =
     const snapshot = await harness.byok.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed');
     expect(snapshot?.claimedExecutor).toEqual(PI);
-    expect(snapshot?.claimedRuntimeCapabilities).toEqual(PI_RUNTIME_INFO.capabilities);
+    expect(snapshot?.claimedRuntimeCapabilities).toEqual({ steer: true, resume: true, approvalInteractive: false });
   });
 
   it('a re-announcement advertising a DIFFERENT capability set does not retroactively change an already-running task: the snapshot is frozen at claim time', async () => {

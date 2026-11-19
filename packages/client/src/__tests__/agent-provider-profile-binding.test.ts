@@ -31,9 +31,9 @@ function prepareInput(): RuntimeAdapterPrepareInput {
     offer: {
       instruction: 'inspect image',
       target: {
-        lane: 'byok-profile',
-        runtimeId: 'pi',
-        providerProfile: binding,
+        lane: 'harness',
+        harnessId: 'pi',
+        selection: { mode: 'byok-profile', providerProfile: binding },
       },
     },
     descriptor: new PiAdapter().descriptor,
@@ -114,9 +114,9 @@ describe('Agent provider profile binding admission', () => {
       server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
         instruction: 'inspect image',
         target: {
-          lane: 'byok-profile',
-          runtimeId: 'pi',
-          providerProfile: binding,
+          lane: 'harness',
+          harnessId: 'pi',
+          selection: { mode: 'byok-profile', providerProfile: binding },
         },
       }, { taskId, seq: server.nextSeq() }));
 

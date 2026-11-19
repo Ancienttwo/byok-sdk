@@ -10,12 +10,14 @@ import { exactProviderProfileBinding, inspectProviderProfileStore, SqliteProvide
  */
 export function catalogEntryFor(profile: ModelProviderProfile, base: ExecutionTemplate): ExecutionTemplate | undefined {
   const { target } = base.payload;
-  if (target.lane !== 'runtime' || target.runtimeId !== 'pi') throw new Error(`A provider profile pins only Pi entries, not ${JSON.stringify(target)}`);
+  if (target.lane !== 'harness' || target.harnessId !== 'pi') throw new Error('A provider profile pins only Pi entries');
   if (profile.pi_model === undefined) return undefined;
   const binding = exactProviderProfileBinding(profile);
   return { ...base, payload: { ...base.payload, target: {
-    lane: 'byok-profile' as const, runtimeId: 'pi' as const,
-    providerProfile: { ...binding, requiredCapabilities: [...binding.requiredCapabilities] },
+    lane: 'harness', harnessId: 'pi', selection: {
+      mode: 'byok-profile',
+      providerProfile: { ...binding, requiredCapabilities: [...binding.requiredCapabilities] },
+    },
   } } };
 }
 

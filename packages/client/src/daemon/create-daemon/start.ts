@@ -12,6 +12,34 @@ import { composeStartTerminals } from './start-terminals.js';
 import { composeStartRunnerDeps } from './start-runner.js';
 import { composeStartEnvelopes } from './start-envelopes.js';
 import { createStartConnection } from './start-connection.js';
+import { detectRuntimes } from './support.js';
+import { abortableSleep } from '../../util/timer-delay.js';
+
+const HARNESS_SCAN_INTERVAL_MS = 60_000;
+
+async function refreshHarnessInventory(scope: DaemonScope, signal: AbortSignal): Promise<void> {
+  const { adapters, config, daemonState } = scope;
+  const connection = daemonState.connection!;
+  while (!signal.aborted) {
+    await abortableSleep(HARNESS_SCAN_INTERVAL_MS, signal);
+    if (signal.aborted) return;
+    try {
+      const scan = await detectRuntimes(adapters, config.runtimeAllowlist, signal);
+      if (signal.aborted) return;
+      const previous = new Map(daemonState.runtimeObservations.map(observation => [observation.id, observation]));
+      daemonState.runtimeObservations = scan.observations.map(observation => {
+        const prior = previous.get(observation.id);
+        const versionChange = prior?.version === observation.version ? prior?.versionChange : undefined;
+        return Object.freeze({ ...observation, ...(versionChange === undefined ? {} : { versionChange }) });
+      });
+      daemonState.detectedHarnessFacts = scan.harnesses;
+      daemonState.detectedRuntimeUnavailable = scan.runtimeUnavailable;
+      connection.updateHarnessInventory(scan.harnesses, scan.runtimeUnavailable);
+    } catch {
+      if (!signal.aborted) console.warn('[byok/client] executor inventory scan failed');
+    }
+  }
+}
 
 /** One daemon start under the owner lease (#926). */
 
@@ -38,12 +66,12 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   if (run === undefined) return;
   const {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,
-    sealedRun, recordRecoveryFailure, runtimes, harnesses, runtimeUnavailable, blobClient, agentMemoryBackend, agentMemoryIntentBackend,
+    sealedRun, recordRecoveryFailure, harnesses, runtimeUnavailable, blobClient, agentMemoryBackend, agentMemoryIntentBackend,
   } = run;
   const {
     capabilities, agentHomeProjectionCompletion, processProviderProvisioningNotice,
     processAgentMemoryIntentNotice, handleRemoteInputPreparation, opened,
-  } = composeStartLanes(daemonScope, { agentMemoryBackend, agentMemoryIntentBackend, record, blobClient, sealedRun, runtimes, harnesses });
+  } = composeStartLanes(daemonScope, { agentMemoryBackend, agentMemoryIntentBackend, record, blobClient, sealedRun, harnesses });
 
   const {
     sendEnvelope, replaceRefusedTerminal, refuseOverBoundEnvelope, withReplyTransition,
@@ -71,7 +99,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   });
 
   daemonState.connection = createStartConnection(daemonScope, {
-    record, capabilities, runtimes, harnesses, runtimeUnavailable, handleAgentHomeProjectionEnvelope,
+    record, capabilities, harnesses, runtimeUnavailable, handleAgentHomeProjectionEnvelope,
     handleAgentInputPreparationEnvelope, handleProviderProvisioningEnvelope,
     handleAgentMemoryIntentEnvelope, handleE2eeKeyPackageEnvelope, handleAgentEgressEnvelope,
     handleAgentContentReadEnvelope, activePressureEngine, journalIdentity, activeJournal,
@@ -83,6 +111,7 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
   // Before the connection, so a key package notice in the first poll waits for the resume.
   startDeviceMember(record);
   await daemonState.connection.start();
+  void refreshHarnessInventory(daemonScope, daemonState.blobLifecycleAbort!.signal);
   daemonState.daemonStarted = true;
   } catch (err) {
     // A failed start opens no session: its teardown settles a queued

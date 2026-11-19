@@ -10,7 +10,7 @@ import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { observationOf } from './fixtures/mcp-observation';
 
-const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
+const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 
 const FAKE_CODEX = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 const sessions: Session[] = [];

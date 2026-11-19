@@ -6,10 +6,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessagePublishPlainPayload, Envelope } from '@byok-sdk/protocol';
 import type { AgentMessageDraftEvent } from '@byok-sdk/server';
-import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { createDaemonWithAdapters, PiAdapter, type Daemon, type RuntimeAdapter } from '@byok-sdk/client';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
-import { createDaemonWithAdapters, type Daemon } from '@byok-sdk/client';
-import type { RuntimeAdapter } from '../types';
 import { InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -43,7 +41,9 @@ async function setup(options: { adapter?: RuntimeAdapter; gateReply?: boolean } 
   await fs.mkdir(gate);
   const adapter = options.adapter ?? new PiAdapter({
     resolveBin: () => ({ command: piFixture, source: 'env' }),
-    spawnFn: ((command: string, args: readonly string[], spawnOptions?: SpawnOptions) => spawn(command, args, {
+    byokLauncher: { command: piFixture, profileDbPath: path.join(root, 'profiles.db'), sessionDir: path.join(root, 'sessions') },
+    validateProviderProfileBinding: async () => {},
+    spawnFn: ((command: string, args: readonly string[], spawnOptions?: SpawnOptions) => spawn(command, args.slice(args.indexOf('--') + 1), {
       ...spawnOptions, env: { ...spawnOptions?.env,
         ...(options.gateReply ? { FAKE_PI_REPLY_GATE: gate } : {}) },
     })) as typeof spawn,
@@ -80,12 +80,19 @@ async function setup(options: { adapter?: RuntimeAdapter; gateReply?: boolean } 
   const submit = async (required = true) => {
     await server.byok.executions.submit({ taskId, deviceId, payload: {
       instruction: 'Write a reply.', agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
-      target: adapter.descriptor.id === 'custom-draft' ? { lane: 'harness', harnessId: 'custom-draft' } : { lane: 'runtime', runtimeId: 'pi' },
+      target: adapter.descriptor.id === 'custom-draft'
+        ? { lane: 'harness', harnessId: 'custom-draft', selection: { mode: 'device-default' } }
+        : { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
+            profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, modelId: 'fixture', requiredCapabilities: [],
+          } } },
       ...(required ? { messageEgress: {
         mode: 'required' as const, contract: 'draft.v1', contentType: 'text/plain' as const, maxBytes: 1024,
       } } : {}),
       terminalProjection: { mode: 'none' },
     }, ...(required ? { agentMessageContext: { destinationBinding: 'chat' } } : {}) });
+    await vi.waitFor(() => {
+      expect(sent.some(event => event.type === 'task.started'), JSON.stringify(sent.filter(event => event.type === 'task.decline' || event.type === 'task.fail'))).toBe(true);
+    });
   };
   const read = () => {
     readerAbort = new AbortController();
@@ -111,7 +118,7 @@ function drafts(sent: Envelope[]) {
 function assertWireCapability(sent: Envelope[], id: string, expected: true | undefined) {
   const hello = sent.find(e => e.type === 'conn.hello');
   if (hello?.type !== 'conn.hello') throw new Error('missing conn.hello');
-  const runtime = [...(hello.payload.runtimes ?? []), ...(hello.payload.harnesses ?? [])].find(r => r.id === id);
+  const runtime = hello.payload.harnesses.find(r => r.id === id);
   expect(runtime).toBeDefined();
   expect(runtime?.capabilities?.messageDraft).toBe(expected);
   const claim = sent.find(e => e.type === 'task.claim');

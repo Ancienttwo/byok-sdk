@@ -5,7 +5,7 @@ import type { ByokServer } from '@byok-sdk/server';
 import { RequiredToolsetsSchema, TerminalProjectionSelectionSchema, type TerminalProjectionSelection } from '@byok-sdk/protocol';
 import type { ScopedTool } from './http';
 import type { BetaLedger } from './ledger';
-import { BetaError, canonicalJson, invalid, object, runtimeTarget, taskArguments, text, type Caller, type RoutineReservation,
+import { BetaError, invalid, runtimeTarget, snapshotJsonObject, taskArguments, text, type Caller, type RoutineReservation,
   type TaskArguments } from './model';
 import { input, integer, json, selectDevice } from './tools';
 
@@ -21,6 +21,7 @@ export const routineScheduleCalendar: NextOccurrence = (definition, after) => {
   if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule) || schedule.tz !== definition.timeZone) {
     throw new Error('A beta routine rule is a RoutineSchedule in the definition time zone');
   }
+  // SAFETY: nextRoutineOccurrence validates the stored schedule, including its bounds and field names.
   return nextRoutineOccurrence(schedule as unknown as RoutineSchedule, after);
 };
 
@@ -54,7 +55,8 @@ function routineInput(args: Readonly<Record<string, unknown>> | undefined): Rout
   const value = input(args, ['localId', 'schedule', 'task'], ['localId', 'schedule', 'task']);
   const localId = text(value.localId);
   if (!/^[A-Za-z0-9._:-]{1,160}$/.test(localId)) invalid();
-  const schedule = object(JSON.parse(canonicalJson(value.schedule))) as unknown as RoutineSchedule;
+  // SAFETY: checkRoutineSchedule validates the complete object before it is used as a schedule.
+  const schedule = snapshotJsonObject(value.schedule) as unknown as RoutineSchedule;
   const check = checkRoutineSchedule(schedule);
   if (!check.ok) throw new BetaError('invalid_input', `${check.code}: ${check.message}`);
   const task = taskArguments(value.task);
@@ -108,7 +110,9 @@ export function createRoutineTools(options: RoutineToolOptions): ScopedTool[] {
     const key = ledger.authorize(caller, 'routines.write');
     if (!key.agentRef) throw new Error('A routine grant has no AgentRef');
     const { schedule, task } = parsed.definition;
-    return { id: reservation.routineId, version: 1, timeZone: schedule.tz, rule: schedule as unknown as Json,
+    const { daysOfWeek, ...time } = schedule;
+    const rule: Json = { ...time, ...(daysOfWeek === undefined ? {} : { daysOfWeek: [...daysOfWeek] }) };
+    return { id: reservation.routineId, version: 1, timeZone: schedule.tz, rule,
       execution: { deviceId, payload: { target: runtimeTarget(task.runtime), session: { mode: 'fresh' }, instruction: task.instruction, agentRef: key.agentRef,
         egressPolicy: options.egressPolicy, terminalProjection: parsed.terminalProjection,
         ...(task.toolsets ? { requiredToolsets: [...task.toolsets] } : {}) } },
@@ -202,7 +206,7 @@ export function createRoutineTools(options: RoutineToolOptions): ScopedTool[] {
           const target = routine?.definition.execution.payload.target;
           const last = lastOccurrence(state, reservation.routineId);
           return { ...view(state, reservation), localId: reservation.localId, createdAt: iso(reservation.createdAt),
-            ...(routine ? { schedule: routine.definition.rule, runtime: target?.lane === 'runtime' ? target.runtimeId : undefined } : {}),
+            ...(routine ? { schedule: routine.definition.rule, runtime: target?.lane === 'harness' ? target.harnessId : undefined } : {}),
             ...(last ? { lastOccurrence: last } : {}) };
         });
         return json({ routines, ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }) });

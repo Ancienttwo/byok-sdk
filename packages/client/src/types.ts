@@ -7,9 +7,10 @@ import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-author
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
 import type {
-  AgentEgressPolicy,
   AgentEvent,
   ExecutionTarget,
+  HarnessSelection,
+  SelectionMode,
   TaskOfferPlainPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation.js';
@@ -44,15 +45,9 @@ export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> 
   sessionRef?: string;
 };
 
-/**
- * The model lanes of an offer `target`: the only lanes that carry a model
- * selection an adapter must honor. The other lanes only name the adapter.
- */
-export type ModelLaneTarget = Extract<ExecutionTarget, { readonly lane: 'subscription' | 'byok' | 'byok-profile' }>;
-
-/** The model selection of an offer `target`, or `undefined` for the `auto`, `runtime` and `harness` lanes. */
-export function modelLaneTarget(target: ExecutionTarget): ModelLaneTarget | undefined {
-  return target.lane === 'subscription' || target.lane === 'byok' || target.lane === 'byok-profile' ? target : undefined;
+/** The selection carried to adapter prepare and start. */
+export function offerSelection(target: ExecutionTarget): HarnessSelection | undefined {
+  return target.lane === 'harness' ? target.selection : undefined;
 }
 export type {
   McpServerObservation,
@@ -106,7 +101,7 @@ export type RuntimeVersionVerdict =
  * `resolveBin` option, `env` a `BYOK_<RUNTIME>_BIN` variable, `path` a bare
  * name found on the runtime environment's PATH.
  */
-export type RuntimeExecutableSource = 'config' | 'path' | 'env';
+export type RuntimeExecutableSource = 'config' | 'path' | 'env' | 'managed';
 
 /**
  * One probe outcome, never a separately authored presence boolean. Authentication
@@ -372,10 +367,12 @@ export interface RuntimeAdapterDescriptor {
    * adapter constructor. Absent for a custom adapter with no policy.
    */
   readonly versionPolicy?: RuntimeVersionPolicy;
-  /** Explicit opt-in to the authoritative model lanes of `task.offer.target` (`subscription`, `byok`, `byok-profile`). */
-  readonly supportsDispatchSelection: boolean;
-  /** Consumes explicit per-task execution options or refuses them before prompting. */
-  readonly supportsTaskExecutionOptions?: boolean;
+  /** Selection modes this adapter can honor. */
+  readonly selectionModes: readonly SelectionMode[];
+  /** pi-ai catalog provider id for this adapter's configured BYOK resolver. */
+  readonly byokProviderId?: string;
+  /** Consumes explicit per-task reasoning effort. */
+  readonly supportsEffort?: boolean;
   /**
    * Whether this adapter actually CONSUMES
    * {@link RuntimeAdapterPrepareInput.mcpToolsetTools} — i.e. whether it
@@ -496,7 +493,8 @@ export interface RuntimeOperationManifest {
   readonly descriptor: RuntimeAdapterDescriptor;
   readonly requiredToolsetIds: readonly string[];
   /** The credential-free runtime/lane/provider/model authority for this operation: the offer's model-lane target. */
-  readonly modelTarget?: ModelLaneTarget;
+  readonly selection?: HarnessSelection;
+  readonly effort?: string;
   readonly sessionRef?: string;
   /** Strict Agent identity, present on every `task.offer`. */
   readonly agentRef?: AgentRef;
@@ -754,8 +752,9 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
   return Object.freeze({
     id: descriptor.id,
     ...(descriptor.memoryLane === undefined ? {} : { memoryLane: descriptor.memoryLane }),
-    supportsDispatchSelection: descriptor.supportsDispatchSelection === true,
-    ...(descriptor.supportsTaskExecutionOptions === true ? { supportsTaskExecutionOptions: true } : {}),
+    selectionModes: Object.freeze([...descriptor.selectionModes]),
+    ...(descriptor.byokProviderId === undefined ? {} : { byokProviderId: descriptor.byokProviderId }),
+    ...(descriptor.supportsEffort === true ? { supportsEffort: true } : {}),
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,
     ...(descriptor.mcpToolApprovals === true ? { mcpToolApprovals: true } : {}),
     ...(descriptor.progressMessageBoundary === undefined ? {} : { progressMessageBoundary: progressMessageBoundaryOf(descriptor.progressMessageBoundary) }),
@@ -797,26 +796,25 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
 
 /** Copy then freeze the complete safe operation authority just before claim. */
 export function sealRuntimeOperationManifest(manifest: RuntimeOperationManifest): RuntimeOperationManifest {
-  const modelTarget = manifest.modelTarget === undefined
+  const selection = manifest.selection === undefined
     ? undefined
-    : manifest.modelTarget.lane === 'byok-profile'
+    : manifest.selection.mode === 'byok-profile'
       ? Object.freeze({
-          ...manifest.modelTarget,
+          ...manifest.selection,
           providerProfile: Object.freeze({
-            ...manifest.modelTarget.providerProfile,
-            requiredCapabilities: Object.freeze([
-              ...manifest.modelTarget.providerProfile.requiredCapabilities,
-            ]),
+            ...manifest.selection.providerProfile,
+            requiredCapabilities: Object.freeze([...manifest.selection.providerProfile.requiredCapabilities]),
           }),
-        }) as ModelLaneTarget
-      : Object.freeze({ ...manifest.modelTarget });
+        }) as HarnessSelection
+      : Object.freeze({ ...manifest.selection });
   return Object.freeze({
     ...(manifest.agentMemory === undefined ? {} : {agentMemory: manifest.agentMemory}),
     taskId: manifest.taskId,
     runtimeId: manifest.runtimeId,
     descriptor: freezeRuntimeAdapterDescriptor(manifest.descriptor),
     requiredToolsetIds: Object.freeze([...manifest.requiredToolsetIds]),
-    ...(modelTarget === undefined ? {} : { modelTarget }),
+    ...(selection === undefined ? {} : { selection }),
+    ...(manifest.effort === undefined ? {} : { effort: manifest.effort }),
     ...(manifest.sessionRef === undefined ? {} : { sessionRef: manifest.sessionRef }),
     ...(manifest.agentRef === undefined
       ? {}

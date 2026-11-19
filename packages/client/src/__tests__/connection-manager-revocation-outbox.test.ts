@@ -58,7 +58,7 @@ describe('a revoked device stops draining its outbox instead of retrying forever
       deviceId: record.deviceId,
       productId: 'test-product',
       capabilities: [],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: () => {},
@@ -73,8 +73,8 @@ describe('a revoked device stops draining its outbox instead of retrying forever
     // first attempt discovers revocation (401 on the send, then on the
     // renewal it triggers), exactly like a real mid-session revocation.
     server.revokeDevice(record.deviceId);
-    connection.send(createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task-revoked-1' }));
-    connection.send(createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task-revoked-2' }));
+    connection.send(createEnvelope('task.claim', { deviceId: record.deviceId, executor: { id: 'pi' } }, { taskId: 'task-revoked-1' }));
+    connection.send(createEnvelope('task.claim', { deviceId: record.deviceId, executor: { id: 'pi' } }, { taskId: 'task-revoked-2' }));
 
     await vi.waitFor(() => expect(connection?.getHaltReason()).toBe('device_revoked'), { timeout: 2000 });
     await vi.waitFor(() => expect(postBatchSpy.mock.calls.length).toBeGreaterThanOrEqual(1));

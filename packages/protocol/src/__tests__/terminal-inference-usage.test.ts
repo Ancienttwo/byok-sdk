@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { EnvelopeValidationError, parseMessage } from '../index';
 
 const HEADER = {
-  v: 7,
+  v: 8,
   id: '00000000-0000-4000-8000-000000000201',
   ts: '2026-08-21T10:00:00.000Z',
   task_id: 'task-inference-usage',
@@ -21,7 +21,7 @@ const usage = {
 
 function terminal(type: 'task.complete' | 'task.fail' | 'task.cancelled', terminalUsage: unknown) {
   const payload = type === 'task.complete'
-    ? { executor: { kind: 'runtime', runtimeId: 'codex' }, summary: 'done', sessionRef: 'session-1', usage: terminalUsage }
+    ? { executor: { id: 'codex' }, summary: 'done', sessionRef: 'session-1', usage: terminalUsage }
     : type === 'task.fail'
       ? { reason: 'runtime failed', retryable: false, usage: terminalUsage }
       : { reason: 'operator cancelled', usage: terminalUsage };

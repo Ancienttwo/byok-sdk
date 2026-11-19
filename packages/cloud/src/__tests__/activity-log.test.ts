@@ -63,7 +63,7 @@ describe('activity log bounds and authority', () => {
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId: 'artifact-task', payload: offerPayload('work') });
     const artifact = { name: 'report', contentType: 'text/plain', inline: 'result' };
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'artifact-task' });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId: 'artifact-task' });
     const output = createEnvelope('task.artifact', artifact, { taskId: 'artifact-task' });
     const result = await harness.json('/byok/messages', { method: 'POST', headers: { ...device.authorization, 'content-type': 'application/json' }, body: JSON.stringify({ messages: [claim, output] }) });
     expect(result).toMatchObject({ status: 200, body: { accepted: 2 } });

@@ -77,7 +77,7 @@ it('SIGKILL during wake delivery recovers the frozen input and only one executio
     expect(replayed).toMatchObject({ dedupKey: submitted.dedupKey, taskId: submitted.taskId,
       delivery: 2, beforeReplayCount: 0, slotReplayCount: 1 });
     expect(replayed.sdkWake).toMatchObject({ dedupKey: submitted.dedupKey, state: 'delivering', deliveries: 2 });
-    expect(replayed.attempt).toMatchObject({ taskId: submitted.taskId, deviceId, status: 'running', claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } });
+    expect(replayed.attempt).toMatchObject({ taskId: submitted.taskId, deviceId, status: 'running', claimedExecutor: { id: 'pi' } });
     adapter.sessions.get(submitted.taskId)!.finish({ text: 'survived Host death' });
     await vi.waitFor(() => expect(Object.values(ledger!.snapshot().intents)[0]?.conclusion).toBe('succeeded'), { timeout: 15_000 });
     const after = ledger.snapshot();

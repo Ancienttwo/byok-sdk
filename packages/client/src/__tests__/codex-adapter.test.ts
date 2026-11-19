@@ -26,7 +26,7 @@ import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
 import * as vendoredProjection from '../../vendor/oar/a41628f/runtimes/codex/projection';
 
-const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
+const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codex.mjs', import.meta.url),
 );
@@ -153,6 +153,22 @@ describe('Codex persistent app-server adapter', () => {
       version: output,
       versionVerdict: { state: 'warn', qualifiedVersion: '0.169.0' },
     });
+  });
+  it.each([
+    ['0.47.0', [], 'prepared'],
+    ['0.47.0', ['host-tools'], 'reject'],
+    ['0.48.0-rc.1', ['host-tools'], 'reject'],
+    ['0.48.0', ['host-tools'], 'prepared'],
+  ] as const)('applies the toolset floor to Codex %s with required toolsets %j', async (version, requiredToolsetIds, kind) => {
+    vi.stubEnv('FAKE_CODEX_VERSION', `codex-cli ${version}`);
+    const runtime = adapter();
+    const result = await runtime.prepare({
+      offer: { target: CODEX_TARGET, instruction: 'hello' },
+      descriptor: runtime.descriptor,
+      requiredToolsetIds,
+    });
+    expect(result.kind).toBe(kind);
+    if (result.kind === 'reject') expect(result.reason).toContain('Codex 0.48.0 or later');
   });
   it('detect admits the qualified version with an allow verdict', async () => {
     expect(await adapter().detect()).toMatchObject({
@@ -448,9 +464,9 @@ describe('Codex persistent app-server adapter', () => {
       {
         ...task,
         target: {
-          lane: 'subscription',
-          runtimeId: 'codex',
-          modelId: 'wanted',
+          lane: 'harness',
+          harnessId: 'codex',
+          selection: { mode: 'subscription', modelId: 'wanted' },
         },
       },
       resources,

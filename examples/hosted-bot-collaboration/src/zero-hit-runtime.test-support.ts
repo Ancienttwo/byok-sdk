@@ -16,7 +16,7 @@ export class ZeroHitSession extends BotStubSession {
 
 export class ZeroHitAdapter extends BotStubAdapter {
   override readonly descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'pi', supportsDispatchSelection: true, requiresMcpToolsetToolObservation: true,
+    id: 'pi', selectionModes: ['device-default'], requiresMcpToolsetToolObservation: true,
     capabilities: { steer: true, resume: false, mcpToolsets: true, approvalInteractive: true },
   });
   override readonly sessions = new Map<string, ZeroHitSession>();

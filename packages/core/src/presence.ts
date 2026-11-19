@@ -34,6 +34,9 @@ export interface PresenceRuntimeCapabilities {
   readonly toolAuthorizationAuto?: boolean;
   readonly durableLane?: boolean;
   readonly preparedLane?: boolean;
+  readonly selectionModes: readonly string[];
+  readonly effort: boolean;
+  readonly byokProviderId?: string;
   readonly isolation?: {
     readonly userInstructions?: boolean;
     readonly userOutputStyle?: boolean;
@@ -45,12 +48,13 @@ export interface PresenceRuntimeCapabilities {
   };
 }
 
-/** Runtime facts observed by a daemon's real local probe. Omitted fields are unknown. */
-export interface PresenceRuntimeFact {
+/** Executor facts observed by a daemon's local scan. */
+export interface PresenceHarnessFact {
   readonly id: string;
   readonly version?: string;
   readonly authPresent?: boolean;
-  readonly capabilities?: PresenceRuntimeCapabilities;
+  readonly capabilities: PresenceRuntimeCapabilities;
+  readonly versionPolicy?: { readonly state: 'allow' | 'warn' | 'block'; readonly qualifiedVersion?: string };
 }
 
 /** Copies the defined boolean flags named by `keys`; a stored row holds no other keys. */
@@ -61,20 +65,22 @@ function definedFlags<T extends object, K extends keyof T>(source: T, keys: read
 }
 
 /** A frozen copy of one runtime fact holding only the known fields; every presence store returns this. */
-export function freezePresenceRuntimeFact(runtime: PresenceRuntimeFact): PresenceRuntimeFact {
+export function freezePresenceHarnessFact(runtime: PresenceHarnessFact): PresenceHarnessFact {
   const capabilities = runtime.capabilities;
   return Object.freeze({
     id: runtime.id,
     ...(runtime.version === undefined ? {} : { version: runtime.version }),
     ...(runtime.authPresent === undefined ? {} : { authPresent: runtime.authPresent }),
-    ...(capabilities === undefined ? {} : {
-      capabilities: Object.freeze({
-        ...definedFlags(capabilities, ['steer', 'images', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
-        ...(capabilities.isolation === undefined ? {} : {
-          isolation: Object.freeze(definedFlags(capabilities.isolation, ['userInstructions', 'userOutputStyle', 'userMemory', 'userSkills', 'userHookContext', 'userMcpServers', 'sessionPersistence'])),
-        }),
+    capabilities: Object.freeze({
+      ...definedFlags(capabilities, ['steer', 'images', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
+      selectionModes: Object.freeze([...capabilities.selectionModes]),
+      effort: capabilities.effort,
+      ...(capabilities.byokProviderId === undefined ? {} : { byokProviderId: capabilities.byokProviderId }),
+      ...(capabilities.isolation === undefined ? {} : {
+        isolation: Object.freeze(definedFlags(capabilities.isolation, ['userInstructions', 'userOutputStyle', 'userMemory', 'userSkills', 'userHookContext', 'userMcpServers', 'sessionPersistence'])),
       }),
     }),
+    ...(runtime.versionPolicy === undefined ? {} : { versionPolicy: Object.freeze({ ...runtime.versionPolicy }) }),
   });
 }
 
@@ -85,7 +91,7 @@ export interface TenantReadinessPresence {
   readonly configuredToolsets?: readonly string[];
   readonly clientVersion?: string;
   readonly protocolVersions?: readonly number[];
-  readonly runtimes?: readonly PresenceRuntimeFact[];
+  readonly harnesses?: readonly PresenceHarnessFact[];
   readonly observedAt: string;
   readonly expiresAt: string;
 }
@@ -129,8 +135,8 @@ export interface PresenceHint {
   readonly clientVersion?: string;
   /** Protocol versions actually advertised by this daemon. */
   readonly protocolVersions?: readonly number[];
-  /** Runtime/auth facts from a real local probe; unknown facts are omitted. */
-  readonly runtimes?: readonly PresenceRuntimeFact[];
+  /** Executor facts from the device scan. */
+  readonly harnesses?: readonly PresenceHarnessFact[];
   readonly observedAt: string;
   readonly expiresAt: string;
 }
@@ -145,8 +151,8 @@ export interface PresenceHintInput {
   readonly clientVersion?: string;
   /** Protocol versions actually advertised by this daemon. */
   readonly protocolVersions?: readonly number[];
-  /** Runtime/auth facts from a real local probe; unknown facts are omitted. */
-  readonly runtimes?: readonly PresenceRuntimeFact[];
+  /** Executor facts from the device scan. */
+  readonly harnesses?: readonly PresenceHarnessFact[];
   /** Hint lifetime. §12.7.5 suggests 60-120s for presence. */
   readonly ttlMs: number;
   /** Minimum time between accepted publications for this device. `0` explicitly disables throttling. */

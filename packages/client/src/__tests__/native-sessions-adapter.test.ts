@@ -53,7 +53,7 @@ async function fixture(memory = false, readyFrames: unknown[] = [{ type: 'byok_h
       }) } };
     },
   };
-  const session = await startPreparedOperation(wrapped, { target: { lane: 'runtime', runtimeId: 'pi' }, instruction: 'dream' }, { workspaceDir: cwd, agentHome: cwd, env: process.env });
+  const session = await startPreparedOperation(wrapped, { target: { lane: 'auto' }, instruction: 'dream' }, { workspaceDir: cwd, agentHome: cwd, env: process.env });
   return { session, cwd, commands, ack: () => acknowledgeAbort() };
 }
 

@@ -37,7 +37,7 @@ const switching = expect.objectContaining({ name: 'DeviceSwitchingError', code: 
 const execution = { ...template('device'), agentMessageContext: { destinationBinding: 'one' } };
 const evidence = (turnId: string, document: Json = {}) => ({
   terminal: { envelope: { task_id: taskId(turnId, 0), type: 'task.complete', payload: { document } } } as unknown as DeviceTerminal,
-  attempt: { taskId: taskId(turnId, 0), status: 'completed', claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } } as unknown as TaskAttempt,
+  attempt: { taskId: taskId(turnId, 0), status: 'completed', claimedExecutor: { id: 'pi' } } as unknown as TaskAttempt,
 }) satisfies TaskEvidence;
 /** An Agent message of the frozen task of `turnId`, bound as its input. */
 async function message(scope: string, turnId: string, messageId: string): Promise<AgentMessageInput> {

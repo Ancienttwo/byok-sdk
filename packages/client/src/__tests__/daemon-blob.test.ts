@@ -111,7 +111,7 @@ describe('blob client (protocol §7)', () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available', sessionCapabilities: { images: false } });
     await setupDaemon(adapter, new StubRuntimeAdapter('codex', { kind: 'available', sessionCapabilities: { images: true } }));
     const taskId = 'image-runtime-unsupported';
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'runtime', runtimeId: 'pi' },
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       instruction: 'see this', images: [inputImage] }, { taskId, seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
     expect(declined.payload).toMatchObject({ retryable: false, code: 'bad_request', reason: 'selected execution lane does not support image input' });
@@ -178,7 +178,7 @@ describe('blob client (protocol §7)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'runtime', runtimeId: 'claude' },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } },
           instruction: {
             blobRef: {
               blobId: 'instr-blob-bundled-prepared',

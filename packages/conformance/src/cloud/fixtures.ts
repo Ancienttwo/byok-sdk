@@ -13,7 +13,7 @@ export const TENANT_A: TenantId = tenantId('tenant-a');
 export const TENANT_B: TenantId = tenantId('tenant-b');
 
 /** The executor a claim reports when a case does not care which runtime ran. */
-export const PI_EXECUTOR: ClaimedExecutor = { kind: 'runtime', runtimeId: 'pi' };
+export const PI_EXECUTOR: ClaimedExecutor = { id: 'pi' };
 
 /** Ed25519 public keys are opaque to every store here; only their identity matters. */
 export function registration(deviceId: string, overrides: Partial<DeviceRegistration> = {}): DeviceRegistration {

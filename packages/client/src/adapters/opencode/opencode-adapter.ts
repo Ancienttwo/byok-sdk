@@ -16,6 +16,7 @@ import { freezeRuntimeAdapterDescriptor, PolicyUnsupportedError, type RuntimeAda
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation.js';
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { haltGate, oarCancelSettled, raceDeadline, RetryableOnce } from '../session-kit.js';
@@ -23,7 +24,7 @@ import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import { OPENCODE_RUNTIME_CAPABILITIES } from './opencode-capabilities.js';
-import { OPENCODE_VERSION_POLICY, opencodeVersionToken } from './opencode-version.js';
+import { OPENCODE_VERSION_POLICY, opencodeVersionToken, opencodeVersionUnsupported } from './opencode-version.js';
 import { resolveOpenCodeBin } from './resolve-bin.js';
 import { object, OpenCodeProjection, type OpenCodeTurnOutcome } from './projection.js';
 
@@ -31,6 +32,8 @@ import { object, OpenCodeProjection, type OpenCodeTurnOutcome } from './projecti
 const CHILD_UPDATE_AFTER_ANSWER = 'opencode/session/child_update/after_answer';
 
 export interface OpenCodeAdapterOptions {
+  /** SDK install root in which to find a managed runtime. */
+  runtimeInstallRoot?: string;
   /** Ordered Host model ids. The SDK has no default and does not consult prices or a model catalog. */
   models: readonly string[];
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -54,7 +57,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     return this.#runtimeReaders ??= createRuntimeReaders(this, {
       nativeAssetRoot: this.options.nativeAssetRoot,
       spawnFn: this.options.spawnFn,
-      command: (env) => resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env)).bin.command,
+      command: (env) => resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env), () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'opencode')).bin.command,
       version: opencodeVersionToken,
     });
   }
@@ -81,8 +84,8 @@ export class OpenCodeAdapter implements RuntimeAdapter {
   }
 
   get descriptor() {
-    return freezeRuntimeAdapterDescriptor({ id: 'opencode', supportsDispatchSelection: false,
-      supportsTaskExecutionOptions: true,
+    return freezeRuntimeAdapterDescriptor({ id: 'opencode', selectionModes: ['device-default', 'adapter-model'],
+      supportsEffort: true,
       // `platforms` is OS-grained: `darwin` covers x64 and arm64; `win32` is x64. Each has the lifecycle contract on both lines (#1593).
       platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES,
       ...(this.policy === undefined ? {} : { versionPolicy: this.policy }),
@@ -93,12 +96,14 @@ export class OpenCodeAdapter implements RuntimeAdapter {
   private async probe(): Promise<{ detected: RuntimeDetectResult; command?: string; version?: string }> {
     try {
       const { env } = await this.runtimeEnvironment();
-      const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env));
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env), () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'opencode'));
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const version = await probeRuntimeVersion(invocation.command, 15_000, env, invocation.args);
       if (version.kind !== 'available') return { detected: version };
-      const token = opencodeVersionToken(version.stdout);
+      const token = opencodeVersionToken(version.stdout.trim() || version.stderr);
       if (token === undefined) return { detected: { kind: 'refused', reason: 'acp_unavailable' } };
+      const unsupportedVersion = opencodeVersionUnsupported(token);
+      if (unsupportedVersion !== undefined) return { detected: { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion } };
       return { command: resolved.bin.command, version: token, detected: {
         kind: 'available', version: token, rawVersion: version.stdout,
         sessionCapabilities: (await import('#byok-acp-runtime')).opencodeSessionCapabilities({ kind: 'available', via: 'executable', command: resolved.bin.command, version: token }),

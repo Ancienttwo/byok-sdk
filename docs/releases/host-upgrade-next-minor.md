@@ -3,6 +3,59 @@
 This checklist starts after the published 0.44.1 release. Hosts on an earlier release first follow the
 [0.44.0 checklist](host-upgrade-0.44.0.md) and its predecessors.
 
+## Wire v8 and the provider store cutover
+
+1. Pause new task offers and provisioning intents while the old Host and devices
+   are still running. Resolve or cancel open intents, finish in-flight tasks,
+   and let the devices flush their outboxes and terminal receipts.
+2. Stop the old server and daemons. Keep their stores for rollback and provision
+   fresh SQLite or PostgreSQL storage for the v8 server. Initialize fresh local
+   daemon journals, outboxes, and K4/K8 ledgers. Follow the provider store steps
+   below in the same window. The SDK does not import v7 state into v8.
+3. Upgrade the Host, server, and daemons together and pair the devices against
+   the new server. Wait for each device to publish its harness inventory before
+   submitting explicit offers. Wire v7 and v8 peers refuse each other.
+4. Use `{ lane: 'auto' }` to let a device choose an advertised executor that
+   supports device defaults. For explicit routing, pass `lane: 'harness'`, the
+   advertised `harnessId`, and a supported `selection`. Use `device-default`
+   to keep the executor's defaults or `subscription` with a `modelId` to pin
+   the model under Claude or Codex's own CLI login. For a Host credential, use
+   `byok` with the advertised pi-ai catalog `providerId` and a `modelId`.
+   Preserve the original target when replaying a task ID. Replaying the ID
+   with different offer bytes returns `binding_conflict`.
+
+### Pi provider selection
+
+Replace Pi offers that used `byok` with `byok-profile`. Read the persisted
+local profile and derive the exact binding with
+`exactProviderProfileBinding(profile)` from `@byok-sdk/keys`. Use the binding
+from the store assigned to the target device, and refresh it after changing
+the profile.
+
+```ts
+const target = {
+  lane: 'harness',
+  harnessId: 'pi',
+  selection: { mode: 'byok-profile', providerProfile: exactProviderProfileBinding(profile) },
+} satisfies ExecutionTarget;
+```
+
+AiphaBee already uses exact profile binding. Its existing profile selection
+continues to work when passed through the v8 target shape.
+
+## Managed runtime upgrades
+
+Set `DaemonConfig.runtimeInstallRoot` to the absolute SDK install root and pass
+that same root to `upgradeRuntime({ installRoot, runtimeId })`. The Host calls
+this operation explicitly. It stages Claude, Codex, DSH, or OpenCode v2 at the
+SDK's exact qualified version with npm install scripts disabled. The daemon
+prefers the resulting managed executable. The active copy switches only after
+the staged CLI passes its version and liveness probes.
+
+AGY and Grok return vendor commands and reasons. Pi ships with the SDK. Read
+local status or doctor for the installed source and upgrade guidance. Stop
+sessions using a managed copy before calling `uninstallManagedRuntime`.
+
 ## Provider store credential namespace
 
 1. Precheck the existing database with the candidate's

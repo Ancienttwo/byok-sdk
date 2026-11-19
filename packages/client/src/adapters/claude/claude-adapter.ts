@@ -2,7 +2,7 @@ import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-l
 import { requireRuntimeApiKey } from '../resolve-runtime-api-key.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
-import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
+import { offerSelection, type RuntimeTaskInput } from '../../types.js';
 import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
 import { claudeAgentUserContextSettings } from './agent-user-context.js';
@@ -13,7 +13,7 @@ import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import type { AgentEvent } from '@byok-sdk/protocol';
+import type { AgentEvent, HarnessSelection } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
   SteerUnsupportedError,
@@ -32,6 +32,7 @@ import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEn
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import { ClaudeToolAuthorizationBridge } from './tool-authorization.js';
 import { ClaudeNativeInteractionBridge, CLAUDE_NATIVE_INTERACTION_CAPABILITIES } from './native-interactions.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
@@ -42,6 +43,9 @@ import { claudeSessionCapabilities, sessionCredentialRedactor, type ClaudeCreden
 import { ClaudeStreamSession } from './stream-session.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import type { spawn } from 'node:child_process';
+import { withoutProviderCredentials } from '../provider-credential-environment.js';
+import { resolveRuntimeApiKey } from '../resolve-runtime-api-key.js';
+import { PI_PROVIDER_ENV_KEYS } from '../pi/pi-provider-env.generated.js';
 import { servedModelName } from '../served-model.js';
 import { CLAUDE_VERSION_POLICY, claudeVersionToken } from './claude-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
@@ -116,6 +120,10 @@ async function rejectOwnedStartup(cause: unknown, credentials: ClaudeCredentialR
 }
 
 export interface ClaudeAdapterOptions {
+  /** SDK install root in which to find a managed runtime. */
+  runtimeInstallRoot?: string;
+  /** Host API key for this pi-ai catalog provider, resolved just before each spawn. */
+  byok?: Readonly<{ providerId: string; resolveKey: () => Promise<string> }>;
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /** The environment Claude and its MCP servers get (#1095). Default: the login-shell snapshot. */
@@ -200,7 +208,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return this.#runtimeReaders ??= createRuntimeReaders(this, {
       nativeAssetRoot: this.options.nativeAssetRoot,
       spawnFn: this.options.spawnFn,
-      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin).bin.command,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude')).bin.command,
       version: claudeVersionToken,
       environment: env => ({ env, credentials: claudeProviderCredentials(env) }),
     });
@@ -221,6 +229,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   readonly descriptor;
+  private readonly byok?: NonNullable<ClaudeAdapterOptions['byok']>;
   private readonly nativeOptions?: NativeInteractionHostOptions;
   private readonly environmentPolicy: RuntimeEnvironmentPolicy;
   private readonly effectiveVersionPolicy: RuntimeVersionPolicy | undefined;
@@ -237,10 +246,17 @@ export class ClaudeAdapter implements RuntimeAdapter {
     this.nativeOptions = options.nativeInteractions === undefined ? undefined : snapshotNativeInteractionHostOptions(options.nativeInteractions);
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'ClaudeAdapterOptions.runtimeEnvironment');
     this.effectiveVersionPolicy = resolveRuntimeVersionPolicy(CLAUDE_VERSION_POLICY, options.versionPolicy);
+    if (options.byok !== undefined) {
+      if (!Object.hasOwn(PI_PROVIDER_ENV_KEYS, options.byok.providerId) || typeof options.byok.resolveKey !== 'function') {
+        throw new TypeError('ClaudeAdapterOptions.byok requires a pi-ai catalog providerId and a resolveKey function');
+      }
+      this.byok = Object.freeze({ ...options.byok });
+    }
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id: 'claude',
-      supportsDispatchSelection: true,
-      supportsTaskExecutionOptions: true,
+      selectionModes: ['device-default', 'subscription', ...(this.byok === undefined ? [] : ['byok' as const])],
+      ...(this.byok === undefined ? {} : { byokProviderId: this.byok.providerId }),
+      supportsEffort: true,
       // `progress` events are complete text blocks, never deltas, and
       // `progressStartsMessage` joins the blocks of one message, so the
       // closing reply is the last assistant message. A run that repeats its
@@ -270,9 +286,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const { env } = await this.runtimeEnvironment();
-      claudeProviderCredentials(env);
-      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin);
+      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env) as Record<string, string>;
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude'));
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
       if (probe.kind !== 'available') return probe;
@@ -291,13 +306,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     const { effort } = input.offer;
-    let modelId: string | undefined;
+    let selection: ClaudeSelection;
     try {
-      modelId = subscriptionModel(modelLaneTarget(input.offer.target), 'claude');
+      selection = this.executionSelection(offerSelection(input.offer.target));
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
     }
-    let bin: ResolvedBin;
+    let bin: { command: string };
     try {
       bin = this.resolveBin();
     } catch (error) {
@@ -313,14 +328,23 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return {
       kind: 'prepared',
       operation: {
-        start: (startInput) => this.startPrepared(startInput, modelId, invocation, effort),
+        start: (startInput) => this.startPrepared(startInput, selection, invocation, effort),
       },
     };
   }
 
+  private executionSelection(input: HarnessSelection | undefined): ClaudeSelection {
+    if (input === undefined || input.mode === 'device-default') return { mode: 'device-default' };
+    if (input.mode === 'subscription') return { mode: 'subscription', modelId: input.modelId };
+    if (input.mode === 'byok' && input.providerId === this.byok?.providerId) {
+      return { mode: 'byok', providerId: input.providerId, modelId: input.modelId };
+    }
+    throw new PolicyUnsupportedError('Claude does not support the selected credential source or provider');
+  }
+
   private async startPrepared(
     startInput: RuntimeOperationStartInput,
-    modelId: string | undefined,
+    selection: ClaudeSelection,
     invocation: RuntimeInvocation,
     effort: string | undefined,
   ): Promise<Session> {
@@ -426,9 +450,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
       }
 
       const resumeSessionId = startInput.manifest.sessionRef;
-      let manifestModelId: string | undefined;
+      let manifestSelection: ClaudeSelection;
       try {
-        manifestModelId = subscriptionModel(startInput.manifest.modelTarget, 'claude');
+        manifestSelection = this.executionSelection(startInput.manifest.selection);
       } catch (cause) {
         throw new RuntimeExecutionFailure({
           phase: 'start',
@@ -436,7 +460,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
           reason: 'prepared claude operation received an invalid runtime selection manifest',
         }, { cause });
       }
-      if (manifestModelId !== modelId) {
+      const manifestModelId = manifestSelection.mode === 'device-default' ? undefined : manifestSelection.modelId;
+      const modelId = selection.mode === 'device-default' ? undefined : selection.modelId;
+      if (manifestSelection.mode !== selection.mode || manifestModelId !== modelId || startInput.manifest.effort !== effort) {
         throw new RuntimeExecutionFailure({
           phase: 'start',
           retry: 'non-retryable',
@@ -504,6 +530,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // The adapter, never the host callback, owns fatal process termination.
         onFatal: error => { closeBridges(); stream?.fail(error); },
       }, resumeSessionId);
+      if (selection.mode === 'byok') {
+        const key = await resolveRuntimeApiKey('claude', this.byok!.resolveKey, signal);
+        throwIfCancelled();
+        for (const name of Object.keys(env)) {
+          if (/^CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)$/i.test(name)) delete env[name];
+        }
+        env.ANTHROPIC_API_KEY = key;
+        credentials.addExplicit(key);
+      }
       const spawnLineProcess = createOwnedLineProcessSpawn({
         nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude', stderrRedactor: credentials,
       });
@@ -590,7 +625,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         this.interruptTimeoutMs,
         startInput.scratch,
         mcpIdentity,
-        manifestModelId,
+        manifestSelection,
         native,
         gate,
       );
@@ -632,8 +667,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     }
   }
 
-  private resolveBin(): ResolvedBin {
-    return (this.options.resolveBin ?? resolveClaudeBin)();
+  private resolveBin(): { command: string } {
+    return resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude')).bin;
   }
 }
 
@@ -641,18 +676,7 @@ function claudeEffortRefusal(reason: string, cause?: unknown): RuntimeExecutionF
   return new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason, failure: { class: 'invalid_request' } }, { cause });
 }
 
-function subscriptionModel(
-  selection: ModelLaneTarget | undefined,
-  runtimeId: 'claude',
-): string | undefined {
-  if (selection === undefined) return undefined;
-  if (selection.lane !== 'subscription' || selection.runtimeId !== runtimeId) {
-    throw new PolicyUnsupportedError(
-      `claude adapter cannot execute ${selection.lane} selection for runtime ${selection.runtimeId}`,
-    );
-  }
-  return selection.modelId;
-}
+type ClaudeSelection = Extract<HarnessSelection, { mode: 'device-default' | 'subscription' | 'byok' }>;
 
 /** Whether an assistant frame calls a Claude MCP tool (`mcp__…`) the session has no identity for yet. */
 function callsUnresolvedMcpTool(message: ClaudeStreamMessage, correlation: ToolUseCorrelation): boolean {
@@ -702,7 +726,7 @@ class ClaudeSession implements Session {
     /** Task-scoped temp `--mcp-config` directory, if any — removed in `close()`. */
     private readonly scratch: ExecutionScratch,
     private readonly mcpIdentity: ReturnType<typeof createClaudeMcpIdentityResolver>,
-    private readonly modelId?: string,
+    private readonly selection: ClaudeSelection,
     private readonly native?: ClaudeNativeInteractionBridge,
     private readonly gate?: ClaudeToolAuthorizationBridge,
   ) { this.correlation = { toolNameByUseId: new Map(), mcpIdentities: this.mcpIdentity.identities }; if (native !== undefined) this.interactions = native.channel; }
@@ -861,11 +885,11 @@ class ClaudeSession implements Session {
     if (task.effort !== undefined && task.effort !== this.stream.effort) {
       throw new PolicyUnsupportedError('claude persistent session cannot change effort');
     }
-    const requestedModel = subscriptionModel(modelLaneTarget(task.target), 'claude');
-    if (requestedModel !== undefined && requestedModel !== this.modelId) {
-      throw new PolicyUnsupportedError(
-        `claude persistent session cannot change model from ${this.modelId ?? '(legacy default)'} to ${requestedModel}`,
-      );
+    const selection = offerSelection(task.target);
+    if (selection !== undefined && (selection.mode !== this.selection.mode ||
+      ('modelId' in selection && (!('modelId' in this.selection) || selection.modelId !== this.selection.modelId)) ||
+      (selection.mode === 'byok' && (this.selection.mode !== 'byok' || selection.providerId !== this.selection.providerId)))) {
+      throw new PolicyUnsupportedError('claude persistent session cannot change its explicit selection');
     }
     // A prompt on the SAME persistent process: claude keeps a
     // `--input-format stream-json` process alive across sequential turns,

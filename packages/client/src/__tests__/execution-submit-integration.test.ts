@@ -37,7 +37,7 @@ it('runs two recurring executions through real HTTP and TaskRunner with distinct
       // Host context fixture; this test does not implement the product's transcript builder.
       const instruction = index === 0 ? 'U1' : 'U1\nA1\nU2';
       const input = { taskId, deviceId, payload: {
-        instruction, target: { lane: 'runtime' as const, runtimeId: 'pi' as const },
+        instruction, target: { lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'device-default' as const } },
         agentRef: { agentId: 'recurring-agent', profileRevision: 'profile-v1' },
         session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         messageEgress: { mode: 'required' as const, contract: 'conversation-turn/v1', contentType: 'text/markdown' as const, maxBytes: 1024 },
@@ -120,7 +120,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       const instruction = 'Remember the constraint: 中文 🐝, no external tools.';
       frozenInstructions.set('preceding-user-turn', instruction);
       await sdk.executions.submit({ taskId: 'preceding-user-turn', deviceId, payload: {
-        agentRef, target: { lane: 'runtime', runtimeId: 'pi' }, instruction,
+        agentRef, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, instruction,
         session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'preceding-turn' } });
@@ -144,7 +144,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
         history: [{ input: frozenInstructions.get('preceding-user-turn'), reply: (precedingMessage!.payload as AgentMessagePublishPlainPayload).body }] })
       : 'Summarize only this frozen historical input.';
     frozenInstructions.set(taskId, summaryInstruction);
-    const input = { taskId, deviceId, payload: { agentRef, target: { lane: 'runtime' as const, runtimeId: 'pi' as const },
+    const input = { taskId, deviceId, payload: { agentRef, target: { lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'device-default' as const } },
       instruction: summaryInstruction,
       session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector } };
     await sdk.executions.submit(input);
@@ -221,7 +221,7 @@ it.each(['document', 'missing', 'invalid'] as const)('persists strict fresh Summ
       frozenInstructions.set('dependent-user-turn', instruction);
       // New explicit user execution after Summary, not a retry of the competing probe.
       await sdk.executions.submit({ taskId: 'dependent-user-turn', deviceId, payload: {
-        agentRef, target: { lane: 'runtime', runtimeId: 'pi' }, instruction,
+        agentRef, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, instruction,
         session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' },
         messageEgress: { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 },
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: 'user-turn' } });

@@ -13,7 +13,7 @@ import type { Session, MessageDraftDelta } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { memoryClaude } from './fixtures/memory-claude';
 
-const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
 
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const SALESKO_MCP_FIXTURE = fileURLToPath(new URL('./fixtures/fake-salesko-mcp.mjs', import.meta.url));

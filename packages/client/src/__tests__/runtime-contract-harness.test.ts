@@ -50,7 +50,7 @@ const isolation = (bits: Partial<RuntimeIsolationCapabilities>): RuntimeIsolatio
 const descriptor = (capabilities: Partial<RuntimeCapabilities> = {}): RuntimeAdapterDescriptor =>
   freezeRuntimeAdapterDescriptor({
     id: 'fixture-runtime',
-    supportsDispatchSelection: false,
+    selectionModes: ['device-default'],
     capabilities: { steer: false, resume: false, approvalInteractive: false, ...capabilities },
   });
 

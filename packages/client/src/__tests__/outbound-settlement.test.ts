@@ -28,7 +28,7 @@ async function open(onOutboundSettled: (batch: readonly OutboundSettlement[]) =>
   vi.spyOn(LongPollClient.prototype, 'start').mockImplementation(() => {});
   vi.spyOn(LongPollClient.prototype, 'stop').mockImplementation(() => {});
   connection = new ConnectionManager({ serverUrl: 'http://example.invalid', deviceId: 'settlement-device', productId: 'test',
-    capabilities: [], runtimes: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
+    capabilities: [], harnesses: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
     onEnvelope: () => {}, onOutboundSettled, longPollRetryDelayMs: 1,
   });
   for (const envelope of queued) connection.send(envelope);
@@ -39,7 +39,7 @@ async function open(onOutboundSettled: (batch: readonly OutboundSettlement[]) =>
 
 function helloEnvelope(): Envelope {
   return createEnvelope('conn.hello', {
-    deviceId: 'settlement-device', productId: 'test', protocolVersions: [PROTOCOL_VERSION], capabilities: [], runtimes: [],
+    deviceId: 'settlement-device', productId: 'test', protocolVersions: [PROTOCOL_VERSION], capabilities: [], harnesses: [],
   });
 }
 
@@ -90,7 +90,7 @@ describe('outbound settlement contract #397', () => {
       settled.push(...batch);
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    const envelope = createEnvelope('task.complete', { summary: 'exact bytes', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task' });
+    const envelope = createEnvelope('task.complete', { summary: 'exact bytes', sessionRef: 'session', executor: { id: 'pi' } }, { taskId: 'task' });
     connection.send(envelope);
     await vi.waitFor(() => expect(connection.outboxLength()).toBe(0));
     expect(business).toHaveLength(2);
@@ -122,7 +122,7 @@ describe('outbound settlement contract #397', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const first = createEnvelope('task.started', {}, { taskId: 'task-1' });
     const second = createEnvelope('task.started', {}, { taskId: 'task-2' });
-    const claim = createEnvelope('task.claim', { deviceId: 'settlement-device', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task-3' });
+    const claim = createEnvelope('task.claim', { deviceId: 'settlement-device', executor: { id: 'pi' } }, { taskId: 'task-3' });
     const third = createEnvelope('task.started', {}, { taskId: 'task-3' });
 
     connection.send(first);
@@ -162,7 +162,7 @@ describe('outbound settlement contract #397', () => {
     vi.spyOn(LongPollClient.prototype, 'start').mockImplementation(() => {});
     const onHalted = vi.fn();
     connection = new ConnectionManager({ serverUrl: 'http://example.invalid', deviceId: 'settlement-device', productId: 'test',
-      capabilities: [], runtimes: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
+      capabilities: [], harnesses: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
       onEnvelope: () => {}, onHalted, longPollRetryDelayMs: 1,
     });
     await connection.start();
@@ -181,7 +181,7 @@ describe('outbound settlement contract #397', () => {
     vi.spyOn(LongPollClient.prototype, 'start').mockImplementation(() => {});
     const onHalted = vi.fn();
     connection = new ConnectionManager({ serverUrl: 'http://example.invalid', deviceId: 'settlement-device', productId: 'test',
-      capabilities: [], runtimes: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
+      capabilities: [], harnesses: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
       onEnvelope: () => {}, onHalted, longPollRetryDelayMs: 1,
     });
     await connection.start();
@@ -235,7 +235,7 @@ describe('outbound settlement contract #397', () => {
     vi.spyOn(LongPollClient.prototype, 'start').mockImplementation(() => {});
     vi.spyOn(LongPollClient.prototype, 'stop').mockImplementation(() => {});
     connection = new ConnectionManager({ serverUrl: 'http://example.invalid', deviceId: 'settlement-device', productId: 'test',
-      capabilities: [], runtimes: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
+      capabilities: [], harnesses: [], auth: await auth(), cursorStore: { load: async () => undefined, save: async () => {} } as never,
       onEnvelope: () => {}, longPollRetryDelayMs: 1,
     });
     expect(() => connection!.getIngressBudget()).toThrow(/no activity ingress has been advertised/);

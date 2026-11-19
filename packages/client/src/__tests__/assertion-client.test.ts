@@ -361,7 +361,7 @@ describe('requestTaskAssertion', () => {
         'task.offer',
         {
           instruction: 'qualify the inbound lead',
-          target: { lane: 'runtime', runtimeId: 'pi' },
+          target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
           agentRef: { agentId: 'salesko-agent', profileRevision: 'profile-rev-1' },
           requiredToolsets: [TOOLSET],
           ...FRESH_OFFER,

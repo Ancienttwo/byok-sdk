@@ -79,7 +79,7 @@ const adapter = new OpenCodeAdapter({ models, spawnFn: observedSpawn,
   ...(process.env.OC_EXECUTABLE ? { resolveBin: () => ({ command: process.env.OC_EXECUTABLE!, source: 'env' as const }) } : {}) });
 async function start(instruction: string, cwd: string, sessionRef?: string) {
   mkdirSync(cwd, { recursive: true });
-  const prepared = await adapter.prepare({ offer: { instruction, target: { lane: 'harness', harnessId: 'opencode' }, ...(sessionRef ? { sessionRef } : {}) }, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+  const prepared = await adapter.prepare({ offer: { instruction, target: { lane: 'harness', harnessId: 'opencode', selection: { mode: 'device-default' } }, ...(sessionRef ? { sessionRef } : {}) }, descriptor: adapter.descriptor, requiredToolsetIds: [] });
   if (prepared.kind === 'reject') throw new Error(prepared.reason);
   const scratch = await createExecutionScratch({ root: scratchRoot });
   const env = (await adapter.runtimeEnvironment()).env;

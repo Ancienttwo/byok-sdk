@@ -1279,6 +1279,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `agentEgress.contentRead.artifact.sensitiveNames` | advanced | array |
 | `agentEgress.contentRead.runtimeAllowlistedRoots` | advanced | array |
 | `runtimeAllowlist` | common | array |
+| `runtimeInstallRoot` | advanced | string |
 | `runtimes` | advanced | object |
 | `runtimes.pi` | advanced | object |
 | `runtimes.pi.durableLane` | advanced | boolean |
@@ -1293,6 +1294,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.pi.runtimeEnvironment` | advanced | union |
 | `runtimes.pi.packageDir` | advanced | string |
 | `runtimes.claude` | advanced | object |
+| `runtimes.claude.byok` | embedded-only | embedded-only |
 | `runtimes.claude.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.claude.agentSessionPersistence` | advanced | "disabled" / "enabled" |
 | `runtimes.claude.versionPolicy` | advanced | object |

@@ -1,6 +1,6 @@
 import { createEnvelope } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { TENANT_A, createHarness } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, createHarness } from './support/harness';
 
 // #687: a daemon batch can carry task.started together with the first Agent
 // message. A failure at the message must not undo the lifecycle before it.
@@ -11,6 +11,7 @@ describe('POST /byok/messages with a failing Agent message', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection', 'agent-egress-fresh-session'],
     });
     const agentRef = { agentId: 'batch-agent', profileRevision: 'profile-v1' };
@@ -19,7 +20,7 @@ describe('POST /byok/messages with a failing Agent message', () => {
       taskId,
       deviceId: device.deviceId,
       payload: {
-        instruction: 'reply', agentRef, target: { lane: 'runtime' as const, runtimeId: 'codex' as const }, session: { mode: 'fresh' },
+        instruction: 'reply', agentRef, target: { lane: 'harness' as const, harnessId: 'codex' as const, selection: { mode: 'device-default' as const } }, session: { mode: 'fresh' },
         egressPolicy: {
           policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -37,7 +38,7 @@ describe('POST /byok/messages with a failing Agent message', () => {
       contentHash: 'sha256:2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824',
     }, { taskId });
     const batch = [
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor: { id: 'codex' } }, { taskId }),
       createEnvelope('task.started', {}, { taskId }),
       message,
     ];

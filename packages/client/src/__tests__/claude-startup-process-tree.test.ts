@@ -8,7 +8,7 @@ import type { SpawnFn } from '../adapters/claude/claude-adapter';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
-const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
 
 function exists(pid: number): boolean {
   try { process.kill(pid, 0); return true; }

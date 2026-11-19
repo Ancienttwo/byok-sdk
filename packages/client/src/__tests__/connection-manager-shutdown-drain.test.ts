@@ -57,7 +57,7 @@ describe('ConnectionManager.stop(drainTimeoutMs) — bounded outbox drain before
       deviceId: record.deviceId,
       productId: 'test-product',
       capabilities: [],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: () => {},

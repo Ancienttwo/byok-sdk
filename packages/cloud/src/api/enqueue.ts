@@ -10,6 +10,7 @@ import {
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  harnessSupportsTarget,
   isSealedPayload,
   requiredReceiverCapabilities,
   type AgentContentReceiptPayload,
@@ -120,10 +121,12 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       ...(window === undefined ? {} : { nativeSessions: window }) };
     if (recorded === undefined) {
       await assertAgentCapabilities(tenant, deviceId, requiredReceiverCapabilities('task.offer', resolved));
-      if (resolved.target.lane === 'harness') {
-        const harnessId = resolved.target.harnessId;
-        const target = await options.cloud.devices.get(tenant, deviceId);
-        if (!target?.harnesses?.some(harness => harness.id === harnessId)) throw new ByokCloudError('agent_capability_missing', 'requested custom harness is not advertised by this device');
+      const target = resolved.target;
+      if (target.lane === 'harness') {
+        const registered = device ?? await options.cloud.devices.get(tenant, deviceId);
+        if (registered?.harnesses?.some(harness => harnessSupportsTarget(harness, target)) !== true) {
+          throw new ByokCloudError('agent_capability_missing', 'the device does not advertise the requested harness, selection mode and effort');
+        }
       }
     }
     return resolved;
@@ -185,7 +188,7 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
     // A sealed retry may seal the same content again. When its comparison
     // projection matches, the first ciphertext stays the offer (§9.2).
     let build = buildEnvelope;
-    let offerPayload: object = proposed.payload;
+    let offerPayload: Record<string, unknown> = proposed.payload;
     if (!recorded.created && !(await sameTaskBody(recorded.receipt.body, proposedBody, options.crypto))) {
       const first = isSealedPayload(proposed.type, proposed.payload)
         ? firstSealedPayload(recorded.receipt.body, { deviceId, type: proposed.type, payload: proposed.payload })
@@ -250,14 +253,14 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
   }
 
   /** A sealed member above the inline limit names its ciphertext blob (#654); see {@link sealedCiphertextCommitted}. */
-  async function assertSealedCiphertext(tenant: TenantId, payload: object): Promise<void> {
+  async function assertSealedCiphertext(tenant: TenantId, payload: Record<string, unknown>): Promise<void> {
     const ref = sealedCiphertextRef(payload);
     if (ref !== undefined && !(await sealedCiphertextCommitted(tenantStoresFor(controlPlane(tenant), root).objects, ref))) {
       throw new ByokCloudError('coordination_input_invalid', 'A sealed ciphertextRef must name a committed object of this tenant with its size and content type.');
     }
   }
 
-  async function retainTaskCiphertext(tenant: TenantId, taskId: string, payload: object): Promise<void> {
+  async function retainTaskCiphertext(tenant: TenantId, taskId: string, payload: Record<string, unknown>): Promise<void> {
     const ref = sealedCiphertextRef(payload);
     if (ref !== undefined) await retainSealedCiphertext(tenantStoresFor(controlPlane(tenant), root).objects, taskId, ref);
   }

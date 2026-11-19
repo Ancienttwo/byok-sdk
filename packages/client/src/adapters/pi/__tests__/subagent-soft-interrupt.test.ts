@@ -9,7 +9,7 @@ import { PiAdapter } from '../pi-adapter';
 import { startPreparedOperation } from '../../../__tests__/fixtures/prepared-operation';
 import type { Session } from '../../../types';
 
-const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+const PI_TARGET = { lane: 'auto' } as const;
 
 const snapshot = (active: boolean) => ({ asyncSnapshot: {
   kind: 'pi-subagents.async-status-snapshot', version: 1, omitted: { runs: 0, byteLimitExceeded: false },

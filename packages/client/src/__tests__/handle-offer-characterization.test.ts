@@ -14,7 +14,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '../types';
 import { StubRuntimeAdapter, StubSession } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferRunnerDeps, resumeSession } from './fixtures/fresh-offer';
 
 /**
@@ -63,7 +63,7 @@ function claimed(sent: readonly Envelope[], taskId: string): number {
 
 function agentOffer(taskId: string, seq: number, extra: { sessionRef?: string } = {}): Envelope {
   return createEnvelope('task.offer', {
-    instruction: 'characterized work', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
+    instruction: 'characterized work', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT,
     ...(extra.sessionRef === undefined ? FRESH_OFFER : resumeSession(extra.sessionRef)),
   }, { taskId, seq });
 }
@@ -76,7 +76,7 @@ async function agentRunner(
   const agentHome = new AgentHomeManager({ hostStorageRoot: await temporary('byok-offer-char-home-') });
   const sent: Envelope[] = [];
   // Held by reference: the runner re-reads `startupTimeoutMs` per offer.
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome,
     agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -279,7 +279,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
     vi.spyOn(AgentMessageOutbox, 'open').mockRejectedValueOnce(new Error('outbox fixture failure'));
     const taskId = 'agent-message-outbox-failed';
     const offer = (seq: number) => createEnvelope('task.offer', {
-      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      instruction: 'reply', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId, seq });
 
@@ -353,7 +353,7 @@ describe('handleOffer exit characterization (before the phase split)', () => {
 
     expect(claimed(sent, taskId)).toBe(1);
     expect(terminals(sent, taskId).map((entry) => ({ type: entry.type, payload: entry.payload }))).toEqual([{
-      type: 'task.fail', payload: { reason: 'runtime activation failed: send fixture failure', retryable: false, failure: { class: 'unknown' }, agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' } },
+      type: 'task.fail', payload: { reason: 'runtime activation failed: send fixture failure', retryable: false, failure: { class: 'unknown' }, agentRef: AGENT, executor: { id: 'pi' } },
     }]);
     expect(adapter.sessions).toHaveLength(1);
     expect(adapter.sessions[0]!.closeCalled).toBe(true);

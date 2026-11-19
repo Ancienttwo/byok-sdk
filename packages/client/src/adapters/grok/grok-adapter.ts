@@ -5,7 +5,7 @@ import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { requireImageInput } from '../input-images.js';
 import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
-import { modelLaneTarget, type RuntimeTaskInput } from '../../types.js';
+import { offerSelection, type RuntimeTaskInput } from '../../types.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -158,8 +158,8 @@ export class GrokAdapter implements RuntimeAdapter {
 
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'grok',
-    supportsDispatchSelection: false,
-    supportsTaskExecutionOptions: true,
+    selectionModes: ['device-default', 'adapter-model'],
+    supportsEffort: true,
     // Windows has no Grok evidence (`docs/adapter-capabilities.md`).
     platforms: ['darwin', 'linux'],
     capabilities: {
@@ -482,7 +482,10 @@ class GrokSession implements Session {
     if ((task.modelId !== undefined && task.modelId !== this.model) || (task.effort !== undefined && task.effort !== this.effort)) {
       throw new PolicyUnsupportedError('grok persistent session cannot change model or effort');
     }
-    if (modelLaneTarget(task.target) !== undefined) throw new PolicyUnsupportedError(`grok persistent session runs ${this.model ?? 'the default model'} and takes no dispatch selection`);
+    const selection = offerSelection(task.target);
+    if (selection !== undefined && selection.mode !== 'device-default' && selection.mode !== 'adapter-model') {
+      throw new PolicyUnsupportedError('grok persistent session cannot change credential source');
+    }
     await this.prompt(task.instruction, task.images);
   }
   async steer(): Promise<void> {

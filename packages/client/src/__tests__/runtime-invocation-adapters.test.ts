@@ -56,7 +56,7 @@ describe('adapters detect and launch through one resolved invocation (#763)', ()
     const { calls, spawnFn } = recordingSpawn();
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'npm-shim:claude', source: 'path' }), spawnFn });
     expect(await adapter.detect()).toMatchObject({ kind: 'available' });
-    sessions.push(await startPreparedOperation(adapter, { target: { lane: 'runtime', runtimeId: 'claude' }, instruction: 'say hi' }, await resources()));
+    sessions.push(await startPreparedOperation(adapter, { target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, instruction: 'say hi' }, await resources()));
     expect(calls).toHaveLength(1);
     expect(calls[0]!.command).toBe(process.execPath);
     expect(calls[0]!.args.slice(0, 2)).toEqual([fixtures.claude, '-p']);
@@ -66,7 +66,7 @@ describe('adapters detect and launch through one resolved invocation (#763)', ()
     const { calls, spawnFn } = recordingSpawn();
     const adapter = new CodexAdapter({ resolveBin: () => ({ command: 'npm-shim:codex', source: 'path' }), spawnFn });
     expect(await adapter.detect()).toMatchObject({ kind: 'available' });
-    sessions.push(await startPreparedOperation(adapter, { target: { lane: 'runtime', runtimeId: 'codex' }, instruction: 'hello' }, await resources()));
+    sessions.push(await startPreparedOperation(adapter, { target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, instruction: 'hello' }, await resources()));
     expect(calls).toHaveLength(1);
     expect(calls[0]!.command).toBe(process.execPath);
     expect(calls[0]!.args[0]).toBe(fixtures.codex);
@@ -76,7 +76,7 @@ describe('adapters detect and launch through one resolved invocation (#763)', ()
   it('rejects a resolver failure the same way in both adapters, without a local path', async () => {
     const resolveBin = () => ({ command: 'unreadable-shim', source: 'path' as const });
     for (const [adapter, runtime] of [[new ClaudeAdapter({ resolveBin }), 'claude'], [new CodexAdapter({ resolveBin }), 'codex']] as const) {
-      expect(await adapter.prepare({ offer: { target: { lane: 'runtime', runtimeId: runtime }, instruction: 'x' } } as never))
+      expect(await adapter.prepare({ offer: { target: { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } }, instruction: 'x' } } as never))
         .toEqual({ kind: 'reject', reason: `${runtime} installation refused: not-executable`, retryable: false });
     }
   });

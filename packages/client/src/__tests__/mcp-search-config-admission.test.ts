@@ -6,7 +6,7 @@ import { TaskRunner } from '../daemon/task-runner';
 import { admitOfferLimits } from '../daemon/task-runner/offer-admission';
 import { OfferAdmissionTiming } from '../daemon/task-runner/offer-admission-timing';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
-import { acceptClaimSettlement, testIngressBudget } from './fixtures/activity-ingress';
+import { testHarnesses, acceptClaimSettlement, testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { observationOf } from './fixtures/mcp-observation';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -23,7 +23,7 @@ function setup(getMcpToolsetSnapshot: () => ReturnType<typeof snapshot>) {
   });
   const sent: Envelope[] = [];
   const probe = vi.fn(async () => observationOf({ host: ['echo'] }).host!);
-  const runner = new TaskRunner({
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },
     ...testAgentHomeDeps(),
     adapters: [adapter],
     deviceId: 'device-1',
@@ -46,7 +46,7 @@ function setup(getMcpToolsetSnapshot: () => ReturnType<typeof snapshot>) {
   const taskId = 'search-admission';
   const payload: TaskOfferPlainPayload = {
     agentRef: freshTestAgentRef(), session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-    instruction: 'test instruction', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['host'],
+    instruction: 'test instruction', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, requiredToolsets: ['host'],
   };
   const offer = createEnvelope('task.offer', payload, { taskId, seq: 1 });
   return {

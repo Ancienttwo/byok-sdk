@@ -216,7 +216,7 @@ describe('execution record as a DaemonEvent, an audit record and a live-view lin
   it('follows its task terminal event, whether it is published before or after the server settles that terminal', () => {
     const { observer, events, offer, record } = observed();
     const settled = [
-      createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'completed' }),
+      createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { id: 'pi' } }, { taskId: 'completed' }),
       createEnvelope('task.fail', { reason: 'runtime exited', retryable: true }, { taskId: 'failed' }),
       createEnvelope('task.cancelled', { reason: 'operator' }, { taskId: 'cancelled' }),
     ];
@@ -225,12 +225,12 @@ describe('execution record as a DaemonEvent, an audit record and a live-view lin
       observer.noteExecutionRecord(record(terminal.task_id!));
       observer.handleOutboundEnvelope(terminal);
     }
-    const refused = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'refused' });
+    const refused = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { id: 'pi' } }, { taskId: 'refused' });
     offer('refused');
     observer.noteExecutionRecord(record('refused'));
     observer.noteOutboundRejected(refused, { envelopeId: refused.id, type: refused.type, taskId: 'refused', reason: 'not_permitted', terminal: true });
     offer('late');
-    observer.handleOutboundEnvelope(createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'late' }));
+    observer.handleOutboundEnvelope(createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { id: 'pi' } }, { taskId: 'late' }));
     observer.noteExecutionRecord(record('late'));
     observer.noteExecutionRecord(record('untracked'));
     expect(events.map(event => `${event.kind}:${'taskId' in event ? event.taskId : ''}`)).toEqual([

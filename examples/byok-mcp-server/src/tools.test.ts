@@ -37,7 +37,7 @@ it('runs submit, status and list against the real daemon, and frees the slot at 
   expect(retry.value).toEqual({ taskId, state: expect.any(String), deduplicated: true });
 
   const session = await host.runtime.session(taskId);
-  expect(host.runtime.offers).toEqual([expect.objectContaining({ instruction: 'Write the B3 answer.', target: { lane: 'runtime', runtimeId: 'pi' } })]);
+  expect(host.runtime.offers).toEqual([expect.objectContaining({ instruction: 'Write the B3 answer.', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } })]);
   expect((await call(client, 'byok_whoami')).value.quota.now).toMatchObject({ runningTasks: 1, remainingSubmits: 59 });
   session.emit({ type: 'progress', text: 'B3 answer' }); session.emit({ type: 'turn_end' });
   const outcome = await until(client, taskId, state => state === 'Complete');

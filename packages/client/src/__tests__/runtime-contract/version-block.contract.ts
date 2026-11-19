@@ -97,7 +97,7 @@ describe('runtime contract: synthetic Host version block (#1103)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'codex' } },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } },
         { taskId, seq: server.nextSeq() },
       ),
     );

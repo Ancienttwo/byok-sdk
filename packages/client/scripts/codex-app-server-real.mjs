@@ -22,6 +22,7 @@ const { spawnOwnedLineProcess } = await import(
 );
 const { CodexProjection } = await import('../src/adapters/codex/projection.ts');
 const { CodexAdapter } = await import('../src/adapters/codex/codex-adapter.ts');
+const { CODEX_TOOLSET_MINIMUM_VERSION, supportsCodexToolsetSelection } = await import('../src/adapters/codex/codex-version.ts');
 const execute = promisify(execFile);
 const report = {
   status: 'not-verified',
@@ -35,6 +36,10 @@ const detected = await adapter.detect();
 report.detection = detected;
 if (detected.kind !== 'available' || !detected.authPresent) {
   console.log(JSON.stringify(report, null, 2));
+  process.exit(1);
+}
+if (!supportsCodexToolsetSelection(detected.version)) {
+  console.log(JSON.stringify({ ...report, reason: `enabled_tools requires Codex ${CODEX_TOOLSET_MINIMUM_VERSION} or later` }, null, 2));
   process.exit(1);
 }
 const workspace = await mkdtemp(join(tmpdir(), 'byok-s2b-real-'));
@@ -55,7 +60,14 @@ const overrides = {
 const listed = await execute('codex', ['mcp', 'list', '--json'], {
   timeout: 5000,
 });
-for (const entry of JSON.parse(listed.stdout))
+let configuredServers;
+try {
+  configuredServers = JSON.parse(listed.stdout);
+  if (!Array.isArray(configuredServers)) throw new TypeError('expected an array of MCP servers');
+} catch (error) {
+  throw new Error('Codex mcp list did not return a readable server list', { cause: error });
+}
+for (const entry of configuredServers)
   if (entry.name !== 'byoks2b') {
     if (entry.transport.type === 'stdio')
       overrides[`mcp_servers.${entry.name}.command`] = '"/bin/false"';

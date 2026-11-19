@@ -116,7 +116,7 @@ describe('startup refuses a journal of another wire major', () => {
     const { server, config, identity } = await pairedDaemonStore();
     const journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     await seedOffer(journal, identity, 'done-task', 1, encodeEnvelope(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'done' }, { taskId: 'done-task', seq: 1 })));
-    const terminal = majorBytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'done-task', sessionRef: 's' })), 2);
+    const terminal = majorBytes(encodeEnvelope(createEnvelope('task.complete', { summary: 'old', sessionRef: 's', executor: { id: 'pi' } }, { taskId: 'done-task', sessionRef: 's' })), 2);
     await journal.recordTerminal({ taskId: 'done-task', terminalType: 'complete', bytes: terminal, payloadHash: journalHash(terminal),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });
     await journal.close();
@@ -147,7 +147,7 @@ describe('result-document recovery from the journal', () => {
     const device = (await createTestDeviceStore(config.storeDir!, undefined, config.productId).credentials.read())!;
     const identity = { tenantId: device.tenantId, productId: config.productId, deviceId: device.deviceId };
     const offerBytes = (taskId: string) => encodeEnvelope(createEnvelope('task.offer', {
-      session: { mode: 'fresh' }, instruction: 'submit one result', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
+      session: { mode: 'fresh' }, instruction: 'submit one result', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selection,
       ...(requiredReply ? { messageEgress: { mode: 'required', contract: 'reply.v1', contentType: 'text/plain', maxBytes: 1024 } } : {}),
     }, { taskId, seq: 1 }));
     const home = path.join(config.agentHome!.hostStorageRoot, 'agents', agentRef.agentId);
@@ -210,7 +210,7 @@ describe('result-document recovery from the journal', () => {
     journal = new SqliteLocalTaskJournal({ storeDir: config.storeDir! });
     await startWith(config, journal);
     const terminal = await server.waitFor((envelope) => envelope.task_id === taskId && envelope.type === 'task.fail');
-    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef, executor: { kind: 'runtime', runtimeId: 'pi' } });
+    expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', retryable: false, agentRef, executor: { id: 'pi' } });
     expect(JSON.stringify(terminal)).not.toContain('"document"');
     expect(server.received.some((envelope) => envelope.type === 'task.complete')).toBe(false);
     expect(await (await AgentResultStore.open(home)).get(taskId)).toEqual(staged);
@@ -239,7 +239,7 @@ describe('result-document recovery from the journal', () => {
       bytesHash: journalHash(bytes), opensTask: true, receivedAt: new Date().toISOString() });
     await journal.recordAdmission({ taskId, admitted: true, claimedRuntime: 'pi', decidedAt: new Date().toISOString() });
     const complete = encodeEnvelope(createEnvelope('task.complete', {
-      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef, executor: { kind: 'runtime', runtimeId: 'pi' },
+      summary: 'submitted', sessionRef: 'session-1', document: { verdict: 'pass' }, agentRef, executor: { id: 'pi' },
     }, { taskId, sessionRef: 'session-1' }));
     await journal.recordTerminal({ taskId, terminalType: 'complete', bytes: complete, payloadHash: journalHash(complete),
       truthState: 'pending', attempt: 1, recordedAt: new Date().toISOString() });

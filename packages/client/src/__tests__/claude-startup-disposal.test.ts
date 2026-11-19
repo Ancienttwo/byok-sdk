@@ -8,7 +8,7 @@ import { ClaudeAdapter, type SpawnFn } from '../adapters/claude/claude-adapter';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 
-const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
 
 const tree = vi.hoisted(() => ({ adopt: vi.fn(async () => {}), dispose: vi.fn(async () => {}), terminate: vi.fn(async () => {}) }));
 vi.mock('../adapters/process-tree', () => ({

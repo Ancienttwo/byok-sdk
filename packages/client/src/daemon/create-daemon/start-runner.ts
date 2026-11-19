@@ -31,6 +31,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
   const memoryCommit = agentMemoryCommitStore(daemonScope);
   const deps: TaskRunnerDeps = {
     adapters,
+    advertisedHarnesses: () => daemonState.connection?.advertisedHarnesses() ?? [],
     ...(run.capabilities.includes('native-sessions') ? { nativeSessions: { sessionDir: config.piByokLauncher!.sessionDir! } } : {}),
     runtimeAllowlist: config.runtimeAllowlist,
     // M5 batch-3: see `DaemonConfig.runtimePreference`'s own doc comment above.

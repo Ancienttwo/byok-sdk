@@ -15,10 +15,10 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
 import { agentReliabilityKey } from '../agent-reliability';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
-import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
-const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const EXECUTOR = { id: 'pi' } as const;
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: 'test-product', deviceId } as const;
@@ -72,6 +72,7 @@ describe('the inbound gate', () => {
   it('step 1: accepts every generic daemon -> server type', async () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     await stores.devices.recordCapabilities({
+      harnesses: TEST_HARNESSES,
       capabilities: [
         'agent-home-contract',
         'agent-egress-policy',
@@ -273,8 +274,8 @@ describe('the inbound gate', () => {
     });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-first-device', deviceId, agentRef: AGENT_REF });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId, agentRef: AGENT_REF });
-    await harness.stores.tasks.claim(TENANT_A, { taskId: 'task-first-device', deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
-    await harness.stores.tasks.claim(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
+    await harness.stores.tasks.claim(TENANT_A, { taskId: 'task-first-device', deviceId, executor: { id: 'pi' } });
+    await harness.stores.tasks.claim(TENANT_A, { taskId: 'task-other-device', deviceId: other.deviceId, executor: { id: 'pi' } });
     const envelopeId = '10000000-0000-4000-8000-000000000123';
     const first = createEnvelope('task.progress', { seq: 1, events: [] }, {
       id: envelopeId,
@@ -297,7 +298,7 @@ describe('the inbound gate', () => {
     });
     await harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId: 'task-shared', deviceId, agentRef: AGENT_REF });
     await harness.stores.tasks.reserveAgentOffer(TENANT_B, { taskId: 'task-shared', deviceId, agentRef: AGENT_REF });
-    for (const tenant of [TENANT_A, TENANT_B]) await harness.stores.tasks.claim(tenant, { taskId: 'task-shared', deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
+    for (const tenant of [TENANT_A, TENANT_B]) await harness.stores.tasks.claim(tenant, { taskId: 'task-shared', deviceId, executor: { id: 'pi' } });
     const envelope = progress('task-shared');
 
     expect(await handleInboundEnvelope(stores, deviceId, envelope).then((result) => result.outcome)).toBe('accepted');
@@ -353,7 +354,7 @@ describe('the inbound gate', () => {
 
 /** The first sealed golden line of each daemon type with a sealed branch (#654). */
 const sealedGoldenPayloads = new Map<string, unknown>();
-for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
+for (const raw of readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8').trimEnd().split('\n')) {
   const line = JSON.parse(raw) as { type: string; payload: unknown };
   if ((DAEMON_TO_SERVER_TYPES as readonly string[]).includes(line.type) && isSealedPayload(line.type, line.payload)
     && !sealedGoldenPayloads.has(line.type)) sealedGoldenPayloads.set(line.type, line.payload);

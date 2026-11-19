@@ -11,7 +11,7 @@ import {
   requiredReceiverCapabilities,
 } from '../index';
 
-const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const EXECUTOR = { id: 'pi' } as const;
 
 /**
  * `task.complete.document` — the bounded structured-result channel and its
@@ -337,10 +337,8 @@ describe('task.complete.document is v3 baseline (no capability flag)', () => {
     expect(requiredReceiverCapabilities('task.complete', { executor: EXECUTOR, summary: 'done', sessionRef: 'sess-1', document: { a: 1 } })).toEqual([]);
   });
 
-  it('kept every other pre-existing flag in order (v7 retired steer and provider-profile-binding)', () => {
-    expect([...CAPABILITY_FLAGS].slice(0, 2)).toEqual([
-      'dispatch-selection',
-      'toolset-selection',
-    ]);
+  it('retains the toolset selection flag after v8 makes dispatch selection mandatory', () => {
+    expect(CAPABILITY_FLAGS).toContain('toolset-selection');
+    expect(CAPABILITY_FLAGS).not.toContain('dispatch-selection');
   });
 });

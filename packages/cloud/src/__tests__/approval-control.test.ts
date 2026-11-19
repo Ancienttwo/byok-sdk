@@ -84,7 +84,7 @@ async function claimedTask(harness: CloudHarness, device: PairedDevice): Promise
     await handleInboundEnvelope(
       stores,
       device.deviceId,
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId: offer.taskId }),
     ).then((result) => result.outcome),
   ).toBe('accepted');
   expect(
@@ -268,7 +268,7 @@ describe('the gates that refuse before any mailbox row exists', () => {
         device.deviceId,
         createEnvelope(
           'task.complete',
-          { summary: 'did it anyway', sessionRef: 'resolved-locally', agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } },
+          { summary: 'did it anyway', sessionRef: 'resolved-locally', agentRef: TEST_AGENT_REF, executor: { id: 'pi' } },
           { taskId: task.taskId },
         ),
       ).then((result) => result.outcome),

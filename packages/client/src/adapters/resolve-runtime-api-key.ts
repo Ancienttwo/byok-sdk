@@ -1,7 +1,8 @@
 import { validateHeaderValue } from 'node:http';
 import { RuntimeExecutionFailure } from '../runtime-failure.js';
 
-type RuntimeKeySource = 'dsh' | 'agy' | `Claude ${'ANTHROPIC_API_KEY' | 'ANTHROPIC_AUTH_TOKEN'}`;
+type RuntimeWithHostCredential = 'claude' | 'dsh' | 'agy';
+type RuntimeKeySource = RuntimeWithHostCredential | `Claude ${'ANTHROPIC_API_KEY' | 'ANTHROPIC_AUTH_TOKEN'}`;
 const MIN_RUNTIME_KEY_LENGTH = 20;
 
 export function requireRuntimeApiKey(key: unknown, source: RuntimeKeySource): string {
@@ -20,7 +21,7 @@ export function requireRuntimeApiKey(key: unknown, source: RuntimeKeySource): st
   return key;
 }
 
-function resolutionFailed(runtime: 'dsh' | 'agy'): RuntimeExecutionFailure {
+function resolutionFailed(runtime: RuntimeWithHostCredential): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure({
     phase: 'start', retry: 'non-retryable', failure: { class: 'auth' },
     reason: `${runtime} provider API key resolution failed`,
@@ -28,7 +29,7 @@ function resolutionFailed(runtime: 'dsh' | 'agy'): RuntimeExecutionFailure {
 }
 
 /** Resolve one spawn's credential. Host exceptions and cancellation reasons can contain secrets. */
-export async function resolveRuntimeApiKey(runtime: 'dsh' | 'agy', resolveKey: () => Promise<string>, signal?: AbortSignal): Promise<string> {
+export async function resolveRuntimeApiKey(runtime: RuntimeWithHostCredential, resolveKey: () => Promise<string>, signal?: AbortSignal): Promise<string> {
   const cancelled = () => new Error(`${runtime} start was cancelled`);
   if (signal?.aborted) throw cancelled();
   const stopped = Promise.withResolvers<never>();

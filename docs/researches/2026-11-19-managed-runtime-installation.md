@@ -1,0 +1,16 @@
+# Managed runtime installation evidence for #2419
+
+The November 19, 2026 candidate was tested on macOS arm64 against the OAR pins in its base, `8aa372807`. The public Host operation installed each package under a temporary SDK root with `--ignore-scripts`. It selected the executable in the table, checked `--version` and the adapter's help command, and published the generation after both checks passed. [#2419](https://github.com/Ancienttwo/byok-sdk/issues/2419)
+
+| Runtime | Package and qualified release | Executable |
+| --- | --- | --- |
+| Claude | `@anthropic-ai/claude-code@2.1.312` | `@anthropic-ai/claude-code-darwin-arm64/claude` |
+| Codex | `@openai/codex@0.160.0` | `node_modules/.bin/codex` |
+| DSH | `@deepseek-ai/dsh@0.2.2-rc.1` | `node_modules/.bin/dsh` |
+| OpenCode | `@opencode/cli@2.3.0` | `@opencode/cli-darwin-arm64/bin/opencode` |
+
+For DSH, the installer restored mode `0755` on the `node-pty` `spawn-helper`. The qualified `dsh.close` contract used the managed binary through `BYOK_CONTRACT_DSH_BIN`. A real ACP shell tool started, and closing the session reaped its processes. That case passed. The other 23 contract cases were filtered out.
+
+A preflight on the same macOS arm64 host used the Claude and Codex adapter pins from `038d66c9d` in a temporary copy of the client source. Claude `2.1.326` selected `@anthropic-ai/claude-code-darwin-arm64/claude`. Codex `0.169.0` selected `node_modules/.bin/codex`. Both passed the public operation’s version and help probes and published their installations.
+
+`agy help update` confirmed the standalone CLI's `agy update` command. Grok returns its vendor npm command. The installer regression suite exercises both vendor responses, native package path selection, version mismatch before publication, and preservation of the previous generation after a failed install.

@@ -9,7 +9,6 @@ import { isSqliteAvailable } from '../sqlite-support';
 import {
   INPUT_IMAGES_CAPABILITY,
   INPUT_IMAGE_MAX_BYTES,
-  TASK_EXECUTION_OPTIONS_CAPABILITY,
   type ExecutionTarget,
   type InputImageBlobRef,
 } from '@byok-sdk/protocol';
@@ -21,10 +20,10 @@ import { claimAndStart, connectFakeDaemonLongPoll, nextEnvelope, startServer, st
 const PRODUCT_ID = 'acme';
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jFJ0AAAAASUVORK5CYII=', 'base64');
 const IMAGE = { bytes: PNG, contentType: 'image/png' } as const;
-const RUNTIME: ExecutionTarget = { lane: 'runtime', runtimeId: 'pi' };
+const RUNTIME: ExecutionTarget = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } };
 const TARGET_OPTIONS = [
   { ...RUNTIME, effort: 'xhigh' },
-  { lane: 'harness', harnessId: 'grok', modelId: 'grok-4' },
+  { lane: 'harness', harnessId: 'grok', selection: { mode: 'adapter-model', modelId: 'grok-4' } },
 ] satisfies ExecutionTarget[];
 const EGRESS = {
   policyRevision: '1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -48,14 +47,18 @@ describe('embedded execution options and images (#2383)', () => {
     vi.restoreAllMocks();
   });
 
-  async function start(capabilities: string[], storage?: ByokServerStorage) {
+  async function start(capabilities: string[], storage?: ByokServerStorage, executionOptions = true) {
     const instance = byok = createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 20, ...(storage === undefined ? {} : { storage }) });
     const http = await startServer(instance);
     server = http.server;
     const daemon = await connectFakeDaemonLongPoll(http.baseUrl, instance, {
       productId: PRODUCT_ID,
       capabilities: ['agent-home-contract', ...capabilities],
-      harnesses: [{ id: 'grok', capabilities: {} }],
+      harnesses: [
+        { id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } },
+        { id: 'claude', capabilities: { selectionModes: ['device-default'], effort: executionOptions } },
+        { id: 'grok', capabilities: { selectionModes: executionOptions ? ['device-default', 'adapter-model'] : ['device-default'], effort: false } },
+      ],
     });
     const input = { ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'inspect this' };
     async function uploadDeviceBlob(finalize: boolean, data = PNG): Promise<InputImageBlobRef> {
@@ -78,24 +81,24 @@ describe('embedded execution options and images (#2383)', () => {
   }
 
   it.each(TARGET_OPTIONS)('offers the exact target $lane when execution options are advertised', async (target) => {
-    const { instance, daemon, input } = await start([TASK_EXECUTION_OPTIONS_CAPABILITY]);
+    const { instance, daemon, input } = await start([]);
     const { taskId } = await instance.dispatch({ ...input, target });
     expect(await nextEnvelope(daemon)).toMatchObject({ type: 'task.offer', task_id: taskId, payload: { target } });
   });
 
   it.each(TARGET_OPTIONS)('refuses the $lane target without execution options even with image support', async (target) => {
-    const { instance, daemon, input } = await start([INPUT_IMAGES_CAPABILITY]);
+    const { instance, daemon, input } = await start([INPUT_IMAGES_CAPABILITY], undefined, false);
     await expect(instance.dispatch({ ...input, taskId: 'unsupported', target }))
-      .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining(TASK_EXECUTION_OPTIONS_CAPABILITY) });
+      .rejects.toMatchObject({ code: 'agent_capability_missing' });
     expect(await instance.tasks.attempt('unsupported')).toBeUndefined();
     expect(await daemon.next()).toEqual([]);
   });
 
   it.each([
     { ...RUNTIME, effort: 'bad effort' },
-    { lane: 'harness', harnessId: 'grok', modelId: '' },
+    { lane: 'harness', harnessId: 'grok', selection: { mode: 'adapter-model', modelId: '' } },
   ] satisfies ExecutionTarget[])('rejects malformed execution options on $lane', async (target) => {
-    const { instance, input } = await start([TASK_EXECUTION_OPTIONS_CAPABILITY]);
+    const { instance, input } = await start([]);
     await expect(instance.dispatch({ ...input, taskId: 'invalid', target })).rejects.toMatchObject({ name: 'ZodError' });
     expect(await instance.tasks.attempt('invalid')).toBeUndefined();
   });
@@ -123,7 +126,7 @@ describe('embedded execution options and images (#2383)', () => {
   });
 
   it('refuses task images before creating a task if the device lacks the image flag', async () => {
-    const { instance, daemon, input, upload } = await start([TASK_EXECUTION_OPTIONS_CAPABILITY]);
+    const { instance, daemon, input, upload } = await start([]);
     await expect(instance.dispatch({ ...input, taskId: 'unsupported-image', images: [await upload()] }))
       .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining(INPUT_IMAGES_CAPABILITY) });
     expect(await instance.tasks.attempt('unsupported-image')).toBeUndefined();

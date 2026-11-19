@@ -1,12 +1,10 @@
 /**
  * The store's wire epoch: the one startup fence of the hosted composition.
  *
- * Each wire major starts on a new database (v7: #1757). The migration that
- * opens an epoch refuses a database that holds rows and then writes its epoch
- * (`0040_wire_v7.sql`), so `byok_wire_epoch` names the major every row was
- * written under. A composition reads it before it serves a request and
- * refuses any other value, or none: a v6 database, migrated or not, never
- * serves a v7 build. The check reads one row and changes nothing.
+ * Each wire major starts on a new database. The current migration refuses a
+ * database that holds rows and records epoch 8 in `byok_wire_epoch`. A
+ * composition reads this row before serving requests and requires its own
+ * protocol version.
  */
 import { PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
@@ -28,7 +26,7 @@ export class PostgresStoreEpochUnsupportedError extends Error {
   constructor(foundEpoch: number | undefined) {
     super(
       `The database's wire epoch is ${foundEpoch === undefined ? 'absent' : String(foundEpoch)}, not ${PROTOCOL_VERSION}; ` +
-        'wire v7 starts on a new database: run the migrations on a new database and pair the devices again',
+        `wire v${PROTOCOL_VERSION} starts on a new database: run the migrations on a new database and pair the devices again`,
     );
     this.name = 'PostgresStoreEpochUnsupportedError';
     this.requiredEpoch = PROTOCOL_VERSION;

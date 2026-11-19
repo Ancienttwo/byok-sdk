@@ -46,7 +46,7 @@ import { SealedAgentExecutionInputSchema } from '../index';
 import type { SealedAgentExecutionInput } from '../index';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload } from './support/harness';
+import { TEST_HARNESSES, corpusOfferInventory, PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload } from './support/harness';
 
 type Json = { [key: string]: unknown };
 
@@ -56,9 +56,9 @@ const GOLDEN_TENANT = 'tenant-golden';
 const GOLDEN_DEVICE = 'device-golden-1';
 const GOLDEN_SCOPE = { scopeId: 'scope-golden-device-1', epoch: 2 };
 
-const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const PI_EXECUTOR = { id: 'pi' } as const;
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; ts: string; payload: Json });
@@ -478,10 +478,10 @@ describe('sealed payload v1: the sealed execution lane and the plaintext lanes (
       const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
       const flags = requiredReceiverCapabilities('task.offer', line.payload);
-      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: flags.filter((flag) => flag !== 'sealed-payload-v1') });
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: corpusOfferInventory(line.payload), capabilities: flags.filter((flag) => flag !== 'sealed-payload-v1') });
       await expect(sealedLane(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'agent_capability_missing' });
 
-      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: flags });
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: corpusOfferInventory(line.payload), capabilities: flags });
       const enqueued = await sealedLane(harness, device.deviceId, line.payload as never);
       expect(enqueued.envelope).toMatchObject({ type: 'task.offer', payload: { sealing: line.payload.sealing, instruction: line.payload.instruction } });
     },
@@ -492,7 +492,7 @@ describe('sealed payload v1: the sealed execution lane and the plaintext lanes (
     async (_index, variant, line) => {
       const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
-      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
       const reads = vi.spyOn(harness.stores.devices, 'get');
 
       await expect(plainLanes[variant](harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
@@ -507,13 +507,13 @@ describe('sealed payload v1: the sealed execution lane and the plaintext lanes (
     const line = executionLines.find((candidate) => candidate.payload.sealed !== undefined)!;
     const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
     const device = await harness.pairDevice(TENANT_A);
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
     const payload: Json = structuredClone(line.payload);
     const read = harness.stores.devices.get.bind(harness.stores.devices);
     vi.spyOn(harness.stores.devices, 'get').mockImplementation(async (...args) => {
       // A resume offer is not this lane's, and a selection would need dispatch-selection, which this device lacks.
       payload.session = { mode: 'resume', sessionRef: 'changed-session' };
-      payload.target = { lane: 'subscription', runtimeId: 'codex', modelId: 'test-model' };
+      payload.target = { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'test-model' } };
       return read(...args);
     });
 
@@ -537,7 +537,7 @@ describe('sealed payload v1: the sealed execution lane and the plaintext lanes (
       const line = byReference;
       const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }), consumeSealed: async () => ({ outcome: 'accepted' }) } });
       const device = await harness.pairDevice(TENANT_A);
-      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: requiredReceiverCapabilities('task.offer', line.payload) });
 
       await expect(sealedLane(harness, device.deviceId, line.payload as never)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
       expect(await harness.cloud.readTaskAttempt(TENANT_A, 'sealed-lane')).toBeUndefined();

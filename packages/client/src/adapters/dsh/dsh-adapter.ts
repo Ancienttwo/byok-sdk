@@ -34,6 +34,7 @@ import { AsyncQueue } from '../../util/async-queue.js';
 import { comparablePath } from '../../util/comparable-path.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { DSH_RUNTIME_CAPABILITIES } from './dsh-capabilities.js';
@@ -41,6 +42,14 @@ import { assertDshModelSelection, assertDshSandboxMode, dshAgentsHome, dshEnviro
 import { DSH_VERSION_POLICY, dshVersionToken } from './dsh-version.js';
 import { DshProjection, type DshTurnOutcome } from './projection.js';
 import { resolveDshBin } from './resolve-bin.js';
+import { PI_PROVIDER_ENV_KEYS } from '../pi/pi-provider-env.generated.js';
+import { offerSelection } from '../../types.js';
+
+/** DSH uses pi-ai catalog ids verbatim except for its own DeepSeek plugin. */
+const DSH_PROVIDER_CATALOG_IDS = new Map([
+  ...Object.keys(PI_PROVIDER_ENV_KEYS).map(id => [id, id] as const),
+  ['deepseek', 'deepseek'], // The deepseek-official plugin serves pi-ai's deepseek provider.
+]);
 
 /** Provider and model for dsh. The patch names the route and the SDK's child-only key variable. */
 export interface DshModelSelection {
@@ -51,6 +60,8 @@ export interface DshModelSelection {
    * example `openai`, `anthropic` or `openrouter`.
    */
   readonly provider: string;
+  /** pi-ai id of a Host's custom endpoint. */
+  readonly providerId?: string;
   readonly model: string;
   /** Endpoint for `custom` (required) or a catalog provider (optional). Not allowed for `deepseek`. It must not carry credentials. */
   readonly baseUrl?: string;
@@ -65,6 +76,8 @@ const PROFILE_PROBE_TIMEOUT_MS = 30_000;
 const PATCH_FILE = 'dsh.patch.yml';
 
 export interface DshAdapterOptions {
+  /** SDK install root in which to find a managed runtime. */
+  runtimeInstallRoot?: string;
   /**
    * Absolute path of the dsh home (`DSH_HOME`) this SDK owns, for example
    * under the Host's store directory. It must persist across executions:
@@ -134,7 +147,7 @@ export class DshAdapter implements RuntimeAdapter {
     return this.#runtimeReaders ??= createRuntimeReaders(this, {
       nativeAssetRoot: this.options.nativeAssetRoot,
       spawnFn: this.options.spawnFn,
-      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveDshBin).bin.command,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveDshBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'dsh')).bin.command,
       version: dshVersionToken,
       versionRefusal: dshVersionUnsupported,
       environment: env => ({ env: dshEnvironment(env, this.root, this.sandbox) }),
@@ -168,11 +181,18 @@ export class DshAdapter implements RuntimeAdapter {
   private readonly interruptTimeoutMs: number;
   private readonly maxRetainedBytes: number;
 
+  private providerId(): string | undefined {
+    const { provider, providerId } = this.options.model;
+    return DSH_PROVIDER_CATALOG_IDS.get(provider === 'custom' ? providerId ?? '' : provider);
+  }
+
   get descriptor() {
+    const byokProviderId = this.providerId();
     return freezeRuntimeAdapterDescriptor({
       id: 'dsh',
-      supportsDispatchSelection: false,
-      supportsTaskExecutionOptions: true,
+      selectionModes: byokProviderId === undefined ? [] : ['byok'],
+      ...(byokProviderId === undefined ? {} : { byokProviderId }),
+      supportsEffort: true,
       // dsh ships no win32 build of its native addon (docs/researches/2026-11-01-dsh-adapter.md §1.9).
       platforms: ['darwin', 'linux'],
       capabilities: DSH_RUNTIME_CAPABILITIES,
@@ -216,7 +236,7 @@ export class DshAdapter implements RuntimeAdapter {
    */
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin);
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'dsh'));
       const command = resolved.bin.command;
       const { env: base } = await this.runtimeEnvironment();
       const env = dshEnvironment(base, this.root, this.sandbox);
@@ -244,25 +264,27 @@ export class DshAdapter implements RuntimeAdapter {
 
   /** Cheap admission: the version probe only. The acp profile probe belongs to `detect()`. */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    const { modelId, effort } = input.offer;
-    const route = dshRoute(this.options.model);
-    const prefix = `${route}/`;
-    if (modelId !== undefined && (!modelId.startsWith(prefix) || modelId.length === prefix.length)) {
-      return { kind: 'reject', reason: `model_rejected: dsh modelId must select the configured ${route} route`, retryable: false };
+    const { effort, target } = input.offer;
+    const selection = offerSelection(target);
+    const configured = this.options.model;
+    if (target.lane !== 'harness' || target.harnessId !== 'dsh' || selection?.mode !== 'byok' || selection.providerId !== this.providerId()) {
+      return { kind: 'reject', reason: 'dsh requires its configured BYOK provider', retryable: false };
     }
-    const selection = modelId === undefined ? this.options.model : { ...this.options.model, model: modelId.slice(prefix.length) };
+    if (selection.modelId !== `${dshRoute(configured)}/${configured.model}`) {
+      return { kind: 'reject', reason: 'model_rejected: dsh requires the configured model', retryable: false };
+    }
     try {
       dshMcpRows(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');
     } catch (error) {
       return { kind: 'reject', reason: `dsh cannot attach the task MCP servers: ${(error as Error).message}`, retryable: false };
     }
-    const command = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin).bin.command;
+    const command = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'dsh')).bin.command;
     const { env: base } = await this.runtimeEnvironment();
     const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, dshEnvironment(base, this.root, this.sandbox));
     if (version.kind !== 'available') {
       return { kind: 'reject', reason: `dsh installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
     }
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, selection, effort) } };
+    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, configured, effort) } };
   }
 
   private async start(input: RuntimeOperationStartInput, command: string, selection: DshModelSelection, effort: string | undefined): Promise<Session> {
@@ -277,6 +299,10 @@ export class DshAdapter implements RuntimeAdapter {
       ? await agentPersona('dsh', input.manifest, { reappliesOnResume: true })
       : undefined;
     const model = `${dshRoute(selection)}/${selection.model}`;
+    const requested = input.manifest.selection;
+    if (requested?.mode !== 'byok' || requested.providerId !== this.providerId() || requested.modelId !== model || input.manifest.effort !== effort) {
+      throw authority('dsh manifest differs from the admitted provider, model or effort');
+    }
     const session = new DshSession(
       input.scratch,
       this.interruptTimeoutMs,

@@ -282,7 +282,7 @@ describe('S11-F1 authoritative preparation completion replay', () => {
   it('unblocks the actual cumulative cursor past the failed preparation and successful tail', async () => {
     const h = await harness();
     const cursorStore = new CursorStore(h.storeDir);
-    const connection = new ConnectionManager({ serverUrl: 'http://cloud.test', deviceId: h.device.deviceId, productId: 'test-product', capabilities: [], runtimes: [], auth: h.auth, cursorStore,
+    const connection = new ConnectionManager({ serverUrl: 'http://cloud.test', deviceId: h.device.deviceId, productId: 'test-product', capabilities: [], harnesses: [], auth: h.auth, cursorStore,
       onEnvelope: async envelope => { if (envelope.type === 'agent.input.preparation') await h.handle(envelope.payload); },
     });
     // Feed the production delivery/cursor path without starting a live transport.

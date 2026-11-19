@@ -26,7 +26,7 @@
  */
 import {
   BYOK_PRESENCE_PATH,
-  type RuntimeInfo,
+  type HarnessInfo,
   type RuntimeUnavailableEntry,
   type ToolsetId,
 } from '@byok-sdk/protocol';
@@ -80,7 +80,7 @@ export interface PresencePublisherOptions {
   /** U4a Local Agent release version; never inferred from the host package. */
   clientVersion?: string;
   /** The same runtime/auth snapshot sent in `conn.hello`. */
-  runtimes?: readonly RuntimeInfo[];
+  harnesses?: readonly HarnessInfo[];
   /**
    * The same non-available snapshot sent in `conn.hello`, filtered to built-in
    * runtime ids (#1103 D8). Presence's id domain is frozen to `RuntimeId`: a
@@ -174,20 +174,7 @@ export class PresencePublisher {
             ...(this.opts.protocolVersions === undefined
               ? {}
               : { protocolVersions: [...this.opts.protocolVersions] }),
-            // The conn.hello snapshot's runtime facts, its capability matrix
-            // included (#1103): discovery data a Host reads before dispatch,
-            // never a negotiation channel.
-            ...(this.opts.runtimes === undefined
-              ? {}
-              : {
-                  runtimes: this.opts.runtimes.map(({ id, version, authPresent, capabilities, versionPolicy }) => ({
-                    id,
-                    ...(version === undefined ? {} : { version }),
-                    ...(authPresent === undefined ? {} : { authPresent }),
-                    ...(capabilities === undefined ? {} : { capabilities }),
-                    ...(versionPolicy === undefined ? {} : { versionPolicy }),
-                  })),
-                }),
+            ...(this.opts.harnesses === undefined ? {} : { harnesses: this.opts.harnesses }),
             ...(this.opts.runtimeUnavailable === undefined
               ? {}
               : {

@@ -522,7 +522,7 @@ describe('terminal prepared observation', () => {
   it('rides on task.complete and task.fail, strictly', () => {
     expect(TerminalPreparedObservationSchema.safeParse(OBSERVATION).success).toBe(true);
     expect(
-      TaskCompletePayloadSchema.safeParse({ executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 's', sessionRef: 'r', preparedObservation: OBSERVATION }).success,
+      TaskCompletePayloadSchema.safeParse({ executor: { id: 'pi' }, summary: 's', sessionRef: 'r', preparedObservation: OBSERVATION }).success,
     ).toBe(true);
     expect(TaskFailPayloadSchema.safeParse({ reason: 'context_overflow: x', preparedObservation: OBSERVATION }).success)
       .toBe(true);

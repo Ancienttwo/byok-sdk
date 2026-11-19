@@ -10,7 +10,7 @@ const input: FrozenInput = {
   taskId: 'task-1',
   deviceId: 'device-1',
   payload: {
-    target: { lane: 'runtime', runtimeId: 'pi' },
+    target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
     session: { mode: 'fresh' },
     instruction: 'Reply to the room.',
     agentRef: { agentId: 'main', profileRevision: '1' },

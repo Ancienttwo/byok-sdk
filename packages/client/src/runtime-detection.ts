@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { RuntimeUpgradeAdvice } from './runtime/runtime-releases.js';
 import type { RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import type { ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
@@ -27,6 +28,8 @@ export interface RuntimeObservation {
   version?: string;
   /** Native release floor refusal, for local status and doctor only. */
   unsupportedVersion?: RuntimeUnsupportedVersion;
+  /** Upgrade advice derived independently of the runtime version policy. */
+  upgrade?: RuntimeUpgradeAdvice;
   /**
    * The qualified version of a `warn` verdict, and only of one. Audit keeps
    * this projection of the warning while it drops the verdict itself.
@@ -96,7 +99,7 @@ export function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, 
 /** Keys of the redacted audit observation; see `DaemonRecord` `runtimes-detected`. */
 const AUDIT_OBSERVATION_KEYS: readonly string[] = Object.freeze(['id', 'present', 'outcome', 'reason', 'code', 'version', 'qualifiedVersion', 'authPresent', 'steer', 'resume', 'images']);
 /** Live status adds the local-only evidence audit never holds. */
-const STATUS_OBSERVATION_KEYS: readonly string[] = Object.freeze([...AUDIT_OBSERVATION_KEYS, 'versionVerdict', 'versionChange', 'executablePath', 'executableSource', 'unsupportedVersion']);
+const STATUS_OBSERVATION_KEYS: readonly string[] = Object.freeze([...AUDIT_OBSERVATION_KEYS, 'versionVerdict', 'versionChange', 'executablePath', 'executableSource', 'unsupportedVersion', 'upgrade']);
 
 /** Side arrays an earlier daemon's control `status` sent beside `runtimes[]`. */
 const REMOVED_STATUS_SIDE_ARRAYS: readonly string[] = Object.freeze(['runtimeVersionVerdicts', 'runtimeVersionChanges', 'runtimeExecutables']);
@@ -110,10 +113,10 @@ export class ControlStatusShapeUnsupportedError extends Error {
 }
 
 /** The runtimes of a control `status` result. */
-export function parseControlStatusRuntimes(status: object): RuntimeObservation[] | undefined {
+export function parseControlStatusRuntimes(status: { readonly runtimes?: unknown; readonly runtimeVersionVerdicts?: unknown; readonly runtimeVersionChanges?: unknown; readonly runtimeExecutables?: unknown }): RuntimeObservation[] | undefined {
   const removed = REMOVED_STATUS_SIDE_ARRAYS.filter((key) => Object.hasOwn(status, key));
   if (removed.length > 0) throw new ControlStatusShapeUnsupportedError(removed);
-  return parseRuntimeObservations((status as { readonly runtimes?: unknown }).runtimes, 'status');
+  return parseRuntimeObservations(status.runtimes, 'status');
 }
 
 /**
@@ -157,7 +160,9 @@ export function parseRuntimeObservations(value: unknown, source: 'audit' | 'stat
     if (verdict !== undefined
       && (verdict.state === 'warn' ? r.qualifiedVersion !== verdict.qualifiedVersion : r.qualifiedVersion !== undefined)) return undefined;
     if (source === 'status' && verdict === undefined && r.qualifiedVersion !== undefined) return undefined;
+    if (r.upgrade !== undefined && !isRuntimeUpgradeAdvice(r.upgrade)) return undefined;
     const change = r.versionChange as RuntimeVersionChange | undefined;
+    // SAFETY: the preceding checks validate every allowed observation field.
     observations.push({
       ...r,
       ...(verdict === undefined ? {} : { versionVerdict: verdict }),
@@ -178,7 +183,7 @@ const REFUSAL_REASONS: readonly RuntimeDetectionRefusalReason[] = Object.freeze(
 const ENVIRONMENT_CODES: readonly string[] = SERVICE_ENVIRONMENT_UNAVAILABLE_CODES;
 const MAX_VERSION_CHARS = 256;
 const MAX_EXECUTABLE_PATH_CHARS = 4096;
-const EXECUTABLE_SOURCES: readonly string[] = Object.freeze(['config', 'path', 'env'] satisfies RuntimeExecutableSource[]);
+const EXECUTABLE_SOURCES: readonly string[] = Object.freeze(['config', 'path', 'env', 'managed'] satisfies RuntimeExecutableSource[]);
 
 /** Both optional; a path must be absolute, printable and explained by a source. */
 function isExecutableFields(executablePath: unknown, executableSource: unknown): boolean {
@@ -193,6 +198,15 @@ function isVersionText(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0 && value.length <= MAX_VERSION_CHARS;
 }
 
+function isRuntimeUpgradeAdvice(value: unknown): value is RuntimeUpgradeAdvice {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const advice = value as Record<string, unknown>;
+  return Object.keys(advice).every(key => ['state', 'installedVersion', 'qualifiedVersion', 'minimumVersion', 'command'].includes(key))
+    && (advice.state === 'required'
+      ? isVersionText(advice.minimumVersion) && (advice.installedVersion === undefined || isVersionText(advice.installedVersion))
+      : advice.state === 'available' && advice.minimumVersion === undefined && isVersionText(advice.installedVersion))
+    && isVersionText(advice.qualifiedVersion) && isVersionText(advice.command) && !/[\r\n\0]/u.test(advice.command);
+}
 
 function isVersionChange(value: unknown): value is RuntimeVersionChange {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -303,7 +317,7 @@ export function isWireRuntimeId(id: string): id is RuntimeId {
   return (RUNTIME_IDS as readonly string[]).includes(id);
 }
 
-/** The `task.offer` target that reaches this adapter: the `runtime` lane for a wire runtime id, else the `harness` lane. */
-export function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): Extract<ExecutionTarget, { readonly lane: 'runtime' | 'harness' }> {
-  return isWireRuntimeId(descriptor.id) ? { lane: 'runtime', runtimeId: descriptor.id } : { lane: 'harness', harnessId: descriptor.id };
+/** Explicitly request an adapter's device-owned configuration. */
+export function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): Extract<ExecutionTarget, { lane: 'harness' }> {
+  return { lane: 'harness', harnessId: descriptor.id, selection: { mode: 'device-default' } };
 }

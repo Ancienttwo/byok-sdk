@@ -163,7 +163,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       const index = adapter.sessions.length;
       const messageEgress = { mode: 'required', contract: 'conversation-turn/v1', contentType: 'text/markdown', maxBytes: 1024 } as const;
       const enqueued = await sdk.executions.submit({ taskId, deviceId, payload: {
-        agentRef, target: { lane: 'runtime', runtimeId: 'pi' }, instruction,
+        agentRef, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, instruction,
         session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: { mode: 'none' }, messageEgress,
       }, agentMessageContext: { destinationBinding: 'conversation', freshnessCursor: `turn-${seq}` } });
       expect(enqueued).toMatchObject({ taskId, envelope: { type: 'task.offer' } });
@@ -235,7 +235,7 @@ it('synthetic Host: ContextPack turns cross Summary updates with CAS, replay, st
       const index = adapter.sessions.length;
       summaryTaskIds.push(job.taskId);
       const enqueued = await sdk.executions.submit({ taskId: job.taskId, deviceId, payload: {
-        agentRef, target: { lane: 'runtime', runtimeId: 'pi' }, instruction, session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector,
+        agentRef, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, instruction, session: { mode: 'fresh' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, terminalProjection: selector,
       } });
       expect(enqueued).toMatchObject({ taskId: job.taskId, envelope: { type: 'task.offer' } });
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(index + 1), { timeout: 10000 });

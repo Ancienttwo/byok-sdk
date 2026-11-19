@@ -9,7 +9,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { testExecutionScratch, testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { projectRuntimeBoundaryFailure, RuntimeDisposalFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
@@ -27,7 +27,7 @@ import { startPreparedOperation } from './fixtures/prepared-operation';
 import { validateRuntimeDetectResult } from '../runtime-detection';
 import type { MessageDraftDelta, Session } from '../types';
 
-const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode' } as const;
+const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode', selection: { mode: 'device-default' } } as const;
 
 const fake = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 const models = ['fixture/first', 'fixture/next', 'fixture/third'];
@@ -120,8 +120,23 @@ async function collect(session: Session) {
 
 it.each([
   ['1.18.35', '1.18.35'], ['opencode v2.0.26', '2.0.26'], ['1.19.5', '1.19.5'], ['opencode v2.3.0', '2.3.0'],
-  ['1.18.34', undefined], ['2.0.25', undefined], ['2.0.26-rc.1', undefined], ['opencode v3.0.0', undefined], ['garbage 1.18.35', undefined], ['1.18.35\n2.0.26', undefined],
-])('normalizes only a complete supported release token %s', (raw, expected) => expect(opencodeVersionToken(raw)).toBe(expected));
+  ['1.18.34', '1.18.34'], ['2.0.25', '2.0.25'], ['2.0.26-rc.1', '2.0.26-rc.1'],
+  ['opencode v3.0.0', undefined], ['garbage 1.18.35', undefined], ['1.18.35\n2.0.26', undefined],
+])('normalizes a complete release version %s from a supported major', (raw, expected) => expect(opencodeVersionToken(raw)).toBe(expected));
+
+it.each([
+  ['1.18.34', '1.18.35'], ['2.0.25', '2.0.26'], ['2.0.26-rc.1', '2.0.26'],
+])('reports %s below the ACP floor %s', async (installedVersion, requiredVersion) => {
+  const { adapter } = setup(installedVersion);
+  await expect(adapter.detect()).resolves.toEqual({
+    kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion },
+  });
+});
+
+it.each(['1.18.35', '2.0.26'])('detects %s at its ACP floor', async version => {
+  const { adapter } = setup(version);
+  await expect(adapter.detect()).resolves.toMatchObject({ kind: 'available', version });
+});
 
 for (const version of ['1.18.35', 'opencode v2.0.26']) {
   defineRuntimeCases(`OpenCode ${version} replay contract`, {
@@ -361,14 +376,14 @@ it('keeps the admitted native identity in task.complete and persisted terminal e
   const sent: Envelope[] = [];
   const handoffs = new AgentSessionHandoffStore();
   const recorded = vi.spyOn(handoffs, 'recordTerminal');
-  const runner = new TaskRunner({ ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [box.adapter], agentHome: new AgentHomeManager({ hostStorageRoot: path.join(box.cwd, 'homes') }), agentSessionHandoffs: handoffs,
     deviceId: 'device-1', productId: 'opencode-test', storeDir: path.join(box.cwd, 'store'),
     send: envelope => { sent.push(envelope); }, approvalRegistry: new ApprovalRegistry(),
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
   });
   try {
-    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: 'opencode' }, agentRef: { agentId: 'opencode-agent', profileRevision: 'r1' },
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: 'opencode', selection: { mode: 'device-default' } }, agentRef: { agentId: 'opencode-agent', profileRevision: 'r1' },
       instruction: 'opencode-limit', agentMemory: 'none', ...FRESH_OFFER }, { taskId: 'identity-fallback', seq: 1 }));
     expect(sent.some(envelope => envelope.type === 'task.started')).toBe(true);
     const published = box.facts().find(fact => fact.kind === 'native-session')!.sessionId;

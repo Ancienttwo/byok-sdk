@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util';
 import { abortableSleep } from '../util/timer-delay.js';
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import {
@@ -11,7 +12,6 @@ import {
   ProtocolNegotiationError,
   type CapabilityFlag,
   type Envelope,
-  type RuntimeInfo,
   type RuntimeUnavailableEntry,
   type ToolsetId,
 } from '@byok-sdk/protocol';
@@ -55,10 +55,10 @@ function isCursorEnvelopeType(type: Envelope['type']): boolean {
 function createConnectionHelloEnvelope(
   opts: Pick<
     ConnectionManagerOptions,
-    'deviceId' | 'productId' | 'capabilities' | 'clientVersion' | 'runtimes' | 'harnesses' | 'runtimeUnavailable' | 'getConfiguredToolsets'
+    'deviceId' | 'productId' | 'capabilities' | 'clientVersion' | 'harnesses' | 'runtimeUnavailable' | 'getConfiguredToolsets'
   >,
   getCursor: () => number | undefined,
-): Envelope {
+): Extract<Envelope, { type: 'conn.hello' }> {
   const configuredToolsets = opts.getConfiguredToolsets?.();
   return createEnvelope('conn.hello', {
     protocolVersions: [PROTOCOL_VERSION],
@@ -66,7 +66,6 @@ function createConnectionHelloEnvelope(
     deviceId: opts.deviceId,
     productId: opts.productId,
     clientVersion: opts.clientVersion,
-    runtimes: opts.runtimes,
     harnesses: opts.harnesses,
     runtimeUnavailable: opts.runtimeUnavailable === undefined ? undefined : [...opts.runtimeUnavailable],
     configuredToolsets: configuredToolsets === undefined ? undefined : [...configuredToolsets],
@@ -81,8 +80,7 @@ export interface ConnectionManagerOptions {
   capabilities: CapabilityFlag[];
   /** U4a Local Agent release version, sent unchanged in `conn.hello`. */
   clientVersion?: string;
-  runtimes: RuntimeInfo[];
-  harnesses?: HarnessInfo[];
+  harnesses: HarnessInfo[];
   /** Strip-safe non-available projection from the same start snapshot (#1103 B2b). */
   runtimeUnavailable?: readonly RuntimeUnavailableEntry[];
   /** Reads current sorted logical IDs from the validated local registry for every `conn.hello`. */
@@ -167,6 +165,9 @@ export class ConnectionManager {
   private readonly lifetime = new AbortController();
   /** Ends the current open session; set only while one is open. */
   private endSession: (() => void) | undefined;
+  private acceptedHarnesses: readonly HarnessInfo[] = [];
+  private refreshInventory = false;
+  private inFlightHelloPost: Promise<unknown> | undefined;
   /** Counts open sessions, so a request from an ended session cannot end the next one. */
   private sessionGeneration = 0;
   private cursor: number | undefined;
@@ -301,13 +302,38 @@ export class ConnectionManager {
    * then serves an open session until it ends, then backs off with
    * `fleetJitter('reconnect')` before the next handshake.
    */
+  advertisedHarnesses(): readonly HarnessInfo[] {
+    return this.state === 'open' ? this.acceptedHarnesses : [];
+  }
+
+  updateHarnessInventory(harnesses: HarnessInfo[], runtimeUnavailable: readonly RuntimeUnavailableEntry[]): void {
+    if (isDeepStrictEqual(harnesses, this.opts.harnesses) && isDeepStrictEqual(runtimeUnavailable, this.opts.runtimeUnavailable)) return;
+    this.opts.harnesses = harnesses;
+    this.opts.runtimeUnavailable = runtimeUnavailable;
+    this.refreshInventory = true;
+    this.breakSession();
+  }
+
   private async run(): Promise<void> {
     const signal = this.lifetime.signal;
-    let hello: Envelope | undefined;
+    let hello: Extract<Envelope, { type: 'conn.hello' }> | undefined;
     while (!this.isEnded()) {
       this.setState('connecting');
       if (this.isEnded()) return;
-      hello ??= createConnectionHelloEnvelope(this.opts, () => this.cursor);
+      if (hello === undefined) {
+        // A failed or superseded refresh must not overwrite the inventory
+        // that this handshake publishes. Wait for any already posted hello.
+        await this.inFlightHelloPost;
+        if (this.isEnded()) return;
+        for (let index = this.outbox.length - 1; index >= 0; index--) {
+          const envelope = this.outbox[index]!;
+          if (envelope.type !== 'conn.hello') continue;
+          this.outbox.splice(index, 1);
+          this.forget(envelope);
+        }
+        this.refreshInventory = false;
+        hello = createConnectionHelloEnvelope(this.opts, () => this.cursor);
+      }
       const answer = await this.longPoll.postBatch([hello], signal);
       if (this.isEnded()) return;
       if (answer !== undefined && 'refusedStatus' in answer) {
@@ -336,9 +362,12 @@ export class ConnectionManager {
       if (answer === undefined) {
         this.notify(() => this.opts.onOperationalOutcome?.('failure', 'reconnect'));
       } else {
-        await this.serveSession(answer);
+        this.acceptedHarnesses = hello.payload.harnesses;
         hello = undefined;
+        if (this.refreshInventory) continue;
+        await this.serveSession(answer);
         if (this.isEnded()) return;
+        if (this.refreshInventory) continue;
       }
       await abortableSleep(this.nextReconnectDelayMs(), signal);
     }
@@ -581,8 +610,11 @@ export class ConnectionManager {
         const posts = batch.some((envelope) => !this.unsupportedTypes.has(envelope.type));
         let retained: Retained | undefined;
         try {
-          retained = await postAndSettle(batch, generation);
+          const settlement = postAndSettle(batch, generation);
+          if (batch.some(envelope => envelope.type === 'conn.hello')) this.inFlightHelloPost = settlement;
+          retained = await settlement;
         } finally {
+          this.inFlightHelloPost = undefined;
           this.inFlightBatch = [];
         }
         if (retained === undefined) {

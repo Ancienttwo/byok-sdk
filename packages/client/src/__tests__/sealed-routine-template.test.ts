@@ -16,7 +16,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SealedTasks, type SealedScopeKeyring } from '../daemon/sealed-task';
 import { TaskRunner } from '../daemon/task-runner';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -35,7 +35,7 @@ type Payload = Record<string, unknown> & {
 };
 type Line = { type: MessageType; task_id: string; ts: string; payload: Payload };
 
-const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as Line)
@@ -85,7 +85,7 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
   const storeDir = path.join(root, 'store');
   const sent: Envelope[] = [];
   const adapter = new StubRuntimeAdapter('pi');
-  const runner = new TaskRunner({
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
@@ -106,7 +106,7 @@ async function device(keyring: SealedScopeKeyring = new GoldenKeyring()) {
   let seq = 0;
   /** Offers `payload` as the Host would, on the stub runtime. The AAD does not bind `target`. */
   const offer = (taskId: string, payload: Payload) =>
-    runner.handleEnvelope(createEnvelope(TYPE, { ...structuredClone(payload), target: { lane: 'runtime', runtimeId: 'pi' } } as never, { taskId, seq: ++seq }));
+    runner.handleEnvelope(createEnvelope(TYPE, { ...structuredClone(payload), target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } } as never, { taskId, seq: ++seq }));
   const declines = (taskId: string) => sent.filter((envelope) => envelope.type === 'task.decline' && envelope.task_id === taskId).map((envelope) => envelope.payload);
   return { adapter, offer, declines, sent };
 }

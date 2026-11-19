@@ -5,8 +5,9 @@ import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import os from 'node:os';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { startDurablePi, type DurableStart } from '../adapters/pi-durable/session';
-import type { Session, MessageDraftDelta } from '../types';
+import { startDurablePi } from '../adapters/pi-durable/session';
+import { sealRuntimeOperationManifest, type Session, type MessageDraftDelta } from '../types';
+import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 
 interface WorkerPlan {
@@ -45,15 +46,18 @@ async function start(plan: WorkerPlan[], options: { blockConfigWrite?: boolean; 
   const release = vi.fn(() => scratch.release());
   // The injected spawn launches only our inert fixture, never Pi.
   const starting = startDurablePi({
-    input: { scratch, signal: options.signal,
+    input: { kind: 'instruction', env: {}, scratch, signal: options.signal,
       instruction: 'synthetic instruction', mcpEnv: {},
-      manifest: { taskId: 'task', cwd: home,
+      manifest: sealRuntimeOperationManifest({
+        taskId: 'task', cwd: home, workspace: { workspaceDir: home }, runtimeId: 'pi',
+        descriptor: new StubRuntimeAdapter().descriptor, requiredToolsetIds: [], forwardedEnvironmentNames: [],
         agentRef: { agentId: 'agent', profileRevision: 'revision' },
         lease: { leaseId: 'lease', canonicalHome: home },
-        modelTarget: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'test' } },
-      durableContext: { tenantId: 'tenant', lifecycle: { ownsLease: () => true,
+        selection: { mode: 'byok-profile', providerProfile: { profileRef: 'probe', modelId: 'test', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [] } },
+      }),
+      durableContext: { replicaRoot: path.join(root, 'replica'), tenantId: 'tenant', lifecycle: { ownsLease: () => true,
         record: async (kind: string, count: number) => { journal.push(`${kind}:${count}`); } } },
-    } as DurableStart['input'],
+    },
     runtimeLaunch: { scratch, kind: 'pi-durable', credentialSource: 'keys-profile', command: process.execPath, fixedArgs: [], cwd: root,
       projectionDir: path.join(root, 'projection'), env: {}, release, sessionCwd: home },
     replicaRoot: path.join(root, 'replica'),

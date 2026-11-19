@@ -11,7 +11,7 @@ import { createEnvelope, encodeEnvelope, PROTOCOL_VERSION, type Envelope } from 
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope, terminalReceiptKey } from '../inbound';
 import { tenantStoresFor, type TenantStores } from '../tenant-stores';
-import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload } from './support/harness';
+import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, TEST_HARNESSES } from './support/harness';
 
 function devicePrincipal(tenant: TenantId, deviceId: string) {
   return { kind: 'device', tenantId: tenant, productId: 'test-product', deviceId } as const;
@@ -25,7 +25,7 @@ function storesFor(harness: ReturnType<typeof createHarness>, deviceId: string):
   });
 }
 
-const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const EXECUTOR = { id: 'pi' } as const;
 
 function claim(taskId: string, deviceId: string): Envelope {
   return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: EXECUTOR }, { taskId });
@@ -54,7 +54,7 @@ describe('inbound lifecycle recovery', () => {
       productId: 'test-product',
       clientVersion: '0.0.0-test',
       protocolVersions: [PROTOCOL_VERSION],
-      runtimes: [],
+      harnesses: [],
       capabilities: ['recovered-capability'],
     });
     let fault = true;
@@ -186,6 +186,7 @@ describe('inbound lifecycle recovery', () => {
     const stores = storesFor(harness, device.deviceId);
     const agentRef = { agentId: 'recovery-agent', profileRevision: 'recovery-profile' } as const;
     await stores.devices.recordCapabilities({
+      harnesses: TEST_HARNESSES,
       capabilities: [
         'agent-home-contract',
         'agent-egress-policy',
@@ -258,11 +259,10 @@ describe('inbound lifecycle recovery', () => {
     const stores = storesFor(harness, device.deviceId);
     const first = { taskId: 'task-placement-first', agentRef: { agentId: 'agent-first', profileRevision: 'profile-first' } } as const;
     const second = { taskId: 'task-placement-second', agentRef: { agentId: 'agent-second', profileRevision: 'profile-second' } } as const;
-    await Promise.all(
-      [first, second].map(({ taskId, agentRef }) =>
-        harness.stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: device.deviceId, agentRef }),
-      ),
-    );
+    await grantAgentHome(harness, TENANT_A, device.deviceId);
+    for (const { taskId, agentRef } of [first, second]) {
+      await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: { ...offerPayload(), agentRef } });
+    }
     for (const { taskId, agentRef } of [first, second]) {
       const claimed = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor: EXECUTOR }, { taskId });
       await expect(handleInboundEnvelope(stores, device.deviceId, claimed).then((result) => result.outcome)).resolves.toBe('accepted');

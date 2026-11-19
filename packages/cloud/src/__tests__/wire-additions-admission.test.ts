@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { INPUT_IMAGES_CAPABILITY, TASK_EXECUTION_OPTIONS_CAPABILITY, WIRE_ADDITIONS, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type MessageType, type TaskSteerSealedPayload } from '@byok-sdk/protocol';
+import { INPUT_IMAGES_CAPABILITY, WIRE_ADDITIONS, ExecutionTargetSchema, createEnvelope, isServerToDaemonType, requiredReceiverCapabilities, type HarnessInfo, type MessageType, type TaskSteerSealedPayload } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { AgentExecutionInputSchema, SealedAgentExecutionInputSchema, type AgentExecutionInput } from '../agent-execution';
@@ -44,7 +44,7 @@ async function steerRunningTask(harness: CloudHarness, deviceId: string, payload
     { core: harness.core, cloud: harness.stores, mailboxWake: harness.mailboxWake },
   );
   for (const envelope of [
-    createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' }, capabilities: { steer: true } }, { taskId: offer.taskId }),
+    createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' }, capabilities: { steer: true } }, { taskId: offer.taskId }),
     createEnvelope('task.started', {}, { taskId: offer.taskId }),
   ]) {
     expect((await handleInboundEnvelope(stores, deviceId, envelope)).outcome).toBe('accepted');
@@ -118,7 +118,7 @@ const CLOUD_EMITTED: readonly MessageType[] = ['agent.message.disposition'];
 /** A gated server-to-daemon type this cloud has no Host enqueue for. */
 const NOT_HOSTED: readonly MessageType[] = ['provider.provisioning.available'];
 
-const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url));
+const corpusPath = fileURLToPath(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url));
 const gatedLines = readFileSync(corpusPath, 'utf8')
   .split('\n')
   .filter((line) => line.length > 0)
@@ -149,8 +149,6 @@ const freshBase = {
 
 /** The wire corpus exercises these fields on resume offers. Give them fresh Host inputs too. */
 const hostedFresh = [
-  { field: 'effort', flag: TASK_EXECUTION_OPTIONS_CAPABILITY, fields: { target: { lane: 'runtime', runtimeId: 'codex', effort: 'high' } } },
-  { field: 'harness modelId', flag: TASK_EXECUTION_OPTIONS_CAPABILITY, fields: { target: { lane: 'harness', harnessId: 'grok', modelId: 'grok-code' } } },
   { field: 'images', flag: INPUT_IMAGES_CAPABILITY, fields: { images: [{
     mediaType: 'image/png',
     blob: { blobId: 'fresh-image', contentHash: `sha256:${'a'.repeat(64)}`, size: 32, contentType: 'image/png' },
@@ -177,19 +175,27 @@ const submitExpressible = (entry: Pick<(typeof gatedLines)[number], 'variant' | 
   return true;
 };
 
-/** The custom harness a harness `target` names, if any. */
-function harnessTargetOf(payload: Record<string, unknown>): string | undefined {
-  const target = payload.target as { lane?: unknown; harnessId?: string } | undefined;
-  return target?.lane === 'harness' ? target.harnessId : undefined;
+function harnessTargetOf(payload: Record<string, unknown> | undefined) {
+  const target = ExecutionTargetSchema.safeParse(payload?.target);
+  return target.success && target.data.lane === 'harness' ? target.data : undefined;
 }
 
-/** `harnessId` also advertises that custom harness: an unadvertised one is a missing capability. */
-async function deviceWith(capabilities: readonly string[], harnessId?: unknown): Promise<{ harness: CloudHarness; deviceId: string }> {
+async function deviceWith(capabilities: readonly string[], payload?: Record<string, unknown>): Promise<{ harness: CloudHarness; deviceId: string }> {
   const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const device = await harness.pairDevice(TENANT_A);
-  const harnesses = typeof harnessId === 'string'
-    ? [{ id: harnessId, version: '1.0.0', capabilities: { steer: true, resume: true, approvalInteractive: false } }] : undefined;
-  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [...capabilities], ...(harnesses === undefined ? {} : { harnesses }) });
+  const target = harnessTargetOf(payload);
+  const harnesses: HarnessInfo[] = [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } }];
+  if (target !== undefined) {
+    const { harnessId, selection } = target;
+    const capabilities: HarnessInfo['capabilities'] = {
+      selectionModes: [selection.mode], effort: target.effort !== undefined,
+      ...(selection.mode === 'byok' ? { byokProviderId: selection.providerId } : {}),
+    };
+    const executor = { id: harnessId, capabilities };
+    if (harnessId === 'pi') harnesses[0] = executor;
+    else harnesses.push(executor);
+  }
+  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities, harnesses });
   return { harness, deviceId: device.deviceId };
 }
 
@@ -235,14 +241,13 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     const withoutProjection = fresh.filter((entry) => entry.payload.terminalProjection === undefined);
     expect(withoutProjection.length).toBeGreaterThan(0);
     expect(withoutProjection.filter(submitExpressible)).toEqual([]);
-    const harnessOnly = fresh.filter((entry) => harnessTargetOf(entry.payload) !== undefined);
+    const harnessOnly = fresh.filter((entry) => entry.payload.terminalProjection !== undefined && harnessTargetOf(entry.payload) !== undefined);
     expect(harnessOnly.length).toBeGreaterThan(0);
     expect(harnessOnly.filter(submitExpressible)).toEqual(harnessOnly);
   });
 
   it.each(hostedFreshCases)('gates fresh execution $field and preserves it in the admitted offer', async ({ flag, flags, payload }) => {
-    const harnessId = harnessTargetOf(payload);
-    const { harness, deviceId } = await deviceWith(flags.filter((candidate) => candidate !== flag), harnessId);
+    const { harness, deviceId } = await deviceWith(flags.filter((candidate) => candidate !== flag), payload);
     const submit = () => harness.cloud.submitAgentExecution(TENANT_A, { taskId: 'gated', deviceId, payload });
 
     await expect(submit()).rejects.toMatchObject({
@@ -257,11 +262,8 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     await expect(submit()).resolves.toMatchObject({ envelope: { type: 'task.offer', payload } });
   });
 
-  // Wire v7: one offer `target` cannot contradict itself, so the only pinned
-  // refusal left in the corpus is line 69's reader rule.
-  it.each([69])(
-    'raw corpus offer %i has its pinned reader-rule refusal before device reads', async line => {
-      const entry = gatedLines.find(candidate => candidate.line === line)!;
+  it.each(gatedLines.filter(entry => entry.payload.homeAccess === 'memory-reader' && entry.payload.agentMemory === 'read-write'))(
+    'raw corpus offer $line has its pinned reader-rule refusal before device reads', async entry => {
       const { harness, deviceId } = await deviceWith(entry.flags);
       const reads = vi.spyOn(harness.stores.devices, 'get');
       const error = await ENQUEUE[entry.type]!(harness, deviceId, entry.payload as never)
@@ -311,7 +313,7 @@ describe('hosted admission follows WIRE_ADDITIONS (#386)', () => {
     'corpus line %i (%s) is not refused for a capability when the device advertises every flag the table requires',
     async (_line, _label, entry) => {
       const { type } = entry;
-      const { harness, deviceId } = await deviceWith(entry.flags, harnessTargetOf(entry.payload));
+      const { harness, deviceId } = await deviceWith(entry.flags, entry.payload);
       const host = hostCopy(entry);
       const run = ENQUEUE[type]!(harness, deviceId, host.payload as never);
       if (submitExpressible(host)) expect(await errorCode(run)).not.toBe('agent_capability_missing');

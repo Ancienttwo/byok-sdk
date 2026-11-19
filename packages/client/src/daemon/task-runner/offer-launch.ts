@@ -16,7 +16,7 @@ import { materializeInputImages } from './input-images.js';
 import path from 'node:path';
 import { createEnvelope, type AgentMemoryStartRefusal, type TaskDeclineCode, type TaskFailure } from '@byok-sdk/protocol';
 import { readResidentMemory } from '../../resident-memory.js';
-import { modelLaneTarget, sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types.js';
+import { offerSelection, sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types.js';
 import { admitPreparedOffer, type PreparedOfferServerProjection } from '../prepared-offer-admission.js';
 import type { InputPreparationStore } from '../input-preparation-store.js';
 import { inputPreparationDigest } from '../../input-preparation.js';
@@ -122,14 +122,15 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   // `env` was built before admission (see its declaration above) so the
   // MCP probes and the runtime child are guaranteed to share one
   // allowlist decision rather than two computations that could drift.
-  const modelTarget = modelLaneTarget(offered.target);
+  const selection = offerSelection(offered.target);
   const manifest = sealRuntimeOperationManifest({
     ...(preparation === undefined ? {} : {agentMemory}),
     taskId,
     runtimeId: pick.descriptor.id,
     descriptor: pick.descriptor,
     requiredToolsetIds: requiredToolsets ?? [],
-    ...(modelTarget === undefined ? {} : { modelTarget }),
+    ...(selection === undefined ? {} : { selection }),
+    ...(offered.effort === undefined ? {} : { effort: offered.effort }),
     ...(sessionRef === undefined ? {} : { sessionRef }),
     agentRef: agentBinding.resolution.agentRef,
     cwd: workspaceDir,

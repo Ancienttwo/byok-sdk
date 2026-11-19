@@ -130,7 +130,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       taskId: 'fresh-reader-read-write',
       deviceId: daemon.deviceId,
       payload: {
-        instruction: 'read memory', target: { lane: 'runtime', runtimeId: 'codex' }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        instruction: 'read memory', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write',
       },
     })).rejects.toThrow(/agentMemory read-write requires a writer/);
@@ -157,7 +157,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       taskId: 'fresh-read-if-admitted-refused',
       deviceId: daemon.deviceId,
       payload: {
-        instruction: 'chat turn', target: { lane: 'runtime', runtimeId: 'codex' }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        instruction: 'chat turn', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory: 'read-if-admitted',
       },
     })).rejects.toMatchObject({ code: 'agent_capability_missing' });
@@ -206,7 +206,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       taskId: 'fresh-read-write-if-admitted-refused',
       deviceId: daemon.deviceId,
       payload: {
-        instruction: 'chat turn', target: { lane: 'runtime', runtimeId: 'codex' }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        instruction: 'chat turn', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory: 'read-write-if-admitted',
       },
     })).rejects.toMatchObject({
@@ -256,7 +256,7 @@ describe('reference-server per-task Agent memory dispatch (#614)', () => {
       taskId: 'fresh-reader-read-write-if-admitted',
       deviceId: daemon.deviceId,
       payload: {
-        instruction: 'read memory', target: { lane: 'runtime', runtimeId: 'codex' }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
+        instruction: 'read memory', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF,
         session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted',
       },
     })).rejects.toThrow(/agentMemory read-write-if-admitted requires a writer/);

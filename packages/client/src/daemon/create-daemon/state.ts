@@ -1,5 +1,5 @@
 import type { CapabilityDeclaration } from '@byok-sdk/core';
-import type { CapabilityFlag, RuntimeInfo, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
+import type { CapabilityFlag, HarnessInfo, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
 import type { ServiceEnvironmentStatus } from '../../login-shell-environment.js';
 import type { RuntimeObservation } from '../../runtime-detection.js';
 import type { AgentEgressController } from '../agent-egress-controller.js';
@@ -127,7 +127,7 @@ export interface DaemonState {
   // Presence and task context share one deployment declaration. Discovery is
   // asynchronous to start(); only Agent offers with host toolsets wait for it.
   presencePublisher: PresencePublisher | undefined;
-  detectedRuntimeFacts: readonly RuntimeInfo[];
+  detectedHarnessFacts: readonly HarnessInfo[];
   /** #1103 B2b: the optional `runtimeUnavailable` projection of this run's detection. */
   detectedRuntimeUnavailable: readonly RuntimeUnavailableEntry[];
   runtimeObservations: RuntimeObservation[];

@@ -698,44 +698,32 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         target: z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"auto">;
         }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"runtime">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-                pi: "pi";
-            }>;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"subscription">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-            }>;
-            modelId: z.ZodString;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerId: z.ZodString;
-            modelId: z.ZodString;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok-profile">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerProfile: z.ZodObject<{
-                profileRef: z.ZodString;
-                profileRevision: z.ZodString;
-                profileHash: z.ZodString;
-                modelId: z.ZodString;
-                requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                    "image-input": "image-input";
-                }>>;
-            }, z.core.$strict>;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"harness">;
             harnessId: z.ZodString;
-            modelId: z.ZodOptional<z.ZodString>;
+            selection: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"device-default">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"adapter-model">;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"subscription">;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"byok">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"byok-profile">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "mode">;
             effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -846,44 +834,32 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         target: z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"auto">;
         }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"runtime">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-                pi: "pi";
-            }>;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"subscription">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-            }>;
-            modelId: z.ZodString;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerId: z.ZodString;
-            modelId: z.ZodString;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok-profile">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerProfile: z.ZodObject<{
-                profileRef: z.ZodString;
-                profileRevision: z.ZodString;
-                profileHash: z.ZodString;
-                modelId: z.ZodString;
-                requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                    "image-input": "image-input";
-                }>>;
-            }, z.core.$strict>;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"harness">;
             harnessId: z.ZodString;
-            modelId: z.ZodOptional<z.ZodString>;
+            selection: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"device-default">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"adapter-model">;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"subscription">;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"byok">;
+                providerId: z.ZodString;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"byok-profile">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    modelId: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+            }, z.core.$strict>], "mode">;
             effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{

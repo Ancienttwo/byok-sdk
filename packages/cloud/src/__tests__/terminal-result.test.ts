@@ -29,7 +29,7 @@ function blobRef(): BlobRef {
   };
 }
 
-const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const EXECUTOR = { id: 'pi' } as const;
 
 const projectionEvidence = { profileRevision: '3', projectionHash: `sha256:${'3'.repeat(64)}` };
 

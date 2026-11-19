@@ -169,7 +169,7 @@ readline.createInterface({input: process.stdin}).on('line', line => {
         ...(nativeInteractions ? { nativeInteractions: { timeoutMs: 1000, onRequest: () => { nativeRequestCount += 1; } } } : {}),
       });
       const mcpServers = { [name]: { command: process.execPath, args: [helper] } };
-      const offer = { target: { lane: 'runtime', runtimeId: 'codex' }, instruction: 'Run the provided submit_result tool, then finish.' };
+      const offer = { target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, instruction: 'Run the provided submit_result tool, then finish.' };
       const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers });
       if (prepared.kind !== 'prepared') throw new Error(`Codex refused preparation: ${prepared.reason}`);
       scratch = await createExecutionScratch({ root: join(caseRoot, 's') });

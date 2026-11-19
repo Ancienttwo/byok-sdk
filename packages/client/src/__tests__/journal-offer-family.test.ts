@@ -58,23 +58,23 @@ interface OfferCase {
  *   to a server that accepts it).
  */
 const offerCases: readonly OfferCase[] = [
-  { name: 'resume', payload: { instruction: 'journal lifecycle', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: RESUME, requiredToolsets: ['test-missing'] }, declined: true },
-  { name: 'resume+egress', payload: { instruction: 'journal lifecycle', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }, declined: false },
-  { name: 'fresh', payload: { instruction: 'journal lifecycle', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }, declined: false },
+  { name: 'resume', payload: { instruction: 'journal lifecycle', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, session: RESUME, requiredToolsets: ['test-missing'] }, declined: true },
+  { name: 'resume+egress', payload: { instruction: 'journal lifecycle', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }, declined: false },
+  { name: 'fresh', payload: { instruction: 'journal lifecycle', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY }, declined: false },
   {
     // The one offer that carries no instruction: the request is already inside
     // the frozen envelope the referenced record retained.
     name: 'prepared',
     payload: {
-      target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentMemory: PREPARED_AGENT_MEMORY,
       preparation: { reference: 'journal-family-record', requestDigest: 'journal-family-request-digest' },
     },
     declined: true,
   },
-  { name: 'sealed resume', payload: { instruction: 'journal lifecycle', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: RESUME, sealing: SEALING }, declined: true },
-  { name: 'sealed resume+egress', payload: { instruction: 'journal lifecycle', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },
-  { name: 'sealed fresh', payload: { instruction: 'journal lifecycle', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },
+  { name: 'sealed resume', payload: { instruction: 'journal lifecycle', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, session: RESUME, sealing: SEALING }, declined: true },
+  { name: 'sealed resume+egress', payload: { instruction: 'journal lifecycle', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, session: RESUME, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },
+  { name: 'sealed fresh', payload: { instruction: 'journal lifecycle', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, sealing: SEALING }, declined: true },
 ];
 
 /**

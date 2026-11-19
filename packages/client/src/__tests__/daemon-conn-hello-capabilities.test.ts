@@ -36,21 +36,11 @@ async function tmpDir(prefix: string): Promise<string> {
 }
 
 /**
- * Pre-freeze protocol addition (`RuntimeInfo.capabilities`, `messages.ts`):
- * `conn.hello.runtimes[]` now carries each detected runtime's own
- * steer/resume/approvalInteractive, surfaced by
- * `create-daemon.ts`'s `detectRuntimes`/`toRuntimeInfoCapabilities`. This
- * exercises the FULL real path (all three bundled adapters, driven through
- * their real fixture binaries — the same fixtures each adapter's own test
- * file uses — talking to a real in-process WS server) rather than a stub,
- * so the truthful per-runtime matrix asserted below is exactly what a real
- * `conn.hello` on the wire would contain: each adapter's own already-tested
- * `capabilities()` (see `pi-adapter.test.ts`/`claude-adapter.test.ts`/
- * `codex-adapter.test.ts`) — including `approvalInteractive`, which S0
- * (H-002/H-003) turned into a pure passthrough of adapter truth instead of
- * the hardcoded `false` `toRuntimeInfoCapabilities` used to layer on.
+ * Wire v8 publishes each usable executor's selection modes and capabilities
+ * in `conn.hello.harnesses`. The fixture launches the three bundled adapters
+ * through their real detection paths and checks the inventory sent to the Host.
  */
-describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilities addition)', () => {
+describe('conn.hello harnesses', () => {
   let server: TestServer;
   let daemon: Daemon | undefined;
   // Windows spawns no script without a shell: each fixture runs behind a
@@ -81,11 +71,13 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
   });
 
   it('advertises truthful, per-runtime capabilities for all three bundled runtimes', async () => {
-    const pi = new PiAdapter({ resolveBin: () => ({ command: piCommand, source: 'env' }) });
+    const storeDir = await tmpDir('byok-conn-hello-store-');
+    const pi = new PiAdapter({
+      resolveBin: () => ({ command: piCommand, source: 'env' }),
+      byokLauncher: { command: piCommand, profileDbPath: path.join(storeDir, 'profiles.db'), sessionDir: path.join(storeDir, 'sessions') },
+    });
     const claude = new ClaudeAdapter({ resolveBin: () => ({ command: claudeCommand, source: 'path' }) });
     const codex = new CodexAdapter({ resolveBin: () => ({ command: codexCommand, source: 'path' }) });
-
-    const storeDir = await tmpDir('byok-conn-hello-store-');
     daemon = createDaemonWithAdapters(
       { storage: { scratchRoot: testScratchRoot() },
         localAgentRelease: { version: '0.0.0-test' }, productName: 'Test Product',
@@ -115,7 +107,7 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
     expect(hello.payload.clientVersion).toBe('0.0.0-test');
-    const runtimes = hello.payload.runtimes ?? [];
+    const runtimes = hello.payload.harnesses ?? [];
     expect(hello.payload.capabilities).toContain('toolset-selection');
     expect(hello.payload.capabilities).toContain('input-images');
     expect(hello.payload.configuredToolsets).toEqual(['crm.readonly', 'salesko.connectors']);
@@ -127,7 +119,8 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
 
     // pi: the only bundled runtime that can express mid-turn steering; its
     // task-scoped pi-mcp-adapter bridge also consumes selected MCP toolsets.
-    expect(byId.get('pi')).toEqual({
+    expect(byId.get('pi')).toMatchObject({
+      selectionModes: ['byok-profile'],
       images: true,
       steer: true,
       resume: true,
@@ -141,7 +134,8 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     });
 
     // Claude still supports plan; its private confirm/approval MCP path has been removed.
-    expect(byId.get('claude')).toEqual({
+    expect(byId.get('claude')).toMatchObject({
+      selectionModes: ['device-default', 'subscription'],
       images: true,
       steer: false,
       resume: true,
@@ -154,7 +148,8 @@ describe('conn.hello runtimes[].capabilities (pre-freeze RuntimeInfo.capabilitie
     });
 
     // codex: persistent app-server steering with YOLO-only auto permission mode.
-    expect(byId.get('codex')).toEqual({
+    expect(byId.get('codex')).toMatchObject({
+      selectionModes: ['device-default', 'subscription'],
       images: true,
       steer: true,
       resume: true,
@@ -208,8 +203,8 @@ describe('conn.hello.capabilities', () => {
       runtimeEnvironment: async () => testRuntimeEnvironment(),
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'pi',
-        supportsTaskExecutionOptions: true,
-        supportsDispatchSelection: true,
+        supportsEffort: true,
+        selectionModes: ['device-default', 'subscription'],
         capabilities: { images: true, mcpToolsets: true, steer: false, resume: false, approvalInteractive: false },
       }),
       async detect() { return { kind: 'available' }; },
@@ -227,7 +222,7 @@ describe('conn.hello.capabilities', () => {
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
-    expect(hello.payload.capabilities).toEqual(['task-execution-options', 'dispatch-selection', 'toolset-selection', 'input-images']);
+    expect(hello.payload.capabilities).toEqual(['toolset-selection', 'input-images']);
   });
 
   it('withholds dispatch-selection when a custom built-in-id adapter has not opted into exact target semantics', async () => {
@@ -235,7 +230,7 @@ describe('conn.hello.capabilities', () => {
       runtimeEnvironment: async () => testRuntimeEnvironment(),
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'pi',
-        supportsDispatchSelection: false,
+        selectionModes: ['device-default'],
         capabilities: {
           steer: false,
           resume: false,

@@ -431,7 +431,7 @@ export interface TaskAttempt {
   readonly status: TaskAttemptStatus;
   /**
    * The executor the CLAIMING daemon reported for itself on its own
-   * `task.claim` (`TaskClaimPayload.executor`, wire v7), snapshotted at the
+   * `task.claim` (`TaskClaimPayload.executor`), snapshotted at the
    * `offered -> claimed` transition and never written again — a redelivered or
    * losing claim leaves it exactly as the winning claim left it.
    *

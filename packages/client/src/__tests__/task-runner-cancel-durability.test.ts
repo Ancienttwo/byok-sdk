@@ -11,7 +11,7 @@ import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { AGENT_TERMINAL_EVIDENCE_MAX_ATTEMPTS } from '../daemon/task-runner/state';
 import { RuntimeDisposalFailure } from '../runtime-failure';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -54,7 +54,7 @@ async function fixture(overrides: Partial<TaskRunnerDeps> = {}) {
   const committing = deferred();
   const committed = deferred();
   const awaitTerminalCommit = vi.fn(async () => { committing.resolve(); await committed.promise; });
-  const runner = new TaskRunner({
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     agentHome, agentSessionHandoffs: handoffs, deviceId: 'cancel-device',
@@ -68,7 +68,7 @@ async function fixture(overrides: Partial<TaskRunnerDeps> = {}) {
     awaitTerminalCommit, ...overrides,
   });
   await runner.handleEnvelope(createEnvelope('task.offer', {
-    ...FRESH_OFFER, instruction: 'wait for cancellation', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
+    ...FRESH_OFFER, instruction: 'wait for cancellation', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT,
   }, { taskId: TASK, seq: 1 }));
   expect(sent.filter(event => event.type === 'task.started')).toHaveLength(1);
   expect(releases).toHaveLength(1);

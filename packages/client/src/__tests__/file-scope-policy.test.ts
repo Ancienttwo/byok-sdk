@@ -22,7 +22,7 @@ import { PI_STUB_DECLARATIONS, StubRuntimeAdapter, type StubAdapterDeclarations 
 import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { freshTestAgentRef, testAgentHomeConfig, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner, testScratchRoot } from './fixtures/execution-scratch';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -58,7 +58,7 @@ function makeRunner(
   toolAuthorization: ToolAuthorizationResolver,
   extra: Partial<Pick<TaskRunnerDeps, 'onFileScopeAudit'>> = {},
 ): TaskRunner {
-  return new TaskRunner({
+  return new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },
     advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(), adapters: [adapter], ...testAgentHomeDeps(),
     deviceId: 'device-1', send: (envelope) => { sent.push(envelope); },

@@ -57,7 +57,7 @@ describe('device-wide task resources (#1121)', () => {
 
   function offer(taskId: string, agentId: string, limits?: { maxDurationMs: number }): void {
     server.send(createEnvelope('task.offer', {
-      instruction: `work for ${agentId}`, agentRef: { agentId, profileRevision: 'r1' }, target: { lane: 'runtime', runtimeId: 'pi' }, ...FRESH_OFFER,
+      instruction: `work for ${agentId}`, agentRef: { agentId, profileRevision: 'r1' }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, ...FRESH_OFFER,
       ...(limits === undefined ? {} : { limits }),
     }, { taskId, seq: server.nextSeq() }));
   }

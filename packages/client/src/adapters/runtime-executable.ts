@@ -15,7 +15,10 @@ export interface ResolvedRuntimeCommand<B extends { readonly command: string } =
 export function resolveRuntimeCommand<B extends { readonly command: string; readonly source: 'env' | 'path' }>(
   configured: (() => B) | undefined,
   builtIn: () => B,
-): ResolvedRuntimeCommand<B> {
+  managed?: () => { command: string; source: 'managed' } | undefined,
+): ResolvedRuntimeCommand {
+  const managedBin = managed?.();
+  if (managedBin !== undefined) return { bin: managedBin, source: 'managed' };
   if (configured !== undefined) return { bin: configured(), source: 'config' };
   const bin = builtIn();
   return { bin, source: bin.source };

@@ -17,14 +17,13 @@ import {
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 
-const DSH_TARGET = { lane: 'harness', harnessId: 'dsh' } as const;
-
 import { defineMcpSearchProbes } from './mcp-search-probe';
 import { searchMcpEnvironmentFor } from '../../daemon/search-runtime-qualification';
 import type { DaemonConfig } from '../../daemon/create-daemon';
 const target = contractTarget('dsh', QUALIFIED_DSH_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
+const DSH_TARGET = { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'openai', modelId: `byok-custom/${MODEL}` } } as const;
 const PROVIDER_KEY = 'byok-contract-dsh-provider-86ae';
 const resolveKey = async () => PROVIDER_KEY;
 const PROJECT_MARKER = 'BYOK-CONTRACT-DSH-PROJECT-4e19';
@@ -39,7 +38,7 @@ const RESUME_MARKER = 'BYOK-CONTRACT-DSH-RESUME-e07c';
 const AGENT_PERSONA_MARKER = 'BYOK-CONTRACT-DSH-AGENT-PERSONA-71d4';
 const SKILL_FILE = `---\nname: ${SKILL}\ndescription: ${SKILL_MARKER}\n---\n\nRuntime contract user skill.\n`;
 
-const loopbackModel = (baseUrl: string): DshModelSelection => ({ provider: 'custom', model: MODEL, baseUrl });
+const loopbackModel = (baseUrl: string): DshModelSelection => ({ provider: 'custom', model: MODEL, baseUrl, providerId: 'openai' });
 
 /** One SDK-owned dsh root for the file; detect() writes the acp profile into it before any turn. */
 const rootBox = once(() => createSandbox('dsh-root'));

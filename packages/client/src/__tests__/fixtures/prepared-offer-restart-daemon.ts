@@ -30,7 +30,7 @@ import {
 import type { McpToolsetConfig, RuntimeCapabilities } from '../../types';
 import { StubRuntimeAdapter } from './stub-adapter';
 import { observationOf } from './mcp-observation';
-import { acceptClaimSettlement, testIngressBudget } from './activity-ingress';
+import { testHarnesses, acceptClaimSettlement, testIngressBudget } from './activity-ingress';
 import { advertiseEveryDeviceFlag } from '../support/advertised-capabilities';
 
 // The test identity for Agent-home lease writers, the same as the parent's.
@@ -185,7 +185,7 @@ const sent: Envelope[] = [];
 await fs.mkdir(config.runnerStoreDir, { recursive: true });
 await fs.mkdir(config.agentHomeDir, { recursive: true });
 
-const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: new ScratchRoot(config.scratchRoot),
+const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: new ScratchRoot(config.scratchRoot),
   adapters: [adapter],
   deviceId: DEVICE_ID,
   send: (envelope) => sent.push(envelope),
@@ -360,7 +360,7 @@ function preparedOffer(
     {
       session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      target: { lane: 'runtime', runtimeId: 'pi' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       agentRef: agentRefOf(agentId),
       requiredToolsets: [TOOLSET_ID],
       agentMemory: 'none',

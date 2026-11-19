@@ -1,5 +1,14 @@
 import type { TaskRunnerDeps } from '../../daemon/task-runner';
-import type { ActivityIngress } from '@byok-sdk/protocol';
+import type { ActivityIngress, HarnessInfo } from '@byok-sdk/protocol';
+import type { RuntimeAdapter } from '../../types';
+
+export function testHarnesses(adapters: readonly RuntimeAdapter[]): HarnessInfo[] {
+  return adapters.map(({ descriptor }) => ({ id: descriptor.id, capabilities: {
+    selectionModes: [...descriptor.selectionModes],
+    effort: descriptor.supportsEffort === true,
+    ...(descriptor.byokProviderId === undefined ? {} : { byokProviderId: descriptor.byokProviderId }),
+  } }));
+}
 
 /**
  * The reference cloud's default activity advertisement. TaskRunner harnesses

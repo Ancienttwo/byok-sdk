@@ -43,7 +43,7 @@ const taskIdProperty = { type: 'string', description: 'A taskId that byok_task_s
 /** Ranks granted devices: runtime advertised now, then offline (queued work), then online without it. */
 export async function selectDevice(sdk: Pick<ByokServer, 'machines'>, key: KeyInfo, runtime: RuntimeId): Promise<string> {
   const machines = new Map((await sdk.machines.list()).map(machine => [machine.deviceId, machine]));
-  const rank = (machine: MachineInfo) => machine.runtimes?.some(fact => fact.id === runtime) ? 0 : machine.connected ? 2 : 1;
+  const rank = (machine: MachineInfo) => machine.harnesses?.some(fact => fact.id === runtime) ? 0 : machine.connected ? 2 : 1;
   const granted = key.deviceIds.flatMap(id => machines.get(id) ?? []).sort((a, b) => rank(a) - rank(b));
   if (!granted[0]) throw new BetaError('unavailable', 'No granted device is registered', 60);
   return granted[0].deviceId;
@@ -52,7 +52,12 @@ export async function selectDevice(sdk: Pick<ByokServer, 'machines'>, key: KeyIn
 /** The B3 task catalogue. Each handler reaches the SDK only through the caller's saved ledger reservations. */
 export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
   const { sdk, ledger } = options;
-  const blobBase = new URL(options.blobBaseUrl);
+  let blobBase: URL;
+  try {
+    blobBase = new URL(options.blobBaseUrl);
+  } catch (error) {
+    throw new TypeError('Select the HTTPS or loopback HTTP origin of the SDK routes', { cause: error });
+  }
   // Download URLs carry a signature: HTTPS, or loopback HTTP, as for the MCP origin.
   if (blobBase.origin !== options.blobBaseUrl.replace(/\/$/, '') || blobBase.protocol !== 'https:'
     && !(blobBase.protocol === 'http:' && ['127.0.0.1', 'localhost', '[::1]'].includes(blobBase.hostname))) {
@@ -158,9 +163,9 @@ export function createTaskTools(options: TaskToolOptions): ScopedTool[] {
           const machine = machines.get(deviceId);
           return { deviceId, registered: machine !== undefined, connected: machine?.connected ?? false,
             runtimes: key.runtimes.map(id => {
-              const fact = machine?.runtimes?.find(item => item.id === id);
+              const fact = machine?.harnesses?.find(item => item.id === id);
               // Runtime facts exist only while the device's presence is fresh; otherwise installation is unknown.
-              return { id, installed: machine?.runtimes === undefined ? null : fact !== undefined,
+              return { id, installed: machine?.harnesses === undefined ? null : fact !== undefined,
                 ...(fact?.version === undefined ? {} : { version: fact.version }),
                 ...(fact?.authPresent === undefined ? {} : { authPresent: fact.authPresent }) };
             }) };

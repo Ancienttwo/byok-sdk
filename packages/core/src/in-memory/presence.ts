@@ -9,7 +9,7 @@ import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpire
  */
 import { ByokCoreError } from '../errors.js';
 import {
-  freezePresenceRuntimeFact,
+  freezePresenceHarnessFact,
   type PresenceHint,
   type PresenceHintInput,
   type PresenceStore,
@@ -72,11 +72,7 @@ export class InMemoryPresenceStore implements PresenceStore {
       ...(input.protocolVersions === undefined
         ? {}
         : { protocolVersions: Object.freeze([...input.protocolVersions]) }),
-      ...(input.runtimes === undefined
-        ? {}
-        : {
-            runtimes: Object.freeze(input.runtimes.map(freezePresenceRuntimeFact)),
-          }),
+      ...(input.harnesses === undefined ? {} : { harnesses: Object.freeze(input.harnesses.map(freezePresenceHarnessFact)) }),
       observedAt: now.toISOString(),
       expiresAt: new Date(now.getTime() + input.ttlMs).toISOString(),
     };

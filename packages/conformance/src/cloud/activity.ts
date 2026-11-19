@@ -58,9 +58,10 @@ export function runActivityConformance(name: string, factory: ActivityCompositio
           return { deviceId: body.deviceId, authorization: { authorization: `Bearer ${body.accessToken}` } };
         } };
         const TEST_AGENT_REF = { agentId: 'test-agent', profileRevision: 'rev-1' };
-        const offerPayload = (instruction: string) => ({ instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' }, target: { lane: 'runtime' as const, runtimeId: 'pi' as const } });
+        const offerPayload = (instruction: string) => ({ instruction, agentRef: TEST_AGENT_REF, session: { mode: 'resume' as const, sessionRef: 'test-session' }, target: { lane: 'harness' as const, harnessId: 'pi', selection: { mode: 'device-default' as const } } });
         const device = await harness.pairDevice(TENANT_A);
-        await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
+        await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+          harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } }] });
         const taskId = 'empty-progress';
         await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: offerPayload('work') });
         const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI_EXECUTOR }, { taskId });

@@ -31,7 +31,7 @@ import { openJournalDatabase } from '../util/sqlite-support';
 import type { JournalIdentity, JournalReceipt, LocalTaskJournal, LocalTerminalRecord, ReceivedEnvelopeRecord, RecoverableTask } from '../daemon/journal/journal';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
@@ -280,7 +280,7 @@ describe('hosted journal integration (L-002)', () => {
     });
     const { adapter, storeDir, deviceId } = await startDaemon({}, journal);
     const seq = server.nextSeq();
-    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'absent runtime', target: { lane: 'runtime', runtimeId: 'claude' } },
+    const offer = createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'absent runtime', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } },
       { taskId: 'decline-retry', seq });
     server.send(offer);
     await vi.waitFor(() => expect(daemon!.status().pendingTerminalCommits).toBe(1));
@@ -478,7 +478,7 @@ async function makeRunner(
   sent: Envelope[],
   admissionGuard?: TaskRunnerDeps['admissionGuard'],
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',

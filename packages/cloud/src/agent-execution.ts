@@ -12,7 +12,7 @@ const FRESH_EXECUTION = { session: SessionSelectionSchema.options[1], preparatio
  * Persist this validated input before dispatch; the Host owns Turn/generation and outbox.
  *
  * `terminalProjection` is always required (#470). The execution target is the
- * offer's required `target` (wire v7), validated by the protocol schema.
+ * offer's required `target`, validated by the protocol schema.
  */
 export const AgentExecutionInputSchema = z.object({
   taskId: z.string().min(1),

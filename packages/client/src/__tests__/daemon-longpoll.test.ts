@@ -38,10 +38,10 @@ describe('long-poll lifecycle (protocol §8)', () => {
     await daemon.pair('code');
     await daemon.start();
     try {
-      server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'blocked', target: { lane: 'runtime', runtimeId: 'codex' } },
+      server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'blocked', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } },
         { taskId: 'slow-start', seq: server.nextSeq() }));
       await server.waitFor(e => e.type === 'task.claim');
-      server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'independent', target: { lane: 'runtime', runtimeId: 'pi' } },
+      server.pushLongPollEvent(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'independent', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } },
         { taskId: 'other-start', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(other.sessions).toHaveLength(1));
       server.pushLongPollEvent(createEnvelope('task.cancel', { reason: 'remote' },

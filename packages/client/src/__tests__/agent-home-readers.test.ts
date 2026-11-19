@@ -28,7 +28,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import { builtAgentMemoryFilesystemHelperBin } from './fixtures/agent-memory-helper-build';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -105,7 +105,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     server.send(createEnvelope('task.offer', {
       instruction: `work for ${agentId}`,
       agentRef: { agentId, profileRevision: 'r1' },
-      target: { lane: 'runtime', runtimeId: 'pi' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       ...(options.reader === true ? { homeAccess: 'memory-reader' as const } : {}),
       ...(options.agentMemory === undefined ? {} : { agentMemory: options.agentMemory }),
       ...(options.sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef: options.sessionRef } }),
@@ -925,7 +925,7 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     });
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [durable],
       agentHome,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -941,7 +941,7 @@ describe('durable Pi and memory-reader Attempts (#317)', () => {
     });
 
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'read on durable Pi', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'durable-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
+      instruction: 'read on durable Pi', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: { agentId: 'durable-agent', profileRevision: 'r1' }, ...FRESH_OFFER,
       homeAccess: 'memory-reader',
     }, { taskId: 'durable-reader', seq: 1 }));
 
@@ -962,7 +962,7 @@ describe('reader admission after a published reader terminal (#476)', () => {
     const pi = new StubRuntimeAdapter('pi');
     const sent: Envelope[] = [];
     const agentHome = new AgentHomeManager({ hostStorageRoot });
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [pi],
       agentHome,
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -978,7 +978,7 @@ describe('reader admission after a published reader terminal (#476)', () => {
       maxConcurrentReaderAttemptsPerAgentHome: 4,
     });
     const readerOffer = (taskId: string, seq: number): Envelope => createEnvelope('task.offer', {
-      instruction: 'read', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'finishing-readers', profileRevision: 'r1' }, ...FRESH_OFFER,
+      instruction: 'read', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: { agentId: 'finishing-readers', profileRevision: 'r1' }, ...FRESH_OFFER,
       homeAccess: 'memory-reader',
     }, { taskId, seq });
     const declinesOf = (taskId: string) => sent.filter((entry) => entry.type === 'task.decline' && entry.task_id === taskId);

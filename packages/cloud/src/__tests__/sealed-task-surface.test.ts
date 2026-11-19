@@ -19,11 +19,11 @@ import {
 import { describe, expect, it } from 'vitest';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, type CloudHarness } from './support/harness';
+import { TEST_HARNESSES, corpusOfferInventory, PRODUCT_ID, TENANT_A, TEST_AGENT_REF, createHarness, type CloudHarness } from './support/harness';
 import { SEALING, inlineMember } from './support/sealed';
 
 type CorpusLine = { type: MessageType; payload: Record<string, unknown> };
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as CorpusLine);
@@ -39,7 +39,7 @@ const CONTEXT = { destinationBinding: 'conversation/654/turn/1' };
 
 let taskCount = 0;
 
-const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const PI_EXECUTOR = { id: 'pi' } as const;
 
 const SCOPE_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1);
 
@@ -82,7 +82,7 @@ async function sealAgentInstruction(
 /** A sealed fresh Agent execution payload with both categories sealed. */
 function sealedAgentOffer(sealed: Awaited<ReturnType<typeof sealAgentInstruction>>) {
   return {
-    target: { lane: 'runtime', runtimeId: 'pi' } as const,
+    target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } as const,
     agentRef: TEST_AGENT_REF,
     session: { mode: 'fresh' as const },
     egressPolicy: {
@@ -128,7 +128,7 @@ async function egressTask(
   const fixture = typeof build === 'function' ? await build(device.deviceId, taskId) : build;
   const payload: EgressPayload = fixture;
   await harness.stores.devices.recordCapabilities(TENANT_A, {
-    deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(type, payload as never),
+    deviceId: device.deviceId, harnesses: corpusOfferInventory(payload), capabilities: requiredReceiverCapabilities(type, payload as never),
   });
   if (lane === 'plain') await harness.cloud.enqueueAgentEgressOffer(TENANT_A, device.deviceId, { taskId, payload: payload as never, agentMessageContext: CONTEXT });
   if (lane === 'fresh') await harness.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: device.deviceId, payload: payload as never, agentMessageContext: CONTEXT });
@@ -183,7 +183,7 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     const taskId = 'sealed-read-surface';
     const instruction = await sealAgentInstruction(device.deviceId, taskId, 'secret plan');
     await harness.stores.devices.recordCapabilities(TENANT_A, {
-      deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', sealedAgentOffer(instruction) as never),
+      deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: requiredReceiverCapabilities('task.offer', sealedAgentOffer(instruction) as never),
     });
     await harness.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: device.deviceId, payload: sealedAgentOffer(instruction) as never });
     const send = deviceSender(harness, device.deviceId, taskId);
@@ -231,7 +231,7 @@ describe('the Host read surface of a sealed task (#654 E4a)', () => {
     const taskId = 'sealed-read-surface-fail';
     const instruction = await sealAgentInstruction(device.deviceId, taskId, 'secret plan');
     await harness.stores.devices.recordCapabilities(TENANT_A, {
-      deviceId: device.deviceId, capabilities: requiredReceiverCapabilities('task.offer', sealedAgentOffer(instruction) as never),
+      deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: requiredReceiverCapabilities('task.offer', sealedAgentOffer(instruction) as never),
     });
     await harness.cloud.submitSealedAgentExecution(TENANT_A, { taskId, deviceId: device.deviceId, payload: sealedAgentOffer(instruction) as never });
     const send = deviceSender(harness, device.deviceId, taskId);

@@ -7,7 +7,7 @@ import { GrokAdapter } from '../adapters/grok/grok-adapter';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import type { Session } from '../types';
 
-const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
+const GROK_TARGET = { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } } as const;
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
 const sessions: Session[] = [];

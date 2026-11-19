@@ -162,7 +162,7 @@ describe('provider.provisioning.available notice', () => {
 
   it('forbids task_id and requires seq', () => {
     const base = {
-      v: 7,
+      v: 8,
       id: '20000000-0000-4000-8000-000000000099',
       ts: '2026-09-28T05:00:00.000Z',
       type: 'provider.provisioning.available',
@@ -185,7 +185,7 @@ describe('provider.provisioning.available notice', () => {
     const payload = { requestId: REQUEST_ID, [field]: value };
     expect(ProviderProvisioningAvailablePayloadSchema.safeParse(payload).success).toBe(false);
     const raw = JSON.stringify({
-      v: 7,
+      v: 8,
       id: '20000000-0000-4000-8000-000000000098',
       ts: '2026-09-28T05:00:00.000Z',
       type: 'provider.provisioning.available',

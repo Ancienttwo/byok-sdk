@@ -16,11 +16,12 @@ const tenant = tenantId('custom-harness');
 const deviceId = 'custom-device';
 const harnessId = 'acme-harness';
 const capabilities = { steer: true };
+const inventoryCapabilities = { ...capabilities, selectionModes: ['device-default'] as const, effort: false };
 const payload = { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, instruction: 'run custom adapter' } as const;
 const agentRef = TEST_AGENT_REF;
-const HARNESS: ClaimedExecutor = { kind: 'harness', harnessId };
-const OTHER_HARNESS: ClaimedExecutor = { kind: 'harness', harnessId: 'other' };
-const PI: ClaimedExecutor = { kind: 'runtime', runtimeId: 'pi' };
+const HARNESS: ClaimedExecutor = { id: harnessId };
+const OTHER_HARNESS: ClaimedExecutor = { id: 'other' };
+const PI: ClaimedExecutor = { id: 'pi' };
 
 describe('SQLite custom-harness claim authority', () => {
   const roots: string[] = [];
@@ -66,9 +67,9 @@ describe('SQLite custom-harness claim authority', () => {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
       await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract', 'custom-harness'],
-        harnesses: [{ id: harnessId, capabilities }, { id: 'other', capabilities }] });
+        harnesses: [{ id: harnessId, capabilities: { ...inventoryCapabilities, selectionModes: ['device-default'] } }, { id: 'other', capabilities: { ...inventoryCapabilities, selectionModes: ['device-default'] } }] });
       const offer = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, {
-        payload: { ...payload, target: selection === 'explicit' ? { lane: 'harness', harnessId } : { lane: 'auto' } },
+        payload: { ...payload, target: selection === 'explicit' ? { lane: 'harness', harnessId, selection: { mode: 'device-default' } } : { lane: 'auto' } },
       });
       const taskId = offer.taskId;
       const claim = createEnvelope('task.claim', { executor: HARNESS, deviceId, agentRef, capabilities }, { taskId });
@@ -117,13 +118,13 @@ describe('SQLite custom-harness claim authority', () => {
   });
 
   it.each(['pi', 'claude', 'codex'] as const)('preserves built-in claim %s without fabricating a harness', async (runtimeId) => {
-    const executor: ClaimedExecutor = { kind: 'runtime', runtimeId };
+    const executor: ClaimedExecutor = { id: runtimeId };
     const { open } = fixture();
     let runtime = open();
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
-      await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract'] });
+      await runtime.bound.devices.recordCapabilities({ capabilities: ['agent-home-contract'], harnesses: [{ id: runtimeId, capabilities: { ...inventoryCapabilities, selectionModes: ['device-default'] } }] });
       const { taskId } = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { payload: { ...payload, target: { lane: 'auto' } } });
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', {
         deviceId, agentRef, executor,
@@ -138,7 +139,7 @@ describe('SQLite custom-harness claim authority', () => {
     } finally { await runtime.stores.close(); }
   });
 
-  it('refuses a task attempt row that names both a claimed runtime and a claimed harness', async () => {
+  it('refuses a task attempt row that names an executor without an owner', async () => {
     const { open, path } = fixture();
     const runtime = open();
     try {
@@ -146,10 +147,10 @@ describe('SQLite custom-harness claim authority', () => {
     } finally { await runtime.stores.close(); }
     const db = new DatabaseSync(path);
     try {
-      expect(() => db.prepare("UPDATE task_attempt SET claimed_runtime = 'pi', claimed_harness_id = ? WHERE task_id = 'both'").run(harnessId))
+      expect(() => db.prepare("UPDATE task_attempt SET claimed_harness_id = ? WHERE task_id = 'both'").run(harnessId))
         .toThrow(/CHECK constraint failed/);
-      expect(db.prepare("SELECT claimed_runtime, claimed_harness_id FROM task_attempt WHERE task_id = 'both'").get())
-        .toEqual({ claimed_runtime: null, claimed_harness_id: null });
+      expect(db.prepare("SELECT claimed_harness_id FROM task_attempt WHERE task_id = 'both'").get())
+        .toEqual({ claimed_harness_id: null });
     } finally { db.close(); }
   });
 
@@ -160,7 +161,7 @@ describe('SQLite custom-harness claim authority', () => {
     // The executor CHECK names the column, so it cannot be dropped; renamed, it is just as missing.
     db.exec('ALTER TABLE task_attempt RENAME COLUMN claimed_harness_id TO claimed_harness_removed');
     db.close();
-    expect(() => open()).toThrow('BYOK SQLite table task_attempt does not match schema 10');
+    expect(() => open()).toThrow('BYOK SQLite table task_attempt does not match schema 11');
     const check = new DatabaseSync(path, { readOnly: true });
     try {
       expect(check.prepare('PRAGMA table_info(task_attempt)').all().map(column => column.name)).not.toContain('claimed_harness_id');

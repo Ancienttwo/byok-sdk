@@ -50,6 +50,7 @@ import { resolveAgyBin } from './resolve-bin.js';
 
 /** Upstream's bound: the CLI can read its update state before it prints the version. */
 const VERSION_TIMEOUT_MS = 30_000;
+const AGY_PROVIDER_ID = 'google';
 
 export interface AgyAdapterOptions {
   /**
@@ -136,8 +137,9 @@ export class AgyAdapter implements RuntimeAdapter {
   get descriptor() {
     return freezeRuntimeAdapterDescriptor({
       id: 'agy',
-      supportsDispatchSelection: false,
-      supportsTaskExecutionOptions: true,
+      selectionModes: ['byok'],
+      byokProviderId: AGY_PROVIDER_ID,
+      supportsEffort: true,
       requiresMcpToolsetToolObservation: true,
       platforms: ['darwin', 'linux', 'win32'],
       capabilities: AGY_RUNTIME_CAPABILITIES,
@@ -201,7 +203,11 @@ export class AgyAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    const { effort, modelId = this.options.model } = input.offer;
+    const { effort, target } = input.offer;
+    if (target.lane !== 'harness' || target.harnessId !== 'agy' || target.selection.mode !== 'byok' || target.selection.providerId !== AGY_PROVIDER_ID) {
+      return { kind: 'reject', reason: 'agy requires the google BYOK provider', retryable: false };
+    }
+    const { modelId } = target.selection;
     const detected = await this.detect();
     if (detected.kind !== 'available') {
       return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };
@@ -216,6 +222,10 @@ export class AgyAdapter implements RuntimeAdapter {
 
   private async start(input: RuntimeOperationStartInput, command: string, model: string | undefined, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('agy requires a resolved instruction');
+    const selection = input.manifest.selection;
+    if (selection?.mode !== 'byok' || selection.providerId !== AGY_PROVIDER_ID || selection.modelId !== model || input.manifest.effort !== effort) {
+      throw authority('agy manifest differs from the admitted provider, model or effort');
+    }
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('agy manifest has no sealed cwd');
     const resume = input.manifest.sessionRef;
@@ -244,6 +254,12 @@ export class AgyAdapter implements RuntimeAdapter {
       for (const value of credentials) redactor.addExplicit(value);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'agy acp' });
+      const hooks: NonNullable<Parameters<typeof import('../../runtime/acp-session-runtime.js').antigravitySession>[4]> = {
+        credentialsForRedaction: credentials,
+        onReady: id => session.ready(id),
+        onRecord: record => session.record(record),
+        onPermission: request => session.permission(request),
+      };
       const raw = await acp.antigravitySession(
         (bin, args, options) => {
           const child = spawnAgent(bin, args, options);
@@ -266,13 +282,7 @@ export class AgyAdapter implements RuntimeAdapter {
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(resume === undefined ? {} : { resume }),
         },
-        {
-          credentialsForRedaction: credentials,
-          onReady: (id) => session.ready(id),
-          // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
-          onRecord: (record) => session.record(record),
-          onPermission: (request) => session.permission(request),
-        },
+        hooks,
       );
       session.bind(raw);
       if (input.signal?.aborted) throw infrastructure('agy start was aborted');

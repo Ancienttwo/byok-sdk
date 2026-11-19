@@ -12,7 +12,7 @@ import { sealRuntimeOperationManifest, type Session } from '../types';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 
-const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+const PI_TARGET = { lane: 'auto' } as const;
 
 const FAKE_PI = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const roots: string[] = [];

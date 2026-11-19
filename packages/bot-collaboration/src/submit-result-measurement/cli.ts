@@ -49,8 +49,8 @@ function targetFor(runtime: MeasuredRuntime, model: string): ExecutionTarget {
   // harness and takes the model as an adapter option. Pi BYOK needs a credential-custody
   // launcher, so Pi uses the model of its own configuration, and the cell records the
   // operator label.
-  if (runtime === 'claude' || runtime === 'codex') return { lane: 'subscription', runtimeId: runtime, modelId: model };
-  return runtime === 'grok' ? { lane: 'harness', harnessId: 'grok' } : { lane: 'runtime', runtimeId: 'pi' };
+  if (runtime === 'claude' || runtime === 'codex') return { lane: 'harness', harnessId: runtime, selection: { mode: 'subscription', modelId: model } };
+  return runtime === 'grok' ? { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } } : { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } };
 }
 
 function builtinAdapters(runtime: MeasuredRuntime, model: string): () => RuntimeAdapter[] {
@@ -71,7 +71,7 @@ function describePlan(manifest: RunManifest, model: string, target: ExecutionTar
   const roundBytes = CORPUS.filter(entry => manifest.plan.order.includes(entry.id)).reduce((sum, entry) => sum + entry.bytes.instruction, 0);
   return [
     `Cell: ${manifest.cellId}`,
-    `Runtime: ${String(manifest.cell.runtime)}; model ${model} ${target.lane === 'subscription' ? '(sent as the subscription target)' : target.lane === 'harness' ? '(set as the Grok adapter model)' : '(from the Pi configuration; recorded as a label)'}`,
+    `Runtime: ${String(manifest.cell.runtime)}; model ${model} ${target.lane === 'harness' && target.selection.mode === 'subscription' ? '(sent as the subscription target)' : target.lane === 'harness' ? '(sent as the adapter target)' : '(from the Pi configuration; recorded as a label)'}`,
     `Corpus: ${manifest.corpus.revision}; preflight ${manifest.corpus.preflight.ok ? 'ok' : 'FAILED: the run is void'}`,
     `Plan: ${manifest.plan.calibrationTrials} uncounted calibration trial + ${manifest.plan.rounds} rounds x ${manifest.plan.order.length} cases = ${manifest.plan.plannedTrials} counted trials`,
     `Runtime tasks: ${manifest.plan.runtimeTasks} (max-trials ${manifest.budget.maxTrials}). Each task makes at least two model requests; token counts are unknown until measured.`,

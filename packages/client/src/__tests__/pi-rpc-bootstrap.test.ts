@@ -18,7 +18,7 @@ const PROVIDER = 'bootstrap-loopback';
 const BOOT = 'BYOK-BOOT-2299';
 const TASK = 'BYOK-TASK-2299';
 const LATER = 'BYOK-LATER-2299';
-const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+const PI_TARGET = { lane: 'auto' } as const;
 type SessionEvent = Session['events'] extends AsyncIterable<infer Event> ? Event : never;
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 

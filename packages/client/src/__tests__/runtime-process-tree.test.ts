@@ -82,7 +82,7 @@ describe('bundled runtime process-tree disposal', () => {
   it('escalates a TERM-resistant POSIX process group before resolving close', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-process-tree-escalation-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
-    const offer: RuntimeTaskInput = { target: { lane: 'runtime', runtimeId: 'pi' }, instruction: 'stay alive' };
+    const offer: RuntimeTaskInput = { target: { lane: 'auto' }, instruction: 'stay alive' };
     const adapter = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'package' }) });
     const session = await startPreparedOperation(adapter, offer, {
       workspaceDir,
@@ -124,7 +124,7 @@ describe('bundled runtime process-tree disposal', () => {
   it('Pi close resolves only after its real root, descendant and grandchild are all gone', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-process-tree-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
-    const offer: RuntimeTaskInput = { target: { lane: 'runtime', runtimeId: 'pi' }, instruction: 'stay alive' };
+    const offer: RuntimeTaskInput = { target: { lane: 'auto' }, instruction: 'stay alive' };
     const adapter = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'package' }) });
     const session = await startPreparedOperation(adapter, offer, {
       workspaceDir,
@@ -151,7 +151,7 @@ describe('bundled runtime process-tree disposal', () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-process-tree-escape-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
     const escapeLog = path.join(workspaceDir, 'escapees.log');
-    const offer: RuntimeTaskInput = { target: { lane: 'runtime', runtimeId: 'pi' }, instruction: 'stay alive' };
+    const offer: RuntimeTaskInput = { target: { lane: 'auto' }, instruction: 'stay alive' };
     const adapter = new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'package' }) });
     const session = await startPreparedOperation(adapter, offer, {
       workspaceDir,

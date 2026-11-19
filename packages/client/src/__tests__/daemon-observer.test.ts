@@ -162,7 +162,7 @@ describe('daemon local observability (DaemonObserver)', () => {
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(),  instruction: 'do something risky', ...FRESH_OFFER, target: { lane: 'harness', harnessId: 'acme-harness' } },
+        { agentRef: freshTestAgentRef(),  instruction: 'do something risky', ...FRESH_OFFER, target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } } },
         { taskId: 'task-decline-1', seq: server.nextSeq() },
       ),
     );
@@ -398,12 +398,12 @@ describe('daemon local observability (DaemonObserver)', () => {
         observer.handleInboundEnvelope(
           createEnvelope(
             'task.offer',
-            { agentRef: freshTestAgentRef(),  instruction: 'run it', ...FRESH_OFFER, target: { lane: 'runtime', runtimeId: 'claude' } },
+            { agentRef: freshTestAgentRef(),  instruction: 'run it', ...FRESH_OFFER, target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } },
             { taskId: 'task-runtime-1', seq: 1 },
           ),
         );
         observer.handleOutboundEnvelope(
-          createEnvelope('task.claim', { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'task-runtime-1' }),
+          createEnvelope('task.claim', { deviceId: 'device-1', executor: { id: 'pi' } }, { taskId: 'task-runtime-1' }),
         );
 
         expect(events).toEqual([
@@ -418,18 +418,17 @@ describe('daemon local observability (DaemonObserver)', () => {
         });
       });
 
-      it('keeps a harness claim free of a claimedRuntime field', () => {
+      it('reports the claimed ID for a custom harness', () => {
         const observer = new DaemonObserver();
         const events: DaemonEvent[] = [];
         observer.subscribe((e) => events.push(e));
 
         observer.handleOutboundEnvelope(
-          createEnvelope('task.claim', { deviceId: 'device-1', executor: { kind: 'harness', harnessId: 'acme-harness' } }, { taskId: 'task-runtime-legacy' }),
+          createEnvelope('task.claim', { deviceId: 'device-1', executor: { id: 'acme-harness' } }, { taskId: 'task-runtime-legacy' }),
         );
 
-        expect(events[0]).toEqual({ kind: 'claimed', ts: expect.any(String), taskId: 'task-runtime-legacy' });
-        expect(events[0] && 'claimedRuntime' in events[0]).toBe(false);
-        expect(observer.tasks()[0] && 'claimedRuntime' in observer.tasks()[0]!).toBe(false);
+        expect(events[0]).toEqual({ kind: 'claimed', ts: expect.any(String), taskId: 'task-runtime-legacy', claimedRuntime: 'acme-harness' });
+        expect(observer.tasks()[0]?.claimedRuntime).toBe('acme-harness');
       });
     });
 
@@ -640,7 +639,7 @@ it('projects a refused terminal after restart without an accepted lifecycle even
   const observer = new DaemonObserver();
   const events: DaemonEvent[] = [];
   observer.subscribe((event) => events.push(event));
-  const terminal = createEnvelope('task.complete', { summary: 'local terminal truth', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'recovered' });
+  const terminal = createEnvelope('task.complete', { summary: 'local terminal truth', sessionRef: 'session', executor: { id: 'pi' } }, { taskId: 'recovered' });
   observer.noteOutboundRejected(terminal, { envelopeId: terminal.id, type: terminal.type, taskId: 'recovered', reason: 'not_permitted', terminal: true });
   expect(observer.tasks()).toMatchObject([{ taskId: 'recovered', state: 'Complete', delivery: 'rejected', summary: 'local terminal truth' }]);
   expect(events.map((event) => event.kind)).toEqual(['outbound-rejected']);

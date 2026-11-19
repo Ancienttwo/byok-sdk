@@ -243,6 +243,7 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
     const hello = MESSAGE_PAYLOAD_SCHEMAS['conn.hello'].safeParse({
       protocolVersions: [1],
       capabilities: ['steer', 'some-future-capability-flag'],
+      harnesses: [],
       deviceId: 'device-1',
       productId: 'acme-agent',
     });
@@ -278,8 +279,8 @@ describe('freeze guard: behavior assertions (unknown tolerance vs. fail-closed)'
   });
 
   it('the current wire major is 7', () => {
-    expect(PROTOCOL_VERSION).toBe(7);
-    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(7);
+    expect(PROTOCOL_VERSION).toBe(8);
+    expect(createEnvelope('task.started', {}, { taskId: 'task-1' }).v).toBe(8);
   });
 
   it.each([1, 2, 3, 4, 5, 6])('a v%i envelope is REJECTED: there is no v1, v2, v3, v4, v5 or v6 reader', (v) => {
@@ -361,7 +362,7 @@ function offerProbePayload(variant: (typeof OFFER_PROBE_VARIANTS)[number]): Reco
 function minimalPayloadForProbe(type: MessageType): unknown {
   switch (type) {
     case 'conn.hello':
-      return { protocolVersions: [PROTOCOL_VERSION], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
+      return { protocolVersions: [PROTOCOL_VERSION], capabilities: [], deviceId: 'device-1', productId: 'acme-agent', harnesses: [] };
     case 'task.offer':
       return offerProbePayload('resume');
     case 'agent.egress.reliable':
@@ -492,7 +493,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.steer':
       return { text: 'hi' };
     case 'task.claim':
-      return { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } };
+      return { deviceId: 'device-1', executor: { id: 'pi' } };
     case 'task.started':
       return {};
     case 'task.decline':
@@ -504,7 +505,7 @@ function minimalPayloadForProbe(type: MessageType): unknown {
     case 'task.await_approval':
       return { summary: 'about to do a thing', approvalId: 'approval-1' };
     case 'task.complete':
-      return { executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'sess-1' };
+      return { executor: { id: 'pi' }, summary: 'done', sessionRef: 'sess-1' };
     case 'task.fail':
       return { reason: 'boom' };
     case 'task.cancelled':

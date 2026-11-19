@@ -315,7 +315,7 @@ describe('redelivery from a stale cursor (§9)', () => {
     if (offer1?.type !== 'task.offer') throw new Error('unreachable');
     const cursor = offer1.seq; // "I've fully processed everything through this seq"
 
-    await claimAndStart(started.byok, daemon, handle1, { kind: 'runtime', runtimeId: 'pi' }, PI_RUNTIME_INFO.capabilities);
+    await claimAndStart(started.byok, daemon, handle1, { id: 'pi' }, PI_RUNTIME_INFO.capabilities);
     await handle1.steer('keep going'); // assigns the next seq; deliberately never read
 
     // task2 is cancelled before the resync — terminal by the time redelivery

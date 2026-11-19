@@ -23,24 +23,24 @@ describe('presence upsert SQL binding contract', () => {
   it('stores and returns the runtime capability matrix with only its known keys (#1103)', async () => {
     const clock = createMutableClock();
     const matrix = {
-      steer: true, resume: true, toolAuthorizationAuto: true, preparedLane: true,
+      steer: true, resume: true, toolAuthorizationAuto: true, preparedLane: true, selectionModes: ['byok-profile'], effort: false,
       isolation: { userInstructions: true, userOutputStyle: true, userMemory: false, userSkills: true, userHookContext: false, userMcpServers: false, sessionPersistence: false },
     };
     const row = {
       tenant_id: 'sql-presence', device_id: 'device', level: 'online', detail: null, configured_toolsets: null, client_version: null,
-      protocol_versions: null, runtimes: [{ id: 'pi', version: '1.4.0', capabilities: matrix }],
+      protocol_versions: null, harnesses: [{ id: 'pi', version: '1.4.0', capabilities: matrix }],
       observed_at: clock.now().toISOString(), expires_at: new Date(clock.now().getTime() + 60_000).toISOString(),
     };
     const query = vi.fn().mockResolvedValue({ rows: [row] });
     const store = new PostgresPresenceStore({ query } as unknown as ByokPool, clock);
     const hint = await store.publish(tenantId('sql-presence'), {
       deviceId: 'device', level: 'online', ttlMs: 60_000, minimumIntervalMs: 0,
-      runtimes: [{ id: 'pi', version: '1.4.0', capabilities: { ...matrix, isolation: { ...matrix.isolation, extra: true } as typeof matrix.isolation, extra: true } as typeof matrix }],
+      harnesses: [{ id: 'pi', version: '1.4.0', capabilities: { ...matrix, isolation: { ...matrix.isolation, extra: true } as typeof matrix.isolation, extra: true } as typeof matrix }],
     });
     const [, values] = query.mock.calls[0]!;
     expect(JSON.parse(values.find((value: unknown) => typeof value === 'string' && value.startsWith('[{"id"')) as string))
       .toEqual([{ id: 'pi', version: '1.4.0', capabilities: matrix }]);
-    expect(hint.runtimes).toEqual([{ id: 'pi', version: '1.4.0', capabilities: matrix }]);
-    expect(Object.isFrozen(hint.runtimes?.[0]?.capabilities?.isolation)).toBe(true);
+    expect(hint.harnesses).toEqual([{ id: 'pi', version: '1.4.0', capabilities: matrix }]);
+    expect(Object.isFrozen(hint.harnesses?.[0]?.capabilities?.isolation)).toBe(true);
   });
 });

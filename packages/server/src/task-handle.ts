@@ -28,7 +28,7 @@ function steerRejectionMessage(
 
 function executorLabel(executor: ClaimedExecutor | undefined): string {
   if (executor === undefined) return 'executor (unknown)';
-  return executor.kind === 'runtime' ? `runtime ${executor.runtimeId}` : `harness ${executor.harnessId}`;
+  return `harness ${executor.id}`;
 }
 
 /**

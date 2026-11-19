@@ -282,6 +282,7 @@ describe('S1: tenant/product isolation at pairing, token, and hello (I2/I5/I9)',
       daemon,
       createEnvelope('conn.hello', {
         protocolVersions: [PROTOCOL_VERSION],
+        harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }],
         capabilities: [],
         deviceId: daemon.deviceId,
         productId: OTHER_PRODUCT_ID,

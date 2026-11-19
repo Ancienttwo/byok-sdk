@@ -223,7 +223,7 @@ it('keeps cancellation unsettled and never changes generation until device termi
   await running('cancel');
   // This case requires a durable claim before cancellation can wait for terminal.
   await vi.waitFor(async () => expect(await host.server.tasks.attempt(intent.taskId)).toMatchObject({
-    ownerDeviceId: host.deviceId, claimedExecutor: { kind: 'runtime', runtimeId: 'pi' },
+    ownerDeviceId: host.deviceId, claimedExecutor: { id: 'pi' },
   }), { timeout: 5000 });
   await host.core.cancel('cancel');
   await vi.waitFor(async () => expect(await host.server.tasks.deviceTerminal(intent.taskId)).toBeDefined());
@@ -290,7 +290,7 @@ it('accepts the deadline/claim race but holds the FIFO until the cancelled termi
   const session = await running('race');
   // Session creation is not a durable claim receipt. Keep the Host's scan after
   // this test's explicit deadline step, but observe the real SDK claim first.
-  await vi.waitFor(async () => expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } }));
+  await vi.waitFor(async () => expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ claimedExecutor: { id: 'pi' } }));
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   vi.spyOn(session, 'interrupt').mockImplementation(async () => { session.interrupted = true; await gate; });
@@ -298,7 +298,7 @@ it('accepts the deadline/claim race but holds the FIFO until the cancelled termi
     now += 60_001;
     vi.setSystemTime(now);
     await host.core.drain();
-    expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ status: 'cancel_requested', claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } });
+    expect(await host.server.tasks.attempt(first.taskId)).toMatchObject({ status: 'cancel_requested', claimedExecutor: { id: 'pi' } });
     const second = await host.core.enqueue(host.intent('behind', { waitUntil: now + 60_000 }));
     expect(await host.server.tasks.offer(second.taskId)).toBeUndefined();
     expect(host.core.intent('race')).toMatchObject({ generation: 0, phase: 'inflight' });

@@ -42,7 +42,7 @@ const server = {
     },
     attempt: async (taskId: string) => {
       const input = submitted.get(taskId);
-      return input && { taskId, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'completed', claimedExecutor: { kind: 'runtime', runtimeId: 'pi' }, ownerDeviceId: input.deviceId };
+      return input && { taskId, deviceId: input.deviceId, agentRef: input.payload.agentRef, status: 'completed', claimedExecutor: { id: 'pi' }, ownerDeviceId: input.deviceId };
     },
     cancel: async (taskId: string) => { cancels.push(taskId); },
   },

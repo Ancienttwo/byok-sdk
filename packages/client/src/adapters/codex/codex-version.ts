@@ -1,4 +1,7 @@
 import type { RuntimeVersionPolicy } from '../../types.js';
+import { compareRuntimeSemver } from '../../runtime/compare-runtime-semver.js';
+
+export const CODEX_TOOLSET_MINIMUM_VERSION = '0.48.0';
 
 /**
  * Codex CLI version policy, as in OAR: the version is read, never gated by
@@ -20,6 +23,11 @@ export const CODEX_VERSION_POLICY: RuntimeVersionPolicy = Object.freeze({
  */
 export function codexVersionToken(output: string): string {
   return /^codex-cli\s+(\S+)/.exec(output.trim())?.[1] ?? output.trim();
+}
+
+export function supportsCodexToolsetSelection(output: string | undefined): boolean {
+  if (output === undefined) return false;
+  return (compareRuntimeSemver(codexVersionToken(output), CODEX_TOOLSET_MINIMUM_VERSION) ?? -1) >= 0;
 }
 
 /** Whether `codex --version` output names the qualified release exactly (used by the warn-only team relay). */

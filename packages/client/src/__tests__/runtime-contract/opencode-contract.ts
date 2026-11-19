@@ -14,7 +14,7 @@ import {
 import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 import { defineMcpSearchProbes } from './mcp-search-probe';
 
-const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode' } as const;
+const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode', selection: { mode: 'device-default' } } as const;
 
 const MODEL = 'fake';
 /** The shell tool is `bash` on the 1.x line and `shell` on 2.x. */

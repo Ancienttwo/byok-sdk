@@ -67,7 +67,7 @@ describe('protocol-version admission at real long-poll receive', () => {
       deviceId: record.deviceId,
       productId: 'version-admission-client',
       capabilities: ['agent-home-contract'],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: (envelope) => {

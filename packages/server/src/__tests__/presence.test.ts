@@ -55,16 +55,16 @@ describe('single TTL presence lease', () => {
     const h = await start({ longPollHoldMs: 10, presenceTtlMs: 1_000 });
     const daemon = await connectFakeDaemonLongPoll(h.baseUrl, h.byok, {
       productId: PRODUCT_ID, clientVersion: '0.5.0', configuredToolsets: ['crm'],
-      runtimes: [{ id: 'pi', version: '1.2.0', authPresent: true, capabilities: { steer: true } }],
+      harnesses: [{ id: 'pi', version: '1.2.0', authPresent: true, capabilities: { steer: true, selectionModes: ['byok-profile'], effort: false } }],
     });
     expect((await h.byok.machines.list())[0]).toMatchObject({
-      clientVersion: '0.5.0', configuredToolsets: ['crm'], runtimes: [{ id: 'pi', version: '1.2.0', authPresent: true }],
+      clientVersion: '0.5.0', configuredToolsets: ['crm'], harnesses: [{ id: 'pi', version: '1.2.0', authPresent: true }],
     });
     vi.setSystemTime(T0 + 800);
     await daemon.next();
     const machine = (await h.byok.machines.list())[0];
     expect(machine).toMatchObject({ connected: true, lastSeen: new Date(T0 + 800).toISOString() });
-    expect(machine?.runtimes).toEqual([{ id: 'pi', version: '1.2.0', authPresent: true }]);
+    expect(machine?.harnesses).toMatchObject([{ id: 'pi', version: '1.2.0', authPresent: true }]);
     vi.setSystemTime(T0 + 1_000);
     const heartbeat = await fetch(`${h.baseUrl}/byok/presence`, {
       method: 'PUT', headers: { authorization: `Bearer ${daemon.accessToken}`, 'content-type': 'application/json' },

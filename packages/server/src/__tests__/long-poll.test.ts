@@ -52,7 +52,7 @@ describe('long-poll transport (§8)', () => {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${accessToken}` },
       body: JSON.stringify({ messages: [createEnvelope('conn.hello', {
-        protocolVersions: [PROTOCOL_VERSION], capabilities: ['agent-home-contract'], deviceId, productId: PRODUCT_ID,
+        protocolVersions: [PROTOCOL_VERSION], harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }], capabilities: ['agent-home-contract'], deviceId, productId: PRODUCT_ID,
       })] }),
     });
     expect(hello.status).toBe(200);

@@ -62,7 +62,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       deviceId: record.deviceId,
       productId: 'test-product',
       capabilities: [],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: async (envelope) => {
@@ -130,7 +130,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const opens = openBarrier();
     connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
       onStateChange: opens.onStateChange, onHalted: opens.onHalted,
-      productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
+      productId: 'test-product', capabilities: [], harnesses: [], auth, cursorStore,
       onEnvelope: async (envelope) => {
         if (envelope.type !== 'task.offer') return;
         const n = Number(envelope.task_id);
@@ -168,7 +168,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
     const opens = openBarrier();
     connection = new ConnectionManager({ serverUrl: server.url, deviceId: record.deviceId,
       onStateChange: opens.onStateChange, onHalted: opens.onHalted,
-      productId: 'test-product', capabilities: [], runtimes: [], auth, cursorStore,
+      productId: 'test-product', capabilities: [], harnesses: [], auth, cursorStore,
       onEnvelope: async e => { if (e.type === 'task.offer') effect(); },
     });
     await connection.start(); await opens.waitForOpen(connection);
@@ -197,7 +197,7 @@ describe('cursor only advances after the handler succeeds (finding F3)', () => {
       deviceId: record.deviceId,
       productId: 'test-product',
       capabilities: [],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: async (envelope) => {

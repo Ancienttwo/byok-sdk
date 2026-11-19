@@ -225,6 +225,7 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
         createEnvelope('conn.hello', {
           protocolVersions: [PROTOCOL_VERSION],
           capabilities: DEVICE_CAPABILITIES,
+          harnesses: [{ id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }],
           deviceId,
           productId: PRODUCT_ID,
         }),
@@ -236,7 +237,7 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
         deviceId,
         payload: {
           instruction: `instruction ${CANARY}`,
-          target: { lane: 'runtime', runtimeId: 'codex' },
+          target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
           agentRef,
           session: { mode: 'fresh' },
           egressPolicy: EGRESS_POLICY,
@@ -248,7 +249,7 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
       expect((await poll()).map((event) => [event.type, event.task_id])).toEqual([
         ['task.offer', taskId],
       ]);
-      await send(createEnvelope('task.claim', { deviceId, agentRef, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId }));
+      await send(createEnvelope('task.claim', { deviceId, agentRef, executor: { id: 'codex' } }, { taskId }));
       await send(createEnvelope('task.started', {}, { taskId }));
 
       // Progress: the canary is in a progress text and a tool result.
@@ -352,7 +353,7 @@ describe.skipIf(SKIP_DATAPLANE)(`hosted plaintext inventory — ${SKIP_REASON}`,
           'task.complete',
           {
             agentRef,
-            executor: { kind: 'runtime', runtimeId: 'codex' },
+            executor: { id: 'codex' },
             sessionRef: SESSION_REF,
             summary: `summary ${CANARY}`,
             finalMessage: `final ${CANARY}`,

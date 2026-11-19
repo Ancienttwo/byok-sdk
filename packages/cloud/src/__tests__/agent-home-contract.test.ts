@@ -5,11 +5,11 @@ import {
   handleInboundEnvelope,
   tenantStoresFor,
 } from '..';
-import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-1', profileRevision: 'profile-r1' } as const;
 const OTHER_AGENT_REF = { agentId: 'agent-2', profileRevision: 'profile-r9' } as const;
-const EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const EXECUTOR = { id: 'pi' } as const;
 
 function deviceStores(harness: CloudHarness, deviceId: string) {
   return tenantStoresFor(
@@ -57,6 +57,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'toolset-selection'],
     });
 
@@ -101,6 +102,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
 
@@ -129,6 +131,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
 
@@ -191,6 +194,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     const hello = createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }],
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
       deviceId: device.deviceId,
       productId: 'test-product',
@@ -222,10 +226,12 @@ describe('hosted Agent-home contract', () => {
     const stores = deviceStores(harness, device.deviceId);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
     const downgradedHello = createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }],
       capabilities: [],
       deviceId: device.deviceId,
       productId: 'test-product',
@@ -250,6 +256,7 @@ describe('hosted Agent-home contract', () => {
     const stores = deviceStores(harness, device.deviceId);
     const incompatibleHello = createEnvelope('conn.hello', {
       protocolVersions: [1],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }],
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
       deviceId: device.deviceId,
       productId: 'test-product',
@@ -264,6 +271,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
 
@@ -296,6 +304,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
     const fresh = { ...agentPayload(), session: { mode: 'fresh' } };
@@ -333,6 +342,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
 
@@ -396,6 +406,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
     vi.spyOn(harness.core.mailbox, 'append').mockRejectedValueOnce(new Error('mailbox unavailable'));
@@ -431,6 +442,7 @@ describe('hosted Agent-home contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
     });
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {

@@ -19,7 +19,7 @@ import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
 import type { RawEvent } from '../../vendor/oar/a41628f/contracts/session';
 import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 
-const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 
@@ -305,24 +305,55 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       {
         ...baseTask,
         target: {
-          lane: 'subscription',
-          runtimeId: 'claude',
-          modelId: 'opus',
+          lane: 'harness',
+          harnessId: 'claude',
+          selection: { mode: 'subscription', modelId: 'opus' },
         },
       },
-      await makeCtx(),
+      await makeCtx({ ...process.env, ANTHROPIC_API_KEY: 'ambient-key', CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token' }),
     );
     openSessions.push(session);
+    expect(calls[0]?.env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(calls[0]?.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(calls[0]?.args).toContain('--model');
     expect(calls[0]?.args[calls[0].args.indexOf('--model') + 1]).toBe('opus');
     await expect(session.followUp({
       instruction: 'switch model',
       target: {
-        lane: 'subscription',
-        runtimeId: 'claude',
-        modelId: 'sonnet',
+        lane: 'harness',
+        harnessId: 'claude',
+        selection: { mode: 'subscription', modelId: 'sonnet' },
       },
-    })).rejects.toThrow(/persistent session cannot change model/);
+    })).rejects.toThrow(/persistent session cannot change its explicit selection/);
+  });
+
+  it('resolves the declared Host key only when launching its configured BYOK selection', async () => {
+    const resolveKey = vi.fn(async () => 'host-fixture-key');
+    const spawnEnvs: NodeJS.ProcessEnv[] = [];
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      byok: { providerId: 'anthropic', resolveKey },
+      spawnFn: ((command: string, args: string[], options: { env: NodeJS.ProcessEnv }) => {
+        spawnEnvs.push(options.env);
+        return realSpawn(command, args, options);
+      }) as never,
+    });
+    const target = { lane: 'harness', harnessId: 'claude', selection: {
+      mode: 'byok', providerId: 'anthropic', modelId: 'opus',
+    } } as const;
+    const mismatched = { ...target, selection: { ...target.selection, providerId: 'openai' } };
+    expect(adapter.descriptor.byokProviderId).toBe('anthropic');
+    await expect(adapter.prepare({ descriptor: adapter.descriptor, requiredToolsetIds: [], offer: { ...baseTask, target: mismatched } }))
+      .resolves.toMatchObject({ kind: 'reject', retryable: false });
+    expect(resolveKey).not.toHaveBeenCalled();
+    const session = await startAdapter(adapter, { ...baseTask, target }, await makeCtx({ ...process.env,
+      ANTHROPIC_API_KEY: 'ambient-key', CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token', CLAUDE_CODE_USE_BEDROCK: '1',
+    }));
+    openSessions.push(session);
+    expect(resolveKey).toHaveBeenCalledExactlyOnceWith();
+    expect(spawnEnvs[0]?.ANTHROPIC_API_KEY).toBe('host-fixture-key');
+    expect(spawnEnvs[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(spawnEnvs[0]?.CLAUDE_CODE_USE_BEDROCK).toBeUndefined();
   });
 
   it.each([undefined, 'resume-me-123'])('passes the effort from the selected Claude model menu (resume=%s)', async sessionRef => {
@@ -333,7 +364,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       { id: 'sonnet', effortLevels: ['low'] }, { id: 'opus', effortLevels: ['future-level'] },
     ] });
     const session = await startAdapter(adapter, {
-      ...baseTask, target: { lane: 'subscription', runtimeId: 'claude', modelId: 'opus' }, effort: 'future-level', sessionRef,
+      ...baseTask, target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'subscription', modelId: 'opus' } }, effort: 'future-level', sessionRef,
     }, await makeCtx({ ...process.env, FAKE_CLAUDE_SESSION_ID: 'resume-me-123' }));
     openSessions.push(session);
     expect(calls[0]).toEqual(expect.arrayContaining(['--model', 'opus', '--effort', 'future-level']));
@@ -349,7 +380,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn: spawnFn as never });
     vi.spyOn(adapter, 'listModels').mockResolvedValue(catalog);
     await expect(startAdapter(adapter, {
-      ...baseTask, target: { lane: 'subscription', runtimeId: 'claude', modelId: 'opus' }, effort: 'high',
+      ...baseTask, target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'subscription', modelId: 'opus' } }, effort: 'high',
     }, await makeCtx())).rejects.toMatchObject({ message, phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
     expect(spawnFn).not.toHaveBeenCalled();
   });

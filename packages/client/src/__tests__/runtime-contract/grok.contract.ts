@@ -11,7 +11,7 @@ import {
 import { searchThenCall, startLoopbackProvider, type ProviderRequest, type ProviderStep } from './loopback';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 
-const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
+const GROK_TARGET = { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } } as const;
 
 import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('grok', QUALIFIED_GROK_VERSION);

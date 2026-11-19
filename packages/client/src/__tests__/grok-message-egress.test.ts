@@ -11,7 +11,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-acp-agent.mjs', import.meta.url));
@@ -28,7 +28,7 @@ async function temporary(prefix: string): Promise<string> {
 
 async function grokRunner(sent: Envelope[]) {
   const storeDir = await temporary('byok-grok-egress-store-');
-  return new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
+  return new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
     adapters: [new GrokAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }) })],
     agentHome: new AgentHomeManager({ hostStorageRoot: await temporary('byok-grok-egress-home-') }),
     agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -49,7 +49,7 @@ it('publishes the closing Grok reply on the message lane when Grok never called 
   const sent: Envelope[] = [];
   const runner = await grokRunner(sent);
   await runner.handleEnvelope(createEnvelope('task.offer', {
-    session: { mode: 'fresh' }, instruction: 'tool', target: { lane: 'harness', harnessId: 'grok' }, agentRef,
+    session: { mode: 'fresh' }, instruction: 'tool', target: { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } }, agentRef,
     egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'example.chat.v1', contentType: 'text/markdown', maxBytes: 100_000 },
   }, { taskId, seq: 1 }));
@@ -82,7 +82,7 @@ it('fails the task when Grok stops on a permission request, and sends no task.co
   const sent: Envelope[] = [];
   const runner = await grokRunner(sent);
   await runner.handleEnvelope(createEnvelope('task.offer', {
-    session: { mode: 'fresh' }, instruction: 'recorded-permission-stop', target: { lane: 'harness', harnessId: 'grok' }, agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
+    session: { mode: 'fresh' }, instruction: 'recorded-permission-stop', target: { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } }, agentRef, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
   }, { taskId, seq: 1 }));
 
   await vi.waitFor(() => expect(sent.some((envelope) => envelope.type === 'task.fail')).toBe(true), { timeout: 8000 });

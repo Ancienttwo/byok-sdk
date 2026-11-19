@@ -55,7 +55,7 @@ export function readDeviceTerminalReceipt(taskId: string, receipt: RequestReceip
 export interface TerminalResult {
   readonly taskId: string;
   /**
-   * The claimed executor (wire v7, `TaskAttempt.claimedExecutor`), the one
+   * The claimed executor (`TaskAttempt.claimedExecutor`), the one
    * authority for what ran. Absent when the task was never claimed: a decline,
    * an unclaimed cancel, or an unclaimed interruption, whose reported executor
    * is only checked against the offer.

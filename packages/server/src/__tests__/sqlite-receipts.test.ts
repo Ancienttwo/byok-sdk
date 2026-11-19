@@ -14,7 +14,7 @@ import { SqliteOwnershipError } from '../sqlite-support';
 import { TEST_AGENT_REF, TEST_SESSION_REF } from './test-support';
 
 // Faults run as TEMP triggers on the store's own connection: a trigger written
-// into the file is an object schema 10 does not know, and the open refuses it.
+// into the file is an object schema 11 does not know, and the open refuses it.
 const faults = vi.hoisted((): string[] => []);
 afterEach(() => { faults.length = 0; });
 vi.mock('../sqlite-support.js', async (importOriginal) => {
@@ -31,9 +31,9 @@ const AGENT_REF = { agentId: 'agent-1', profileRevision: 'rev-1' } as const;
 const tenant = tenantId('receipts');
 const other = tenantId('other');
 const deviceId = 'device-receipts';
-const payload = { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, instruction: 'original', target: { lane: 'runtime', runtimeId: 'claude' } } as const;
+const payload = { agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, instruction: 'original', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } } as const;
 /** What a device claims for {@link payload}'s runtime target. */
-const CLAUDE = { kind: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE = { id: 'claude' } as const;
 
 describe('SQLite receipt recovery', () => {
   const roots: string[] = [];
@@ -84,12 +84,12 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
-      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: [
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: false } }, { id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }, { id: 'claude', capabilities: { selectionModes: ['device-default'], effort: false } }], capabilities: [
         'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress',
         'terminal-projection-selection', 'agent-egress-fresh-session',
       ] });
       const execution = AgentExecutionInputSchema.parse({ taskId, deviceId, payload: {
-        instruction: 'reply', target: { lane: 'runtime', runtimeId: 'codex' }, agentRef, session: { mode: 'fresh' },
+        instruction: 'reply', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, agentRef, session: { mode: 'fresh' },
         egressPolicy: { policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
           transfers: { workspace: { maxBytes: 512, allowedMimeTypes: ['text/plain'] }, transcript: 'disabled', artifact: 'disabled' } },
@@ -190,7 +190,7 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
-      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: false } }, { id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }, { id: 'claude', capabilities: { selectionModes: ['device-default'], effort: false } }], capabilities: ['agent-home-contract'] });
       const first = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, input);
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.claim', { executor: CLAUDE, deviceId, agentRef: TEST_AGENT_REF }, { taskId })).then((result) => result.outcome)).toBe('accepted');
       expect(await handleInboundEnvelope(runtime.bound, deviceId, createEnvelope('task.complete', { executor: CLAUDE, agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId })).then((result) => result.outcome)).toBe('accepted');
@@ -218,7 +218,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE request_receipt'); db.close();
     expect(() => open()).toThrow();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '11' }));
     const check = new DatabaseSync(path, { readOnly: true });
     expect(check.prepare("SELECT name FROM sqlite_master WHERE name = 'request_receipt'").get()).toBeUndefined();
     check.close();
@@ -228,7 +228,7 @@ describe('SQLite receipt recovery', () => {
     const { open, path } = fixture(); await open().stores.close();
     const db = new DatabaseSync(path); db.exec('DROP TABLE mailbox_message'); db.close();
     expect(() => open()).toThrow(expect.objectContaining({
-      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10', requiredVersion: '10',
+      name: 'SqliteSchemaError', code: 'SQLITE_SCHEMA_INVALID', foundVersion: '11', requiredVersion: '11',
       message: 'Missing BYOK SQLite table mailbox_message',
     }));
     const check = new DatabaseSync(path, { readOnly: true });
@@ -245,7 +245,7 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
-      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: false } }, { id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }, { id: 'claude', capabilities: { selectionModes: ['device-default'], effort: false } }], capabilities: ['agent-home-contract'] });
       await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, input)).rejects.toMatchObject({
         code: 'task_offer_append_refused', taskId: input.taskId, cause: expect.objectContaining({ message: expect.stringContaining('injected append failure') }) });
       expect(await runtime.cloud.readTaskOffer(tenant, input.taskId)).toMatchObject({ delivered: false, payload });
@@ -267,7 +267,7 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
-      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: false } }, { id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }, { id: 'claude', capabilities: { selectionModes: ['device-default'], effort: false } }], capabilities: ['agent-home-contract'] });
       await expect(runtime.cloud.enqueueAgentOffer(tenant, deviceId, input)).rejects.toThrow('injected delivered failure');
       const before = (await runtime.stores.core.mailbox.readAfter(tenant, { deviceId, afterSeq: 0 })).messages;
       expect(before).toHaveLength(1);
@@ -285,8 +285,8 @@ describe('SQLite receipt recovery', () => {
     const corrupt = new DatabaseSync(path);
     corrupt.exec('DROP TABLE request_receipt; CREATE TABLE request_receipt (tenant_id TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, recorded_at TEXT NOT NULL)');
     corrupt.close();
-    expect(() => open()).toThrow('BYOK SQLite table request_receipt does not match schema 10');
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10' }));
+    expect(() => open()).toThrow('BYOK SQLite table request_receipt does not match schema 11');
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '11' }));
   });
 
   it('keeps cancellation result authority after reopen', async () => {
@@ -294,7 +294,7 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
-      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: false } }, { id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }, { id: 'claude', capabilities: { selectionModes: ['device-default'], effort: false } }], capabilities: ['agent-home-contract'] });
       await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { taskId: 'cancelled-task', payload });
       await runtime.cloud.cancelTask(tenant, 'cancelled-task', 'host-cancel');
       const result = await runtime.cloud.readTaskResult(tenant, 'cancelled-task');
@@ -311,7 +311,7 @@ describe('SQLite receipt recovery', () => {
     try {
       await runtime.stores.cloud.devices.register(tenant, { deviceId, productId: 'probe', deviceName: 'fixture',
         devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
-      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: ['agent-home-contract'] });
+      await runtime.stores.cloud.devices.recordCapabilities(tenant, { deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: false } }, { id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }, { id: 'claude', capabilities: { selectionModes: ['device-default'], effort: false } }], capabilities: ['agent-home-contract'] });
       await runtime.stores.cloud.tasks.reserveAgentOffer(tenant, { taskId: 'unsubmitted', deviceId, agentRef: AGENT_REF });
       expect(await runtime.cloud.readTaskOffer(tenant, 'unsubmitted')).toBeUndefined();
       const enqueued = await runtime.cloud.enqueueAgentOffer(tenant, deviceId, { taskId, payload });

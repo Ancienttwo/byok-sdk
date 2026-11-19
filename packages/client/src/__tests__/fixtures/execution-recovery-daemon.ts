@@ -175,7 +175,7 @@ class ControlledSession implements Session {
 class ControlledAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
-    supportsDispatchSelection: true,
+    selectionModes: ['device-default', 'byok-profile'],
     capabilities: {
       steer: true,
       resume: true,

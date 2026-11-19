@@ -14,10 +14,10 @@ import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 
-const DSH_TARGET = { lane: 'harness', harnessId: 'dsh' } as const;
+const DSH_TARGET = { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'openai', modelId: 'byok-custom/loop-model' } } as const;
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url));
-const MODEL: DshModelSelection = { provider: 'custom', model: 'loop-model', baseUrl: 'http://127.0.0.1:9/v1' };
+const MODEL: DshModelSelection = { provider: 'custom', providerId: 'openai', model: 'loop-model', baseUrl: 'http://127.0.0.1:9/v1' };
 const sessions: Session[] = [];
 const dirs: string[] = [];
 const ambient: string[] = [];
@@ -90,7 +90,7 @@ describe('DshAdapter construction and descriptor', () => {
 
   it('declares the dsh descriptor', () => {
     const descriptor = new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: '/tmp/byok-dsh-x', model: MODEL }).descriptor;
-    expect(descriptor).toMatchObject({ id: 'dsh', supportsDispatchSelection: false, platforms: ['darwin', 'linux'], progressMessageBoundary: 'event' });
+    expect(descriptor).toMatchObject({ id: 'dsh', selectionModes: ['byok'], byokProviderId: 'openai', platforms: ['darwin', 'linux'], progressMessageBoundary: 'event' });
     expect(descriptor.capabilities).toEqual(DSH_RUNTIME_CAPABILITIES);
     expect(descriptor.versionPolicy).toEqual({ qualifiedVersion: QUALIFIED_DSH_VERSION, unqualified: 'warn' });
   });
@@ -178,7 +178,7 @@ describe('DshAdapter sessions', () => {
   it('uses the task model and effort on fresh and resumed DSH sessions', async () => {
     const resolveKey = vi.fn().mockResolvedValueOnce('dsh-first-test-key-value').mockResolvedValueOnce('dsh-rotated-test-key-value');
     const box = await setup({ resolveKey });
-    const request = { target: DSH_TARGET, instruction: 'hello', modelId: 'byok-custom/task-model', effort: 'high' };
+    const request = { target: { ...DSH_TARGET, selection: { ...DSH_TARGET.selection, modelId: 'byok-custom/task-model' } }, instruction: 'hello', effort: 'high' };
     const fresh = await box.open(request);
     await turn(fresh);
     const sessionRef = fresh.sessionRef;
@@ -189,9 +189,32 @@ describe('DshAdapter sessions', () => {
     expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['dsh-first-test-key-value', 'dsh-rotated-test-key-value']);
     const expected = { provider: 'byok-custom', model: 'task-model', reasoningEffort: 'high' };
     expect(log.filter(fact => ['open', 'resume'].includes(fact.method)).map(row => row.request.agentOptions)).toEqual([expected, expected]);
-    expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch({ ...MODEL, model: 'task-model' })));
-    await expect(box.adapter.prepare({ offer: { ...request, modelId: 'other-route/task-model' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [] }))
-      .resolves.toMatchObject({ kind: 'reject', retryable: false, reason: expect.stringMatching(/^model_rejected:/) });
+    expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch(MODEL)));
+  });
+
+  it.each([
+    [{ ...DSH_TARGET.selection, providerId: 'anthropic' }, 'dsh requires its configured BYOK provider'],
+    [{ ...DSH_TARGET.selection, modelId: 'byok-custom/other' }, 'model_rejected: dsh requires the configured model'],
+  ] as const)('rejects a mismatched BYOK selection before invoking the resolver', async (selection, reason) => {
+    const resolveKey = vi.fn(async () => 'test-key');
+    const { adapter } = await setup({ resolveKey });
+    await expect(adapter.prepare({ offer: { target: { ...DSH_TARGET, selection }, instruction: 'test' }, descriptor: adapter.descriptor, requiredToolsetIds: [] }))
+      .resolves.toEqual({ kind: 'reject', retryable: false, reason });
+    expect(resolveKey).not.toHaveBeenCalled();
+  });
+
+  it('keeps two concurrent launch keys scoped to their own processes', async () => {
+    const slow = Promise.withResolvers<string>();
+    const resolveKey = vi.fn().mockReturnValueOnce(slow.promise).mockResolvedValueOnce('parallel-second-key');
+    const { open, facts } = await setup({ resolveKey });
+    const first = open({ target: DSH_TARGET, instruction: 'first launch' });
+    await vi.waitFor(() => expect(resolveKey).toHaveBeenCalledOnce());
+    await turn(await open({ target: DSH_TARGET, instruction: 'second launch' }));
+    slow.resolve('parallel-first-key');
+    await turn(await first);
+    const log = await facts();
+    expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['parallel-second-key', 'parallel-first-key']);
+    expect(log.filter(row => row.method === 'prompt').map(row => row.request.text)).toEqual(['second launch', 'first launch']);
   });
 
   it('keeps two concurrent launch keys scoped to their own processes', async () => {

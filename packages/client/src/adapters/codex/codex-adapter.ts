@@ -6,7 +6,7 @@ import { assertCodexMcpHubQualified } from './hub-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { requireImageInput } from '../input-images.js';
 import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
-import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
+import { offerSelection, type RuntimeTaskInput } from '../../types.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
 import { CodexNativeInteractions } from './native-interactions.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
@@ -17,6 +17,7 @@ import * as codexRuntime from '../../runtime/codex-session-runtime.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type {
   AgentEvent,
+  HarnessSelection,
   TaskFailure,
 } from '@byok-sdk/protocol';
 import {
@@ -40,6 +41,7 @@ import {
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { readProcessTable } from '../../runtime/oar-process-tree.js';
 import { objectRecord as recordOf } from '../shared-rules.js';
 import { CodexProjection, type CodexRecord } from './projection.js';
@@ -48,6 +50,7 @@ import { haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin.js';
 import { findRuntimeCommandOnPath, resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities.js';
 import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
@@ -73,6 +76,8 @@ export function assertCodexSandboxSetting(value: unknown, label: string): assert
 }
 
 export interface CodexAdapterOptions {
+  /** SDK install root in which to find a managed runtime. */
+  runtimeInstallRoot?: string;
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /** The environment Codex and its MCP servers get (#1095). Default: the login-shell snapshot. */
@@ -149,7 +154,7 @@ export class CodexAdapter implements RuntimeAdapter {
     return this.#runtimeReaders ??= createRuntimeReaders(this, {
       nativeAssetRoot: this.options.nativeAssetRoot,
       spawnFn: this.options.spawnFn,
-      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin).bin.command,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex')).bin.command,
       version: codexVersionToken,
     });
   }
@@ -170,8 +175,8 @@ export class CodexAdapter implements RuntimeAdapter {
 
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
-    supportsDispatchSelection: true,
-    supportsTaskExecutionOptions: true,
+    selectionModes: ['device-default', 'subscription'],
+    supportsEffort: true,
     progressMessageBoundary: 'event',
     platforms: ['darwin', 'linux', 'win32'],
     mcpToolApprovals: true,
@@ -220,8 +225,8 @@ export class CodexAdapter implements RuntimeAdapter {
 
   private async detectInstallation(): Promise<CodexInstallation> {
     try {
-      const { env } = await this.runtimeEnvironment();
-      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin);
+      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex'));
       const host = runtimeInvocationHost(env);
       const named = resolved.bin.command;
       const explicitlyPathed = named.includes('/') || (host.platform === 'win32' && named.includes('\\'));
@@ -282,7 +287,7 @@ export class CodexAdapter implements RuntimeAdapter {
     const { effort } = input.offer;
     let model: string | undefined;
     try {
-      model = subscriptionModel(modelLaneTarget(input.offer.target));
+      model = subscriptionModel(offerSelection(input.offer.target));
     } catch (error) {
       return {
         kind: 'reject',
@@ -320,7 +325,7 @@ export class CodexAdapter implements RuntimeAdapter {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
     assertCodexMcpHubQualified(input);
-    if (subscriptionModel(input.manifest.modelTarget) !== model)
+    if (subscriptionModel(input.manifest.selection) !== model || input.manifest.effort !== effort)
       throw authority(
         'prepared codex operation received a manifest with different runtime selection',
       );
@@ -350,7 +355,8 @@ export class CodexAdapter implements RuntimeAdapter {
     let rootPid: number | undefined;
     const cleanupOnAbort = process.platform !== 'win32';
     try {
-      const codexHome = excludeUserContext ? { CODEX_HOME: await createCodexAgentHome(input.env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {};
+      const env = withoutProviderCredentials({ ...input.env, ...input.scratch.env });
+      if (excludeUserContext) env.CODEX_HOME = await createCodexAgentHome(input.env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome);
       // The open deadline covers spawn, initialize, the thread open and its read-back.
       const raw = await session.within('open', retryable, codexRuntime.codexSession(
         (bin, args, options) => {
@@ -366,7 +372,7 @@ export class CodexAdapter implements RuntimeAdapter {
         { kind: 'available', via: 'executable', command: invocation.command },
         {
           cwd,
-          env: { ...input.env, ...input.scratch.env, ...codexHome } as Record<string, string>,
+          env,
           retainedBytes: this.maxRetainedBytes,
           endTurnProcessesOnAbort: cleanupOnAbort,
           ...(model === undefined ? {} : { model }),
@@ -623,7 +629,7 @@ class CodexSession implements Session {
     if (task.effort !== undefined && task.effort !== this.effort) {
       throw new PolicyUnsupportedError('codex persistent session cannot change effort');
     }
-    const model = subscriptionModel(modelLaneTarget(task.target));
+    const model = subscriptionModel(offerSelection(task.target));
     if (model !== undefined && model !== this.model)
       throw new PolicyUnsupportedError(
         'codex persistent session cannot change model',
@@ -683,10 +689,10 @@ class CodexSession implements Session {
   }
 }
 function subscriptionModel(
-  selection: ModelLaneTarget | undefined,
+  selection: HarnessSelection | undefined,
 ): string | undefined {
-  if (!selection) return undefined;
-  if (selection.lane !== 'subscription' || selection.runtimeId !== 'codex')
+  if (selection === undefined || selection.mode === 'device-default') return undefined;
+  if (selection.mode !== 'subscription')
     throw new PolicyUnsupportedError(
       'codex cannot execute this runtime selection',
     );

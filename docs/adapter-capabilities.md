@@ -1463,11 +1463,12 @@ An unreported menu leaves both arrays absent.
 
 ## Selection and platforms
 
-A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descriptor)`
-from `@byok-sdk/client/adapters` returns the offer `target`
-`{ lane: 'runtime', runtimeId }` for a frozen wire runtime id (`RUNTIME_IDS` in
-`@byok-sdk/protocol/constants`) and `{ lane: 'harness', harnessId }` for any
-other id. `descriptor.platforms` lists the supported `process.platform` values:
+A Host reads the device’s advertised harness inventory. For an adapter that
+advertises `device-default`, `taskRuntimeTarget(descriptor)` from
+`@byok-sdk/client/adapters` constructs
+`{ lane: 'harness', harnessId: descriptor.id, selection: { mode: 'device-default' } }`.
+For other advertised modes, the Host supplies the matching selection.
+`descriptor.platforms` lists the supported `process.platform` values:
 Claude, Codex, Pi and agy declare macOS, Linux and Windows; Grok, dsh
 and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with

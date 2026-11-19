@@ -1,4 +1,8 @@
-import type { ModelLaneTarget, RuntimeTaskInput } from '../types';
+import type { ExecutionTarget } from '@byok-sdk/protocol';
+import type { RuntimeTaskInput } from '../types';
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
+
+type PiProfileTarget = Extract<ExecutionTarget, { lane: 'harness' }>;
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { createHash } from 'node:crypto';
@@ -354,7 +358,7 @@ interface StartOverrides {
   captureLaunch?: (resources: { projectionDir?: string; release: () => Promise<void> }) => void;
   /** Everything a BYOK-profile prepared launch adds, and nothing else. */
   byok?: {
-    selection: ModelLaneTarget;
+    selection: PiProfileTarget;
     launcher?: PiAdapterOptions['byokLauncher'];
     projectionRoot: string;
   };
@@ -369,13 +373,13 @@ const __executionScratch = await testExecutionScratch();
 
   const byok = overrides.byok;
   const adapter = new PiAdapter({
-    ...(byok?.launcher === undefined ? {} : { byokLauncher: byok.launcher }),
+    ...(byok?.launcher === undefined ? {} : { byokLauncher: byok.launcher, validateProviderProfileBinding: async () => {} }),
     ...(overrides.spawnFn === undefined ? {} : { spawnFn: overrides.spawnFn }),
   });
   const offer: RuntimeTaskInput = {
     taskId: 'prepared-launch-test',
     instruction: 'unused on the prepared lane',
-    target: byok === undefined ? { lane: 'runtime', runtimeId: 'pi' } : byok.selection,
+    target: byok === undefined ? { lane: 'auto' } : byok.selection,
   } as unknown as RuntimeTaskInput;
   const result = await adapter.prepare({
     offer,
@@ -391,7 +395,7 @@ const __executionScratch = await testExecutionScratch();
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
     requiredToolsetIds: [...prepared.requiredToolsets],
-    ...(byok === undefined ? {} : { modelTarget: byok.selection }),
+    ...(byok === undefined ? {} : { selection: byok.selection.selection }),
     ...(overrides.sessionRef === undefined ? {} : { sessionRef: overrides.sessionRef }),
     workspace: { workspaceDir: prepared.workspaceDir },
     forwardedEnvironmentNames: Object.keys(prepared.childEnv).sort(),
@@ -937,7 +941,7 @@ async function byokFixture(endpoint: ProviderEndpoint): Promise<{
   profile: ModelProviderProfile;
   launcher: NonNullable<PiAdapterOptions['byokLauncher']>;
   projectionRoot: string;
-  selection: ModelLaneTarget;
+  selection: PiProfileTarget;
 }> {
   const profile = byokProfile(endpoint.baseUrl);
   const prepared = await prepareOnThisDevice(endpoint, (snapshot) => {
@@ -955,8 +959,10 @@ async function byokFixture(endpoint: ProviderEndpoint): Promise<{
     },
     projectionRoot: await tempDir('byok-pi-prepared-projections-'),
     selection: {
-      lane: 'byok', runtimeId: 'pi', providerId: BYOK_PROFILE_REF, modelId: 'glm-4.6',
-    } as unknown as ModelLaneTarget,
+      lane: 'harness',
+      harnessId: 'pi',
+      selection: { mode: 'byok-profile', providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [...profile.capabilities] } },
+    },
   };
 }
 

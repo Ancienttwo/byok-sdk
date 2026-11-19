@@ -41,7 +41,7 @@ describe('SQLite durable device authority', () => {
       await expect(stores.cloud.devices.register(other, registration('new'))).rejects.toThrow('another tenant');
       await stores.cloud.devices.revoke(other, 'new');
       await expect(stores.cloud.devices.recordCapabilities(other, { deviceId: 'new', capabilities: [] })).resolves.toBeUndefined();
-      const declared = { deviceId: 'new', capabilities: ['agent-message-v1'], harnesses: [{ id: 'custom-test', capabilities: { mcpToolsets: true } }] };
+      const declared = { deviceId: 'new', capabilities: ['agent-message-v1'], harnesses: [{ id: 'custom-test', capabilities: { mcpToolsets: true, selectionModes: [] as [], effort: false } }] };
       await stores.cloud.devices.recordCapabilities(tenant, declared);
       await stores.close(); stores = open(path);
       await expect(stores.cloud.devices.resolveByDeviceId('old')).resolves.toBeUndefined();
@@ -76,7 +76,7 @@ describe('SQLite durable device authority', () => {
     const path = database(); await open(path).close();
     const old = new DatabaseSync(path);
     old.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version); old.close();
-    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '10' }));
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '11' }));
     expect(() => open(path)).toThrow('start on a new database');
     const read = new DatabaseSync(path, { readOnly: true });
     expect(read.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
@@ -145,7 +145,7 @@ describe('SQLite durable device authority', () => {
   ])('refuses a current file holding an unknown %s, which a newer build wrote', async (_kind, ddl) => {
     const path = database(); await open(path).close();
     const edit = new DatabaseSync(path); edit.exec(ddl); edit.close();
-    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '10' }));
+    expect(() => open(path)).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '11' }));
   });
 
   it('rejects unknown versions and malformed old databases without marking them migrated', async () => {

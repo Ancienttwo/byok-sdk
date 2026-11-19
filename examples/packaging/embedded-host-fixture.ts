@@ -104,7 +104,7 @@ async function host(): Promise<void> {
     const { taskId } = await byok.executions.submit({
       taskId: randomUUID(), deviceId,
       payload: { instruction: 'reply once', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
-        terminalProjection: { mode: 'none' }, target: { lane: 'byok', runtimeId: 'pi', providerId: 'packaging', modelId: 'packaging-model' } },
+        terminalProjection: { mode: 'none' }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok', providerId: 'packaging', modelId: 'packaging-model' } } },
     });
     const task = await until(async () => {
       const snapshot = await byok.tasks.get(taskId);

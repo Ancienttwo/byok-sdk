@@ -257,7 +257,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
 
       const taskOffer = createEnvelope(
         'task.offer',
-        { instruction: 'do the thing', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, target: { lane: 'runtime', runtimeId: 'pi' } },
+        { instruction: 'do the thing', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } },
         { taskId: 'task_forged', seq: 100 },
       );
 
@@ -308,7 +308,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       const claim = createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId });
       const forgedOffer = createEnvelope(
         'task.offer',
-        { instruction: 'forged', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, target: { lane: 'runtime', runtimeId: 'pi' } },
+        { instruction: 'forged', agentRef: TEST_AGENT_REF, session: { mode: 'resume', sessionRef: TEST_SESSION_REF }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } },
         { taskId: 'task_forged_2', seq: 999 },
       );
 
@@ -338,7 +338,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
 
       // Queue a steer before accepting cancellation.
       const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
-      await claimAndStart(daemon, handle1, { kind: 'runtime', runtimeId: 'pi' }, PI_RUNTIME_INFO.capabilities);
+      await claimAndStart(daemon, handle1, { id: 'pi' }, PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
       await handle1.result();
@@ -377,7 +377,7 @@ describe('inbound gate (Wave 1): idempotency, ownership, type restriction, cance
       });
 
       const handle1 = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'task one' });
-      await claimAndStart(daemon, handle1, { kind: 'runtime', runtimeId: 'pi' }, PI_RUNTIME_INFO.capabilities);
+      await claimAndStart(daemon, handle1, { id: 'pi' }, PI_RUNTIME_INFO.capabilities);
       await handle1.steer('keep going');
       await handle1.cancel('changed my mind');
       await handle1.result();

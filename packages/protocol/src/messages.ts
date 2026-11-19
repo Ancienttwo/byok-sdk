@@ -86,7 +86,7 @@ export const ProtocolVersionNumberSchema = z
   .max(2_147_483_647);
 
 /**
- * Per-runtime feature flags reported in `conn.hello.runtimes[].capabilities`
+ * Per-executor feature flags reported in `conn.hello.harnesses[].capabilities`
  * for one detected runtime. Distinct from the connection-level `CAPABILITY_FLAGS`
  * (`version.ts`) / `conn.hello.capabilities` array: those are protocol-level
  * flags negotiated for the whole connection, while this is what one specific
@@ -138,32 +138,27 @@ export const RuntimeVersionPolicyProjectionSchema = z.object({
 });
 export type RuntimeVersionPolicyProjection = z.infer<typeof RuntimeVersionPolicyProjectionSchema>;
 
-/**
- * Typed runtime detection info reported in `conn.hello`. Each optional field
- * records only what detection observed.
- */
-export const RuntimeInfoSchema = z.object({
-  id: RuntimeIdSchema,
-  version: z.string().optional(),
-  authPresent: z.boolean().optional(),
-  /** Omitted when runtime capability detection produced no observation. */
-  capabilities: RuntimeCapabilitiesSchema.optional(),
-  /** #1103 D8: discovery projection; absent means unknown. */
-  versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
-});
-export type RuntimeInfo = z.infer<typeof RuntimeInfoSchema>;
+/** One available executor's identity and data-driven offer capabilities. */
+export const HarnessIdSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/);
 
-/** Custom identities are disjoint from the frozen built-in runtime enum. */
-export const HarnessIdSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/)
-  .refine(value => !(RUNTIME_IDS as readonly string[]).includes(value), 'built-in runtime must use runtime');
+export const SelectionModeSchema = z.enum(['device-default', 'adapter-model', 'subscription', 'byok', 'byok-profile']);
+export type SelectionMode = z.infer<typeof SelectionModeSchema>;
+
 export const HarnessInfoSchema = z.object({
   id: HarnessIdSchema,
   version: z.string().min(1).max(128).optional(),
-  capabilities: RuntimeCapabilitiesSchema,
-  /** #1103 D8: the same version-policy projection a built-in runtime carries. */
+  authPresent: z.boolean().optional(),
+  capabilities: RuntimeCapabilitiesSchema.extend({
+    selectionModes: z.array(SelectionModeSchema).max(SelectionModeSchema.options.length)
+      .refine(modes => new Set(modes).size === modes.length, 'duplicate selection mode'),
+    effort: z.boolean(),
+    byokProviderId: HarnessIdSchema.optional(),
+  }).refine(caps => caps.selectionModes.includes('byok') === (caps.byokProviderId !== undefined),
+    'byok requires one provider id'),
   versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
 });
 export type HarnessInfo = z.infer<typeof HarnessInfoSchema>;
+
 const EXECUTOR_INVENTORY_MAX_ITEMS = 64;
 
 export const HarnessInventorySchema = z.array(HarnessInfoSchema).max(EXECUTOR_INVENTORY_MAX_ITEMS)
@@ -178,7 +173,7 @@ export const HarnessInventorySchema = z.array(HarnessInfoSchema).max(EXECUTOR_IN
  * "everything is available".
  */
 export const RuntimeUnavailableEntrySchema = z.object({
-  id: z.union([RuntimeIdSchema, HarnessIdSchema]),
+  id: HarnessIdSchema,
   cause: RuntimeUnavailableCauseSchema,
   retryable: z.boolean(),
 });
@@ -275,9 +270,8 @@ export const ConnHelloPayloadSchema = z.object({
   productId: z.string(),
   /** U4a Local Agent release identity; this is the sole client-version authority. */
   clientVersion: z.string().min(1).max(128).optional(),
-  /** Runtimes detected on this device (M1 gap #4; replaces `agents`). */
-  runtimes: z.array(RuntimeInfoSchema).optional(),
-  harnesses: HarnessInventorySchema.optional(),
+  /** Usable executors from the latest device scan. */
+  harnesses: HarnessInventorySchema,
   /** #1103 D8: non-available runtimes and harnesses; absent means unknown. */
   runtimeUnavailable: RuntimeUnavailableListSchema.optional(),
   /** Validated logical IDs configured on this device; definitions and secrets stay local. */
@@ -340,61 +334,46 @@ const DispatchTargetIdSchema = z
   .max(160)
   .regex(/^[^\u0000\r\n]+$/u, 'dispatch target ids must not contain control line breaks');
 
-const effort = ReasoningEffortSchema.optional();
+/** A model and its credential source form one exact selection. */
+export const HarnessSelectionSchema = z.discriminatedUnion('mode', [
+  z.strictObject({ mode: z.literal('device-default') }),
+  z.strictObject({ mode: z.literal('adapter-model'), modelId: DispatchTargetIdSchema }),
+  z.strictObject({ mode: z.literal('subscription'), modelId: DispatchTargetIdSchema }),
+  z.strictObject({ mode: z.literal('byok'), providerId: HarnessIdSchema, modelId: DispatchTargetIdSchema }),
+  z.strictObject({ mode: z.literal('byok-profile'), providerProfile: ProviderProfileBindingSchema }),
+]);
+export type HarnessSelection = z.infer<typeof HarnessSelectionSchema>;
 
-/**
- * What a `task.offer` asks the device to run (wire v7): one discriminated
- * union, so no two selectors can disagree. `auto` lets the device pick by its
- * own preference, a built-in runtime or an advertised custom harness (a claim
- * may name either, docs/protocol.md §3.1); `runtime` names a built-in runtime
- * with the device's model; the three model lanes carry a model selection and
- * fix which runtime may hold it (subscription credentials belong to the
- * vendor CLIs, a BYOK provider runs only through Pi); `harness` names a
- * custom harness and may select its model. Each explicit lane can request a
- * reasoning effort. The field is required: absence carries no meaning.
- */
+/** An offer uses device preference or explicitly names one advertised harness. */
 export const ExecutionTargetSchema = z.discriminatedUnion('lane', [
-  z.object({ lane: z.literal('auto') }).strict(),
-  z.object({ lane: z.literal('runtime'), runtimeId: RuntimeIdSchema, effort }).strict(),
-  z
-    .object({
-      lane: z.literal('subscription'),
-      runtimeId: z.enum(['claude', 'codex']),
-      modelId: DispatchTargetIdSchema,
-      effort,
-    })
-    .strict(),
-  z
-    .object({
-      lane: z.literal('byok'),
-      runtimeId: z.literal('pi'),
-      providerId: DispatchTargetIdSchema,
-      modelId: DispatchTargetIdSchema,
-      effort,
-    })
-    .strict(),
-  z
-    .object({
-      lane: z.literal('byok-profile'),
-      runtimeId: z.literal('pi'),
-      providerProfile: ProviderProfileBindingSchema,
-      effort,
-    })
-    .strict(),
-  z.object({ lane: z.literal('harness'), harnessId: HarnessIdSchema, modelId: DispatchTargetIdSchema.optional(), effort }).strict(),
+  z.strictObject({ lane: z.literal('auto') }),
+  z.strictObject({
+    lane: z.literal('harness'),
+    harnessId: HarnessIdSchema,
+    selection: HarnessSelectionSchema,
+    effort: ReasoningEffortSchema.optional(),
+  }),
 ]);
 export type ExecutionTarget = z.infer<typeof ExecutionTargetSchema>;
 
-/**
- * What a device actually ran (wire v7): a built-in runtime or a custom
- * harness, never a model. The offer's {@link ExecutionTargetSchema} is the
- * request; this is the claim's answer, so a claim cannot assert a model
- * selection it never confirmed.
- */
-export const ClaimedExecutorSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('runtime'), runtimeId: RuntimeIdSchema }).strict(),
-  z.object({ kind: z.literal('harness'), harnessId: HarnessIdSchema }).strict(),
-]);
+/** An explicit target is admitted only by the named executor's descriptor. */
+export function harnessSupportsTarget(
+  harness: { readonly id: string; readonly capabilities: {
+    readonly selectionModes: readonly SelectionMode[];
+    readonly effort: boolean;
+    readonly byokProviderId?: string;
+  } },
+  target: ExecutionTarget,
+): boolean {
+  const { capabilities } = harness;
+  if (target.lane === 'auto') return capabilities.selectionModes.includes('device-default');
+  return harness.id === target.harnessId && capabilities.selectionModes.includes(target.selection.mode)
+    && (target.effort === undefined || capabilities.effort)
+    && (target.selection.mode !== 'byok' || target.selection.providerId === capabilities.byokProviderId);
+}
+
+/** The identity recorded by a successful claim and echoed by its terminal. */
+export const ClaimedExecutorSchema = z.strictObject({ id: HarnessIdSchema });
 export type ClaimedExecutor = z.infer<typeof ClaimedExecutorSchema>;
 
 /**
@@ -553,8 +532,8 @@ export type OfferSelectionRule = (typeof OFFER_SELECTION_RULES)[number];
 export type OfferSelectionViolation = { readonly rule: OfferSelectionRule; readonly path: readonly string[]; readonly message: string };
 
 /** Whether an offer target names Pi explicitly: the built-in Pi runtime or a Pi model lane. */
-export function targetsPi(target: { readonly lane: string; readonly runtimeId?: string } | undefined): boolean {
-  return target !== undefined && target.lane !== 'auto' && target.lane !== 'harness' && target.runtimeId === 'pi';
+export function targetsPi(target: { readonly lane: string; readonly harnessId?: string } | undefined): boolean {
+  return target?.lane === 'harness' && target.harnessId === 'pi';
 }
 
 /**
@@ -1105,17 +1084,15 @@ export type OfferAdmissionTimings = z.infer<typeof OfferAdmissionTimingsSchema>;
  * Claiming no longer implies the task is `Running` (M1 gap #2) — see
  * `task.started`.
  *
- * `executor` (wire v7, required): the ACTUAL runtime or harness this device
- * selected for the task, distinct from the offer's `target` (the merely
- * REQUESTED one). For an `auto` target the device picks by its own
- * preference, and this is the only way the server learns what ran. It never
- * carries a model: see {@link ClaimedExecutorSchema}.
+ * `executor` is the advertised harness identity selected for the task. For
+ * an `auto` target the device picks among advertised harnesses that support
+ * `device-default`, in device preference order. See {@link ClaimedExecutorSchema}.
  *
  * `capabilities` (S0/D-4, additive-minor — docs/protocol.md §2.4): the
  * TASK-level capability authority — what the claiming adapter reported about
  * itself at the moment it took this task, reusing `RuntimeCapabilitiesSchema`
  * (above) rather than introducing a second capability shape. Same source of
- * truth as `conn.hello.runtimes[].capabilities`, different scope: `conn.hello`
+ * truth as `conn.hello.harnesses[].capabilities`, different scope: `conn.hello`
  * is CONNECTION-level discovery ("what could this device run"), which no
  * server-side task control decision may read, because it describes a device,
  * not the adapter that claimed this task. This field is task-shaped: it shares a lifecycle with

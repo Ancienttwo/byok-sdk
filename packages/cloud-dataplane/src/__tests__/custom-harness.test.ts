@@ -18,17 +18,15 @@ describe.skipIf(SKIP_DATAPLANE)(`custom harness claim CAS — ${SKIP_REASON}`, (
       const store = new PostgresTaskAttemptStore(scope.pool, createMutableClock());
       await store.reserveAgentOffer(tenant, { taskId: 't', deviceId: 'device-a', agentRef: AGENT_REF });
       const outcomes = await Promise.all(['acme-harness', 'other'].map((harnessId) =>
-        store.claim(tenant, { taskId: 't', deviceId: 'device-a', executor: { kind: 'harness', harnessId } })));
+        store.claim(tenant, { taskId: 't', deviceId: 'device-a', executor: { id: harnessId } })));
       const winner = await new PostgresTaskAttemptStore(scope.pool, createMutableClock()).get(tenant, 't');
-      expect(winner?.claimedExecutor?.kind).toBe('harness');
-      expect(['acme-harness', 'other']).toContain(winner?.claimedExecutor?.kind === 'harness' ? winner.claimedExecutor.harnessId : undefined);
+      expect(['acme-harness', 'other']).toContain(winner?.claimedExecutor?.id);
       // Both CAS callers must observe the same immutable winner, so inbound
       // can reject the losing identity without trusting its earlier read.
       for (const outcome of outcomes) expect(outcome).toEqual(winner);
       expect(winner?.ownerDeviceId).toBe('device-a');
-      // An owned attempt names exactly one executor: neither both columns (0021, 0040) nor none (0040).
-      await expect(scope.pool.query(`UPDATE task SET claimed_runtime = 'pi' WHERE tenant_id = $1 AND task_id = 't'`, [tenant]))
-        .rejects.toThrow(/task_claimed_(identity_exclusive|executor_present)/u);
+      // An owned attempt requires an executor, and v8 removes the old lane column.
+      await expect(scope.pool.query('SELECT claimed_runtime FROM task LIMIT 0')).rejects.toMatchObject({ code: '42703' });
       await expect(scope.pool.query(`UPDATE task SET claimed_harness_id = NULL WHERE tenant_id = $1 AND task_id = 't'`, [tenant]))
         .rejects.toThrow('task_claimed_executor_present');
     } finally { await scope.dispose(); }

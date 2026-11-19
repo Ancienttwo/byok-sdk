@@ -12,7 +12,7 @@ import { prependAgentMemoryGuidance } from '../daemon/memory-guidance';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type Session } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 const unusedBlobClient: BlobResolver = {
   resolveInstruction: async () => {
@@ -70,7 +70,7 @@ async function makeRunner(
   sent: Envelope[],
   extra: Partial<TaskRunnerDeps> = {},
 ): Promise<TaskRunner> {
-  return new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
+  return new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-final-message',
@@ -85,7 +85,7 @@ async function makeRunner(
 
 async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'claude' | 'codex'): Promise<void> {
   await runner.handleEnvelope(
-    createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: INSTRUCTION, target: { lane: 'runtime', runtimeId: runtime }, ...FRESH_OFFER }, { taskId, seq: 1 }),
+    createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: INSTRUCTION, target: { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } }, ...FRESH_OFFER }, { taskId, seq: 1 }),
   );
 }
 

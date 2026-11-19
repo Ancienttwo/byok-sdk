@@ -1,4 +1,4 @@
-import { freezePresenceRuntimeFact, isCoreError } from '@byok-sdk/core';
+import { isCoreError } from '@byok-sdk/core';
 import { PresencePublishRequestSchema } from '@byok-sdk/protocol';
 import type { Context } from 'hono';
 import { admitDeviceRequest, readBoundedJsonBody, type DeviceRouteDeps } from './shared.js';
@@ -41,9 +41,7 @@ export function presencePublishHandler(deps: PresenceRouteDeps) {
           ...(parsed.data.protocolVersions === undefined
             ? {}
             : { protocolVersions: parsed.data.protocolVersions }),
-          ...(parsed.data.runtimes === undefined
-            ? {}
-            : { runtimes: parsed.data.runtimes.map(freezePresenceRuntimeFact) }),
+          ...(parsed.data.harnesses === undefined ? {} : { harnesses: parsed.data.harnesses }),
           ttlMs: deps.ttlMs,
           minimumIntervalMs: deps.minimumIntervalMs,
         }),

@@ -53,7 +53,7 @@ if (POSTGRES_URL === undefined) {
           level: 'working',
           clientVersion: '0.4.2',
           protocolVersions: [2],
-          runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
+          harnesses: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { selectionModes: ['byok-profile'], effort: false } }],
           ttlMs: 60_000,
           minimumIntervalMs: 0,
         });
@@ -107,7 +107,7 @@ if (POSTGRES_URL === undefined) {
         await expect(core.presence.read(TENANT_A, 'readiness-active')).resolves.toMatchObject({
           clientVersion: '0.4.2',
           protocolVersions: [2],
-          runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
+          harnesses: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { selectionModes: ['byok-profile'], effort: false } }],
         });
         const readinessA = await devices.readiness(TENANT_A, core.presence);
         expect(readinessA).toMatchObject({
@@ -134,7 +134,7 @@ if (POSTGRES_URL === undefined) {
               level: 'working',
               clientVersion: '0.4.2',
               protocolVersions: [2],
-              runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
+              harnesses: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { selectionModes: ['byok-profile'], effort: false } }],
               observedAt: '2026-01-01T00:00:00.000Z',
               expiresAt: '2026-01-01T00:01:00.000Z',
             },
@@ -153,7 +153,7 @@ if (POSTGRES_URL === undefined) {
         expect(readinessB.devices[0]?.presence).toMatchObject({ level: 'thinking' });
         expect(readinessB.devices[0]?.presence).not.toHaveProperty('clientVersion');
         expect(readinessB.devices[0]?.presence).not.toHaveProperty('protocolVersions');
-        expect(readinessB.devices[0]?.presence).not.toHaveProperty('runtimes');
+        expect(readinessB.devices[0]?.presence).not.toHaveProperty('harnesses');
 
         clock.advance(60_000);
         await expect(devices.readiness(TENANT_A, core.presence)).resolves.toMatchObject({

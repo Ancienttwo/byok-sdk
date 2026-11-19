@@ -25,8 +25,8 @@ const fixture = (name: string) => fileURLToPath(new URL(`./fixtures/${name}`, im
 const RESETS_AT_SECONDS = 1_792_832_400;
 
 /** Spawns the fixture with extra environment the daemon's filtered runtime env would drop. */
-const withEnv = (env: Record<string, string>) => ((command: string, args: readonly string[], options?: SpawnOptions) =>
-  spawn(command, args, { ...options, env: { ...options?.env, ...env } })) as typeof spawn;
+const withEnv = (env: Record<string, string>, unwrapPiLauncher = false) => ((command: string, args: readonly string[], options?: SpawnOptions) =>
+  spawn(command, unwrapPiLauncher ? args.slice(args.indexOf('--') + 1) : args, { ...options, env: { ...options?.env, ...env } })) as typeof spawn;
 
 const ADAPTERS = {
   claude: () => new ClaudeAdapter({
@@ -39,11 +39,13 @@ const ADAPTERS = {
     resolveBin: () => ({ command: fixture('fake-codex.mjs'), source: 'path' }),
     spawnFn: withEnv({ FAKE_CODEX_TURN_FAILS: '1', FAKE_CODEX_FAIL_MESSAGE: 'Rate limit reached', FAKE_CODEX_ERROR_INFO: '"rateLimitExceeded"' }),
   }),
-  pi: () => new PiAdapter({
+  pi: (root: string) => new PiAdapter({
     resolveBin: () => ({ command: fixture('fake-pi.mjs'), source: 'env' }),
-    spawnFn: withEnv({ FAKE_PI_AUTO_RETRY_FAIL: '1', FAKE_PI_AUTO_RETRY_FINAL_ERROR: '429 You exceeded your current quota' }),
+    byokLauncher: { command: fixture('fake-pi.mjs'), profileDbPath: path.join(root, 'profiles.db'), sessionDir: path.join(root, 'sessions') },
+    validateProviderProfileBinding: async () => {},
+    spawnFn: withEnv({ FAKE_PI_AUTO_RETRY_FAIL: '1', FAKE_PI_AUTO_RETRY_FINAL_ERROR: '429 You exceeded your current quota' }, true),
   }),
-} satisfies Record<string, () => RuntimeAdapter>;
+} satisfies Record<string, (root: string) => RuntimeAdapter>;
 
 let real: RealServerHandle | undefined;
 let daemon: Daemon | undefined;
@@ -65,13 +67,20 @@ async function failedTask(runtime: keyof typeof ADAPTERS) {
     productName: 'Failure class test', productId, serverUrl: server.url,
     storeDir: path.join(root, 'store'),
     agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
-  }, [ADAPTERS[runtime]()], { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
+  }, [ADAPTERS[runtime](root)], { longPoll: { retryDelayMs: 20, idleDelayMs: 20 } });
   const record = await daemon.pair((await server.createPairingCode()).code);
   await daemon.start();
   await vi.waitFor(async () => {
     expect((await server.byok.machines.list()).find((machine) => machine.deviceId === record.deviceId)?.connected).toBe(true);
   });
-  const taskId = await submitAgentTask(server, { taskId: `task-failure-class-${runtime}`, deviceId: record.deviceId, instruction: 'say hi', runtime });
+  const taskId = await submitAgentTask(server, {
+    taskId: `task-failure-class-${runtime}`, deviceId: record.deviceId, instruction: 'say hi', runtime,
+    ...(runtime !== 'pi' ? {} : { target: {
+      lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
+        profileRef: 'fixture', profileRevision: '1', modelId: 'fixture', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
+      } },
+    } }),
+  });
   return vi.waitFor(async () => {
     const snapshot = await server.byok.tasks.get(taskId);
     expect(snapshot?.state).toBe('Failed');

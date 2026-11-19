@@ -81,7 +81,7 @@ function sealedExecution(taskId: string, deviceId: string, fields: Readonly<Reco
     taskId,
     deviceId,
     payload: {
-      target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT_REF, session: { mode: 'fresh' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT_REF, session: { mode: 'fresh' },
       egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' }, ...fields,
     } as never,
   };
@@ -136,7 +136,7 @@ async function sealedTerminalByReference(
   await host.cloud.submitSealedAgentExecution(TENANT_1, sealedExecution(taskId, device.deviceId, { instruction: 'answer at length', sealing }));
   expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer', taskId]]);
   await sendAll(device, [
-    createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
+    createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { id: 'pi' } }, { taskId }),
     createEnvelope('task.started', {}, { taskId }),
   ]);
 
@@ -157,7 +157,7 @@ async function sealedTerminalByReference(
   const terminal = () => createEnvelope('task.complete', {
     sessionRef: 'session-sealed-terminal',
     agentRef: AGENT_REF,
-    executor: { kind: 'runtime', runtimeId: 'pi' },
+    executor: { id: 'pi' },
     sealed: { ...content.header, ciphertextRef: blob.ref },
   } as never, { taskId });
   return {
@@ -281,7 +281,7 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       expect(await device.send(progressEnvelope(taskA, 2, canaryA.text))).toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
       expect(await device.send(await publishEnvelope(taskA, canaryA.text, randomUUID())))
         .toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
-      expect(await device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId: taskA })))
+      expect(await device.send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { id: 'codex' } }, { taskId: taskA })))
         .toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
       expect(host.consumed.filter((body) => body.includes(canaryA.core))).toHaveLength(1);
       // D had no terminal receipt. A late device terminal finds the fence and stores nothing.
@@ -355,9 +355,9 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
       expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer', taskId]]);
       await sendAll(device, [
-        createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
+        createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { id: 'pi' } }, { taskId }),
         createEnvelope('task.started', {}, { taskId }),
-        createEnvelope('task.complete', { agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'session-sealed' }, { taskId }),
+        createEnvelope('task.complete', { agentRef: AGENT_REF, executor: { id: 'pi' }, summary: 'done', sessionRef: 'session-sealed' }, { taskId }),
       ]);
       await device.poll();
       expect((await readObjects(storage)).has(key)).toBe(true);
@@ -386,7 +386,7 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       }));
       expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.offer', taskId]]);
       await sendAll(device, [
-        createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' }, capabilities: { steer: true } }, { taskId }),
+        createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { id: 'pi' }, capabilities: { steer: true } }, { taskId }),
         createEnvelope('task.started', {}, { taskId }),
       ]);
 
@@ -401,7 +401,7 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
       });
       expect((await host.core.objects.get(TENANT_1, hash))?.refCount).toBe(1);
       expect((await device.poll()).map((event) => [event.type, event.task_id])).toEqual([['task.steer', taskId]]);
-      await sendAll(device, [createEnvelope('task.complete', { agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'session-sealed-steer' }, { taskId })]);
+      await sendAll(device, [createEnvelope('task.complete', { agentRef: AGENT_REF, executor: { id: 'pi' }, summary: 'done', sessionRef: 'session-sealed-steer' }, { taskId })]);
       await device.poll();
       expect((await readObjects(storage)).has(key)).toBe(true);
 
@@ -502,7 +502,7 @@ describe.skipIf(SKIP_DATAPLANE)(`task redaction on Postgres — ${SKIP_REASON}`,
         payload: { ...offer.payload, messageEgress: { ...offer.payload.messageEgress, maxBytes: 262_144 }, sealing } as never,
       });
       await device.poll();
-      await sendAll(device, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId })]);
+      await sendAll(device, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { id: 'codex' } }, { taskId })]);
       await device.poll();
       const messageId = randomUUID();
       // The Host reads only the member's outer fields, so any sealed bytes of the right size serve.

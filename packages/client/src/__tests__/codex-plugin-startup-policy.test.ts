@@ -8,7 +8,7 @@ import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
-const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
+const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 const sessions: Session[] = [];

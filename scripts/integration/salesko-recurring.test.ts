@@ -55,7 +55,7 @@ for (const selection of ['claude', 'pi-exact', 'pi-historical-flat'] as const) f
     'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'agent-message-egress', 'terminal-projection-selection', 'provider-profile-binding',
   ] });
   let binding = { agentRef: { agentId: '7bf9cf51-8c51-4a67-b8f3-4f11de2cecb1', profileRevision: '1' }, deviceId: device.deviceId,
-    placementRevision: '3', runtime, ...(runtime === 'pi' ? { dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'integration-zai', modelId: 'glm-5.3-flash' } } : {}), cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
+    placementRevision: '3', runtime, ...(runtime === 'pi' ? { dispatchSelection: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok', providerId: 'integration-zai', modelId: 'glm-5.3-flash' } } } : {}), cwd: 'byok-agent-home', egressPolicy: C.PrivateAgentEgressPolicy, tools: C.PrivateAgentChatToolBinding };
   if (selection === 'pi-exact') {
     const { ProviderRegistry, InMemoryProviderProfileStore, InMemorySecretStore } = await installed('@byok-sdk/keys');
     const { providerBindingReport } = await load('apps/local-agent/src/keys.ts');
@@ -71,7 +71,7 @@ for (const selection of ['claude', 'pi-exact', 'pi-historical-flat'] as const) f
       const agent = await createMemoryPrivateAgentAndProjection(tenantId, tenant,
         { profile: { name: 'Exact Pi', runtimePreference: 'pi_provider_key', providerProfile, researchPreset: 'relationship_research' }, placement: { deviceId: device.deviceId } }, new Date(now));
       binding = privateAgentChatBinding({ profile: agent.profile, placement: agent.placement });
-      expect(binding.dispatchSelection).toEqual({ lane: 'byok-profile', runtimeId: 'pi', providerProfile });
+      expect(binding.dispatchSelection).toEqual({ lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile' }, providerProfile });
     } finally { registry.close(); }
   }
   await repository.createConversation({ continuity: { mode: "fresh", version: 1 }, tenantId, userId, conversationId, title: 'Integration', agentId: binding.agentRef.agentId, execution: { epoch: 1 }, now });

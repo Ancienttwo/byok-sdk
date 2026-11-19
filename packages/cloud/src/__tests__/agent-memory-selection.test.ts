@@ -7,7 +7,7 @@ import {
   type AgentMemorySelection,
 } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 /**
  * #614: an ordinary Agent offer that selects its own `agentMemory` reaches only
@@ -44,7 +44,7 @@ const memoryOffersWith = (agentMemory: AgentMemorySelection): ReadonlyArray<read
   })],
   ['submitAgentExecution', (harness, deviceId, taskId) => harness.cloud.submitAgentExecution(TENANT_A, { deviceId,
     taskId,
-    payload: { instruction: 'plan only', target: { lane: 'runtime' as const, runtimeId: 'codex' as const }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory },
+    payload: { instruction: 'plan only', target: { lane: 'harness' as const, harnessId: 'codex' as const, selection: { mode: 'device-default' as const } }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY, agentMemory },
   })],
 ];
 const memoryOffers = memoryOffersWith('none');
@@ -52,7 +52,7 @@ const memoryOffers = memoryOffersWith('none');
 async function deviceWith(capabilities: readonly string[]): Promise<{ harness: CloudHarness; deviceId: string }> {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
-  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [...capabilities] });
+  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: [...capabilities] });
   return { harness, deviceId: device.deviceId };
 }
 
@@ -70,7 +70,7 @@ describe('hosted per-task Agent memory selection (#614)', () => {
       'replays first admission (advertised=%s, capability changed=%s)', async (advertised, changed) => {
         const capabilities = [...BASE_CAPABILITIES, AGENT_MEMORY_SELECTION_CAPABILITY];
         const { harness, deviceId } = await deviceWith([...capabilities, ...(advertised ? [capability] : [])]);
-        const input = { taskId: `conditional-retry-${field}`, deviceId, payload: { instruction: 'dream', target: { lane: 'runtime' as const, runtimeId: 'pi' as const },
+        const input = { taskId: `conditional-retry-${field}`, deviceId, payload: { instruction: 'dream', target: { lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'device-default' as const } },
           terminalProjection: { mode: 'none' as const }, agentRef: AGENT_REF, session: { mode: 'fresh' as const },
           egressPolicy: POLICY, agentMemory: 'none' as const, ...conditional } };
         const append = vi.spyOn(harness.core.mailbox, 'append').mockRejectedValueOnce(new Error('injected append failure'));
@@ -78,7 +78,7 @@ describe('hosted per-task Agent memory selection (#614)', () => {
         const recorded = await harness.cloud.readTaskOffer(TENANT_A, input.taskId);
         expect(recorded).toMatchObject({ delivered: false });
         await harness.stores.devices.recordCapabilities(TENANT_A, {
-          deviceId, capabilities: [...capabilities, ...((advertised !== changed) ? [capability] : [])],
+          deviceId, harnesses: TEST_HARNESSES, capabilities: [...capabilities, ...((advertised !== changed) ? [capability] : [])],
         });
         const readDevice = vi.spyOn(harness.stores.devices, 'get');
         const retried = await harness.cloud.submitAgentExecution(TENANT_A, input);
@@ -91,7 +91,7 @@ describe('hosted per-task Agent memory selection (#614)', () => {
 
   it.each([true, false])('resolves conditional commit at enqueue (advertised=%s)', async (advertised) => {
     const { harness, deviceId } = await deviceWith([...BASE_CAPABILITIES, ...(advertised ? ['agent-memory-commit-on-success'] : [])]);
-    const payload = { instruction: 'plan only', target: { lane: 'runtime' as const, runtimeId: 'codex' as const }, terminalProjection: { mode: 'none' as const },
+    const payload = { instruction: 'plan only', target: { lane: 'harness' as const, harnessId: 'codex' as const, selection: { mode: 'device-default' as const } }, terminalProjection: { mode: 'none' as const },
       agentRef: AGENT_REF, session: { mode: 'fresh' as const }, egressPolicy: POLICY, agentMemoryCommit: 'on-success-if-advertised' as const };
     await harness.cloud.submitAgentExecution(TENANT_A, { deviceId, taskId: 'conditional-commit', payload });
     const offer = await harness.cloud.readTaskOffer(TENANT_A, 'conditional-commit');
@@ -104,7 +104,7 @@ describe('hosted per-task Agent memory selection (#614)', () => {
 
   it.each([true, false])('resolves nativeSessions at enqueue (advertised=%s)', async advertised => {
     const { harness, deviceId } = await deviceWith([...BASE_CAPABILITIES, AGENT_MEMORY_SELECTION_CAPABILITY, ...(advertised ? ['native-sessions'] : [])]);
-    const payload = { instruction: 'dream', target: { lane: 'runtime' as const, runtimeId: 'pi' as const }, terminalProjection: { mode: 'none' as const }, agentRef: AGENT_REF, session: { mode: 'fresh' as const },
+    const payload = { instruction: 'dream', target: { lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'device-default' as const } }, terminalProjection: { mode: 'none' as const }, agentRef: AGENT_REF, session: { mode: 'fresh' as const },
       egressPolicy: POLICY, agentMemory: 'none' as const, nativeSessions: { fromMs: 1, toMs: 2, ifAdvertised: true as const } };
     await harness.cloud.submitAgentExecution(TENANT_A, { deviceId, taskId: 'native-sessions', payload });
     const offer = await harness.cloud.readTaskOffer(TENANT_A, 'native-sessions');
@@ -118,7 +118,7 @@ describe('hosted per-task Agent memory selection (#614)', () => {
   it('refuses agentMemoryCommit to a device without agent-memory-commit-on-success (#1440)', async () => {
     const { harness, deviceId } = await deviceWith(BASE_CAPABILITIES);
     await expect(harness.cloud.submitAgentExecution(TENANT_A, { deviceId, taskId: 'commit-refused', payload: {
-      instruction: 'plan only', target: { lane: 'runtime' as const, runtimeId: 'codex' as const }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY,
+      instruction: 'plan only', target: { lane: 'harness' as const, harnessId: 'codex' as const, selection: { mode: 'device-default' as const } }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY,
       agentMemoryCommit: 'on-success',
     } })).rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining('agent-memory-commit-on-success') });
     expect(await mailboxTypes(harness, deviceId)).toEqual([]);

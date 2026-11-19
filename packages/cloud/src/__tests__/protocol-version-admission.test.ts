@@ -11,7 +11,7 @@ import { handleInboundEnvelope, type ByokCloudObserver, type InboundRefused } fr
 import { tenantStoresFor } from '../tenant-stores';
 import { createHarness, grantAgentHome, offerPayload, PRODUCT_ID, TENANT_A, TEST_AGENT_REF } from './support/harness';
 
-const PI = { kind: 'runtime', runtimeId: 'pi' } as const;
+const PI = { id: 'pi' } as const;
 
 function storesFor(harness: ReturnType<typeof createHarness>, deviceId: string) {
   return tenantStoresFor(
@@ -32,7 +32,7 @@ function resultDocumentExecution(deviceId: string) {
     deviceId,
     payload: {
       instruction: 'produce a structured result',
-      target: { lane: 'runtime', runtimeId: 'codex' },
+      target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
       agentRef: { agentId: 'agent', profileRevision: 'revision' },
       session: { mode: 'fresh' },
       egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -58,11 +58,11 @@ function v6HttpBodies() {
 }
 
 describe('protocol-version admission at cloud lifecycle boundaries', () => {
-  it('is wire v7', () => {
-    expect(PROTOCOL_VERSION).toBe(7);
+  it('is wire v8', () => {
+    expect(PROTOCOL_VERSION).toBe(8);
   });
 
-  it.each([1, 2, 3, 4, 5, 6])('rejects the retired v:%i at the exported inbound gate before the claim lifecycle mutation', async (v) => {
+  it.each([1, 2, 3, 4, 5, 6, 7])('rejects the retired v:%i at the exported inbound gate before the claim lifecycle mutation', async (v) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
@@ -78,7 +78,7 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it.each([1, 2, 3, 4, 5, 6])('answers the retired v:%i at POST /byok/messages with a per-entry protocol_version_unsupported', async (v) => {
+  it.each([1, 2, 3, 4, 5, 6, 7])('answers the retired v:%i at POST /byok/messages with a per-entry protocol_version_unsupported', async (v) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
@@ -95,19 +95,19 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('offered');
   });
 
-  it('keeps the supported v:7 claim path accepted', async () => {
+  it('keeps the supported v:8 claim path accepted', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const offer = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: PI }, { taskId: offer.taskId });
-    expect(claim.v).toBe(7);
+    expect(claim.v).toBe(8);
 
     await expect(handleInboundEnvelope(storesFor(harness, device.deviceId), device.deviceId, claim).then((result) => result.outcome)).resolves.toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, offer.taskId))?.status).toBe('claimed');
   });
 
-  it.each([2, 5, 6])('refuses a v%i daemon handshake and delivers no offer to it', async (retired) => {
+  it.each([2, 5, 6, 7])('refuses a v%i daemon handshake and delivers no offer to it', async (retired) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const stores = storesFor(harness, device.deviceId);
@@ -117,7 +117,7 @@ describe('protocol-version admission at cloud lifecycle boundaries', () => {
       protocolVersions: [retired],
       capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session',
         'terminal-projection-selection'],
-      runtimes: [],
+      harnesses: [],
     };
     const capabilitiesBefore = (await harness.stores.devices.get(TENANT_A, device.deviceId))?.capabilities;
 

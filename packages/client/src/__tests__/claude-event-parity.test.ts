@@ -7,7 +7,7 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
-const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 // Captured from the pre-OAR claude adapter (events.ts) before the stream-json session replaced it.

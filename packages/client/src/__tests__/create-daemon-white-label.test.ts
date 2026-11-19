@@ -1,4 +1,3 @@
-import type { RuntimeTaskInput } from '../types';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
@@ -124,11 +123,11 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
 
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
-    const ids = (hello.payload.runtimes ?? []).map((r) => r.id).sort();
+    const ids = (hello.payload.harnesses ?? []).map((r) => r.id).sort();
     expect(ids).toEqual(['claude', 'codex']);
   });
 
-  it('no runtimeAllowlist configured defaults to all three bundled runtimes (pi, claude, codex)', async () => {
+  it('advertises the usable default executors and reports Pi without a configured launcher separately', async () => {
     const storeDir = await tmpDir('byok-allowlist-store-');
 
     daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
@@ -143,8 +142,9 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
 
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
-    const ids = (hello.payload.runtimes ?? []).map((r) => r.id).sort();
-    expect(ids).toEqual(['claude', 'codex', 'pi']);
+    const ids = (hello.payload.harnesses ?? []).map((r) => r.id).sort();
+    expect(ids).toEqual(['claude', 'codex']);
+    expect(hello.payload.runtimeUnavailable).toContainEqual({ id: 'pi', cause: 'runtime_not_configured', retryable: false });
   });
 });
 
@@ -188,7 +188,7 @@ describe('runtimeAllowlist enforcement regression (TaskRunner.pickAdapter, uncha
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'claude' } },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } },
         { taskId: 'task-disallowed', seq: server.nextSeq() },
       ),
     );

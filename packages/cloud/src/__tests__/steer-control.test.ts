@@ -41,7 +41,7 @@ import { handleInboundEnvelope } from '../inbound';
 import { DEDUP_RING_CAPACITY } from '../stores/in-memory';
 import { SteerRejectedError } from '../steer-control';
 import { tenantStoresFor } from '../tenant-stores';
-import {
+import { TEST_HARNESSES,
   PRODUCT_ID,
   TENANT_A,
   TEST_AGENT_REF,
@@ -139,7 +139,7 @@ async function claim(
         {
           deviceId: device.deviceId,
           agentRef: TEST_AGENT_REF,
-          executor: { kind: 'runtime', runtimeId: report.runtime ?? 'pi' },
+          executor: { id: report.runtime ?? 'pi' },
           ...(report.capabilities === undefined ? {} : { capabilities: report.capabilities }),
         },
         { taskId },
@@ -185,7 +185,7 @@ async function helloAdvertisingSteer(harness: CloudHarness, device: PairedDevice
         capabilities: ['agent-home-contract'],
         deviceId: device.deviceId,
         productId: PRODUCT_ID,
-        runtimes: [{ id: 'pi', capabilities: { steer: true } }],
+        harnesses: TEST_HARNESSES.map(harness => ({ ...harness, capabilities: { ...harness.capabilities, steer: true } })),
       }),
     ).then((result) => result.outcome),
   ).toBe('accepted');
@@ -223,7 +223,7 @@ describe('steerTask (GAP-2)', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { capabilities: { steer: true } });
-    await deviceStores(harness, device).devices.recordCapabilities({ capabilities: ['agent-home-contract', 'input-images'] });
+    await deviceStores(harness, device).devices.recordCapabilities({ harnesses: TEST_HARNESSES, capabilities: ['agent-home-contract', 'input-images'] });
     const image = { mediaType: 'image/png' as const, blob: { blobId: 'missing', contentHash: `sha256:${'a'.repeat(64)}`, size: 1, contentType: 'image/png' } };
     for (const images of [[], Array<typeof image>(17).fill(image), [{ ...image, blob: { ...image.blob, size: -1 } }]]) {
       await expect(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'look', images }))
@@ -243,14 +243,14 @@ describe('steerTask (GAP-2)', () => {
     const blob = await uploadCiphertext(harness, device, Uint8Array.of(137, 80, 78, 71), { contentType: mediaType });
     const payload = { text: 'look', images: [{ blob, mediaType }] } as const;
 
-    await deviceStores(harness, device).devices.recordCapabilities({ capabilities: ['agent-home-contract', 'input-images'] });
+    await deviceStores(harness, device).devices.recordCapabilities({ harnesses: TEST_HARNESSES, capabilities: ['agent-home-contract', 'input-images'] });
     const enqueued = await harness.cloud.steerTask(TENANT_A, task.taskId, payload);
     expect((await poll(harness, device, task.seq)).events).toEqual([enqueued.envelope]);
     expect(enqueued.envelope).toMatchObject({ type: 'task.steer', task_id: task.taskId, payload });
   });
 
   it('steerSealedTask delivers the sealed task.steer only to a device that advertised sealed-payload-v1, and steerTask refuses sealed fields (#654)', async () => {
-    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8');
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8');
     const sealedSteer = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined)!.payload;
     const harness = createHarness();
@@ -263,7 +263,7 @@ describe('steerTask (GAP-2)', () => {
     });
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
 
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: ['sealed-payload-v1'] });
     // The plaintext lane never strips a sealed member or a steer id.
     const sealing = { scopeId: 'scope-golden-device-1', epoch: 2, categories: ['task-input'] };
     for (const payload of [{ ...sealedSteer, text: 'plaintext' }, { text: 'plaintext', steerId: sealedSteer.steerId }, { text: 'plaintext', sealing }]) {
@@ -280,13 +280,13 @@ describe('steerTask (GAP-2)', () => {
   });
 
   it('steerSealedTask refuses a sealed steer by ciphertextRef to a blob that is not committed, and writes no mailbox row (#654)', async () => {
-    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8');
+    const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8');
     const byReference = corpus.trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: TaskSteerSealedPayload })
       .find((line) => line.type === 'task.steer' && line.payload.sealed !== undefined && 'ciphertextRef' in line.payload.sealed)!.payload;
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: ['sealed-payload-v1'] });
 
     await expect(harness.cloud.steerSealedTask(TENANT_A, task.taskId, byReference)).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
@@ -296,7 +296,7 @@ describe('steerTask (GAP-2)', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: ['sealed-payload-v1'] });
     const seal = (steerId: string, text: string) => sealSteer(device.deviceId, task.taskId, steerId, text);
     const steerId = randomUUID();
     const first = await seal(steerId, 'go left');
@@ -323,7 +323,7 @@ describe('steerTask (GAP-2)', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: ['sealed-payload-v1'] });
     const steerId = randomUUID();
     const content = await sealSteer(device.deviceId, task.taskId, steerId, 'x'.repeat(BY_REFERENCE_TEXT_LENGTH));
     const ref = await uploadCiphertext(harness, device, content.ciphertext);
@@ -339,7 +339,7 @@ describe('steerTask (GAP-2)', () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
     const task = await running(harness, device, { runtime: 'pi', capabilities: { steer: true } });
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['sealed-payload-v1'] });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: ['sealed-payload-v1'] });
     const steerId = randomUUID();
     const byReference = async (text: string) => {
       const content = await sealSteer(device.deviceId, task.taskId, steerId, text);
@@ -372,7 +372,7 @@ describe('steerTask (GAP-2)', () => {
 
     const error = await steerRejection(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' }));
     expect(error.code).toBe('steer_unsupported_runtime');
-    expect(error.executor).toEqual({ kind: 'runtime', runtimeId: 'claude' });
+    expect(error.executor).toEqual({ id: 'claude' });
     expect(error.status).toBe('running');
 
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
@@ -385,7 +385,7 @@ describe('steerTask (GAP-2)', () => {
 
     const error = await steerRejection(harness.cloud.steerTask(TENANT_A, task.taskId, { text: 'go left' }));
     expect(error.code).toBe('steer_unsupported_runtime');
-    expect(error.executor).toEqual({ kind: 'runtime', runtimeId: 'pi' });
+    expect(error.executor).toEqual({ id: 'pi' });
 
     expect((await poll(harness, device, task.seq)).events).toEqual([]);
   });
@@ -457,7 +457,7 @@ describe('steerTask (GAP-2)', () => {
         device.deviceId,
         createEnvelope(
           'task.complete',
-          { agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'session-1' },
+          { agentRef: TEST_AGENT_REF, executor: { id: 'pi' }, summary: 'done', sessionRef: 'session-1' },
           { taskId: task.taskId },
         ),
       ).then((result) => result.outcome),
@@ -495,7 +495,7 @@ describe('steerTask (GAP-2)', () => {
 });
 
 describe('task.steer_refused (wire v7, #2009)', () => {
-  const PI = { kind: 'runtime', runtimeId: 'pi' } as const;
+  const PI = { id: 'pi' } as const;
   const refusal = async (steerMessageId: string, reason: string, taskId: string) =>
     createEnvelope('task.steer_refused', { steerMessageId, reason }, { id: await steerRefusalEnvelopeId(steerMessageId), taskId });
 

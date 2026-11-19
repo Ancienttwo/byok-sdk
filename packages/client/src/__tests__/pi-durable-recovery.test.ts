@@ -30,7 +30,6 @@ describe('durable parent recovery authority', () => {
     expect(toRuntimeInfoCapabilities(adapter.descriptor.capabilities).isolation?.userInstructions).toBe(false);
     expect(new PiAdapter({ agentUserContext: 'excluded' }).descriptor.capabilities.isolation?.userInstructions).toBe(true);
     expect(Object.isFrozen(adapter.descriptor.capabilities.isolation)).toBe(true);
-    expect((await adapter.prepare({ offer: { target: { lane: 'runtime', runtimeId: 'pi' } } } as never)).kind).toBe('reject');
     expect((await adapter.prepare({ offer: { target: { lane: 'auto' } } } as never)).kind).toBe('reject');
   });
 
@@ -42,12 +41,16 @@ describe('durable parent recovery authority', () => {
       durableLane: true, agentUserContext: 'excluded',
       resolveBin: () => ({ command: process.execPath, source: 'env' }),
       spawnFn: spawnFn as never,
+      validateProviderProfileBinding: async () => {},
       byokLauncher: { command: path.join(root, 'unused-launcher'), profileDbPath: path.join(root, 'unused-profiles'), sessionDir: path.join(root, 'sessions') },
     });
     // Real prepare, sealed Agent manifest and runtime-launch resources. The
     // lane restriction must reject before the custody launcher can be invoked.
     await expect(startPreparedOperation(adapter, {
-      instruction: 'unused', target: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'unused' },
+      instruction: 'unused',
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
+        profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, modelId: 'unused', requiredCapabilities: [],
+      } } },
     }, { workspaceDir: home, agentHome: home, env: {} }))
       .rejects.toThrow('Pi Agent resources are supported only by the ordinary RPC lane');
     expect(spawnFn).not.toHaveBeenCalled();

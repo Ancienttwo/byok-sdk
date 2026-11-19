@@ -48,7 +48,7 @@ describeSqlite('SQLite terminal-task archive replays (#1120)', () => {
       const submit = async (taskId: string) => {
         await instance.executions.submit({
           taskId, deviceId: daemon.deviceId,
-          payload: { instruction: 'archive me', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+          payload: { instruction: 'archive me', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
         });
         return (await daemon.next()).find((event) => event.type === 'task.offer' && event.task_id === taskId)!;
       };

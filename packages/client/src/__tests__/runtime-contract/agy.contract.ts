@@ -16,6 +16,7 @@ import {
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 import { defineMcpSearchProbes } from './mcp-search-probe';
 
+const AGY_TARGET = { lane: 'harness', harnessId: 'agy', selection: { mode: 'byok', providerId: 'google', modelId: 'gemini-3.8-flash' } } as const;
 const target = contractTarget('agy', QUALIFIED_AGY_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const PROJECT_MARKER = 'BYOK-CONTRACT-AGY-PROJECT-3d71';
@@ -122,11 +123,11 @@ async function resumed() {
   try {
     const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
     const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } };
-    const opened: Session = await startPreparedOperation(runtime, { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'First.' }, resources);
+    const opened: Session = await startPreparedOperation(runtime, { target: AGY_TARGET, instruction: 'First.' }, resources);
     for await (const event of opened.events) if (event.type === 'turn_end') break;
     const sessionRef = opened.sessionRef;
     await opened.close();
-    const again = await startPreparedOperation(runtime, { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'Second.', sessionRef }, resources);
+    const again = await startPreparedOperation(runtime, { target: AGY_TARGET, instruction: 'Second.', sessionRef }, resources);
     const events: AgentEvent[] = [];
     for await (const event of again.events) {
       events.push(event as AgentEvent);

@@ -288,7 +288,10 @@ it.skipIf(process.platform === 'win32')('keeps native version floor evidence loc
     runtimeEnvironment: { base: 'allowlist' } });
   const { observations, ...hello } = await detectRuntimes([adapter]);
   const versions = { installedVersion: '1.4.9', requiredVersion: '1.5.0' };
-  expect(parseControlStatusRuntimes({ runtimes: observations })?.[0]?.unsupportedVersion).toEqual(versions);
+  expect(parseControlStatusRuntimes({ runtimes: observations })?.[0]).toMatchObject({
+    unsupportedVersion: versions,
+    upgrade: { state: 'required', installedVersion: '1.4.9', minimumVersion: '1.5.0', command: 'agy update' },
+  });
   const lines = formatLiveStatusLines({
     pid: 1, uptimeMs: 1, paired: true, lifecycle: { phase: 'running', connection: 'open' }, runtimes: observations,
     toolsets: { revision: '1', toolsets: [] },

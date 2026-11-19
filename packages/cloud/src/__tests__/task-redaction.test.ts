@@ -23,7 +23,7 @@ import {
   type TaskRedactionStoreInput,
 } from '../task-redaction';
 import { createWebCrypto } from '../crypto/web-crypto';
-import { TENANT_A, TENANT_B, CLOUD_ORIGIN, createDeviceKeys, type PairedDevice } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, TENANT_B, CLOUD_ORIGIN, createDeviceKeys, type PairedDevice } from './support/harness';
 
 const crypto = createWebCrypto();
 const codec = taskRedactionCodec(crypto);
@@ -37,7 +37,7 @@ const CAPABILITIES = [
   'agent-egress-fresh-session',
 ];
 const SECRET = 'redaction-secret-text';
-const CODEX_EXECUTOR = { kind: 'runtime', runtimeId: 'codex' } as const;
+const CODEX_EXECUTOR = { id: 'codex' } as const;
 
 function executionInput(taskId: string, deviceId: string) {
   return {
@@ -46,7 +46,7 @@ function executionInput(taskId: string, deviceId: string) {
     payload: {
       instruction: `instruction ${SECRET}`,
       agentRef: AGENT_REF,
-      target: { lane: 'runtime', runtimeId: 'codex' },
+      target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
       session: { mode: 'fresh' },
       egressPolicy: {
         policyRevision: 'policy-v1',
@@ -158,7 +158,7 @@ function createFixture(withStore = true): Fixture {
         body: JSON.stringify({ pairingCode: code, deviceName: 'test-device', devicePublicKey: keys.publicKeyBase64Url, expectedDeviceDigest: null }),
       });
       const body = (await response.json()) as { deviceId: string; accessToken: string };
-      await base.stores.devices.recordCapabilities(tenant, { deviceId: body.deviceId, capabilities: CAPABILITIES });
+      await base.stores.devices.recordCapabilities(tenant, { deviceId: body.deviceId, harnesses: TEST_HARNESSES, capabilities: CAPABILITIES });
       return {
         tenant,
         deviceId: body.deviceId,

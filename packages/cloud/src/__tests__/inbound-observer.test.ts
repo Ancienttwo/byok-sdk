@@ -25,7 +25,7 @@ function devicePrincipal(tenant: TenantId, deviceId: string) {
 }
 
 function claim(taskId: string, deviceId: string): Envelope {
-  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
+  return createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId });
 }
 
 function recorder(): { readonly seen: InboundCommitted[]; readonly observer: ByokCloudObserver } {

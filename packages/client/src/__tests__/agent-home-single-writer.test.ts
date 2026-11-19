@@ -107,7 +107,7 @@ describe('canonical Agent home single writer (WP0)', () => {
     runtime?: RuntimeId,
   ): Envelope {
     return createEnvelope('task.offer', {
-      target: runtime === undefined ? { lane: 'auto' } : { lane: 'runtime', runtimeId: runtime },
+      target: runtime === undefined ? { lane: 'auto' } : { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } },
       instruction: `work for ${agentId}`,
       agentRef: { agentId, profileRevision: 'r1' },
       ...FRESH_OFFER,

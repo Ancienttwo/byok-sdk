@@ -11,7 +11,7 @@ import { egressCheck, fileEgress, skip, type RuntimeCases } from './contract';
 import type { openCodeContract } from './opencode-contract';
 import { startLoopbackProvider, type ProviderRequest } from './loopback';
 
-const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode' } as const;
+const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode', selection: { mode: 'device-default' } } as const;
 
 const CHILD_TEXT = 'BYOK_CHILD_TEXT_2182';
 const ROOT_TEXT = 'BYOK_ROOT_DONE_2182';

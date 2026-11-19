@@ -188,6 +188,10 @@ try {
       `  assert.deepEqual([...second.alreadyApplied], expected, 'second run must recognise every migration');\n` +
       `  const ledger = await emptyPool.query('SELECT version FROM byok_schema_migration ORDER BY version');\n` +
       `  assert.deepEqual(ledger.rows.map((row) => row.version), expected, 'ledger must record every migration');\n` +
+      `  const epoch = await emptyPool.query('SELECT epoch FROM byok_wire_epoch WHERE singleton');\n` +
+      `  assert.deepEqual(epoch.rows, [{ epoch: 8 }], 'empty installs must start on wire v8');\n` +
+      `  const claimedColumns = await emptyPool.query("SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'task' AND column_name IN ('claimed_runtime', 'claimed_harness_id')");\n` +
+      `  assert.deepEqual(claimedColumns.rows, [{ column_name: 'claimed_harness_id' }], 'wire v8 has one claimed executor column');\n` +
       `\n` +
       `  const prior = await migrate(upgradePool, baselineDirectory);\n` +
       `  assert.deepEqual([...prior.applied], baseline, 'v0.4.2 fixture must apply migrations 0001-0007 only');\n` +

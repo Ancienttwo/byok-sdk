@@ -9,6 +9,7 @@ import type { AuthManager } from '../daemon/auth-manager';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { testScratchRoot } from './fixtures/execution-scratch';
+import * as timerDelay from '../util/timer-delay';
 
 const ALLOW = { state: 'allow' as const, qualifiedVersion: '1.4.0' };
 const WARN = { state: 'warn' as const, qualifiedVersion: '1.0.52' };
@@ -97,9 +98,9 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
     const hello = await server.waitFor((event) => event.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
 
-    const runtimes = new Map((hello.payload.runtimes ?? []).map((runtime) => [runtime.id, runtime]));
+    const runtimes = new Map((hello.payload.harnesses ?? []).map((runtime) => [runtime.id, runtime]));
     expect(runtimes.get('pi')?.versionPolicy).toEqual(ALLOW);
-    expect(runtimes.get('codex')?.versionPolicy).toEqual(WIRE_BLOCK);
+    expect(runtimes.has('codex')).toBe(false);
     expect(runtimes.has('claude')).toBe(false);
     // A matched spec stays local; the wire carries state + qualified token only.
     expect(JSON.stringify(hello.payload)).not.toContain('"matched"');
@@ -111,11 +112,54 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
 
     expect(hello.payload.runtimeUnavailable).toEqual([
       { id: 'claude', cause: 'not_installed', retryable: true },
+      { id: 'codex', cause: 'version_blocked', retryable: false },
       { id: 'dsh', cause: 'acp_unavailable', retryable: true },
     ]);
-    // A blocked runtime is still detected and available; block is not a
-    // runtime_unavailable entry.
-    expect(hello.payload.runtimeUnavailable?.some((entry) => entry.cause === 'version_blocked')).toBe(false);
+  });
+
+  it.each([false, true])('publishes the new inventory after a scan with an older hello in flight: %s', async holdOldHello => {
+    const sleep = timerDelay.abortableSleep;
+    const nextScan = Promise.withResolvers<void>();
+    const scanTimer = vi.spyOn(timerDelay, 'abortableSleep');
+    scanTimer.mockImplementation((ms, signal) => ms === 60_000 ? nextScan.promise : sleep(ms, signal));
+    let releaseOldHello: (() => void) | undefined;
+    try {
+      const adapter = new StubRuntimeAdapter('fixture');
+      const storeDir = await tmpDir('byok-rescan-');
+      dirs.push(storeDir);
+      daemon = createDaemonWithAdapters({
+        storage: { scratchRoot: testScratchRoot() },
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Rescan', productId: 'rescan', serverUrl: server.url, storeDir,
+      }, [adapter]);
+      await daemon.pair('pairing-code');
+      await daemon.start();
+      const first = await server.waitFor(event => event.type === 'conn.hello');
+      expect(first.payload).toMatchObject({ harnesses: [{ id: 'fixture' }] });
+      if (holdOldHello) {
+        await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual({ phase: 'running', connection: 'open' }));
+        releaseOldHello = server.holdNextMessagesResponse(event => event.type === 'conn.hello');
+        daemon.reloadMcpToolsets({}, daemon.status().toolsets.revision);
+        await server.waitFor(event => event.type === 'conn.hello' && event.id !== first.id);
+      }
+      vi.spyOn(adapter, 'detect').mockResolvedValue({ kind: 'not-found' });
+      scanTimer.mockRestore();
+      nextScan.resolve();
+      await vi.waitFor(() => expect(daemon?.status().runtimes).toMatchObject([{ id: 'fixture', outcome: 'not-found' }]));
+      if (holdOldHello) {
+        expect(server.received.some(event => event.type === 'conn.hello' && event.payload.harnesses.length === 0)).toBe(false);
+      }
+      releaseOldHello?.();
+      const refreshed = await server.waitFor(event => event.type === 'conn.hello' && event.payload.harnesses.length === 0);
+      expect(refreshed.payload).toMatchObject({
+        harnesses: [], runtimeUnavailable: [{ id: 'fixture', cause: 'not_installed', retryable: true }],
+      });
+      expect(daemon.status().runtimes).toMatchObject([{ id: 'fixture', outcome: 'not-found' }]);
+    } finally {
+      releaseOldHello?.();
+      scanTimer.mockRestore();
+      nextScan.resolve();
+    }
   });
 
   it('publishes the same projection on presence, with harness ids in runtimeUnavailable', async () => {
@@ -135,7 +179,7 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
         serverUrl: 'https://example.test',
         auth: stubAuth(),
         intervalMs: 30_000,
-        runtimes: hello.payload.runtimes,
+        harnesses: hello.payload.harnesses,
         runtimeUnavailable: hello.payload.runtimeUnavailable,
       });
       publisher.start();
@@ -148,8 +192,8 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
 
     expect(bodies).toHaveLength(1);
     const body = bodies[0]!;
-    expect((body.runtimes as Array<{ id: string; versionPolicy?: unknown }>).map((runtime) => [runtime.id, runtime.versionPolicy]))
-      .toEqual([['pi', ALLOW], ['codex', WIRE_BLOCK]]);
+    expect((body.harnesses as Array<{ id: string; versionPolicy?: unknown }>).map((runtime) => [runtime.id, runtime.versionPolicy]))
+      .toEqual([['pi', ALLOW], ['grok', WARN], ['zeta', undefined]]);
     // Presence runtimes stay built-in; runtimeUnavailable is the conn.hello list, harness ids included.
     expect(body.runtimeUnavailable).toEqual(hello.payload.runtimeUnavailable);
   });

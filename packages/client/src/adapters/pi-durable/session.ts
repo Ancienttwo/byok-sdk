@@ -38,13 +38,12 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   const manifest = input.manifest;
   if (!context || !manifest.agentRef || !manifest.lease || runtimeLaunch.credentialSource !== 'keys-profile' || runtimeLaunch.kind !== 'pi-durable'
     || manifest.cwd !== manifest.lease.canonicalHome || input.signal?.aborted) throw startFailure('durable requires current Agent lease and credential custody');
-  const selection = manifest.modelTarget;
-  if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw startFailure('durable requires BYOK selection');
+  const selection = manifest.selection;
+  if (selection?.mode !== 'byok-profile') throw startFailure('durable requires an exact provider profile');
   const binding = { agentRef: { ...manifest.agentRef, tenantId: context.tenantId }, taskId: manifest.taskId, leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome };
   const configDir = input.scratch.sdkDir;
   const configPath = path.join(configDir, 'config.json');
-  const profileRef = selection.lane === 'byok-profile' ? selection.providerProfile.profileRef : selection.providerId;
-  const model = selection.lane === 'byok-profile' ? selection.providerProfile.modelId : selection.modelId;
+  const { profileRef, modelId: model } = selection.providerProfile;
   let serialized: ReturnType<typeof serializePiHostConfig>;
   let file: Awaited<ReturnType<typeof admitReplica>>;
   // One gate serves every worker of this execution, so a respawn asks the same

@@ -107,7 +107,7 @@ describe('ByokServer.tasks.events', () => {
     await instance.executions.submit({
       taskId,
       deviceId: daemon.deviceId,
-      payload: { instruction: 'stream me', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      payload: { instruction: 'stream me', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
     });
   }
 
@@ -410,7 +410,7 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
   async function submitRunning(instance: ByokServer, post: (envelope: Envelope) => Promise<void>, deviceId: string, taskId: string) {
     await instance.executions.submit({
       taskId, deviceId,
-      payload: { instruction: 'outlive me', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+      payload: { instruction: 'outlive me', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
     });
     await post(createEnvelope('task.claim', { executor: TEST_CLAIMED_EXECUTOR, deviceId, agentRef: AGENT }, { taskId }));
     await post(createEnvelope('task.started', {}, { taskId }));
@@ -471,7 +471,7 @@ describe('ByokServer.tasks.events across a SQLite restart', () => {
       expect((await reader.next()).value?.event).toMatchObject({ kind: 'state', state: 'Running' });
       await expect(instance().executions.submit({
         taskId: 'resubmitted', deviceId,
-        payload: { instruction: 'outlive me', target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
+        payload: { instruction: 'outlive me', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } },
       })).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       await post(createEnvelope('task.progress', progress(1, 'after the refused resubmit'), { taskId: 'resubmitted' }));
       expect((await reader.next()).value?.event).toEqual({ kind: 'agent', event: { type: 'progress', text: 'after the refused resubmit' } });

@@ -16,12 +16,12 @@ import { createEnvelope, type Envelope, type MessageType } from '@byok-sdk/proto
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
-const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; task_id: string; payload: Record<string, unknown> });
@@ -46,7 +46,7 @@ async function runnerWith(adapter: StubRuntimeAdapter, sent: Envelope[], missing
   dirs.push(dir);
   // The Host skipped the gate in these tests, and the daemon's own advertised-flag
   // check is not the subject: advertise every flag so the offer reaches the sealed decline.
-  return new TaskRunner({...testAgentHomeDeps(), ...freshOfferEgressDeps(),
+  return new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },...testAgentHomeDeps(), ...freshOfferEgressDeps(),
     advertisedCapabilities: () => advertiseEveryDeviceFlag().filter((flag) => flag !== missingFlag),
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
@@ -64,7 +64,7 @@ describe('strict offer decline redelivery', () => {
   it('declines a redelivered plaintext offer with a missing capability only once', async () => {
     const sent: Envelope[] = [];
     const runner = await runnerWith(new StubRuntimeAdapter('pi'), sent, 'agent-egress-policy');
-    const payload = { agentRef: freshTestAgentRef(), session: { mode: 'resume' as const, sessionRef: 'session-1' }, instruction: 'x', target: { lane: 'runtime' as const, runtimeId: 'pi' as const }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
+    const payload = { agentRef: freshTestAgentRef(), session: { mode: 'resume' as const, sessionRef: 'session-1' }, instruction: 'x', target: { lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'device-default' as const } }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY };
     await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId: 'plain-decline', seq: 1 }));
     await runner.handleEnvelope(createEnvelope('task.offer', payload, { taskId: 'plain-decline', seq: 2 }));
     const declines = sent.filter((envelope) => envelope.type === 'task.decline');
@@ -104,7 +104,7 @@ describe('sealed payload refusal on a daemon without sealed-payload-v1 (#654)', 
     const runner = await runnerWith(adapter, sent);
     const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
-      await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'plain task', target: { lane: 'runtime', runtimeId: 'pi' } }, { taskId: 'plain-task', seq: 1 }));
+      await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'plain task', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } }, { taskId: 'plain-task', seq: 1 }));
       const session = adapter.sessions[0]!;
 
       await runner.handleEnvelope(createEnvelope('task.steer', sealedSteer as never, { taskId: 'plain-task', seq: 2 }));

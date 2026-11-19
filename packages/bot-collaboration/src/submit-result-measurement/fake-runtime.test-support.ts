@@ -153,7 +153,7 @@ class FakeSession implements Session {
  */
 export class FakeMeasurementAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'pi', supportsDispatchSelection: false, requiresMcpToolsetToolObservation: true,
+    id: 'pi', selectionModes: ['device-default'], requiresMcpToolsetToolObservation: true,
     capabilities: { steer: false, resume: false, mcpToolsets: true, approvalInteractive: false },
   });
   readonly behaviors: FakeBehavior[] = [];

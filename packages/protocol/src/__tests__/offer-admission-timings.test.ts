@@ -12,10 +12,10 @@ const ALL_PHASES = {
   toolsetProbeMs: 120,
   runtimeLaunchMs: 9,
 };
-const sealedDecline = readFileSync(new URL('./golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const sealedDecline = readFileSync(new URL('./golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd().split('\n').map((raw) => JSON.parse(raw) as { type: string; payload: Record<string, unknown> })
   .find((line) => line.type === 'task.decline' && line.payload.sealed !== undefined)!.payload;
-const CLAIM = { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } } as const;
+const CLAIM = { deviceId: 'device-1', executor: { id: 'pi' } } as const;
 
 describe('offer admission timings (#1014)', () => {
   it.each([{ totalMs: 0 }, ALL_PHASES])('rides on task.claim and on both task.decline branches: %j', (admission) => {

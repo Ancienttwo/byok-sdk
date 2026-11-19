@@ -1,6 +1,6 @@
 import { AGENT_HOME_READERS_CAPABILITY, decodeEnvelope, type AgentEgressPolicy } from '@byok-sdk/protocol';
 import { describe, expect, it } from 'vitest';
-import { TENANT_A, createHarness, type CloudHarness } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, createHarness, type CloudHarness } from './support/harness';
 
 /**
  * #317: a `homeAccess: 'memory-reader'` Agent offer reaches only a device that
@@ -43,14 +43,14 @@ const readerOffers: ReadonlyArray<readonly [string, ReaderOffer]> = [
   })],
   ['submitAgentExecution', (harness, deviceId, taskId) => harness.cloud.submitAgentExecution(TENANT_A, { deviceId: deviceId,
     taskId,
-    payload: { instruction: 'read memory', target: { lane: 'runtime' as const, runtimeId: 'codex' as const }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader' },
+    payload: { instruction: 'read memory', target: { lane: 'harness' as const, harnessId: 'codex' as const, selection: { mode: 'device-default' as const } }, terminalProjection: { mode: 'none' }, agentRef: AGENT_REF, session: { mode: 'fresh' }, egressPolicy: POLICY, homeAccess: 'memory-reader' },
   })],
 ];
 
 async function deviceWith(capabilities: readonly string[]): Promise<{ harness: CloudHarness; deviceId: string }> {
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
-  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [...capabilities] });
+  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: [...capabilities] });
   return { harness, deviceId: device.deviceId };
 }
 

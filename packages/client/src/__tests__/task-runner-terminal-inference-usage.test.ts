@@ -12,7 +12,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_DAEMON_EGRESS, FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -35,7 +35,7 @@ async function makeRunner(
   withRelease = true,
 ): Promise<TaskRunner> {
   const release = Object.freeze({ version: '0.6.0' });
-  const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); }, advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-terminal-usage',
@@ -58,8 +58,8 @@ async function startTask(runner: TaskRunner, taskId: string, runtime: 'pi' | 'cl
         // This requested model must NOT become provider/model terminal
         // telemetry. The adapter did not observe either fact.
         target: runtime === 'codex'
-          ? { lane: 'subscription', runtimeId: 'codex', modelId: 'gpt-5' }
-          : { lane: 'runtime', runtimeId: runtime },
+          ? { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'gpt-5' } }
+          : { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } },
       },
       { taskId, seq: 1 },
     ),
@@ -223,7 +223,7 @@ describe('TaskRunner terminal inference usage projection', () => {
       const taskId = 'terminal-composition-release-identity';
       server.send(createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'finish', target: { lane: 'runtime', runtimeId: 'codex' } },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'finish', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } },
         { taskId, seq: server.nextSeq() },
       ));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);

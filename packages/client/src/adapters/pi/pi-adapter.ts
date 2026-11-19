@@ -6,7 +6,8 @@ import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, sdkLaneReport,
 import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-capabilities.js';
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources.js';
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity.js';
-import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
+import type { HarnessSelection } from '@byok-sdk/protocol';
+import { offerSelection, type RuntimeTaskInput } from '../../types.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { startDurablePi } from '../pi-durable/session.js';
 import { startAborted, untilStartAborted } from './start-signal.js';
@@ -253,8 +254,8 @@ export function validatePiByokLauncherConfig(
 export class PiAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
-    supportsDispatchSelection: true,
-    supportsTaskExecutionOptions: true,
+    selectionModes: [],
+    supportsEffort: true,
     // Pi registers ONE tool per observed MCP tool, carrying that tool's real
     // schema (`./mcp-extension.ts`), so it consumes the daemon's observation
     // exactly like claude and codex do. It previously declared nothing here
@@ -295,6 +296,7 @@ export class PiAdapter implements RuntimeAdapter {
     if (options.durableLane !== undefined && typeof options.durableLane !== 'boolean') throw new Error('PiAdapterOptions.durableLane must be boolean; pass replicaRoot through durableContext');
     this.descriptor = freezeRuntimeAdapterDescriptor({
       ...this.descriptor,
+      selectionModes: options.byokLauncher === undefined ? [] : ['byok-profile'],
       capabilities: {
         ...PI_RUNTIME_CAPABILITIES,
         isolation: {
@@ -311,7 +313,7 @@ export class PiAdapter implements RuntimeAdapter {
     // Windows waits for validated parent-death Job Object recovery.
     // The durable worker re-resolves the scope on every spawn and swaps its
     // native file tools for the SDK scoped ones.
-    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, supportsTaskExecutionOptions: false, memoryLane: undefined, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], fileScope: { lanes: ['durable'] }, capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
+    if (options.durableLane === true) this.descriptor = freezeRuntimeAdapterDescriptor({ ...this.descriptor, supportsEffort: false, memoryLane: undefined, trajectoryEvidence: undefined, platforms: ['darwin', 'linux'], fileScope: { lanes: ['durable'] }, capabilities: PI_DURABLE_RUNTIME_CAPABILITIES });
     validatePiByokLauncherConfig(options.byokLauncher);
     if (options.sdkHelperHost !== undefined) resolveSdkReservedHelperBin('pi-rpc', options.sdkHelperHost);
   }
@@ -373,7 +375,7 @@ export class PiAdapter implements RuntimeAdapter {
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     if (this.options.durableLane === true && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
-    if (this.options.durableLane === true && modelLaneTarget(input.offer.target) === undefined) {
+    if (this.options.durableLane === true && offerSelection(input.offer.target)?.mode !== 'byok-profile') {
       return { kind: 'reject', reason: 'durable Pi requires an ordinary BYOK selection', retryable: false };
     }
     // Fail closed BEFORE anything is spawned. pi registers one tool per
@@ -418,43 +420,26 @@ export class PiAdapter implements RuntimeAdapter {
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
     const { effort } = input.offer;
-    const selection = modelLaneTarget(input.offer.target);
-    const pinnedSelection: ModelLaneTarget | undefined = selection === undefined
-      ? undefined
-      : selection.lane === 'byok-profile'
-        ? Object.freeze({
-            ...selection,
-            providerProfile: Object.freeze({
-              ...selection.providerProfile,
-              requiredCapabilities: Object.freeze([...selection.providerProfile.requiredCapabilities]),
-            }),
-          }) as unknown as ModelLaneTarget
-        : Object.freeze({ ...selection });
+    const selection = offerSelection(input.offer.target);
+    if (selection !== undefined && (selection.mode !== 'byok-profile' || input.offer.target.lane !== 'harness' || input.offer.target.harnessId !== 'pi')) {
+      return { kind: 'reject', reason: 'Pi requires an exact provider profile selection', retryable: false };
+    }
+    const providerProfile = selection === undefined ? undefined : Object.freeze({
+      ...selection.providerProfile,
+      requiredCapabilities: Object.freeze([...selection.providerProfile.requiredCapabilities]),
+    });
     let launcherArgs: string[] | undefined;
-    if (pinnedSelection !== undefined) {
-      if ((pinnedSelection.lane !== 'byok' && pinnedSelection.lane !== 'byok-profile') || pinnedSelection.runtimeId !== 'pi') {
-        return { kind: 'reject', reason: `pi adapter cannot execute ${pinnedSelection.lane} selection for runtime ${pinnedSelection.runtimeId}`, retryable: false };
-      }
+    if (providerProfile !== undefined) {
       const launcher = this.options.byokLauncher;
       if (launcher === undefined) {
         return { kind: 'reject', reason: 'pi BYOK selection requires a configured credential-custody launcher', retryable: false };
       }
-      const providerProfile = pinnedSelection.lane === 'byok-profile'
-        ? pinnedSelection.providerProfile
-        : undefined;
-      if (providerProfile !== undefined) {
-        try {
-          await (this.options.validateProviderProfileBinding ?? validateProviderProfileBindingWithLauncher)(
-            providerProfile,
-            launcher,
-          );
-        } catch (error) {
-          return {
-            kind: 'reject',
-            reason: `provider profile admission failed: ${errorMessage(error)}`,
-            retryable: false,
-          };
-        }
+      try {
+        await (this.options.validateProviderProfileBinding ?? validateProviderProfileBindingWithLauncher)(
+          { ...providerProfile, requiredCapabilities: [...providerProfile.requiredCapabilities] }, launcher,
+        );
+      } catch (error) {
+        return { kind: 'reject', reason: `provider profile admission failed: ${errorMessage(error)}`, retryable: false };
       }
       launcherArgs = [
         '--profile-db',
@@ -467,22 +452,18 @@ export class PiAdapter implements RuntimeAdapter {
         ...(launcher.secretServicePrefix
           ? ['--secret-service-prefix', launcher.secretServicePrefix]
           : []),
-        '--provider',
-        providerProfile?.profileRef ?? (pinnedSelection.lane === 'byok' ? pinnedSelection.providerId : ''),
-        '--model',
-        providerProfile?.modelId ?? (pinnedSelection.lane === 'byok' ? pinnedSelection.modelId : ''),
-        ...(providerProfile === undefined ? [] : [
-          '--profile-revision', providerProfile.profileRevision,
-          '--profile-hash', providerProfile.profileHash,
-          '--required-capabilities', JSON.stringify(providerProfile.requiredCapabilities),
-          '--validate-only', 'false',
-        ]),
+        '--provider', providerProfile.profileRef,
+        '--model', providerProfile.modelId,
+        '--profile-revision', providerProfile.profileRevision,
+        '--profile-hash', providerProfile.profileHash,
+        '--required-capabilities', JSON.stringify(providerProfile.requiredCapabilities),
+        '--validate-only', 'false',
       ];
     }
 
     let boundRuntime: PiRuntimeLaunchResources | undefined;
     let sessionLease: PiSessionRetentionLease | undefined;
-    const sessionDir = pinnedSelection === undefined || this.options.durableLane === true ? undefined : this.options.byokLauncher!.sessionDir;
+    const sessionDir = providerProfile === undefined || this.options.durableLane === true ? undefined : this.options.byokLauncher!.sessionDir;
     const acquireSessionLease = async (sessionRef: string) => {
       if (sessionDir === undefined) return undefined;
       if (sessionLease !== undefined) throw authorityFailure('Pi operation already owns a session retention lease');
@@ -500,7 +481,7 @@ export class PiAdapter implements RuntimeAdapter {
           boundRuntime = await resolvePiRuntimeLaunch({
             ...resources, sessionCwd: resources.cwd, kind,
             // The launch env may not come from runtimeEnvironment(); packageDir stays the one asset root.
-            env: withPiPackageDirEnv(pinnedSelection === undefined ? resources.env : withoutProviderCredentials(resources.env), this.options.packageDir),
+            env: withPiPackageDirEnv(providerProfile === undefined ? resources.env : withoutProviderCredentials(resources.env), this.options.packageDir),
             resolveInvocation: () => {
               const host = this.options.sdkHelperHost;
               if (host !== undefined) {
@@ -525,7 +506,7 @@ export class PiAdapter implements RuntimeAdapter {
             // what turns the launch into `credentialSource: 'keys-profile'` and
             // a fresh 0700 per-launch projection directory. The device secret
             // reaches the Pi child only through the keys launcher.
-            ...(pinnedSelection !== undefined
+            ...(providerProfile !== undefined
               ? { keysSessionDir: this.options.byokLauncher!.sessionDir } : {}),
           });
           return boundRuntime;
@@ -542,8 +523,8 @@ export class PiAdapter implements RuntimeAdapter {
           }
           parsePiMcpEnvironment(startInput.mcpEnv);
           const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
-          const manifestSelection = startInput.manifest.modelTarget;
-          if (!sameModelTarget(manifestSelection, pinnedSelection)) {
+          const manifestSelection = startInput.manifest.selection;
+          if (!samePiProfile(manifestSelection, providerProfile) || startInput.manifest.effort !== effort) {
             throw new RuntimeExecutionFailure({
               phase: 'start', retry: 'non-retryable',
               reason: 'prepared pi operation received a manifest with different runtime selection',
@@ -913,7 +894,7 @@ interface PreparedPiLaunchInput {
   readonly preparation: RuntimePreparedLaunchV1;
   readonly manifest: RuntimeOperationManifest;
   readonly manifestCwd: string;
-  readonly manifestSelection: ModelLaneTarget | undefined;
+  readonly manifestSelection: HarnessSelection | undefined;
   readonly env: NodeJS.ProcessEnv;
   /**
    * The credential-custody launcher this operation must be parented by, and
@@ -1248,42 +1229,17 @@ async function validateProviderProfileBindingWithLauncher(
   ], { timeout: DETECT_TIMEOUT_MS });
 }
 
-/**
- * Compare two model-lane targets field-for-field within their own lane.
- *
- * The lanes do not share an identity shape: `subscription` pins a model,
- * `byok` a flat `providerId`/`modelId` pair, while `byok-profile` pins an exact local
- * provider profile (ref, revision, hash, model, and the capabilities the task
- * requires). Comparing only the fields one lane happens to expose would let a
- * manifest carrying a *different* profile pass the start-time authority check,
- * so each lane is compared on everything that lane seals — including
- * `requiredCapabilities` in order, since the sealed array is the exact value
- * the manifest froze rather than a set.
- */
-function sameModelTarget(
-  left: ModelLaneTarget | undefined,
-  right: ModelLaneTarget | undefined,
-): boolean {
-  if (left === undefined || right === undefined) return left === right;
-  if (left.lane === 'byok-profile' || right.lane === 'byok-profile') {
-    if (left.lane !== 'byok-profile' || right.lane !== 'byok-profile') return false;
-    if (left.runtimeId !== right.runtimeId) return false;
-    const leftProfile = left.providerProfile;
-    const rightProfile = right.providerProfile;
-    return leftProfile.profileRef === rightProfile.profileRef &&
-      leftProfile.profileRevision === rightProfile.profileRevision &&
-      leftProfile.profileHash === rightProfile.profileHash &&
-      leftProfile.modelId === rightProfile.modelId &&
-      leftProfile.requiredCapabilities.length === rightProfile.requiredCapabilities.length &&
-      leftProfile.requiredCapabilities.every(
-        (capability, index) => capability === rightProfile.requiredCapabilities[index],
-      );
-  }
-  if (left.lane === 'byok' || right.lane === 'byok') {
-    if (left.lane !== 'byok' || right.lane !== 'byok') return false;
-    return left.runtimeId === right.runtimeId && left.providerId === right.providerId && left.modelId === right.modelId;
-  }
-  return left.runtimeId === right.runtimeId && left.modelId === right.modelId;
+/** Compares every part of a prepared Pi profile binding. */
+function samePiProfile(selection: HarnessSelection | undefined, profile: Readonly<Omit<ProviderProfileBinding, 'requiredCapabilities'> & {
+  requiredCapabilities: readonly ProviderProfileBinding['requiredCapabilities'][number][];
+}> | undefined): boolean {
+  if (selection === undefined || profile === undefined) return selection === undefined && profile === undefined;
+  if (selection.mode !== 'byok-profile') return false;
+  const binding = selection.providerProfile;
+  return binding.profileRef === profile.profileRef && binding.profileRevision === profile.profileRevision
+    && binding.profileHash === profile.profileHash && binding.modelId === profile.modelId
+    && binding.requiredCapabilities.length === profile.requiredCapabilities.length
+    && binding.requiredCapabilities.every((capability, index) => capability === profile.requiredCapabilities[index]);
 }
 
 /**
@@ -1398,7 +1354,7 @@ class PiSession implements Session {
   constructor(
     public readonly sessionRef: string,
     private readonly rpc: PiRpcClient,
-    private readonly selection: ModelLaneTarget | undefined,
+    private readonly selection: HarnessSelection | undefined,
     /** Task-scoped isolated MCP extension configuration, removed in close(). */
     private readonly scratch: ExecutionScratch,
     /** Where the first turn starts in `rpc.events`, or `handled` when Pi consumed the input without a run. */
@@ -1544,14 +1500,9 @@ class PiSession implements Session {
     if (task.effort !== undefined && task.effort !== this.effort) {
       throw new PolicyUnsupportedError('pi persistent session cannot change effort');
     }
-    const requestedSelection = modelLaneTarget(task.target);
-    if (requestedSelection !== undefined && (
-      this.selection?.lane !== 'byok' ||
-      requestedSelection.lane !== 'byok' ||
-      requestedSelection.runtimeId !== 'pi' ||
-      requestedSelection.providerId !== this.selection.providerId ||
-      requestedSelection.modelId !== this.selection.modelId
-    )) {
+    const requestedSelection = offerSelection(task.target);
+    if (requestedSelection !== undefined && !samePiProfile(requestedSelection,
+      this.selection?.mode === 'byok-profile' ? this.selection.providerProfile : undefined)) {
       throw new PolicyUnsupportedError(
         'pi persistent session cannot change its authoritative BYOK provider/model selection',
       );

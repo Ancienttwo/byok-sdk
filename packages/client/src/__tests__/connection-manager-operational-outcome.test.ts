@@ -60,7 +60,7 @@ async function setup(scenario: Scenario, onOperationalOutcome: ConnectionManager
   const onCrashed = vi.fn();
   const onHalted = vi.fn();
   connection = new ConnectionManager({
-    serverUrl, deviceId, productId: 'observer-test', capabilities: [], runtimes: [], auth, cursorStore,
+    serverUrl, deviceId, productId: 'observer-test', capabilities: [], harnesses: [], auth, cursorStore,
     onEnvelope: () => {}, onOperationalOutcome, onCrashed, onHalted,
     onOutboundSettled: async batch => {
       const hello = batch[0]?.envelope.type === 'conn.hello';
