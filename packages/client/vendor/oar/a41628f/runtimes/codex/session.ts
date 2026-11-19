@@ -194,11 +194,21 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   if (safe.kind !== "frame") return safe;
   const native = asRecord(safe.body.native);
   const safeItem = asRecord(native?.item);
-  if (method === "turn/completed" || method === "turn/started" || method === "thread/start" || method === "thread/resume"
-    || method === "thread/fork" || method === "thread/started") {
+  const isOpenReply = method === "thread/start" || method === "thread/resume" || method === "thread/fork";
+  if (isOpenReply || method === "turn/completed" || method === "turn/started" || method === "thread/started") {
+    const turn = asRecord(native?.turn);
+    const hiddenTurn = method === "turn/completed" && asRecord(originalNative?.turn) !== null && turn === null;
+    if (hiddenTurn) {
+      const events = safe.body.events.map(event => {
+        if (event.kind !== "turn_ended") return event;
+        const { forkAnchor: _withheld, ...ended } = event;
+        return ended;
+      });
+      return { ...safe, body: { ...safe.body, events } };
+    }
     const snapshot = redactCodexSnapshot(originalNative, native, redact);
     if (snapshot !== native) return { ...safe, body: { ...safe.body, native: snapshot } };
-    if (native === null && (method === "thread/start" || method === "thread/resume")) return { ...safe, body: { ...safe.body, events: [] } };
+    if (native === null && isOpenReply) return { ...safe, body: { ...safe.body, events: [] } };
     return safe;
   }
   if (method.startsWith("thread/goal/") && asRecord(originalNative?.goal) !== null && asRecord(native?.goal) === null) {

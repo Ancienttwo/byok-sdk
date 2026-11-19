@@ -366,6 +366,16 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     assembledText = safe !== record;
     return redact(safe, path => isAssistantToolArguments(path, record.body.native));
   }
+  if (record.body.type === "session/event:turn/end") {
+    const safe = redact(record);
+    if (safe.kind !== "frame") return safe;
+    const originalReason = asRecord(asRecord(asRecord(record.body.native)?.data)?.reason);
+    const reason = asRecord(asRecord(asRecord(safe.body.native)?.data)?.reason);
+    if (originalReason === null || (reason !== null && (asRecord(originalReason.error) === null || asRecord(reason.error) !== null))) return safe;
+    const events = safe.body.events.map(event => event.kind === "turn_ended" && event.outcome.kind === "failed"
+      ? { ...event, outcome: { kind: "failed" as const, failure: event.outcome.failure, reason: "DSH reported a failed turn" } } : event);
+    return { ...safe, body: { ...safe.body, events } };
+  }
   if (record.body.type === "session/event:user/message") {
     const safe = redact(record);
     if (safe.kind !== "frame") return safe;

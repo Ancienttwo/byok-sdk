@@ -31,6 +31,7 @@ import { startAcpProcess, type SpawnAcpLineProcess } from "./process.js";
 import { acpRequestTimeoutError } from "./errors.js";
 import { createAcpRecorder } from "./records.js";
 import { acpToolProgressOutput, acpToolTerminalContent } from "./projection.js";
+import { acpReportedEffort, acpReportedModel } from "./model.js";
 import { createAcpTerminalHost, type SpawnAcpTerminal } from "./terminal.js";
 import { createAcpTurns, type ActiveTurn } from "./turns.js";
 import { acpTakesImages } from "./prompt.js";
@@ -61,6 +62,17 @@ export function redactAcpRecord<T extends RawEvent>(
   });
   if (record.kind !== "frame" || safe.kind !== "frame") return safe;
   const fragment = update?.sessionUpdate;
+  const retainedNative = asRecord(safe.body.native);
+  if (method.startsWith("session/") && update === null && safe.body.native !== record.body.native) {
+    const model = acpReportedModel(retainedNative);
+    const effort = acpReportedEffort(retainedNative);
+    const events = safe.body.events.flatMap<RuntimeEventBody>(event => {
+      if (event.kind === "model") return model === null ? [] : [{ ...event, model }];
+      if (event.kind === "effort") return effort === null ? [] : [{ ...event, effort }];
+      return [event];
+    });
+    return { ...safe, body: { ...safe.body, events } };
+  }
   if (toolUpdate || fragment === "usage_update") {
     const packet = asRecord(safe.body.native);
     const safeUpdate = packet === null ? null : directUpdate ? asRecord(packet.update) : childNotification?.(method.replace(/\/after_answer$/u, ""), packet)?.update ?? null;
@@ -242,13 +254,13 @@ async function openAcpRuntimeSession(
     // id and the kernel can be bound (records.ts).
     const usageGate = createUsageUpdateGate();
     const nativeTurns = createAcpNativeTurnTracker(profile.nativeTurns);
-    const tokenUsage = createAcpTokenUsage(profile, nativeTurns?.sentByOar);
+    const tokenUsage = createAcpTokenUsage(profile, nativeTurns?.sentByOar, credentials.redactValue);
     // BYOK change: a child ledger is an attributed observation and never enters the root accumulator.
     const childLedgers = new Map<string, ReturnType<typeof createAcpTokenUsage>>();
     const childTokenUsage = profile.spontaneousTokenUsage === undefined ? undefined : (sessionId: string) => {
       let ledger = childLedgers.get(sessionId);
       if (ledger === undefined) {
-        ledger = createAcpTokenUsage(profile);
+        ledger = createAcpTokenUsage(profile, undefined, credentials.redactValue);
         childLedgers.set(sessionId, ledger);
       }
       return ledger;

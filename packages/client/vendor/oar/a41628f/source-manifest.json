@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.121.0",
-    "commit": "3468f0bd0edcf2d9ec897afda27b1b62b08cd203"
+    "commit": "c67bbc8ebeccdd60b330bfa5348b730c5d0a7557"
   },
   "release": {
     "ecosystem": "npm",
@@ -522,7 +522,7 @@
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "b86ac107394dce5b477d7e2b4ab9e849146cd089ad3be074c2614f3294a38545",
-      "vendoredSha256": "908fb63e6a775352ae9197220aa6f4ea7de50abd322536f5136f31f6a56e08b8",
+      "vendoredSha256": "5e2a5efb04b2e9dd97c4ef45d0a0e6d749d3ccf6182aedadc063263253afa8e6",
       "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort uses the caller-owned isolated POSIX process reader and stays a no-op on Windows (#2381); the caller's retainedBytes goes to the upstream kernel's record retention. Propagate the typed resume effort refusal. Upstream: planned contribution (#2378). Share Runtime.sessionCapabilities with the narrow BYOK bridge."
     },
     {
@@ -624,7 +624,7 @@
       "path": "runtimes/dsh/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/projection.ts",
       "upstreamSha256": "c83aa677b6a0a5f82e60282b1ca6e3c96c1837fd215e57180c5b0ccb03de94dd",
-      "vendoredSha256": "1d11f1d9e557306bf56ada771556c2e74cdfdef39269b0f4799de738cce852af",
+      "vendoredSha256": "5f51364d8c17753667921b0e8ac78ad045b654628e8ef249079fc7b9a7cf9d3b",
       "delta": "Project dsh tool-call input from decoded, sanitized native arguments and keep native and projected JSON consistent (#2408)."
     },
     {
@@ -916,7 +916,7 @@
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
       "upstreamSha256": "87ff447c2b9968b684c0d74b71a4017f06f49789638fdd6172003f79eab840a3",
-      "vendoredSha256": "058752738b636465505b31e2f5344c7fa7842442aaff3348227813a492a141dd",
+      "vendoredSha256": "44f80ab6d47ba34ef09eedfc7319b28b71ff1e7b0b5223fa3be64447272481b7",
       "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. OAR 0.99: the session keeps its own state construction in place of upstream session-state.ts (that module builds the terminal host without the injected spawn); it wires the upstream native-turn tracker (prompt naming, tracker-fed token usage and recorder, the recorder bound after the turn driver) and the profile steerRequest RPC through steer-request.ts; upstream turn-terminals.ts is not wired because endTurnProcessesOnAbort is omitted. endTurnProcessesOnAbort is omitted from AcpSessionOptions; the caller's retainedBytes goes to the upstream kernel's record retention. Upstream #652 agentPid wiring is omitted. Dispose starts the abort (descendant read and cancel write are synchronous) and does not wait for the write before it kills the process. The process stream observes the prompt-answer boundary with the opening boundary (shared/acp/opening.ts), and the recorder gets whilePromptAwaited (shared/acp/records.ts). Redact echoed image data before recording native output. Linked child terminal usage has its own cumulative counters and replay fence (#2381)."
     },
     {
@@ -937,7 +937,8 @@
       "path": "shared/acp/token-usage.ts",
       "sourcePath": "packages/oar/src/shared/acp/token-usage.ts",
       "upstreamSha256": "c420b8b41c0da22ba626c02371e2a61509cfc470cf86d792b14517f8cd003168",
-      "vendoredSha256": "c420b8b41c0da22ba626c02371e2a61509cfc470cf86d792b14517f8cd003168"
+      "vendoredSha256": "2e4ba14d21af0bfb5edbdf7812a1e429e0ebff2673cab8287cfb3b524a5aae7b",
+      "delta": "Sanitize prompt reply usage before projection and cumulative accounting. A withheld usage map adds no tokens to subsequent totals."
     },
     {
       "path": "shared/acp/turns.ts",

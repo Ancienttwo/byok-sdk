@@ -265,6 +265,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'shared/acp/session.ts',
     'shared/acp/steer-request.ts',
     'shared/acp/terminal.ts',
+    'shared/acp/token-usage.ts',
     'shared/acp/turns.ts',
     'shared/credential-redactor.ts',
     'shared/executable/diagnostics.ts',

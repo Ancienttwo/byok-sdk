@@ -1,4 +1,5 @@
 import type { RuntimeEventBody, TokenTotals } from "../../contracts/session.js";
+import type { CredentialRedactor } from "../credential-redactor.js";
 import { asNumber, asRecord, type JsonRecord } from "../json.js";
 import { acpPromptUsage } from "./projection.js";
 import type { AcpSessionProfile } from "./profile.js";
@@ -9,12 +10,14 @@ export interface AcpTokenUsage {
   extension(method: string, params: JsonRecord, opened: boolean): RuntimeEventBody | null;
 }
 
-export function createAcpTokenUsage(profile: AcpSessionProfile, sentByOar: (promptId: string) => boolean = () => false): AcpTokenUsage {
+export function createAcpTokenUsage(profile: AcpSessionProfile, sentByOar: (promptId: string) => boolean = () => false, redact?: CredentialRedactor["redactValue"]): AcpTokenUsage {
   let billed: TokenTotals = { input: 0, output: 0 };
   const seen = new Set<string>();
   return {
     prompt(response) {
-      const reading = acpPromptUsage(profile.promptContextUsage?.(response) ?? null, profile.promptTokenUsage?.(response) ?? null, billed);
+      const safe = redact === undefined ? response : asRecord(redact(response));
+      if (safe === null) return null;
+      const reading = acpPromptUsage(profile.promptContextUsage?.(safe) ?? null, profile.promptTokenUsage?.(safe) ?? null, billed);
       ({ billed } = reading);
       return reading.event;
     },
