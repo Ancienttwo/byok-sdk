@@ -134,6 +134,17 @@ it('L: refuses a Turn that still has its K4 intent and is not reported, and a ro
   expect(retain(['a', routineTurn])).toMatchObject({ archivedRoots: 2 });
 });
 
+it('L: rejects a potentially hot journal without changing it (#2420)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ledger-hot-')); roots.push(root);
+  const file = join(root, 'host.sqlite');
+  new HostLedger(file, 'tenant', botLedgerOptions).close();
+  const journal = Buffer.alloc(1024); Buffer.from('d9d505f920a163d7', 'hex').copy(journal);
+  writeFileSync(file + '-journal', journal);
+  const before = readdirSync(root).sort().map(name => [name, readFileSync(join(root, name)).toString('hex')]);
+  expect(inspectLedger(file, 'tenant')).toMatchObject({ verdict: 'rejected', reason: expect.stringContaining('hot rollback journal') });
+  expect(readdirSync(root).sort().map(name => [name, readFileSync(join(root, name)).toString('hex')])).toEqual(before);
+});
+
 it('L: refuses old would-do rows without changing the ledger (#1756)', () => {
   const root = mkdtempSync(join(tmpdir(), 'k8-would-do-')); roots.push(root);
   const ledger = new HostLedger(join(root, 'host.sqlite'), 'tenant', botLedgerOptions); closers.push(() => ledger.close());

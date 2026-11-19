@@ -281,7 +281,9 @@
 // entry @byok-sdk/core/sqlite-node
 //   SQLITE_USER_OBJECT -> dist/sqlite-node.d.ts
 //   SqliteReadOnlyOpenError -> dist/sqlite-node.d.ts
+//   SqliteSnapshotError -> dist/sqlite-node.d.ts
 //   readSqliteFileUnchanged -> dist/sqlite-node.d.ts
+//   readSqliteSnapshot -> dist/sqlite-node.d.ts
 //   sqliteFileUri -> dist/sqlite-node.d.ts
 //   sqliteOpenPath -> dist/sqlite-node.d.ts
 // entry @byok-sdk/core/system-tool
@@ -1977,6 +1979,14 @@ export declare class SqliteReadOnlyOpenError extends Error {
     });
 }
 export declare function readSqliteFileUnchanged<T>(path: string, readMetadata: (db: DatabaseSync) => T): T | undefined;
+export declare class SqliteSnapshotError extends Error {
+    readonly path: string;
+    readonly reason: 'changed' | 'hot-journal';
+    constructor(path: string, reason: 'changed' | 'hot-journal', options?: {
+        cause: unknown;
+    });
+}
+export declare function readSqliteSnapshot<T>(path: string, read: (db: DatabaseSync, copyPath: string) => T): T | undefined;
 export declare function sqliteOpenPath(path: string, platform?: NodeJS.Platform): string;
 export declare function sqliteFileUri(path: string, platform?: NodeJS.Platform): string;
 // ==== @byok-sdk/core dist/store-compatibility.d.ts ====

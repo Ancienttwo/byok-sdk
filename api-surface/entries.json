@@ -60,7 +60,6 @@
         "node:util",
         "node:worker_threads",
         "node:zlib",
-        "os",
         "path",
         "zod"
       ],
@@ -110,7 +109,6 @@
           "node:util",
           "node:worker_threads",
           "node:zlib",
-          "os",
           "path"
         ],
         "thirdParty": [
@@ -2182,8 +2180,8 @@
   "@byok-sdk/core/sqlite-node": {
     "kind": "exports",
     "policy": {
-      "purpose": "Read-only SQLite format admission for Node stores",
-      "budgetBytes": 2010,
+      "purpose": "Read-only SQLite format admission and private snapshots for Node stores",
+      "budgetBytes": 4729,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

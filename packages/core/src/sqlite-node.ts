@@ -27,7 +27,8 @@ export class SqliteReadOnlyOpenError extends Error {
  * store can refuse an older format without changing it.
  *
  * Only the main file is read: content still in a WAL or a hot rollback journal
- * is not seen. A store whose main file has no metadata yet while a WAL exists
+ * is not seen. Use {@link readSqliteSnapshot} when committed WAL data is needed.
+ * A store whose main file has no metadata yet while a WAL exists
  * (created by the current code and not yet checkpointed) is decided by the
  * store's own check after its writable open; a new store checkpoints right
  * after writing its metadata, which keeps that window short.
@@ -65,6 +66,95 @@ export function readSqliteFileUnchanged<T>(
   } finally {
     db.close();
   }
+}
+
+/** A consistent private snapshot could not be taken, or may need journal recovery. */
+export class SqliteSnapshotError extends Error {
+  constructor(readonly path: string, readonly reason: 'changed' | 'hot-journal', options?: { cause: unknown }) {
+    super(`SQLite snapshot of ${path} unavailable: ${reason === 'changed' ? 'files changed while copying' : 'a potentially hot rollback journal exists'}`, options);
+    this.name = 'SqliteSnapshotError';
+  }
+}
+
+/**
+ * Read committed main-file and WAL data from a writable private copy, without
+ * opening the original with SQLite. Unlike {@link readSqliteFileUnchanged},
+ * this sees uncheckpointed commits and refuses a potentially hot rollback
+ * journal. A changed file during copying throws {@link SqliteSnapshotError}.
+ * `:memory:`, missing and empty files return undefined, as in that function.
+ * The callback must finish synchronously; its database and copy path are valid
+ * only until it returns. The private directory and its files are then removed.
+ */
+export function readSqliteSnapshot<T>(path: string, read: (db: DatabaseSync, copyPath: string) => T): T | undefined {
+  if (path === ':memory:' || path === '') return undefined;
+  const fs = process.getBuiltinModule('node:fs');
+  const { join, basename } = process.getBuiltinModule('node:path');
+  let file: string;
+  try { file = fs.realpathSync(path); }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
+    throw new SqliteReadOnlyOpenError(path, { cause: error });
+  }
+  const stat = (name: string) => {
+    try { return fs.statSync(name); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }
+  };
+  let initial: ReturnType<typeof stat>;
+  try { initial = stat(file); }
+  catch (error) { throw new SqliteReadOnlyOpenError(path, { cause: error }); }
+  if (!initial || initial.size === 0) return undefined;
+  const directory = fs.mkdtempSync(join(process.getBuiltinModule('node:os').tmpdir(), 'byok-sqlite-snapshot-'));
+  try {
+    const copy = join(directory, basename(file));
+    const suffixes = ['', '-wal', '-journal'];
+    const fingerprint = (suffix: string) => {
+      const s = stat(file + suffix);
+      return s && `${s.size}:${s.mtimeMs}:${s.ino}`;
+    };
+    const before = suffixes.map(fingerprint);
+    const initialFingerprint = `${initial.size}:${initial.mtimeMs}:${initial.ino}`;
+    if (before[0] !== initialFingerprint) throw new SqliteSnapshotError(path, 'changed');
+    const walHeader = (name: string) => {
+      const fd = fs.openSync(name, 'r');
+      try {
+        const header = Buffer.alloc(32);
+        return header.subarray(0, fs.readSync(fd, header, 0, header.length, 0));
+      } finally { fs.closeSync(fd); }
+    };
+    try {
+      const beforeWal = before[1] === undefined ? undefined : walHeader(file + '-wal');
+      suffixes.forEach((suffix, i) => { if (before[i] !== undefined) fs.copyFileSync(file + suffix, copy + suffix); });
+      if (beforeWal) {
+        const afterWal = walHeader(file + '-wal');
+        const copiedWal = walHeader(copy + '-wal');
+        if (!beforeWal.equals(afterWal) || !beforeWal.equals(copiedWal)) throw new SqliteSnapshotError(path, 'changed');
+      }
+      if (suffixes.some((suffix, i) => fingerprint(suffix) !== before[i])) throw new SqliteSnapshotError(path, 'changed');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' ||
+          suffixes.some((suffix, i) => fingerprint(suffix) !== before[i])) {
+        throw new SqliteSnapshotError(path, 'changed', { cause: error });
+      }
+      throw error;
+    }
+    // SQLite treats a journal larger than 512 bytes with a valid nonzero
+    // header as hot when no writer holds the reserved lock. Do not probe locks
+    // on the original: conservatively refuse this candidate even with a writer.
+    if (before[2] !== undefined && fs.statSync(copy + '-journal').size > 512) {
+      const fd = fs.openSync(copy + '-journal', 'r');
+      const header = Buffer.alloc(8);
+      let bytes: number;
+      try { bytes = fs.readSync(fd, header, 0, header.length, 0); } finally { fs.closeSync(fd); }
+      if (bytes === 8 && header.equals(Buffer.from([0xd9, 0xd5, 0x05, 0xf9, 0x20, 0xa1, 0x63, 0xd7]))) {
+        throw new SqliteSnapshotError(path, 'hot-journal');
+      }
+    }
+    const sqlite = process.getBuiltinModule('node:sqlite');
+    if (!sqlite) throw new Error('node:sqlite is not available in this runtime');
+    // Bun needs a writable copy to create WAL/SHM and may remove them on close (#2371).
+    const db = new sqlite.DatabaseSync(`${sqliteFileUri(copy)}?mode=rw`);
+    try { return read(db, copy); } finally { db.close(); }
+  } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
 const EXTENDED = '\\\\?\\';

@@ -251,6 +251,12 @@ example when the daemon stops before its outcome commits.
   upload deduplicates by task id, and only the task that concluded the intent
   can pass the check above.
 
+## Ledger compatibility
+
+`inspectLedger` reads a private snapshot and refuses a potentially hot rollback
+journal instead of recovering it on that copy. Stop the ledger owner and recover
+the database before inspecting it again; preserve the original during recovery.
+
 ## Would-do rows
 
 Each would-do row names the Turn whose outcome proposed it, in `turnId`

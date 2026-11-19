@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "6e36133a3271768e039ee307cc0c23f68757e4a6affd9380c4569fa06df7d39e"
+    "snapshotSha256": "ec50a58fec0b7eb1ab4d2a64bc48768eb0a9a81ad3024512613288b6986c01d5"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,25 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "sqlite-snapshot-read",
+      "impact": "additive",
+      "summary": "@byok-sdk/core/sqlite-node exposes readSqliteSnapshot and SqliteSnapshotError to read committed WAL data on a private copy without changing the original files.",
+      "migration": "packages/core/README.md#sqlite-snapshots",
+      "items": [
+        "export:@byok-sdk/core/sqlite-node#SqliteSnapshotError",
+        "export:@byok-sdk/core/sqlite-node#readSqliteSnapshot"
+      ]
+    },
+    {
+      "id": "bot-ledger-hot-journal",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration inspectLedger rejects a ledger with a potentially hot rollback journal instead of recovering it on a private copy. Recover the ledger before inspecting it.",
+      "migration": "packages/bot-collaboration/README.md#ledger-compatibility",
+      "items": [
+        "behavior:bot-ledger-hot-journal"
+      ]
+    },
     {
       "id": "provider-store-credential-namespace",
       "impact": "breaking",
@@ -242,6 +261,16 @@
       "item": "export:@byok-sdk/client#SdkReservedHelperKind",
       "change": "changed",
       "entry": "mcp-hub-sdk-helper"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#SqliteSnapshotError",
+      "change": "added",
+      "entry": "sqlite-snapshot-read"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#readSqliteSnapshot",
+      "change": "added",
+      "entry": "sqlite-snapshot-read"
     },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
