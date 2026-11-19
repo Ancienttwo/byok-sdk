@@ -25,6 +25,7 @@ import {
   type ModelProviderProfile,
   type ProviderProfileRef,
 } from './provider-profile.js';
+import { bindProviderCredentialStore } from './provider-credential-store.js';
 import { exactProviderProfileBinding } from './provider-profile-binding.js';
 import type { ProviderProfileStore } from './profile-store.js';
 import { buildConfiguredProfile } from './registry.js';
@@ -53,6 +54,7 @@ export interface ApplySealedProviderProvisioningOptions {
   /** The untrusted request exactly as fetched from the Host. */
   readonly request: unknown;
   readonly profileStore: ProviderProfileStore;
+  /** Base credential store. Provisioning adds the profile store’s namespace. */
   readonly secretStore: SecretStore<ModelProviderSecretName>;
   /** This device's current sealing key (`DeviceSealingKeyStore.loadOrCreate`). */
   readonly sealingKey: DeviceSealingKey;
@@ -271,7 +273,7 @@ export async function applySealedProviderProvisioning(
     operation: header.operation,
     operationGeneration: header.operationGeneration,
   };
-  const { profileStore: profiles, secretStore: secrets } = options;
+  const { profileStore: profiles } = options;
 
   // 1. Ownership: only a request addressed to this tenant/device may read or
   //    write local custody state.
@@ -326,17 +328,14 @@ export async function applySealedProviderProvisioning(
     await options.faults?.onCutPoint?.(point);
   };
 
-  let replayed = false;
+  let scopedSecrets: SecretStore<ModelProviderSecretName> | undefined;
   let result: ProviderProvisioningResult;
   try {
     result = await withConfigurationLock(profiles, async () => {
       // Store-wide request identity (F4, F6): a known id — completed or merely
       // started — is settled before anything else, on any profile.
       const known = await settleKnownRequest(profiles, facts);
-      if (known !== undefined) {
-        replayed = true;
-        return known;
-      }
+      if (known !== undefined) return known;
       const recordRejection = async (code: ProviderProvisioningRejection): Promise<ProviderProvisioningResult> => {
         const rejected = rejectedResult(facts, profileRef, code);
         await profiles.commitCustody({
@@ -366,6 +365,8 @@ export async function applySealedProviderProvisioning(
       // same request applies once the store is back.
       const decision = await decide(request, profileRef, secret, options);
       if (decision.kind === 'reject') return recordRejection(decision.code);
+      const secrets = bindProviderCredentialStore(options.secretStore, profiles.credentialNamespaceId);
+      scopedSecrets = secrets;
       if (decision.credential.kind !== 'keep' && !(await secretStoreCall(() => secrets.available()))) {
         return rejectedResult(facts, profileRef, 'secret_store_unavailable');
       }
@@ -429,14 +430,14 @@ export async function applySealedProviderProvisioning(
 
   if (
     options.keyCheck === undefined
-    || replayed
+    || scopedSecrets === undefined
     || result.outcome !== 'applied'
     || result.operation === 'delete'
     || result.binding === null
   ) {
     return result;
   }
-  return runKeyCheck(result, profileRef, secretName, options);
+  return runKeyCheck(result, profileRef, secretName, scopedSecrets, options);
 }
 
 function receiptOf(
@@ -570,6 +571,7 @@ async function runKeyCheck(
   result: ProviderProvisioningResult,
   profileRef: ProviderProfileRef,
   secretName: ModelProviderSecretName,
+  secrets: SecretStore<ModelProviderSecretName>,
   options: ApplySealedProviderProvisioningOptions,
 ): Promise<ProviderProvisioningResult> {
   const generation = result.operationGeneration!;
@@ -581,7 +583,7 @@ async function runKeyCheck(
     if (profile === undefined) return undefined;
     const current = bindingOf(profile);
     if (current.profileRevision !== binding.profileRevision || current.profileHash !== binding.profileHash) return undefined;
-    const key = await secretStoreCall(() => options.secretStore.get(secretName));
+    const key = await secretStoreCall(() => secrets.get(secretName));
     return key === undefined ? undefined : { profile, key };
   });
   if (snapshot === undefined) return result;

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AnthropicMessagesClient } from './anthropic-client';
 import { ByokKeysError } from './errors';
@@ -50,6 +50,21 @@ beforeEach(() => {
   clock = Date.parse('2026-08-05T00:00:00.000Z');
 });
 
+describe('ProviderRegistry credential namespace binding', () => {
+  it('rejects an invalid custom store identity before calling scope', () => {
+    Object.defineProperty(profiles, 'credentialNamespaceId', { value: 'invalid' });
+    const scope = vi.spyOn(secrets, 'scope');
+    expect(registry).toThrow(expect.objectContaining({ code: 'SECRET_NAMESPACE_INVALID' }));
+    expect(scope).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes a synchronous scope failure', () => {
+    vi.spyOn(secrets, 'scope').mockImplementation(() => { throw new Error(CANARY, { cause: CANARY }); });
+    expect(registry).toThrow(expect.objectContaining({ code: 'PROVIDER_SECRET_STORE_FAILED', message: 'Provider credential store operation failed' }));
+    try { registry(); } catch (error) { expect((error as Error).cause).toBeUndefined(); }
+  });
+});
+
 describe('ProviderRegistry.configure', () => {
   it('persists the profile and the secret in their separate stores', async () => {
     const status = await registry().configure(OPENAI, CANARY);
@@ -60,7 +75,7 @@ describe('ProviderRegistry.configure', () => {
       secret_configured: true,
     });
     expect((await profiles.get('openai'))?.model).toBe('gpt-5.2');
-    await expect(secrets.get('model-openai-api-key')).resolves.toBe(CANARY);
+    await expect(secrets.scope(profiles.credentialNamespaceId).get('model-openai-api-key')).resolves.toBe(CANARY);
   });
 
   it('never puts the secret into the profile store', async () => {
@@ -108,7 +123,7 @@ describe('ProviderRegistry.configure', () => {
     await registry().configure(OPENAI, CANARY);
     const status = await registry().configure({ ...OPENAI, model: 'gpt-5.3' });
     expect(status.secret_configured).toBe(true);
-    await expect(secrets.get('model-openai-api-key')).resolves.toBe(CANARY);
+    await expect(secrets.scope(profiles.credentialNamespaceId).get('model-openai-api-key')).resolves.toBe(CANARY);
   });
 
   it('fails closed when an authenticating provider has no secret at all', async () => {
@@ -126,7 +141,7 @@ describe('ProviderRegistry.configure', () => {
     await expect(registry().configure(OPENAI, '')).rejects.toThrowError(
       expect.objectContaining({ code: 'PROVIDER_SECRET_EMPTY' }),
     );
-    await expect(secrets.has('model-openai-api-key')).resolves.toBe(false);
+    await expect(secrets.scope(profiles.credentialNamespaceId).has('model-openai-api-key')).resolves.toBe(false);
   });
 
   it('refuses a secret for an unauthenticated provider', async () => {
@@ -148,7 +163,7 @@ describe('ProviderRegistry.configure', () => {
       base_url: 'http://localhost:11434/v1',
     });
     expect(status.secret_configured).toBe(false);
-    await expect(secrets.has('model-openai-api-key')).resolves.toBe(false);
+    await expect(secrets.scope(profiles.credentialNamespaceId).has('model-openai-api-key')).resolves.toBe(false);
   });
 
   it('propagates profile validation failures', async () => {
@@ -162,6 +177,7 @@ describe('ProviderRegistry.configure', () => {
   it('does not alter the credential when a profile write conflicts', async () => {
     await registry().configure(OPENAI, CANARY);
     const rejectingProfiles: ProviderProfileStore = {
+      credentialNamespaceId: profiles.credentialNamespaceId,
       close: () => profiles.close(),
       delete: (profileRef) => profiles.delete(profileRef),
       get: (profileRef) => profiles.get(profileRef),
@@ -193,7 +209,7 @@ describe('ProviderRegistry.configure', () => {
     await expect(subject.configure(OPENAI, 'replacement-secret')).rejects.toMatchObject({
       code: 'PROVIDER_PROFILE_CONFLICT',
     });
-    await expect(secrets.get('model-openai-api-key')).resolves.toBe(CANARY);
+    await expect(secrets.scope(profiles.credentialNamespaceId).get('model-openai-api-key')).resolves.toBe(CANARY);
     // The failed call restored the previous pair and cleared its own marker.
     await expect(profiles.getPending('openai')).resolves.toBeUndefined();
   });
@@ -241,10 +257,10 @@ describe('ProviderRegistry multi-profile custody', () => {
     await subject.configure(primary, 'sk-primary-canary');
     await subject.configure(backup, 'sk-backup-canary');
 
-    await expect(secrets.get('model-openrouter-primary-api-key')).resolves.toBe(
+    await expect(secrets.scope(profiles.credentialNamespaceId).get('model-openrouter-primary-api-key')).resolves.toBe(
       'sk-primary-canary',
     );
-    await expect(secrets.get('model-openrouter-backup-api-key')).resolves.toBe(
+    await expect(secrets.scope(profiles.credentialNamespaceId).get('model-openrouter-backup-api-key')).resolves.toBe(
       'sk-backup-canary',
     );
     expect((await subject.get('openrouter-primary'))?.capabilities).toEqual([
@@ -309,7 +325,7 @@ describe('ProviderRegistry.resolveDefaultModelProvider', () => {
   it('throws rather than returning a degraded client when the secret vanished', async () => {
     const subject = registry();
     await subject.configure(OPENAI, CANARY);
-    await secrets.delete('model-openai-api-key');
+    await secrets.scope(profiles.credentialNamespaceId).delete('model-openai-api-key');
     await expect(subject.resolveDefaultModelProvider()).rejects.toThrowError(
       expect.objectContaining({ code: 'PROVIDER_SECRET_MISSING' }),
     );
@@ -339,7 +355,7 @@ describe('ProviderRegistry lifecycle', () => {
     await subject.configure(OPENAI, CANARY);
     await expect(subject.delete('openai')).resolves.toBe(true);
     await expect(profiles.get('openai')).resolves.toBeUndefined();
-    await expect(secrets.has('model-openai-api-key')).resolves.toBe(false);
+    await expect(secrets.scope(profiles.credentialNamespaceId).has('model-openai-api-key')).resolves.toBe(false);
   });
 
   it('reports false when deleting a provider that was never configured', async () => {
@@ -350,7 +366,7 @@ describe('ProviderRegistry lifecycle', () => {
     const subject = registry();
     await subject.configure(OPENAI, CANARY);
     await subject.configure({ ...ANTHROPIC, enabled: false }, 'sk-ant-canary');
-    await secrets.delete('model-anthropic-api-key');
+    await secrets.scope(profiles.credentialNamespaceId).delete('model-anthropic-api-key');
     const statuses = await subject.list();
     expect(
       statuses.map((entry) => [entry.profile_ref, entry.secret_configured]),

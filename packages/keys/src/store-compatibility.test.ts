@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readSqliteFileUnchanged } from '@byok-sdk/core/sqlite-node';
-import { afterEach, describe, expect, it } from 'vitest';
-import { InMemorySecretStore, listProviderProfileSecretNames } from './index';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { InMemorySecretStore, listProviderProfileSecretNames, removeRetiredProviderCredentials } from './index';
 import { LATEST_PROVIDER_SECRET_RECOVERY_SCHEMA, providerSecretRecoverySignature } from './provider-secret-recovery';
 import { inspectProviderProfileStore } from './store-compatibility';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
@@ -52,8 +52,8 @@ function fixtureCopy(label: string): string {
 function directoryState(directory: string): Record<string, string> {
   return Object.fromEntries(readdirSync(directory).sort().map((name) => {
     const file = join(directory, name);
-    const { mtimeNs, mode } = statSync(file, { bigint: true });
-    return [name, `${createHash('sha256').update(readFileSync(file)).digest('hex')} ${mtimeNs} ${mode}`];
+    const { mtimeNs, ctimeNs, mode } = statSync(file, { bigint: true });
+    return [name, `${createHash('sha256').update(readFileSync(file)).digest('hex')} ${mtimeNs} ${ctimeNs} ${mode}`];
   }));
 }
 
@@ -71,7 +71,6 @@ describeSqlite('inspectProviderProfileStore', () => {
       const result = await inspectProviderProfileStore(file);
       expect(result.store).toBe('keys-profile-store');
       expect(result.verdict).toBe(fixture.expected?.['keys-profile-store']);
-      expect(await listProviderProfileSecretNames(file)).toEqual([]);
       expect(directoryState(dirname(file))).toEqual(before);
     });
   }
@@ -106,8 +105,9 @@ describeSqlite('inspectProviderProfileStore', () => {
     const { sql } = database.prepare("SELECT sql FROM sqlite_master WHERE name = 'provider_profile'").get() as { sql: string };
     const earlier = sql.replace("'groq', ", '');
     expect(earlier).not.toBe(sql);
-    database.exec(`DROP INDEX provider_profile_one_enabled; DROP TABLE provider_profile; ${earlier};`);
-    database.exec('CREATE UNIQUE INDEX provider_profile_one_enabled ON provider_profile(kind) WHERE enabled = 1;');
+    database.exec('DROP TABLE provider_profile');
+    database.exec(earlier);
+    database.exec('CREATE UNIQUE INDEX provider_profile_single_enabled ON provider_profile(kind) WHERE enabled = 1;');
     database.close();
     const before = directoryState(directory);
     expect(await inspectProviderProfileStore(file)).toMatchObject({ verdict: 'new-path-repair', code: 'PROVIDER_STORE_SCHEMA_STALE' });
@@ -151,7 +151,27 @@ function insertProfile(ref: string, authMode = 'bearer', enabled = 0): string {
     VALUES ('${ref}', 'custom', 'model', 'openai_compatible', 'local', 'https://example.test', '${authMode}', 'model', '[]', ${enabled}, 'a', 'a');`;
 }
 
-describeSqlite('listProviderProfileSecretNames', () => {
+async function currentStore(name = 'profiles.db'): Promise<{ file: string; id: string }> {
+  const file = join(tempDir(), name);
+  const store = new SqliteProviderProfileStore({ path: file });
+  await store.close();
+  return { file, id: store.credentialNamespaceId };
+}
+
+async function expectRecoveryRefused(file: string, error: { code: string }): Promise<void> {
+  const base = new InMemorySecretStore();
+  const scoped = new InMemorySecretStore();
+  const scope = vi.spyOn(base, 'scope').mockReturnValue(scoped);
+  const deletions = [vi.spyOn(base, 'delete'), vi.spyOn(scoped, 'delete')];
+  const names = listProviderProfileSecretNames(file);
+  await expect(names).rejects.toMatchObject(error);
+  await expect(names).rejects.not.toHaveProperty('cause');
+  await expect(removeRetiredProviderCredentials(file, base)).rejects.toMatchObject(error);
+  expect(scope).not.toHaveBeenCalled();
+  for (const remove of deletions) expect(remove).not.toHaveBeenCalled();
+}
+
+describeSqlite('offline provider credential recovery', () => {
   it('keeps the latest allowed signature aligned with a newly created store', async () => {
     const file = join(tempDir(), 'current.db');
     await new SqliteProviderProfileStore({ path: file }).close();
@@ -159,85 +179,99 @@ describeSqlite('listProviderProfileSecretNames', () => {
     expect(await listProviderProfileSecretNames(file)).toEqual([]);
   });
 
-  it('uses the fixed legacy names only for provider IDs that exist', async () => {
-    const file = join(tempDir(), 'legacy.db');
-    editFixture(file, `${historicalDdl[0]}
-      INSERT INTO provider_profile VALUES
-        ('openai', 'model', 'openai_compatible', 'OpenAI', 'https://example.test', 'bearer', 'model', 1, 'a', 'a'),
-        ('anthropic', 'model', 'anthropic', 'Anthropic', 'https://example.test', 'x_api_key', 'model', 0, 'a', 'a'),
-        ('custom', 'model', 'openai_compatible', 'Custom', 'https://example.test', 'bearer', 'model', 0, 'a', 'a');`);
-    expect(await listProviderProfileSecretNames(file)).toEqual([
-      'model-anthropic-api-key', 'model-custom-api-key', 'model-openai-api-key',
-    ]);
-    editFixture(file, "UPDATE provider_profile SET provider_id = 'deepseek' WHERE provider_id = 'openai'");
-    expect(await listProviderProfileSecretNames(file)).toEqual([
-      'model-anthropic-api-key', 'model-custom-api-key', 'model-deepseek-api-key',
-    ]);
+  it.each(historicalDdl.map(ddl => [ddl.split('\n', 1)[0], ddl] as const))('rejects the shared layout %s', async (_label, ddl) => {
+    const file = join(tempDir(), 'historical.db');
+    editFixture(file, ddl);
+    await expectRecoveryRefused(file, stale);
   });
 
-  for (const ddl of historicalDdl.slice(1)) {
-    it(`reads the ${ddl.split(' ')[2]} ref layout`, async () => {
-      const file = join(tempDir(), 'early-ref.db');
-      const ref = 'x'.repeat(64);
-      editFixture(file, ddl + insertProfile(ref));
-      expect(await listProviderProfileSecretNames(file)).toEqual([`model-${ref}-api-key`]);
-    });
-  }
+  it.each(['0.41.0', '0.44.1'])('leaves credentials unchanged for the released %s shared layout', async (release) => {
+    const file = fixtureCopy(release);
+    editFixture(file, insertProfile('openai'));
+    const before = directoryState(dirname(file));
+    await expectRecoveryRefused(file, stale);
+    expect(directoryState(dirname(file))).toEqual(before);
+  });
 
-  it('recovers stale profile and pending names and preserves a replacement key in the same scope', async () => {
-    const old = fixtureCopy('0.41.0');
-    const current = fixtureCopy('0.44.0');
-    editFixture(old, insertProfile('openai', 'bearer', 1) + insertProfile('old') + insertProfile('keyless', 'none') + `
-      INSERT INTO provider_custody_pending (profile_ref, operation, since)
-      VALUES ('pending', 'configure', 'now'), ('old', 'replace_secret', 'now');`);
-    editFixture(current, insertProfile('openai'));
-    expect(await inspectProviderProfileStore(old)).toMatchObject({ verdict: 'new-path-repair', ...stale });
-    expect(await inspectProviderProfileStore(current)).toMatchObject({ verdict: 'accepted' });
-    const before = directoryState(dirname(old));
-    const names = await listProviderProfileSecretNames(old);
-    expect(names).toEqual(['model-keyless-api-key', 'model-old-api-key', 'model-openai-api-key', 'model-pending-api-key']);
-    const active = new Set(await listProviderProfileSecretNames(current));
-    const root = new InMemorySecretStore();
-    const scope = root.scope('original-scope');
-    const other = root.scope('another-scope');
-    for (const name of ['model-old-api-key', 'model-pending-api-key', 'model-openai-api-key', 'model-unrelated-api-key']) {
-      await scope.set(name, 'fixture-key');
+  it('removes only the retired DB’s profile and pending names, even when another DB uses the same name', async () => {
+    const retired = await currentStore();
+    const active = await currentStore();
+    const pending = `INSERT INTO provider_custody_pending (profile_ref, operation, since)
+      VALUES ('pending', 'configure', 'now'), ('openai', 'replace_secret', 'now');`;
+    editFixture(retired.file, `${insertProfile('openai', 'bearer', 1)}${insertProfile('keyless', 'none')}${pending}`);
+    editFixture(active.file, insertProfile('openai'));
+    const before = directoryState(dirname(retired.file));
+    const base = new InMemorySecretStore();
+    const retiredSecrets = base.scope(retired.id);
+    const activeSecrets = base.scope(active.id);
+    const names = ['model-keyless-api-key', 'model-openai-api-key', 'model-pending-api-key'];
+    for (const name of ['model-openai-api-key', 'model-pending-api-key', 'model-unrelated-api-key']) {
+      await retiredSecrets.set(name, 'retired-key');
     }
-    await other.set('model-old-api-key', 'different-scope-key');
-    const removed = [];
-    for (const name of names.filter((name) => !active.has(name))) removed.push(await scope.delete(name));
-    expect(removed).toEqual([false, true, true]);
-    expect(await scope.has('model-old-api-key')).toBe(false);
-    expect(await scope.has('model-pending-api-key')).toBe(false);
-    expect(await scope.get('model-openai-api-key')).toBe('fixture-key');
-    expect(await scope.has('model-unrelated-api-key')).toBe(true);
-    expect(await other.has('model-old-api-key')).toBe(true);
-    expect(directoryState(dirname(old))).toEqual(before);
+    await activeSecrets.set('model-openai-api-key', 'active-key');
+    await base.set('model-openai-api-key', 'base-decoy');
+
+    expect(await listProviderProfileSecretNames(retired.file)).toEqual(names);
+    const scope = vi.spyOn(base, 'scope').mockReturnValueOnce(retiredSecrets);
+    const remove = vi.spyOn(retiredSecrets, 'delete');
+    await expect(removeRetiredProviderCredentials(retired.file, base)).resolves.toBeUndefined();
+    expect(scope).toHaveBeenCalledExactlyOnceWith(retired.id);
+    expect(remove.mock.calls.flat()).toEqual(names);
+    for (const name of names) await expect(retiredSecrets.has(name)).resolves.toBe(false);
+    await expect(retiredSecrets.get('model-unrelated-api-key')).resolves.toBe('retired-key');
+    await expect(activeSecrets.get('model-openai-api-key')).resolves.toBe('active-key');
+    await expect(base.get('model-openai-api-key')).resolves.toBe('base-decoy');
+    expect(directoryState(dirname(retired.file))).toEqual(before);
+  });
+
+  it('stops on a backend failure and retries the partial cleanup using the same retired DB', async () => {
+    const { file, id } = await currentStore();
+    for (const ref of ['a', 'b', 'c']) editFixture(file, insertProfile(ref));
+    const before = directoryState(dirname(file));
+    const base = new InMemorySecretStore();
+    const secrets = base.scope(id);
+    const names = ['model-a-api-key', 'model-b-api-key', 'model-c-api-key'];
+    for (const name of names) await secrets.set(name, 'test-credential');
+    const deleteEntry = secrets.delete.bind(secrets);
+    const remove = vi.spyOn(secrets, 'delete').mockImplementationOnce(deleteEntry)
+      .mockRejectedValueOnce(new Error('backend echoed test-credential'));
+    vi.spyOn(base, 'scope').mockReturnValue(secrets);
+    await expect(removeRetiredProviderCredentials(file, base)).rejects.toMatchObject({
+      code: 'PROVIDER_SECRET_STORE_FAILED', message: 'Provider credential store operation failed',
+    });
+    expect(remove.mock.calls.flat()).toEqual(names.slice(0, 2));
+    await expect(secrets.has(names[0]!)).resolves.toBe(false);
+    await expect(secrets.has(names[2]!)).resolves.toBe(true);
+    remove.mockClear();
+    await expect(removeRetiredProviderCredentials(file, base)).resolves.toBeUndefined();
+    expect(remove.mock.calls.flat()).toEqual(names);
+    for (const name of names) await expect(secrets.has(name)).resolves.toBe(false);
+    expect(directoryState(dirname(file))).toEqual(before);
   });
 
   it.each([
     ['extra table', 'CREATE TABLE unrelated(id TEXT)'],
-    ['absent index', 'DROP INDEX provider_profile_one_enabled'],
+    ['absent index', 'DROP INDEX provider_profile_single_enabled'],
     ['changed pending DDL', 'ALTER TABLE provider_custody_pending ADD COLUMN unexpected TEXT'],
     ['substitute view', "DROP TABLE provider_profile; CREATE VIEW provider_profile AS SELECT 'openai' AS profile_ref"],
-    ['invalid ref', insertProfile('BAD-REF')],
-    ['null ref', insertProfile('valid').replace("'valid'", 'NULL')],
-    ['embedded NUL', insertProfile('valid').replace("'valid'", "'valid' || char(0) || 'tail'")],
-  ])('rejects %s even when other refs are valid', async (_label, sql) => {
-    const file = fixtureCopy('0.41.0');
+    ['removed namespace row', 'DELETE FROM provider_store_metadata'],
+    ['invalid namespace', "UPDATE provider_store_metadata SET credential_namespace_id = credential_namespace_id || char(0) || 'tail'"],
+  ])('rejects %s before binding the credential backend', async (_label, sql) => {
+    const { file } = await currentStore();
     editFixture(file, insertProfile('retained') + sql);
     const before = directoryState(dirname(file));
-    const result = listProviderProfileSecretNames(file);
-    await expect(result).rejects.toMatchObject(stale);
-    await expect(result).rejects.not.toHaveProperty('cause');
+    await expectRecoveryRefused(file, stale);
     expect(directoryState(dirname(file))).toEqual(before);
   });
 
-  it('rejects a CHECK set that no released catalog wrote', async () => {
-    const file = join(tempDir(), 'unknown-catalog.db');
-    const ddl = historicalDdl[1]!.replace("'custom'", "'custom', 'future-vendor'");
-    editFixture(file, ddl + insertProfile('valid'));
-    await expect(listProviderProfileSecretNames(file)).rejects.toMatchObject(stale);
+  it('rejects invalid profile or pending refs even after reading valid refs', async () => {
+    const { file } = await currentStore();
+    editFixture(file, insertProfile('valid'));
+    for (const value of ["'BAD-REF'", 'NULL', "'valid' || char(0) || 'tail'"]) {
+      editFixture(file, `INSERT INTO provider_custody_pending (profile_ref, operation, since) VALUES (${value}, 'configure', 'now');`);
+      await expectRecoveryRefused(file, stale);
+      editFixture(file, 'DELETE FROM provider_custody_pending');
+    }
   });
 
   it('rejects missing, non-file, in-memory and damaged inputs', async () => {
@@ -245,38 +279,40 @@ describeSqlite('listProviderProfileSecretNames', () => {
     const damaged = join(dir, 'damaged.db');
     writeFileSync(damaged, 'not a database'.repeat(10));
     for (const file of [dir, join(dir, 'missing.db'), ':memory:', damaged]) {
-      await expect(listProviderProfileSecretNames(file)).rejects.toMatchObject(unavailable);
+      await expectRecoveryRefused(file, unavailable);
     }
   });
 
   it.each(['-wal', '-shm', '-journal'])('rejects even an empty %s file and preserves it', async (suffix) => {
-    const file = fixtureCopy('0.41.0');
+    const { file } = await currentStore();
     writeFileSync(file + suffix, '');
     const before = directoryState(dirname(file));
-    await expect(listProviderProfileSecretNames(file)).rejects.toMatchObject(unavailable);
+    await expectRecoveryRefused(file, unavailable);
     expect(directoryState(dirname(file))).toEqual(before);
   });
 
-  it.skipIf(process.platform === 'win32')('checks for sidecars at the resolved database path', async () => {
-    const file = fixtureCopy('0.41.0');
+  it.skipIf(process.platform === 'win32')('checks for sidecars at the supplied and resolved database paths', async () => {
+    const { file } = await currentStore();
     const alias = join(tempDir(), 'alias.db');
     symlinkSync(file, alias);
     expect(await listProviderProfileSecretNames(alias)).toEqual([]);
-    writeFileSync(file + '-wal', '');
-    await expect(listProviderProfileSecretNames(alias)).rejects.toMatchObject(unavailable);
+    for (const path of [file, alias]) {
+      writeFileSync(path + '-wal', '');
+      await expectRecoveryRefused(alias, unavailable);
+      rmSync(path + '-wal');
+    }
   });
 
   it('refuses a live WAL and reads its committed rows after close and checkpoint', async () => {
-    const parent = process.platform === 'win32' ? '#%.db' : '#%?.db';
-    const file = join(tempDir(), parent);
-    copyFileSync(join(FIXTURES, '0.44.0/keys-profile-store.db'), file);
+    const fileName = process.platform === 'win32' ? '#%.db' : '#%?.db';
+    const { file } = await currentStore(fileName);
     const { DatabaseSync } = loadSqliteModule();
     const writer = new DatabaseSync(file);
     try {
       writer.exec('PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0;' + insertProfile('wal-only'));
       const before = directoryState(dirname(file));
       expect(statSync(file + '-wal').size).toBeGreaterThan(0);
-      await expect(listProviderProfileSecretNames(file)).rejects.toMatchObject(unavailable);
+      await expectRecoveryRefused(file, unavailable);
       expect(directoryState(dirname(file))).toEqual(before);
     } finally {
       writer.close();
@@ -287,7 +323,7 @@ describeSqlite('listProviderProfileSecretNames', () => {
   });
 
   it('refuses a rollback journal left by a process that did not close', async () => {
-    const file = fixtureCopy('0.41.0');
+    const { file } = await currentStore();
     const script = `
       const db = new (require('node:sqlite').DatabaseSync)(process.argv[1]);
       db.exec('PRAGMA journal_mode=DELETE; PRAGMA cache_size=3; CREATE TABLE spill(data); BEGIN;');
@@ -301,7 +337,7 @@ describeSqlite('listProviderProfileSecretNames', () => {
     expect(result.status).not.toBe(0);
     expect(statSync(file + '-journal').size).toBeGreaterThan(512);
     const before = directoryState(dirname(file));
-    await expect(listProviderProfileSecretNames(file)).rejects.toMatchObject(unavailable);
+    await expectRecoveryRefused(file, unavailable);
     expect(directoryState(dirname(file))).toEqual(before);
   });
 });

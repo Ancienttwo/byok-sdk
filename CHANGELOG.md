@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- **Fixed (keys; #2402)** — `discoverProviderModels` reports unreachable providers as `MODEL_LIST_UNREACHABLE` with the original error in `cause`. Timeout and HTTP error codes remain unchanged.
+- **Breaking (keys, #2409)** — `discoverProviderModels` takes `auth_mode` and `base_url` and drops `providerKind` from its connection object. Provider URL normalization is idempotent. [Host upgrade steps](docs/releases/host-upgrade-next-minor.md#model-discovery-connection-fields)
+- **Breaking (keys, #2405)** — Each provider store owns its credential namespace. Pre-namespace stores require a fresh database and re-entered keys. Upgrade the Host and Pi launcher together. [Host upgrade steps](docs/releases/host-upgrade-next-minor.md#provider-store-credential-namespace)
+- **Fixed (keys, #2402 and #2407)** — `discoverProviderModels` reports transport failures while connecting or reading a successful response body as `MODEL_LIST_UNREACHABLE` and preserves the original error in `cause`.
 
 ## 0.44.1 — 2026-11-19 (published)
 

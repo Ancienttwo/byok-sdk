@@ -14,7 +14,8 @@ const profile = parseModelProviderProfile(fixture.profile);
 if (options.expectedBinding) assertExactProviderProfileBinding(profile, options.expectedBinding);
 if (options.validateOnly) process.exit(0);
 const profiles = new InMemoryProviderProfileStore(); await profiles.save(profile);
-const secrets = new InMemorySecretStore(); await secrets.set(modelProviderSecretName(profile.profile_ref),SENTINEL);
+const secrets = new InMemorySecretStore();
+await secrets.scope(profiles.credentialNamespaceId).set(modelProviderSecretName(profile.profile_ref), SENTINEL);
 const launched = await startPiProvider(profile,options,{ambient:process.env,profiles,createSecretStore:()=>secrets,
   spawn:(command,args,spawnOptions) => {
     const configPath = args.at(-1)!;

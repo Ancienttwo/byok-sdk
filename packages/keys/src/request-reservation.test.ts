@@ -31,7 +31,8 @@ import {
   type ApplySealedProviderProvisioningOptions,
   type ProviderProvisioningCutPoint,
 } from './sealed-provisioning';
-import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
+import { observeProviderCredentials } from './fixtures/observe-provider-credentials';
+import { InMemorySecretStore, type SecretStore, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
@@ -48,6 +49,7 @@ const STORES: Array<{ name: string; enabled: boolean; open: (dir: string) => Pro
 let dir: string;
 let profiles: ProviderProfileStore;
 let secrets: InMemorySecretStore;
+let credentials: SecretStore;
 let sealingKey: DeviceSealingKey;
 
 for (const store of STORES) {
@@ -56,6 +58,7 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'byok-keys-reservation-'));
   profiles = store.open(dir);
   secrets = new InMemorySecretStore();
+  credentials = observeProviderCredentials(secrets, profiles);
   sealingKey = await new DeviceSealingKeyStore({ secretStore: secrets }).loadOrCreate(enrollment);
 });
 
@@ -94,14 +97,14 @@ async function interruptOriginal(cut: ProviderProvisioningCutPoint) {
 }
 
 function spyWrites() {
-  return { set: vi.spyOn(secrets, 'set'), del: vi.spyOn(secrets, 'delete') };
+  return { set: vi.spyOn(credentials, 'set'), del: vi.spyOn(credentials, 'delete') };
 }
 
 describe('F6: store-wide request id reservation', () => {
   for (const cut of ['after-pending', 'after-secret-write'] as const) {
     it(`F6 same-profile different-digest redelivery while pending (${cut}) is a conflict with zero writes`, async () => {
       const { original, exp } = await interruptOriginal(cut);
-      const keyBefore = await secrets.get(modelProviderSecretName(PROFILE_REF));
+      const keyBefore = await credentials.get(modelProviderSecretName(PROFILE_REF));
       const writes = spyWrites();
       const impostor = await replaceSecretRequest(sealingKey, 'k-impostor', { requestId: 'dup', generation: 3, expected: exp });
 
@@ -120,7 +123,7 @@ describe('F6: store-wide request id reservation', () => {
       await expect(readSealedProvisioningResult({ profileStore: profiles, requestId: 'dup', requestDigest: originalDigest }))
         .resolves.toMatchObject({ status: 'completed', result: { code: 'local_commit_interrupted' } });
       expect(await apply(impostor)).toMatchObject({ outcome: 'rejected', code: 'request_conflict' });
-      await expect(secrets.get(modelProviderSecretName(PROFILE_REF))).resolves.toBe(keyBefore);
+      await expect(credentials.get(modelProviderSecretName(PROFILE_REF))).resolves.toBe(keyBefore);
 
       // A higher generation under a new request id still recovers explicitly.
       const recovery = await replaceSecretRequest(sealingKey, 'k-recovered', { requestId: 'recover', generation: 4, expected: exp });

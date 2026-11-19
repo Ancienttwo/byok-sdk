@@ -199,10 +199,10 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
         request, profileStore, secretStore, sealingKey,
         resolveProfileRef: () => PROFILE_REF, readIdentity: async () => placedIdentity(), now: () => new Date(NOW),
       });
-      const keyBefore = await secretStore.get(modelProviderSecretName(PROFILE_REF));
+      const keyBefore = await secretStore.scope(profileStore.credentialNamespaceId).get(modelProviderSecretName(PROFILE_REF));
       expect(await apply(older)).toMatchObject({ outcome: 'rejected', code: 'operation_generation_stale' });
       expect(await apply(newer)).toMatchObject({ outcome: 'rejected', code: 'local_commit_interrupted' });
-      await expect(secretStore.get(modelProviderSecretName(PROFILE_REF))).resolves.toBe(keyBefore);
+      await expect(secretStore.scope(profileStore.credentialNamespaceId).get(modelProviderSecretName(PROFILE_REF))).resolves.toBe(keyBefore);
       expect(await launcherView()).toEqual({ refused: 'PROVIDER_CONFIGURATION_PENDING' });
 
       const recovery = await replaceSecretRequest(sealingKey, 'sk-crash-recovered-4', { requestId: 'recover', generation: 4, expected });
@@ -237,13 +237,13 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       readIdentity: async (agentId) => ({ ...placedIdentity(), placement: { agentId, placementRevision: 'placement-1' } }),
       now: () => new Date(NOW),
     });
-    const keyBefore = await secretStore.get(modelProviderSecretName(PROFILE_REF));
+    const keyBefore = await secretStore.scope(profileStore.credentialNamespaceId).get(modelProviderSecretName(PROFILE_REF));
     const sameProfile = await replaceSecretRequest(sealingKey, 'sk-f6-same', { requestId: 'dup', generation: 3, expected });
     const otherProfile = await configureRequest(sealingKey, 'sk-f6-other', { requestId: 'dup', generation: 1, agentId: otherAgent });
     expect(await apply(sameProfile)).toMatchObject({ outcome: 'rejected', code: 'request_conflict' });
     expect(await apply(otherProfile)).toMatchObject({ outcome: 'rejected', code: 'request_conflict' });
-    await expect(secretStore.has(modelProviderSecretName(otherRef))).resolves.toBe(false);
-    await expect(secretStore.get(modelProviderSecretName(PROFILE_REF))).resolves.toBe(keyBefore);
+    await expect(secretStore.scope(profileStore.credentialNamespaceId).has(modelProviderSecretName(otherRef))).resolves.toBe(false);
+    await expect(secretStore.scope(profileStore.credentialNamespaceId).get(modelProviderSecretName(PROFILE_REF))).resolves.toBe(keyBefore);
     expect(await apply(original)).toMatchObject({ outcome: 'rejected', code: 'local_commit_interrupted', requestId: 'dup' });
     await profileStore.close();
     expect(await launcherView()).toEqual({ refused: 'PROVIDER_CONFIGURATION_PENDING' });
