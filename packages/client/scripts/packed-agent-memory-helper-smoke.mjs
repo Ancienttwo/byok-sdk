@@ -43,7 +43,7 @@ if (Object.hasOwn(manifest.entries, target)) {
 }
 
 if (process.platform === 'win32') {
-  const bin = memory.resolveAgentMemoryFilesystemHelper();
+  const bin = path.join(directory, 'win32-x64.exe');
   const original = readFileSync(bin);
   const scratch = mkdtempSync(path.join(tmpdir(), 'byok-packed-helper-pe-'));
   const copy = path.join(scratch, 'agent-memory-fs.exe');
