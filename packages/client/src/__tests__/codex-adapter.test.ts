@@ -24,7 +24,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/a122061/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/a41628f/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
 const fixture = fileURLToPath(
@@ -98,12 +98,12 @@ describe('Codex persistent app-server adapter', () => {
   it('detects the pinned version, app-server and native auth', async () => {
     expect(await adapter().detect()).toEqual({
       kind: 'available',
-      version: 'codex-cli 0.160.0',
+      version: 'codex-cli 0.169.0',
       authPresent: true,
       sessionCapabilities: { images: true, steer: true },
       executablePath: fixture,
       executableSource: 'config',
-      versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
+      versionVerdict: { state: 'allow', qualifiedVersion: '0.169.0' },
     });
   });
   it('keeps not-logged-in detection honest', async () => {
@@ -146,33 +146,33 @@ describe('Codex persistent app-server adapter', () => {
     // Codex reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter().descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
   });
-  it.each(['codex-cli 0.161.0', 'codex-cli 1.0.0', 'codex-cli 0.159.1', 'codex-cli 0.160.0-alpha.1', 'codex 0.161.0'])('detect admits unqualified version %j with a warn verdict, never a refusal', async (output) => {
+  it.each(['codex-cli 0.161.0', 'codex-cli 1.0.0', 'codex-cli 0.159.1', 'codex-cli 0.169.0-alpha.1', 'codex 0.161.0'])('detect admits unqualified version %j with a warn verdict, never a refusal', async (output) => {
     vi.stubEnv('FAKE_CODEX_VERSION', output);
     expect(await adapter().detect()).toMatchObject({
       kind: 'available',
       version: output,
-      versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' },
+      versionVerdict: { state: 'warn', qualifiedVersion: '0.169.0' },
     });
   });
   it('detect admits the qualified version with an allow verdict', async () => {
     expect(await adapter().detect()).toMatchObject({
-      kind: 'available', version: 'codex-cli 0.160.0',
-      versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
+      kind: 'available', version: 'codex-cli 0.169.0',
+      versionVerdict: { state: 'allow', qualifiedVersion: '0.169.0' },
     });
   });
   it('keeps the Host policy as the whole effective descriptor policy, replacing the default', async () => {
     const versionPolicy = {
-      qualifiedVersion: '0.160.0',
+      qualifiedVersion: '0.169.0',
       unqualified: 'allow' as const,
       block: [{ kind: 'exact' as const, version: '0.161.0' }],
     };
     const host = adapter({ versionPolicy });
     expect(host.descriptor.versionPolicy).toEqual(versionPolicy);
     expect(host.descriptor.versionPolicy).not.toHaveProperty('warn');
-    expect(adapter().descriptor.versionPolicy).toEqual({ qualifiedVersion: '0.160.0', unqualified: 'warn' });
+    expect(adapter().descriptor.versionPolicy).toEqual({ qualifiedVersion: '0.169.0', unqualified: 'warn' });
     vi.stubEnv('FAKE_CODEX_VERSION', 'codex-cli 0.161.0');
     expect(await host.detect()).toMatchObject({
-      versionVerdict: { state: 'block', qualifiedVersion: '0.160.0', matched: '0.161.0' },
+      versionVerdict: { state: 'block', qualifiedVersion: '0.169.0', matched: '0.161.0' },
     });
   });
   it('detect refuses a missing app-server subcommand', async () => {
@@ -479,6 +479,17 @@ describe('Codex persistent app-server adapter', () => {
     );
     expect(out.some((e) => e.type === 'turn_end')).toBe(false);
   });
+  it('projects the reset of a native Codex account quota window', async () => {
+    const s = await open(adapter(), task, await ctx({
+      FAKE_CODEX_TURN_FAILS: '1',
+      FAKE_CODEX_ERROR_INFO: '"usageLimitExceeded"',
+      FAKE_CODEX_QUOTA_RESET_AT: '1795068000',
+    }));
+    await expect(turn(s)).rejects.toMatchObject({
+      phase: 'run', failure: { class: 'quota', resetsAt: '2026-11-19T06:00:00.000Z' },
+    });
+  });
+
   it('unexpected process exit closes the stream with a typed non-retryable run failure', async () => {
     const s = await open(
       adapter(),
@@ -508,6 +519,7 @@ describe('Codex persistent app-server adapter', () => {
     ['Anthropic limit wording', { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }, { class: 'unknown' }],
     ['an invalid_request_error type', { type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long' } }, { class: 'invalid_request' }],
     ['an error code', { error: { code: 'insufficient_quota', message: 'You exceeded your current quota.' } }, { class: 'quota' }],
+    ['a structured quota reset', { error: { type: 'usage_limit_reached', resets_at: 1795068000 } }, { class: 'quota', resetsAt: '2026-11-19T06:00:00.000Z' }],
   ] as const)('classifies codexErrorInfo other with %s from the body, sending unknown for a text rule (#869)', async (_label, body, failure) => {
     const message = JSON.stringify(body);
     const s = await open(adapter(), task, await ctx({

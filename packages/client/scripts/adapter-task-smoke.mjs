@@ -324,7 +324,7 @@ try {
   // Each fake reads its lifecycle variables, set on the live environment below, from its child environment.
   const fakeEnvironment = (runtime) => ({ pass: ['PATH', `FAKE_${runtime.toUpperCase()}_*`] });
   const agyLog = path.join(workDir, 'agy.jsonl');
-  Object.assign(process.env, { FAKE_ACP_VERSION: '1.5.1', FAKE_ACP_LOG: agyLog, GEMINI_API_KEY: AGY_AUDIT_KEY });
+  Object.assign(process.env, { FAKE_ACP_VERSION: '1.5.11', FAKE_ACP_LOG: agyLog, GEMINI_API_KEY: AGY_AUDIT_KEY });
   const adapters = [
     new client.ClaudeAdapter({ runtimeEnvironment: fakeEnvironment('claude'), resolveBin: () => ({ command: runtimeShim('claude'), source: 'path' }) }),
     new client.CodexAdapter({ runtimeEnvironment: fakeEnvironment('codex'), resolveBin: () => ({ command: runtimeShim('codex'), source: 'path' }) }),

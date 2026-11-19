@@ -3,16 +3,16 @@ type ErrorExports<M> = Extract<keyof M, `${string}Error`>;
 // Check source types across the private JS/declaration boundary.
 // The bridge exposes a smaller surface than the full OAR adapter.
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
-import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/a122061/runtimes/codex/session.js';
-import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/a122061/contracts/session.js';
-import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/a122061/runtimes/codex/app-server-client.js';
+import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/a41628f/runtimes/codex/session.js';
+import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/a41628f/contracts/session.js';
+import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/a41628f/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnvironment } from '../../packages/client/src/runtime/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
-import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/a122061/contracts/session-not-found-error.js';
-import type { SessionUnavailableError as VendorSessionUnavailableError } from '../../packages/client/vendor/oar/a122061/contracts/session-unavailable-error.js';
+import type { SessionNotFoundError as VendorSessionNotFoundError } from '../../packages/client/vendor/oar/a41628f/contracts/session-not-found-error.js';
+import type { SessionUnavailableError as VendorSessionUnavailableError } from '../../packages/client/vendor/oar/a41628f/contracts/session-unavailable-error.js';
 import type * as TreeBridge from '../../packages/client/src/runtime/oar-process-tree.js';
-import type * as VendorTree from '../../packages/client/vendor/oar/a122061/shared/executable/process-tree.js';
+import type * as VendorTree from '../../packages/client/vendor/oar/a41628f/shared/executable/process-tree.js';
 
 type Assert<T extends true> = T;
 type Equal<A, B> =
@@ -132,8 +132,13 @@ export type CheckProjectionInput = Assert<Assignable<RawEvent, Parameters<CodexP
 export type CheckHookRecord = Assert<Assignable<RawEvent, Parameters<NonNullable<NonNullable<BridgeArgs[4]>['onRecord']>>[0]>>;
 
 // The process-tree bridge re-exports the vendored OAR functions with their exact types.
-export type CheckTreeExports = Assert<Equal<keyof typeof TreeBridge, 'descendantsOf' | 'killEntries' | 'parseProcessPs' | 'readProcessTable'>>;
-export type CheckTreeVendorExports = Assert<Equal<Exclude<keyof typeof VendorTree, 'ProcessEntry' | 'ProcessTable' | 'ProcessTableRead' | 'ProcessTableSource' | 'ProcessTableFailureReason' | 'ProcessTableFailure' | 'ProcessTableObservation' | 'InvalidProcessTableError' | 'parseProcessStat' | 'parseProcessWindows' | 'observeProcessTable' | 'processTableFailure' | 'signalEntries'>, keyof typeof TreeBridge>>;
+import type * as VendorPipes from '../../packages/client/vendor/oar/a41628f/shared/executable/pipe-close.js';
+import type * as VendorQuery from '../../packages/client/vendor/oar/a41628f/shared/executable/query.js';
+export type CheckTreeExports = Assert<Equal<keyof typeof TreeBridge, 'descendantsOf' | 'killEntries' | 'parseProcessPs' | 'readProcessTable' | 'PIPE_CLOSE_MS' | 'closePipesAfterExit' | 'withQueryDeadline'>>;
+export type CheckTreeVendorExports = Assert<Equal<Exclude<keyof typeof VendorTree, 'ProcessEntry' | 'ProcessTable' | 'ProcessTableRead' | 'ProcessTableSource' | 'ProcessTableFailureReason' | 'ProcessTableFailure' | 'ProcessTableObservation' | 'InvalidProcessTableError' | 'parseProcessStat' | 'parseProcessWindows' | 'observeProcessTable' | 'processTableFailure' | 'signalEntries'>, Exclude<keyof typeof TreeBridge, 'PIPE_CLOSE_MS' | 'closePipesAfterExit' | 'withQueryDeadline'>>>;
+export type CheckPipeDeadline = Assert<Equal<typeof TreeBridge.PIPE_CLOSE_MS, typeof VendorPipes.PIPE_CLOSE_MS>>;
+export type CheckPipeClose = Assert<Assignable<typeof VendorPipes.closePipesAfterExit, typeof TreeBridge.closePipesAfterExit>>;
+export type CheckQueryDeadline = Assert<Equal<typeof TreeBridge.withQueryDeadline, typeof VendorQuery.withQueryDeadline>>;
 export type CheckTreeEntry = Assert<Equal<TreeBridge.ProcessEntry, VendorTree.ProcessEntry>>;
 export type CheckTreeTable = Assert<Equal<TreeBridge.ProcessTable, VendorTree.ProcessTable>>;
 export type CheckTreeRead = Assert<Equal<typeof TreeBridge.readProcessTable, typeof VendorTree.readProcessTable>>;
@@ -144,17 +149,17 @@ export type CheckTreeParsePs = Assert<Equal<typeof TreeBridge.parseProcessPs, ty
 // The ACP bridge: one start signature for every vendored ACP runtime, with
 // the SDK-owned agent process, terminal processes and explicit environment.
 import type * as AcpBridge from '../../packages/client/src/runtime/acp-session-runtime.js';
-import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/a122061/shared/acp/session.js';
-import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/a122061/shared/acp/process.js';
-import type { AcpError as VendorAcpError } from '../../packages/client/vendor/oar/a122061/shared/acp/errors.js';
-import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/a122061/shared/acp/terminal.js';
-import type { AdapterSession } from '../../packages/client/vendor/oar/a122061/contracts/session.js';
-import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/a122061/contracts/runtime-failure-error.js';
-import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/a122061/contracts/errors.js';
-import type { ModelConfirmationError as VendorModelConfirmationError } from '../../packages/client/vendor/oar/a122061/contracts/model-confirmation-error.js';
+import type { StartAcpSession as VendorStartAcp, AcpSessionOptions, AcpSessionHooks } from '../../packages/client/vendor/oar/a41628f/shared/acp/session.js';
+import type { SpawnAcpLineProcess } from '../../packages/client/vendor/oar/a41628f/shared/acp/process.js';
+import type { AcpError as VendorAcpError } from '../../packages/client/vendor/oar/a41628f/shared/acp/errors.js';
+import type { SpawnAcpTerminal } from '../../packages/client/vendor/oar/a41628f/shared/acp/terminal.js';
+import type { AdapterSession } from '../../packages/client/vendor/oar/a41628f/contracts/session.js';
+import type { RuntimeFailureError as VendorRuntimeFailureError } from '../../packages/client/vendor/oar/a41628f/contracts/runtime-failure-error.js';
+import type { UnsupportedOptionError as VendorUnsupportedOptionError } from '../../packages/client/vendor/oar/a41628f/contracts/errors.js';
+import type { ModelConfirmationError as VendorModelConfirmationError } from '../../packages/client/vendor/oar/a41628f/contracts/model-confirmation-error.js';
 import type { spawnOwnedTerminalProcess } from '../../packages/client/src/runtime/owned-terminal-process.js';
-import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/a122061/runtimes/grok/session.js';
-import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/a122061/runtimes/antigravity/session.js';
+import type { grokSession as vendorGrokSession } from '../../packages/client/vendor/oar/a41628f/runtimes/grok/session.js';
+import type { antigravitySession as vendorAntigravitySession } from '../../packages/client/vendor/oar/a41628f/runtimes/antigravity/session.js';
 
 type AcpBridgeArgs = Parameters<AcpBridge.StartAcpSession>;
 type AcpBridgeOptions = Mutable<
@@ -221,26 +226,21 @@ export type CheckAcpEnv = Assert<Equal<Readonly<Awaited<ReturnType<typeof buildR
 // The failure bridge (#869): the vendored OAR failure tables, typed with the
 // protocol's class. The protocol enum and OAR's `FailureClass` are one set.
 import type * as FailureBridge from '../../packages/client/src/runtime/oar-failure-runtime.js';
-import type { codexFailure as vendorCodexFailure } from '../../packages/client/vendor/oar/a122061/runtimes/codex/failure.js';
-import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/a122061/shared/failure-class.js';
-import type { FailureClass } from '../../packages/client/vendor/oar/a122061/contracts/failure.js';
+import type { failureFromStatus as vendorFailureFromStatus } from '../../packages/client/vendor/oar/a41628f/shared/failure-class.js';
+import type { FailureClass } from '../../packages/client/vendor/oar/a41628f/contracts/failure.js';
 import type { RuntimeFailureClass } from '../../packages/protocol/src/messages.js';
 
 export type CheckRuntimeFailureClass = Assert<Equal<RuntimeFailureClass, FailureClass>>;
 export type CheckFailureBridgeClass = Assert<Equal<ReturnType<typeof FailureBridge.failureFromStatus>, RuntimeFailureClass>>;
-export type CheckFailureExports = Assert<Equal<keyof typeof FailureBridge, 'codexFailure' | 'failureFromStatus'>>;
+export type CheckFailureExports = Assert<Equal<keyof typeof FailureBridge, 'failureFromStatus'>>;
 export type CheckFailureFromStatus = Assert<Equal<typeof FailureBridge.failureFromStatus, typeof vendorFailureFromStatus>>;
-export type CheckCodexFailureParameters = Assert<Equal<Parameters<typeof FailureBridge.codexFailure>, Parameters<typeof vendorCodexFailure>>>;
-export type CheckCodexFailureClass = Assert<Equal<ReturnType<typeof FailureBridge.codexFailure>['failure'], ReturnType<typeof vendorCodexFailure>['failure']>>;
-export type CheckCodexFailureFromText = Assert<Equal<ReturnType<typeof FailureBridge.codexFailure>['fromText'], Field<ReturnType<typeof vendorCodexFailure>, 'fromText'>>>;
-export type CheckCodexFailureVendor = Assert<Assignable<typeof vendorCodexFailure, typeof FailureBridge.codexFailure>>;
 
 // The dsh bridge: the vendored native runtime, narrowed to what the SDK calls.
 // 'withdraw' is omitted on purpose, as for Codex. The runtime reports steer; the vendored session always returns it for the qualified dsh.
 import type * as DshBridge from '../../packages/client/src/runtime/dsh-session-runtime.js';
-import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/a122061/runtimes/dsh/session.js';
-import type { dshMcpRows as vendorDshMcpRows } from '../../packages/client/vendor/oar/a122061/runtimes/dsh/mcp.js';
-import type { DshLineProcess } from '../../packages/client/vendor/oar/a122061/runtimes/dsh/launch.js';
+import type { dshSession as vendorDshSession, DshSessionHooks } from '../../packages/client/vendor/oar/a41628f/runtimes/dsh/session.js';
+import type { dshMcpRows as vendorDshMcpRows } from '../../packages/client/vendor/oar/a41628f/runtimes/dsh/mcp.js';
+import type { DshLineProcess } from '../../packages/client/vendor/oar/a41628f/runtimes/dsh/launch.js';
 
 type VendorDshArgs = Parameters<typeof vendorDshSession>;
 type DshBridgeArgs = Parameters<typeof DshBridge.dshSession>;
@@ -273,7 +273,7 @@ export type CheckDshVendorSession = Assert<Assignable<DshVendorSession, DshBridg
 export type CheckDshSpawn = Assert<Assignable<ReturnType<typeof spawnOwnedLineProcess>, DshLineProcess>>;
 export type CheckDshNotFound = Assert<Equal<DshBridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 
-import type { opencodeSession as vendorOpenCodeSession } from '../../packages/client/vendor/oar/a122061/runtimes/opencode/session.js';
+import type { opencodeSession as vendorOpenCodeSession } from '../../packages/client/vendor/oar/a41628f/runtimes/opencode/session.js';
 export type CheckOpenCodeVendor = Assert<Equal<typeof vendorOpenCodeSession, VendorStartAcp>>;
 export type CheckOpenCodeBridge = Assert<Equal<typeof AcpBridge.opencodeSession, AcpBridge.StartAcpSession>>;
 
@@ -295,10 +295,10 @@ export type CheckDshModelConfirmation = Assert<Equal<DshBridge.ModelConfirmation
 import type * as ClaudeBridge from '../../packages/client/src/runtime/claude-session-runtime.js';
 import type { ClaudeStreamSessionOptions } from '../../packages/client/src/adapters/claude/stream-session.js';
 export type CheckClaudeEffort = Assert<Equal<Pick<ClaudeStreamSessionOptions, 'effort'>, Mutable<Pick<VendorArgs[2], 'effort'>>>>;
-import type { streamJsonSession as vendorStreamJsonSession, StreamJsonSessionHooks } from '../../packages/client/vendor/oar/a122061/shared/stream-json/session.js';
-import type { StreamJsonSessionProfile } from '../../packages/client/vendor/oar/a122061/shared/stream-json/profile.js';
-import type { claudeProjectionProfile as vendorClaudeProfile, ClaudeProjectionState as VendorClaudeState } from '../../packages/client/vendor/oar/a122061/runtimes/claude/projection.js';
-import type { sessionCredentialRedactor as vendorRedactor, CredentialRedactor } from '../../packages/client/vendor/oar/a122061/shared/credential-redactor.js';
+import type { streamJsonSession as vendorStreamJsonSession, StreamJsonSessionHooks } from '../../packages/client/vendor/oar/a41628f/shared/stream-json/session.js';
+import type { StreamJsonSessionProfile } from '../../packages/client/vendor/oar/a41628f/shared/stream-json/profile.js';
+import type { claudeProjectionProfile as vendorClaudeProfile, ClaudeProjectionState as VendorClaudeState } from '../../packages/client/vendor/oar/a41628f/runtimes/claude/projection.js';
+import type { sessionCredentialRedactor as vendorRedactor, CredentialRedactor } from '../../packages/client/vendor/oar/a41628f/shared/credential-redactor.js';
 
 type ClaudeVendorArgs = Parameters<typeof vendorStreamJsonSession<VendorClaudeState>>;
 type ClaudeVendorProfile = StreamJsonSessionProfile<VendorClaudeState>;
@@ -333,39 +333,39 @@ export type CheckClaudeRetention = Assert<Equal<ClaudeBridgeArgs[5], ClaudeVendo
 // 'Runtime.minVersion' (OAR 0.110 runtime contract) is omitted on purpose: no bridge exports an OAR Runtime
 // (runtimes/*/index.ts is not selected), and each SDK adapter's RuntimeVersionPolicy owns its version gate.
 // The check fails when the vendored member changes or goes away, so the omission is revisited then.
-import type { Runtime as VendorRuntime } from '../../packages/client/vendor/oar/a122061/contracts/runtime.js';
+import type { Runtime as VendorRuntime } from '../../packages/client/vendor/oar/a41628f/contracts/runtime.js';
 export type CheckRuntimeMinVersionOmitted = Assert<Equal<VendorRuntime['minVersion'], string | undefined>>;
 // The pre-open declaration is intentionally deferred until the SDK consumes it.
-export type CheckRuntimeSessionCapabilitiesOmitted = Assert<Equal<VendorRuntime['sessionCapabilities'], ((installation: import('../../packages/client/vendor/oar/a122061/contracts/installation.js').AvailableInstallation) => import('../../packages/client/vendor/oar/a122061/contracts/runtime.js').SessionCapabilityDeclaration) | undefined>>;
+export type CheckRuntimeSessionCapabilitiesOmitted = Assert<Equal<VendorRuntime['sessionCapabilities'], ((installation: import('../../packages/client/vendor/oar/a41628f/contracts/installation.js').AvailableInstallation) => import('../../packages/client/vendor/oar/a41628f/contracts/runtime.js').SessionCapabilityDeclaration) | undefined>>;
 
 // The SDK supplies both the filtered environment and every reader transport.
 import type * as Readers from '../../packages/client/src/runtime/oar-readers.js';
 import type * as VersionFloors from '../../packages/client/src/runtime/oar-version-floors.js';
 import type { OwnedReaderOptions as SdkReaderOptions } from '../../packages/client/src/runtime/oar-reader-contract.js';
-import type { OwnedReaderOptions as VendorReaderOptions, ListModelsResult } from '../../packages/client/vendor/oar/a122061/contracts/list-models.js';
-import type { AccountUsageSnapshot } from '../../packages/client/vendor/oar/a122061/contracts/account-usage.js';
+import type { OwnedReaderOptions as VendorReaderOptions, ListModelsResult } from '../../packages/client/vendor/oar/a41628f/contracts/list-models.js';
+import type { AccountUsageSnapshot } from '../../packages/client/vendor/oar/a41628f/contracts/account-usage.js';
 import type { RuntimeAccountUsage, RuntimeModelCatalog } from '../../packages/client/src/runtime/runtime-reader-types.js';
-import type { codexListModels as V_codexListModels } from '../../packages/client/vendor/oar/a122061/runtimes/codex/list-models.js';
+import type { codexListModels as V_codexListModels } from '../../packages/client/vendor/oar/a41628f/runtimes/codex/list-models.js';
 export type Check_codexListModels = Assert<Assignable<typeof V_codexListModels, typeof Readers.codexListModels>>;
-import type { codexAccountUsage as V_codexAccountUsage } from '../../packages/client/vendor/oar/a122061/runtimes/codex/account-usage.js';
+import type { codexAccountUsage as V_codexAccountUsage } from '../../packages/client/vendor/oar/a41628f/runtimes/codex/account-usage.js';
 export type Check_codexAccountUsage = Assert<Assignable<typeof V_codexAccountUsage, typeof Readers.codexAccountUsage>>;
-import type { claudeListModels as V_claudeListModels } from '../../packages/client/vendor/oar/a122061/runtimes/claude/list-models.js';
+import type { claudeListModels as V_claudeListModels } from '../../packages/client/vendor/oar/a41628f/runtimes/claude/list-models.js';
 export type Check_claudeListModels = Assert<Assignable<typeof V_claudeListModels, typeof Readers.claudeListModels>>;
-import type { claudeAccountUsage as V_claudeAccountUsage } from '../../packages/client/vendor/oar/a122061/runtimes/claude/account-usage.js';
+import type { claudeAccountUsage as V_claudeAccountUsage } from '../../packages/client/vendor/oar/a41628f/runtimes/claude/account-usage.js';
 export type Check_claudeAccountUsage = Assert<Assignable<typeof V_claudeAccountUsage, typeof Readers.claudeAccountUsage>>;
-import type { dshListModels as V_dshListModels } from '../../packages/client/vendor/oar/a122061/runtimes/dsh/list-models.js';
+import type { dshListModels as V_dshListModels } from '../../packages/client/vendor/oar/a41628f/runtimes/dsh/list-models.js';
 export type Check_dshListModels = Assert<Assignable<typeof V_dshListModels, typeof Readers.dshListModels>>;
-import type { opencodeListModels as V_opencodeListModels } from '../../packages/client/vendor/oar/a122061/runtimes/opencode/list-models.js';
+import type { opencodeListModels as V_opencodeListModels } from '../../packages/client/vendor/oar/a41628f/runtimes/opencode/list-models.js';
 export type Check_opencodeListModels = Assert<Assignable<typeof V_opencodeListModels, typeof Readers.opencodeListModels>>;
-import type { antigravityAccountUsage as V_antigravityAccountUsage } from '../../packages/client/vendor/oar/a122061/runtimes/antigravity/account-usage.js';
+import type { antigravityAccountUsage as V_antigravityAccountUsage } from '../../packages/client/vendor/oar/a41628f/runtimes/antigravity/account-usage.js';
 export type Check_antigravityAccountUsage = Assert<Assignable<typeof V_antigravityAccountUsage, typeof Readers.antigravityAccountUsage>>;
-import type { antigravityVersionRefusal as V_antigravityVersionRefusal } from '../../packages/client/vendor/oar/a122061/runtimes/antigravity/version.js';
+import type { antigravityVersionRefusal as V_antigravityVersionRefusal } from '../../packages/client/vendor/oar/a41628f/runtimes/antigravity/version.js';
 export type Check_antigravityVersionRefusal = Assert<Assignable<typeof V_antigravityVersionRefusal, typeof VersionFloors.antigravityVersionRefusal>>;
-import type { dshVersionUnsupported as V_dshVersionUnsupported } from '../../packages/client/vendor/oar/a122061/runtimes/dsh/version.js';
+import type { dshVersionUnsupported as V_dshVersionUnsupported } from '../../packages/client/vendor/oar/a41628f/runtimes/dsh/version.js';
 export type Check_dshVersionUnsupported = Assert<Assignable<typeof V_dshVersionUnsupported, typeof VersionFloors.dshVersionUnsupported>>;
-import type { grokListModels as V_grokListModels } from '../../packages/client/vendor/oar/a122061/runtimes/grok/list-models.js';
-import type { grokAccountUsage as V_grokAccountUsage } from '../../packages/client/vendor/oar/a122061/runtimes/grok/account-usage.js';
-import type { antigravityListModels as V_antigravityListModels } from '../../packages/client/vendor/oar/a122061/runtimes/antigravity/list-models.js';
+import type { grokListModels as V_grokListModels } from '../../packages/client/vendor/oar/a41628f/runtimes/grok/list-models.js';
+import type { grokAccountUsage as V_grokAccountUsage } from '../../packages/client/vendor/oar/a41628f/runtimes/grok/account-usage.js';
+import type { antigravityListModels as V_antigravityListModels } from '../../packages/client/vendor/oar/a41628f/runtimes/antigravity/list-models.js';
 export type CheckGrokListModels = Assert<Assignable<typeof V_grokListModels, typeof AcpBridge.grokListModels>>;
 export type CheckGrokAccountUsage = Assert<Assignable<typeof V_grokAccountUsage, typeof AcpBridge.grokAccountUsage>>;
 export type CheckAntigravityListModels = Assert<Assignable<typeof V_antigravityListModels, typeof AcpBridge.antigravityListModels>>;

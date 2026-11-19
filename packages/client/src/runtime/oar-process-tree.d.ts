@@ -22,3 +22,21 @@ export declare function readProcessTable(source?: "procfs" | "ps" | "windows"): 
 export declare function descendantsOf(table: ProcessTable, pid: number, source?: "procfs" | "ps" | "windows"): ProcessEntry[];
 /** SIGKILL each entry that `table` shows still running with the same start time, and its process group; never the host or its group. */
 export declare function killEntries(entries: Iterable<ProcessEntry>, table: ProcessTable): void;
+
+export declare const PIPE_CLOSE_MS: 2000;
+export declare function closePipesAfterExit(
+  child: import('node:child_process').ChildProcess,
+  pipes: readonly { readonly name: 'stdout' | 'stderr'; readonly stream: import('node:stream').Readable | null }[],
+  limitMs?: number,
+  onLater?: undefined,
+  unreadLimitMs?: number,
+  retainHolders?: (child: import('node:child_process').ChildProcess, entries: readonly ProcessEntry[]) => void,
+): Promise<unknown>;
+export type OwnQueryProcess = <P extends { kill(): void; readonly exited: Promise<unknown> }>(process: P) => P;
+export declare function withQueryDeadline<T>(
+  name: string,
+  timeoutMs: number,
+  query: (signal: AbortSignal, own: OwnQueryProcess) => Promise<T>,
+  timeoutResult?: T,
+  signal?: AbortSignal,
+): Promise<T>;

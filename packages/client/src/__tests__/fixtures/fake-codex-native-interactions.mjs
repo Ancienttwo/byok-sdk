@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Synthetic Codex 0.160.0 stdio only. No provider, credentials, MCP or command execution.
+// Synthetic Codex 0.169.0 stdio only. No provider, credentials, MCP or command execution.
 import readline from 'node:readline';
 import { appendFileSync } from 'node:fs';
 const args = process.argv.slice(2);
-if (args.includes('--version')) { console.log('codex-cli 0.160.0'); process.exit(0); }
+if (args.includes('--version')) { console.log('codex-cli 0.169.0'); process.exit(0); }
 if (args[0] === 'login') { console.log('Not logged in'); process.exit(1); }
 if (args.includes('--help')) { console.log('app-server --listen stdio://'); process.exit(0); }
 const send = frame => console.log(JSON.stringify(frame));

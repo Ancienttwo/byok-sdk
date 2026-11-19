@@ -130,7 +130,10 @@ prerelease (`0.2.1-rc.5`) as an exact version.
   `QUALIFIED_DSH_VERSION`, or
   `QUALIFIED_CLAUDE_VERSION`. Pi has no
   separate constant: it is bundled, and its version is
-  `byok.piRuntimePin`.
+  `byok.piRuntimePin`. Claude and Codex follow the `accepted` pins in the
+  vendored OAR `.github/runtime-versions.json` on every OAR upgrade.
+  `check:version-authority` enforces the match. These loopback legs exercise
+  the SDK-owned behavior and isolation on top of the OAR native adapters.
 - **Nightly** (`runtime-contract-nightly.yml`, also `workflow_dispatch`): the
   same suite against each CLI's latest release. A failure comments on one open
   tracking issue, or creates it. Pi's leg reports every case as skipped,

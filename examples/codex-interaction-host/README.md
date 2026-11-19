@@ -1,7 +1,7 @@
 # Codex native-interaction terminal reference Host
 
 This private example is an **offline-only local terminal Host**. It runs the real
-public `CodexAdapter` against the included synthetic Codex 0.160.0 app-server
+public `CodexAdapter` against the included synthetic Codex 0.169.0 app-server
 stdio fixture. The fixture never executes a command, reads credentials, or
 contacts a provider. This is not live Codex acceptance, a browser/mobile UI,
 or authenticated remote SaaS approval transport. Salesko remains Pi-only.

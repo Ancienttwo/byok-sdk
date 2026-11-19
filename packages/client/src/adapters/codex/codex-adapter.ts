@@ -32,6 +32,7 @@ import {
 } from '../../types.js';
 import {
   RuntimeExecutionFailure,
+  runtimeFailureClassOf,
   RuntimeStartupDisposalFailure,
   isRuntimeExecutionFailure,
 } from '../../runtime-failure.js';
@@ -39,7 +40,7 @@ import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEn
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { readProcessTable } from '../../runtime/oar-process-tree.js';
-import { codexFailure } from '../../runtime/oar-failure-runtime.js';
+import { objectRecord as recordOf } from '../shared-rules.js';
 import { CodexProjection, type CodexRecord } from './projection.js';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session-kit.js';
@@ -512,41 +513,31 @@ class CodexSession implements Session {
     try {
       const nativeFrame = record.body as { origin?: string; type?: string; native?: Record<string, unknown> };
       if (record.kind === 'frame' && nativeFrame.origin === 'byok-native' && nativeFrame.type && nativeFrame.native) this.native?.notification(nativeFrame.type, nativeFrame.native);
+      const body = recordOf(record.body);
+      if (record.kind === 'frame' && record.sessionId === this.sessionRef && body?.type === 'turn/completed' && body.origin !== 'byok-native' && Array.isArray(body.events)) {
+        const ended = body.events.map(recordOf).find(event => event?.kind === 'turn_ended');
+        const outcome = recordOf(ended?.outcome);
+        if (outcome === undefined) return;
+        this.active = false;
+        this.turnWaiters.settleAll();
+        const nativeTurn = recordOf(recordOf(body.native)?.turn);
+        if (outcome.kind === 'failed' && nativeTurn?.status === 'failed') {
+          // Establish the typed terminal before a required SDK record consumer can throw.
+          const nativeError = recordOf(nativeTurn.error);
+          const reason = typeof nativeError?.message === 'string' ? nativeError.message : 'codex turn failed';
+          const failure = outcome.fromText === true ? 'unknown' : runtimeFailureClassOf(outcome.failure);
+          this.fail(new RuntimeExecutionFailure({
+            phase: 'run',
+            retry: 'non-retryable',
+            reason,
+            failure: failure === 'quota' && typeof outcome.resetsAt === 'string'
+              ? { class: 'quota', resetsAt: outcome.resetsAt } : { class: failure },
+          }));
+        }
+      }
       this.projection?.consume(this.stream, record, (event) =>
         this.queue.push(event),
       );
-      const body = record.body as {
-        origin?: string;
-        type?: string;
-        native?: {
-          threadId?: string;
-          turn?: { status?: string; error?: { message?: string; codexErrorInfo?: unknown } };
-        };
-      };
-      if (
-        record.kind === 'frame' &&
-        body.origin === 'byok-native' &&
-        body.type === 'turn/completed' &&
-        (body.native?.threadId === undefined ||
-          body.native.threadId === this.sessionRef)
-      ) {
-        this.active = false;
-        this.turnWaiters.settleAll();
-        if (body.native?.turn?.status === 'failed') {
-          const reason = body.native.turn.error?.message ?? 'codex turn failed';
-          // The native frame precedes the fold, which classifies the same `turn.error`.
-          // A class OAR took from error text is not structured evidence: send `unknown`.
-          const classified = codexFailure(reason, body.native.turn.error);
-          this.fail(
-            new RuntimeExecutionFailure({
-              phase: 'run',
-              retry: 'non-retryable',
-              reason,
-              failure: { class: classified.fromText ? 'unknown' : classified.failure },
-            }),
-          );
-        }
-      }
     } catch (error) {
       // After an exit the app-server made on its own, a failing record is one that exit produced
       // (its exit record, or a control it settled as exited): the exit stays the class.

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/a122061/runtimes/codex/session';
-import { codexThreadOpen } from '../../vendor/oar/a122061/runtimes/codex/open';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/a122061/runtimes/codex/app-server-client';
+import { codexSession } from '../../vendor/oar/a41628f/runtimes/codex/session';
+import { codexThreadOpen } from '../../vendor/oar/a41628f/runtimes/codex/open';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/a41628f/runtimes/codex/app-server-client';
 
 /**
  * A scripted app-server: answers every request, `thread/start` and

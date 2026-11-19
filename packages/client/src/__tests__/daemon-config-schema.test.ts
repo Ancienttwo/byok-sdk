@@ -184,9 +184,9 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     ['an agy config without a home', { runtimes: { agy: {} } }, 'missing_required', 'runtimes.agy.home'],
     ['an agy allowlist without runtimes.agy', { runtimeAllowlist: ['agy'], toolAuthorization: { default: 'all' } }, 'missing_required', 'runtimes.agy'],
     ['a dsh allowlist without runtimes.dsh', { runtimeAllowlist: ['dsh'], toolAuthorization: { default: 'all' } }, 'missing_required', 'runtimes.dsh'],
-    ['a prefix without a component boundary', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.160.0', unqualified: 'warn', block: [{ kind: 'prefix', prefix: '0.16' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].prefix'],
-    ['an empty exact version', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.160.0', unqualified: 'warn', block: [{ kind: 'exact', version: '' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].version'],
-    ['a duplicate spec', { runtimeAllowlist: ['claude'], runtimes: { claude: { versionPolicy: { qualifiedVersion: '2.1.312', unqualified: 'allow', allow: [{ kind: 'exact', version: '2.1.313' }], warn: [{ kind: 'exact', version: '2.1.313' }] } } } }, 'invalid_version_policy', 'runtimes.claude.versionPolicy.warn[0]'],
+    ['a prefix without a component boundary', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.169.0', unqualified: 'warn', block: [{ kind: 'prefix', prefix: '0.16' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].prefix'],
+    ['an empty exact version', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.169.0', unqualified: 'warn', block: [{ kind: 'exact', version: '' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].version'],
+    ['a duplicate spec', { runtimeAllowlist: ['claude'], runtimes: { claude: { versionPolicy: { qualifiedVersion: '2.1.326', unqualified: 'allow', allow: [{ kind: 'exact', version: '2.1.313' }], warn: [{ kind: 'exact', version: '2.1.313' }] } } } }, 'invalid_version_policy', 'runtimes.claude.versionPolicy.warn[0]'],
   ])('refuses %s in a config file and at construction', async (_name, extra, code, issuePath) => {
     const fileCheck = checkDaemonConfig({ ...base, ...extra }, { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE });
     expect(fileCheck.ok).toBe(false);
@@ -197,7 +197,7 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
 
   it('accepts a valid version policy from DaemonConfig and reports it as effective', async () => {
     const versionPolicy = {
-      qualifiedVersion: '0.160.0',
+      qualifiedVersion: '0.169.0',
       unqualified: 'allow' as const,
       block: [{ kind: 'prefix' as const, prefix: '0.16.' }],
     };

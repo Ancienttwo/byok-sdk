@@ -205,7 +205,7 @@ describe('daemon detection authority', () => {
     const server = await TestServer.start(); servers.push(server);
     const refused = unsupportedHere();
     const available = fakeRuntimeAdapter('codex', {
-      detect: { kind: 'available', version: 'codex-cli 9.9.9', authPresent: true, versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' } },
+      detect: { kind: 'available', version: 'codex-cli 9.9.9', authPresent: true, versionVerdict: { state: 'warn', qualifiedVersion: '0.169.0' } },
     });
     const daemon = createDaemonWithAdapters({
       storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Metadata', productId: 'metadata',
@@ -227,7 +227,7 @@ describe('daemon detection authority', () => {
     expect(detected.runtimes).toEqual(await Promise.all([refused, available].map(async adapter =>
       projectRuntimeObservation(adapter.descriptor, await observeRuntimeDetection(adapter)))));
     expect(detected.runtimes[0]).toMatchObject({ id: 'claude', outcome: 'refused', reason: 'platform_unsupported' });
-    expect(detected.runtimes[1]).toMatchObject({ id: 'codex', version: 'codex-cli 9.9.9', qualifiedVersion: '0.160.0', authPresent: true });
+    expect(detected.runtimes[1]).toMatchObject({ id: 'codex', version: 'codex-cli 9.9.9', qualifiedVersion: '0.169.0', authPresent: true });
 
     server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'no start', target: { lane: 'runtime', runtimeId: 'claude' }, ...FRESH_OFFER }, { taskId: 'platform-refused', seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline');

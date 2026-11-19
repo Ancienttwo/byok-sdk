@@ -104,6 +104,7 @@ export type StartAcpSession = (
     )[];
   },
   hooks?: {
+    credentialsForRedaction?: readonly string[];
     startupSignal?: AbortSignal;
     onReady?: (sessionId: string) => void;
     onRecord?: (record: AcpRecord) => void;

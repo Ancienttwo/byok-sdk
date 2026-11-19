@@ -19,7 +19,7 @@ for (let i = 0; i < argv.length; i++)
     config[value.slice(0, eq)] = value.slice(eq + 1);
   }
 if (argv.includes('--version')) {
-  console.log(process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.160.0');
+  console.log(process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.169.0');
   process.exit(0);
 }
 if (argv[0] === 'login') {
@@ -312,6 +312,9 @@ async function runTurn(id, input) {
     },
   });
   if (process.env.FAKE_CODEX_TURN_FAILS === '1') {
+    if (process.env.FAKE_CODEX_QUOTA_RESET_AT) {
+      notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, resetsAt: Number(process.env.FAKE_CODEX_QUOTA_RESET_AT) } } });
+    }
     notify('error', {
       threadId,
       error: {
