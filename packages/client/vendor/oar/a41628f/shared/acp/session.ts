@@ -57,6 +57,14 @@ export function redactAcpRecord<T extends RawEvent>(
     return toolUpdate && path.length === 4 && body === "body" && native === "native" && update === "update" && field === "status"
       && (value === "pending" || value === "in_progress" || value === "completed" || value === "failed" || value === "cancelled");
   });
+  if (record.kind === "frame" && safe.kind === "frame" && credentials.hasProtectedValues()
+    && update?.sessionUpdate === "agent_thought_chunk") {
+    const packet = asRecord(safe.body.native);
+    const thought = asRecord(packet?.update);
+    const { content: _withheld, ...safeUpdate } = thought ?? {};
+    const native = thought === null ? safe.body.native : { ...packet, update: safeUpdate };
+    return { ...safe, body: { ...safe.body, native, events: safe.body.events.filter(event => event.kind !== "reasoning") } };
+  }
   if (pendingText !== undefined && safe.kind === "frame" && record.kind === "frame" && credentials.hasProtectedValues()) {
     const lane = record.sessionId;
     const previous = pendingText.get(lane) ?? "";

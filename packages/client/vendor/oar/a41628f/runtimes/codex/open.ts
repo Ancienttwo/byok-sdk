@@ -41,7 +41,7 @@ export function codexMcpServersConfig(servers: readonly McpServer[]): JsonRecord
   checkMcpServerNames(servers);
   const invalid = servers.find((server) => !CODEX_MCP_SERVER_NAME.test(server.name));
   if (invalid !== undefined) {
-    throw new Error(`codex starts no MCP server named ${JSON.stringify(invalid.name)}: its names match ${CODEX_MCP_SERVER_NAME.source}`);
+    throw new Error(`codex MCP server names must match ${CODEX_MCP_SERVER_NAME.source}`);
   }
   return Object.fromEntries(servers.map((server) => [server.name, isHttpMcpServer(server)
     ? { url: server.url, ...(server.headers === undefined ? {} : { http_headers: server.headers }), enabled: true }

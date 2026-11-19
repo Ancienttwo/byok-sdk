@@ -23,7 +23,9 @@ const authority = (reason: string) =>
  * public event omits that input and retains the tool identity.
  */
 function toolInput(native: unknown): Record<string, unknown> | undefined {
-  const text = record(record(native)?.data)?.arguments;
+  const nativeData = record(native)?.data;
+  if (native === '[redacted]' || nativeData === '[redacted]') return undefined;
+  const text = record(nativeData)?.arguments;
   let parsed: unknown;
   try {
     parsed = typeof text === 'string' ? JSON.parse(text) : undefined;

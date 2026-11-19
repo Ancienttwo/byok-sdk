@@ -634,6 +634,16 @@ it('emits dsh tool use when complete native arguments arrive', async () => {
   expect(events).toEqual([{ type: 'tool_use', tool: 'shell', toolCallId: 'c', input: { command: 'sleep 600' } }]);
 });
 
+it('preserves a dsh tool identity when redaction withholds its entire data object', async () => {
+  const { DshProjection } = await import('../adapters/dsh/projection');
+  const projection = new DshProjection('root');
+  const emit = vi.fn();
+  projection.consume({ kind: 'frame', seq: 1, sessionId: 'root', agentPath: [], body: {
+    native: { data: '[redacted]' }, events: [{ kind: 'tool_call_started', callId: 'c', tool: 'shell' }],
+  } }, emit, () => {});
+  expect(emit).toHaveBeenCalledExactlyOnceWith({ type: 'tool_use', tool: 'shell', toolCallId: 'c' });
+});
+
 it('settles dsh and agy turns using private root membership when the recorded IDs collide', async () => {
   const { DshProjection } = await import('../adapters/dsh/projection');
   const { AgyProjection } = await import('../adapters/antigravity/projection');

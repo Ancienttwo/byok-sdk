@@ -89,19 +89,29 @@ describe('unconnected OAR Codex adapter', () => {
     await session.dispose();
   });
 
-  it('redacts a Codex credential split across draft notifications', async () => {
+  it.each(['item/agentMessage/delta', 'item/commandExecution/outputDelta'])('redacts or withholds Codex streamed content for %s', async method => {
     const key = 'synthetic-secret-for-codex';
     const fake = fakeServer();
     const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' },
       { cwd: '/workspace', env: { OPENAI_API_KEY: key } });
     for (const delta of [key.slice(0, 12), key.slice(12)]) {
-      fake.frame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-root', itemId: 'm', delta } });
+      fake.frame({ method, params: { threadId: method === 'item/agentMessage/delta' ? 'child' : 'thread-root', itemId: 'm', delta } });
       expect(JSON.stringify(session.records())).not.toContain(delta);
     }
     expect(session.records()).toContainEqual(expect.objectContaining({ kind: 'frame', body: expect.objectContaining({
-      origin: 'byok-native', type: 'item/agentMessage/delta', native: expect.objectContaining({ delta: '[redacted]' }),
+      origin: 'byok-native', type: method, native: method === 'item/agentMessage/delta'
+        ? expect.objectContaining({ delta: '[redacted]' }) : { threadId: 'thread-root', itemId: 'm' },
     }) }));
     await session.dispose();
+  });
+
+  it('rejects an invalid MCP server name without encoding the protected value into the error', async () => {
+    const key = 'fixture-"quoted"';
+    const fake = fakeServer();
+    await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { API_KEY: key }, mcpServers: [{ name: key, command: 'fake' }],
+    })).rejects.toThrow('codex MCP server names must match');
+    expect(fake.spawn).not.toHaveBeenCalled();
   });
 
   it('passes launch arguments to the owned spawn without adding them to records', async () => {

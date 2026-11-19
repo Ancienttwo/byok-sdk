@@ -251,8 +251,18 @@ async function openCodexSession(
     const activeTurn = state.codexTurnId ?? lastNotifiedRootTurnId;
     const byokStaleTurn = isRoot && typeof turnId === "string" && activeTurn !== undefined && turnId !== activeTurn;
     if (isRoot && !byokStaleTurn && (method === "turn/started" || method === "turn/completed")) draftTails.clear();
-    if (isRoot && !byokStaleTurn && method === "item/agentMessage/delta" && typeof params.delta === "string" && credentials.hasProtectedValues()) {
-      const lane = typeof params.itemId === "string" ? params.itemId : "";
+    const draftMethod = method === "item/agentMessage/delta";
+    const streamedOutput = method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta"
+      || method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta";
+    const lane = JSON.stringify([notificationSession, typeof params.itemId === "string" ? params.itemId : ""]);
+    if (method === "item/completed") {
+      const itemId = asRecord(params.item)?.id;
+      if (typeof itemId === "string") draftTails.delete(JSON.stringify([notificationSession, itemId]));
+    }
+    if (credentials.hasProtectedValues() && typeof params.delta === "string" && (streamedOutput || (draftMethod && byokStaleTurn))) {
+      const { delta: _omitted, ...rest } = params;
+      params = rest;
+    } else if (draftMethod && typeof params.delta === "string" && credentials.hasProtectedValues()) {
       const { ready, pending } = credentials.redactChunk((draftTails.get(lane) ?? "") + params.delta);
       if (pending === "") draftTails.delete(lane);
       else draftTails.set(lane, pending);
