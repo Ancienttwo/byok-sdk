@@ -124,7 +124,7 @@ export function redactAcpRecord<T extends RawEvent>(
   const terminal = update.status === "completed" || update.status === "failed" || update.status === "cancelled"
     || safe.body.events.some(event => event.kind === "tool_call_ended");
   let withholdProgress = false;
-  const progressOutput = !terminal && update.sessionUpdate === "tool_call_update" ? acpToolProgressOutput(rawOutput, text => {
+  const progressOutput = !terminal ? acpToolProgressOutput(rawOutput, text => {
     const { ready, pending } = credentials.redactChunk((previous ?? "") + text);
     withholdProgress = ready !== text || pending !== "" || previous !== undefined;
     if (pending === "") pendingToolText?.delete(toolLane);

@@ -40,6 +40,7 @@ export interface CredentialRedactor {
 /** Explicit session credentials only; runtime-native keys can be added after SDK resolution. */
 export function sessionCredentialRedactor(options: Partial<SessionOptions>): CredentialRedactor {
   const known = new Set<string>();
+  let orderedValues: readonly string[] = [];
   const add = (value: string | null | undefined): void => { if (credentialValue(value)) { known.add(value); } };
   const env = (entries: SessionOptions["env"]): void => {
     for (const [name, value] of Object.entries(entries ?? {})) {
@@ -58,10 +59,10 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
       if (authorization) { add(/^\s*\S+\s+(.+?)\s*$/u.exec(value)?.[1]); }
     }
   }
-  let values = [...known].toSorted((left, right) => right.length - left.length);
-  const images = new Set<string>();
+  const refresh = (): void => { orderedValues = [...known].toSorted((left, right) => right.length - left.length); };
+  refresh();
   const redactTextParts = (text: string, streaming: boolean): { ready: string; pending: string } => {
-    const keys = [...values, ...images].toSorted((left, right) => right.length - left.length);
+    const keys = orderedValues;
     let cut = text.length;
     if (streaming) {
       for (const key of keys) {
@@ -86,27 +87,25 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     return { ready: parts.join(""), pending: text.slice(at) };
   };
   const redact = (text: string): string => redactTextParts(text, false).ready;
-  const matches = (text: string): boolean => values.some(value => text.includes(value)) || [...images].some(image => text.includes(image));
+  const matches = (text: string): boolean => orderedValues.some(value => text.includes(value));
   const addKnown = (value: string): void => {
     if (value.length !== 0 && !known.has(value)) {
       known.add(value);
-      values = [...known].toSorted((left, right) => right.length - left.length);
+      refresh();
     }
   };
   return {
-    values: () => values,
-    hasProtectedValues: () => values.length !== 0 || images.size !== 0,
+    values: () => orderedValues,
+    hasProtectedValues: () => orderedValues.length !== 0,
     matches,
     redactChunk: text => redactTextParts(text, true),
     add(value) {
       if (credentialValue(value)) { addKnown(value); }
     },
     addExplicit: addKnown,
-    addImage(data) {
-      if (data.length !== 0) images.add(data);
-    },
+    addImage: addKnown,
     redact,
-    redactValue: (value, jsonField, structure) => values.length === 0 && images.size === 0 ? value : redactText(value, redact, jsonField, structure, matches),
+    redactValue: (value, jsonField, structure) => orderedValues.length === 0 ? value : redactText(value, redact, jsonField, structure, matches),
   };
 }
 
