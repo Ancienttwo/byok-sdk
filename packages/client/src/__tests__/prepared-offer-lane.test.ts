@@ -1492,6 +1492,37 @@ describe('every compared item declines by its own name, with no claim and no pin
     expect(built.store.get(built.recordId)?.pin).toBeUndefined();
   });
 
+  it('rejects a counted direct preparation when its toolset now uses search exposure', async () => {
+    const built = await lane({ registryRevision: true });
+    const direct = Object.fromEntries(built.toolsets);
+    const registry = new McpToolsetRegistry(direct);
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    const detect = vi.spyOn(adapter, 'detect');
+    const probe = vi.fn();
+    const pin = vi.spyOn(built.store, 'pin');
+    const sent: Envelope[] = [];
+    const runner = await makeRunner(built, adapter, sent, {
+      getMcpToolsets: () => registry.snapshot().toolsets,
+      mcpToolsetToolsProbe: probe,
+    });
+    const revision = registry.snapshot().revision;
+    registry.reload({ [TOOLSET_ID]: { mcpServers: direct[TOOLSET_ID]!.mcpServers, exposure: 'search' } }, revision);
+
+    await runner.handleEnvelope(preparedOffer('task-prepared-now-search', reference(built)));
+
+    expect(sent.map((envelope) => envelope.type)).toEqual(['task.decline']);
+    expect(sent[0]!.payload).toMatchObject({ code: 'unsupported_input', retryable: false });
+    expect(declineReason(sent)).toBe(
+      `prepared inputs require direct exposure for MCP toolset ${JSON.stringify(TOOLSET_ID)}`,
+    );
+    expect(detect).not.toHaveBeenCalled();
+    expect(probe).not.toHaveBeenCalled();
+    expect(pin).not.toHaveBeenCalled();
+    expect(built.store.get(built.recordId)?.pin).toBeUndefined();
+    expect(adapter.preparedStartCalls).toHaveLength(0);
+    expect(adapter.startCalls).toHaveLength(0);
+  });
+
   it('declines a prepared offer on a daemon with no input-preparation lane at all', async () => {
     const built = await lane();
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);

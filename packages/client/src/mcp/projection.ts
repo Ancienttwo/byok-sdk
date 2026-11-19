@@ -37,16 +37,18 @@ export function qualifiedMcpToolName(serverName: string, toolName: string): stri
   return `mcp__${serverName}__${toolName}`;
 }
 
-/** Shared by prepared and ordinary tool projection. */
-function assertUniqueQualifiedNames(
-  observation: Readonly<Record<string, McpServerObservation>>,
+export class McpQualifiedToolNameCollisionError extends McpAuthorityError {}
+
+/** Validate the runtime names shared by Pi direct projection and the hub catalog. */
+export function assertUniqueQualifiedNames(
+  observation: Iterable<readonly [string, McpServerObservation]>,
 ): void {
   const qualifiedNames = new Set<string>();
-  for (const [serverName, server] of Object.entries(observation)) {
+  for (const [serverName, server] of observation) {
     for (const tool of server.tools) {
       const name = qualifiedMcpToolName(serverName, tool.name);
       if (qualifiedNames.has(name)) {
-        throw new McpAuthorityError(`duplicate MCP runtime tool name ${JSON.stringify(name)}`);
+        throw new McpQualifiedToolNameCollisionError(`duplicate MCP runtime tool name ${JSON.stringify(name)}`);
       }
       qualifiedNames.add(name);
     }
@@ -66,7 +68,7 @@ function assertUniqueQualifiedNames(
 export function projectMcpTools(
   observation: Readonly<Record<string, McpToolsetServerObservation>>,
 ): readonly McpToolProjection[] {
-  assertUniqueQualifiedNames(observation);
+  assertUniqueQualifiedNames(Object.entries(observation));
   const projections: McpToolProjection[] = [];
   for (const [serverName, server] of Object.entries(observation)) {
     if (!GRANTABLE_MCP_SERVER_NAME.test(serverName)) {

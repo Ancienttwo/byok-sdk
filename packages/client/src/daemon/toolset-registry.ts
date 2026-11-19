@@ -116,9 +116,10 @@ function canonicalServers(toolset: McpToolsetConfig): readonly unknown[] {
       ...(server.approveTools?.length ? [server.approveTools] : [])] as const);
 }
 
-/** The full content identity of one local definition: what it runs and explicitly approves. */
+/** The full content identity of one local definition, including any search exposure. */
 function canonicalToolset(toolset: McpToolsetConfig): unknown {
-  return { servers: canonicalServers(toolset) };
+  // Omitted and explicit direct exposure retain the original digest bytes.
+  return { servers: canonicalServers(toolset), ...(toolset.exposure === 'search' ? { exposure: toolset.exposure } : {}) };
 }
 
 function buildState(configured: McpToolsetConfigInput): RegistryState {
@@ -140,8 +141,12 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
       throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} must be an object`);
     }
     const toolsetKeys = Object.keys(rawToolset);
-    if (toolsetKeys.some((key) => key !== 'mcpServers')) {
-      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} accepts only the mcpServers field`);
+    if (toolsetKeys.some((key) => key !== 'mcpServers' && key !== 'exposure')) {
+      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId} accepts only mcpServers and exposure`);
+    }
+    const { exposure } = rawToolset;
+    if (exposure !== undefined && exposure !== 'direct' && exposure !== 'search') {
+      throw new Error(`DaemonConfig.mcpToolsets.${toolsetId}.exposure must be direct or search`);
     }
     const rawServers = (rawToolset as { mcpServers?: unknown }).mcpServers;
     if (rawServers === null || typeof rawServers !== 'object' || Array.isArray(rawServers)) {
@@ -213,7 +218,10 @@ function buildState(configured: McpToolsetConfigInput): RegistryState {
         ...(args.length > 0 ? { args: Object.freeze([...args]) as readonly string[] } : {}),
       });
     }
-    const toolset = Object.freeze({ mcpServers: Object.freeze(servers) });
+    const toolset = Object.freeze({
+      mcpServers: Object.freeze(servers),
+      ...(exposure === 'search' ? { exposure } : {}),
+    });
     resolved.set(toolsetId, toolset);
     definitionRevisions.set(toolsetId, digest(canonicalToolset(toolset)));
   }

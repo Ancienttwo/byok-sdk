@@ -2,6 +2,7 @@ import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-l
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
+import { assertCodexMcpHubQualified } from './hub-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { requireImageInput } from '../input-images.js';
 import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
@@ -302,6 +303,7 @@ export class CodexAdapter implements RuntimeAdapter {
   ): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
+    assertCodexMcpHubQualified(input);
     if (subscriptionModel(input.manifest.modelTarget) !== model)
       throw authority(
         'prepared codex operation received a manifest with different runtime selection',

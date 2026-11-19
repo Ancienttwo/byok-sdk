@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "c3931ced72deb6d9490378234f1af4cfce076e9aed50eba10d9bfdfbd2c62055"
+    "snapshotSha256": "6e36133a3271768e039ee307cc0c23f68757e4a6affd9380c4569fa06df7d39e"
   },
   "configFields": {
     "status": "tracked",
@@ -92,9 +92,42 @@
         "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
         "export:@byok-sdk/bot-collaboration/rules#syncTurn"
       ]
+    },
+    {
+      "id": "mcp-toolset-exposure-config",
+      "impact": "additive",
+      "summary": "Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2396",
+      "items": [
+        "config:mcpToolsets",
+        "export:@byok-sdk/client#McpToolsetConfig"
+      ]
+    },
+    {
+      "id": "mcp-hub-sdk-helper",
+      "impact": "additive",
+      "summary": "Handle mcp-hub in exhaustive SdkReservedHelperKind switches and include byok-mcp-hub in fixed distribution lists. Single-file Hosts continue routing SDK helpers through runSdkReservedHelperCommand.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2396",
+      "items": [
+        "bin:byok-mcp-hub",
+        "export:@byok-sdk/client#SdkReservedHelperKind"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "bin:byok-mcp-hub",
+      "change": "added",
+      "after": "@byok-sdk/client ./dist/bin/byok-mcp-hub.js",
+      "entry": "mcp-hub-sdk-helper"
+    },
+    {
+      "item": "config:mcpToolsets",
+      "change": "changed",
+      "before": "optional schema-sha256=fba615fff84b94e3",
+      "after": "optional schema-sha256=7d4f72ebf918d478",
+      "entry": "mcp-toolset-exposure-config"
+    },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
       "change": "added",
@@ -199,6 +232,16 @@
       "item": "export:@byok-sdk/bot-collaboration/testing#syncVectors",
       "change": "changed",
       "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/client#McpToolsetConfig",
+      "change": "changed",
+      "entry": "mcp-toolset-exposure-config"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkReservedHelperKind",
+      "change": "changed",
+      "entry": "mcp-hub-sdk-helper"
     },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",

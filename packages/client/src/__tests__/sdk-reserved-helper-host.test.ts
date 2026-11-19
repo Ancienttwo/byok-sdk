@@ -200,7 +200,7 @@ describe('SDK-reserved helper host composition', () => {
     }
   });
 
-  it.each(['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp'] as const)('%s refuses an unusable context file', async (kind) => {
+  it.each(['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp', 'mcp-hub'] as const)('%s refuses an unusable context file', async (kind) => {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-context-'));
     roots.push(dir);
     const blank = path.join(dir, 'blank.json');
@@ -211,12 +211,21 @@ describe('SDK-reserved helper host composition', () => {
     await expect(runSdkReservedHelper(kind, ['relative.json'])).rejects.toThrow(/must be absolute/);
   });
 
+  it('rejects a malformed hub binding before opening stdio', async () => {
+    const context = await fixture('bad-binding.json', JSON.stringify({
+      storeDir: '/store', productId: 'fixture', contextToken: 'synthetic-token',
+      binding: { catalogPath: '/catalog.json', attemptId: 'attempt', launchCwd: '/workspace',
+        mcpEnv: {}, mcpServers: { fixture: { command: process.execPath, args: 'invalid' } } },
+    }));
+    await expect(runSdkReservedHelper('mcp-hub', [context])).rejects.toThrow('invalid hub binding');
+  });
+
   it('retains exact MCP arity at both dispatch boundaries', async () => {
     for (const kind of ['agent-memory-describe', 'agent-team-mcp'] as const) {
       await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '--config', '/x'])).rejects.toThrow(/invalid/);
       await expect(runSdkReservedHelper(kind, ['extra'])).rejects.toThrow(/do not accept arguments/);
     }
-    for (const kind of ['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp'] as const) {
+    for (const kind of ['agent-message-mcp', 'agent-result-mcp', 'agent-memory-mcp', 'mcp-hub'] as const) {
       await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind])).rejects.toThrow(/invalid/);
       await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, '--config', '/x'])).rejects.toThrow(/invalid/);
       await expect(runSdkReservedHelper(kind)).rejects.toThrow(/exactly one context file/);
@@ -404,6 +413,11 @@ it('accepts exactly the manifest helper kinds and rejects every other kind', asy
   const runner = vi.spyOn(runners, 'runSdkReservedHelper').mockResolvedValue();
   const { reservedHelperKinds } = sdkDistributionManifest;
   expect(Object.keys(sdkDistributionManifest)).not.toContain('piSubagentHelperKinds');
+  expect(sdkDistributionManifest.bins['byok-mcp-hub']).toEqual({
+    package: '@byok-sdk/client', role: 'reserved-helper', kind: 'mcp-hub',
+  });
+  expect(reservedHelperKinds).toContain('mcp-hub');
+  expect(resolveSdkReservedHelperBin('mcp-hub').args[0]).toMatch(/bin[/\\]byok-mcp-hub\.js$/u);
   for (const kind of reservedHelperKinds) {
     const argv = sdkReservedHelperArgumentCount(kind) === 1 ? ['/context.json'] : [];
     await expect(runSdkReservedHelperCommand([BYOK_SDK_HELPER_SUBCOMMAND, kind, ...argv])).resolves.toBe(true);

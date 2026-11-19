@@ -1220,6 +1220,7 @@ export class TaskRunner {
    */
   private resolveMcpServers(
     requiredToolsets: readonly string[],
+    registry: ReadonlyMap<string, McpToolsetConfig> | undefined,
   ):
     | {
         ok: true;
@@ -1228,7 +1229,7 @@ export class TaskRunner {
         mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
       }
     | { ok: false; reason: string } {
-    return resolveMcpServers.call(this, requiredToolsets);
+    return resolveMcpServers(requiredToolsets, registry);
   }
 
   private pump(active: ActiveTask): Promise<void> {

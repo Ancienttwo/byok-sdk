@@ -152,5 +152,8 @@ export async function runSdkReservedHelper(kind: SdkReservedHelperKind, argv: re
     case 'agent-team-mcp':
       await runAgentTeamMcp();
       return;
+    case 'mcp-hub':
+      await (await import('#byok-mcp-hub-runtime')).runMcpHub(argv);
+      return;
   }
 }

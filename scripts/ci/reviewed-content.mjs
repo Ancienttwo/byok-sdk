@@ -448,6 +448,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
     if (publicManifests.includes(path) && admitPrivateDistImports(before, after)) {
       qualify.push(path.slice(0, -'/package.json'.length));
     }
+    // #2396: admit this new client bin until the release containing it becomes the base.
+    if (path === 'packages/client/package.json' && !Object.hasOwn(before.bin ?? {}, 'byok-mcp-hub')
+      && after.bin?.['byok-mcp-hub'] === './dist/bin/byok-mcp-hub.js') {
+      delete after.bin['byok-mcp-hub'];
+      if (before.bin === undefined && Object.keys(after.bin).length === 0) delete after.bin;
+      qualify.push('packages/client');
+    }
     // #2286: core gains exactly its sqlite-node entry, from none or from part A's node-only shape. One-time: remove
     // this admission in the release that ships #2286, once that release's core manifest is the base (as #2218 did).
     const sqliteNode = { types: './dist/sqlite-node.d.ts', default: './dist/sqlite-node.js' };

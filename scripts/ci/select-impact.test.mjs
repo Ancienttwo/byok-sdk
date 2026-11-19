@@ -897,11 +897,12 @@ test('#794 D3: a direct Worker example path selects only that example and the da
   assert.throws(() => selectImpact(['examples/hosted-bot-collaboration-worker/wrangler.json']), /reviewed CI mapping required/i);
 });
 
-test('the Codex helper loopback selects client checks without admitting arbitrary scripts', () => {
-  const path = 'packages/client/scripts/codex-reserved-mcp-loopback.mjs';
-  assert.deepEqual(selectImpact([path]), {
-    ...selectImpact(['packages/client/scripts/codex-app-server-real.mjs']), files: [path],
-  });
+test('the Codex helper loopback and MCP hub comparison select client checks without admitting arbitrary scripts', () => {
+  for (const path of ['packages/client/scripts/codex-reserved-mcp-loopback.mjs', 'packages/client/scripts/codex-mcp-hub-comparison.mjs']) {
+    assert.deepEqual(selectImpact([path]), {
+      ...selectImpact(['packages/client/scripts/codex-app-server-real.mjs']), files: [path],
+    });
+  }
   assert.throws(() => selectImpact(['packages/client/scripts/unreviewed-codex-loopback.mjs']), /reviewed CI mapping required/i);
 });
 

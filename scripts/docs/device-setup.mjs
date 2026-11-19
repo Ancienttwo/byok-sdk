@@ -48,7 +48,10 @@ export function generateGuide(current, manifest = JSON.parse(read('packages/clie
   const sections = {
     fields: table('| Field | Tier | Shape |', fields(schema.properties, schema.required)),
     errors: table('| Code / halt reason | Retryable unchanged | Next step | Guide |', Object.entries(catalog).sort(([a], [b]) => a.localeCompare(b)).map(([code, entry]) => [`\`${code}\``, entry.retryable ? 'yes' : 'no', entry.nextStep, `[guide](${entry.anchor})`])),
-    migrations: `Manifest transition: **${manifest.from.version} → ${manifest.to.version}**. Versions and entries below come from the current package manifest; they are not a release announcement.\n\n` + table('| Entry | Impact | Change and migration |', manifest.entries.filter((entry) => entry.items.some((item) => item.startsWith('config:')) || /local-tool-approval|wire-v4/.test(entry.id) || entry.id === 'capability-ports-two-way' || entry.migration === 'docs/spec.md#recommended-host-layout').map((entry) => [entry.id, entry.impact, `${entry.summary} [Migration](../${entry.migration})`])),
+    migrations: `Manifest transition: **${manifest.from.version} → ${manifest.to.version}**. Versions and entries below come from the current package manifest; they are not a release announcement.\n\n` + table('| Entry | Impact | Change and migration |', manifest.entries.filter((entry) => entry.items.some((item) => item.startsWith('config:')) || /local-tool-approval|wire-v4/.test(entry.id) || entry.id === 'capability-ports-two-way' || entry.migration === 'docs/spec.md#recommended-host-layout').map((entry) => {
+      const migration = entry.migration.startsWith('https://') ? entry.migration : `../${entry.migration}`;
+      return [entry.id, entry.impact, `${entry.summary} [Migration](${migration})`];
+    })),
   };
   let result = current;
   for (const [name, content] of Object.entries(sections)) {

@@ -40,6 +40,18 @@ describe('client build and private lazy entry boundaries', () => {
     expect(root).toMatch(/import\(["']#byok-pi-runtime-host["']\)/);
   });
 
+  it('loads the hub runtime only on helper dispatch', () => {
+    const target = '#byok-mcp-hub-runtime';
+    const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
+    const root = readFileSync(path.join(DIST, 'index.js'), 'utf8');
+    const bin = readFileSync(path.resolve(PACKAGE_ROOT, manifest.bin['byok-mcp-hub']), 'utf8');
+    expect(staticImports(root)).not.toContain(target);
+    expect(/import\(["']#byok-mcp-hub-runtime["']\)/u.test(root)).toBe(true);
+    expect(root.includes('MCP hub Attempt is inactive')).toBe(false);
+    expect(staticImports(bin)).toContain(target);
+    expect(existsSync(path.resolve(PACKAGE_ROOT, manifest.imports[target].default))).toBe(true);
+  });
+
   it('loads pi-subagents and TypeBox from installed packages, ships the child gate entry, and leaves no build metadata in dist', () => {
     const manifest = JSON.parse(readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
     const host = readFileSync(path.join(DIST, 'bin/pi-runtime-host.js'), 'utf8');

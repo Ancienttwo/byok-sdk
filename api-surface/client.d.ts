@@ -5722,7 +5722,7 @@ export declare const sdkDistributionManifest: Readonly<{
 }>;
 // ==== @byok-sdk/client dist/sdk-reserved-helper-host.d.ts ====
 export declare const BYOK_SDK_HELPER_SUBCOMMAND = "__byok_sdk_helper";
-export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-result-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
+export type SdkReservedHelperKind = 'agent-message-mcp' | 'agent-result-mcp' | 'agent-memory-mcp' | 'agent-memory-describe' | 'agent-team-mcp' | 'mcp-hub' | 'pi-rpc' | 'pi-prepared' | 'pi-durable';
 export interface SdkHelperHostConfig {
     readonly mode: 'self-executable';
     readonly executable?: string;
@@ -6030,6 +6030,7 @@ export interface McpStdioServerConfig {
     env?: Readonly<Record<string, string>>;
 }
 export interface McpToolsetConfig {
+    exposure?: 'direct' | 'search';
     mcpServers: Readonly<Record<string, McpStdioServerConfig & {
         readonly approveTools?: readonly string[];
     }>>;

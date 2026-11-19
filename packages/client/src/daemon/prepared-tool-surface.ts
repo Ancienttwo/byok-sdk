@@ -48,7 +48,7 @@ import type { McpToolsetRegistry } from './toolset-registry.js';
 
 /** Every way this module refuses. Each maps 1:1 onto an `InputPreparationErrorCodeV1`. */
 export type PreparedToolSurfaceRefusalCode =
-  /** A named toolset is not configured here, or its servers collide. */
+  /** A named toolset is unavailable, uses search exposure, or has colliding servers. */
   | 'unsupported_input'
   /** A required server could not be observed, or its answer is ungrantable. */
   | 'toolsets_unobservable';
@@ -192,6 +192,13 @@ export async function resolvePreparedToolBinding(
         'unsupported_input',
         'required_toolset_unconfigured',
         `required MCP toolset ${JSON.stringify(toolsetId)} is not configured on this device`,
+      );
+    }
+    if (toolset.exposure === 'search') {
+      return refuse(
+        'unsupported_input',
+        'required_toolset_search_exposure',
+        `prepared inputs require direct exposure for MCP toolset ${JSON.stringify(toolsetId)}`,
       );
     }
     toolsetDefinitionRevisions[toolsetId] = definitionRevision;

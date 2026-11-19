@@ -13,6 +13,7 @@ import { assemblePreparedPiToolSurface } from '../adapters/pi/prepared-tools';
 import { resolvePinnedPiRuntimeIdentity, createPiInputPreparationCompiler } from '../adapters/pi/input-preparation';
 import { createPreparedToolSurfaceAssembler } from '../daemon/prepared-tool-surface';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
+import { McpStdioClient } from '../mcp/client';
 import { bindMcpToolsetServerObservation, observeMcpServer } from '../mcp/observation';
 import { INPUT_PREPARATION_ARTIFACT_FORMAT, INPUT_PREPARATION_VERSION } from '../input-preparation';
 import { resolveBunBin } from './support/test-bun-bin';
@@ -251,6 +252,18 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
         const sdk = await import(CLIENT_DIST) as typeof import('../index');
         for (const relative of await sdk.copyPiRuntimeAssets({ outDir: assetRoot, form: 'interpreter+bundle' })) {
           await fs.chmod(path.join(assetRoot, relative), 0o444);
+        }
+        const context = path.join(runDir, 'mcp hub context.json');
+        await fs.writeFile(context, JSON.stringify({ storeDir: runDir, productId: 'fixture', contextToken: 'synthetic-token',
+          binding: { catalogPath: path.join(runDir, 'catalog.json'), attemptId: 'fixture', launchCwd: runDir,
+            mcpEnv: {}, mcpServers: {} } }), { mode: 0o600 });
+        const hubBin = sdk.resolveSdkReservedHelperBin('mcp-hub', { mode: 'self-executable', executable: interpreter, entry: bundle });
+        const hub = new McpStdioClient({ command: hubBin.command, args: [...hubBin.args, context] }, { cwd: runDir, env });
+        try {
+          await hub.connect();
+          expect((await hub.listTools()).map(tool => tool.name)).toEqual(['tool_search', 'call_tool']);
+        } finally {
+          await hub.close();
         }
         const paths: Record<string, string> = {}; const tier1: string[] = []; const nativeBlockers: string[] = [];
         for (const kind of ['instruction', 'prepared'] as const) {

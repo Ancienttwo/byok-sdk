@@ -2458,6 +2458,13 @@
       "additionalProperties": {
         "type": "object",
         "properties": {
+          "exposure": {
+            "enum": [
+              "direct",
+              "search"
+            ],
+            "description": "Defaults to direct mounting. Search exposure requires a qualified runtime. Prepared inputs require direct exposure."
+          },
           "mcpServers": {
             "type": "object",
             "additionalProperties": {
@@ -2499,7 +2506,7 @@
         ],
         "additionalProperties": false
       },
-      "description": "Device-local registry behind wire-level `requiredToolsets` ids. Only\nlogical ids cross the SaaS wire; MCP executable definitions stay here.\nThe first slice supports stdio servers (`command` + `args`) only and\ndeliberately has no task-provided env/header/secret surface."
+      "description": "Device-local registry behind wire-level `requiredToolsets` ids. Only\nlogical ids cross the SaaS wire; MCP executable definitions stay here.\nToolsets define local stdio servers and default to direct exposure.\nSearch exposure requires a qualified runtime and an ordinary offer."
     },
     "dangerouslyAllowInsecureRemote": {
       "type": "boolean",

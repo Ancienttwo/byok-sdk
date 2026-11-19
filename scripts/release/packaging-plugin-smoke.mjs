@@ -5,12 +5,14 @@
 // exemptions, at npm's hoisted paths, and run from an empty directory. Every bin
 // of every installed SDK package has a role in the installed distribution manifest.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
-import { sdkDistributionManifest } from '@byok-sdk/client';
+import { resolveSdkReservedHelperBin, sdkDistributionManifest } from '@byok-sdk/client';
 import { byokSdkPackaging, sdkBundleImportMetaExemptions } from '@byok-sdk/client/packaging';
 
 // A package manifest change runs this smoke, so a new bin in any package fails here until it has a role.
@@ -22,6 +24,47 @@ for (const dir of readdirSync(path.resolve('node_modules/@byok-sdk'))) {
 assert.deepEqual(Object.fromEntries(Object.entries(sdkDistributionManifest.bins).map(([name, bin]) => [name, bin.package]).sort()),
   Object.fromEntries(Object.entries(installedBins).sort()), 'every published bin has a role in sdkDistributionManifest.bins');
 console.log(`[release-pack] all ${Object.keys(installedBins).length} installed SDK bins are classified`);
+
+async function smokeMcpHub(command, args, context) {
+  const child = spawn(command, [...args, context], { stdio: ['pipe', 'pipe', 'inherit'], timeout: 10_000 });
+  const closed = once(child, 'close');
+  // Observe a spawn failure even if stdout ends before the first request returns.
+  void closed.catch(() => {});
+  const reader = createInterface({ input: child.stdout });
+  const lines = reader[Symbol.asyncIterator]();
+  async function request(id, method, params) {
+    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+    const reply = await lines.next();
+    assert.equal(reply.done, false, method);
+    assert.ok(!reply.value.includes(context) && !reply.value.includes('synthetic-token'), method);
+    let frame;
+    try {
+      frame = JSON.parse(reply.value);
+    } catch (cause) {
+      throw new Error(`byok-mcp-hub returned an invalid JSON-RPC frame for ${method}`, { cause });
+    }
+    assert.equal(frame.id, id);
+    return frame.result;
+  }
+  try {
+    const initialized = await request(1, 'initialize', { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'packaging-smoke', version: '1' } });
+    assert.equal(initialized.serverInfo.name, 'byoktools');
+    child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized"}\n');
+    assert.deepEqual((await request(2, 'tools/list')).tools.map(tool => tool.name), ['tool_search', 'call_tool']);
+    const search = await request(3, 'tools/call', { name: 'tool_search', arguments: { query: 'echo' } });
+    assert.equal(search.isError, true);
+    assert.match(search.content[0].text, /Attempt is inactive/);
+    const call = await request(4, 'tools/call', { name: 'call_tool', arguments: { server: 'fixture', tool: 'echo', arguments: {} } });
+    assert.equal(call.isError, true);
+    child.stdin.end();
+    assert.deepEqual(await closed, [0, null]);
+    assert.equal((await lines.next()).done, true, 'EOF must end protocol output');
+  } finally {
+    reader.close();
+    if (child.exitCode === null && child.signalCode === null) child.kill();
+    await closed;
+  }
+}
 
 const esbuildArg = process.argv.indexOf('--esbuild');
 if (esbuildArg < 0) throw new Error('usage: packaging-plugin-smoke.mjs --esbuild <esbuild main>');
@@ -42,6 +85,14 @@ writeFileSync(entry, [
 ].join('\n'));
 const work = realpathSync(mkdtempSync(path.join(tmpdir(), 'byok-packed-plugin-')));
 try {
+  const context = path.join(work, 'private hub context.json');
+  writeFileSync(context, JSON.stringify({ storeDir: work, productId: 'packaging-smoke', contextToken: 'synthetic-token',
+    binding: { catalogPath: path.join(work, 'catalog.json'), attemptId: 'fixture', launchCwd: work, mcpEnv: {}, mcpServers: {} },
+  }), { mode: 0o600 });
+  const installed = resolveSdkReservedHelperBin('mcp-hub');
+  await smokeMcpHub(installed.command, installed.args, context);
+  if (process.platform !== 'win32') await smokeMcpHub(path.resolve('node_modules/.bin/byok-mcp-hub'), [], context);
+  console.log('[release-pack] installed byok-mcp-hub handshakes, rejects calls without a catalog or proof, and exits at EOF');
   for (const format of ['esm', 'cjs']) {
     const outfile = path.join(work, format === 'esm' ? 'host.mjs' : 'host.cjs');
     const result = await build({ entryPoints: [entry], bundle: true, platform: 'node', format, target: 'node24', outfile,
@@ -60,6 +111,8 @@ try {
     const line = run.stdout.split('\n').find(row => row.startsWith(MARKER));
     assert.deepEqual(JSON.parse(line.slice(MARKER.length)), { server: 'function', paired: false, helperHost: true }, format);
     rmSync(scratch, { recursive: true, force: true });
+    const hosted = resolveSdkReservedHelperBin('mcp-hub', { mode: 'self-executable', executable: process.execPath, entry: outfile });
+    await smokeMcpHub(hosted.command, hosted.args, context);
     console.log(`[release-pack] installed byokSdkPackaging ${format} bundle builds and runs (${sites.size} reviewed import.meta exemptions)`);
   }
 } finally {
