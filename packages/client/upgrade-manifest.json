@@ -372,6 +372,16 @@
         "export:@byok-sdk/protocol#TaskDeclinePayload",
         "export:@byok-sdk/protocol#harnessSelectionNeedsModel"
       ]
+    },
+    {
+      "id": "native-subscription-admission",
+      "impact": "additive",
+      "summary": "The launch-resources hook receives the local Agent home and cancellation signal for pre-claim checks. Native subscription offers require the vendor's subscription login.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#harness-model-selection",
+      "items": [
+        "export:@byok-sdk/client#PreparedRuntimeOperation",
+        "export:@byok-sdk/client/adapters#PreparedRuntimeOperation"
+      ]
     }
   ],
   "changes": [
@@ -594,6 +604,11 @@
       "entry": "harness-model-defaults"
     },
     {
+      "item": "export:@byok-sdk/client#PreparedRuntimeOperation",
+      "change": "changed",
+      "entry": "native-subscription-admission"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeAdapterDescriptor",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
@@ -707,6 +722,11 @@
       "item": "export:@byok-sdk/client/adapters#PiAdapter",
       "change": "changed",
       "entry": "harness-model-defaults"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
+      "change": "changed",
+      "entry": "native-subscription-admission"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",

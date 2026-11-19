@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter, RuntimeOperationStartInput } from '../types';
@@ -147,6 +149,24 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
     const declined = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === taskId);
     expect(declined.payload).toMatchObject({ code, retryable: false });
+    expect(server.received.some(envelope => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
+  });
+
+  it.each(['claude', 'codex'] as const)('declines %s API-key login before claiming a subscription offer', async id => {
+    const fake = fileURLToPath(new URL(`./fixtures/fake-${id}.mjs`, import.meta.url));
+    const resolveBin = () => ({ command: fake, source: 'env' as const });
+    const environment: Record<string, string> = id === 'claude'
+      ? { FAKE_CLAUDE_AUTH_STATUS: JSON.stringify({ loggedIn: true, authMethod: 'api_key', apiKeySource: 'apiKeyHelper' }) }
+      : { FAKE_CODEX_ACCOUNT_TYPE: 'apiKey' };
+    const adapter = id === 'claude' ? new ClaudeAdapter({ resolveBin }) : new CodexAdapter({ resolveBin });
+    const runtimeEnvironment = testRuntimeEnvironment();
+    vi.spyOn(adapter, 'runtimeEnvironment').mockResolvedValue({ ...runtimeEnvironment, env: { ...runtimeEnvironment.env, ...environment } });
+    await setup([adapter]);
+    const taskId = `subscription-key-${id}`;
+    server.send(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: id, selection: { mode: 'subscription', modelId: 'fixture-model' } },
+      agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    const declined = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === taskId);
+    expect(declined.payload, JSON.stringify(declined.payload)).toMatchObject({ code: 'invalid_request', retryable: false });
     expect(server.received.some(envelope => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
   });
 

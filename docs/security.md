@@ -370,8 +370,11 @@ proxy never carries the traffic to the daemon's loopback gate and MCP servers.
 Claude, Codex, Grok, OpenCode and Pi remove provider credential variables
 from their native launches using the shared denylist. Claude also removes
 `CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, and
-`CLAUDE_CODE_USE_FOUNDRY`. Codex checks the native `account/read` response
-before admitting `subscription` and again before opening the thread. Other
+`CLAUDE_CODE_USE_FOUNDRY`. For `subscription`, Claude checks `auth status`
+in the task's working directory before claim and again before session launch.
+Codex checks `account/read` before claim and before opening the thread. The
+first read uses the execution's own runtime home, working directory and
+startup restrictions. Other
 environment keys, including loader variables such as `NODE_OPTIONS`, `LD_*`
 and `DYLD_*`, follow the configured environment policy.
 

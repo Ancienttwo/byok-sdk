@@ -332,6 +332,25 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     })).rejects.toThrow(/persistent session cannot change its explicit selection/);
   });
 
+  it.each([
+    { loggedIn: true, authMethod: 'api_key', apiKeySource: 'apiKeyHelper' },
+    { loggedIn: true, authMethod: 'bedrock', apiProvider: 'bedrock' },
+    { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'vertex' },
+    { loggedIn: true, authMethod: 'claude.ai', apiProvider: 'firstParty', apiKeySource: 'apiKeyHelper' },
+    { loggedIn: true },
+    { loggedIn: false, authMethod: 'claude.ai' },
+  ])('declines Claude subscription before spawning a session for native auth status %j', async status => {
+    const spawnFn = vi.fn(() => { throw new Error('unexpected Claude session spawn'); });
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn });
+    const target = { lane: 'harness', harnessId: 'claude', selection: { mode: 'subscription', modelId: 'opus' } } as const;
+    const resources = await makeCtx({ ...process.env, FAKE_CLAUDE_AUTH_STATUS: JSON.stringify(status) });
+    await expect(startAdapter(adapter, { ...baseTask, target }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+      message: 'Claude subscription selection requires a Claude.ai login',
+    });
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
   it('resolves the declared Host key only when launching its configured BYOK selection', async () => {
     const resolveKey = vi.fn(async () => 'host-fixture-key');
     const spawnEnvs: NodeJS.ProcessEnv[] = [];

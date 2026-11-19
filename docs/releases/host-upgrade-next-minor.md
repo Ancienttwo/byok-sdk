@@ -19,8 +19,8 @@ This checklist starts after the published 0.44.1 release. Hosts on an earlier re
    supports device defaults. For explicit routing, pass `lane: 'harness'`, the
    advertised `harnessId`, and a supported `selection`. Use `device-default`
    to keep the executor's defaults or `subscription` with a `modelId` to pin
-   the model under Claude or Codex's own CLI login. Codex subscription
-   requires a ChatGPT account. For a Host credential, use
+   the model under the vendor's own CLI login. Subscription admission
+   requires Claude.ai for Claude or a ChatGPT account for Codex. For a Host credential, use
    `byok` with the advertised pi-ai catalog `providerId`. For `byok` and
    `adapter-model`, omit `modelId` only if the device advertises that selection
    mode in `capabilities.defaultModelModes`. DSH can use a configured default
@@ -74,7 +74,9 @@ the staged CLI passes its version and liveness probes.
 AGY and Grok return vendor commands and reasons. Pi ships with the SDK. Read
 local status or doctor for the installed source and upgrade guidance. Stop
 sessions using a managed copy before calling `uninstallManagedRuntime` with
-an install root whose path has no symbolic links.
+an install root whose path has no symbolic links. Keep the install root
+stable during removal. A process with write access to the path can still
+replace a directory between the path check and the recursive delete.
 
 ## Provider store credential namespace
 

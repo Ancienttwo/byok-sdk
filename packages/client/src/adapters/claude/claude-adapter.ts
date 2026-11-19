@@ -24,6 +24,8 @@ import {
   type RuntimeVersionPolicy,
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
+  type PreparedRuntimeOperation,
+  type RuntimeLaunchResources,
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types.js';
@@ -55,6 +57,12 @@ const execFileAsync = promisify(execFile);
 
 /** Applied to both `detect()` probe calls (`--version`, `auth status --json`) — mirrors codex-adapter.ts's identical `DETECT_TIMEOUT_MS`/rationale exactly (cross-model review finding: these two claude probes previously had NO timeout at all, unlike codex's, so a hung claude CLI could block daemon startup and every `detect()` call indefinitely). `detect()` runs on every allowlist-narrowed task offer, so a small ceiling is cheap insurance against either probe ever unexpectedly hanging. */
 const DETECT_TIMEOUT_MS = 5000;
+const SUBSCRIPTION_REQUIRED = 'Claude subscription selection requires a Claude.ai login';
+type ClaudeAuthStatus = { loggedIn?: unknown; authMethod?: unknown; apiProvider?: unknown; apiKeySource?: unknown };
+interface ClaudeSubscriptionLaunch extends RuntimeLaunchResources {
+  readonly cwd: string;
+  readonly env: Readonly<Record<string, string>>;
+}
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -218,7 +226,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude')).bin.command,
       version: claudeVersionToken,
-      environment: env => ({ env: claudeCredentialEnvironment(env) }),
+      environment: env => ({ env: claudeCredentialEnvironment(env), credentials: claudeProviderCredentials(env) }),
     });
   }
 
@@ -294,13 +302,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const env = claudeCredentialEnvironment((await this.runtimeEnvironment()).env);
+      const { env: rawEnv } = await this.runtimeEnvironment();
+      claudeProviderCredentials(rawEnv);
+      const env = claudeCredentialEnvironment(rawEnv);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude'));
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim();
-      const authPresent = await this.probeAuthPresent(invocation, env);
+      const authPresent = (await this.#readAuthStatus(invocation, env))?.loggedIn === true;
       return {
         kind: 'available', version, authPresent,
         sessionCapabilities: { ...claudeSessionCapabilities(), steer: this.descriptor.capabilities.steer },
@@ -337,12 +347,22 @@ export class ClaudeAdapter implements RuntimeAdapter {
       // As Codex: the reason names the detect kind only, never a local path.
       return { kind: 'reject', reason: `claude installation refused: ${classifyDetectError(error).kind}`, retryable: false };
     }
-    return {
-      kind: 'prepared',
-      operation: {
-        start: (startInput) => this.startPrepared(startInput, selection, invocation, effort),
-      },
+    let admittedLaunch: ClaudeSubscriptionLaunch | undefined;
+    const operation: PreparedRuntimeOperation = {
+      start: startInput => this.startPrepared(startInput, selection, invocation, effort, admittedLaunch),
     };
+    if (selection.mode === 'subscription') {
+      operation.resolveRuntimeLaunch = async ({ cwd, env, scratch, signal = input.signal }) => {
+        if (admittedLaunch !== undefined) throw invalidClaudeRequest('Claude subscription launch was already resolved');
+        const launchEnv = Object.freeze(claudeCredentialEnvironment({ ...env, ...scratch.env }));
+        const status = await this.#readAuthStatus(invocation, launchEnv, cwd, signal);
+        signal?.throwIfAborted();
+        if (!claudeHasSubscription(status)) throw invalidClaudeRequest(SUBSCRIPTION_REQUIRED);
+        admittedLaunch = Object.freeze({ cwd, env: launchEnv, scratch, release: () => scratch.release() });
+        return admittedLaunch;
+      };
+    }
+    return { kind: 'prepared', operation };
   }
 
   private executionSelection(input: HarnessSelection | undefined): ClaudeSelection {
@@ -359,17 +379,19 @@ export class ClaudeAdapter implements RuntimeAdapter {
     selection: ClaudeSelection,
     invocation: RuntimeInvocation,
     effort: string | undefined,
+    admittedLaunch: ClaudeSubscriptionLaunch | undefined,
   ): Promise<Session> {
     const signal = startInput.signal;
-    const env = claudeCredentialEnvironment({ ...startInput.env, ...startInput.scratch.env });
+    const rawEnv = { ...startInput.env, ...startInput.scratch.env };
+    const env = admittedLaunch === undefined ? claudeCredentialEnvironment(rawEnv) : { ...admittedLaunch.env };
     const taskMcpServers = startInput.mcpServers ?? {};
-    const credentials = sessionCredentialRedactor({ env, mcpServers: Object.entries(taskMcpServers).map(([name, server]) => ({ name, ...server })) });
+    const credentials = sessionCredentialRedactor({ env: rawEnv, mcpServers: Object.entries(taskMcpServers).map(([name, server]) => ({ name, ...server })) });
     const cancellationFailure = () => new RuntimeExecutionFailure({
       phase: 'start', retry: 'retryable',
       reason: 'claude runtime startup was cancelled',
     }, { cause: signal?.reason });
     if (signal?.aborted) {
-      for (const [name, key] of Object.entries(env)) {
+      for (const [name, key] of Object.entries(rawEnv)) {
         if (key !== undefined && key.length > 0 && CLAUDE_PROVIDER_KEYS.some(candidate => process.platform === 'win32' ? candidate === name.toUpperCase() : candidate === name)) {
           credentials.addExplicit(key);
         }
@@ -425,7 +447,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
-      for (const credential of claudeProviderCredentials(env)) credentials.addExplicit(credential);
+      for (const credential of claudeProviderCredentials(rawEnv)) credentials.addExplicit(credential);
       throwIfCancelled();
       const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
       // Built before any write, so a refusal leaves no file behind.
@@ -488,6 +510,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
           reason: 'prepared claude operation received a manifest without a sealed cwd',
         });
       }
+      if (selection.mode === 'subscription' && (admittedLaunch === undefined || admittedLaunch !== startInput.runtimeLaunch
+        || admittedLaunch.cwd !== manifestCwd || admittedLaunch.scratch !== startInput.scratch)) {
+        throw invalidClaudeRequest('Claude subscription start requires its exact admitted launch');
+      }
       let launchModel = manifestModelId;
       if (effort !== undefined) {
         let catalog: RuntimeModelCatalog;
@@ -495,15 +521,15 @@ export class ClaudeAdapter implements RuntimeAdapter {
           catalog = await this.listModels({ signal });
         } catch (cause) {
           throwIfCancelled();
-          throw claudeEffortRefusal('claude_effort_catalog_unavailable', cause);
+          throw invalidClaudeRequest('claude_effort_catalog_unavailable', cause);
         }
         throwIfCancelled();
-        if (catalog.kind !== 'ok') throw claudeEffortRefusal('claude_effort_catalog_unavailable');
+        if (catalog.kind !== 'ok') throw invalidClaudeRequest('claude_effort_catalog_unavailable');
         const model = manifestModelId === undefined
           ? catalog.models.find(entry => entry.default === true || entry.id === 'default')
           : catalog.models.find(entry => entry.id === manifestModelId) ?? catalog.models.find(entry => entry.resolvedId === manifestModelId);
-        if (model?.effortLevels === undefined || model.disabled !== undefined) throw claudeEffortRefusal('claude_effort_menu_unavailable');
-        if (!model.effortLevels.includes(effort)) throw claudeEffortRefusal('claude_effort_unsupported');
+        if (model?.effortLevels === undefined || model.disabled !== undefined) throw invalidClaudeRequest('claude_effort_menu_unavailable');
+        if (!model.effortLevels.includes(effort)) throw invalidClaudeRequest('claude_effort_unsupported');
         // Pin the model whose menu admitted the effort, including on resume.
         launchModel ??= model.resolvedId ?? model.id;
       }
@@ -542,6 +568,10 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // The adapter, never the host callback, owns fatal process termination.
         onFatal: error => { closeBridges(); stream?.fail(error); },
       }, resumeSessionId);
+      if (selection.mode === 'subscription' && !claudeHasSubscription(await this.#readAuthStatus(invocation, env, manifestCwd, signal))) {
+        throwIfCancelled();
+        throw invalidClaudeRequest(SUBSCRIPTION_REQUIRED);
+      }
       if (selection.mode === 'byok') {
         const key = await resolveRuntimeApiKey('claude', this.byok!.resolveKey, signal);
         throwIfCancelled();
@@ -646,33 +676,18 @@ export class ClaudeAdapter implements RuntimeAdapter {
     }
   }
 
-  /**
-   * `claude auth status --json` is claude's OWN non-secret login-state
-   * signal (see the credential-isolation rule on `RuntimeAdapter` in
-   * `../../types.ts`) — empirically confirmed live on this logged-in
-   * machine to report `{"loggedIn":true,"authMethod":"claude.ai",
-   * "apiProvider":"firstParty","email":"...","orgId":"...","orgName":"...",
-   * "subscriptionType":"max"}`, with no token/key material anywhere in it.
-   * This spawns the binary and parses ONLY its own reported status — it
-   * never reads `~/.claude` or any credential file itself. Pi's `auth check`
-   * needs an explicit provider and a single-file product exposes no pi CLI,
-   * so pi's equivalent (`../pi/auth-presence.ts`) checks env-var *names* and
-   * the shape of its agent-dir login records instead.
-   * A failed/unparseable probe (binary present but not logged in, a future
-   * claude release changing this output shape, etc.) fails closed to
-   * `false` — this never affects `present`, which is solely about whether
-   * `--version` itself succeeded.
-   */
-  private async probeAuthPresent(invocation: RuntimeInvocation, env: Record<string, string>): Promise<boolean> {
+  /** Read only the CLI's native login status. Admission supplies the task cwd and launch environment. */
+  async #readAuthStatus(invocation: RuntimeInvocation, env: Readonly<Record<string, string>>, cwd?: string, signal?: AbortSignal): Promise<ClaudeAuthStatus | undefined> {
     try {
       const { stdout } = await execFileAsync(invocation.command, [...invocation.args, 'auth', 'status', '--json'], {
-        timeout: DETECT_TIMEOUT_MS,
-        env,
+        timeout: DETECT_TIMEOUT_MS, killSignal: 'SIGKILL', env, cwd, signal,
       });
-      const parsed = JSON.parse(stdout) as { loggedIn?: unknown };
-      return parsed.loggedIn === true;
+      const status: unknown = JSON.parse(stdout);
+      if (status === null || typeof status !== 'object' || Array.isArray(status)) return undefined;
+      const { loggedIn, authMethod, apiProvider, apiKeySource } = status as ClaudeAuthStatus;
+      return { loggedIn, authMethod, apiProvider, apiKeySource };
     } catch {
-      return false;
+      return undefined;
     }
   }
 
@@ -681,7 +696,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 }
 
-function claudeEffortRefusal(reason: string, cause?: unknown): RuntimeExecutionFailure {
+function claudeHasSubscription(status: ClaudeAuthStatus | undefined): boolean {
+  return status?.loggedIn === true && status.authMethod === 'claude.ai'
+    && (status.apiProvider === undefined || status.apiProvider === 'firstParty')
+    && (status.apiKeySource === undefined || status.apiKeySource === null || status.apiKeySource === '');
+}
+
+function invalidClaudeRequest(reason: string, cause?: unknown): RuntimeExecutionFailure {
   return new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason, failure: { class: 'invalid_request' } }, { cause });
 }
 

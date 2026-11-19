@@ -860,7 +860,6 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private executionSelection;
     private startPrepared;
-    private probeAuthPresent;
     private resolveBin;
 }
 // ==== @byok-sdk/client dist/adapters/claude/resolve-bin.d.ts ====
@@ -6365,6 +6364,11 @@ export interface PreparedRuntimeOperation {
         cwd: string;
         env: Readonly<Record<string, string | undefined>>;
         scratch: ExecutionScratch;
+        signal?: AbortSignal;
+        agentHome?: {
+            readonly canonicalHome: string;
+            readonly access: 'writer' | 'memory-reader';
+        };
     }): Promise<RuntimeLaunchResources>;
     start(input: RuntimeOperationStartInput): Promise<Session>;
 }

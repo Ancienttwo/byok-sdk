@@ -480,15 +480,12 @@ describe('Codex persistent app-server adapter', () => {
   });
 
   it.each(['apiKey', 'amazonBedrock', 'absent'])('declines Codex subscription at admission for a %s account', async accountType => {
-    vi.stubEnv('FAKE_CODEX_ACCOUNT_TYPE', accountType);
-    vi.stubEnv('OPENAI_API_KEY', 'host-provider-key');
-    const resources = await ctx();
+    const resources = await ctx({ FAKE_CODEX_ACCOUNT_TYPE: accountType, OPENAI_API_KEY: 'host-provider-key' });
     const receipt = path.join(resources.workspaceDir, 'admission.jsonl');
-    vi.stubEnv('FAKE_CODEX_RPC_RECEIPT', receipt);
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
     const owned = tracked();
-    const a = adapter({ spawnFn: owned.spawnFn, runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_CODEX_*', 'OPENAI_API_KEY'] } });
-    await expect(a.prepare({ offer: { ...task, target: SUBSCRIPTION_TARGET }, descriptor: a.descriptor, requiredToolsetIds: [] }))
-      .resolves.toMatchObject({ kind: 'reject', code: 'invalid_request', retryable: false });
+    await expect(open(adapter({ spawnFn: owned.spawnFn }), { ...task, target: SUBSCRIPTION_TARGET }, resources))
+      .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
     const methods = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line).method);
     expect(methods).toEqual(['initialize', 'initialized', 'account/read']);
     expect(owned.pids).toHaveLength(1);
@@ -496,14 +493,18 @@ describe('Codex persistent app-server adapter', () => {
   });
 
   it('refuses a changed Codex account before opening a subscription thread', async () => {
-    const resources = await ctx({ FAKE_CODEX_ACCOUNT_TYPE: 'apiKey' });
+    const resources = await ctx();
     const receipt = path.join(resources.workspaceDir, 'execution.jsonl');
     resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
-    await expect(open(adapter(), { ...task, target: SUBSCRIPTION_TARGET }, resources)).rejects.toMatchObject({
+    let starts = 0;
+    const a = adapter({ spawnFn: ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => spawn(command, args, {
+      ...options, env: { ...options?.env, FAKE_CODEX_ACCOUNT_TYPE: ++starts === 1 ? 'chatgpt' : 'apiKey' },
+    })) as typeof spawn });
+    await expect(open(a, { ...task, target: SUBSCRIPTION_TARGET }, resources)).rejects.toMatchObject({
       phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
     });
     const methods = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line).method);
-    expect(methods).toContain('account/read');
+    expect(methods.filter(method => method === 'account/read')).toHaveLength(2);
     expect(methods).not.toContain('thread/start');
   });
   it('followUp uses one persistent process and the same event stream', async () => {
@@ -1013,6 +1014,36 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     expect(await fs.readdir(user)).not.toContain('sessions');
     const methods = (await fs.readFile(`${receipt}.rpc`, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(frame => frame.id !== undefined && typeof frame.method === 'string').map(frame => frame.method);
     expect(methods.slice(0, 3)).toEqual(['initialize', 'config/read', 'thread/start']);
+  });
+
+  it.each(['chatgpt', 'apiKey'])('starts the subscription probe under the execution isolation for a %s account', async accountType => {
+    const user = await userHome();
+    const resources = await ctx({ CODEX_HOME: user, FAKE_CODEX_ACCOUNT_TYPE: accountType, OPENAI_API_KEY: 'host-provider-key',
+      FAKE_CODEX_USER_CONFIG: JSON.stringify({ cli_auth_credentials_store: 'file' }) });
+    resources.reader = { canonicalHome: resources.workspaceDir };
+    resources.workspaceDir = path.join(resources.workspaceDir, '.byok', 'runs', 'subscription');
+    await fs.mkdir(resources.workspaceDir, { recursive: true });
+    const launches: Array<{ args: string[]; cwd?: string; env?: NodeJS.ProcessEnv }> = [];
+    const a = adapter({ agentUserContext: 'excluded', agentUserMcpServers: 'excluded', sandbox: 'read-only',
+      spawnFn: ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+        launches.push({ args, cwd: options?.cwd as string | undefined, env: options?.env });
+        return spawn(command, args, options);
+      }) as typeof spawn });
+    const result = open(a, { ...task, target: SUBSCRIPTION_TARGET }, resources);
+    if (accountType === 'chatgpt') {
+      await turn(await result);
+      expect(launches).toHaveLength(2);
+      expect(launches[0]).toEqual(launches[1]);
+    } else {
+      await expect(result).rejects.toMatchObject({ retry: 'non-retryable', failure: { class: 'invalid_request' } });
+      expect(launches).toHaveLength(1);
+    }
+    expect(launches[0]?.cwd).toBe(resources.workspaceDir);
+    expect(launches[0]?.args).toEqual(expect.arrayContaining([
+      'sandbox_mode="read-only"', 'project_root_markers=[".byok"]', 'features.plugins=false', 'features.memories=false',
+    ]));
+    expect(launches[0]?.env?.CODEX_HOME).toMatch(/codex-home$/u);
+    expect(launches[0]?.env?.OPENAI_API_KEY).toBeUndefined();
   });
 
   it('refuses a credential store other than file before the thread opens', async () => {

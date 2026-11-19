@@ -699,10 +699,13 @@ export interface PreparedRuntimeOperation {
    * or on an offer that never started. Absent when the runtime owns no swept session data.
    */
   acquireSessionLease?(sessionRef: string): Promise<RuntimeSessionLease | undefined>;
-  /** Resource phase after workspace resolution and before claim; never reads a credential. */
+  /** Resource phase after workspace resolution and before claim. May verify native login without reading credential values. */
   resolveRuntimeLaunch?(input: {
     kind: 'instruction' | 'prepared'; cwd: string; env: Readonly<Record<string, string | undefined>>;
     scratch: ExecutionScratch;
+    signal?: AbortSignal;
+    /** The locally leased Agent home, when this is an Agent task. */
+    agentHome?: { readonly canonicalHome: string; readonly access: 'writer' | 'memory-reader' };
   }): Promise<RuntimeLaunchResources>;
   /**
    * Must resolve without waiting on anything a first-turn tool call produces.

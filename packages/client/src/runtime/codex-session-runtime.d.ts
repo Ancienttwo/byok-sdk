@@ -9,6 +9,7 @@ export interface CodexControl {
 }
 export declare function startAppServerClient(
   spawn: typeof spawnOwnedLineProcess, command: string, env: Readonly<Record<string, string>>,
+  configOverrides?: Readonly<Record<string, string>>, cwd?: string, options?: { readonly launchArgs?: readonly string[] },
 ): {
   readonly spawned: Promise<void>;
   handle(handlers: { onNotification(): void; onServerRequest(): void }): void;
