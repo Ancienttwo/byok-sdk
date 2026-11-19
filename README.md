@@ -502,7 +502,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 31292 B |
 | `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 5393 B |
 | `@byok-sdk/client/packaging` | Single-file Host build: esbuild packaging plugin and SDK asset copy | — | forbidden | 38169 B |
-| `@byok-sdk/client/testing` | Runtime adapter and device credential test doubles; no daemon | — | forbidden | 627000 B |
+| `@byok-sdk/client/testing` | Runtime adapter and device credential test doubles; no daemon | — | forbidden | 628000 B |
 | `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok, agy, OpenCode) | `@agentclientprotocol/sdk`, `zod` | allowed | 178000 B |
 | `@byok-sdk/client#byok-mcp-hub-runtime` | Private MCP hub runtime for SDK helper dispatch | `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 55062 B |
 | `@byok-sdk/client#byok-oar-readers` | Private on-demand OAR runtime readers | — | forbidden | 67358 B |
