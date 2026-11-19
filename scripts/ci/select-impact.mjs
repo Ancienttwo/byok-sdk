@@ -866,7 +866,8 @@ export function selectImpact(paths, context = {}) {
     if (path === 'scripts/qualification/opencode-native-canary.ts') { dirs.add('packages/client'); continue; }
     // Opt-in Codex probes select their client runtime owner; CI does not invoke the probes.
     if (path === 'packages/client/scripts/codex-app-server-real.mjs'
-      || path === 'packages/client/scripts/codex-reserved-mcp-loopback.mjs') { dirs.add('packages/client'); continue; }
+      || path === 'packages/client/scripts/codex-reserved-mcp-loopback.mjs'
+      || path === 'packages/client/scripts/codex-mcp-hub-comparison.mjs') { dirs.add('packages/client'); continue; }
     // #701: the retired vendored pi-subagents 0.60.0 snapshot. The client now
     // depends on the installed package; only this snapshot's deletion remains.
     if (/^packages\/client\/vendor\/pi-subagents\/0\.60\.0\/(?:index\.ts|LICENSE|package\.json|PROVENANCE\.md|source-manifest\.json|src\/.+\.ts)$/.test(path)) {
