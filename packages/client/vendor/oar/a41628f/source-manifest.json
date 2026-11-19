@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.121.0",
-    "commit": "cbb44e8858d37fe7e46da34671cc5976294a4258"
+    "commit": "9bd00c53df7c014ffb15b41412527d247504ea1b"
   },
   "release": {
     "ecosystem": "npm",
@@ -522,7 +522,7 @@
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "b86ac107394dce5b477d7e2b4ab9e849146cd089ad3be074c2614f3294a38545",
-      "vendoredSha256": "28f12ca2e7d8fbc7d0da8879a4198a63affef48049cbaa5142df33fb087040c6",
+      "vendoredSha256": "a6a63322cc019dab8ed16132d376ef50204a97828e44c84816173267cd0d3a6d",
       "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort uses the caller-owned isolated POSIX process reader and stays a no-op on Windows (#2381); the caller's retainedBytes goes to the upstream kernel's record retention. Propagate the typed resume effort refusal. Upstream: planned contribution (#2378). Share Runtime.sessionCapabilities with the narrow BYOK bridge."
     },
     {
@@ -916,7 +916,7 @@
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
       "upstreamSha256": "87ff447c2b9968b684c0d74b71a4017f06f49789638fdd6172003f79eab840a3",
-      "vendoredSha256": "4166323efb10cbac96d68a2fd2d0dd4c406fc5258bff67fe8d0556f463f74979",
+      "vendoredSha256": "a15916bfa3b6ed718b057ea1aae4264cf73afde456491e0421daca07d31b1521",
       "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. OAR 0.99: the session keeps its own state construction in place of upstream session-state.ts (that module builds the terminal host without the injected spawn); it wires the upstream native-turn tracker (prompt naming, tracker-fed token usage and recorder, the recorder bound after the turn driver) and the profile steerRequest RPC through steer-request.ts; upstream turn-terminals.ts is not wired because endTurnProcessesOnAbort is omitted. endTurnProcessesOnAbort is omitted from AcpSessionOptions; the caller's retainedBytes goes to the upstream kernel's record retention. Upstream #652 agentPid wiring is omitted. Dispose starts the abort (descendant read and cancel write are synchronous) and does not wait for the write before it kills the process. The process stream observes the prompt-answer boundary with the opening boundary (shared/acp/opening.ts), and the recorder gets whilePromptAwaited (shared/acp/records.ts). Redact echoed image data before recording native output. Linked child terminal usage has its own cumulative counters and replay fence (#2381)."
     },
     {
@@ -975,7 +975,7 @@
       "path": "shared/credential-redactor.ts",
       "sourcePath": "packages/oar/src/shared/credential-redactor.ts",
       "upstreamSha256": "e7358de620f170bcd2b4ec1e46d98a6fe58a1e6d52dfe5dc535c090a713af6be",
-      "vendoredSha256": "1d750cefec65db9a8f2e193bf5faebbc6dff8b6f858ff27bf63aedd313a05ffa",
+      "vendoredSha256": "7acff518354a5e6f64fcf40b99c26af9cf234dd8f70bb679fe9b8396d70d6662",
       "delta": "Register caller-resolved provider credentials and apply one content redactor to retained records, errors and protocol-declared encoded fields (#2380, #2408)."
     },
     {
@@ -1224,7 +1224,7 @@
       "path": "shared/stream-json/session.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/session.ts",
       "upstreamSha256": "4e2ec5c6d575ffaa1c976a1580b9cfbdf9058e2c0f51da29abd689ea148fbc7b",
-      "vendoredSha256": "9a185ff74480f8491ca9a4c4650b6fa73e80898aec3c867092c96aebde1d85b7",
+      "vendoredSha256": "b5f4841059f3b1306b712192f462461f61ced3fe81be758f7fab68864a915a66",
       "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it; profile.permissionResponse is not read, and a request no hook answers stays unanswered. An optional retainedBytes goes to the upstream kernel's record retention, which elides the oldest native payloads past it after every observer has the complete record. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing. A refused or unwritten interrupt withdraws its abort mark and kill fallback: the interrupt goes through the acknowledged write, a write that throws or rejects rejects the abort with code error, a write not acknowledged within 10 s counts as written, the fallback is armed once the write is acknowledged or that bound passes unless Claude refused the interrupt, once the fallback fires the queue does not drain and the held result waits for the exit, and a root result arriving while an interrupt is pending is held, with later lines except control responses, until every pending interrupt settles. Redact echoed image data before recording native output."
     },
     {

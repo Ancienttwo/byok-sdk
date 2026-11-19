@@ -3,6 +3,7 @@ import path from 'node:path';
 import { expect } from 'vitest';
 import { ClaudeAdapter, type ClaudeAdapterOptions } from '../../adapters/claude/claude-adapter';
 import { ClaudeStreamSession } from '../../adapters/claude/stream-session';
+import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime';
 import { memoryClaude } from '../fixtures/memory-claude';
 import { QUALIFIED_CLAUDE_VERSION } from '../../adapters/claude/claude-version';
 import { CLAUDE_ABSENT_ISOLATION_SOURCES } from '../../adapters/claude/claude-capabilities';
@@ -275,10 +276,10 @@ const ownTurn = once(async () => {
 defineRuntimeCases(`claude runtime contract: claude cases (${target.mode} ${target.expectedVersion})`, {
   streamSettlement: ['retains redacted replies, settles interrupts before the result and records exit before refusals', check(async () => {
     const cli = memoryClaude();
-    const stream = new ClaudeStreamSession(cli.child as never);
     const secret = 'claude-contract-fake-key';
+    const stream = new ClaudeStreamSession(cli.child as never, sessionCredentialRedactor({ env: { ANTHROPIC_API_KEY: secret } }));
     const replies: Promise<void>[] = [];
-    await stream.open({ env: { ANTHROPIC_API_KEY: secret }, maxRetainedBytes: 64 * 1024, mcpServers: {},
+    await stream.open({ maxRetainedBytes: 64 * 1024,
       onFrame: () => {}, onExit: () => {},
       onAppRequest: (_request, respond) => { replies.push(respond({ type: 'control_response', response: { request_id: 'permission', subtype: 'success', response: { secret } } })); },
     });

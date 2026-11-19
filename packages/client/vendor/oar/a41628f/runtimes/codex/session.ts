@@ -24,7 +24,7 @@ import { inputImagesRefusal } from "../../shared/input-images.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 // BYOK change: Return the raw adapter contract without best-effort observer projections.
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
-import { isProjectedToolInput, redactRuntimeRecord, sessionCredentialRedactor, type CredentialRedactor } from "../../shared/credential-redactor.js";
+import { isProjectedToolInput, redactRuntimeRecord, sessionCredentialRedactor, type CredentialRedactor, type CredentialRedactionTail } from "../../shared/credential-redactor.js";
 import { redactJoinedText } from "../../shared/redact-text.js";
 import { createSessionKernel } from "../../shared/session-kernel.js";
 import { newSessionLinks } from "../../shared/session-links.js";
@@ -149,7 +149,9 @@ function redactCodexSnapshot(source: JsonRecord | null, safe: JsonRecord | null,
     : { ...reply, thread: { ...thread, turns } };
 }
 
-export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"], normalizedDraft = false): T {
+export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"], normalizedDraft = false,
+  readyText?: WeakSet<RuntimeEventBody>,
+): T {
   const method = record.kind === "frame" ? record.body.type : "";
   const originalNative = record.kind === "frame" ? asRecord(record.body.native) : null;
   const originalItem = asRecord(originalNative?.item);
@@ -165,10 +167,10 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     || (rawFunction && path.length === 4 && path[0] === "body" && path[1] === "native" && path[2] === "item" && path[3] === "arguments"), (path, value) => {
     const [body, group, member, field] = path;
     if (body !== "body" || record.kind !== "frame") return false;
-    if (normalizedDraft && record.body.type === "item/agentMessage/delta") {
-      if (path.length === 3 && group === "native" && member === "delta") return true;
-      if (path.length === 4 && group === "events" && typeof member === "number" && field === "text"
-        && record.body.events[member]?.kind === "text_delta") return true;
+    if (normalizedDraft && record.body.type === "item/agentMessage/delta" && path.length === 3 && group === "native" && member === "delta") return true;
+    if (path.length === 4 && group === "events" && typeof member === "number" && field === "text") {
+      const event = record.body.events[member];
+      if (event?.kind === "text_delta" && (normalizedDraft || readyText?.has(event))) return true;
     }
     if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native")
       || (group === "byokTurnStatus" && record.body.type === "turn/completed" && (value === "completed" || value === "interrupted" || value === "failed"));
@@ -370,9 +372,10 @@ async function openCodexSession(
 
   // BYOK change: The record consumer observes from seq 0: it registers before any record is appended.
   // Observer errors are swallowed by the kernel, so the consumer fails the session itself.
+  const readyText = new WeakSet<RuntimeEventBody>();
   const kernel = createSessionKernel(threadId, record => {
     const body = record.kind === "frame" ? record.body : undefined;
-    return redactCodexRecord(record, redactValue, body?.type === "item/agentMessage/delta" && credentials.hasProtectedValues());
+    return redactCodexRecord(record, redactValue, body?.type === "item/agentMessage/delta" && credentials.hasProtectedValues(), readyText);
   }, options.retainedBytes);
   if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);
   hooks.onReady?.(threadId);
@@ -403,7 +406,7 @@ async function openCodexSession(
   // fold owns event translation, attribution and graph links; this owns the
   // transport-only turn id and the control decisions (busy, spontaneous).
   let lastNotifiedRootTurnId: string | undefined;
-  const draftTails = new Map<string, Map<string | undefined, Map<string, string>>>();
+  const draftTails = new Map<string, Map<string | undefined, Map<string, CredentialRedactionTail>>>();
   const onNotification = (method: string, params: JsonRecord): void => {
     // BYOK change: Retain the exact native notification before any potentially throwing fold.
     // The record envelope's sessionId puts a foreign thread in the graph (observe/graph.ts); no out-of-band node.
@@ -437,12 +440,12 @@ async function openCodexSession(
     const itemFields = typeof item?.type === "string" ? codexItemFields.get(item.type) : undefined;
     const withheldItem = item !== null && (withheld || Object.getOwnPropertyNames(item)
       .some(key => !isCodexItemKey(itemFields, key) && credentials.matches(key)));
-    let draftTail: string | undefined;
+    let draftTail = "";
     if (method === "item/completed" && !byokStaleTurn && typeof item?.id === "string") {
       const pending = turnTails?.get(item.id);
       if (!withheldItem && pending !== undefined && item.type === "agentMessage"
-        && typeof item.text === "string" && item.text.endsWith(pending)) {
-        draftTail = pending;
+        && typeof item.text === "string" && item.text.endsWith(pending.text)) {
+        draftTail = credentials.finishRedaction(pending);
       }
       pruneTail(item.id);
     }
@@ -451,8 +454,8 @@ async function openCodexSession(
       const { delta: _omitted, ...rest } = params;
       params = rest;
     } else if (!withheld && draftMethod && typeof params.delta === "string" && credentials.hasProtectedValues()) {
-      const { ready, pending } = credentials.redactChunk((turnTails?.get(itemId) ?? "") + params.delta);
-      if (pending === "") pruneTail(itemId);
+      const { ready, pending } = credentials.redactChunk(params.delta, turnTails?.get(itemId));
+      if (pending === undefined) pruneTail(itemId);
       else {
         const items = (turnTails ?? new Map()).set(itemId, pending);
         draftTails.set(notificationSession, (threadTails ?? new Map()).set(draftTurn, items));
@@ -516,7 +519,11 @@ async function openCodexSession(
       switch (command.kind) {
         case "frame":
           const events = [...command.body.events, ...links];
-          if (draftTail !== undefined && !events.some(event => event.kind === "text_delta")) events.push({ kind: "text_delta", text: draftTail });
+          if (draftTail !== "" && !events.some(event => event.kind === "text_delta")) {
+            const event = { kind: "text_delta" as const, text: draftTail };
+            readyText.add(event);
+            events.push(event);
+          }
           const body = { ...command.body, ...(method === "thread/tokenUsage/updated" ? { native: params } : {}), events, byokRoot: isRoot, ...terminalStatus };
           kernel.frame(body, {
             ...(command.sessionId === undefined ? {} : { sessionId: command.sessionId }),

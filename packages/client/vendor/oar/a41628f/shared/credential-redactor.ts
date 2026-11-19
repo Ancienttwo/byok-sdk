@@ -22,12 +22,21 @@ function urlCredentials(value: string | null | undefined): readonly string[] {
   return [value, ...passwords.filter((password) => password.length >= CREDENTIAL_MIN_LENGTH)];
 }
 
+export interface CredentialRedactionTail {
+  /** The original suffix that can still begin a credential, at most longest key length minus one. */
+  readonly text: string;
+  /** The number of UTF-16 code units already covered by the last emitted replacement. */
+  readonly covered: number;
+  readonly continuesRedaction: boolean;
+}
+
 export interface CredentialRedactor {
   /** Private connection redaction input. Never put these values in records or diagnostics. */
   values(this: void): readonly string[];
   hasProtectedValues(this: void): boolean;
   matches(this: void, text: string): boolean;
-  redactChunk(this: void, text: string): { readonly ready: string; readonly pending: string };
+  redactChunk(this: void, text: string, tail?: CredentialRedactionTail): { readonly ready: string; readonly pending?: CredentialRedactionTail };
+  finishRedaction(this: void, tail?: CredentialRedactionTail): string;
   add(this: void, value: string | undefined): void;
   /** BYOK change: A credential the caller resolved, including short or path-like values. */
   addExplicit(this: void, value: string): void;
@@ -61,7 +70,7 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
   }
   const refresh = (): void => { orderedValues = [...known].toSorted((left, right) => right.length - left.length); };
   refresh();
-  const redactTextParts = (text: string, streaming: boolean): { ready: string; pending: string } => {
+  const redactTextParts = (text: string, streaming: boolean, tail?: CredentialRedactionTail): { ready: string; pending?: CredentialRedactionTail } => {
     const keys = orderedValues;
     let cut = text.length;
     if (streaming) {
@@ -71,20 +80,34 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
         }
       }
     }
+    const matches: { start: number; end: number }[] = [];
+    if (tail !== undefined && tail.covered > 0) matches.push({ start: 0, end: tail.covered });
+    for (const key of keys) {
+      let previous: { start: number; end: number } | undefined;
+      for (let start = text.indexOf(key); start !== -1; start = text.indexOf(key, start + 1)) {
+        const end = start + key.length;
+        if (previous !== undefined && start <= previous.end) previous.end = end;
+        else { previous = { start, end }; matches.push(previous); }
+      }
+    }
+    matches.sort((a, b) => a.start - b.start);
     const parts: string[] = [];
     let at = 0;
-    while (at < cut) {
-      let next = cut;
-      let length = 0;
-      for (const key of keys) {
-        const match = text.indexOf(key, at);
-        if (match >= 0 && match < next) { next = match; length = key.length; }
-      }
-      parts.push(text.slice(at, next));
-      if (length !== 0) parts.push("[redacted]");
-      at = next + length;
+    let continuing = tail?.continuesRedaction === true;
+    for (const { start, end } of matches) {
+      if (start <= at && continuing) { at = Math.max(at, end); continue; }
+      if (start >= cut) break;
+      parts.push(text.slice(at, start), "[redacted]");
+      at = end;
+      continuing = true;
     }
-    return { ready: parts.join(""), pending: text.slice(at) };
+    if (at < cut) { parts.push(text.slice(at, cut)); continuing = false; }
+    const ready = parts.join("");
+    const suffix = text.slice(cut);
+    // Only the possible partial match stays buffered. Remember coverage and
+    // adjacency so a later match can extend a replacement already emitted.
+    return !streaming || (suffix === "" && !continuing) ? { ready }
+      : { ready, pending: { text: suffix, covered: Math.max(0, at - cut), continuesRedaction: continuing } };
   };
   const redact = (text: string): string => redactTextParts(text, false).ready;
   const matches = (text: string): boolean => orderedValues.some(value => text.includes(value));
@@ -98,7 +121,8 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     values: () => orderedValues,
     hasProtectedValues: () => orderedValues.length !== 0,
     matches,
-    redactChunk: text => redactTextParts(text, true),
+    redactChunk: (text, tail) => redactTextParts((tail?.text ?? "") + text, true, tail),
+    finishRedaction: tail => tail === undefined ? "" : redactTextParts(tail.text, false, tail).ready,
     add(value) {
       if (credentialValue(value)) { addKnown(value); }
     },

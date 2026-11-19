@@ -667,7 +667,10 @@ function runProbeOrTurnFlow() {
 
     const failure = JSON.parse(process.env.FAKE_CLAUDE_FAILURES ?? '[]')[turn - 1];
     if (failure) {
-      if (failure.exit === true) process.exit(1);
+      if (failure.exit === true) {
+        if (typeof failure.stderr === 'string') process.stderr.write(`${failure.stderr}\n`);
+        process.exit(1);
+      }
       if (failure.rateLimit !== undefined) send({ type: 'rate_limit_event', rate_limit_info: failure.rateLimit, session_id: reportedSessionId });
       const text = failure.text ?? 'API Error: fixture failure';
       send({

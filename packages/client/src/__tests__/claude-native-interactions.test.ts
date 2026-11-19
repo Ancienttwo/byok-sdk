@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
+import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 import { ClaudeNativeInteractionBridge } from '../adapters/claude/native-interactions';
 import type { NativeInteractionHostOptions, NativeInteractionReceipt, NativeInteractionRequest } from '../native-interactions';
 import type { Session } from '../types';
@@ -345,8 +346,8 @@ describe('Claude native bridge transport fencing', () => {
   it('bounds initialization and never takes an unrelated ACK for it', async () => {
     vi.useFakeTimers();
     const claude = memoryClaude();
-    const stream = new ClaudeStreamSession(claude.child as never);
-    const opened = stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, initialize: { hooks: null }, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    const stream = new ClaudeStreamSession(claude.child as never, sessionCredentialRedactor({}));
+    const opened = stream.open({ maxRetainedBytes: 16 * 1024 * 1024, initialize: { hooks: null }, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     const refused = expect(opened).rejects.toMatchObject({ phase: 'start', message: expect.stringContaining('Claude native control initialization failed') });
     await vi.advanceTimersByTimeAsync(0);
     expect(claude.written).toMatchObject([{ type: 'control_request', request: { subtype: 'initialize', hooks: null } }]);

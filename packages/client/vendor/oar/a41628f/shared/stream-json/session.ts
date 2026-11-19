@@ -13,7 +13,7 @@ import { withdrawControl } from "../held-input.js";
 import { asRecord, parseJson, type JsonRecord } from "../json.js";
 // BYOK change: the injected line process, one credential redactor per open and the upstream kernel; no SessionCredentials or executable manager.
 import type { LineProcess } from "../../runtimes/codex/app-server-client.js";
-import { isProjectedToolInput, redactRuntimeRecord, type CredentialRedactor } from "../credential-redactor.js";
+import { isProjectedToolInput, redactRuntimeRecord, type CredentialRedactor, type CredentialRedactionTail } from "../credential-redactor.js";
 import { createSessionKernel } from "../session-kernel.js";
 import { redactJoinedText } from "../redact-text.js";
 import { toolContent } from "../tool-output.js";
@@ -57,15 +57,15 @@ const streamJsonUsageFields = new Set(["input_tokens", "cache_creation_input_tok
 const streamJsonResultFields = new Set(["type", "subtype", "session_id", "parent_tool_use_id", "is_error", "terminal_reason", "result", "usage", "modelUsage", "stop_reason", "api_error_status", "permission_denials", "num_turns", "duration_ms", "duration_api_ms", "total_cost_usd", "fast_mode_state", "structured_output", "errors"]);
 
 interface StreamTextTails {
-  readonly drafts: Map<string, string>;
-  readonly assistant: Map<string, string>;
-  readonly projected: Map<string, string>;
+  readonly drafts: Map<string, CredentialRedactionTail>;
+  readonly assistant: Map<string, CredentialRedactionTail>;
+  readonly projected: Map<string, CredentialRedactionTail>;
   readonly messages: Map<string, { id: unknown; published: boolean }>;
 }
 
-function redactTextPart(tails: Map<string, string>, lane: string, text: string, credentials: CredentialRedactor): string {
-  const { ready, pending } = credentials.redactChunk((tails.get(lane) ?? "") + text);
-  if (pending === "") tails.delete(lane);
+function redactTextPart(tails: Map<string, CredentialRedactionTail>, lane: string, text: string, credentials: CredentialRedactor): string {
+  const { ready, pending } = credentials.redactChunk(text, tails.get(lane));
+  if (pending === undefined) tails.delete(lane);
   else tails.set(lane, pending);
   return ready;
 }
@@ -91,7 +91,8 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
       let published = continues && currentMessage?.published === true;
       if (!continues) {
         const previous = textTails.assistant.get(lane);
-        if (previous !== undefined) terminalText = { text: credentials.redact(previous), continues: currentMessage?.published === true };
+        const text = credentials.finishRedaction(previous);
+        if (text !== "") terminalText = { text, continues: currentMessage?.published === true };
         textTails.assistant.delete(lane);
       }
       const withoutSnapshot = hasOpaqueCredentialKey(native, streamJsonAssistantEnvelope) || hasOpaqueCredentialKey(message, streamJsonMessageFields);
@@ -257,17 +258,17 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   if (redacted.kind !== "frame") return redacted;
   if (textTails !== undefined && assistantTails !== undefined && native?.type === "result") {
     draftTails?.delete(lane);
-    const projectedTail = textTails.projected.get(lane);
+    const projectedTail = credentials.finishRedaction(textTails.projected.get(lane));
     textTails.projected.delete(lane);
-    if (projectedTail !== undefined) {
+    if (projectedTail !== "") {
       redacted = { ...redacted, body: { ...redacted.body,
-        events: [{ kind: "text_delta", text: credentials.redact(projectedTail) }, ...redacted.body.events] } };
+        events: [{ kind: "text_delta", text: projectedTail }, ...redacted.body.events] } };
     }
-    const tail = assistantTails.get(lane);
+    const tail = credentials.finishRedaction(assistantTails.get(lane));
     const message = textTails.messages.get(lane);
     assistantTails.delete(lane);
     textTails.messages.delete(lane);
-    if (tail !== undefined) terminalText = { text: credentials.redact(tail), continues: message?.published === true };
+    if (tail !== "") terminalText = { text: tail, continues: message?.published === true };
   }
   if (terminalText === undefined || redacted.kind !== "frame") return redacted;
   const body = { ...redacted.body, byokTextTail: terminalText };

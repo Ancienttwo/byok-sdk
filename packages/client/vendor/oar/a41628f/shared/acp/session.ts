@@ -14,7 +14,7 @@ import type {
   SessionOptions,
 } from "../../contracts/session.js";
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
-import { isProjectedToolInput, redactRuntimeRecord, sessionCredentialRedactor, type CredentialRedactor } from "../credential-redactor.js";
+import { isProjectedToolInput, redactRuntimeRecord, sessionCredentialRedactor, type CredentialRedactor, type CredentialRedactionTail } from "../credential-redactor.js";
 import { asRecord, type JsonRecord } from "../json.js";
 import { manualCompaction, type CompactionOperation } from "../manual-compaction.js";
 import { createSessionKernel } from "../session-kernel.js";
@@ -43,7 +43,7 @@ import { sendAcpSteerRequest } from "./steer-request.js";
 
 export function redactAcpRecord<T extends RawEvent>(
   record: T, credentials: CredentialRedactor, childNotification?: AcpSessionProfile["childNotification"],
-  pendingText?: Map<string, string>, pendingToolText?: Map<string, string>,
+  pendingText?: Map<string, CredentialRedactionTail>, pendingToolText?: Map<string, CredentialRedactionTail>,
 ): T {
   const native = record.kind === "frame" ? asRecord(record.body.native) : null;
   const direct = asRecord(native?.update);
@@ -101,11 +101,11 @@ export function redactAcpRecord<T extends RawEvent>(
   }
   if (pendingText !== undefined && safe.kind === "frame" && record.kind === "frame" && credentials.hasProtectedValues()) {
     const lane = record.sessionId;
-    const previous = pendingText.get(lane) ?? "";
+    const previous = pendingText.get(lane);
     const delta = update?.sessionUpdate === "agent_message_chunk" ? record.body.events.find(event => event.kind === "text_delta") : undefined;
     if (delta !== undefined && update !== null) {
-      const { ready, pending } = credentials.redactChunk(previous + delta.text);
-      if (pending.length === 0) pendingText.delete(lane);
+      const { ready, pending } = credentials.redactChunk(delta.text, previous);
+      if (pending === undefined) pendingText.delete(lane);
       else pendingText.set(lane, pending);
       const safeNative = asRecord(safe.body.native);
       const safeUpdate = asRecord(safeNative?.update);
@@ -119,17 +119,20 @@ export function redactAcpRecord<T extends RawEvent>(
     }
     const closedChild = child != null && record.body.events.some(event => event.kind === "task_ended" && event.taskId === child.sessionId);
     if (closedChild) {
-      const tail = pendingText.get(child.sessionId);
+      const text = credentials.finishRedaction(pendingText.get(child.sessionId));
       pendingText.delete(child.sessionId);
-      if (tail !== undefined) {
-        const event = { kind: "text_delta" as const, text: credentials.redact(tail), byokChildId: credentials.redact(child.sessionId) };
+      if (text !== "") {
+        const event = { kind: "text_delta" as const, text, byokChildId: credentials.redact(child.sessionId) };
         safe = { ...safe, body: { ...safe.body, events: [event, ...safe.body.events] } };
       }
     }
-    if (safe.kind === "frame" && previous !== "" && record.body.events.some(event => event.kind === "turn_ended" || event.kind === "tool_call_started" || event.kind === "tool_call_ended")) {
+    if (safe.kind === "frame" && previous !== undefined && record.body.events.some(event => event.kind === "turn_ended" || event.kind === "tool_call_started" || event.kind === "tool_call_ended")) {
       pendingText.delete(lane);
-      const events = [{ kind: "text_delta" as const, text: credentials.redact(previous) }, ...safe.body.events];
-      safe = { ...safe, body: { ...safe.body, events } };
+      const text = credentials.finishRedaction(previous);
+      if (text !== "") {
+        const events = [{ kind: "text_delta" as const, text }, ...safe.body.events];
+        safe = { ...safe, body: { ...safe.body, events } };
+      }
     }
   }
   if (!toolUpdate || safe.kind !== "frame" || !credentials.hasProtectedValues()) return safe;
@@ -141,9 +144,9 @@ export function redactAcpRecord<T extends RawEvent>(
     || safe.body.events.some(event => event.kind === "tool_call_ended");
   let withholdProgress = false;
   const progressOutput = !terminal ? acpToolProgressOutput(rawOutput, text => {
-    const { ready, pending } = credentials.redactChunk((previous ?? "") + text);
-    withholdProgress = ready !== text || pending !== "" || previous !== undefined;
-    if (pending === "") pendingToolText?.delete(toolLane);
+    const { ready, pending } = credentials.redactChunk(text, previous);
+    withholdProgress = ready !== text || pending !== undefined || previous !== undefined;
+    if (pending === undefined) pendingToolText?.delete(toolLane);
     else pendingToolText?.set(toolLane, pending);
     return ready;
   }, update.rawOutput) : undefined;
@@ -161,8 +164,8 @@ export function redactAcpRecord<T extends RawEvent>(
         const safeExitCode = exitCode !== undefined && asRecord(rawOutput) !== null ? { exitCode } : {};
         ended = { ...result, ...safeExitCode, ...(output === undefined ? {} : { content: output }) };
       }
-      return previous === undefined || ended.content !== undefined ? [ended]
-        : [{ kind: "tool_call_progress", callId: event.callId, output: credentials.redact(previous) }, ended];
+      const output = ended.content === undefined ? credentials.finishRedaction(previous) : "";
+      return output === "" ? [ended] : [{ kind: "tool_call_progress", callId: event.callId, output }, ended];
     }
     return [event];
   });
@@ -319,8 +322,8 @@ async function openAcpRuntimeSession(
       } finally { releaseStartup?.(); }
     })();
     // BYOK change: the record consumer observes from seq 0: it registers before the recorder binds.
-    const pendingText = new Map<string, string>();
-    const pendingToolText = new Map<string, string>();
+    const pendingText = new Map<string, CredentialRedactionTail>();
+    const pendingToolText = new Map<string, CredentialRedactionTail>();
     const kernel = createSessionKernel(opened.sessionId, record => {
       const safe = redactAcpRecord(record, credentials, profile.childNotification, pendingText, pendingToolText);
       if (safe.kind !== "frame") return safe;

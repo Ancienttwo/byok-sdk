@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
+import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 import { claudeMcpEventIdentities, createClaudeMcpIdentityResolver } from '../adapters/claude/mcp-identity';
 import { AGENT_MESSAGE_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
 import type { Session, MessageDraftDelta } from '../types';
@@ -120,8 +121,8 @@ describe('Claude MCP identity from its own mcp_status answer', () => {
 describe('Claude mcp_status control request', () => {
   it('returns the body, and undefined on an error answer or the process exit', async () => {
     const claude = memoryClaude();
-    const stream = new ClaudeStreamSession(claude.child as never);
-    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    const stream = new ClaudeStreamSession(claude.child as never, sessionCredentialRedactor({}));
+    await stream.open({ maxRetainedBytes: 16 * 1024 * 1024, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     const respond = (index: number, subtype: string, response?: unknown) =>
       claude.send({ type: 'control_response', response: { subtype, request_id: claude.written[index]!.request_id, response } });
     const body = status({ name: 'market', tools: ['quote'] });

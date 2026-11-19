@@ -27,7 +27,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types.js';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
@@ -38,7 +38,7 @@ import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions
 import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeFrame, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
 import { ClaudeFailureEvidence } from './failure-evidence.js';
 import { requireImageInput } from '../input-images.js';
-import { claudeSessionCapabilities } from '../../runtime/claude-session-runtime.js';
+import { claudeSessionCapabilities, sessionCredentialRedactor, type ClaudeCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { ClaudeStreamSession } from './stream-session.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import type { spawn } from 'node:child_process';
@@ -58,12 +58,29 @@ function errorMessage(err: unknown): string {
 
 export type SpawnFn = typeof spawn;
 
+function redactClaudeFailure(error: unknown, credentials: ClaudeCredentialRedactor): Error {
+  const safe = credentials.redactValue(error);
+  if (safe === error && safe instanceof Error) return safe;
+  // OAR copies Error diagnostics when redaction changes them. Rebuild the SDK
+  // failures with their original typed control facts and the sanitized cause.
+  const cause = safe instanceof Error ? safe.cause : undefined;
+  if (isRuntimeExecutionFailure(error)) {
+    return new RuntimeExecutionFailure({ phase: error.phase, retry: error.retry, failure: error.failure,
+      reason: credentials.redact(error.message) }, { cause });
+  }
+  if (isRuntimeDisposalFailure(error)) {
+    return new RuntimeDisposalFailure({ stage: error.stage, reason: credentials.redact(error.message) }, { cause });
+  }
+  return safe instanceof Error ? safe : new Error(typeof safe === 'string' ? safe : 'Claude operation failed', { cause: safe });
+}
+
 /** One owner covers process teardown and task config on every failed start. */
-async function rejectOwnedStartup(cause: unknown, stream: ClaudeStreamSession | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
-  const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
+async function rejectOwnedStartup(cause: unknown, credentials: ClaudeCredentialRedactor, stream: ClaudeStreamSession | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
+  const safe = redactClaudeFailure(cause, credentials);
+  const failure = isRuntimeExecutionFailure(safe) ? safe : new RuntimeExecutionFailure({
     phase: 'start', retry: 'retryable',
     reason: 'claude runtime startup failed',
-  }, { cause });
+  }, { cause: safe });
   let disposalAttempt: Promise<void> | undefined;
   const retryDisposal = (): Promise<void> => {
     if (!disposalAttempt) {
@@ -75,7 +92,10 @@ async function rejectOwnedStartup(cause: unknown, stream: ClaudeStreamSession | 
         else await stream?.dispose();
         await scratch.release();
       })();
-      disposalAttempt = attempt.catch(error => { disposalAttempt = undefined; throw error; });
+      disposalAttempt = attempt.catch(error => {
+        disposalAttempt = undefined;
+        throw redactClaudeFailure(error, credentials);
+      });
     }
     return disposalAttempt;
   };
@@ -305,11 +325,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
     effort: string | undefined,
   ): Promise<Session> {
     const signal = startInput.signal;
+    const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
+    const taskMcpServers = startInput.mcpServers ?? {};
+    const credentials = sessionCredentialRedactor({ env, mcpServers: Object.entries(taskMcpServers).map(([name, server]) => ({ name, ...server })) });
     const cancellationFailure = () => new RuntimeExecutionFailure({
       phase: 'start', retry: 'retryable',
       reason: 'claude runtime startup was cancelled',
     }, { cause: signal?.reason });
-    if (signal?.aborted) throw cancellationFailure();
     // This adapter has no prepared-input lane: a frozen provider request is
     // compiled against the pi runtime's own verified closure, and claude cannot
     // be told to send someone else's bytes. Refused by name rather than
@@ -359,9 +381,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
+      for (const credential of claudeProviderCredentials(env)) credentials.addExplicit(credential);
       throwIfCancelled();
-      const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
-      const credentials = claudeProviderCredentials(env);
       const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
       // Built before any write, so a refusal leaves no file behind.
       const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
@@ -370,7 +391,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
           try { return realpathSync.native(dir); } catch { return dir; }
         })
         : undefined;
-      const taskMcpServers = startInput.mcpServers ?? {};
       const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
       const sdkDir = startInput.scratch.sdkDir;
       if (needsMcpConfig || userContextSettings) {
@@ -478,7 +498,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       }, resumeSessionId);
       const spawnLineProcess = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude' });
       try {
-        stream = new ClaudeStreamSession(spawnLineProcess(invocation.command, [...invocation.args, ...args], { cwd: manifestCwd, env }));
+        stream = new ClaudeStreamSession(spawnLineProcess(invocation.command, [...invocation.args, ...args], { cwd: manifestCwd, env }), credentials);
       } catch (cause) {
         throw new RuntimeExecutionFailure({
           phase: 'start', retry: 'retryable',
@@ -492,10 +512,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         await Promise.race([opened.open({
           effort,
           ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
-          env,
-          credentials,
           maxRetainedBytes: this.maxRetainedBytes,
-          mcpServers: taskMcpServers,
           ...(native === undefined && gate === undefined ? {} : { initialize: { hooks: gate?.hooks ?? null } }),
           onFrame: frame => native?.receive(frame),
           onExit: () => { native?.close(); gate?.close(); },
@@ -569,7 +586,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       );
     } catch (cause) {
       gate?.close();
-      return rejectOwnedStartup(cause, stream, startInput.scratch, cancellation !== undefined);
+      return rejectOwnedStartup(cause, credentials, stream, startInput.scratch, cancellation !== undefined);
     } finally {
       signal?.removeEventListener('abort', onAbort);
     }
@@ -688,6 +705,7 @@ class ClaudeSession implements Session {
     const failureEvidence = this.failureEvidence;
     const workspaceDir = this.workspaceDir;
     const mcpIdentity = this.mcpIdentity;
+    const redactFailure = (error: unknown): never => { throw redactClaudeFailure(error, stream.credentials); };
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent | MessageDraftDelta> {
         const inner = stream.frames[Symbol.asyncIterator]();
@@ -725,7 +743,7 @@ class ClaudeSession implements Session {
         // exactly what lets `pump()`'s existing "iterable ended without
         // turn_end" branch report the task as Failed instead of hanging.
         let turnSettled = false;
-        return {
+        const iterator = {
           async next(): Promise<IteratorResult<AgentEvent | MessageDraftDelta>> {
             for (;;) {
               const buffered = pending.shift();
@@ -798,6 +816,7 @@ class ClaudeSession implements Session {
             }
           },
         };
+        return { next: () => iterator.next().catch(redactFailure) };
       },
     };
   }
@@ -821,7 +840,11 @@ class ClaudeSession implements Session {
     );
   }
 
-  async followUp(task: RuntimeTaskInput): Promise<void> {
+  followUp(task: RuntimeTaskInput): Promise<void> {
+    return this.#followUp(task).catch(error => { throw redactClaudeFailure(error, this.stream.credentials); });
+  }
+
+  async #followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
     }
@@ -859,8 +882,12 @@ class ClaudeSession implements Session {
 
   /** Native interrupt ACK is bounded; TaskRunner still closes after cancellation acknowledgment. */
   async interrupt(): Promise<void> {
-    this.native?.endTurn('interrupted');
-    if (!await this.stream.interruptAndSettle(this.interruptTimeoutMs)) await this.stream.dispose();
+    try {
+      this.native?.endTurn('interrupted');
+      if (!await this.stream.interruptAndSettle(this.interruptTimeoutMs)) await this.stream.dispose();
+    } catch (error) {
+      throw redactClaudeFailure(error, this.stream.credentials);
+    }
   }
 
   async close(): Promise<void> {
@@ -876,7 +903,7 @@ class ClaudeSession implements Session {
       })();
       this.closeAttempt = attempt.catch((error: unknown) => {
         this.closeAttempt = undefined;
-        throw error;
+        throw redactClaudeFailure(error, this.stream.credentials);
       });
     }
     await this.closeAttempt;

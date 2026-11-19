@@ -33,12 +33,19 @@ export interface ClaudeProjectionState { readonly abortRequested: boolean }
 export declare const claudeProjectionProfile: ClaudeProjectionProfile;
 export declare const initialClaudeProjection: ClaudeProjectionState;
 export declare const resumedClaudeProjection: ClaudeProjectionState;
+interface ClaudeCredentialRedactionTail {
+  readonly text: string;
+  readonly covered: number;
+  readonly continuesRedaction: boolean;
+}
+
 /** One per open: the session's explicit credentials, redacted from records and errors. */
 export interface ClaudeCredentialRedactor {
   values(this: void): readonly string[];
   hasProtectedValues(this: void): boolean;
   matches(this: void, text: string): boolean;
-  redactChunk(this: void, text: string): { readonly ready: string; readonly pending: string };
+  redactChunk(this: void, text: string, tail?: ClaudeCredentialRedactionTail): { readonly ready: string; readonly pending?: ClaudeCredentialRedactionTail };
+  finishRedaction(this: void, tail?: ClaudeCredentialRedactionTail): string;
   add(this: void, value: string | undefined): void;
   addExplicit(this: void, value: string): void;
   addImage(this: void, data: string): void;
