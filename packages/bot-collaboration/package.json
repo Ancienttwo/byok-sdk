@@ -60,7 +60,7 @@
   },
   "peerDependencies": {
     "@hono/node-server": "^2.1.6",
-    "vitest": "^5.1.0"
+    "vitest": "^4.0.0 || ^5.1.0"
   },
   "peerDependenciesMeta": {
     "@hono/node-server": {

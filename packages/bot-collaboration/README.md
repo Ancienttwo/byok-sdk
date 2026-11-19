@@ -16,7 +16,7 @@ Each symbol has one entry (#1845). K4 needs Node 24.22.1 or later, because its l
 | `.` | `BotCollaboration` and its option types, `botLedgerOptions`, `botCompactVeto`, `createBotPersonaProjection`, `teamSnapshot` and its errors | Node only. It loads the L Host and `@byok-sdk/client`. |
 | `./host-kit` | The L modules a Host adapter composes: model, channel, delivery, routines, team, migration, retention, dreaming, adapter steps | Node or a Worker. It loads the K4 root entry, but not the L Host or `@byok-sdk/client`. The hosted Worker example bundles it. |
 | `./rules` | The pure rules that the two entries above do not export | Anywhere. It loads only `@byok-sdk/protocol` and `@byok-sdk/server/execution-core/canonical`, so no `node:sqlite`. |
-| `./testing` | The shared vectors, the L test Host, and the K4 test data `policy` and `template` | Tests on Node. It needs the optional peers `vitest` and `@hono/node-server`. |
+| `./testing` | The shared vectors, the L test Host, and the K4 test data `policy` and `template` | Tests on Node. It needs the optional peers `vitest` (4.x or 5.1+) and `@hono/node-server`. |
 
 `openLTestHost` requires a `deviceCredentials` backend from the caller. In tests,
 import `InMemoryDeviceCredentialBackend` from `@byok-sdk/client/testing` and pass

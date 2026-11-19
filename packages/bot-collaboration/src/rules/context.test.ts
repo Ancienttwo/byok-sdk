@@ -44,6 +44,19 @@ it('#606 acceptance 4: freezes the ContextPack from injected history, and reads 
   expect(history).toEqual(injected);
 });
 
+it('informs only observing Bots that cross-Bot delegations will not be sent', () => {
+  const current = turn('t1', 'Delegate this', 'queued');
+  const history: ContextHistory = { turns: [current], cards: [], questions: [], rejected: [] };
+  const state = authority();
+  const instruction = (autonomy?: 'observe' | 'auto') => turnInstruction({ ...state, team: { ...state.team,
+    bots: { ...state.team.bots, main: { ...state.team.bots.main!, ...(autonomy === undefined ? {} : { autonomy }) } } } },
+  history, current, limits).instruction;
+  const notice = 'You are in observe mode. Cross-Bot delegate actions will not be sent; they are recorded as observations.';
+  expect(instruction('observe')).toContain(notice);
+  expect(instruction()).toContain(notice);
+  expect(instruction('auto')).not.toContain(notice);
+});
+
 it('selects the current Turn by id and keeps it out of the history rows', () => {
   const rows = [turn('t1', 'First'), turn('t2', 'Now', 'queued'), turn('t3', 'Later', 'queued')];
   const history: ContextHistory = { turns: rows, cards: [], questions: [], rejected: [] };

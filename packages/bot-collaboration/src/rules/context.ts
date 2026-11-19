@@ -4,6 +4,7 @@ import { roomContext, type RoomMessage } from './rooms.js';
 import { HISTORY_MAX_ITEMS, HISTORY_MAX_BYTES, HISTORY_OMITTED_NOTICE, historyWindow, fitHistory } from './history.js';
 import { crossBotRequest, delegationBlock, instructionOverhead, isCrossBot, openDelegationsContext } from './delegation.js';
 import { ownerMainTurn, ROOM_SYSTEM_PROMPT, systemPrompt, type ContextRoutine, type ContextState } from './schema.js';
+import { autonomyOf } from './autonomy.js';
 
 /**
  * The frozen ContextPack and instruction as pure rules (#739 D1). The caller gives the history; no function
@@ -100,7 +101,9 @@ export interface InstructionLimits {
  */
 export function turnInstruction<R extends ContextRoutine>(state: ContextState, history: ContextHistory, turn: Turn, limits: InstructionLimits,
   routines: readonly R[] = [], actions?: readonly string[]) {
-  const prompt = turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : systemPrompt(actions);
+  const basePrompt = turn.source === 'room_slot' ? ROOM_SYSTEM_PROMPT : systemPrompt(actions);
+  const prompt = autonomyOf(state.team.bots[turn.botId]) === 'observe'
+    ? `${basePrompt}\n\nYou are in observe mode. Cross-Bot delegate actions will not be sent; they are recorded as observations.` : basePrompt;
   const cross = isCrossBot(turn);
   const request = cross ? crossBotRequest(state, turn) : turn.request;
   const context = turnContext(state, history, turn, limits.turnLimit,

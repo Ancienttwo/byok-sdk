@@ -2204,6 +2204,7 @@ export declare function advanceRoomSeats(state: {
 import { type ResultSchema } from '@byok-sdk/protocol';
 import type { Turn } from './turn.js';
 import type { RoomsState } from './rooms.js';
+import type { Autonomy } from './autonomy.js';
 import { type DelegationView } from './delegation.js';
 // support
 export interface ContextBot {
@@ -2214,6 +2215,7 @@ export interface ContextBot {
     readonly archived: boolean;
     readonly participation?: 'suspended';
     readonly readyRevision: string | null;
+    readonly autonomy?: Autonomy;
 }
 // support
 export interface ContextState extends DelegationView {
