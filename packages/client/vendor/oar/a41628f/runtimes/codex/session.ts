@@ -121,9 +121,24 @@ const isCodexNotificationKey = (method: string, key: string): boolean => key ===
 const isCodexItemKey = (fields: readonly string[] | undefined, key: string): boolean => fields !== undefined
   && (key === "id" || key === "type" || fields.includes(key));
 
+function redactCodexTurnItems(source: JsonRecord | null, safe: JsonRecord | null, redact: CredentialRedactor["redactValue"]): JsonRecord | null {
+  const originalItems = source?.items;
+  const retainedItems = safe?.items;
+  if (!Array.isArray(originalItems) || !Array.isArray(retainedItems)) return safe;
+  const items = retainedItems.map((item: unknown, index: number) => {
+    const original = asRecord(originalItems[index]);
+    const retained = asRecord(item);
+    if (original?.type !== "userMessage" || !Array.isArray(original.content) || retained === null) return item;
+    const { content } = redactJoinedText(original.content, retained.content, redact);
+    return content === retained.content ? item : { ...retained, content };
+  });
+  return items.every((item: unknown, index: number) => item === retainedItems[index]) ? safe : { ...safe, items };
+}
+
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"], normalizedDraft = false): T {
   const method = record.kind === "frame" ? record.body.type : "";
-  const originalItem = record.kind === "frame" ? asRecord(asRecord(record.body.native)?.item) : null;
+  const originalNative = record.kind === "frame" ? asRecord(record.body.native) : null;
+  const originalItem = asRecord(originalNative?.item);
   const itemType = method === "item/started" || method === "item/completed" ? originalItem?.type : undefined;
   const isRawItem = method === "rawResponseItem/completed";
   const rawFunction = isRawItem && originalItem?.type === "function_call";
@@ -158,6 +173,32 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   if (safe.kind !== "frame") return safe;
   const native = asRecord(safe.body.native);
   const safeItem = asRecord(native?.item);
+  if (method === "turn/completed" || method === "turn/started") {
+    const turn = asRecord(native?.turn);
+    const updated = redactCodexTurnItems(asRecord(originalNative?.turn), turn, redact);
+    return updated === turn ? safe : { ...safe, body: { ...safe.body, native: { ...native, turn: updated } } };
+  }
+  if (method === "thread/start" || method === "thread/resume") {
+    const originalTurns = asRecord(originalNative?.thread)?.turns;
+    const thread = asRecord(native?.thread);
+    const retainedTurns = thread?.turns;
+    if (!Array.isArray(originalTurns) || !Array.isArray(retainedTurns)) return safe;
+    const turns = retainedTurns.map((turn: unknown, index: number) => {
+      const original = asRecord(originalTurns[index]);
+      const retained = asRecord(turn);
+      return redactCodexTurnItems(original, retained, redact) ?? turn;
+    });
+    return turns.every((turn: unknown, index: number) => turn === retainedTurns[index]) ? safe
+      : { ...safe, body: { ...safe.body, native: { ...native, thread: { ...thread, turns } } } };
+  }
+  if (method === "error" && asRecord(originalNative?.error) !== null && asRecord(native?.error) === null) {
+    const events = safe.body.events.map(event => {
+      if (event.kind !== "retry") return event;
+      const { reason: _withheld, ...retry } = event;
+      return retry;
+    });
+    return { ...safe, body: { ...safe.body, events } };
+  }
   if (itemType === "userMessage" && Array.isArray(originalItem?.content)) {
     const { content, input } = redactJoinedText(originalItem.content, safeItem?.content, redact);
     const events = safe.body.events.map(event => event.kind === "user_message" ? { ...event, input } : event);
@@ -405,7 +446,10 @@ async function openCodexSession(
       state.spontaneous = false;
       state.codexTurnId = null;
     }
-    const projectionParams = withheldItem ? { ...params, item: undefined } : params;
+    const error = method === "error" ? asRecord(params.error) : null;
+    const withheldError = error !== null && (Object.getOwnPropertyNames(error).some(credentials.matches)
+      || Object.getOwnPropertyNames(params).some(key => !isCodexNotificationKey(method, key) && credentials.matches(key)));
+    const projectionParams = withheldItem ? { ...params, item: undefined } : withheldError ? { ...params, error: undefined } : params;
     const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, projectionParams);
     state.projection = nextProjection;
     const links = newSessionLinks(kernel, commands.flatMap((command) => command.kind === "link" ? [command.edge] : []));
