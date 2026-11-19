@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { promises as nodeFs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createManagedServiceLifecycle, createServiceLifecycle } from '../lifecycle/create-service-lifecycle';
 import { inspectStoreServiceState, inspectStoreServiceStateWith } from '../lifecycle/store-service-state';
 import type { Runner } from '../util/exec-runner';
@@ -79,8 +79,14 @@ async function codeOf(promise: Promise<unknown>): Promise<string | undefined> {
 }
 
 describe('inspectStoreServiceState (#2421)', () => {
+  beforeEach(() => {
+    vi.stubEnv('XDG_RUNTIME_DIR', undefined);
+    vi.stubEnv('DBUS_SESSION_BUS_ADDRESS', undefined);
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
   const owner = { owner: 'cli', service: 'production' };
-  const registrations = { darwin: { manager: 'launchd', uid: 501 }, linux: { manager: 'systemd' }, win32: { manager: 'winsw' } } as const;
+  const registrations = { darwin: { manager: 'launchd', uid: 501 }, linux: { manager: 'systemd', uid: 999 }, win32: { manager: 'winsw' } } as const;
   function claim(storeDir: string, registration: ServiceRegistration) {
     return withServiceOwnerGate(() => claimHeldServiceLifecycleOwner({ storeDir, ...owner }, nodeFs, registration));
   }
@@ -164,6 +170,12 @@ describe('inspectStoreServiceState (#2421)', () => {
     await claimServiceLifecycleOwner({ storeDir, ...owner });
     const run = vi.fn<Runner>().mockResolvedValue({ code: 113, stdout: '', stderr: 'Could not find service' });
     expect(await inspectStoreServiceStateWith(storeDir, 'darwin', { run, getuid: () => 999 })).toEqual({ state: 'unknown', owner });
+  }));
+
+  it('leaves an absent systemd unit unknown in a different user namespace', () => withStore(async storeDir => {
+    await claim(storeDir, { manager: 'systemd', uid: 501 });
+    const run = vi.fn<Runner>().mockResolvedValue({ code: 4, stdout: 'inactive', stderr: '' });
+    expect(await inspectStoreServiceStateWith(storeDir, 'linux', { run, getuid: () => 999 })).toEqual({ state: 'unknown', owner });
   }));
 
   it.skipIf(process.platform === 'win32')('does not follow a service owner record symlink', () => withStore(async storeDir => {

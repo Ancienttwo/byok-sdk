@@ -21,7 +21,7 @@ export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readF
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {
   serviceName: string;
-  registration?(): ServiceRegistration;
+  registration?(): ServiceRegistration | null;
   unitPath: string;
   launcherPath: string;
   /** The unit first, then the launcher, with their exact expected content. */

@@ -64,7 +64,7 @@ async function runStopProgram(program: ServiceProgram): Promise<number | null> {
 /** PowerShell that prints the pid of every `cmd.exe` whose command line names `launcherPath`. */
 function launcherQuery(launcherPath: string): string {
   const literal = launcherPath.replaceAll("'", "''");
-  return `$ErrorActionPreference = 'Stop'; $p = '${literal}'; Get-CimInstance Win32_Process -Filter 'Name=''cmd.exe''' | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | ForEach-Object { $_.ProcessId }`;
+  return `$ErrorActionPreference = 'Stop'; $p = '${literal}'; $launcherPids = @(); $hidden = $false; Get-CimInstance Win32_Process -Filter 'Name=''cmd.exe''' | ForEach-Object { if (-not $_.CommandLine) { $hidden = $true } elseif ($_.CommandLine.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $launcherPids += $_.ProcessId } }; if ($launcherPids.Count -gt 0) { $launcherPids } elseif ($hidden) { throw 'Incomplete launcher process visibility' }`;
 }
 
 async function queryLauncher(launcherPath: string, run: Runner) {

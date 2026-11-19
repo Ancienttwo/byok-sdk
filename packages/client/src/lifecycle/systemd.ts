@@ -14,6 +14,7 @@ export interface SystemdDeps {
   run?: Runner;
   fs?: ManagedLifecycleFs;
   homedir?: () => string;
+  getuid?: () => number;
 }
 
 /**
@@ -202,7 +203,10 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
 
   return createManagedLifecycle(def, {
     serviceName: name,
-    registration: () => ({ manager: 'systemd' }),
+    registration: () => {
+      const uid = systemdLocalUserUid(deps.getuid);
+      return uid === undefined ? null : { manager: 'systemd', uid };
+    },
     unitPath,
     launcherPath,
     files: () => [
@@ -241,6 +245,15 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
     },
     query: () => querySystemdService(name, { run }),
   }, fs, gateRoot);
+}
+
+export function systemdLocalUserUid(getuid: () => number | undefined = () => process.getuid?.()): number | undefined {
+  const uid = getuid();
+  if (uid === undefined) return undefined;
+  const runtime = `/run/user/${uid}`;
+  if (process.env.XDG_RUNTIME_DIR !== undefined && process.env.XDG_RUNTIME_DIR !== runtime) return undefined;
+  if (process.env.DBUS_SESSION_BUS_ADDRESS !== undefined && process.env.DBUS_SESSION_BUS_ADDRESS !== `unix:path=${runtime}/bus`) return undefined;
+  return uid;
 }
 
 /** Query a service by its recorded manager name. @internal */

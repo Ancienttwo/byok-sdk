@@ -4,7 +4,7 @@ import { resolvePathWithoutCreate } from '../util/path-mutation-gate.js';
 import { queryLaunchdService, type LaunchdDeps } from './launchd.js';
 import { sanitizeServiceName, type ServiceManagerQuery } from './service-types.js';
 import { inspectServiceOwnerRecord, serviceLauncherPath, type ServiceRegistration } from './service-unit.js';
-import { querySystemdService, type SystemdDeps } from './systemd.js';
+import { querySystemdService, systemdLocalUserUid, type SystemdDeps } from './systemd.js';
 import { queryWindowsUserService } from './windows-user.js';
 import { queryWinswService, type WinswDeps } from './winsw.js';
 
@@ -58,7 +58,11 @@ async function queryRecordedService(
       const current = await queryLaunchdService(service, deps);
       return { running: current.running, determinate: current.running };
     }
-    case 'linux': return registration === undefined || registration.manager === 'systemd' ? querySystemdService(service, deps) : undefined;
+    case 'linux': {
+      const current = await querySystemdService(service, deps);
+      const local = registration?.manager === 'systemd' && systemdLocalUserUid(deps.getuid) === registration.uid;
+      return { running: current.running, determinate: (local && current.determinate) || current.running };
+    }
     case 'win32': {
       if (registration?.manager === 'winsw') return queryWinswService(service, deps);
       if (registration?.manager === 'windows-user') return queryWindowsUserService(registration.launcher, deps);

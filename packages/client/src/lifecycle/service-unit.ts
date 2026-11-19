@@ -213,7 +213,8 @@ const OWNER_RECORD_FILENAME = 'lifecycle-owner.json';
 
 export type ServiceRegistration =
   | { readonly manager: 'launchd'; readonly uid: number }
-  | { readonly manager: 'systemd' | 'winsw' }
+  | { readonly manager: 'systemd'; readonly uid: number }
+  | { readonly manager: 'winsw' }
   | { readonly manager: 'windows-user'; readonly launcher: string };
 
 interface OwnerRecord {
@@ -268,8 +269,8 @@ function parseOwnerRecord(text: string): OwnerRecord {
 
 function validRegistration(value: ServiceRegistration): boolean {
   switch (value?.manager) {
-    case 'launchd': return Number.isSafeInteger(value.uid) && value.uid >= 0;
-    case 'systemd':
+    case 'launchd':
+    case 'systemd': return Number.isSafeInteger(value.uid) && value.uid >= 0;
     case 'winsw': return true;
     case 'windows-user': return typeof value.launcher === 'string' && path.win32.isAbsolute(value.launcher) && !hasControlChar(value.launcher);
     default: return false;
@@ -367,15 +368,16 @@ export async function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInp
  *
  * @internal
  */
-export async function claimHeldServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs, registration?: ServiceRegistration): Promise<void> {
+export async function claimHeldServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs, registration?: ServiceRegistration | null): Promise<void> {
   const current = await readOwnerRecord(input.storeDir, fs);
   if (current !== undefined && current.owner !== input.owner) throw new ServiceUnitError('lifecycle_owner_conflict');
-  if (current?.service === input.service && (registration === undefined || isDeepStrictEqual(registration, current.registration))) return;
-  if (registration !== undefined && !validRegistration(registration)) throw new ServiceUnitError('lifecycle_owner_unreadable');
+  const registered = registration ?? undefined;
+  if (current?.service === input.service && (registration === undefined || isDeepStrictEqual(registered, current.registration))) return;
+  if (registered !== undefined && !validRegistration(registered)) throw new ServiceUnitError('lifecycle_owner_unreadable');
   const file = ownerRecordPath(input.storeDir);
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${randomUUID()}.tmp`;
-  const record: OwnerRecord = { version: 1, owner: input.owner, service: input.service, ...(registration === undefined ? {} : { registration }) };
+  const record: OwnerRecord = { version: 1, owner: input.owner, service: input.service, ...(registered === undefined ? {} : { registration: registered }) };
   await fs.writeFile(tmp, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });
   try {
     await fs.rename(tmp, file);
