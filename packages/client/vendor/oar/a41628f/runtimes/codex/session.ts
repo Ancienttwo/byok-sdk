@@ -98,9 +98,9 @@ type CodexSessionArgs = Parameters<typeof codexSession>;
 // BYOK change: one request on the session's own client, for the caller-owned open steps.
 export type CodexOpenStepRequest = (method: string, params: JsonRecord) => Promise<JsonRecord>;
 
-const codexObservedMethods = new Set(["turn/started", "turn/completed", "thread/tokenUsage/updated", "error", "item/agentMessage/delta", "item/started", "item/completed"]);
+const codexObservedMethods = new Set(["turn/started", "turn/completed", "thread/tokenUsage/updated", "error", "item/agentMessage/delta", "item/started", "item/completed", "rawResponseItem/completed"]);
 const codexItemFields = new Map<string, readonly string[]>([
-  ["agentMessage", ["text"]], ["error", ["message"]],
+  ["agentMessage", ["text"]], ["userMessage", ["content", "clientId"]], ["error", ["message"]],
   ["commandExecution", ["command", "status", "aggregatedOutput", "exitCode"]],
   ["fileChange", ["changes", "status"]], ["mcpToolCall", ["server", "tool", "arguments", "result", "error", "status"]],
   ["collabAgentToolCall", ["tool", "prompt", "status", "receiverThreadIds", "agentsStates"]],
@@ -111,7 +111,7 @@ const codexUsageFields = new Set(["last", "total", "modelContextWindow"]);
 const codexTokenFields = new Set(["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]);
 const codexNotificationFields: Readonly<Record<string, readonly string[]>> = {
   "turn/started": ["turn"], "turn/completed": ["turn"], "item/started": ["item"], "item/completed": ["item"],
-  "item/agentMessage/delta": ["itemId", "delta"], "thread/tokenUsage/updated": ["tokenUsage"], error: ["error", "willRetry"],
+  "item/agentMessage/delta": ["itemId", "delta"], "thread/tokenUsage/updated": ["tokenUsage"], "rawResponseItem/completed": ["item"], error: ["error", "willRetry"],
 };
 const isCodexNotificationKey = (method: string, key: string): boolean => key === "threadId" || key === "turnId"
   || codexNotificationFields[method]?.includes(key) === true;
@@ -119,11 +119,14 @@ const isCodexItemKey = (fields: readonly string[] | undefined, key: string): boo
   && (key === "id" || key === "type" || fields.includes(key));
 
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"], normalizedDraft = false): T {
-  const itemType = record.kind === "frame" && (record.body.type === "item/started" || record.body.type === "item/completed")
-    ? asRecord(asRecord(record.body.native)?.item)?.type : undefined;
-  const itemFields = typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
+  const method = record.kind === "frame" ? record.body.type : "";
+  const originalItem = record.kind === "frame" ? asRecord(asRecord(record.body.native)?.item) : null;
+  const itemType = method === "item/started" || method === "item/completed" ? originalItem?.type : undefined;
+  const rawFunction = method === "rawResponseItem/completed" && originalItem?.type === "function_call";
+  const itemFields = rawFunction ? ["arguments", "call_id", "name"] : typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
   const encoded = itemType === "mcpToolCall" || itemType === "fileChange" || itemType === "collabAgentToolCall" || itemType === "sleep";
-  const safe = redactRuntimeRecord(record, redact, path => encoded && isProjectedToolInput(record, path), (path, value) => {
+  const safe = redactRuntimeRecord(record, redact, path => (encoded && isProjectedToolInput(record, path))
+    || (rawFunction && path.length === 4 && path[0] === "body" && path[1] === "native" && path[2] === "item" && path[3] === "arguments"), (path, value) => {
     const [body, group, member, field] = path;
     if (body !== "body" || record.kind !== "frame") return false;
     if (normalizedDraft && record.body.type === "item/agentMessage/delta") {
@@ -146,9 +149,19 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
         && ((path.length === 3 && codexUsageFields.has(key))
           || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));
   });
-  if (record.kind !== "frame" || safe.kind !== "frame" || itemType !== "mcpToolCall" || record.body.type !== "item/completed") return safe;
-  const originalItem = asRecord(asRecord(record.body.native)?.item);
+  if (safe.kind !== "frame") return safe;
   const safeItem = asRecord(asRecord(safe.body.native)?.item);
+  if (itemType === "userMessage" && method === "item/started" && Array.isArray(originalItem?.content)) {
+    const surviving = safeItem?.content;
+    const text = originalItem.content.flatMap((block: unknown, index: number) => {
+      const source = asRecord(block);
+      return Array.isArray(surviving) && asRecord(surviving[index]) !== null && source?.type === "text" && typeof source.text === "string" ? [source.text] : [];
+    }).join("");
+    const input = redact(text);
+    const events = safe.body.events.map(event => event.kind === "user_message" ? { ...event, input } : event);
+    return { ...safe, body: { ...safe.body, events } };
+  }
+  if (itemType !== "mcpToolCall" || method !== "item/completed") return safe;
   if (safeItem?.result === originalItem?.result && safeItem?.error === originalItem?.error) return safe;
   const content = safeItem === null ? undefined : codexToolContent({ ...safeItem, type: "mcpToolCall" });
   const events = safe.body.events.map(event => {

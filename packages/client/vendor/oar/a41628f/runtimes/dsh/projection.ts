@@ -366,6 +366,16 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     assembledText = safe !== record;
     return redact(safe, path => isAssistantToolArguments(path, record.body.native));
   }
+  if (record.body.type === "session/event:user/message") {
+    const safe = redact(record);
+    if (safe.kind !== "frame") return safe;
+    const original = asRecord(asRecord(record.body.native)?.data)?.content;
+    const content = asRecord(asRecord(safe.body.native)?.data)?.content;
+    if (!Array.isArray(original)) return safe;
+    const blocks = Array.isArray(content) ? original.filter((_block, index) => asRecord(content[index]) !== null) : [];
+    const input = credentials.redact(textOf(blocks));
+    return { ...safe, body: { ...safe.body, events: safe.body.events.map(event => event.kind === "user_message" ? { ...event, input } : event) } };
+  }
   if (record.body.type === "session/event:tool/result") {
     const safe = redact(record);
     if (safe.kind !== "frame") return safe;

@@ -42,7 +42,7 @@ import { sendAcpSteerRequest } from "./steer-request.js";
 
 export function redactAcpRecord<T extends RawEvent>(
   record: T, credentials: CredentialRedactor, childNotification?: AcpSessionProfile["childNotification"],
-  pendingText?: Map<string, string>,
+  pendingText?: Map<string, string>, pendingToolText?: Map<string, string>,
 ): T {
   const native = record.kind === "frame" ? asRecord(record.body.native) : null;
   const direct = asRecord(native?.update);
@@ -110,25 +110,42 @@ export function redactAcpRecord<T extends RawEvent>(
       safe = { ...safe, body: { ...safe.body, events } };
     }
   }
-  if (!toolUpdate || safe.kind !== "frame") return safe;
+  if (!toolUpdate || safe.kind !== "frame" || !credentials.hasProtectedValues()) return safe;
   const rawOutput = credentials.redactValue(update.rawOutput);
   const content = credentials.redactValue(update.content);
-  if (rawOutput === update.rawOutput && content === update.content) return safe;
-  // Serialize and truncate output only after removing credentials from the full source.
-  return { ...safe, body: { ...safe.body, events: safe.body.events.map(event => {
+  const toolLane = JSON.stringify([child?.sessionId ?? record.sessionId, update.toolCallId]);
+  let withholdProgress = false;
+  const events = safe.body.events.map(event => {
     if (event.kind === "tool_call_progress") {
       const { output: _original, ...progress } = event;
-      const output = acpToolProgressOutput(rawOutput);
-      return output === undefined ? progress : { ...progress, output };
+      const output = acpToolProgressOutput(rawOutput, text => {
+        const previous = pendingToolText?.get(toolLane);
+        const { ready, pending } = pendingToolText === undefined
+          ? { ready: credentials.redact(text), pending: "" }
+          : credentials.redactChunk((previous ?? "") + text);
+        withholdProgress = ready !== text || pending !== "" || previous !== undefined;
+        if (pending === "") pendingToolText?.delete(toolLane);
+        else pendingToolText?.set(toolLane, pending);
+        return ready;
+      });
+      return output === undefined || output === "" ? progress : { ...progress, output };
     }
     if (event.kind === "tool_call_ended") {
+      pendingToolText?.delete(toolLane);
+      if (rawOutput === update.rawOutput && content === update.content) return event;
       const { content: _original, exitCode, ...ended } = event;
       const output = acpToolTerminalContent(content, rawOutput);
       const safeExitCode = exitCode !== undefined && asRecord(rawOutput) !== null ? { exitCode } : {};
       return { ...ended, ...safeExitCode, ...(output === undefined ? {} : { content: output }) };
     }
     return event;
-  }) } };
+  });
+  if (!withholdProgress) return { ...safe, body: { ...safe.body, events } };
+  const packet = asRecord(safe.body.native);
+  const sanitizedUpdate = asRecord(packet?.update);
+  if (sanitizedUpdate === null) return { ...safe, body: { ...safe.body, native: "[redacted]", events } };
+  const { rawOutput: _withheld, ...safeUpdate } = sanitizedUpdate;
+  return { ...safe, body: { ...safe.body, native: { ...packet, update: safeUpdate }, events } };
 }
 
 export type { AcpSessionProfile } from "./profile.js";
@@ -271,8 +288,9 @@ async function openAcpRuntimeSession(
     })();
     // BYOK change: the record consumer observes from seq 0: it registers before the recorder binds.
     const pendingText = new Map<string, string>();
+    const pendingToolText = new Map<string, string>();
     const kernel = createSessionKernel(opened.sessionId, record => {
-      const safe = redactAcpRecord(record, credentials, profile.childNotification, pendingText);
+      const safe = redactAcpRecord(record, credentials, profile.childNotification, pendingText, pendingToolText);
       if (safe.kind !== "frame") return safe;
       const body = { ...safe.body, byokRoot: record.sessionId === opened.sessionId && record.agentPath.length === 0 };
       return { ...safe, body };

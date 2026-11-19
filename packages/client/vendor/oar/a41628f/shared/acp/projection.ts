@@ -73,9 +73,9 @@ function inputDetail(value: unknown): string | undefined {
   }
 }
 
-export function acpToolProgressOutput(value: unknown): string | undefined {
+export function acpToolProgressOutput(value: unknown, mapText: (text: string) => string = text => text): string | undefined {
   const text = textContent(value) ?? inputDetail(value);
-  return text === undefined ? undefined : truncate(text);
+  return text === undefined ? undefined : truncate(mapText(text));
 }
 
 export function acpToolTerminalContent(content: unknown, rawOutput: unknown): readonly ToolOutputPart[] | undefined {
