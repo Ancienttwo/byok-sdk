@@ -1,8 +1,10 @@
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope, type TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import { expect, it, vi } from 'vitest';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
+import { admitOfferLimits } from '../daemon/task-runner/offer-admission';
+import { OfferAdmissionTiming } from '../daemon/task-runner/offer-admission-timing';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { acceptClaimSettlement, testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
@@ -42,12 +44,13 @@ function setup(getMcpToolsetSnapshot: () => ReturnType<typeof snapshot>) {
     getMcpToolsetSnapshot,
   });
   const taskId = 'search-admission';
-  const offer = createEnvelope('task.offer', {
+  const payload: TaskOfferPlainPayload = {
     agentRef: freshTestAgentRef(), session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     instruction: 'test instruction', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['host'],
-  }, { taskId, seq: 1 });
+  };
+  const offer = createEnvelope('task.offer', payload, { taskId, seq: 1 });
   return {
-    adapter, sent, probe,
+    adapter, sent, probe, runner, taskId, payload,
     run: () => runner.handleEnvelope(offer),
     cancel: () => runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 2 })),
   };
@@ -69,6 +72,27 @@ it('declines ordinary search offers before runtime detection, probing or claim',
   } finally {
     await cancel();
   }
+});
+
+it('declines native-sessions in search admission before runtime selection', () => {
+  const search = snapshot('search', process.execPath);
+  const { runner, taskId, payload } = setup(() => search);
+  const decline = vi.fn();
+  // The wire selection rule already rejects the combination. Exercise the
+  // separate limits boundary with the same payload shape.
+  const result = admitOfferLimits.call(runner, {
+    taskId, decline, admissionWithdrawn: () => false,
+    admissionSignal: new AbortController().signal,
+    releaseReservation() {}, reserveHome() {}, admission: new OfferAdmissionTiming(),
+  }, {
+    ...payload, target: { lane: 'runtime', runtimeId: 'pi' },
+    agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 },
+  });
+  expect(result).toBeUndefined();
+  expect(decline).toHaveBeenCalledExactlyOnceWith({
+    reason: 'native-sessions require direct exposure for MCP toolset "host"',
+    retryable: false, code: 'unsupported_input',
+  });
 });
 
 it('checks exposure and projects servers from the same registry snapshot', async () => {

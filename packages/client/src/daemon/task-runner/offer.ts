@@ -327,7 +327,7 @@ export async function handleOffer(
         // closed. A runtime may drain pending memory calls in close(): revoke
         // and wake them before disposal can await them.
         this['revokeAgentMemoryContext'](taskId);
-        this['revokeMcpHubContext'](taskId);
+        this['revokeHostToolsetContexts'](taskId);
         endMemoryStartWait.call(this, taskId);
         await this['startupOwnership'].dispose(taskId);
       }

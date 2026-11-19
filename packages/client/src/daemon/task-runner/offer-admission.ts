@@ -174,9 +174,10 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
   }
   const searchToolset = requiredToolsets?.find((id) => snapshot?.toolsets.get(id)?.exposure === 'search');
   if (searchToolset !== undefined && resolvedMcp?.ok) {
-    if (offeredPreparation(payload) !== undefined) {
+    if (payload.nativeSessions !== undefined || offeredPreparation(payload) !== undefined) {
+      const lane = payload.nativeSessions === undefined ? 'prepared inputs' : 'native-sessions';
       decline({
-        reason: `prepared inputs require direct exposure for MCP toolset ${JSON.stringify(searchToolset)}`,
+        reason: `${lane} require direct exposure for MCP toolset ${JSON.stringify(searchToolset)}`,
         retryable: false,
         code: 'unsupported_input',
       });

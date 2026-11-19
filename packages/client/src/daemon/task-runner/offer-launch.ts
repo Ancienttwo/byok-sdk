@@ -571,6 +571,8 @@ async function startAndActivateRuntime(
   launch: LaunchGate,
 ): Promise<void> {
   const { taskId } = phase;
+  const { mcpHub } = activation;
+  mcpHub?.beginStart(input.blobAbort.signal);
   const {
     agentBinding, ordinaryMemoryMode, ordinaryMemoryMcp, readerAttempt, sessionRef, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
     preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
@@ -688,10 +690,11 @@ async function startAndActivateRuntime(
     timeoutMs: (this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS) + 5_000,
     requestAuthorization: (summary, signal) => requestApproval(summary, signal, 'tool-authorization'),
   });
-  const { mcpHub } = activation;
-  if (mcpHub !== undefined && toolAuthorizationGate !== undefined) {
-    bindMcpHubAuthorization(toolAuthorizationGate, { catalog: mcpHub.binding, isActive: mcpHub.isActive });
-  }
+  const dispatchGate = mcpHub === undefined || toolAuthorizationGate === undefined ? undefined
+    : bindMcpHubAuthorization(toolAuthorizationGate, {
+        catalog: mcpHub.binding, isActive: mcpHub.isActive,
+        canRequestDispatchApproval: () => this['tasks'].get(taskId)?.mcpHub === mcpHub,
+      });
   if (toolAuthorization.fileScope !== undefined && fileScopeGrant !== undefined && toolAuthorizationGate === undefined) {
     // A configured scope with no auto gate would reach the adapter as an
     // unscoped launch. Refuse the claimed task instead of dropping it.
@@ -724,6 +727,16 @@ async function startAndActivateRuntime(
   const memoryCommitGuidance = !readerAttempt && ordinaryMemoryMode === 'read-write' && activation.payload.agentMemoryCommit === 'on-success'
     ? 'Memory writes are kept only if this task completes successfully.\n'
     : '';
+  if (mcpHub !== undefined) {
+    try {
+      await mcpHub.configureAuthorization(dispatchGate);
+    } catch {
+      await failBeforeStart.call(this, taskId, 'the private MCP hub authorization could not be initialized', false, {
+        binding: agentBinding, runtimeId: pick.descriptor.id,
+      });
+      return;
+    }
+  }
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(input.sessionLease === undefined ? {} : { sessionLease: input.sessionLease }),

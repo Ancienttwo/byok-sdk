@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { McpHubCatalogBinding } from './mcp/hub/catalog.js';
+import type { ToolAuthorizationIpcConfig } from './tool-authorization-ipc.js';
 import type { SdkReservedHelperKind } from './sdk-reserved-helper-host.js';
 
 /**
@@ -27,6 +28,7 @@ export const MCP_HUB_CONTEXT_ACTIVE_METHOD = 'mcp_hub.is_active';
 export interface McpHubContext extends SdkReservedMcpContext {
   readonly binding: McpHubCatalogBinding;
   readonly innerNonces?: readonly string[];
+  readonly authorization?: 'all' | ToolAuthorizationIpcConfig;
 }
 
 /** The daemon's context file, the one source of a task-scoped MCP server's identity. Throws when unusable. */

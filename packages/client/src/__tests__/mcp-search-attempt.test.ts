@@ -9,6 +9,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { createControlMethods } from '../daemon/create-daemon/control-methods';
 import type { DaemonScope } from '../daemon/create-daemon/scope';
 import { connectControlClient } from '../daemon/control-client';
+import { exportPrivateKeyPem, generateDeviceKeyPair } from '../daemon/device-keys';
 import { startControlServer } from '../daemon/control-server';
 import type { SearchRuntimeEvidence } from '../daemon/search-runtime-qualification';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
@@ -95,18 +96,33 @@ function setup(adapters = [new FixtureAdapter()], extra: Partial<TaskRunnerDeps>
     ...extra,
   });
   cleanup.push(() => runner.shutdownActiveTasks('test cleanup'));
-  const daemonState = { runner: runner as TaskRunner | undefined, shuttingDown: false };
+  const { publicKeyBase64Url, privateKey } = generateDeviceKeyPair();
+  const daemonState = {
+    runner: runner as TaskRunner | undefined, shuttingDown: false,
+    auth: { isRevoked: () => false, readCurrent: async () => ({
+      deviceId: 'fixture-device', tenantId: 'fixture-tenant', devicePublicKey: publicKeyBase64Url,
+      devicePrivateKeyPem: exportPrivateKeyPem(privateKey),
+    }) },
+  };
   const startControl = async () => {
-    const methods = createControlMethods({ daemonState, adapters } as unknown as DaemonScope);
+    const methods = createControlMethods({
+      daemonState, adapters, config: { serverUrl: 'https://fixture.example', productId },
+      observer: { noteDeviceAssertion() {} }, taskContextCapabilityAvailable: () => true,
+      deviceAssertionAudiences: new Set(['connector']), deviceAssertionTtlMs: 60_000,
+    } as unknown as DaemonScope);
     const control = await startControlServer({ storeDir, productId, methods });
     cleanup.push(() => control.close());
     return control;
   };
-  const proof = async () => {
+  const connectControl = async () => {
     const result = await connectControlClient({ storeDir, productId });
     if (!result.ok) throw new Error(result.reason);
     cleanup.push(async () => { result.client.close(); });
-    return (contextToken: string) => result.client.request<boolean>(MCP_HUB_CONTEXT_ACTIVE_METHOD, { contextToken });
+    return result.client;
+  };
+  const proof = async () => {
+    const client = await connectControl();
+    return (contextToken: string) => client.request<boolean>(MCP_HUB_CONTEXT_ACTIVE_METHOD, { contextToken });
   };
   const configure = (options: Record<string, unknown> = {}) => writeFile(configFile, JSON.stringify({ pages: [[replyTool]], ...options }));
   const receipts = async () => (await readFile(receiptFile, 'utf8')).trim().split('\n').map(line => JSON.parse(line));
@@ -114,7 +130,7 @@ function setup(adapters = [new FixtureAdapter()], extra: Partial<TaskRunnerDeps>
   const offer = (taskId = 'search-task', requiredToolsets = ['host'], target: Offer['target'] = { lane: 'auto' }, extra: Pick<Offer, 'terminalProjection'> = {}) =>
     runner.handleEnvelope(createEnvelope('task.offer', { ...FRESH_OFFER, agentRef: freshTestAgentRef(), instruction: 'Test the connector', target, requiredToolsets, ...extra }, { taskId, seq: 1 }));
   const cancel = (taskId = 'search-task') => runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 2 }));
-  return { runner, startControl, proof, daemonState, registry, mixed, storeDir, configure, receipts, sent, probe, offer, cancel };
+  return { runner, startControl, connectControl, proof, daemonState, registry, mixed, storeDir, configure, receipts, sent, probe, offer, cancel };
 }
 
 async function connectHub(spec: McpStdioServerConfig) {
@@ -127,7 +143,7 @@ async function connectHub(spec: McpStdioServerConfig) {
   return {
     client, stderr: () => stderr,
     search: () => client.callTool({ name: 'tool_search', arguments: { query: 'echo' } }),
-    call: () => client.callTool({ name: 'call_tool', arguments: { server: 'inner', tool: 'echo', arguments: { text: 'hello' } } }),
+    call: (text = 'hello') => client.callTool({ name: 'call_tool', arguments: { server: 'inner', tool: 'echo', arguments: { text } } }),
   };
 }
 
@@ -174,37 +190,46 @@ it('projects mixed tools and proves the sealed cwd, filtered env, inner authoriz
     expect(await active(innerNonce)).toBe(false);
     const hub = await connectHub(spec);
     expect((await hub.client.listTools()).tools.map(tool => tool.name)).toEqual(['tool_search', 'call_tool']);
-    expect(await hub.search()).toMatchObject({ isError: true });
     release();
     await offered;
     expect(await active(context.contextToken)).toBe(true);
     const expectedCwd = await realpath(manifest.workspace.workspaceDir);
-    await configure({ pages: [[{ ...replyTool, description: connectorToken }]] });
-    const rejectedMetadata = await hub.search();
-    expect(rejectedMetadata).toMatchObject({ isError: true });
-    await expect(stat(context.binding.catalogPath)).rejects.toHaveProperty('code', 'ENOENT');
-    await configure();
+    await configure({ pages: [[{ ...replyTool, description: `echo ${connectorToken}` }]] });
     const search = await hub.search();
-    expect(JSON.stringify(search)).toContain('inner');
+    expect(search.isError).not.toBe(true);
+    expect(JSON.stringify(search)).toContain(connectorToken);
     const receipt = (await receipts())[0];
     expect(receipt.cwd).toBe(expectedCwd);
     expect(receipt.env).toMatchObject({ HUB_CONNECTOR_TOKEN: connectorToken, HUB_REGION: 'loopback' });
     for (const name of ['OPENAI_API_KEY', 'byok_control', 'PI_CODING_AGENT_DIR']) expect(receipt.env).not.toHaveProperty(name);
-    const authorization = toolAuthorization!.authorize({ toolName: 'mcp__byoktools__call_tool', toolCallId: 'inner-attempt',
-      cwd: manifest.workspace.workspaceDir, input: { server: 'inner', tool: 'echo', arguments: { text: 'fixture' } } });
-    await vi.waitFor(() => expect(sent.find(envelope => envelope.type === 'task.await_approval')).toBeDefined());
-    const approval = sent.find(envelope => envelope.type === 'task.await_approval')!;
-    await runner.handleEnvelope(createEnvelope('task.reject', { approvalId: approval.payload.approvalId }, { taskId: 'search-task', seq: 2 }));
-    expect(await authorization).toMatchObject({ decision: 'deny' });
-    expect((await receipts()).some(entry => entry.method === 'tools/call')).toBe(false);
-    await configure({ behavior: 'echo-launch-secrets' });
-    const rejectedReply = await hub.call();
-    expect(rejectedReply).toMatchObject({ isError: true });
-    await configure();
-    expect(await hub.call()).toMatchObject({ structuredContent: { text: 'hello' } });
-    expect((await receipts()).filter(entry => entry.method === 'tools/call')).toHaveLength(2);
-    for (const secret of [connectorToken, innerNonce, context.contextToken]) {
-      expect(JSON.stringify([mcpServers, mcpToolsetTools, rejectedMetadata, search, rejectedReply, sent]) + hub.stderr()).not.toContain(secret);
+    const decide = async (type: 'task.approve' | 'task.reject', seq: number, text?: string) => {
+      const prior = sent.filter(envelope => envelope.type === 'task.await_approval').length;
+      const result = hub.call(text);
+      void result.catch(() => undefined);
+      await Promise.race([
+        vi.waitFor(() => expect(sent.filter(envelope => envelope.type === 'task.await_approval')).toHaveLength(prior + 1)),
+        result.then(() => { throw new Error('Hub replied before D requested authorization'); }),
+      ]);
+      const approval = sent.filter(envelope => envelope.type === 'task.await_approval').at(-1)!;
+      await runner.handleEnvelope(createEnvelope(type, { approvalId: approval.payload.approvalId }, { taskId: 'search-task', seq }));
+      return result;
+    };
+    expect(await decide('task.reject', 2)).toMatchObject({ isError: true, content: [{ text: 'MCP tool call is not authorized.' }] });
+    expect((await receipts()).filter(entry => entry.method === 'tools/call')).toHaveLength(0);
+    await expect(toolAuthorization!.authorize({ toolName: 'mcp__byoktools__call_tool', toolCallId: 'inner-attempt',
+      cwd: manifest.workspace.workspaceDir, input: { server: 'inner', tool: 'echo', arguments: { text: 'hello' } } }))
+      .resolves.toMatchObject({ decision: 'allow' });
+    expect(sent.filter(envelope => envelope.type === 'task.await_approval')).toHaveLength(1);
+    await configure({ behavior: 'echo-launch-secrets', pages: [[{ ...replyTool, description: `echo ${connectorToken}` }]] });
+    const rejectedNonce = await decide('task.approve', 3);
+    expect(rejectedNonce).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('private launch data') }] });
+    await configure({ pages: [[{ ...replyTool, description: `echo ${connectorToken}` }]] });
+    const rejectedToken = await decide('task.approve', 4, `echo ${context.contextToken}`);
+    expect(rejectedToken).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('private launch data') }] });
+    expect(await decide('task.approve', 5, connectorToken)).toMatchObject({ structuredContent: { text: connectorToken } });
+    expect((await receipts()).filter(entry => entry.method === 'tools/call')).toHaveLength(3);
+    for (const secret of [innerNonce, context.contextToken]) {
+      expect(JSON.stringify([mcpServers, mcpToolsetTools, search, rejectedNonce, rejectedToken, sent]) + hub.stderr()).not.toContain(secret);
     }
   } finally {
     release();
@@ -251,6 +276,31 @@ it('freezes the catalog across hub restart and reload, then uses a fresh snapsho
   const afterRestart = await proof();
   expect(await afterRestart(next.contextToken)).toBe(false);
   expect(await nextHub.search()).toMatchObject({ isError: true });
+});
+
+it.each(['idle', 'in-flight'] as const)('reclaims a %s inner process on control disconnect', async (state) => {
+  const adapter = new FixtureAdapter();
+  const { configure, offer, receipts, startControl } = setup([adapter]);
+  await configure();
+  const control = await startControl();
+  await offer();
+  const hub = await connectHub(adapter.input!.mcpServers!.byoktools!);
+  expect((await hub.search()).isError).not.toBe(true);
+  expect(await hub.call()).toMatchObject({ structuredContent: { text: 'hello' } });
+  const pid = (await receipts()).find(entry => entry.method === 'tools/call').pid;
+  expect(process.kill(pid, 0)).toBe(true);
+  let pending: ReturnType<typeof hub.call> | undefined;
+  if (state === 'in-flight') {
+    await configure({ behavior: 'hang' });
+    pending = hub.call();
+    void pending.catch(() => undefined);
+    await vi.waitFor(async () => expect((await receipts()).filter(entry => entry.method === 'tools/call')).toHaveLength(2));
+  }
+  await control.close();
+  await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' })));
+  if (pending !== undefined) expect(await pending).toMatchObject({ isError: true, content: [{ text: expect.stringContaining('result unknown') }] });
+  expect(await hub.call()).toMatchObject({ isError: true });
+  expect((await receipts()).filter(entry => entry.method === 'tools/call')).toHaveLength(state === 'idle' ? 1 : 2);
 });
 
 it('retires the spilled token before retrying the same task ID after a claim journal failure', async () => {
@@ -311,6 +361,45 @@ it.each(['ended', 'start-failed', 'shutdown'] as const)('revokes the Attempt bef
   expect(await active(context.contextToken)).toBe(false);
 });
 
+it.each(['start', 'activation'] as const)('revokes direct and inner nonces while %s failure waits for terminal persistence', async (failure) => {
+  const adapter = new FixtureAdapter();
+  const home = testAgentHomeDeps();
+  const writingTerminal = Promise.withResolvers<void>();
+  const releaseTerminal = Promise.withResolvers<void>();
+  if (failure === 'activation') {
+    vi.spyOn(home.agentSessionHandoffs, 'record').mockRejectedValueOnce(new Error('synthetic activation failure'));
+  }
+  const recordTerminal = home.agentSessionHandoffs.recordTaskTerminal.bind(home.agentSessionHandoffs);
+  vi.spyOn(home.agentSessionHandoffs, 'recordTaskTerminal').mockImplementation(async input => {
+    writingTerminal.resolve();
+    await releaseTerminal.promise;
+    return recordTerminal(input);
+  });
+  const { startControl, connectControl, offer, sent } = setup([adapter], home);
+  await startControl();
+  const control = await connectControl();
+  const issue = (contextToken: string) => control.request('task_assertion.issue', { contextToken, audience: 'connector' });
+  const release = adapter.blockStart();
+  const offered = offer('search-task', ['host', 'direct']);
+  try {
+    const { mcpServers } = await Promise.race([
+      adapter.starting.promise, offered.then(() => { throw new Error('The runtime did not start'); }),
+    ]);
+    const context = await readContext(mcpServers!.byoktools!);
+    const nonces = [reservedMcpToken(mcpServers!.native), reservedMcpToken(context.binding.mcpServers.inner)];
+    for (const nonce of nonces) await expect(issue(nonce)).resolves.toHaveProperty('assertion');
+    release(failure === 'start' ? new Error('synthetic start failure') : undefined);
+    await writingTerminal.promise;
+    expect(sent.some(envelope => envelope.type === 'task.fail')).toBe(false);
+    for (const nonce of nonces) await expect(issue(nonce)).rejects.toMatchObject({ code: 'context_revoked' });
+  } finally {
+    release();
+    releaseTerminal.resolve();
+    await offered;
+  }
+  expect(sent.some(envelope => envelope.type === 'task.fail')).toBe(true);
+});
+
 it('skips version mismatches and the durable lane in auto, and admits a direct-only byoktools', async () => {
   const old = new FixtureAdapter('claude', 'fixture-0');
   const durable = new FixtureAdapter('codex', 'fixture-1', true);
@@ -329,4 +418,44 @@ it('skips version mismatches and the durable lane in auto, and admits a direct-o
   await cancel();
   await offer('direct', ['collision'], { lane: 'runtime', runtimeId: 'claude' });
   expect(old.input?.mcpServers?.byoktools?.args).toEqual([expect.stringContaining('host-toolset-')]);
+});
+
+it('searches and enforces D while starting, then denies calls after cancellation', async () => {
+  const adapter = new FixtureAdapter();
+  const onDecision = vi.fn();
+  const { configure, startControl, offer, cancel, proof, sent, receipts } = setup([adapter], {
+    toolAuthorization: () => ({ default: 'auto', rules: {
+      alwaysAsk: [{ id: 'startup-review', match: { mcpServer: 'inner', mcpTool: 'echo' } }],
+    } }),
+    onToolAuthorizationDecision: onDecision,
+  });
+  await configure();
+  await startControl();
+  const active = await proof();
+  const release = adapter.blockStart();
+  const offered = offer();
+  try {
+    const { mcpServers } = await Promise.race([
+      adapter.starting.promise, offered.then(() => { throw new Error('The runtime did not start'); }),
+    ]);
+    const context = await readContext(mcpServers!.byoktools!);
+    const hub = await connectHub(mcpServers!.byoktools!);
+    expect(sent.map(row => row.type)).toEqual(['task.claim']);
+    expect(await active(context.contextToken)).toBe(true);
+    expect(JSON.stringify(await hub.search())).toContain('inner');
+    expect(await hub.call()).toMatchObject({ isError: true, content: [{ text: 'MCP tool call is not authorized.' }] });
+    expect(onDecision).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      toolName: 'mcp__inner__echo', decision: 'deny', authorization: { source: 'rule', ruleIds: ['startup-review'] },
+    }));
+    expect(sent.map(row => row.type)).toEqual(['task.claim']);
+    await cancel();
+    expect(await active(context.contextToken)).toBe(false);
+    expect(await hub.search()).toMatchObject({ isError: true });
+    expect(await hub.call()).toMatchObject({ isError: true });
+    expect((await receipts()).filter(entry => entry.method === 'tools/call')).toHaveLength(0);
+  } finally {
+    release();
+    await offered;
+  }
+  expect(sent.map(row => row.type)).toEqual(['task.claim', 'task.cancelled']);
 });

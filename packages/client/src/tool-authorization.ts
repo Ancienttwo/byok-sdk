@@ -872,6 +872,9 @@ export function createAutoToolAuthorizationGate(input: {
           const inner = await Promise.race([hub.resolve(nativeCall, mcp), expired]);
           if (inner === 'expired') return timedOut();
           if (inner === undefined) return identityUnavailable();
+          // Installed hubs decide the exact call at dispatch. Native hooks
+          // still authenticate the outer identity and validate the binding.
+          if (hub.dispatch !== undefined && !hub.dispatch.calls.has(rawCall)) return allow();
           call = inner;
         } else {
           if (needsMcpIdentity && nativeCall.toolName.startsWith('mcp__') && mcp === undefined) return identityUnavailable();
@@ -890,6 +893,9 @@ export function createAutoToolAuthorizationGate(input: {
           risk = { level: 'high', reasons: Object.freeze(['outside-file-scope']), authorization: FLOOR_AUTHORIZATION };
         }
         if (risk.level === 'normal') return allow();
+        if (hub?.dispatch?.canRequestApproval() === false) return finish({
+          decision: 'deny', code: 'tool_authorization_unavailable', reason: 'tool approval is unavailable during runtime startup',
+        });
         const summary = call.toolName === 'subagent_launch'
           ? describeWorkflowChildLaunch(call, risk, workflowChildLaunchEffects(call, input.workspace, input.home ?? homedir(), rules, { platform: input.platform }))
           : describeHighRiskToolCall(call, risk.reasons, risk.authorization);

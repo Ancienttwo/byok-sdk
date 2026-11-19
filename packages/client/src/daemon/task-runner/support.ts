@@ -20,7 +20,7 @@ import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { createEnvelope, RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclineCode, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types.js';
+import type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeOperationStartInput, Session } from '../../types.js';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable.js';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home.js';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers.js';
@@ -132,6 +132,9 @@ export function observePreparedCall(
 export interface McpHubAttempt {
   readonly binding: McpHubCatalogBinding;
   readonly isActive: () => boolean;
+  beginStart(signal: AbortSignal): void;
+  configureAuthorization(gate: RuntimeOperationStartInput['toolAuthorization']): Promise<void>;
+  closeAuthorization(): void;
 }
 
 export interface ActiveTask {

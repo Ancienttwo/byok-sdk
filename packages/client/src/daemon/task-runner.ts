@@ -616,6 +616,10 @@ export class TaskRunner {
   }
 
   constructor(private readonly deps: TaskRunnerDeps) {
+    // Startup and admission can revoke contexts before a terminal plan exists.
+    hostFor(this).registerHandler('revoke.host_contexts', (_envelope, context) => {
+      if (context.taskId !== undefined) this.revokeHostToolsetContexts(context.taskId);
+    });
     this.startupOwnership = new StartupOwnership({
       isOfferInFlight: taskId => this.inFlightOffers.has(taskId),
       allowRetry: () => !this.stoppingOffers,
@@ -1181,6 +1185,7 @@ export class TaskRunner {
 
   /** Shutdown (contract §8.2(1)): no task on this device keeps a mintable context across it. */
   private revokeAllHostToolsetContexts(): void {
+    for (const attempt of this.mcpHubContextByToken.values()) attempt.closeAuthorization();
     this.mcpHubContextByToken.clear();
     this.mcpHubContextByTask.clear();
     for (const entry of this.hostToolsetContextByToken.values()) entry.state = 'revoked';
@@ -1212,7 +1217,10 @@ export class TaskRunner {
 
   private revokeMcpHubContext(taskId: string): void {
     const token = this.mcpHubContextByTask.get(taskId);
-    if (token !== undefined) this.mcpHubContextByToken.delete(token);
+    if (token !== undefined) {
+      this.mcpHubContextByToken.get(token)?.closeAuthorization();
+      this.mcpHubContextByToken.delete(token);
+    }
     this.mcpHubContextByTask.delete(taskId);
   }
 

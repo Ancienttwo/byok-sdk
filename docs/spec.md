@@ -2633,6 +2633,8 @@ into one content-addressed snapshot, resolves every requested id from exactly on
 snapshot before claim, and rejects missing ids or colliding server names.
 Runtime selection also requires an adapter that advertises `mcpToolsets`; no
 semantic fallback to a tool-less runtime exists.
+The Host is responsible for credentials its connectors echo in tool replies
+in both direct and search exposure.
 
 `command` must be an absolute path. A definition carrying a bare name, a
 relative path (`mcp_toolset_command_not_absolute`) or a command starting with

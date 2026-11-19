@@ -9,6 +9,8 @@ import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESU
 import type { AgentMemoryMcpContext, McpHubContext, SdkReservedMcpContext } from '../../sdk-reserved-helper-context.js';
 import { MCP_HUB_SERVER_NAME } from '../../mcp/hub/protocol.js';
 import type { McpHubCatalogBinding } from '../../mcp/hub/catalog.js';
+import type { ToolAuthorizationGate } from '../../tool-authorization.js';
+import { startToolAuthorizationIpc } from '../../tool-authorization-ipc.js';
 import { atomicWriteFile } from '../../util/atomic-write.js';
 import type { ExecutionScratch } from '../retention/scratch.js';
 import { freshHostToolsetContextToken, taskTearingDown, type AgentResultContext, type McpHubAttempt } from './support.js';
@@ -197,18 +199,36 @@ export async function sealMcpHub(
     catalogPath: path.join(scratch.sdkDir, 'mcp-hub-catalog.json'),
     launchCwd, mcpServers, mcpEnv,
   });
+  const file = mcpHubContextFile(scratch);
+  let authorization: Awaited<ReturnType<typeof startToolAuthorizationIpc>> | undefined;
+  let startupSignal: AbortSignal | undefined;
   const contextToken = freshHostToolsetContextToken();
+  const isCurrent = (): boolean => this['mcpHubContextByToken'].get(contextToken) === attempt;
   const attempt: McpHubAttempt = Object.freeze({
     binding,
     isActive: () => this['mcpHubContextByToken'].get(contextToken) === attempt
-      && this['tasks'].get(taskId)?.mcpHub === attempt && !this['stoppingOffers'] && !taskTearingDown(this, taskId),
+      && (startupSignal?.aborted === false || this['tasks'].get(taskId)?.mcpHub === attempt)
+      && !this['stoppingOffers'] && !taskTearingDown(this, taskId),
+    beginStart(signal: AbortSignal) { startupSignal = signal; },
+    async configureAuthorization(gate: ToolAuthorizationGate | undefined) {
+      authorization = gate === undefined ? undefined : await startToolAuthorizationIpc(gate);
+      if (!isCurrent()) {
+        attempt.closeAuthorization();
+        return;
+      }
+      const launchContext: McpHubContext = { ...context, authorization: authorization?.config ?? 'all' };
+      await writeMcpContextFile(file, launchContext);
+    },
+    closeAuthorization() {
+      void authorization?.close().catch(() => undefined);
+    },
   });
   this['mcpHubContextByToken'].set(contextToken, attempt);
   this['mcpHubContextByTask'].set(taskId, contextToken);
   const context: McpHubContext = {
     storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken, binding, innerNonces,
   };
-  await writeMcpContextFile(mcpHubContextFile(scratch), context);
+  await writeMcpContextFile(file, context);
   return attempt;
 }
 

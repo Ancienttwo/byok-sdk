@@ -43,13 +43,14 @@ function matchesInputSchema(args: McpHubCall['arguments'], schema: unknown): boo
 }
 
 /** Internal stdio helper. Only a daemon-owned Attempt proof makes either tool callable. */
-export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } {
+export function serveMcpHub(options: McpHubOptions): { close(): Promise<void>; disconnect(): Promise<void> } {
   const binding = snapshotHubBinding(options.binding);
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   let catalog: McpHubCatalog | undefined;
   let discovery: Discovery | undefined;
   let closing: Promise<void> | undefined;
+  let disconnecting: Promise<void> | undefined;
 
   const pool = new McpServerPool((name) => {
     const frozen = catalog?.get(name);
@@ -65,7 +66,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     } catch {
       // A missing or failed control proof denies this operation.
     }
-    if (!active) throw new InactiveAttemptError('MCP hub Attempt is inactive or could not be verified.');
+    if (!active || disconnecting !== undefined) throw new InactiveAttemptError('MCP hub Attempt is inactive or could not be verified.');
     signal.throwIfAborted();
   }
 
@@ -118,6 +119,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
 
   async function callTool(request: McpServerToolCall): Promise<Record<string, unknown>> {
     const { name, signal } = request;
+    if (disconnecting !== undefined) return hubText('MCP hub control connection is closed.', true);
     if (name === HUB_SEARCH_TOOL) {
       const query = parseHubQuery(request.arguments);
       if (query === undefined) return hubText('tool_search requires a query string of at most 256 characters.', true);
@@ -179,6 +181,14 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     void close();
   }
 
+  // Keep stdio open so dispatched calls can report an unknown result.
+  function disconnect(): Promise<void> {
+    if (disconnecting !== undefined) return disconnecting;
+    discovery?.abort.abort();
+    disconnecting = Promise.allSettled([pool.close(), discovery?.done]).then(() => undefined);
+    return disconnecting;
+  }
+
   function close(): Promise<void> {
     if (closing !== undefined) return closing;
     stdio.close();
@@ -186,10 +196,9 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     input.off('error', closeStreams);
     output.off('close', closeStreams);
     output.off('error', closeStreams);
-    discovery?.abort.abort();
-    closing = Promise.allSettled([pool.close(), discovery?.done]).then(() => undefined);
+    closing = disconnect();
     return closing;
   }
 
-  return { close };
+  return { close, disconnect };
 }
