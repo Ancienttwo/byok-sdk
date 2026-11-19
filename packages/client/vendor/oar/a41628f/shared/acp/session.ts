@@ -76,13 +76,14 @@ export function redactAcpRecord<T extends RawEvent>(
       const { ready, pending } = credentials.redactChunk(previous + delta.text);
       if (pending.length === 0) pendingText.delete(lane);
       else pendingText.set(lane, pending);
-      if (ready === delta.text) return safe;
       const safeNative = asRecord(safe.body.native);
       const safeUpdate = asRecord(safeNative?.update);
-      const content = { ...asRecord(safeUpdate?.content), type: "text", text: ready };
-      const native = safeUpdate === null ? safe.body.native : { ...safeNative, update: { ...safeUpdate, content } };
+      const safeContent = asRecord(safeUpdate?.content);
+      if (safeContent === null) pendingText.delete(lane);
+      const content = { ...safeContent, type: "text", text: ready };
+      const native = safeContent === null ? safe.body.native : { ...safeNative, update: { ...safeUpdate, content } };
       const events = safe.body.events.flatMap<RuntimeEventBody>(event => event.kind !== "text_delta" ? [event]
-        : ready.length === 0 ? [] : [{ ...event, text: ready }]);
+        : safeContent === null || ready.length === 0 ? [] : [{ ...event, text: ready }]);
       return { ...safe, body: { ...safe.body, native, events } };
     }
     const closedChild = child != null && record.body.events.some(event => event.kind === "task_ended" && event.taskId === child.sessionId);

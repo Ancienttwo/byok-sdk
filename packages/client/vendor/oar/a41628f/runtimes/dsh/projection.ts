@@ -323,8 +323,16 @@ function withholdStreamFragment(frame: unknown): unknown {
 
 /** BYOK change: only complete tool arguments can be decoded safely. Use the same sanitized JSON for both views. */
 export function redactDshRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
-  const protocolString = (path: RedactionPath) => record.kind === "frame"
-    && record.body.type === "session/event:assistant/message" && path.length === 2 && path[0] === "body" && path[1] === "type";
+  const protocolString = (path: RedactionPath) => {
+    if (record.kind !== "frame" || record.body.type !== "session/event:assistant/message" || path[0] !== "body") return false;
+    if (path.length === 2 && path[1] === "type") return true;
+    const [ , native, data, message, content, index, field] = path;
+    if (!assembledText || path.length !== 7 || native !== "native" || data !== "data" || message !== "message"
+      || content !== "content" || typeof index !== "number" || field !== "text") return false;
+    const blocks = asRecord(asRecord(asRecord(record.body.native)?.data)?.message)?.content;
+    return Array.isArray(blocks) && asRecord(blocks[index])?.type === "text";
+  };
+  let assembledText = false;
   const redact = <R extends RawEvent>(value: R, jsonField?: (path: RedactionPath) => boolean): R =>
     redactRuntimeRecord(value, credentials.redactValue, jsonField, protocolString, (path, key) => {
       const [body, native, index, usage, context] = path;
@@ -351,7 +359,9 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     }
   }
   if (record.body.type === "session/event:assistant/message") {
-    return redact(redactAssistantText(record, credentials), path => isAssistantToolArguments(path, record.body.native));
+    const safe = redactAssistantText(record, credentials);
+    assembledText = safe !== record;
+    return redact(safe, path => isAssistantToolArguments(path, record.body.native));
   }
   if (record.body.type !== "session/event:tool/call") return redact(record);
   const safe = redact(record, isToolArguments);

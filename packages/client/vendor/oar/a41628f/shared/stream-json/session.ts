@@ -76,6 +76,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   const assistantTails = textTails?.assistant;
   let terminalText: { text: string; continues: boolean } | undefined;
   let sanitizedText = false;
+  let sanitizedFragment: "content_block" | "delta" | undefined;
   if (textTails !== undefined && record.kind === "frame" && record.body.type === "assistant" && native?.type === "assistant"
     && credentials.hasProtectedValues()) {
     const message = asRecord(native.message);
@@ -126,6 +127,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
         return text === "" ? [] : [{ ...projected, text }];
       });
       sanitizedText = true;
+      sanitizedFragment = fragmentField;
       safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, [fragmentField]: { ...delta, text: ready } } }, events } };
     }
     if ((isStart && delta?.type === "thinking") || (event?.type === "content_block_delta" && delta?.type === "thinking_delta")) {
@@ -145,8 +147,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
     if (sanitizedText && native === "events" && typeof field === "number" && path.length === 4
       && group === "text" && safe.body.events[field]?.kind === "text_delta") return true;
     if (native !== "native" || record.kind !== "frame") return false;
-    if (sanitizedText && record.body.type === "stream_event" && field === "event" && path.length === 5
-      && (group === "delta" || group === "content_block") && block === "text") return true;
+    if (sanitizedFragment !== undefined && field === "event" && path.length === 5 && group === sanitizedFragment && block === "text") return true;
     if (sanitizedText && record.body.type === "assistant" && field === "message" && group === "content"
       && typeof block === "number" && member === "text" && path.length === 6) {
       const content = asRecord(asRecord(record.body.native)?.message)?.content;

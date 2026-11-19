@@ -113,7 +113,7 @@ const codexNotificationFields: Readonly<Record<string, readonly string[]>> = {
   "item/agentMessage/delta": ["itemId", "delta"], "thread/tokenUsage/updated": ["tokenUsage"], error: ["error", "willRetry"],
 };
 
-export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"]): T {
+export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"], normalizedDraft = false): T {
   const itemType = record.kind === "frame" && (record.body.type === "item/started" || record.body.type === "item/completed")
     ? asRecord(asRecord(record.body.native)?.item)?.type : undefined;
   const itemFields = typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
@@ -121,6 +121,11 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   return redactRuntimeRecord(record, redact, path => encoded && isProjectedToolInput(record, path), (path, value) => {
     const [body, group, member, field] = path;
     if (body !== "body" || record.kind !== "frame") return false;
+    if (normalizedDraft && record.body.type === "item/agentMessage/delta") {
+      if (path.length === 3 && group === "native" && member === "delta") return true;
+      if (path.length === 4 && group === "events" && typeof member === "number" && field === "text"
+        && record.body.events[member]?.kind === "text_delta") return true;
+    }
     if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native")
       || (group === "byokTurnStatus" && record.body.type === "turn/completed" && (value === "completed" || value === "interrupted" || value === "failed"));
     if (path.length !== 4 || group !== "native") return false;
@@ -224,7 +229,10 @@ async function openCodexSession(
 
   // BYOK change: The record consumer observes from seq 0: it registers before any record is appended.
   // Observer errors are swallowed by the kernel, so the consumer fails the session itself.
-  const kernel = createSessionKernel(threadId, record => redactCodexRecord(record, redactValue), options.retainedBytes);
+  const kernel = createSessionKernel(threadId, record => {
+    const body = record.kind === "frame" ? record.body : undefined;
+    return redactCodexRecord(record, redactValue, body?.type === "item/agentMessage/delta" && credentials.hasProtectedValues());
+  }, options.retainedBytes);
   if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);
   hooks.onReady?.(threadId);
   const state: CodexSessionState = {
