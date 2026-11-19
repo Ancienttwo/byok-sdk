@@ -129,7 +129,12 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
         mcpServers: { fixture: { command: process.execPath, env: { MCP_TOKEN: 'is_error' } } },
       });
       openSessions.push(session);
-      expect(await takeEvents(session, 5)).toContainEqual({ type: 'turn_end' });
+      const events: AgentEvent[] = [];
+      for await (const event of session.events) {
+        if (event.type !== 'message_draft_delta') events.push(event);
+        if (event.type === 'turn_end') break;
+      }
+      expect(events.at(-1)).toEqual({ type: 'turn_end' });
     } finally {
       await fs.rm(resources.workspaceDir, { recursive: true, force: true });
     }
