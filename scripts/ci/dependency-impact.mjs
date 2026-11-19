@@ -97,6 +97,13 @@ export function dependencyLockImpact(before, after, { cwd, admitted = [] }) {
     }
     if (!isDeepStrictEqual(specs(before.workspaces[dir]), specs(record))) roots.add(dir);
     const old = structuredClone(before.workspaces[dir]), next = structuredClone(record);
+    // #2396: admit only the new client MCP hub bin declared by its manifest.
+    if (dir === 'packages/client' && plain(next.bin) && !Object.hasOwn(old.bin ?? {}, 'byok-mcp-hub')
+      && next.bin['byok-mcp-hub'] === './dist/bin/byok-mcp-hub.js'
+      && manifest.bin?.['byok-mcp-hub'] === next.bin['byok-mcp-hub']) {
+      delete next.bin['byok-mcp-hub'];
+      if (old.bin === undefined && Object.keys(next.bin).length === 0) delete next.bin;
+    }
     // #2411: only K8's removed Vitest optional peer may change this metadata.
     if (dir === 'packages/bot-collaboration' && Array.isArray(old.optionalPeers) && Array.isArray(next.optionalPeers)
       && Object.hasOwn(old.peerDependencies ?? {}, 'vitest') && !Object.hasOwn(next.peerDependencies ?? {}, 'vitest')) {

@@ -104,6 +104,33 @@ test('#2411: only K8 may remove Vitest from optionalPeers with its peer', t => {
   assert.throws(() => check(otherBefore, otherAfter), /lock workspace changes more than dependency fields/);
 });
 
+test('#2396: only the matching client MCP hub bin addition is admitted', t => {
+  const f = fixture(t), dir = 'packages/client', name = 'byok-mcp-hub', target = './dist/bin/byok-mcp-hub.js';
+  f.lock.workspaces[dir] = { ...f.client, bin: { existing: './dist/existing.js' } };
+  f.client.bin = { ...f.lock.workspaces[dir].bin, [name]: target };
+  f.write(`${dir}/package.json`, f.client);
+  const next = structuredClone(f.lock);
+  next.workspaces[dir].bin[name] = target;
+  const check = (before, after) => dependencyLockImpact(structuredClone(before), structuredClone(after), { cwd: f.cwd });
+  assert.doesNotThrow(() => check(f.lock, next));
+  for (const change of [
+    lock => { lock.workspaces[dir].bin[name] = './dist/other.js'; },
+    lock => { lock.workspaces[dir].bin.existing = './dist/other.js'; },
+    lock => { lock.workspaces[dir].bin.extra = './dist/extra.js'; },
+    lock => { lock.workspaces[dir].other = true; },
+    lock => { lock.workspaces['packages/ui-runtime'].bin = { [name]: target }; },
+  ]) {
+    const altered = structuredClone(next); change(altered);
+    assert.throws(() => check(f.lock, altered), /lock workspace changes more than dependency fields/);
+  }
+  f.write(`${dir}/package.json`, { ...f.client, bin: { ...f.client.bin, [name]: './dist/other.js' } });
+  assert.throws(() => check(f.lock, next), /lock workspace changes more than dependency fields/);
+  const beforeExisting = structuredClone(f.lock);
+  beforeExisting.workspaces[dir].bin[name] = './dist/old.js';
+  f.write(`${dir}/package.json`, f.client);
+  assert.throws(() => check(beforeExisting, next), /lock workspace changes more than dependency fields/);
+});
+
 test('an orphan lock row is rejected even beside a valid transitive upgrade', t => {
   const f = fixture(t);
   f.lock.packages.nested[0] = 'nested@1.0.1';
