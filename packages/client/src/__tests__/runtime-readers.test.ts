@@ -257,7 +257,7 @@ fetch(process.env.GOOGLE_GEMINI_BASE_URL + '/v1beta/models', { headers: { 'x-goo
   const adapter = agyAdapterWithEndpoint(new AgyAdapter({
     home: path.join(await tempDir(), 'owned'),
     resolveKey: async () => {
-      const key = `quota-fixture-key-${resolved.length}`;
+      const key = `quota-fixture-credential-${resolved.length}`;
       resolved.push(key);
       return key;
     },

@@ -28,8 +28,8 @@ describe('conn.hello version policy projection (#1103 D8/D9)', () => {
     const payload = ConnHelloPayloadSchema.parse({
       ...helloBase,
       runtimes: [
-        { id: 'claude', version: '2.1.312', versionPolicy: { state: 'allow', qualifiedVersion: '2.1.312' } },
-        { id: 'codex', version: '0.160.0', versionPolicy: { state: 'warn' } },
+        { id: 'claude', version: '2.1.326', versionPolicy: { state: 'allow', qualifiedVersion: '2.1.326' } },
+        { id: 'codex', version: '0.169.0', versionPolicy: { state: 'warn' } },
         { id: 'pi', version: '1.4.0', versionPolicy: { state: 'block', qualifiedVersion: '1.4.0' } },
       ],
       harnesses: [
@@ -50,7 +50,7 @@ describe('conn.hello version policy projection (#1103 D8/D9)', () => {
   it('treats an absent projection as unknown, never allow, and leaves an old payload byte-identical', () => {
     const old = {
       ...helloBase,
-      runtimes: [{ id: 'claude', version: '2.1.312', authPresent: true }],
+      runtimes: [{ id: 'claude', version: '2.1.326', authPresent: true }],
     };
     const parsed = ConnHelloPayloadSchema.parse(old);
     expect(parsed).toEqual(old);
@@ -85,8 +85,8 @@ describe('PresencePublishRequest version policy projection (#1103 D8)', () => {
     const payload = PresencePublishRequestSchema.parse({
       level: 'online',
       runtimes: [
-        { id: 'claude', version: '2.1.312', versionPolicy: { state: 'allow', qualifiedVersion: '2.1.312' } },
-        { id: 'codex', version: '0.160.0', versionPolicy: { state: 'block', qualifiedVersion: '0.160.0' } },
+        { id: 'claude', version: '2.1.326', versionPolicy: { state: 'allow', qualifiedVersion: '2.1.326' } },
+        { id: 'codex', version: '0.169.0', versionPolicy: { state: 'block', qualifiedVersion: '0.169.0' } },
       ],
       runtimeUnavailable: [
         { id: 'codex', cause: 'version_blocked', retryable: false },
@@ -120,11 +120,11 @@ describe('old-reader compatibility: closed objects drop the new fields', () => {
       capabilities: RuntimeCapabilitiesSchema.optional(),
     });
     const parsed = oldRuntimeInfo.parse({
-      id: 'codex', version: '0.160.0', authPresent: true,
-      versionPolicy: { state: 'block', qualifiedVersion: '0.160.0' },
+      id: 'codex', version: '0.169.0', authPresent: true,
+      versionPolicy: { state: 'block', qualifiedVersion: '0.169.0' },
       futureField: 'dropped',
     });
-    expect(parsed).toEqual({ id: 'codex', version: '0.160.0', authPresent: true });
+    expect(parsed).toEqual({ id: 'codex', version: '0.169.0', authPresent: true });
     expect(parsed).not.toHaveProperty('versionPolicy');
   });
 });

@@ -10,7 +10,7 @@ import type { McpToolsetToolObservation } from '../../types.js';
 export type AgyTurnOutcome =
   | { readonly kind: 'completed' }
   | { readonly kind: 'aborted' }
-  | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string; readonly fromText?: true };
+  | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string; readonly fromText?: true; readonly resetsAt?: string };
 
 
 /**
@@ -71,6 +71,7 @@ export class AgyProjection {
       outcome({
         kind: 'failed', reason: typeof turn.reason === 'string' ? turn.reason : 'agy turn failed', failure: runtimeFailureClassOf(turn.failure),
         ...(turn.fromText === true ? { fromText: true as const } : {}),
+        ...(typeof turn.resetsAt === 'string' ? { resetsAt: turn.resetsAt } : {}),
       });
       return;
     }

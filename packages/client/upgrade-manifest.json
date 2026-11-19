@@ -141,6 +141,15 @@
       ]
     },
     {
+      "id": "runtime-provider-key-minimum-length",
+      "impact": "breaking",
+      "summary": "dsh and agy resolveKey and Claude's BYOK environment reject credentials shorter than 20 characters or all whitespace. Set a placeholder of at least 20 characters for a local endpoint that does not authenticate.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "items": [
+        "behavior:runtime-provider-key-minimum-length"
+      ]
+    },
+    {
       "id": "agent-memory-home-resident-check",
       "impact": "additive",
       "summary": "@byok-sdk/client/agent-memory checkAgentMemoryHome supports resident scope so embedded Hosts can check MEMORY.md on device sync without opening the helper or walking notes.",

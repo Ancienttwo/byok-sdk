@@ -70,6 +70,11 @@ function prompt(sessionId, text) {
   const [provider, ...model] = (process.env.FAKE_DSH_ROUTE ?? route).split('/');
   event(sessionId, 'request/header', { header: { config: { provider, model: model.join('/') } } });
   event(sessionId, 'request/context', { contextWindow: 1000 });
+  if (text === 'echo-key-in-tool-field') {
+    const key = process.env.BYOK_DSH_PROVIDER_API_KEY;
+    toolCall(sessionId, 'call_redacted', 'fixture-tool', JSON.stringify({ keep: true, payload: { [key]: 1 } }));
+    return end({ kind: 'completed' });
+  }
   if (text === 'long-input') {
     toolCall(sessionId, 'call_long', 'bash', JSON.stringify({ command: `echo ${'a'.repeat(12000)}; git push origin main`, description: 'long' }));
     return end({ kind: 'completed' });

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { checkOarVersions } from './check-version-authority.mjs';
 
 const script = path.join(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -52,12 +53,15 @@ const SEPARATE_KEYS_SPEC = [
 ].join('\n');
 
 // Builds a fixture repo root; every part can be overridden per test.
-function makeRoot(t, { release = '0.12.0', keys = release, readme = README, spec = SPEC } = {}) {
+function makeRoot(t, {
+  release = '0.12.0', keys = release, readme = README, spec = SPEC,
+  claude = '2.1.326', codex = '0.169.0', agy = '1.5.11', dsh = '0.2.2-rc.1',
+} = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'version-authority-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const manifest of [
     { name: '@byok-sdk/core', version: release },
-    { name: '@byok-sdk/client', version: release },
+    { name: '@byok-sdk/client', version: release, byok: { piRuntimePin: '1.5.2' } },
     { name: '@byok-sdk/server', version: release },
     { name: '@byok-sdk/keys', version: keys },
     { name: '@byok-sdk/testkit', version: '0.0.0', private: true },
@@ -72,6 +76,34 @@ function makeRoot(t, { release = '0.12.0', keys = release, readme = README, spec
   writeFileSync(path.join(root, 'README.md'), readme);
   mkdirSync(path.join(root, 'docs'), { recursive: true });
   writeFileSync(path.join(root, 'docs', 'spec.md'), spec);
+  const vendor = path.join(root, 'packages/client/vendor/oar/abcdef0/.github');
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(path.join(vendor, 'runtime-versions.json'), JSON.stringify({
+    schemaVersion: 1,
+    runtimes: {
+      'claude-aimock': { policy: 'accepted', version: '2.1.326' },
+      'codex-aimock': { policy: 'accepted', version: '0.169.0' },
+      'grok-aimock': { policy: 'accepted', version: '1.0.70' },
+      'antigravity-aimock': { policy: 'accepted', version: '1.5.11' },
+      'dsh-aimock': { policy: 'minimum', version: '0.2.1-rc.5' },
+      'pi-rpc-minimum': { policy: 'minimum', version: '1.4.0' },
+      'opencode-aimock': { policy: 'helper', version: '9.0.0' },
+      'opencode-cleanup': { policy: 'helper', version: '9.0.0' },
+      'qwen-aimock': { policy: 'accepted', version: '9.0.0' },
+    },
+  }));
+  for (const [file, definitions] of Object.entries({
+    'claude/claude-version.ts': { QUALIFIED_CLAUDE_VERSION: claude },
+    'codex/codex-version.ts': { QUALIFIED_CODEX_VERSION: codex },
+    'grok/grok-version.ts': { QUALIFIED_GROK_VERSION: '1.0.77' },
+    'antigravity/agy-version.ts': { QUALIFIED_AGY_VERSION: agy },
+    'dsh/dsh-version.ts': { QUALIFIED_DSH_VERSION: dsh },
+    'opencode/opencode-version.ts': { CONTRACT_OPENCODE_V1_VERSION: '1.19.5', QUALIFIED_OPENCODE_VERSION: '2.3.0' },
+  })) {
+    const target = path.join(root, 'packages/client/src/adapters', file);
+    mkdirSync(path.dirname(target), { recursive: true });
+    writeFileSync(target, Object.entries(definitions).map(([name, version]) => `export const ${name} = '${version}';\n`).join(''));
+  }
   return root;
 }
 
@@ -82,6 +114,33 @@ test('passes when README and spec agree with the release train', (t) => {
   const result = runCheck(makeRoot(t));
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /release train 0\.12\.0 \(packages\/core\/package\.json\)$/m);
+});
+
+test('allows equal and newer qualified pins, and skips other policies and unsupported runtimes', (t) => {
+  const result = runCheck(makeRoot(t));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /SDK qualified versions meet the mapped OAR accepted and minimum versions/);
+});
+
+for (const [runtime, drifted, policy, floor] of [
+  ['agy', '1.5.9', 'accepted', '1.5.11'],
+  ['dsh', '0.2.1-rc.4', 'minimum', '0.2.1-rc.5'],
+]) {
+  test(`reports both versions when the ${runtime} pin is below the OAR ${policy} version`, (t) => {
+    const result = runCheck(makeRoot(t, { [runtime]: drifted }));
+    assert.equal(result.status, 1);
+    assert.ok(result.stderr.includes(`${runtime} SDK qualified version ${drifted} is below OAR ${policy} version ${floor}`), result.stderr);
+  });
+}
+
+test('rejects qualified pins missing from the explicit OAR mapping', async (t) => {
+  const errors = [];
+  const mapping = {
+    'claude-aimock': 'claude', 'codex-aimock': 'codex', 'grok-aimock': 'grok',
+    'dsh-aimock': 'dsh', 'pi-rpc-minimum': 'pi', 'opencode-aimock': 'opencode1', 'opencode-cleanup': 'opencode2',
+  };
+  await checkOarVersions(errors, makeRoot(t), mapping);
+  assert.deepEqual(errors, ['agy: SDK qualified pin has no OAR runtime mapping']);
 });
 
 test('a stale README version on any published train package is reported with file:line', (t) => {

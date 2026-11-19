@@ -21,7 +21,7 @@ const MEMORY_MARKER = 'BYOK-CONTRACT-CODEX-MEMORY-0f47';
 const FIRST_MARKER = 'BYOK-CONTRACT-CODEX-FIRST-TURN-93b8';
 const placeholderKey = 'sk-runtime-contract-placeholder';
 
-/** Codex's own `--version` text: `codex-cli 0.160.0`. */
+/** Codex prints the version token after the `codex-cli` prefix. */
 const identifies = (version: string, expected: string) => /^codex-cli (\S+)$/.exec(version.trim())?.[1] === expected;
 
 async function detectEnv(label: string, files: Record<string, string> = {}) {

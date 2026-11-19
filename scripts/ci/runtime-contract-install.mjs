@@ -9,7 +9,6 @@ import { pathToFileURL } from 'node:url';
 // The qualified versions are read from their single authorities, never copied.
 
 const root = resolve(import.meta.dirname, '../..');
-const adapters = join(root, 'packages/client/src/adapters');
 
 export const RUNTIMES = Object.freeze(['pi', 'claude', 'codex', 'grok', 'dsh', 'agy', 'opencode1', 'opencode2']);
 
@@ -27,23 +26,24 @@ export const NPM_PACKAGES = Object.freeze({
  * The official agy CLI archives of the qualified release, from its platform
  * updater manifests. agy is not on npm. A qualification bump changes both.
  */
-const AGY_ARCHIVE_ROOT = 'https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.1-4523430503120896';
+const AGY_ARCHIVE_ROOT = 'https://storage.googleapis.com/antigravity-public/antigravity-cli/1.5.11-6132547114106880';
 export const AGY_QUALIFIED = Object.freeze({
-  version: '1.5.1',
+  version: '1.5.11',
   archives: Object.freeze({
-    'linux-x64': { url: `${AGY_ARCHIVE_ROOT}/linux-x64/cli_linux_x64.tar.gz`, sha512: 'f70406654ebd966f211424338259e2d38d099c48734e901dc06975063e5a0137d55b6eb9366b75983c6908bbc20ae92a2617656bb191d8ed6fe429d654bca4f5' },
-    'darwin-arm64': { url: `${AGY_ARCHIVE_ROOT}/darwin-arm/cli_mac_arm64.tar.gz`, sha512: '078399b392c3bfce70bc5d9fb1a447a4b0a2a26bd40c36148f4944028b8f21e358890d5b9bedcde69296677b1da2c026b4e283ae918823429c13b91ddcb913ce' },
-    'darwin-x64': { url: `${AGY_ARCHIVE_ROOT}/darwin-x64/cli_mac_x64.tar.gz`, sha512: '736a0f1210b42edc6ec292e1f8438696f616bf6906ad5e878d415b18aa53accc59a678205c332e5af564fab8d32ca5ac5b41c9baad8ced0a7bc224a0ccfcc3b5' },
-    'win32-x64': { url: `${AGY_ARCHIVE_ROOT}/windows-x64/cli_windows_x64.exe`, sha512: '218d2751189e25a275122519a2afc6a3d0af5ff68306cebc68a5da3127bca69a497760988bfd40a884a619d4fa58ccafcb2fba1289dc1fc56e3d7d7b565f4cec' },
+    'linux-x64': { url: `${AGY_ARCHIVE_ROOT}/linux-x64/cli_linux_x64.tar.gz`, sha512: 'dad3c015e8964fcdc1639b13b7152f4cb84cb1bde385707e2bcdf095d6f1831f4f6521199aec499cc052f9e99906b7fdbc52c273df064d5cb7c84b068ba3ce50' },
+    'darwin-arm64': { url: `${AGY_ARCHIVE_ROOT}/darwin-arm/cli_mac_arm64.tar.gz`, sha512: '1b2c8e1f832e1be9b257c24e4ac75c9029771fef5af9b529ea295fff1aa5b9d3e1e5447200a76ac8a775889aa8399210716f188f84242b3c34a2e9a8a3c2cc7d' },
+    'darwin-x64': { url: `${AGY_ARCHIVE_ROOT}/darwin-x64/cli_mac_x64.tar.gz`, sha512: 'ff1f625c2efcff03d2131e3e9dc67bb5d1974b67810706f80ad34317c83769486388226352f1a34ede54fad43f5941220ea9beddefc8b27419023c6e9aa4682c' },
+    'win32-x64': { url: `${AGY_ARCHIVE_ROOT}/windows-x64/cli_windows_x64.exe`, sha512: '7de2a90b3a351c5c1d089b50a773d4fc455062870fa62fc4d50ee2779d7b9f1b630a7025c31163671f6c82ae0426aeda838f98f67270a50fdd2c7de2f2d7eb3f' },
   }),
 });
 
 /** Each runtime's qualified version, from the adapter's own constant or the client manifest. */
-export async function qualifiedVersions() {
+export async function qualifiedVersions(repoRoot = root) {
+  const adapters = join(repoRoot, 'packages/client/src/adapters');
   const load = async (file, name) => (await import(pathToFileURL(join(adapters, file)).href))[name];
   let manifest;
   try {
-    manifest = JSON.parse(readFileSync(join(root, 'packages/client/package.json'), 'utf8'));
+    manifest = JSON.parse(readFileSync(join(repoRoot, 'packages/client/package.json'), 'utf8'));
   } catch (error) {
     throw new Error(`packages/client/package.json is unreadable: ${error instanceof Error ? error.message : String(error)}`);
   }

@@ -382,7 +382,8 @@ class AgySession implements Session {
           retry: !turn.fromText && turn.failure === 'rate_limited' ? 'retryable' : 'non-retryable',
           reason: turn.reason,
           // A class OAR took from error text is not structured evidence (docs/spec.md runtime failure class).
-          failure: { class: turn.fromText ? 'unknown' : turn.failure },
+          failure: !turn.fromText && turn.failure === 'quota' && turn.resetsAt !== undefined
+            ? { class: 'quota', resetsAt: turn.resetsAt } : { class: turn.fromText ? 'unknown' : turn.failure },
         }));
       } else if (turn.kind === 'completed' && refused !== undefined) {
         this.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason: refused.reason }));

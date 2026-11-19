@@ -11,9 +11,9 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 
 const ALLOW = { state: 'allow' as const, qualifiedVersion: '1.4.0' };
 const WARN = { state: 'warn' as const, qualifiedVersion: '1.0.52' };
-const BLOCK = { state: 'block' as const, qualifiedVersion: '0.160.0', matched: '0.16.' };
+const BLOCK = { state: 'block' as const, qualifiedVersion: '0.169.0', matched: '0.16.' };
 // The wire projection carries state + qualified token only.
-const WIRE_BLOCK = { state: 'block' as const, qualifiedVersion: '0.160.0' };
+const WIRE_BLOCK = { state: 'block' as const, qualifiedVersion: '0.169.0' };
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -60,7 +60,7 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
       [
         new StubRuntimeAdapter('pi', { kind: 'available', version: '1.4.0', versionVerdict: ALLOW }),
         new StubRuntimeAdapter('claude', { kind: 'not-found' }),
-        new StubRuntimeAdapter('codex', { kind: 'available', version: '0.160.0', versionVerdict: BLOCK }),
+        new StubRuntimeAdapter('codex', { kind: 'available', version: '0.169.0', versionVerdict: BLOCK }),
         new StubRuntimeAdapter('grok', { kind: 'available', version: '1.0.62', versionVerdict: WARN }),
         new StubRuntimeAdapter('dsh', { kind: 'refused', reason: 'acp_unavailable' }),
         // No policy: the projection must omit the field instead of inventing allow.

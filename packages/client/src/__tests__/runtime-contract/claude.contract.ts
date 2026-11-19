@@ -30,7 +30,7 @@ const MEMORY_MARKER = 'BYOK-CONTRACT-CLAUDE-MEMORY-d3a6';
 /** The system-prompt section Claude adds for any output style other than the default, as JSON in the raw body. */
 const OUTPUT_STYLE_SECTION = JSON.stringify('according to your "Output Style"').slice(1, -1);
 
-/** Claude Code's own `--version` text: `2.1.312 (Claude Code)`. */
+/** Claude Code prints the version token before the `(Claude Code)` suffix. */
 const identifies = (version: string, expected: string) => /^(\S+) \(Claude Code\)$/.exec(version.trim())?.[1] === expected;
 
 async function detectEnv(label: string, files: Record<string, string> = {}) {

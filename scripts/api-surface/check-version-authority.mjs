@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// Version-authority gate for the human-facing docs.
+// Version-authority gate for the release train and OAR-qualified runtimes.
 //
 // `packages/core/package.json` is the release train version — the same
 // authority `scripts/release/check-package-graph.mjs` already derives every
 // manifest assertion from. Since 0.28.2 keys carries that version too.
-// Manifest alignment stays owned by `check:release-graph`; this check only
-// proves that `README.md` and `docs/spec.md` advertise that exact version and
-// no other one.
+// Manifest alignment stays owned by `check:release-graph`. This check proves
+// that `README.md` and `docs/spec.md` advertise the release train version
+// and that SDK runtime qualification follows the vendored OAR policy.
 //
 // A README train mention is `@byok-sdk/<name>@x.y.z` for any published
 // (non-private) workspace package, keys included, so the set of names is
@@ -22,6 +22,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { qualifiedVersions } from '../ci/runtime-contract-install.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(scriptDir, '..', '..');
@@ -54,8 +55,17 @@ function readFile(root, relative) {
   return readFileSync(file, 'utf8');
 }
 
+function readJson(root, relative) {
+  const source = readFile(root, relative);
+  try {
+    return JSON.parse(source);
+  } catch (error) {
+    throw new Error(`${relative}: invalid JSON`, { cause: error });
+  }
+}
+
 function readVersion(root, relative) {
-  const manifest = JSON.parse(readFile(root, relative));
+  const manifest = readJson(root, relative);
   if (typeof manifest.version !== 'string' || manifest.version.length === 0) {
     throw new Error(`${relative}: version must be a non-empty string`);
   }
@@ -70,9 +80,9 @@ function readTrainNames(root) {
   const names = new Set();
   for (const entry of readdirSync(packagesDir, { withFileTypes: true })) {
     if (!entry.isDirectory()) continue;
-    const manifestPath = path.join(packagesDir, entry.name, 'package.json');
-    if (!existsSync(manifestPath)) continue;
-    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const manifestPath = path.join('packages', entry.name, 'package.json');
+    if (!existsSync(path.join(root, manifestPath))) continue;
+    const manifest = readJson(root, manifestPath);
     if (manifest.private === true || typeof manifest.name !== 'string') continue;
     if (manifest.name.startsWith('@byok-sdk/')) names.add(manifest.name.slice('@byok-sdk/'.length));
   }
@@ -117,7 +127,71 @@ function checkSpecPhrase(errors, relative, source, pattern, expected, label) {
   }
 }
 
-export function run(argv, out = console) {
+// OpenCode's two native lines have independent contract pins under one adapter.
+const OAR_RUNTIME_TO_SDK = Object.freeze({
+  'claude-aimock': 'claude',
+  'codex-aimock': 'codex',
+  'antigravity-aimock': 'agy',
+  'grok-aimock': 'grok',
+  'dsh-aimock': 'dsh',
+  'pi-rpc-minimum': 'pi',
+  'opencode-aimock': 'opencode1',
+  'opencode-cleanup': 'opencode2',
+});
+
+function versionParts(version) {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version);
+  if (match === null) throw new Error(`invalid runtime version ${JSON.stringify(version)}`);
+  return { core: match.slice(1, 4).map(BigInt), prerelease: match[4]?.split('.') };
+}
+
+function isOlder(version, floor) {
+  const a = versionParts(version);
+  const b = versionParts(floor);
+  for (let index = 0; index < a.core.length; index++) {
+    if (a.core[index] !== b.core[index]) return a.core[index] < b.core[index];
+  }
+  if (a.prerelease === undefined) return false;
+  if (b.prerelease === undefined) return true;
+  for (let index = 0; index < a.prerelease.length; index++) {
+    const left = a.prerelease[index];
+    const right = b.prerelease[index];
+    if (right === undefined) return false;
+    if (left === right) continue;
+    const leftNumeric = /^\d+$/.test(left);
+    const rightNumeric = /^\d+$/.test(right);
+    if (leftNumeric && rightNumeric) return BigInt(left) < BigInt(right);
+    return leftNumeric !== rightNumeric ? leftNumeric : left < right;
+  }
+  return a.prerelease.length < b.prerelease.length;
+}
+
+export async function checkOarVersions(errors, root, mapping = OAR_RUNTIME_TO_SDK) {
+  const vendor = 'packages/client/vendor/oar';
+  const snapshots = readdirSync(path.join(root, vendor), { withFileTypes: true })
+    .filter(entry => entry.isDirectory() && /^[a-f0-9]{7,40}$/.test(entry.name));
+  if (snapshots.length !== 1) throw new Error(`${vendor}: expected one pinned OAR snapshot, found ${snapshots.length}`);
+  const relative = `${vendor}/${snapshots[0].name}/.github/runtime-versions.json`;
+  const { runtimes } = readJson(root, relative);
+  const qualified = await qualifiedVersions(root);
+  const mapped = new Set(Object.values(mapping));
+  for (const runtime of Object.keys(qualified)) {
+    if (!mapped.has(runtime)) errors.push(`${runtime}: SDK qualified pin has no OAR runtime mapping`);
+  }
+  for (const [key, runtime] of Object.entries(mapping)) {
+    const entry = runtimes?.[key];
+    if (typeof entry?.policy !== 'string') {
+      errors.push(`${relative}: missing policy for mapped OAR runtime ${key} (${runtime})`);
+      continue;
+    }
+    if (entry.policy !== 'accepted' && entry.policy !== 'minimum') continue;
+    if (isOlder(qualified[runtime], entry.version)) {
+      errors.push(`${runtime} SDK qualified version ${qualified[runtime]} is below OAR ${entry.policy} version ${entry.version} (${relative}: ${key})`);
+    }
+  }
+}
+
+export async function run(argv, out = console) {
   const { root } = parseArgs(argv);
   const releaseVersion = readVersion(root, 'packages/core/package.json');
   const errors = [];
@@ -127,23 +201,23 @@ export function run(argv, out = console) {
 
   const spec = readFile(root, 'docs/spec.md');
   checkSpecPhrase(errors, 'docs/spec.md', spec, SPEC_RELEASE, releaseVersion, 'current aligned release');
+  await checkOarVersions(errors, root);
 
   if (errors.length > 0) {
     for (const error of errors) out.error(error);
-    out.error(
-      `\nversion-authority: ${errors.length} mismatch(es). packages/core/package.json (${releaseVersion}) is the only version authority; update the docs to match it.`,
-    );
+    out.error(`\nversion-authority: ${errors.length} mismatch(es)`);
     return 1;
   }
   out.log(
     `version-authority: README.md and docs/spec.md agree with the release train ${releaseVersion} (packages/core/package.json)`,
   );
+  out.log('version-authority: SDK qualified versions meet the mapped OAR accepted and minimum versions');
   return 0;
 }
 
 if (import.meta.main) {
   try {
-    process.exitCode = run(process.argv.slice(2));
+    process.exitCode = await run(process.argv.slice(2));
   } catch (error) {
     console.error(`version-authority: ${error.message}`);
     process.exitCode = 1;

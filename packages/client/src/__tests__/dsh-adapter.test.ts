@@ -45,7 +45,7 @@ async function setup(options: Partial<DshAdapterOptions> = {}, env: NodeJS.Proce
   const workspaceDir = await tempDir('bdw-');
   const log = path.join(await tempDir('bdl-'), 'facts.jsonl');
   const adapter = new DshAdapter({
-    home: root, model: MODEL, resolveKey: async () => 'test-key', resolveBin: () => ({ command: fixture, source: 'path' }),
+    home: root, model: MODEL, resolveKey: async () => 'sdk-test-dsh-resolver-key', resolveBin: () => ({ command: fixture, source: 'path' }),
     runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_DSH_*', 'TEST_DSH_*'] }, ...options,
   });
   const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), FAKE_DSH_LOG: log, byok_dsh_provider_api_key: 'ambient-key', DSH_STRAY: 'ambient', ...env } };
@@ -70,13 +70,13 @@ async function turn(session: Session): Promise<Array<AgentEvent | MessageDraftDe
 
 describe('DshAdapter construction and descriptor', () => {
   it('requires an absolute SDK-owned root that is not the user\'s ~/.dsh', () => {
-    expect(() => new DshAdapter({ resolveKey: async () => 'test-key', home: 'relative/root', model: MODEL })).toThrow(/absolute/);
-    expect(() => new DshAdapter({ resolveKey: async () => 'test-key', home: path.join(os.homedir(), '.dsh'), model: MODEL })).toThrow(/~\/\.dsh/);
-    expect(() => new DshAdapter({ resolveKey: async () => 'test-key', home: path.join(os.homedir(), '.dsh', 'profiles'), model: MODEL })).toThrow(/~\/\.dsh/);
+    expect(() => new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: 'relative/root', model: MODEL })).toThrow(/absolute/);
+    expect(() => new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: path.join(os.homedir(), '.dsh'), model: MODEL })).toThrow(/~\/\.dsh/);
+    expect(() => new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: path.join(os.homedir(), '.dsh', 'profiles'), model: MODEL })).toThrow(/~\/\.dsh/);
   });
 
   it('validates the model selection and sandbox', () => {
-    const at = (model: Partial<DshModelSelection>) => () => new DshAdapter({ resolveKey: async () => 'test-key', home: '/tmp/byok-dsh-x', model: { ...MODEL, ...model } as DshModelSelection });
+    const at = (model: Partial<DshModelSelection>) => () => new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: '/tmp/byok-dsh-x', model: { ...MODEL, ...model } as DshModelSelection });
     expect(at({ model: '' })).toThrow(/model/);
     expect(at({ provider: 'Open AI' })).toThrow(/provider/);
     expect(at({ provider: 'custom', baseUrl: undefined })).toThrow(/baseUrl is required/);
@@ -85,11 +85,11 @@ describe('DshAdapter construction and descriptor', () => {
     expect(at({ baseUrl: 'https://example.test/v1?api_key=secret' })).toThrow(/query string/);
     expect(at({ keyEnv: 'TEST_DSH_PROVIDER_KEY' } as Partial<DshModelSelection>)).toThrow(/keyEnv was removed.*resolveKey/);
     expect(() => new DshAdapter({ home: '/tmp/byok-dsh-x', model: MODEL } as DshAdapterOptions)).toThrow(/resolveKey must be a function/);
-    expect(() => new DshAdapter({ resolveKey: async () => 'test-key', home: '/tmp/byok-dsh-x', model: MODEL, sandbox: 'inherit' as never })).toThrow(/sandbox/);
+    expect(() => new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: '/tmp/byok-dsh-x', model: MODEL, sandbox: 'inherit' as never })).toThrow(/sandbox/);
   });
 
   it('declares the dsh descriptor', () => {
-    const descriptor = new DshAdapter({ resolveKey: async () => 'test-key', home: '/tmp/byok-dsh-x', model: MODEL }).descriptor;
+    const descriptor = new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: '/tmp/byok-dsh-x', model: MODEL }).descriptor;
     expect(descriptor).toMatchObject({ id: 'dsh', supportsDispatchSelection: false, platforms: ['darwin', 'linux'], progressMessageBoundary: 'event' });
     expect(descriptor.capabilities).toEqual(DSH_RUNTIME_CAPABILITIES);
     expect(descriptor.versionPolicy).toEqual({ qualifiedVersion: QUALIFIED_DSH_VERSION, unqualified: 'warn' });
@@ -118,13 +118,13 @@ describe('dshPatch', () => {
   });
 
   it('never carries the key value', () => {
-    expect(dshPatch(MODEL)).not.toContain('test-key');
+    expect(dshPatch(MODEL)).not.toContain('sdk-test-dsh-resolver-key');
   });
 });
 
 describe('DshAdapter detect and prepare', () => {
   it('reads the version, resolves the acp profile in the SDK root, without reading the key', async () => {
-    const resolveKey = vi.fn(async () => 'test-key');
+    const resolveKey = vi.fn(async () => 'sdk-test-dsh-resolver-key');
     const { adapter, root } = await setup({ resolveKey });
     expect(await adapter.detect()).toEqual({ kind: 'available', version: QUALIFIED_DSH_VERSION, sessionCapabilities: { images: false }, executablePath: fixture, executableSource: 'config', versionVerdict: { state: 'allow', qualifiedVersion: QUALIFIED_DSH_VERSION } });
     await expect(fs.stat(path.join(root, 'profiles', 'acp'))).resolves.toBeDefined();
@@ -154,14 +154,14 @@ describe('DshAdapter detect and prepare', () => {
   });
 
   it('rejects a missing binary', async () => {
-    const missing = new DshAdapter({ resolveKey: async () => 'test-key', home: await tempDir('bd-'), model: MODEL, resolveBin: () => ({ command: path.join(os.tmpdir(), 'no-such-dsh'), source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
+    const missing = new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: await tempDir('bd-'), model: MODEL, resolveBin: () => ({ command: path.join(os.tmpdir(), 'no-such-dsh'), source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
     await expect(missing.prepare({ offer: { target: DSH_TARGET, instruction: 'x' }, descriptor: missing.descriptor, requiredToolsetIds: [] })).resolves.toEqual({ kind: 'reject', reason: 'dsh installation refused: not-found', retryable: false });
   });
 });
 
 describe('DshAdapter catalog', () => {
   it('resolves on an authenticated catalog spawn and skips the resolver on a cache hit', async () => {
-    const resolveKey = vi.fn(async () => '/catalog-key');
+    const resolveKey = vi.fn(async () => '/catalog-resolver-fixture-key');
     const { adapter, log, facts } = await setup({ resolveKey });
     setAmbient('FAKE_DSH_LOG', log);
     const catalog = { kind: 'ok', models: [{ id: 'byok-custom/loop-model', displayName: '[redacted]', provider: { id: 'byok-custom' } }] };
@@ -176,7 +176,7 @@ describe('DshAdapter catalog', () => {
 
 describe('DshAdapter sessions', () => {
   it('uses the task model and effort on fresh and resumed DSH sessions', async () => {
-    const resolveKey = vi.fn().mockResolvedValueOnce('first-key').mockResolvedValueOnce('rotated-key');
+    const resolveKey = vi.fn().mockResolvedValueOnce('dsh-first-test-key-value').mockResolvedValueOnce('dsh-rotated-test-key-value');
     const box = await setup({ resolveKey });
     const request = { target: DSH_TARGET, instruction: 'hello', modelId: 'byok-custom/task-model', effort: 'high' };
     const fresh = await box.open(request);
@@ -186,7 +186,7 @@ describe('DshAdapter sessions', () => {
     await turn(await box.open({ ...request, sessionRef }));
     const log = await box.facts();
     expect(resolveKey).toHaveBeenCalledTimes(2);
-    expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['first-key', 'rotated-key']);
+    expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['dsh-first-test-key-value', 'dsh-rotated-test-key-value']);
     const expected = { provider: 'byok-custom', model: 'task-model', reasoningEffort: 'high' };
     expect(log.filter(fact => ['open', 'resume'].includes(fact.method)).map(row => row.request.agentOptions)).toEqual([expected, expected]);
     expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch({ ...MODEL, model: 'task-model' })));
@@ -196,15 +196,15 @@ describe('DshAdapter sessions', () => {
 
   it('keeps two concurrent launch keys scoped to their own processes', async () => {
     const slow = Promise.withResolvers<string>();
-    const resolveKey = vi.fn().mockReturnValueOnce(slow.promise).mockResolvedValueOnce('parallel-second-key');
+    const resolveKey = vi.fn().mockReturnValueOnce(slow.promise).mockResolvedValueOnce('dsh-parallel-second-key-value');
     const { open, facts } = await setup({ resolveKey });
     const first = open({ target: DSH_TARGET, instruction: 'first launch' });
     await vi.waitFor(() => expect(resolveKey).toHaveBeenCalledOnce());
     await turn(await open({ target: DSH_TARGET, instruction: 'second launch' }));
-    slow.resolve('parallel-first-key');
+    slow.resolve('dsh-parallel-first-key-value');
     await turn(await first);
     const log = await facts();
-    expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['parallel-second-key', 'parallel-first-key']);
+    expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['dsh-parallel-second-key-value', 'dsh-parallel-first-key-value']);
     expect(log.filter(row => row.method === 'prompt').map(row => row.request.text)).toEqual(['second launch', 'first launch']);
   });
 
@@ -227,7 +227,7 @@ describe('DshAdapter sessions', () => {
     expect(start.env.TMPDIR).not.toBe(os.tmpdir());
     expect(path.dirname(start.argv[3])).toBe(start.cwd);
     expect(start.cwd).not.toBe(workspaceDir);
-    expect(start.env).toMatchObject({ DSH_HOME: root, DSH_AGENTS_HOME: path.join(root, 'byok-agents-home'), DSH_PERMISSION_MODE: 'danger-full-access', DSH_TELEMETRY_MODE: 'DISABLED', [DSH_PROVIDER_KEY_ENV]: 'test-key' });
+    expect(start.env).toMatchObject({ DSH_HOME: root, DSH_AGENTS_HOME: path.join(root, 'byok-agents-home'), DSH_PERMISSION_MODE: 'danger-full-access', DSH_TELEMETRY_MODE: 'DISABLED', [DSH_PROVIDER_KEY_ENV]: 'sdk-test-dsh-resolver-key' });
     expect(start.env).not.toHaveProperty('byok_dsh_provider_api_key');
     expect(process.env[DSH_PROVIDER_KEY_ENV]).toBeUndefined();
     expect(start.env).not.toHaveProperty('DSH_STRAY');
@@ -237,14 +237,15 @@ describe('DshAdapter sessions', () => {
   it.each([
     ['rejected', async (): Promise<string> => { throw new Error('private resolver value', { cause: new Error('nested resolver value') }); }],
     ['thrown', (): never => { throw new Error('private resolver value'); }],
-    ['blank', async (): Promise<string> => '  '],
+    ['blank', async (): Promise<string> => ' '.repeat(25)],
+    ['short', async (): Promise<string> => '1234567890123456789'],
     ['invalid environment bytes', async (): Promise<string> => 'private resolver value\0'],
-  ] as const)('refuses a %s key before spawn and discards resolver diagnostics', async (_label, resolveKey) => {
+  ] as const)('refuses a %s key before spawn and discards resolver diagnostics', async (label, resolveKey) => {
     const { open, facts } = await setup({ resolveKey });
     const scratch = await testExecutionScratch();
     const error = await open(undefined, { scratch }).catch(error => error);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: 'dsh provider API key resolution failed' });
+    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: ['rejected', 'thrown'].includes(label) ? 'dsh provider API key resolution failed' : expect.stringContaining('at least 20 characters') });
     expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain('resolver value');
     expect((await facts()).some(row => row.kind === 'start')).toBe(false);
     await expect(fs.stat(scratch.sdkDir)).rejects.toMatchObject({ code: 'ENOENT' });
@@ -266,18 +267,27 @@ describe('DshAdapter sessions', () => {
   });
 
   it('redacts echoed key bytes from an early native exit', async () => {
-    const key = '/stderr-provider-key';
+    const key = '/stderr-provider-key-fixture';
     const { open } = await setup({ resolveKey: async () => key }, { FAKE_DSH_OPEN_EXIT: '1' });
     const error = await open().catch(error => error);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
     expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(key);
   });
 
-  it.each(['+1', '/looks/like/a/path'])('redacts an echoed key from the native event before projection (%s)', async key => {
+  it.each(['non-provider-prefix-fixture-key', '/looks/like/a/provider/key'])('redacts an echoed key from the native event before projection (%s)', async key => {
     const { open } = await setup({ resolveKey: async () => key });
     const events = await turn(await open({ target: DSH_TARGET, instruction: 'echo-provider-key' }));
     expect(events).toContainEqual({ type: 'progress', text: 'key was [redacted]' });
     expect(JSON.stringify(events)).not.toContain(key);
+  });
+
+  it('projects valid tool arguments with a credential-bearing object withheld as a string', async () => {
+    const { open } = await setup();
+    const events = await turn(await open({ target: DSH_TARGET, instruction: 'echo-key-in-tool-field' }));
+    expect(events).toContainEqual(expect.objectContaining({
+      type: 'tool_use', tool: 'fixture-tool', input: { keep: true, payload: '[redacted]' },
+    }));
+    expect(events.at(-1)).toEqual({ type: 'turn_end' });
   });
 
   it('opens the session in the canonical workspace with the task MCP servers', async () => {
@@ -402,8 +412,8 @@ describe('DshAdapter sessions', () => {
     expect((error as Error).message).toMatch(/invalid api key/);
   });
 
-  it('preserves the failed outcome when the resolved key matches its discriminator', async () => {
-    const { open } = await setup({ resolveKey: async () => 'failed' });
+  it('preserves the failed outcome when the native reason echoes the resolved key', async () => {
+    const { open } = await setup({ resolveKey: async () => 'dsh-auth-echo-credential-fixture' });
     const session = await open({ target: DSH_TARGET, instruction: 'fail-echo-provider-key' });
     await expect(turn(session)).rejects.toMatchObject({ phase: 'run', failure: { class: 'auth' }, message: expect.stringContaining('invalid api key: [redacted]') });
   });

@@ -10,7 +10,7 @@ it('has no version refusal: a runtime version is observed, never gated', () => {
   expect(() => validateRuntimeDetectResult({ kind: 'refused', reason: 'runtime_version_unsupported' })).toThrow();
 });
 it('preserves an unqualified-version warning on an available result', () => {
-  const available = { kind: 'available', version: 'codex-cli 0.161.0', versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' } };
+  const available = { kind: 'available', version: 'codex-cli 0.161.0', versionVerdict: { state: 'warn', qualifiedVersion: '0.169.0' } };
   expect(validateRuntimeDetectResult(available)).toEqual(available);
   expect(() => validateRuntimeDetectResult({ ...available, versionVerdict: { ...available.versionVerdict, note: 'x' } })).toThrow();
 });

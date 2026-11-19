@@ -16,7 +16,7 @@ import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
-import type { RawEvent } from '../../vendor/oar/a122061/contracts/session';
+import type { RawEvent } from '../../vendor/oar/a41628f/contracts/session';
 
 const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
 
@@ -60,6 +60,20 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   afterEach(async () => {
     await Promise.all(openSessions.splice(0).map((s) => s.close()));
     vi.restoreAllMocks();
+  });
+
+  it.each(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])('refuses a short %s before spawning the BYOK process', async name => {
+    const spawnFn = vi.fn();
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), runtimeEnvironment: { base: 'allowlist' }, spawnFn });
+    const resources = await makeCtx({ PATH: process.env.PATH, [name]: 'short-placeholder' });
+    try {
+      await expect(startAdapter(adapter, baseTask, resources)).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: expect.stringContaining('at least 20 characters'),
+      });
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
   });
 
   it('detect() reports present + version + authPresent from the fake binary', async () => {

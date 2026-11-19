@@ -1,4 +1,5 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { requireRuntimeApiKey } from '../resolve-runtime-api-key.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
@@ -156,7 +157,15 @@ export interface ClaudeAdapterOptions {
  * shell selects: the inherited Bedrock/Vertex switches, OAuth token and other
  * `ANTHROPIC_*` settings would otherwise override or mix with it.
  */
-const CLAUDE_PROVIDER_NAMES = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+const CLAUDE_PROVIDER_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
+const CLAUDE_PROVIDER_NAMES = ['ANTHROPIC_BASE_URL', ...CLAUDE_PROVIDER_KEYS];
+
+function validateClaudeProviderCredentials(env: Readonly<Record<string, string | undefined>>): void {
+  for (const [name, key] of Object.entries(env)) {
+    const providerKey = CLAUDE_PROVIDER_KEYS.find(candidate => process.platform === 'win32' ? candidate === name.toUpperCase() : candidate === name);
+    if (providerKey !== undefined && key !== undefined) requireRuntimeApiKey(key, `Claude ${providerKey}`);
+  }
+}
 const claudeEnvironmentConflicts: RuntimeEnvironmentConflictRule = (passed) =>
   CLAUDE_PROVIDER_NAMES.some((name) => passed.has(name))
     ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK']
@@ -171,6 +180,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin).bin.command,
       version: claudeVersionToken,
+      environment: env => { validateClaudeProviderCredentials(env); return { env }; },
     });
   }
 
@@ -239,6 +249,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const { env } = await this.runtimeEnvironment();
+      validateClaudeProviderCredentials(env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin);
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
@@ -347,6 +358,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
       throwIfCancelled();
+      const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
+      validateClaudeProviderCredentials(env);
       const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
       // Built before any write, so a refusal leaves no file behind.
       const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
@@ -462,7 +475,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
         onFatal: error => { closeBridges(); stream?.fail(error); },
       }, resumeSessionId);
       const spawnLineProcess = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude' });
-      const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
       try {
         stream = new ClaudeStreamSession(spawnLineProcess(invocation.command, [...invocation.args, ...args], { cwd: manifestCwd, env }));
       } catch (cause) {
