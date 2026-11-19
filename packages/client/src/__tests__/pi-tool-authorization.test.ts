@@ -12,6 +12,10 @@ import { readToolAuthorizationGateEnv, requestToolAuthorization, startToolAuthor
 import { createPiToolAuthorizationHook } from '../adapters/pi/tool-authorization-hook';
 import { classifyToolCall } from '../tool-authorization';
 import { bindFileScopeGate } from '../file-scope-gate-binding';
+import { bindMcpHubAuthorization } from '../mcp/hub-authorization';
+import { publishMcpHubCatalog } from '../mcp/hub/catalog';
+import { MCP_HUB_TOOLS } from '../mcp/hub/protocol';
+import { mcpEventIdentities } from '../mcp/event-identity';
 import { resolveFileScopeGrant, type FileScopeGrant } from '../file-scope-guard';
 import { observationOf } from './fixtures/mcp-observation';
 import type { Session } from '../types';
@@ -29,7 +33,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => fs.rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })));
 });
 
-async function fixture(delegated = false, childAgent = 'hook-child', background = false, command?: string, mcpTool?: string) {
+async function fixture(delegated = false, childAgent = 'hook-child', background = false, command?: string, mcpTool?: string, mcpArgs = {}) {
   const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-tool-auth-')));
   roots.push(root);
   const agentDir = path.join(root, 'agent');
@@ -63,7 +67,7 @@ async function fixture(delegated = false, childAgent = 'hook-child', background 
         : { agent: childAgent, task: 'Write the target file' }) }
       : childFirst || (!delegated && turn % 2 === 1)
         ? mcpTool !== undefined
-          ? { name: mcpTool, arguments: '{}' }
+          ? { name: mcpTool, arguments: JSON.stringify(mcpArgs) }
           : command === undefined
           ? { name: 'write', arguments: JSON.stringify({ path: target, content: 'actual file content' }) }
           : { name: 'bash', arguments: JSON.stringify({ command }) }
@@ -227,6 +231,37 @@ describe('Pi auto gate through the real Pi tool pipeline (zero-cost loopback pro
     expect(g.verdicts).toEqual([{ decision: 'deny', code: 'tool_authorization_denied', reason: 'owner authorization required',
       authorization: mode === 'fileScope' ? { source: 'floor', ruleIds: [] } : { source: 'rule', ruleIds: ['ask-salesko'] } }]);
     await expect(fs.stat(recordTo)).rejects.toMatchObject({ code: 'ENOENT' });
+  }, 45_000);
+
+  it('applies the file-scope floor to a bound Pi hub call before its stdio dispatch', async () => {
+    const f = await fixture(false, 'hook-child', false, undefined, 'mcp__byoktools__call_tool', { server: 'inner', tool: 'echo', arguments: {} });
+    const catalog = { catalogPath: path.join(f.root, 'catalog.json'), attemptId: 'pi-hub', launchCwd: f.cwd, mcpEnv: {},
+      mcpServers: { inner: { command: 'fixture' } },
+    };
+    await publishMcpHubCatalog(catalog, Object.values(observationOf({ inner: ['echo'] })), new AbortController().signal);
+    const observed = observationOf({ byoktools: [] });
+    const mcpToolsetTools = { byoktools: {
+      ...observed.byoktools!,
+      tools: MCP_HUB_TOOLS.map(({ name, description, inputSchema }) => ({ name, description: description ?? '', inputSchema })),
+    } };
+    const requestAuthorization = vi.fn(async () => ({ approved: false }));
+    const toolAuthorization = createAutoToolAuthorizationGate({ workspace: f.cwd, home: f.root, timeoutMs: 5_000,
+      requestAuthorization, mcpIdentities: mcpEventIdentities(mcpToolsetTools),
+    });
+    bindMcpHubAuthorization(toolAuthorization, { catalog, isActive: () => true });
+    const { dev, ino } = await fs.stat(f.cwd, { bigint: true });
+    const grant = await resolveFileScopeGrant({ fileScope: { mode: 'home' }, attempt: { homeAccess: 'writer' }, home: { path: f.cwd, identity: { dev, ino } } });
+    bindFileScopeGate(toolAuthorization, { grant, taskId: 'pi-hub', lane: 'rpc', homeAccess: 'writer', onDeny: () => {} });
+    const receipt = path.join(f.root, 'outer-receipt');
+    const server = path.resolve(import.meta.dirname, 'fixtures/mcp-fixture-server.mjs');
+    const session = await startPreparedOperation(adapter(), { target: PI_TARGET, instruction: 'Run the scripted call, then finish.' }, {
+      workspaceDir: f.cwd, agentHome: f.cwd, env: f.env, toolAuthorization, mcpToolsetTools,
+      mcpServers: { byoktools: { command: process.execPath, args: [server, JSON.stringify({ recordTo: receipt })] } },
+    });
+    sessions.push(session);
+    await finish(session);
+    expect(requestAuthorization).toHaveBeenCalledWith(expect.stringContaining('outside-file-scope): mcp__inner__echo'), expect.any(AbortSignal));
+    await expect(fs.access(receipt)).rejects.toMatchObject({ code: 'ENOENT' });
   }, 45_000);
 
   it('applies a newly selected Always Ask rule when a previously allowed native session resumes', async () => {

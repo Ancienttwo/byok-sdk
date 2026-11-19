@@ -7,6 +7,9 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeToolAuthorizationBridge } from '../adapters/claude/tool-authorization';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
+import { bindMcpHubAuthorization } from '../mcp/hub-authorization';
+import { publishMcpHubCatalog } from '../mcp/hub/catalog';
+import { observationOf } from './fixtures/mcp-observation';
 import {
   AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MEMORY_RECALL_TOOL_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_MESSAGE_TOOL_NAME,
   AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME, SDK_RESERVED_MCP_TOOL_NAMES,
@@ -100,6 +103,34 @@ describe('Claude auto gate over the SDK PreToolUse callback (synthetic protocol)
     expect(JSON.stringify(events)).toContain('tool_authorization_unavailable');
     expect(requestAuthorization).not.toHaveBeenCalled();
     await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
+  });
+
+  it.each([true, false])('uses Claude runtime identity for a bound hub without an MCP selector (matching helper: %s)', async matches => {
+    const workspace = await tempRoot();
+    const requestAuthorization = vi.fn(async () => ({ approved: true }));
+    const gate = createAutoToolAuthorizationGate({ workspace, timeoutMs: 2_000, requestAuthorization });
+    const catalog = { catalogPath: path.join(workspace, 'catalog.json'), attemptId: 'claude-hub', launchCwd: workspace, mcpEnv: {},
+      mcpServers: { inner: { command: 'fixture' } },
+    };
+    await publishMcpHubCatalog(catalog, Object.values(observationOf({ inner: ['echo'] })), new AbortController().signal);
+    bindMcpHubAuthorization(gate, { catalog, isActive: () => true });
+    const helper = { command: process.execPath, args: ['fixture-hub', 'attempt-context'] };
+    const session = await start(workspace, gate, { ...process.env,
+      FAKE_TOOL_NAME: 'mcp__byoktools__call_tool',
+      FAKE_TOOL_INPUT: JSON.stringify({ server: 'inner', tool: 'echo', arguments: { command: 'sudo fixture' } }),
+      FAKE_MCP_STATUS: JSON.stringify({ mcpServers: [{ name: 'byoktools',
+        config: matches ? helper : { ...helper, args: ['fixture-hub', 'wrong-context'] }, tools: [{ name: 'call_tool' }],
+      }] }),
+    }, { byoktools: helper });
+    const events = await takeTurn(session);
+    if (matches) {
+      expect(requestAuthorization).toHaveBeenCalledWith(expect.stringContaining('mcp__inner__echo'), expect.any(AbortSignal));
+      expect(await fs.readFile(path.join(workspace, 'tool-1.txt'), 'utf8')).toBe('actual fixture write');
+    } else {
+      expect(requestAuthorization).not.toHaveBeenCalled();
+      expect(JSON.stringify(events)).toContain('tool_authorization_unavailable');
+      await expect(fs.access(path.join(workspace, 'tool-1.txt'))).rejects.toThrow();
+    }
   });
 
   // #1091 F1: a user MCP selector must not lock out the SDK helpers the daemon injects.

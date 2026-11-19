@@ -2,6 +2,7 @@ import { homedir } from 'node:os';
 import { lstatSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep, win32 } from 'node:path';
 import type { AgentRef } from './agent-home.js';
+import type { McpHubGateAuthority } from './mcp/hub-authorization.js';
 
 /**
  * The only product tool-authorization modes, chosen by the local Host per task
@@ -736,6 +737,7 @@ export interface ToolAuthorizationGate {
  * through a bundler, and the brand carries the one list both sides need.
  */
 const FILE_SCOPE_GATE_MARKER = Symbol.for('byok.tool-authorization.file-scope-tools');
+const HUB_GATE_MARKER = Symbol.for('byok.tool-authorization.mcp-hub');
 
 function scopedFileToolNames(gate: ToolAuthorizationGate): readonly string[] | undefined {
   const value = (gate.authorize as unknown as Record<symbol, unknown>)[FILE_SCOPE_GATE_MARKER];
@@ -848,19 +850,33 @@ export function createAutoToolAuthorizationGate(input: {
       try {
         // A runtime label is not an MCP authority. Only an exact admitted mapping
         // may attach identity to a gate request, even if the request supplies one.
-        // A runtime lookup is asked for only when an MCP selector needs it, so
-        // a policy without one never waits on it.
+        // Resolve runtime identity when a selector or an installed hub needs it.
         const { mcp: _untrustedMcp, ...nativeCall } = rawCall;
-        const mcp = resolveMcpIdentity === undefined ? input.mcpIdentities?.get(rawCall.toolName)
-          : needsMcpIdentity ? await Promise.race([resolveMcpIdentity(), expired]) : undefined;
-        if (mcp === 'expired') {
+        call = nativeCall;
+        const boundHub = (gate.authorize as typeof gate.authorize & { [HUB_GATE_MARKER]?: McpHubGateAuthority })[HUB_GATE_MARKER];
+        const hub = boundHub?.outerToolName === nativeCall.toolName ? boundHub : undefined;
+        let mcp: ToolCall['mcp'] | 'expired';
+        if (resolveMcpIdentity === undefined) mcp = input.mcpIdentities?.get(nativeCall.toolName);
+        else if (needsMcpIdentity || hub !== undefined) mcp = await Promise.race([resolveMcpIdentity(), expired]);
+        const identityUnavailable = (): ToolAuthorizationVerdict => finish({
+          decision: 'deny', code: 'tool_authorization_unavailable', reason: 'trusted MCP tool identity is unavailable',
+        });
+        const timedOut = (): ToolAuthorizationVerdict => {
           withdraw.abort();
           return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });
+        };
+        const allow = (): ToolAuthorizationVerdict => hub !== undefined && !hub.isActive()
+          ? identityUnavailable() : finish({ decision: 'allow' });
+        if (mcp === 'expired') return timedOut();
+        if (hub !== undefined) {
+          const inner = await Promise.race([hub.resolve(nativeCall, mcp), expired]);
+          if (inner === 'expired') return timedOut();
+          if (inner === undefined) return identityUnavailable();
+          call = inner;
+        } else {
+          if (needsMcpIdentity && nativeCall.toolName.startsWith('mcp__') && mcp === undefined) return identityUnavailable();
+          if (mcp !== undefined) call = { ...nativeCall, mcp };
         }
-        if (needsMcpIdentity && rawCall.toolName.startsWith('mcp__') && mcp === undefined) {
-          return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: 'trusted MCP tool identity is unavailable' });
-        }
-        call = { ...nativeCall, ...(mcp === undefined ? {} : { mcp }) };
         risk = classifyToolCall(call, input.workspace, input.home, rules, { platform: input.platform });
         // #1061: in a file-scoped session every tool outside the SDK file
         // boundary asks on every call. Risk heuristics cannot auto-allow it;
@@ -873,16 +889,13 @@ export function createAutoToolAuthorizationGate(input: {
           && risk.authorization.source !== 'rule' && !scopedTools.includes(call.toolName)) {
           risk = { level: 'high', reasons: Object.freeze(['outside-file-scope']), authorization: FLOOR_AUTHORIZATION };
         }
-        if (risk.level === 'normal') return finish({ decision: 'allow' });
+        if (risk.level === 'normal') return allow();
         const summary = call.toolName === 'subagent_launch'
           ? describeWorkflowChildLaunch(call, risk, workflowChildLaunchEffects(call, input.workspace, input.home ?? homedir(), rules, { platform: input.platform }))
           : describeHighRiskToolCall(call, risk.reasons, risk.authorization);
         const result = await Promise.race([input.requestAuthorization(summary, withdraw.signal), expired]);
-        if (result === 'expired') {
-          withdraw.abort();
-          return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });
-        }
-        if (result.approved === true) return finish({ decision: 'allow' });
+        if (result === 'expired') return timedOut();
+        if (result.approved === true) return allow();
         return finish({ decision: 'deny', code: 'tool_authorization_denied', reason: result.reason
           ?? (risk.reasons.includes('outside-file-scope') ? 'user did not authorize this tool call outside the file scope'
             : risk.authorization.source === 'rule' ? 'user did not authorize this tool call'

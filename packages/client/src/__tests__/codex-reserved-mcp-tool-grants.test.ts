@@ -2,8 +2,9 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { bindCodexMcpHubInstallation } from '../adapters/codex/hub-tool-grants';
 import { withCodexMcpToolGrants } from '../adapters/codex/reserved-mcp-tool-grants';
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -53,9 +54,10 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
       mcpServers: {
         host: { command: process.execPath, args: ['host.mjs'] },
         other: { command: process.execPath, args: ['other.mjs'] },
+        byoktools: { command: process.execPath, args: ['direct.mjs'] },
         byokagentresult: { command: process.execPath, args: ['helper.mjs'] },
       },
-      mcpToolApprovals: Object.freeze({ host: Object.freeze(['submit_result']) }),
+      mcpToolApprovals: Object.freeze({ host: Object.freeze(['submit_result']), byoktools: Object.freeze(['ordinary']) }),
     });
     sessions.push(session);
     for await (const event of session.events) if (event.type === 'turn_end') break;
@@ -66,10 +68,37 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
     expect(opened.config.mcp_servers.host).toEqual({ command: process.execPath, args: ['host.mjs'], enabled: true, tools: { submit_result: approve } });
     expect(opened.config.mcp_servers.other).toEqual({ command: process.execPath, args: ['other.mjs'], enabled: true });
     expect(opened.config.mcp_servers.byokagentresult.tools).toEqual(expectedTools.byokagentresult);
+    expect(opened.config.mcp_servers.byoktools.tools).toEqual({ ordinary: approve });
     expect(opened.config.mcp_servers.user).toEqual({ enabled: false });
     expect(opened.config.features).toEqual({ apps: false, plugins: false });
     expect(JSON.stringify(opened.config)).not.toContain('default_tools_approval_mode');
     expect(JSON.stringify(opened.config)).not.toContain('enabled_tools');
+  });
+
+  it.each([undefined, 'fake-thread-1'])('refuses an installed hub before spawning Codex (resume: %s)', async sessionRef => {
+    const home = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-hub-')));
+    dirs.push(home);
+    const receipt = path.join(home, 'rpc.jsonl');
+    const helper = { command: process.execPath, args: ['hub.mjs', 'attempt-context'] };
+    const adapter = new CodexAdapter({ resolveBin: () => ({ command: FAKE_CODEX, source: 'path' }) });
+    const prepare = adapter.prepare.bind(adapter);
+    const prepared = vi.spyOn(adapter, 'prepare').mockImplementation(async request => {
+      const result = await prepare(request);
+      if (result.kind === 'prepared') {
+        const start = result.operation.start;
+        return { ...result, operation: { start(input) {
+          bindCodexMcpHubInstallation(input, helper);
+          return start({ ...input, signal: new AbortController().signal });
+        } } };
+      }
+      return result;
+    });
+    await expect(startPreparedOperation(adapter, { target: CODEX_TARGET, instruction: 'hello', sessionRef }, {
+      workspaceDir: home, agentHome: home, env: { PATH: process.env.PATH, FAKE_CODEX_RPC_RECEIPT: receipt },
+      mcpServers: { byoktools: helper },
+    })).rejects.toThrow('Codex MCP hub tool approval is not qualified');
+    expect(prepared).toHaveBeenCalledOnce();
+    await expect(fs.access(receipt)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('preserves an exact misspelled Host declaration without inventing a matching grant', () => {

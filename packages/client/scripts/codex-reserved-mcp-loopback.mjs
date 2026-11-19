@@ -66,10 +66,27 @@ try {
   await mkdir(process.env.CODEX_HOME, { recursive: true, mode: 0o700 });
   const version = await promisify(execFile)(command, ['--version'], { env: process.env, timeout: 5_000 });
   report.runtimeVersion = (version.stdout + version.stderr).trim();
+  if (process.argv.includes('--hub-comparison')) {
+    const { compareCodexMcpHub } = await import('./codex-mcp-hub-comparison.mjs');
+    Object.assign(report, await compareCodexMcpHub({ root, command }));
+    if (report.status !== 'comparison-complete') process.exitCode = 1;
+  } else {
+    await runReservedToolCases();
+    report.status = 'passed';
+  }
+} catch (error) {
+  report.error = error.message;
+  process.exitCode = 1;
+} finally {
+  await closeServer(proxy);
+  await rm(root, { recursive: true, force: true });
+  console.log(JSON.stringify(report, null, 2));
+}
+
+async function runReservedToolCases() {
   const { CodexAdapter } = await import('../src/adapters/codex/codex-adapter.ts');
   const { sealRuntimeOperationManifest } = await import('../src/types.ts');
   const { createExecutionScratch } = await import('../src/daemon/retention/scratch.ts');
-
   const cases = [
     { id: 'sdk-helper', name: 'byokagentresult', expectCall: true },
     { id: 'host-default', name: 'host', expectCall: false },
@@ -142,7 +159,7 @@ readline.createInterface({input: process.stdin}).on('line', line => {
         ...(nativeInteractions ? { nativeInteractions: { timeoutMs: 1000, onRequest: () => { nativeRequestCount += 1; } } } : {}),
       });
       const mcpServers = { [name]: { command: process.execPath, args: [helper] } };
-      const offer = { instruction: 'Run the provided submit_result tool, then finish.' };
+      const offer = { target: { lane: 'runtime', runtimeId: 'codex' }, instruction: 'Run the provided submit_result tool, then finish.' };
       const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers });
       if (prepared.kind !== 'prepared') throw new Error(`Codex refused preparation: ${prepared.reason}`);
       scratch = await createExecutionScratch({ root: join(caseRoot, 's') });
@@ -170,12 +187,4 @@ readline.createInterface({input: process.stdin}).on('line', line => {
       await closeServer(provider);
     }
   }
-  report.status = 'passed';
-} catch (error) {
-  report.error = error.message;
-  process.exitCode = 1;
-} finally {
-  await closeServer(proxy);
-  await rm(root, { recursive: true, force: true });
-  console.log(JSON.stringify(report, null, 2));
 }
