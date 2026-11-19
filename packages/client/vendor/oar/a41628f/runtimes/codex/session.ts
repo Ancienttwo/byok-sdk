@@ -261,7 +261,7 @@ async function openCodexSession(
   // fold owns event translation, attribution and graph links; this owns the
   // transport-only turn id and the control decisions (busy, spontaneous).
   let lastNotifiedRootTurnId: string | undefined;
-  const draftTails = new Map<string, string>();
+  const draftTails = new Map<string, Map<string, string>>();
   const onNotification = (method: string, params: JsonRecord): void => {
     // BYOK change: Retain the exact native notification before any potentially throwing fold.
     // The record envelope's sessionId puts a foreign thread in the graph (observe/graph.ts); no out-of-band node.
@@ -272,30 +272,34 @@ async function openCodexSession(
     const turnId = method === "turn/completed" ? wireTurn : params.turnId;
     const activeTurn = state.codexTurnId ?? lastNotifiedRootTurnId;
     const byokStaleTurn = isRoot && typeof turnId === "string" && activeTurn !== undefined && turnId !== activeTurn;
-    if (isRoot && !byokStaleTurn && (method === "turn/started" || method === "turn/completed")) draftTails.clear();
+    if (!byokStaleTurn && (method === "turn/started" || method === "turn/completed")) draftTails.delete(notificationSession);
     const draftMethod = method === "item/agentMessage/delta";
     const streamedOutput = method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta"
       || method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta";
-    const lane = JSON.stringify([notificationSession, typeof params.itemId === "string" ? params.itemId : ""]);
+    const itemId = typeof params.itemId === "string" ? params.itemId : "";
+    const threadTails = draftTails.get(notificationSession);
     let draftTail: string | undefined;
     if (method === "item/completed") {
       const item = asRecord(params.item);
       if (typeof item?.id === "string") {
-        const key = JSON.stringify([notificationSession, item.id]);
-        if (item.type === "agentMessage" && typeof item.text === "string") {
-          const pending = draftTails.get(key);
-          if (pending !== undefined && item.text.endsWith(pending)) draftTail = credentials.redact(pending);
+        const pending = threadTails?.get(item.id);
+        if (pending !== undefined && item.type === "agentMessage" && typeof item.text === "string" && item.text.endsWith(pending)) {
+          draftTail = pending;
         }
-        draftTails.delete(key);
+        threadTails?.delete(item.id);
+        if (threadTails?.size === 0) draftTails.delete(notificationSession);
       }
     }
     if (credentials.hasProtectedValues() && typeof params.delta === "string" && (streamedOutput || (draftMethod && byokStaleTurn))) {
       const { delta: _omitted, ...rest } = params;
       params = rest;
     } else if (draftMethod && typeof params.delta === "string" && credentials.hasProtectedValues()) {
-      const { ready, pending } = credentials.redactChunk((draftTails.get(lane) ?? "") + params.delta);
-      if (pending === "") draftTails.delete(lane);
-      else draftTails.set(lane, pending);
+      const tails = threadTails ?? new Map<string, string>();
+      const { ready, pending } = credentials.redactChunk((tails.get(itemId) ?? "") + params.delta);
+      if (pending === "") tails.delete(itemId);
+      else tails.set(itemId, pending);
+      if (tails.size === 0) draftTails.delete(notificationSession);
+      else draftTails.set(notificationSession, tails);
       params = { ...params, delta: ready };
     }
     // BYOK change: label native frames and anchor root and turn membership before redaction can change ids.

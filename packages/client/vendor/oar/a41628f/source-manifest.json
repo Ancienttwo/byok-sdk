@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.121.0",
-    "commit": "0789566cd7467e3e607e21b9336e28831fd5adde"
+    "commit": "4c0bfeb8a0a8a5b1f77b4273621b21d89cda4847"
   },
   "release": {
     "ecosystem": "npm",
@@ -522,7 +522,7 @@
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "b86ac107394dce5b477d7e2b4ab9e849146cd089ad3be074c2614f3294a38545",
-      "vendoredSha256": "5444dd0ea64042eee0aa1ddeb9c256de947f18a732f75ad5dc7257347bd37419",
+      "vendoredSha256": "a8f5f5e62c4f697d40e10daf7587be482c6217fd947678da3f282c944d120de6",
       "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort uses the caller-owned isolated POSIX process reader and stays a no-op on Windows (#2381); the caller's retainedBytes goes to the upstream kernel's record retention. Propagate the typed resume effort refusal. Upstream: planned contribution (#2378). Share Runtime.sessionCapabilities with the narrow BYOK bridge."
     },
     {
@@ -624,7 +624,7 @@
       "path": "runtimes/dsh/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/projection.ts",
       "upstreamSha256": "c83aa677b6a0a5f82e60282b1ca6e3c96c1837fd215e57180c5b0ccb03de94dd",
-      "vendoredSha256": "a34d6eb286e4b59c939ff96aad46a307d852e9191906c14f4eeb8e55db97c46f",
+      "vendoredSha256": "ed9be7d4b865c12ab7f3de8e24e5a584a5b4f34fb6b9051f387f32c7315165eb",
       "delta": "Project dsh tool-call input from decoded, sanitized native arguments and keep native and projected JSON consistent (#2408)."
     },
     {
