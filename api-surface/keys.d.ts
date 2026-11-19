@@ -353,6 +353,7 @@ export declare const BYOK_KEYS_ERROR_CODES: {
     readonly MODEL_LIST_INVALID_IDENTIFIER: 'MODEL_LIST_INVALID_IDENTIFIER';
     readonly MODEL_LIST_INVALID_PAGINATION: 'MODEL_LIST_INVALID_PAGINATION';
     readonly MODEL_LIST_INVALID_RESPONSE: 'MODEL_LIST_INVALID_RESPONSE';
+    readonly MODEL_LIST_UNREACHABLE: 'MODEL_LIST_UNREACHABLE';
     readonly MODEL_LIST_UNSUPPORTED: 'MODEL_LIST_UNSUPPORTED';
     readonly MODEL_PROVIDER_AUTH_FAILED: 'MODEL_PROVIDER_AUTH_FAILED';
     readonly MODEL_PROVIDER_BALANCE_INSUFFICIENT: 'MODEL_PROVIDER_BALANCE_INSUFFICIENT';
@@ -991,7 +992,7 @@ export declare const MODEL_PROVIDER_VENDOR_IDS: readonly ModelProviderVendorId[]
 export declare function modelProviderVendor(kind: string): ModelProviderVendor | undefined;
 // ==== @byok-sdk/keys dist/provider-key-check.d.ts ====
 import type { ProviderKeyCheckOutcome } from './custody.js';
-import type { ProviderFetch } from './http.js';
+import { type ProviderFetch } from './http.js';
 import type { ModelProviderProfile } from './provider-profile.js';
 export declare const PROVIDER_KEY_CHECK_TIMEOUT_MS = 10000;
 export interface ProviderKeyCheckOptions {

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "9fd69dfc3fe57c07d629b6b90a91008776de0972fe10739df9de49e6705edd26"
+    "snapshotSha256": "c016de7b5b7466ffd3f837d30ff7c7a7c83ff9fc6a4b717a810f4f794daa2a36"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,15 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "model-list-unreachable",
+      "impact": "additive",
+      "summary": "Hosts can recognize an unreachable provider in discoverProviderModels by the MODEL_LIST_UNREACHABLE error code; the original transport error is available as the cause.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
+      ]
+    },
     {
       "id": "codex-service-tier-details",
       "impact": "additive",
@@ -100,6 +109,11 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeModelEntry",
       "change": "changed",
       "entry": "codex-service-tier-details"
+    },
+    {
+      "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
+      "change": "changed",
+      "entry": "model-list-unreachable"
     },
     {
       "item": "export:@byok-sdk/keys#listProviderProfileSecretNames",

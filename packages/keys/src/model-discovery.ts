@@ -1,6 +1,6 @@
 import { ByokKeysError } from './errors.js';
 import { providerHeaders, requiredProviderSecret } from './headers.js';
-import { fetchWithProviderGuards, objectValue, parseBoundedJsonResponse, PROVIDER_TIMEOUT_MS, type ProviderFetch } from './http.js';
+import { fetchWithProviderGuards, isProviderTransportError, objectValue, parseBoundedJsonResponse, PROVIDER_TIMEOUT_MS, type ProviderFetch } from './http.js';
 import type { ModelProviderKind, ProviderAuthMode } from './provider-profile.js';
 import { normalizeProviderUrl } from './url.js';
 
@@ -36,8 +36,16 @@ export async function discoverProviderModels(
       if (afterId !== undefined) target.searchParams.set('after_id', afterId);
       return fetchImpl(target.href, init);
     };
-    const response = await fetchWithProviderGuards(pageFetch, base.href,
-      { method: 'GET', headers, redirect: 'error' }, signal);
+    let response: Response;
+    try {
+      response = await fetchWithProviderGuards(pageFetch, base.href,
+        { method: 'GET', headers, redirect: 'error' }, signal);
+    } catch (error) {
+      if (isProviderTransportError(error)) {
+        throw new ByokKeysError('MODEL_LIST_UNREACHABLE', 'Model list provider is unreachable', { cause: error });
+      }
+      throw error;
+    }
     if (!response.ok) {
       void response.body?.cancel().catch(() => {});
       const code = response.status === 401 || response.status === 403 ? 'MODEL_LIST_AUTH_FAILED'

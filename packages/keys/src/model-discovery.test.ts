@@ -37,6 +37,14 @@ describe('discoverProviderModels', () => {
     }
   });
 
+  it('wraps an unreachable provider error without exposing connection details', async () => {
+    const cause = new TypeError('fetch failed for https://example.com/v1 with secret');
+    const fetchImpl: ProviderFetch = async () => { throw cause; };
+    const error = await discoverProviderModels(connection, 'secret', fetchImpl).catch(error => error);
+    expect(error).toBeInstanceOf(ByokKeysError);
+    expect(error).toMatchObject({ code: 'MODEL_LIST_UNREACHABLE', message: 'Model list provider is unreachable', cause });
+  });
+
   it('maps HTTP 401 to the auth failure code', async () => {
     const fetchImpl: ProviderFetch = async () => response({}, 401);
     const error = await discoverProviderModels(connection, 'secret', fetchImpl).catch(error => error);
