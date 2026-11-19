@@ -39,8 +39,8 @@ export interface ClaudeFrame {
 export function claudeRecordFrame(record: ClaudeRecord): ClaudeFrame | undefined {
   if (record.kind !== 'frame') return undefined;
   const body = object(record.body);
-  const native = body?.native;
-  if (native === null || typeof native !== 'object' || Array.isArray(native)) return undefined;
+  const native = object(body?.native) ?? object(body?.byokResult);
+  if (native === undefined) return undefined;
   const frame = native as ClaudeStreamMessage;
   if (CONTROL_FRAMES.has(frame.type)) return undefined;
   let context: Record<string, unknown> | undefined;
@@ -548,6 +548,10 @@ export class AssistantMessageTracker {
       if (this.open !== undefined) this.continuations.add(event);
       else if (event.text.trim() !== '') this.open = { messageId };
     }
+  }
+
+  continueMessage(event: AgentEvent): void {
+    this.continuations.add(event);
   }
 
   startsMessage(event: AgentEvent): boolean {

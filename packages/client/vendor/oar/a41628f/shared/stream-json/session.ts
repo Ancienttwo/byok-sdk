@@ -45,7 +45,7 @@ const streamJsonEventTypes = new Set(["message_start", "message_stop", "content_
 const streamJsonDeltaTypes = new Set(["text_delta", "thinking_delta", "input_json_delta"]);
 const streamJsonResultTypes = new Set(["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]);
 const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
-const streamJsonResultFields = new Set(["type", "subtype", "session_id", "parent_tool_use_id", "is_error", "terminal_reason", "result", "usage", "modelUsage", "stop_reason", "api_error_status", "permission_denials", "num_turns", "duration_ms", "duration_api_ms", "total_cost_usd"]);
+const streamJsonResultFields = new Set(["type", "subtype", "session_id", "parent_tool_use_id", "is_error", "terminal_reason", "result", "usage", "modelUsage", "stop_reason", "api_error_status", "permission_denials", "num_turns", "duration_ms", "duration_api_ms", "total_cost_usd", "fast_mode_state", "structured_output", "errors"]);
 
 interface StreamTextTails {
   readonly drafts: Map<string, Map<number, string>>;
@@ -109,7 +109,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
         events: record.body.events.filter(projected => projected.kind !== "tool_call_input_delta") } };
     }
   }
-  const redacted = redactRuntimeRecord(safe, credentials.redactValue, path => isProjectedToolInput(safe, path), (path, value) => {
+  let redacted = redactRuntimeRecord(safe, credentials.redactValue, path => isProjectedToolInput(safe, path), (path, value) => {
     const [body, native, field, group, block, member] = path;
     if (body !== "body" || native !== "native" || record.kind !== "frame") return false;
     if (path.length === 3) {
@@ -129,6 +129,13 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
     return (types?.type === "assistant" || types?.type === "user") && path.length === 6 && field === "message"
       && group === "content" && typeof block === "number" && member === "type" && streamJsonContentTypes.has(value);
   }, (path, key) => native?.type === "result" && path.length === 2 && path[0] === "body" && path[1] === "native" && streamJsonResultFields.has(key));
+  if (redacted.kind === "frame" && native?.type === "result" && asRecord(redacted.body.native) === null && record.kind === "frame") {
+    // Keep terminal evidence even if an opaque native key requires withholding the native map.
+    const fields = Object.fromEntries(Object.entries(native).filter(([key]) => streamJsonResultFields.has(key)));
+    const result = redactStreamJsonRecord({ ...record, body: { ...record.body, native: fields, events: [] } }, credentials).body.native;
+    const body = { ...redacted.body, byokResult: result };
+    redacted = { ...redacted, body };
+  }
   if (assistantTails === undefined || redacted.kind !== "frame" || native?.type !== "result") return redacted;
   draftTails?.delete(lane);
   textTails?.projected.delete(lane);

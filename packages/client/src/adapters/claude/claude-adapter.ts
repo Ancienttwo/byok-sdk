@@ -785,10 +785,12 @@ class ClaudeSession implements Session {
               if (mapped.unmappedLabel) {
                 stream.recordUnmappedFrame(mapped.unmappedLabel);
               }
-              pending = textTail === undefined ? mapped.events : [
-                { type: 'progress', text: textTail, ...(root ? {} : { agentPath: [...agentPath] }) },
-                ...mapped.events,
-              ];
+              pending = mapped.events;
+              if (textTail !== undefined) {
+                const continuation: AgentEvent = { type: 'progress', text: textTail, ...(root ? {} : { agentPath: [...agentPath] }) };
+                assistantMessages.continueMessage(continuation);
+                pending.unshift(continuation);
+              }
               // Nothing to yield yet (routine frame, or an unmapped one) —
               // loop around and pull the next raw line.
             }

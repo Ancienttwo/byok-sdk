@@ -307,12 +307,18 @@ function redactAssistantText<T extends RawEvent>(record: T, credentials: Credent
   return { ...record, body: { ...record.body, native: { ...native, data: { ...data, message: { ...message, content } } } } };
 }
 
-function withholdArgumentDelta(frame: unknown): unknown {
+function withholdStreamFragment(frame: unknown): unknown {
   const native = asRecord(frame);
   const chunk = asRecord(native?.chunk);
-  if (chunk?.type !== "tool-call-delta" || typeof chunk.argumentsDelta !== "string") return frame;
-  const { argumentsDelta: _omitted, ...safeChunk } = chunk;
-  return { ...native, chunk: safeChunk };
+  if (chunk?.type === "tool-call-delta") {
+    const { argumentsDelta: _omitted, ...safeChunk } = chunk;
+    return { ...native, chunk: safeChunk };
+  }
+  if (chunk?.type === "text-delta" || chunk?.type === "reasoning-delta") {
+    const { text: _omitted, ...safeChunk } = chunk;
+    return { ...native, chunk: safeChunk };
+  }
+  return frame;
 }
 
 /** BYOK change: only complete tool arguments can be decoded safely. Use the same sanitized JSON for both views. */
@@ -328,16 +334,16 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     });
   if (record.kind !== "frame") return redact(record);
   if (credentials.hasProtectedValues() && record.body.type === "agent/assistant-stream") {
-    const native = withholdArgumentDelta(record.body.native);
+    const native = withholdStreamFragment(record.body.native);
     return redact({ ...record, body: { ...record.body, native,
-      events: record.body.events.filter(event => event.kind !== "tool_call_input_delta") } });
+      events: record.body.events.filter(event => event.kind !== "tool_call_input_delta" && event.kind !== "text_delta" && event.kind !== "reasoning") } });
   }
   if (credentials.hasProtectedValues() && record.body.type === "session/event:assistant/attempt") {
     const native = asRecord(record.body.native);
     const data = asRecord(native?.data);
     if (Array.isArray(data?.stream)) {
       return redact({ ...record, body: { ...record.body,
-        native: { ...native, data: { ...data, stream: data.stream.map(withholdArgumentDelta) } } } });
+        native: { ...native, data: { ...data, stream: data.stream.map(withholdStreamFragment) } } } });
     }
   }
   if (record.body.type === "session/event:assistant/message") {

@@ -135,6 +135,27 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
+  it('keeps a Claude reply suffix in the original final message', async () => {
+    const resources = await makeCtx();
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), { ...baseTask, instruction: 'The task' }, { ...resources,
+        mcpServers: { fixture: { command: process.execPath, env: { MCP_TOKEN: 'sk-fixture' } } },
+      });
+      openSessions.push(session);
+      let finalText = '';
+      for await (const event of session.events) {
+        if (event.type === 'progress') {
+          if (session.progressStartsMessage?.(event)) finalText = '';
+          finalText += event.text;
+        }
+        if (event.type === 'turn_end') break;
+      }
+      expect(finalText).toBe('reply-1:The task');
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('detect() reports present + version + authPresent from the fake binary', async () => {
     const adapter = fakeClaudeAdapter();
     const result = await adapter.detect();

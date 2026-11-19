@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `b5ce98186200bd19290154c5d4969346216445e3` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `6faba6e9e299b175d350a7202d302bfb3be19428` (the manifest's `fork`).
 
 For #2380, `cff0aa94` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
@@ -165,6 +165,8 @@ All 44 branch deltas from `byok/0.120.0` through `7eb600dc99581a4633c4a0a22a5167
 `505b2f9f` redacts assembled dsh text and streamed Codex and Claude drafts before delivery. Codex also uses the accepted turn ID for stale completion checks, and OpenCode flushes withheld text when a child ends.
 
 `b5ce9818` protects Claude assistant prose across durable blocks and frames while preserving structural keys on terminal results.
+
+`6faba6e9` withholds incomplete dsh text and reasoning and preserves sanitized Claude terminal evidence when an opaque key causes the native result to be withheld.
 
 The decoded-value credential boundary supersedes `82ccb2f2`, `73743394`, `bd8fa0c7`, `7c194335` and `e9e50220`. It preserves JSON literals and unchanged encoded arguments, withholds credential-bearing maps and derives dsh tool input from sanitized native arguments.
 
