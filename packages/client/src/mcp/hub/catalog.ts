@@ -5,6 +5,7 @@ import { isAbsolute } from 'node:path';
 import { compareCodeUnits } from '../../util/compare-code-units.js';
 import type { McpStdioServerSpec } from '../client.js';
 import { GRANTABLE_MCP_SERVER_NAME, parseMcpToolDescriptors, type McpServerObservation } from '../observation.js';
+import { assertUniqueQualifiedNames } from '../projection.js';
 import { isJsonObject } from './protocol.js';
 
 const CATALOG_VERSION = 1;
@@ -102,6 +103,7 @@ export async function readMcpHubCatalog(binding: McpHubCatalogBinding): Promise<
       tools: parseMcpToolDescriptors(`MCP server "${serverName}"`, tools),
     }));
   }
+  assertUniqueQualifiedNames(catalog);
   return catalog;
 }
 
@@ -111,6 +113,7 @@ export async function publishMcpHubCatalog(
   servers: readonly McpServerObservation[],
   signal: AbortSignal,
 ): Promise<McpHubCatalog> {
+  assertUniqueQualifiedNames(servers.map((server) => [server.serverName, server]));
   const document = JSON.stringify({ version: CATALOG_VERSION, binding: fingerprint(binding), servers });
   if (Buffer.byteLength(document, 'utf8') > HUB_CATALOG_MAX_BYTES) throw new Error('MCP hub catalog exceeds its byte limit');
   const temp = `${binding.catalogPath}.${randomUUID()}.tmp`;

@@ -3,6 +3,7 @@ import { CfWorkerJsonSchemaValidator } from '@modelcontextprotocol/client/valida
 import { withOversizeToolResult } from '../../mcp-server/call-frame.js';
 import { serveMcpOverStdio, type McpServerOptions, type McpServerToolCall } from '../../mcp-server/index.js';
 import { McpAuthorityError } from '../client.js';
+import { McpQualifiedToolNameCollisionError } from '../projection.js';
 import { McpCallOutcomeUnknownError, McpServerDriftError, McpServerPool } from '../server-pool.js';
 import { publishMcpHubCatalog, readMcpHubCatalog, snapshotHubBinding, type McpHubCatalog, type McpHubCatalogBinding } from './catalog.js';
 import { discoverMcpHubServers } from './discovery.js';
@@ -71,7 +72,8 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     try {
       catalog ??= await readMcpHubCatalog(binding);
       return catalog;
-    } catch {
+    } catch (error) {
+      if (error instanceof McpQualifiedToolNameCollisionError) throw error;
       throw new Error('The published MCP hub catalog is invalid for this Attempt.');
     }
   }
@@ -83,7 +85,8 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     try {
       catalog = await publishMcpHubCatalog(binding, servers, signal);
       return catalog;
-    } catch {
+    } catch (error) {
+      if (error instanceof McpQualifiedToolNameCollisionError) throw error;
       throw new Error('The MCP hub could not publish its complete catalog.');
     }
   }

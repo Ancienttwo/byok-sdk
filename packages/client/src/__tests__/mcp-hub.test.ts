@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
+import { bindMcpHubAuthorization } from '../mcp/hub-authorization.js';
 import { readMcpHubCatalog, type McpHubCatalogBinding } from '../mcp/hub/index.js';
+import { createAutoToolAuthorizationGate } from '../tool-authorization.js';
 
 const fixture = (name: string): string => fileURLToPath(new URL(`./fixtures/${name}.mjs`, import.meta.url));
 let hubBundleDir: string;
@@ -176,6 +178,34 @@ it('publishes no partial catalog after discovery fails and retries on the next s
   await f.configure('zeta');
   expect(searchHits(await hub.search('echo'))).toHaveLength(2);
   expect(await f.receipts('zeta', 'start')).toHaveLength(2);
+});
+
+it('refuses to freeze or authorize colliding tools even with a toolName allow rule', async () => {
+  const pairs = [{ server: 'ops__read', tool: 'item' }, { server: 'ops', tool: 'read__item' }];
+  const f = await fixtureContext(pairs.map(({ server }) => server));
+  await Promise.all(pairs.map(({ server, tool }) => f.configure(server, { pages: [[{ ...echo, name: tool }]] })));
+  const toolName = 'mcp__ops__read__item';
+  const outerToolName = 'mcp__byoktools__call_tool';
+  const gate = createAutoToolAuthorizationGate({
+    workspace: f.binding.launchCwd, timeoutMs: 2_000,
+    mcpIdentities: new Map([[outerToolName, { server: 'byoktools', tool: 'call_tool' }]]),
+    rules: { allowWithoutAsking: [{ id: 'allow-by-name', match: { toolName } }] },
+    requestAuthorization: async () => ({ approved: false }),
+  });
+  bindMcpHubAuthorization(gate, { catalog: f.binding, isActive: () => true });
+
+  const hub = await f.connect();
+  const result = await hub.search('item');
+  expect(result.isError).toBe(true);
+  expect(text(result)).toContain(`duplicate MCP runtime tool name "${toolName}"`);
+  await expect(readMcpHubCatalog(f.binding)).resolves.toBeUndefined();
+  for (const pair of pairs) {
+    const args = { ...pair, arguments: { text: 'hello' } };
+    await expect(gate.authorize({ toolCallId: pair.server, toolName: outerToolName, input: args, cwd: f.binding.launchCwd }))
+      .resolves.toMatchObject({ decision: 'deny', code: 'tool_authorization_unavailable' });
+    expect(await hub.client.callTool({ name: 'call_tool', arguments: args })).toMatchObject({ isError: true });
+    expect(await f.receipts(pair.server, 'tools/call')).toEqual([]);
+  }
 });
 
 it('allows no more than eight simultaneous discoveries on the same Attempt', async () => {

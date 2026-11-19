@@ -1481,6 +1481,7 @@ Manifest transition: **0.44.1 → 0.44.1**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
+| mcp-toolset-exposure-config | additive | Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default. [Migration](https://github.com/Ancienttwo/byok-sdk/issues/2396) |
 <!-- generated:migrations:end -->
 
 ## Maintaining this guide
