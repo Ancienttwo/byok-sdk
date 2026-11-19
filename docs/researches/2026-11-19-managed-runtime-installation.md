@@ -13,4 +13,11 @@ For DSH, the installer restored mode `0755` on the `node-pty` `spawn-helper`. Th
 
 A preflight on the same macOS arm64 host used the Claude and Codex adapter pins from `038d66c9d` in a temporary copy of the client source. Claude `2.1.326` selected `@anthropic-ai/claude-code-darwin-arm64/claude`. Codex `0.169.0` selected `node_modules/.bin/codex`. Both passed the public operation’s version and help probes and published their installations.
 
+A Windows x64 run on `win-ci` used Node 26.13.0 and npm 11.20.0. The
+installer resolved `node.exe` and its adjacent `node_modules/npm/bin/npm-cli.js`
+and passed the SDK install path, which contained spaces, as an argument.
+Claude `2.1.312`, Codex `0.160.0`, and OpenCode `2.3.0` each returned
+`installed` on the first call and `current` on the second. Uninstall succeeded
+for each runtime. DSH's runtime contract covers macOS and Linux.
+
 `agy help update` confirmed the standalone CLI's `agy update` command. Grok returns its vendor npm command. The installer regression suite exercises both vendor responses, native package path selection, version mismatch before publication, and preservation of the previous generation after a failed install.

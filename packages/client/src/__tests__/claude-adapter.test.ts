@@ -343,6 +343,10 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     } } as const;
     const mismatched = { ...target, selection: { ...target.selection, providerId: 'openai' } };
     expect(adapter.descriptor.byokProviderId).toBe('anthropic');
+    expect(adapter.descriptor.defaultModelModes).toBeUndefined();
+    await expect(adapter.prepare({ descriptor: adapter.descriptor, requiredToolsetIds: [], offer: { ...baseTask,
+      target: { ...target, selection: { mode: 'byok', providerId: 'anthropic' } },
+    } })).resolves.toMatchObject({ kind: 'reject', code: 'invalid_request' });
     await expect(adapter.prepare({ descriptor: adapter.descriptor, requiredToolsetIds: [], offer: { ...baseTask, target: mismatched } }))
       .resolves.toMatchObject({ kind: 'reject', retryable: false });
     expect(resolveKey).not.toHaveBeenCalled();
@@ -354,6 +358,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(spawnEnvs[0]?.ANTHROPIC_API_KEY).toBe('host-fixture-key');
     expect(spawnEnvs[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(spawnEnvs[0]?.CLAUDE_CODE_USE_BEDROCK).toBeUndefined();
+    const crash = await makeCtx({ ...process.env, FAKE_CLAUDE_CRASH_WITH_STDERR: 'fixture refused host-fixture-key' });
+    await expect(startAdapter(adapter, { ...baseTask, target }, crash)).rejects.toThrow('fixture refused [redacted]');
   });
 
   it.each([undefined, 'resume-me-123'])('passes the effort from the selected Claude model menu (resume=%s)', async sessionRef => {

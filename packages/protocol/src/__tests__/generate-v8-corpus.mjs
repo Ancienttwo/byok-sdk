@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 
 const golden = name => new URL(`./golden/${name}`, import.meta.url);
 const readLines = name => readFileSync(golden(name), 'utf8').trimEnd().split('\n').map(line => JSON.parse(line));
-const writeLines = (name, rows) => writeFileSync(golden(name), rows.map(row => JSON.stringify(row)).join('\n') + '\n');
+const writeLines = (name, rows) => writeFileSync(golden(name), `${rows.map(row => JSON.stringify(row)).join('\n')}\n`);
 
 const selectionFor = {
   runtime: () => ({ mode: 'device-default' }),
@@ -14,12 +14,18 @@ const selectionFor = {
   'byok-profile': ({ providerProfile }) => ({ mode: 'byok-profile', providerProfile }),
 };
 
+function selectionModes(id) {
+  if (id === 'pi') return ['byok-profile'];
+  if (id === 'claude' || id === 'codex') return ['device-default', 'subscription'];
+  return ['device-default', 'adapter-model'];
+}
+
 function inventory({ runtimes = [], harnesses = [] }) {
   return [...runtimes, ...harnesses].map(({ id, capabilities, ...facts }) => ({
     id, ...facts,
     capabilities: {
       ...capabilities,
-      selectionModes: id === 'pi' ? ['byok-profile'] : id === 'claude' || id === 'codex' ? ['device-default', 'subscription'] : ['device-default', 'adapter-model'],
+      selectionModes: selectionModes(id),
       effort: true,
     },
   }));
@@ -74,7 +80,37 @@ function httpValue(surface, input) {
   return input;
 }
 
-writeLines('v8.envelopes.ndjson', readLines('v7.envelopes.ndjson').map(envelope));
-writeLines('v8.http.ndjson', readLines('v7.http.ndjson').map(line => ({
+const modelHarnesses = [
+  { id: 'pi', capabilities: { selectionModes: ['device-default', 'adapter-model'], effort: true } },
+  { id: 'opencode', capabilities: { selectionModes: ['adapter-model'], effort: true } },
+  { id: 'grok', capabilities: { selectionModes: ['device-default', 'adapter-model'], defaultModelModes: ['adapter-model'], effort: true } },
+  { id: 'dsh', capabilities: { selectionModes: ['byok'], byokProviderId: 'deepseek', defaultModelModes: ['byok'], effort: true } },
+];
+const modelDefaultsHello = {
+  v: 8, id: '00000000-0000-4000-8000-000000004101', ts: '2026-11-19T00:00:00.000Z', type: 'conn.hello',
+  payload: { deviceId: 'device-model-defaults', productId: 'acme-agent', protocolVersions: [8], capabilities: [], harnesses: modelHarnesses },
+};
+const modelDefaultsOffer = {
+  v: 8, id: '00000000-0000-4000-8000-000000004102', ts: '2026-11-19T00:00:01.000Z', type: 'task.offer',
+  task_id: 'task-model-defaults', seq: 7,
+  payload: { instruction: 'Continue Agent work', agentRef: { agentId: 'agent-golden-1', profileRevision: 'profile-r7' },
+    target: { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'deepseek' } },
+    session: { mode: 'resume', sessionRef: 'sess-golden-agent' } },
+};
+const modelDeclines = ['invalid_request', 'model_unavailable'].map((code, index) => ({
+  v: 8, id: `00000000-0000-4000-8000-00000000410${index + 3}`, ts: '2026-11-19T00:00:02.000Z', type: 'task.decline',
+  task_id: `task-model-decline-${index}`, payload: { code, reason: code, retryable: false },
+}));
+const modelDefaultsPresence = { level: 'online', protocolVersions: [8], harnesses: modelHarnesses };
+const v8Envelopes = readLines('v7.envelopes.ndjson').map(envelope);
+// The decline code stays in plaintext and is outside the sealed binding.
+const sealedDecline = v8Envelopes.find(row => row.type === 'task.decline' && row.payload.sealed !== undefined);
+const sealedModelDeclines = modelDeclines.map((row, index) => ({
+  ...sealedDecline, id: `00000000-0000-4000-8000-00000000410${index + 5}`,
+  payload: { ...sealedDecline.payload, code: row.payload.code, retryable: false },
+}));
+
+writeLines('v8.envelopes.ndjson', [...v8Envelopes, modelDefaultsHello, modelDefaultsOffer, ...modelDeclines, ...sealedModelDeclines]);
+writeLines('v8.http.ndjson', [...readLines('v7.http.ndjson').map(line => ({
   ...line, body: JSON.stringify(httpValue(line.surface, JSON.parse(line.body))), value: httpValue(line.surface, line.value),
-})));
+})), { surface: 'PresencePublishRequest', body: JSON.stringify(modelDefaultsPresence), value: modelDefaultsPresence }]);

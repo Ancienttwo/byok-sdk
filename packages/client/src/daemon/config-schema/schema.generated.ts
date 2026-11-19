@@ -1791,9 +1791,6 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
               ]
             }
           },
-          "required": [
-            "models"
-          ],
           "additionalProperties": false
         },
         "agy": {

@@ -84,11 +84,11 @@ export interface RuntimeAdaptersRuntimes {
     /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
-  /** Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only. */
+  /** Required when `runtimeAllowlist` lists `dsh`. DSH runs on macOS and Linux. */
   dsh?: {
     /** `DshAdapterOptions.home`: the absolute `DSH_HOME` the SDK owns. It must persist across executions, because dsh keeps its sessions there, and must not be `~/.dsh`. */
     home: DshAdapterOptions['home'];
-    /** `DshAdapterOptions.model`: provider, model and optional `baseUrl`. */
+    /** `DshAdapterOptions.model`: provider route, optional default model and optional `baseUrl`. */
     model: DshAdapterOptions['model'];
     /** Per-spawn provider API key resolver for an embedded Host. */
     resolveKey: DshAdapterOptions['resolveKey'];
@@ -99,9 +99,9 @@ export interface RuntimeAdaptersRuntimes {
     /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
-  /** Required when runtimeAllowlist lists opencode. Native user configuration is inherited. */
+  /** Optional OpenCode settings. Native user configuration is inherited. */
   opencode?: {
-    models: OpenCodeAdapterOptions['models'];
+    models?: OpenCodeAdapterOptions['models'];
     /** Absolute executable override, resolved before PATH. Never installs or migrates OpenCode. */
     executable?: string;
     versionPolicy?: RuntimeVersionPolicy;
@@ -347,8 +347,7 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
     case 'agy':
       return buildAgyAdapter(config, environment);
     case 'opencode': {
-      const options = config.runtimes?.opencode;
-      if (!options) throw new DaemonConfigInvalidError([invalid('runtimes.opencode', 'OpenCode requires a Host model candidate list')]);
+      const options = config.runtimes?.opencode ?? {};
       try {
         return new OpenCodeAdapter({ models: options.models, nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
           ...(options.executable === undefined ? {} : { resolveBin: () => ({ command: options.executable!, source: 'env' as const }) }),
@@ -471,7 +470,9 @@ function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfi
     }
     const opencode = record.opencode;
     if (isObject(opencode)) {
-      expect(isStringArray(opencode.models), 'runtimes.opencode.models', 'an array of strings');
+      if (opencode.models !== undefined && !isStringArray(opencode.models)) {
+        issues.push(invalid('runtimes.opencode.models', 'DaemonConfig.runtimes.opencode.models must be an array of strings'));
+      }
       expect(optional(opencode.executable, isString), 'runtimes.opencode.executable', 'a string');
     }
     const agy = record.agy;

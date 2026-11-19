@@ -116,9 +116,7 @@ defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVe
   'detect.auth.absent': check(async () => {
     expectAuth(await detectWith(adapter(), await detectEnv('grok-auth-absent')), false);
   }),
-  'detect.auth.apiKey': check(async () => {
-    expectAuth(await detectWith(adapter(), { ...await detectEnv('grok-auth-key'), XAI_API_KEY: 'xai-runtime-contract-placeholder' }), true);
-  }),
+  'detect.auth.apiKey': skip('Grok uses its own login and drops Host API keys from its environment'),
   'detect.auth.login': check(async () => {
     // The adapter checks that Grok's login file exists and never reads it.
     expectAuth(await detectWith(adapter(), await detectEnv('grok-auth-login', { 'auth.json': '{}' })), true);

@@ -210,7 +210,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude')).bin.command,
       version: claudeVersionToken,
-      environment: env => ({ env, credentials: claudeProviderCredentials(env) }),
+      environment: env => ({ env: withoutProviderCredentials(env) }),
     });
   }
 
@@ -306,9 +306,13 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     const { effort } = input.offer;
+    const requested = offerSelection(input.offer.target);
+    if (requested?.mode === 'byok' && (requested.modelId === undefined || requested.modelId.trim() === '')) {
+      return { kind: 'reject', code: 'invalid_request', reason: 'Claude requires an explicit BYOK model ID', retryable: false };
+    }
     let selection: ClaudeSelection;
     try {
-      selection = this.executionSelection(offerSelection(input.offer.target));
+      selection = this.executionSelection(requested);
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
     }

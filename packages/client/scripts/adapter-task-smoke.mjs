@@ -424,14 +424,14 @@ try {
   };
 
   const preAdmissionPiSpawns = piSpawnCount;
-  const unadvertisedTask = 'adapter-smoke-pi-device-default';
-  await assertNode.rejects(withTimeout(submit(unadvertisedTask, {
-    instruction: 'adapter task smoke: request an unadvertised selection',
-    target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
-  }), 'unadvertised Pi selection submit'), { code: 'agent_capability_missing' });
-  assert(await byok.tasks.offer(unadvertisedTask) === undefined, 'an unadvertised Pi selection created an offer');
-  assert(piSpawnCount === preAdmissionPiSpawns, 'an unadvertised selection spawned Pi');
-  console.log('PASS pi: cloud refused an unadvertised selection before enqueue or spawn');
+  const missingModelTask = 'adapter-smoke-pi-missing-model';
+  await assertNode.rejects(withTimeout(submit(missingModelTask, {
+    instruction: 'adapter task smoke: omit a required Pi model',
+    target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'adapter-model' } },
+  }), 'Pi selection with missing model'), { code: 'invalid_request' });
+  assert(await byok.tasks.offer(missingModelTask) === undefined, 'a missing Pi model created an offer');
+  assert(piSpawnCount === preAdmissionPiSpawns, 'a missing model spawned Pi');
+  console.log('PASS pi: cloud refused a missing model before enqueue or spawn');
 
   for (const runtime of runtimes) {
     const handle = await withTimeout(

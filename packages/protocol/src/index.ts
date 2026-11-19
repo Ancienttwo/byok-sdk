@@ -227,6 +227,8 @@ export {
   HarnessSelectionSchema,
   SelectionModeSchema,
   harnessSupportsTarget,
+  harnessSelectionNeedsModel,
+  type DefaultModelSelectionMode,
   RuntimeCapabilitiesSchema,
   RuntimeVersionPolicyProjectionSchema,
   AgentRefSchema,

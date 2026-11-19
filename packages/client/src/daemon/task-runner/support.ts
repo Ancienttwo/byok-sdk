@@ -292,7 +292,7 @@ export interface ClaimedAgentFailureContext {
 
 export type PickResult =
   | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor; searchEvidence?: SearchRuntimeEvidence }
-  | { ok: false; reason: string; retryable: boolean; runtimeUnavailable?: RuntimeUnavailableAdmission };
+  | { ok: false; reason: string; retryable: boolean; code?: TaskDeclineCode; runtimeUnavailable?: RuntimeUnavailableAdmission };
 
 /**
  * One pre-claim decline. `code` is a fixed protocol token naming device state,

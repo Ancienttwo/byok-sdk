@@ -8,9 +8,11 @@ import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
 import type {
   AgentEvent,
+  DefaultModelSelectionMode,
   ExecutionTarget,
   HarnessSelection,
   SelectionMode,
+  TaskDeclineCode,
   TaskOfferPlainPayload,
 } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation.js';
@@ -369,6 +371,8 @@ export interface RuntimeAdapterDescriptor {
   readonly versionPolicy?: RuntimeVersionPolicy;
   /** Selection modes this adapter can honor. */
   readonly selectionModes: readonly SelectionMode[];
+  /** Model-bearing modes that can use a configured default when the offer omits modelId. */
+  readonly defaultModelModes?: readonly DefaultModelSelectionMode[];
   /** pi-ai catalog provider id for this adapter's configured BYOK resolver. */
   readonly byokProviderId?: string;
   /** Consumes explicit per-task reasoning effort. */
@@ -467,6 +471,7 @@ export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServer
 /** A permanent or currently-unavailable pre-claim admission rejection. */
 export interface RuntimeAdapterRejectedOperation {
   kind: 'reject';
+  code?: TaskDeclineCode;
   reason: string;
   retryable: boolean;
 }
@@ -753,6 +758,7 @@ export function freezeRuntimeAdapterDescriptor(descriptor: RuntimeAdapterDescrip
     id: descriptor.id,
     ...(descriptor.memoryLane === undefined ? {} : { memoryLane: descriptor.memoryLane }),
     selectionModes: Object.freeze([...descriptor.selectionModes]),
+    ...(descriptor.defaultModelModes === undefined ? {} : { defaultModelModes: Object.freeze([...descriptor.defaultModelModes]) }),
     ...(descriptor.byokProviderId === undefined ? {} : { byokProviderId: descriptor.byokProviderId }),
     ...(descriptor.supportsEffort === true ? { supportsEffort: true } : {}),
     requiresMcpToolsetToolObservation: descriptor.requiresMcpToolsetToolObservation === true,

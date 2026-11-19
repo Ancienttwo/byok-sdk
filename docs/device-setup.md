@@ -17,12 +17,11 @@ runtime as the OS user who will run the daemon. For a source checkout, run
 On Linux, the daemon needs the user's unlocked Secret Service session for
 pairing. Device credentials belong in OS credential storage, never this JSON.
 
-OpenCode keyless onboarding remains gated on native OS/line qualification.
-Installing its CLI or supplying `runtimes.opencode.models` does not enable it
-while the adapter advertises no platforms. Follow the
-[OpenCode qualification contract](adapter-capabilities.md#opencode-implementation-and-qualification-1538)
-and its native evidence before selecting it for a device; the SDK does not
-install, upgrade or switch release lines.
+To enable OpenCode on a qualified macOS or Windows device, list `opencode` in
+`runtimeAllowlist`. Supply `runtimes.opencode.models` to let the device use
+configured defaults. With that list omitted, send each task with an explicit
+`adapter-model` selection. See the
+[OpenCode qualification contract](adapter-capabilities.md#opencode-implementation-and-qualification-1538).
 
 For a complete local Host, start the [basic example](../examples/basic/README.md)
 with `bun run --filter @byok-sdk/example-basic dev`, then open
@@ -1327,7 +1326,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.grok.runtimeEnvironment` | advanced | union |
 | `runtimes.dsh` | embedded-only | embedded-only |
 | `runtimes.opencode` | advanced | object |
-| `runtimes.opencode.models` | required when parent is set | array |
+| `runtimes.opencode.models` | advanced | array |
 | `runtimes.opencode.executable` | advanced | string |
 | `runtimes.opencode.versionPolicy` | advanced | object |
 | `runtimes.opencode.versionPolicy.qualifiedVersion` | required when parent is set | string |

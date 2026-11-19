@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter, RuntimeOperationStartInput } from '../types';
 import { TestServer } from './fixtures/test-server';
@@ -115,6 +116,38 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       expect(prepare).not.toHaveBeenCalled();
       expect(pi.startCalls).toHaveLength(1);
     } finally { handoff.mockRestore(); }
+  });
+
+  it('skips an advertised OpenCode that requires an explicit model on auto', async () => {
+    const opencode = new OpenCodeAdapter();
+    const descriptor = opencode.descriptor;
+    vi.spyOn(opencode, 'descriptor', 'get').mockReturnValue({ ...descriptor, platforms: [process.platform] });
+    vi.spyOn(opencode, 'detect').mockResolvedValue({ kind: 'available' });
+    const prepare = vi.spyOn(opencode, 'prepare');
+    await setup([opencode]);
+    const hello = await server.waitFor(envelope => envelope.type === 'conn.hello');
+    expect(hello.payload).toMatchObject({ harnesses: expect.arrayContaining([expect.objectContaining({ id: 'opencode', capabilities: expect.objectContaining({ selectionModes: ['adapter-model'] }) })]) });
+    const taskId = 'auto-explicit-model';
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    const decline = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === taskId);
+    expect(decline.payload).toMatchObject({ runtimeUnavailable: { cause: 'none_available' } });
+    const explicitId = 'missing-adapter-model';
+    server.send(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: 'opencode', selection: { mode: 'adapter-model' } },
+      agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId: explicitId, seq: server.nextSeq() }));
+    const missing = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === explicitId);
+    expect(missing.payload).toMatchObject({ code: 'invalid_request', retryable: false });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it.each(['invalid_request', 'model_unavailable'] as const)('forwards adapter rejection %s before claiming', async code => {
+    const adapter = new StubRuntimeAdapter('pi');
+    vi.spyOn(adapter, 'prepare').mockResolvedValue({ kind: 'reject', code, reason: 'selection refused', retryable: false });
+    await setup([adapter]);
+    const taskId = `reject-${code}`;
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    const declined = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === taskId);
+    expect(declined.payload).toMatchObject({ code, retryable: false });
+    expect(server.received.some(envelope => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
   });
 
   it('declines an undeclared dispatch selection before preparing or claiming', async () => {

@@ -193,6 +193,7 @@
 //   DAEMON_TO_SERVER_TYPES -> dist/messages.d.ts
 //   DECLINE_CODES -> dist/messages.d.ts
 //   DEVICE_NOT_REGISTERED_CODE -> dist/http-api.d.ts
+//   DefaultModelSelectionMode -> dist/messages.d.ts
 //   DeviceNotRegisteredResponse -> dist/http-api.d.ts
 //   DeviceNotRegisteredResponseSchema -> dist/http-api.d.ts
 //   DreamBudget -> dist/dream.d.ts
@@ -469,6 +470,7 @@
 //   createEnvelope -> dist/codec.d.ts
 //   decodeEnvelope -> dist/codec.d.ts
 //   encodeEnvelope -> dist/codec.d.ts
+//   harnessSelectionNeedsModel -> dist/messages.d.ts
 //   harnessSupportsTarget -> dist/messages.d.ts
 //   isKnownAgentEvent -> dist/agent-event.d.ts
 //   isPairingText -> dist/http-api.d.ts
@@ -2474,14 +2476,14 @@ export declare const HostOfferPlainPayloadSchema: z.ZodObject<{
             mode: z.ZodLiteral<"device-default">;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"adapter-model">;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"subscription">;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok">;
             providerId: z.ZodString;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok-profile">;
             providerProfile: z.ZodObject<{
@@ -2603,14 +2605,14 @@ export declare const HostOfferSealedPayloadSchema: z.ZodObject<{
             mode: z.ZodLiteral<"device-default">;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"adapter-model">;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"subscription">;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok">;
             providerId: z.ZodString;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok-profile">;
             providerProfile: z.ZodObject<{
@@ -2838,6 +2840,10 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
                 "device-default": "device-default";
                 subscription: "subscription";
             }>>;
+            defaultModelModes: z.ZodOptional<z.ZodArray<z.ZodEnum<{
+                "adapter-model": "adapter-model";
+                byok: "byok";
+            }>>>;
             effort: z.ZodBoolean;
             byokProviderId: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
@@ -3528,7 +3534,7 @@ export { RESULT_SCHEMA_MAX_BYTES, RESULT_OUTCOME_MAX_BYTES, RESULT_ISSUES_MAX_CO
 export type { ResultSchema, ResultIssue, } from './result-schema.js';
 export { TASK_STATES, TASK_TRANSITIONS, } from './task-state.js';
 export type { TaskState } from './task-state.js';
-export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, HarnessIdSchema, HarnessInventorySchema, HarnessSelectionSchema, SelectionModeSchema, harnessSupportsTarget, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, ExecutionTargetSchema, ReasoningEffortSchema, INPUT_IMAGE_MAX_BYTES, InputImageBlobRefSchema, InputImagesSchema, ClaimedExecutorSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, CONN_HELLO_CAPABILITIES_MAX_ITEMS, AgentMemoryCommitSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskSteerSealedPayloadSchema, TASK_STEER_TEXT_MAX_BYTES, TaskSteerRefusedPayloadSchema, STEER_REFUSAL_REASONS, readSteerRefusalReason, TaskClaimPayloadSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, DECLINE_CODES, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, targetsPi, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, TerminalResidentMemoryOverLimitSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, offerSelectionViolation, } from './messages.js';
+export { MESSAGE_TYPES, MESSAGE_PAYLOAD_SCHEMAS, SERVER_TO_DAEMON_TYPES, DAEMON_TO_SERVER_TYPES, RuntimeIdSchema, ProtocolVersionNumberSchema, HarnessIdSchema, HarnessInventorySchema, HarnessSelectionSchema, SelectionModeSchema, harnessSupportsTarget, harnessSelectionNeedsModel, type DefaultModelSelectionMode, RuntimeCapabilitiesSchema, RuntimeVersionPolicyProjectionSchema, AgentRefSchema, AgentHomeProjectionAgentRefSchema, AGENT_REF_MAX_BYTES, ExecutionTargetSchema, ReasoningEffortSchema, INPUT_IMAGE_MAX_BYTES, InputImageBlobRefSchema, InputImagesSchema, ClaimedExecutorSchema, ToolsetIdSchema, ConfiguredToolsetsSchema, RequiredToolsetsSchema, CONFIGURED_TOOLSETS_MAX_ITEMS, CONN_HELLO_CAPABILITIES_MAX_ITEMS, AgentMemoryCommitSchema, SessionSelectionSchema, TaskOfferPayloadSchema, TaskOfferPlainPayloadSchema, TaskOfferSealedPayloadSchema, AgentEgressReliablePayloadSchema, AgentEgressAckPayloadSchema, AgentMessagePublishPayloadSchema, AgentMessageDraftPayloadSchema, AgentMessageDispositionPayloadSchema, AgentContentReadPayloadSchema, AgentContentReceiptPayloadSchema, AgentHomeProjectionPayloadSchema, AgentMemoryIntentAvailablePayloadSchema, AgentInputPreparationPayloadSchema, TaskApprovePayloadSchema, TaskSteerSealedPayloadSchema, TASK_STEER_TEXT_MAX_BYTES, TaskSteerRefusedPayloadSchema, STEER_REFUSAL_REASONS, readSteerRefusalReason, TaskClaimPayloadSchema, OFFER_ADMISSION_MAX_DURATION_MS, TaskProgressPayloadSchema, TaskArtifactPayloadSchema, TaskAwaitApprovalPayloadSchema, TaskCompletePayloadSchema, TaskFailPayloadSchema, TaskFailureSchema, readTaskFailure, readDeclineCode, DECLINE_CODES, TaskApprovalResolvedPayloadSchema, RESULT_DOCUMENT_MAX_BYTES, checkResultDocument, targetsPi, TerminalAgentHomeProjectionSchema, TerminalAgentHomeMemoryChangeSchema, TerminalResidentMemoryOverLimitSchema, AGENT_HOME_MEMORY_DIGEST_MAX_FILES, AGENT_HOME_MEMORY_DIGEST_MAX_BYTES, AGENT_HOME_MEMORY_PATH_MAX_LENGTH, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, TERMINAL_INFERENCE_USAGE_MAX_DURATION_MS, offerSelectionViolation, } from './messages.js';
 export { steerRefusalEnvelopeId, uuidFromSha256 } from './steer-refusal.js';
 export { PAIR_DEVICE_DIGEST_NAMESPACE, PairDeviceDigestSchema, pairDeviceDigest, type PairDeviceDigestInput, } from './pair-device-digest.js';
 export type { MessageType, RuntimeId, HarnessSelection, SelectionMode, RuntimeCapabilities, RuntimeVersionPolicyProjection, RuntimeUnavailableEntry, AgentRef, ExecutionTarget, ReasoningEffort, InputImageBlobRef, ClaimedExecutor, ToolsetId, ConnHelloPayload, SessionSelection, TaskOfferPayload, TaskOfferPlainPayload, TaskOfferSealedPayload, TaskSteerSealedPayload, AgentEgressReliablePayload, AgentEgressAckPayload, AgentMessagePublishPayload, AgentMessagePublishPlainPayload, AgentMessagePublishSealedPayload, AgentMessageDispositionPayload, AgentContentReadPayload, AgentContentReceiptPayload, AgentHomeProjectionPayload, AgentMemoryIntentAvailablePayload, AgentInputPreparationPayload, TaskSteerRefusedPayload, SteerRefusalReason, SteerRefusalReasonReading, TaskClaimPayload, OfferAdmissionTimings, TaskDeclinePayload, TaskDeclineCode, TaskDeclineCodeReading, TaskArtifactPayload, TaskFailPayload, RuntimeFailureClass, RuntimeQuotaScope, TaskFailure, TaskFailureReading, TaskApprovalResolvedPayload, TerminalInferenceUsage, TerminalPreparedObservation, TerminalAgentHomeProjection, TerminalAgentHomeMemoryChange, TerminalResidentMemoryOverLimit, AgentHomeAccess, AgentMemorySelection, AgentMemoryCommit, } from './messages.js';
@@ -4074,6 +4080,7 @@ export declare const SelectionModeSchema: z.ZodEnum<{
     subscription: "subscription";
 }>;
 export type SelectionMode = z.infer<typeof SelectionModeSchema>;
+export type DefaultModelSelectionMode = Extract<SelectionMode, 'byok' | 'adapter-model'>;
 // support
 export declare const HarnessInfoSchema: z.ZodObject<{
     id: z.ZodString;
@@ -4105,6 +4112,10 @@ export declare const HarnessInfoSchema: z.ZodObject<{
             "device-default": "device-default";
             subscription: "subscription";
         }>>;
+        defaultModelModes: z.ZodOptional<z.ZodArray<z.ZodEnum<{
+            "adapter-model": "adapter-model";
+            byok: "byok";
+        }>>>;
         effort: z.ZodBoolean;
         byokProviderId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -4148,6 +4159,10 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
             "device-default": "device-default";
             subscription: "subscription";
         }>>;
+        defaultModelModes: z.ZodOptional<z.ZodArray<z.ZodEnum<{
+            "adapter-model": "adapter-model";
+            byok: "byok";
+        }>>>;
         effort: z.ZodBoolean;
         byokProviderId: z.ZodOptional<z.ZodString>;
     }, z.core.$strip>;
@@ -4233,6 +4248,10 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
                 "device-default": "device-default";
                 subscription: "subscription";
             }>>;
+            defaultModelModes: z.ZodOptional<z.ZodArray<z.ZodEnum<{
+                "adapter-model": "adapter-model";
+                byok: "byok";
+            }>>>;
             effort: z.ZodBoolean;
             byokProviderId: z.ZodOptional<z.ZodString>;
         }, z.core.$strip>;
@@ -4306,14 +4325,14 @@ export declare const HarnessSelectionSchema: z.ZodDiscriminatedUnion<[z.ZodObjec
     mode: z.ZodLiteral<"device-default">;
 }, z.core.$strict>, z.ZodObject<{
     mode: z.ZodLiteral<"adapter-model">;
-    modelId: z.ZodString;
+    modelId: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>, z.ZodObject<{
     mode: z.ZodLiteral<"subscription">;
     modelId: z.ZodString;
 }, z.core.$strict>, z.ZodObject<{
     mode: z.ZodLiteral<"byok">;
     providerId: z.ZodString;
-    modelId: z.ZodString;
+    modelId: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>, z.ZodObject<{
     mode: z.ZodLiteral<"byok-profile">;
     providerProfile: z.ZodObject<{
@@ -4336,14 +4355,14 @@ export declare const ExecutionTargetSchema: z.ZodDiscriminatedUnion<[z.ZodObject
         mode: z.ZodLiteral<"device-default">;
     }, z.core.$strict>, z.ZodObject<{
         mode: z.ZodLiteral<"adapter-model">;
-        modelId: z.ZodString;
+        modelId: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>, z.ZodObject<{
         mode: z.ZodLiteral<"subscription">;
         modelId: z.ZodString;
     }, z.core.$strict>, z.ZodObject<{
         mode: z.ZodLiteral<"byok">;
         providerId: z.ZodString;
-        modelId: z.ZodString;
+        modelId: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>, z.ZodObject<{
         mode: z.ZodLiteral<"byok-profile">;
         providerProfile: z.ZodObject<{
@@ -4363,10 +4382,12 @@ export declare function harnessSupportsTarget(harness: {
     readonly id: string;
     readonly capabilities: {
         readonly selectionModes: readonly SelectionMode[];
+        readonly defaultModelModes?: readonly DefaultModelSelectionMode[];
         readonly effort: boolean;
         readonly byokProviderId?: string;
     };
 }, target: ExecutionTarget): boolean;
+export declare function harnessSelectionNeedsModel(selection: HarnessSelection, defaults?: readonly DefaultModelSelectionMode[]): boolean;
 export declare const ClaimedExecutorSchema: z.ZodObject<{
     id: z.ZodString;
 }, z.core.$strict>;
@@ -4482,14 +4503,14 @@ export declare const TaskOfferPlainPayloadSchema: z.ZodObject<{
             mode: z.ZodLiteral<"device-default">;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"adapter-model">;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"subscription">;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok">;
             providerId: z.ZodString;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok-profile">;
             providerProfile: z.ZodObject<{
@@ -4611,14 +4632,14 @@ export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
             mode: z.ZodLiteral<"device-default">;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"adapter-model">;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"subscription">;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok">;
             providerId: z.ZodString;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok-profile">;
             providerProfile: z.ZodObject<{
@@ -4788,14 +4809,14 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
             mode: z.ZodLiteral<"device-default">;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"adapter-model">;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"subscription">;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok">;
             providerId: z.ZodString;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok-profile">;
             providerProfile: z.ZodObject<{
@@ -4915,14 +4936,14 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
             mode: z.ZodLiteral<"device-default">;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"adapter-model">;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"subscription">;
             modelId: z.ZodString;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok">;
             providerId: z.ZodString;
-            modelId: z.ZodString;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>, z.ZodObject<{
             mode: z.ZodLiteral<"byok-profile">;
             providerProfile: z.ZodObject<{
@@ -5578,7 +5599,7 @@ export declare const TaskClaimPayloadSchema: z.ZodObject<{
 export type TaskClaimPayload = z.infer<typeof TaskClaimPayloadSchema>;
 // support
 export declare const TaskStartedPayloadSchema: z.ZodObject<{}, z.core.$strip>;
-export declare const DECLINE_CODES: readonly ["agent_home_writer_busy", "agent_home_reader_busy", "sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch", "native_sessions_unsupported", "agent_memory_selection_invalid", "native_sessions_selection_invalid", "runtime_unavailable", "offer_capability_missing", "preparation_store_unavailable", "agent_memory_commit_unavailable", "agent_memory_unavailable", "tool_authorization_unsupported", "file_scope_conflicts_with_all", "file_scope_unsupported", "preparation_lane_unconfigured", "preparation_result_schema_mismatch", "preparation_not_found", "preparation_not_ready", "preparation_device_mismatch", "preparation_agent_mismatch", "preparation_profile_revision_mismatch", "preparation_policy_revision_mismatch", "preparation_request_digest_mismatch", "preparation_artifact_digest_mismatch", "agent_memory_mismatch", "preparation_runtime_identity_mismatch", "preparation_tool_set_mismatch", "preparation_tool_binding_digest_mismatch", "preparation_observation_digest_mismatch", "preparation_tool_surface_unfingerprintable", "preparation_already_pinned", ...("authority_unavailable" | "bad_request" | "cancelled" | "context_hash_mismatch" | "context_unresolvable" | "counter_interrupted" | "counter_unavailable" | "deadline_elapsed" | "durable_write_failed" | "input_preparation_record_log_unsupported" | "input_preparation_unconfigured" | "limit_exceeded" | "not_found" | "observation_drift" | "policy_revision_mismatch" | "request_conflict" | "rpc_frame_too_large" | "runtime_identity_unavailable" | "scope_denied" | "toolsets_unobservable" | "unsupported_input")[]];
+export declare const DECLINE_CODES: readonly ["agent_home_writer_busy", "agent_home_reader_busy", "sealed_key_unavailable", "sealed_open_failed", "sealed_content_mac_mismatch", "sealing_policy_mismatch", "native_sessions_unsupported", "agent_memory_selection_invalid", "native_sessions_selection_invalid", "invalid_request", "model_unavailable", "runtime_unavailable", "offer_capability_missing", "preparation_store_unavailable", "agent_memory_commit_unavailable", "agent_memory_unavailable", "tool_authorization_unsupported", "file_scope_conflicts_with_all", "file_scope_unsupported", "preparation_lane_unconfigured", "preparation_result_schema_mismatch", "preparation_not_found", "preparation_not_ready", "preparation_device_mismatch", "preparation_agent_mismatch", "preparation_profile_revision_mismatch", "preparation_policy_revision_mismatch", "preparation_request_digest_mismatch", "preparation_artifact_digest_mismatch", "agent_memory_mismatch", "preparation_runtime_identity_mismatch", "preparation_tool_set_mismatch", "preparation_tool_binding_digest_mismatch", "preparation_observation_digest_mismatch", "preparation_tool_surface_unfingerprintable", "preparation_already_pinned", ...("authority_unavailable" | "bad_request" | "cancelled" | "context_hash_mismatch" | "context_unresolvable" | "counter_interrupted" | "counter_unavailable" | "deadline_elapsed" | "durable_write_failed" | "input_preparation_record_log_unsupported" | "input_preparation_unconfigured" | "limit_exceeded" | "not_found" | "observation_drift" | "policy_revision_mismatch" | "request_conflict" | "rpc_frame_too_large" | "runtime_identity_unavailable" | "scope_denied" | "toolsets_unobservable" | "unsupported_input")[]];
 export type TaskDeclineCode = (typeof DECLINE_CODES)[number];
 export type TaskDeclineCodeReading = {
     readonly code: TaskDeclineCode;
@@ -5851,7 +5872,9 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         file_scope_unsupported: "file_scope_unsupported";
         input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
         input_preparation_unconfigured: "input_preparation_unconfigured";
+        invalid_request: "invalid_request";
         limit_exceeded: "limit_exceeded";
+        model_unavailable: "model_unavailable";
         native_sessions_selection_invalid: "native_sessions_selection_invalid";
         native_sessions_unsupported: "native_sessions_unsupported";
         not_found: "not_found";
@@ -5967,7 +5990,9 @@ export declare const TaskDeclinePayloadSchema: z.ZodUnion<readonly [z.ZodObject<
         file_scope_unsupported: "file_scope_unsupported";
         input_preparation_record_log_unsupported: "input_preparation_record_log_unsupported";
         input_preparation_unconfigured: "input_preparation_unconfigured";
+        invalid_request: "invalid_request";
         limit_exceeded: "limit_exceeded";
+        model_unavailable: "model_unavailable";
         native_sessions_selection_invalid: "native_sessions_selection_invalid";
         not_found: "not_found";
         observation_drift: "observation_drift";

@@ -208,6 +208,9 @@ export class AgyAdapter implements RuntimeAdapter {
       return { kind: 'reject', reason: 'agy requires the google BYOK provider', retryable: false };
     }
     const { modelId } = target.selection;
+    if (modelId === undefined || modelId.trim() === '') {
+      return { kind: 'reject', code: 'invalid_request', reason: 'AGY requires an explicit BYOK model ID', retryable: false };
+    }
     const detected = await this.detect();
     if (detected.kind !== 'available') {
       return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };

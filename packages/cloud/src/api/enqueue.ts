@@ -10,6 +10,7 @@ import {
   createEnvelope,
   decodeEnvelope,
   encodeEnvelope,
+  harnessSelectionNeedsModel,
   harnessSupportsTarget,
   isSealedPayload,
   requiredReceiverCapabilities,
@@ -124,7 +125,11 @@ export function createEnqueuePaths({ root, controlPlane, options, readTaskOffer 
       const target = resolved.target;
       if (target.lane === 'harness') {
         const registered = device ?? await options.cloud.devices.get(tenant, deviceId);
-        if (registered?.harnesses?.some(harness => harnessSupportsTarget(harness, target)) !== true) {
+        const harness = registered?.harnesses?.find(entry => entry.id === target.harnessId);
+        if (harness !== undefined && harnessSelectionNeedsModel(target.selection, harness.capabilities.defaultModelModes)) {
+          throw new ByokCloudError('invalid_request', 'the requested harness selection requires a model ID');
+        }
+        if (harness === undefined || !harnessSupportsTarget(harness, target)) {
           throw new ByokCloudError('agent_capability_missing', 'the device does not advertise the requested harness, selection mode and effort');
         }
       }

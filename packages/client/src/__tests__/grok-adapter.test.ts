@@ -86,10 +86,11 @@ afterEach(async () => {
 });
 
 describe('GrokAdapter detection', () => {
-  it('reports the version, an unqualified-version warning and the API-key login signal', async () => {
+  it('reports the version and unqualified-version warning without using a Host API key as a login signal', async () => {
     vi.stubEnv('XAI_API_KEY', 'xai-fixture-key');
+    vi.stubEnv('GROK_HOME', await tempDir());
     expect(await adapter().detect()).toEqual({
-      kind: 'available', version: 'grok 1.0.62 (fixture)', authPresent: true,
+      kind: 'available', version: 'grok 1.0.62 (fixture)', authPresent: false,
       sessionCapabilities: { images: true, steer: false },
       executablePath: fixture, executableSource: 'config',
       versionVerdict: { state: 'warn', qualifiedVersion: '1.0.77' },
@@ -134,7 +135,7 @@ describe('GrokAdapter sessions', () => {
 
   it('runs one owned ACP agent with the exact env and closes the reply with the turn', async () => {
     vi.stubEnv('BYOK_GROK_AMBIENT_SECRET', 'must not inherit');
-    const resources = await ctx();
+    const resources = await ctx({ XAI_API_KEY: 'host-key', OPENAI_API_KEY: 'another-host-key' });
     const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hello' }, resources);
     expect(s.sessionRef).toBe('fake-grok-session');
     expect(await turn(s)).toEqual([{ type: 'progress', text: 'echo:hello' }, usage, { type: 'turn_end' }]);
@@ -142,6 +143,8 @@ describe('GrokAdapter sessions', () => {
     expect(started!.argv).toEqual(['agent', '--always-approve', '--no-leader', 'stdio']);
     expect(await fs.realpath(started!.cwd)).toBe(await fs.realpath(resources.workspaceDir));
     expect(started!.env).not.toHaveProperty('BYOK_GROK_AMBIENT_SECRET');
+    expect(started!.env).not.toHaveProperty('XAI_API_KEY');
+    expect(started!.env).not.toHaveProperty('OPENAI_API_KEY');
     expect(started!.env.FAKE_ACP_LOG).toBe(resources.log);
     expect(facts(resources.log).find(fact => fact.kind === 'open')?.method).toBe('session/new');
   });
@@ -646,7 +649,7 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
   it.each([
     ['inspect lists a user instruction file', { FAKE_ACP_INSPECT: extra }, true, 'Grok still loads 1 user instruction file outside the task, such as [paths] extra_rule_dirs'],
     ['inspect fails', { FAKE_ACP_INSPECT: 'fail' }, true, 'grok inspect failed'],
-    ['the user GROK_HOME has no login and no API key', {}, false, 'the user GROK_HOME has no auth.json and XAI_API_KEY is not set'],
+    ['the user GROK_HOME has no login', { XAI_API_KEY: 'host-key' }, false, 'the user GROK_HOME has no auth.json'],
   ] as const)('fails before the agent starts when %s', async (_, env, login, reason) => {
     const resources = await agentCtx(env, login);
     const error = await startPreparedOperation(adapter({ agentUserContext: 'excluded' }), { target: GROK_TARGET, instruction: 'hello' }, resources).catch(e => e);

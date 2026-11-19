@@ -86,6 +86,29 @@ describe('custom harness protocol authority', () => {
     expect(await handleInboundEnvelope(stores, deviceId, hello).then((result) => result.outcome)).toBe('accepted');
   });
 
+  it.each([
+    { mode: 'byok', providerId: 'google' }, { mode: 'adapter-model' },
+  ] as const)('gates missing $mode model on its advertised default at offer and first claim', async selection => {
+    const { h, stores, deviceId } = await setup();
+    const target = { lane: 'harness', harnessId: 'acme-harness', selection } as const;
+    const caps = { ...defaultCapabilities, selectionModes: [selection.mode],
+      ...(selection.mode === 'byok' ? { byokProviderId: selection.providerId } : {}) };
+    const advertise = (withDefault: boolean) => stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+      harnesses: [{ id: ACME.id, capabilities: { ...caps, ...(withDefault ? { defaultModelModes: [selection.mode] } : {}) } }] });
+    const submit = () => h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(), target } });
+    await advertise(false);
+    await expect(submit()).rejects.toMatchObject({ code: 'invalid_request' });
+    await advertise(true);
+    const { taskId } = await submit();
+    const claim = () => handleInboundEnvelope(stores, deviceId, createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: ACME }, { taskId }));
+    await advertise(false);
+    await expect(claim()).resolves.toMatchObject({ outcome: 'rejected', reason: 'claim_harness_unavailable' });
+    await advertise(true);
+    await expect(claim()).resolves.toMatchObject({ outcome: 'accepted' });
+    await advertise(false);
+    await expect(claim()).resolves.toMatchObject({ outcome: 'accepted' });
+  });
+
   it('seals explicit selection, claim CAS and terminal echo for the actual device', async () => {
     const { h, stores, deviceId } = await setup();
     await stores.devices.recordCapabilities({ capabilities: [AGENT_HOME_CONTRACT_CAPABILITY], harnesses: [...inventory, { ...inventory[0]!, id: 'other' }] });

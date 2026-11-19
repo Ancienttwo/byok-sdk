@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { managedBinaryPath, upgradeRuntime } from '../lifecycle/runtime-installation';
+import { managedBinaryPath, npmInstallInvocation, upgradeRuntime } from '../lifecycle/runtime-installation';
 import { runtimeUpgradeAdvice } from '../runtime/runtime-releases';
 import { managedRuntimeDirectory, resolveManagedRuntime } from '../adapters/managed-runtime-path';
 import { resolveRuntimeCommand } from '../adapters/runtime-executable';
@@ -21,6 +21,17 @@ async function tempRoot(): Promise<string> {
 }
 
 describe('managed native executables', () => {
+  it('launches the installed npm CLI with Node on Windows without opening the npm batch wrapper', () => {
+    const directory = 'C:\\Program Files\\nodejs';
+    const command = path.win32.join(directory, 'node.exe');
+    const entry = path.win32.join(directory, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    const isFile = (file: string) => [path.win32.join(directory, 'npm.cmd'), command, entry].includes(file);
+    const readFile = vi.fn(() => { throw new Error('npm batch files must not be read'); });
+    expect(npmInstallInvocation({ platform: 'win32', env: { Path: `"${directory}"` }, isFile, isExecutable: isFile, readFile }))
+      .toEqual({ command, args: [entry] });
+    expect(readFile).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['claude', 'darwin', 'arm64', false, false, '@anthropic-ai/claude-code-darwin-arm64/claude'],
     ['claude', 'linux', 'x64', true, true, '@anthropic-ai/claude-code-linux-x64-musl/claude'],

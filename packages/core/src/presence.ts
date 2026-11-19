@@ -35,6 +35,7 @@ export interface PresenceRuntimeCapabilities {
   readonly durableLane?: boolean;
   readonly preparedLane?: boolean;
   readonly selectionModes: readonly string[];
+  readonly defaultModelModes?: readonly ('byok' | 'adapter-model')[];
   readonly effort: boolean;
   readonly byokProviderId?: string;
   readonly isolation?: {
@@ -74,6 +75,7 @@ export function freezePresenceHarnessFact(runtime: PresenceHarnessFact): Presenc
     capabilities: Object.freeze({
       ...definedFlags(capabilities, ['steer', 'images', 'resume', 'approvalInteractive', 'mcpToolsets', 'messageDraft', 'toolAuthorizationAuto', 'durableLane', 'preparedLane']),
       selectionModes: Object.freeze([...capabilities.selectionModes]),
+      ...(capabilities.defaultModelModes === undefined ? {} : { defaultModelModes: Object.freeze([...capabilities.defaultModelModes]) }),
       effort: capabilities.effort,
       ...(capabilities.byokProviderId === undefined ? {} : { byokProviderId: capabilities.byokProviderId }),
       ...(capabilities.isolation === undefined ? {} : {

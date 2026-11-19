@@ -193,14 +193,41 @@ describe('DshAdapter sessions', () => {
   });
 
   it.each([
-    [{ ...DSH_TARGET.selection, providerId: 'anthropic' }, 'dsh requires its configured BYOK provider'],
-    [{ ...DSH_TARGET.selection, modelId: 'byok-custom/other' }, 'model_rejected: dsh requires the configured model'],
-  ] as const)('rejects a mismatched BYOK selection before invoking the resolver', async (selection, reason) => {
+    [{ ...DSH_TARGET.selection, providerId: 'anthropic' }, undefined],
+    [{ ...DSH_TARGET.selection, modelId: 'other/loop-model' }, 'model_unavailable'],
+    [{ ...DSH_TARGET.selection, modelId: 'byok-custom/' }, 'model_unavailable'],
+  ] as const)('rejects a mismatched BYOK selection before invoking the resolver', async (selection, code) => {
     const resolveKey = vi.fn(async () => 'test-key');
     const { adapter } = await setup({ resolveKey });
     await expect(adapter.prepare({ offer: { target: { ...DSH_TARGET, selection }, instruction: 'test' }, descriptor: adapter.descriptor, requiredToolsetIds: [] }))
-      .resolves.toEqual({ kind: 'reject', retryable: false, reason });
+      .resolves.toMatchObject({ kind: 'reject', retryable: false, ...(code === undefined ? {} : { code }) });
     expect(resolveKey).not.toHaveBeenCalled();
+  });
+
+  it('uses the offered model on the configured route even when a different default exists', async () => {
+    const { open, facts } = await setup();
+    const target = { ...DSH_TARGET, selection: { ...DSH_TARGET.selection, modelId: 'byok-custom/another/vendor-model' } };
+    await turn(await open({ target, instruction: 'hello' }));
+    const log = await facts();
+    expect(log.find(row => row.method === 'open')?.request.agentOptions).toMatchObject({ provider: 'byok-custom', model: 'another/vendor-model' });
+    expect(log.find(row => row.kind === 'start')?.patch[0].config.providers['byok-custom'].models).toEqual([{ id: 'another/vendor-model' }]);
+  });
+
+  it('uses only an advertised configured fallback and omits undeclared custom patch models', async () => {
+    const target = { ...DSH_TARGET, selection: { mode: 'byok', providerId: 'openai' } } as const;
+    const fixed = await setup();
+    expect(fixed.adapter.descriptor.defaultModelModes).toEqual(['byok']);
+    await turn(await fixed.open({ target, instruction: 'hello' }));
+    expect((await fixed.facts()).find(row => row.method === 'open')?.request.agentOptions.model).toBe(MODEL.model);
+
+    const model: DshModelSelection = { provider: 'custom', providerId: 'openai', baseUrl: MODEL.baseUrl };
+    const dynamic = await setup({ model });
+    expect(dynamic.adapter.descriptor.selectionModes).toEqual(['byok']);
+    expect(dynamic.adapter.descriptor.defaultModelModes).toBeUndefined();
+    expect(JSON.parse(dshPatch(model))[0].config.providers['byok-custom']).not.toHaveProperty('models');
+    await expect(dynamic.adapter.prepare({ offer: { target, instruction: 'test' }, descriptor: dynamic.adapter.descriptor, requiredToolsetIds: [] }))
+      .resolves.toMatchObject({ kind: 'reject', code: 'invalid_request', retryable: false });
+    await turn(await dynamic.open());
   });
 
   it('keeps two concurrent launch keys scoped to their own processes', async () => {

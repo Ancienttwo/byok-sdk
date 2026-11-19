@@ -156,6 +156,7 @@ export class CodexAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex')).bin.command,
       version: codexVersionToken,
+      environment: env => ({ env: withoutProviderCredentials(env) }),
     });
   }
 

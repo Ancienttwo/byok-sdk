@@ -127,7 +127,7 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
     expect(ids).toEqual(['claude', 'codex']);
   });
 
-  it('advertises the usable default executors and reports Pi without a configured launcher separately', async () => {
+  it('advertises the usable default executors including native Pi without a launcher', async () => {
     const storeDir = await tmpDir('byok-allowlist-store-');
 
     daemon = createDaemon({ storage: { scratchRoot: testScratchRoot() },
@@ -143,8 +143,8 @@ describe('createDaemon — runtimeAllowlist-driven bundled adapter set', () => {
     const hello = await server.waitFor((e) => e.type === 'conn.hello');
     if (hello.type !== 'conn.hello') throw new Error('unreachable');
     const ids = (hello.payload.harnesses ?? []).map((r) => r.id).sort();
-    expect(ids).toEqual(['claude', 'codex']);
-    expect(hello.payload.runtimeUnavailable).toContainEqual({ id: 'pi', cause: 'runtime_not_configured', retryable: false });
+    expect(ids).toEqual(['claude', 'codex', 'pi']);
+    expect(hello.payload.harnesses.find(harness => harness.id === 'pi')?.capabilities.selectionModes).toEqual(['device-default', 'adapter-model']);
   });
 });
 

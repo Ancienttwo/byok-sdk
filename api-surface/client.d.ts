@@ -925,7 +925,7 @@ import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface DshModelSelection {
     readonly provider: string;
     readonly providerId?: string;
-    readonly model: string;
+    readonly model?: string;
     readonly baseUrl?: string;
 }
 export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only';
@@ -1042,7 +1042,7 @@ import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapt
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface OpenCodeAdapterOptions {
     runtimeInstallRoot?: string;
-    models: readonly string[];
+    models?: readonly string[];
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     versionPolicy?: RuntimeVersionPolicy;
     resolveBin?: () => ResolvedBin;
@@ -1058,7 +1058,7 @@ export declare class OpenCodeAdapter implements RuntimeAdapter {
     private readonly options;
     private readonly environment;
     private readonly policy?;
-    constructor(options: OpenCodeAdapterOptions);
+    constructor(options?: OpenCodeAdapterOptions);
     get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     runtimeEnvironment(): Promise<import("../index.js").RuntimeEnvironment>;
     private probe;
@@ -1135,6 +1135,7 @@ export declare const PI_MEMORY_LANE: Readonly<{
 }>;
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types.js';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host.js';
@@ -1171,6 +1172,7 @@ export declare class PiAdapter implements RuntimeAdapter {
     private readonly effectiveVersionPolicy;
     constructor(options?: PiAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    listModels(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
     projectMcpEnvironment(env: Readonly<Record<string, string>>): Readonly<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -1243,7 +1245,7 @@ export interface RuntimeAdaptersRuntimes {
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     opencode?: {
-        models: OpenCodeAdapterOptions['models'];
+        models?: OpenCodeAdapterOptions['models'];
         executable?: string;
         versionPolicy?: RuntimeVersionPolicy;
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -6052,7 +6054,7 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
-import type { AgentEvent, HarnessSelection, SelectionMode, TaskOfferPlainPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, DefaultModelSelectionMode, HarnessSelection, SelectionMode, TaskDeclineCode, TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation.js';
 import type { AgentRef } from './agent-home.js';
 import type { McpToolsetServerObservation } from './mcp/observation.js';
@@ -6224,6 +6226,7 @@ export interface RuntimeAdapterDescriptor {
     readonly capabilities: RuntimeCapabilities;
     readonly versionPolicy?: RuntimeVersionPolicy;
     readonly selectionModes: readonly SelectionMode[];
+    readonly defaultModelModes?: readonly DefaultModelSelectionMode[];
     readonly byokProviderId?: string;
     readonly supportsEffort?: boolean;
     readonly requiresMcpToolsetToolObservation?: boolean;
@@ -6248,6 +6251,7 @@ export interface RuntimeAdapterPrepareInput {
 export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServerObservation>>;
 export interface RuntimeAdapterRejectedOperation {
     kind: 'reject';
+    code?: TaskDeclineCode;
     reason: string;
     retryable: boolean;
 }

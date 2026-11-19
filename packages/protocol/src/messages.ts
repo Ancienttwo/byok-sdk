@@ -143,6 +143,7 @@ export const HarnessIdSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*
 
 export const SelectionModeSchema = z.enum(['device-default', 'adapter-model', 'subscription', 'byok', 'byok-profile']);
 export type SelectionMode = z.infer<typeof SelectionModeSchema>;
+export type DefaultModelSelectionMode = Extract<SelectionMode, 'byok' | 'adapter-model'>;
 
 export const HarnessInfoSchema = z.object({
   id: HarnessIdSchema,
@@ -151,10 +152,13 @@ export const HarnessInfoSchema = z.object({
   capabilities: RuntimeCapabilitiesSchema.extend({
     selectionModes: z.array(SelectionModeSchema).max(SelectionModeSchema.options.length)
       .refine(modes => new Set(modes).size === modes.length, 'duplicate selection mode'),
+    defaultModelModes: z.array(z.enum(['byok', 'adapter-model'])).max(2).optional(),
     effort: z.boolean(),
     byokProviderId: HarnessIdSchema.optional(),
   }).refine(caps => caps.selectionModes.includes('byok') === (caps.byokProviderId !== undefined),
-    'byok requires one provider id'),
+    'byok requires one provider id')
+    .refine(caps => caps.defaultModelModes === undefined || (new Set(caps.defaultModelModes).size === caps.defaultModelModes.length
+      && caps.defaultModelModes.every(mode => caps.selectionModes.includes(mode))), 'defaults require distinct supported selection modes'),
   versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
 });
 export type HarnessInfo = z.infer<typeof HarnessInfoSchema>;
@@ -337,9 +341,9 @@ const DispatchTargetIdSchema = z
 /** A model and its credential source form one exact selection. */
 export const HarnessSelectionSchema = z.discriminatedUnion('mode', [
   z.strictObject({ mode: z.literal('device-default') }),
-  z.strictObject({ mode: z.literal('adapter-model'), modelId: DispatchTargetIdSchema }),
+  z.strictObject({ mode: z.literal('adapter-model'), modelId: DispatchTargetIdSchema.optional() }),
   z.strictObject({ mode: z.literal('subscription'), modelId: DispatchTargetIdSchema }),
-  z.strictObject({ mode: z.literal('byok'), providerId: HarnessIdSchema, modelId: DispatchTargetIdSchema }),
+  z.strictObject({ mode: z.literal('byok'), providerId: HarnessIdSchema, modelId: DispatchTargetIdSchema.optional() }),
   z.strictObject({ mode: z.literal('byok-profile'), providerProfile: ProviderProfileBindingSchema }),
 ]);
 export type HarnessSelection = z.infer<typeof HarnessSelectionSchema>;
@@ -360,6 +364,7 @@ export type ExecutionTarget = z.infer<typeof ExecutionTargetSchema>;
 export function harnessSupportsTarget(
   harness: { readonly id: string; readonly capabilities: {
     readonly selectionModes: readonly SelectionMode[];
+    readonly defaultModelModes?: readonly DefaultModelSelectionMode[];
     readonly effort: boolean;
     readonly byokProviderId?: string;
   } },
@@ -367,9 +372,18 @@ export function harnessSupportsTarget(
 ): boolean {
   const { capabilities } = harness;
   if (target.lane === 'auto') return capabilities.selectionModes.includes('device-default');
-  return harness.id === target.harnessId && capabilities.selectionModes.includes(target.selection.mode)
+  const { selection } = target;
+  return harness.id === target.harnessId && capabilities.selectionModes.includes(selection.mode)
     && (target.effort === undefined || capabilities.effort)
-    && (target.selection.mode !== 'byok' || target.selection.providerId === capabilities.byokProviderId);
+    && (selection.mode !== 'byok' || selection.providerId === capabilities.byokProviderId)
+    && !harnessSelectionNeedsModel(selection, capabilities.defaultModelModes);
+}
+
+/** A model-bearing selection may omit the model only when that mode has a configured default. */
+export function harnessSelectionNeedsModel(selection: HarnessSelection, defaults?: readonly DefaultModelSelectionMode[]): boolean {
+  if (selection.mode !== 'byok' && selection.mode !== 'adapter-model') return false;
+  if (selection.modelId !== undefined) return selection.modelId.trim() === '';
+  return defaults?.includes(selection.mode) !== true;
 }
 
 /** The identity recorded by a successful claim and echoed by its terminal. */
@@ -1142,6 +1156,8 @@ const HOME_DECLINE_CODES = ['agent_home_writer_busy', 'agent_home_reader_busy'] 
  * a code. Each names device state, never user content.
  */
 const OFFER_ADMISSION_DECLINE_CODES = [
+  'invalid_request',
+  'model_unavailable',
   'runtime_unavailable',
   'offer_capability_missing',
   'preparation_store_unavailable',

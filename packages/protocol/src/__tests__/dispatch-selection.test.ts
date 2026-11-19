@@ -21,6 +21,8 @@ it.each([
   { lane: 'auto' },
   target('codex', { mode: 'device-default' }),
   target('grok', { mode: 'adapter-model', modelId: 'grok-code' }),
+  target('opencode', { mode: 'adapter-model' }),
+  target('dsh', { mode: 'byok', providerId: 'deepseek' }),
   target('claude', { mode: 'subscription', modelId: 'opus' }),
   target('agy', { mode: 'byok', providerId: 'google', modelId: 'gemini' }),
   target('pi', { mode: 'byok-profile', providerProfile: PROFILE }),
@@ -62,6 +64,14 @@ it.each([
 describe('executor admission', () => {
   const [agy] = HarnessInventorySchema.parse([{ id: 'agy', capabilities: { selectionModes: ['byok'], byokProviderId: 'google', effort: false } }]);
   const google = { lane: 'harness', harnessId: 'agy', selection: { mode: 'byok', providerId: 'google', modelId: 'gemini' } } as const;
+
+  it('validates defaults against the advertised model-bearing modes', () => {
+    const item = { id: 'fixture', capabilities: { selectionModes: ['adapter-model'], effort: true } };
+    for (const defaultModelModes of [['byok'], ['adapter-model', 'adapter-model']]) {
+      expect(HarnessInventorySchema.safeParse([{ ...item, capabilities: { ...item.capabilities, defaultModelModes } }]).success).toBe(false);
+    }
+    expect(HarnessInventorySchema.safeParse([{ ...item, capabilities: { ...item.capabilities, defaultModelModes: ['adapter-model'] } }]).success).toBe(true);
+  });
 
   it('admits the announced BYOK provider', () => {
     expect(harnessSupportsTarget(agy!, google)).toBe(true);

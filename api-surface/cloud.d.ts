@@ -704,14 +704,14 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                 mode: z.ZodLiteral<"device-default">;
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"adapter-model">;
-                modelId: z.ZodString;
+                modelId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"subscription">;
                 modelId: z.ZodString;
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"byok">;
                 providerId: z.ZodString;
-                modelId: z.ZodString;
+                modelId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"byok-profile">;
                 providerProfile: z.ZodObject<{
@@ -840,14 +840,14 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                 mode: z.ZodLiteral<"device-default">;
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"adapter-model">;
-                modelId: z.ZodString;
+                modelId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"subscription">;
                 modelId: z.ZodString;
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"byok">;
                 providerId: z.ZodString;
-                modelId: z.ZodString;
+                modelId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>, z.ZodObject<{
                 mode: z.ZodLiteral<"byok-profile">;
                 providerProfile: z.ZodObject<{
@@ -1964,6 +1964,7 @@ export declare const CLOUD_ERROR_CODES: {
     readonly device_retired: 'device_retired';
     readonly task_not_awaiting_approval: 'task_not_awaiting_approval';
     readonly agent_capability_missing: 'agent_capability_missing';
+    readonly invalid_request: 'invalid_request';
     readonly agent_ref_mismatch: 'agent_ref_mismatch';
     readonly agent_task_already_exists: 'agent_task_already_exists';
     readonly task_offer_append_refused: 'task_offer_append_refused';

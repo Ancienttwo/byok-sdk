@@ -145,11 +145,13 @@ resume and cwd refusal, permission refusal, cancellation and disposal evidence,
 including no surviving `serve --service` process. A pre-output rate-limit
 fallback that cannot be provoked honestly stays covered by replay only.
 
-The Host supplies `runtimes.opencode.models`, an ordered list of native model
-ids, and optionally `executable`. There is no SDK model default, price check,
-model listing, automatic installation, upgrade or cross-major migration.
-The adapter selects the first id, applies it explicitly through ACP and refuses
-an absent or differing native readback before prompting. On an OAR-classified
+The Host can supply `runtimes.opencode.models`, an ordered list of native model
+IDs, and an `executable` override. With a list, OpenCode advertises a default
+and uses the first ID when the offer omits the model. An explicit model must
+be on the configured list. Without a list, OpenCode advertises `adapter-model`
+only and the runtime validates the offer's explicit ID. The adapter applies
+the chosen model through ACP and checks the native readback before prompting.
+For the configured default path, on an OAR-classified
 rate limit before text, reasoning or tool output, it retries once with the next
 candidate after reaping the first process tree, resuming the same admitted native
 session and verifying its model readback. It never creates a replacement

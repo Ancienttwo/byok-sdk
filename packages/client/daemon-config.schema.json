@@ -1680,7 +1680,7 @@
         "dsh": {
           "x-byok-surface": "embedded-only",
           "not": {},
-          "description": "Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only."
+          "description": "Required when `runtimeAllowlist` lists `dsh`. DSH runs on macOS and Linux."
         },
         "opencode": {
           "type": "object",
@@ -1882,11 +1882,8 @@
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           },
-          "required": [
-            "models"
-          ],
           "additionalProperties": false,
-          "description": "Required when runtimeAllowlist lists opencode. Native user configuration is inherited."
+          "description": "Optional OpenCode settings. Native user configuration is inherited."
         },
         "agy": {
           "x-byok-surface": "embedded-only",

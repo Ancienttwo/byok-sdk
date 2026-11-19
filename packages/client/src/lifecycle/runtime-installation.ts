@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { probeRuntimeVersion } from '../adapters/detect-outcome.js';
 import { managedRuntimeDirectory, ManagedRuntimeUnavailableError, resolveManagedRuntime, type ManagedRuntimeId, type ManagedRuntimePointer } from '../adapters/managed-runtime-path.js';
 import { withoutProviderCredentials } from '../adapters/provider-credential-environment.js';
-import { resolveRuntimeInvocation, runtimeInvocationHost } from '../adapters/runtime-invocation.js';
+import { findRuntimeCommandOnPath, resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocationHost } from '../adapters/runtime-invocation.js';
 import { acquirePathMutationGate } from '../util/path-mutation-gate.js';
 import { ensureOwnedPrivateDirectory } from '../util/private-unix-socket.js';
 import { runtimeRelease, type UpgradeableRuntimeId } from '../runtime/runtime-releases.js';
@@ -81,6 +81,20 @@ async function restoreDshSpawnHelper(root: string, host: NativePlatform): Promis
   }
 }
 
+/** Windows npm.cmd can redirect to a global npm before running Node. Resolve its installed CLI directly. */
+export function npmInstallInvocation(host: RuntimeInvocationHost): { command: string; args: readonly string[] } {
+  if (host.platform !== 'win32') return { command: 'npm', args: [] };
+  const shim = findRuntimeCommandOnPath('npm.cmd', host);
+  if (shim === undefined) throw new Error('npm.cmd was not found on PATH');
+  const directory = path.win32.dirname(shim);
+  const localNode = path.win32.join(directory, 'node.exe');
+  const node = host.isFile(localNode) ? localNode : findRuntimeCommandOnPath('node.exe', host);
+  if (node === undefined) throw new Error('node.exe was not found for npm');
+  const entry = path.win32.join(directory, 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  if (!host.isFile(entry)) throw new Error('npm-cli.js was not found beside npm.cmd');
+  return { command: node, args: [entry] };
+}
+
 async function runLocal(command: string, args: readonly string[], cwd: string, env: NodeJS.ProcessEnv, timeout: number): Promise<void> {
   const invocation = resolveRuntimeInvocation(command, runtimeInvocationHost(env));
   await run(invocation.command, [...invocation.args, ...args], { cwd, env, timeout, killSignal: 'SIGKILL', windowsHide: true });
@@ -118,8 +132,8 @@ export async function upgradeRuntime(options: RuntimeUpgradeOptions): Promise<Ru
     await fs.mkdir(staging, { mode: 0o700 });
     await fs.writeFile(path.join(staging, 'package.json'), '{"private":true}\n', { mode: 0o600 });
     reason = 'install_failed';
-    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    await runLocal(npm, ['install', '--prefix', staging, '--ignore-scripts', '--include=optional', '--no-audit', '--no-fund', '--no-progress', `${release.package}@${release.qualifiedVersion}`], staging, env, 180_000);
+    const npm = npmInstallInvocation(runtimeInvocationHost(env));
+    await runLocal(npm.command, [...npm.args, 'install', '--prefix', staging, '--ignore-scripts', '--include=optional', '--no-audit', '--no-fund', '--no-progress', `${release.package}@${release.qualifiedVersion}`], staging, env, 180_000);
     reason = 'binary_unavailable';
     const platform = nativePlatform();
     if (id === 'dsh') await restoreDshSpawnHelper(staging, platform);

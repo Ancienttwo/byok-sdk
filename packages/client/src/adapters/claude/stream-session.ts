@@ -74,6 +74,7 @@ export class ClaudeStreamSession {
   /** Spawn and adoption settle before the first protocol write; the open writes `initialize` when asked. */
   async open(options: ClaudeStreamSessionOptions): Promise<void> {
     this.#effort = options.effort;
+    this.#providerKey = options.providerKey;
     await this.child.spawned;
     // A start halted during adoption writes nothing to the adopted process.
     if (this.#fatal !== undefined) throw this.#fatal;
@@ -84,7 +85,7 @@ export class ClaudeStreamSession {
       pid: owned.pid, spawned: owned.spawned, exited: owned.exited,
       kill: () => owned.kill(), dispose: () => owned.dispose(),
       get exitedOnItsOwn() { return owned.exitedOnItsOwn; },
-      observeDescendants: () => owned.observeDescendants(), exitError: () => owned.exitError(),
+      observeDescendants: () => owned.observeDescendants(), exitError: () => this.#exitError(),
       onLine: handler => owned.onLine(handler), onExit: handler => owned.onExit(handler),
       writeAcknowledged: text => owned.writeAcknowledged(text),
       write: (text: string): void => {
@@ -176,7 +177,14 @@ export class ClaudeStreamSession {
   /** The process ended on its own, before any kill, disposal or transport failure. */
   get processExited(): boolean { return this.#fatal === undefined && this.child.exitedOnItsOwn; }
 
-  get terminalError(): Error { return this.#fatal ?? this.child.exitError(); }
+  get terminalError(): Error { return this.#fatal ?? this.#exitError(); }
+
+  #exitError(): Error {
+    const error = this.child.exitError();
+    const key = this.#providerKey;
+    if (key === undefined || !error.message.includes(key)) return error;
+    return new Error(error.message.replaceAll(key, '[redacted]'));
+  }
 
   /** A start step Claude's own exit ended is `runtime_exited`. */
   startupExit() { return this.processExited ? { class: 'runtime_exited' as const } : undefined; }

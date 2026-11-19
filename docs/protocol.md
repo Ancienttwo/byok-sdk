@@ -824,17 +824,23 @@ executors that support `device-default`.
 | Selection mode | Additional fields | Authority |
 | --- | --- | --- |
 | `device-default` | none | The executor's own device configuration |
-| `adapter-model` | `modelId` | The executor's configuration with an explicit model |
+| `adapter-model` | `modelId` unless a default is advertised | The executor's configuration with a task-selected or configured model |
 | `subscription` | `modelId` | The vendor CLI's own login with an explicit model |
-| `byok` | `providerId`, `modelId` | A Host credential for the executor's advertised pi-ai catalog provider |
+| `byok` | `providerId`, `modelId` unless a default is advertised | A Host credential for the executor's advertised pi-ai catalog provider |
 | `byok-profile` | `providerProfile` | An exact device-local profile binding |
 
 The selection variants reject extra fields. Each harness advertises
 `capabilities.selectionModes`, `capabilities.effort`, and, if it accepts
-`byok`, `capabilities.byokProviderId`. The inventory holds at most 64 unique
-IDs. The daemon sends another hello when its scan changes the inventory.
+`byok`, `capabilities.byokProviderId`. Optional `capabilities.defaultModelModes`
+lists the supported `adapter-model` and `byok` modes with a configured model
+default. Cloud returns `invalid_request` before enqueue when the requested
+mode requires a model and the offer omits it. The inventory holds at most 64
+unique IDs. The daemon sends another hello when its scan changes the inventory.
 
-Pi accepts `byok-profile`. The binding carries the opaque local `profileRef`,
+Ordinary Pi accepts `device-default` and `adapter-model` using its own auth
+store. `adapter-model` requires the exact `provider/id` from Pi's model catalog.
+With a credential launcher, Pi also accepts `byok-profile`, the sole selection
+mode on the durable lane. The binding carries the opaque local `profileRef`,
 canonical decimal `profileRevision`, lowercase SHA-256 `profileHash`, `modelId`,
 and `requiredCapabilities`. The hash covers the normalized non-secret profile.
 The credential launcher checks the exact binding before resolving the key for
@@ -2712,6 +2718,8 @@ other known code.
 | `agent_memory_selection_invalid` | The offer's memory selection needs a writer, and it is a memory-reader Attempt |
 | `native_sessions_selection_invalid` | A native-sessions offer is not a fresh memory-only Pi offer |
 | **Offer admission** | |
+| `invalid_request` | The model-bearing selection requires an explicit model ID |
+| `model_unavailable` | The executor cannot admit the requested model |
 | `runtime_unavailable` | No runtime that can run the target is available (with `runtimeUnavailable`, §3.2) |
 | `offer_capability_missing` | The device does not advertise a flag the offer needs (Freeze rule) |
 | `preparation_store_unavailable` | The device's input-preparation store could not be opened |

@@ -43,6 +43,7 @@ import { runGrokInspect } from './inspect.js';
 import { GrokProjection, type GrokTurnOutcome } from './projection.js';
 import { resolveGrokBin } from './resolve-bin.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { GROK_RUNTIME_CAPABILITIES } from './grok-capabilities.js';
 import { GROK_VERSION_POLICY, grokVersionToken } from './grok-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
@@ -144,7 +145,7 @@ export class GrokAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin).bin.command,
       version: grokVersionToken,
-      environment: env => ({ env: { ...env, ...AUTO_UPDATE_OFF } }),
+      environment: env => ({ env: { ...withoutProviderCredentials(env), ...AUTO_UPDATE_OFF } }),
     });
   }
 
@@ -159,6 +160,7 @@ export class GrokAdapter implements RuntimeAdapter {
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'grok',
     selectionModes: ['device-default', 'adapter-model'],
+    ...(this.options.model === undefined ? {} : { defaultModelModes: ['adapter-model'] }),
     supportsEffort: true,
     // Windows has no Grok evidence (`docs/adapter-capabilities.md`).
     platforms: ['darwin', 'linux'],
@@ -200,7 +202,7 @@ export class GrokAdapter implements RuntimeAdapter {
   /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const { env } = await this.runtimeEnvironment();
+      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin);
       const command = resolved.bin.command;
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env);
@@ -229,7 +231,16 @@ export class GrokAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
-    const { effort, modelId = this.options.model } = input.offer;
+    const { effort, target } = input.offer;
+    const selection = offerSelection(target);
+    if (target.lane === 'harness' && (target.harnessId !== 'grok' || (selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model'))) {
+      return { kind: 'reject', reason: 'Grok does not support the requested selection', retryable: false };
+    }
+    const offeredModel = selection?.mode === 'adapter-model' ? selection.modelId : undefined;
+    const modelId = offeredModel ?? this.options.model;
+    if (selection?.mode === 'adapter-model' && (modelId === undefined || modelId.trim() === '')) {
+      return { kind: 'reject', code: 'invalid_request', reason: 'Grok requires a model ID when no default is configured', retryable: false };
+    }
     const detected = await this.detect();
     if (detected.kind !== 'available')
       return {
@@ -238,7 +249,13 @@ export class GrokAdapter implements RuntimeAdapter {
         retryable: false,
       };
     const command = (this.options.resolveBin ?? resolveGrokBin)().command;
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, modelId, effort) } };
+    return { kind: 'prepared', operation: { start: start => {
+      const actual = start.manifest.selection;
+      if (actual?.mode !== selection?.mode || (actual?.mode === 'adapter-model' && actual.modelId !== offeredModel) || start.manifest.effort !== effort) {
+        throw authority('prepared Grok operation received a manifest with different runtime selection');
+      }
+      return this.start(start, command, modelId, effort);
+    } } };
   }
 
   private async start(input: RuntimeOperationStartInput, command: string, model: string | undefined, effort: string | undefined): Promise<Session> {
@@ -252,7 +269,7 @@ export class GrokAdapter implements RuntimeAdapter {
       throw authority(`grok start refused: a login Grok wrote over the linked auth.json is held at ${held[0]}${held.length > 1 ? ` and ${held.length - 1} more` : ''}; ${HELD_LOGIN_RESOLUTION}; until then every Grok task on this device refuses`);
     }
     const persona = await agentPersona('grok', input.manifest);
-    const env = { ...input.env, ...input.scratch.env } as Record<string, string>;
+    const env = withoutProviderCredentials({ ...input.env, ...input.scratch.env });
     const agentTask = input.manifest.agentRef !== undefined;
     const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && agentTask;
     const excludeUserContext = this.options.agentUserContext === 'excluded' && agentTask;
@@ -329,9 +346,8 @@ export class GrokAdapter implements RuntimeAdapter {
   }
 }
 
-/** Grok's own login file, or an API key in the runtime env. Existence only; the file is never read. */
+/** Grok's own login file. Existence only. */
 function grokAuthPresent(env: NodeJS.ProcessEnv): boolean {
-  if (env.XAI_API_KEY) return true;
   const home = env.GROK_HOME || path.join(homedir(), '.grok');
   return existsSync(path.join(home, 'auth.json'));
 }

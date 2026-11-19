@@ -3,7 +3,7 @@
 import { awaitAdmission } from '../admission-wait.js';
 import { detectedRuntimeCapabilities, observeRuntimeDetection } from '../../runtime-detection.js';
 import { AGENT_USER_CONTEXT_WINDOWS_REMEDY, runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
-import { harnessSupportsTarget, type ExecutionTarget } from '@byok-sdk/protocol';
+import { harnessSelectionNeedsModel, harnessSupportsTarget, type ExecutionTarget } from '@byok-sdk/protocol';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type RuntimeAdapterDescriptor } from '../../types.js';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
 import type { McpStdioServerConfig } from '../../types.js';
@@ -60,7 +60,8 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline({
       reason: pick.reason,
       retryable: pick.retryable,
-      ...(pick.runtimeUnavailable === undefined ? {} : { code: 'runtime_unavailable', runtimeUnavailable: pick.runtimeUnavailable }),
+      code: pick.runtimeUnavailable === undefined ? pick.code : 'runtime_unavailable',
+      ...(pick.runtimeUnavailable === undefined ? {} : { runtimeUnavailable: pick.runtimeUnavailable }),
     });
     return undefined;
   }
@@ -276,7 +277,8 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   }
   if (admissionWithdrawn()) return undefined;
   if (prepared.kind === 'reject') {
-    decline({ reason: prepared.reason, retryable: prepared.retryable });
+    decline({ reason: prepared.reason, retryable: prepared.retryable,
+      ...(prepared.code === undefined ? {} : { code: prepared.code }) });
     return undefined;
   }
   // `approveTools` is a grant, projected only to a runtime that declares
@@ -291,6 +293,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
 function descriptorSupportsTarget(descriptor: RuntimeAdapterDescriptor, target: ExecutionTarget): boolean {
   return harnessSupportsTarget({ id: descriptor.id, capabilities: {
     selectionModes: descriptor.selectionModes,
+    defaultModelModes: descriptor.defaultModelModes,
     effort: descriptor.supportsEffort === true,
     byokProviderId: descriptor.byokProviderId,
   } }, target);
@@ -335,7 +338,13 @@ export async function pickAdapter(
     const rows = searchExposure ? searchCandidates(descriptor) : [];
     if (searchExposure && rows.length === 0) return searchUnavailable;
 
-    if (!advertised.some(harness => harnessSupportsTarget(harness, target)) || !descriptorSupportsTarget(descriptor, target)) {
+    const harness = advertised.find(harness => harness.id === requestedRuntime);
+    if (harness?.capabilities.selectionModes.includes(target.selection.mode)
+      && (harnessSelectionNeedsModel(target.selection, harness.capabilities.defaultModelModes)
+        || harnessSelectionNeedsModel(target.selection, descriptor.defaultModelModes))) {
+      return { ok: false, code: 'invalid_request', reason: 'the requested harness selection requires a model ID', retryable: false };
+    }
+    if (harness === undefined || !harnessSupportsTarget(harness, target) || !descriptorSupportsTarget(descriptor, target)) {
       return { ok: false, reason: `runtime "${requestedRuntime}" has no advertised support for the requested selection or effort`, retryable: false };
     }
     const unmet = unmetRequirements(descriptor, requirements);

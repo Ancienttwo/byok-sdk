@@ -28,9 +28,9 @@ function userGrokHome(env: Readonly<Record<string, string | undefined>>): string
 /**
  * Builds the SDK-owned `GROK_HOME` of one Agent task in `dir` and returns it.
  * The session store links to the Agent's own store, `<agentHome>/.byok/grok/sessions`,
- * so a later task of the same Agent resumes its session. Without an API key in
- * the environment, a user home without `auth.json` refuses: a login written
- * into the SDK home would be lost at cleanup. Windows refuses.
+ * so a later task of the same Agent resumes its session. The user home must
+ * have `auth.json` because a login written into the SDK home would be lost
+ * at cleanup. Windows refuses.
  */
 export async function createGrokAgentHome(env: Readonly<Record<string, string | undefined>>, dir: string, agentHome: string | undefined, platform: NodeJS.Platform = process.platform): Promise<string> {
   // Until #2241 settles how a Windows account without symlink privilege links the login, refuse before any link is tried.
@@ -41,7 +41,7 @@ export async function createGrokAgentHome(env: Readonly<Record<string, string | 
     userHome: () => userGrokHome(env),
     userHomeLabel: 'GROK_HOME',
     linked: LINKED,
-    required: env.XAI_API_KEY ? [] : [{ entry: 'auth.json', reason: 'the user GROK_HOME has no auth.json and XAI_API_KEY is not set' }],
+    required: [{ entry: 'auth.json', reason: 'the user GROK_HOME has no auth.json' }],
     agentStore: { agentHome, root: path.join('.byok', 'grok'), entries: ['sessions'], label: 'session store' },
   }, dir, platform);
 }

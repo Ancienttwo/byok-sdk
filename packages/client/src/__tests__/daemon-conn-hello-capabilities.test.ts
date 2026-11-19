@@ -120,7 +120,7 @@ describe('conn.hello harnesses', () => {
     // pi: the only bundled runtime that can express mid-turn steering; its
     // task-scoped pi-mcp-adapter bridge also consumes selected MCP toolsets.
     expect(byId.get('pi')).toMatchObject({
-      selectionModes: ['byok-profile'],
+      selectionModes: ['device-default', 'adapter-model', 'byok-profile'],
       images: true,
       steer: true,
       resume: true,

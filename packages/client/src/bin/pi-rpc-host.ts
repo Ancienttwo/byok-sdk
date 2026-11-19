@@ -5,7 +5,7 @@ import { readFileSync, mkdirSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveInstalledPiLoaderUrl } from '../adapters/pi/resolve-bin.js';
-import { getAgentDir, type CreateAgentSessionOptions, type InlineExtension } from '@earendil-works/pi-coding-agent';
+import { getAgentDir, ModelRuntime, type CreateAgentSessionOptions, type InlineExtension } from '@earendil-works/pi-coding-agent';
 import { MODEL_THINKING_LEVELS } from '@earendil-works/pi-ai/providers/model-schema';
 import { PI_RPC_IPC_KEY_MARKER, receiveLauncherCredential } from '../adapters/pi/launcher-credential.js';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment.js';
@@ -73,6 +73,7 @@ interface PiRpcHostArgs {
   session?: string;
   provider?: string;
   model?: string;
+  exactModel: boolean;
   thinking?: ThinkingLevel;
 }
 
@@ -183,7 +184,7 @@ export function parsePiRpcHostArgs(
   const owned = extractPiConfigDigest(argv, reject);
   argv = owned.args;
   const values = new Map<string, string>();
-  const valued = new Set(['--config', '--mode', '--session', '--provider', '--model', '--thinking']);
+  const valued = new Set(['--config', '--mode', '--session', '--provider', '--model', '--exact-model', '--thinking']);
   for (let i = 0; i < argv.length; i++) {
     const flag = argv[i]!;
     if (values.has(flag)) reject(`duplicate argument ${flag}`);
@@ -201,9 +202,11 @@ export function parsePiRpcHostArgs(
     reject('invalid --thinking level');
   }
   if (values.has('--provider') && !values.has('--model')) reject('--provider requires --model');
+  const exactModel = values.has('--exact-model');
+  if (exactModel && (values.get('--exact-model') !== 'true' || !values.has('--provider'))) reject('--exact-model requires provider and model IDs');
   return {
     configPath, configDigest: owned.digest,
-    session: values.get('--session'), provider: values.get('--provider'), model: values.get('--model'),
+    session: values.get('--session'), provider: values.get('--provider'), model: values.get('--model'), exactModel,
     thinking: thinking as ThinkingLevel | undefined,
   };
 }
@@ -214,6 +217,17 @@ export function parsePiRpcHostArgs(
  */
 export async function runPiRpcHost(argv: readonly string[], packaging: 'installed' | 'bundled' = 'installed'): Promise<void> {
   applyPiHostNetworkDefaults();
+  if (argv.length === 1 && argv[0] === '--list-models-json') {
+    try {
+      const signal = AbortSignal.timeout(12_000);
+      const runtime = await ModelRuntime.create({ signal, allowModelNetwork: false });
+      const models = await runtime.getAvailable(undefined, { signal });
+      process.stdout.write(JSON.stringify(models.map(({ provider, id, name }) => ({ provider, id, name }))));
+    } catch {
+      fail('model catalog unavailable');
+    }
+    return;
+  }
   // Capture before Pi redirects ordinary stdout to stderr. Replacements keep
   // this same JSONL writer, so their ready event remains on the RPC channel.
   const writeHostFrame = process.stdout.write.bind(process.stdout);
@@ -222,6 +236,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
   };
   const args = parsePiRpcHostArgs(argv, failUsage);
   const config = parsePiRpcHostConfig(readPiHostConfig(args.configPath, args.configDigest));
+  if (args.exactModel && config.credentialSource !== 'pi-auth-store') fail('exact native model selection requires the Pi auth store');
   if (packaging === 'installed' || config.credentialSource === 'keys-profile') {
     // Installed Pi creates jiti in its external extension loader; bundled Pi
     // uses this module's URL. These lanes expect no seed, but share its cache
@@ -260,7 +275,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     const resourceAgentDir = join(dirname(args.configPath), 'pi-agent-resources');
     mkdirSync(resourceAgentDir, { mode: 0o700 });
     await runPiSessionRuntime({
-      cwd: config.cwd, credentialSource: config.credentialSource, provider: args.provider, model: args.model, thinking: args.thinking,
+      cwd: config.cwd, credentialSource: config.credentialSource, provider: args.provider, model: args.model, exactModel: args.exactModel, thinking: args.thinking,
       resourceAgentDir, memoryLane, ...memoryLane.toolOptions,
       resourceLoaderOptions: memoryLane.resourceLoaderOptions,
       ...(providerApiKey === undefined ? {} : { providerApiKey }),
@@ -350,7 +365,7 @@ export async function runPiRpcHost(argv: readonly string[], packaging: 'installe
     cwd: config.cwd, credentialSource: config.credentialSource, session: args.session, sessionDir,
     onSessionReady: ready,
     configureSession: session => refusePiSubagentHostCommands(session, [`<inline:${PI_SUBAGENT_HOST_EXTENSION}>`, ...subagentExtensionPaths]),
-    provider: args.provider, model: args.model, thinking: args.thinking,
+    provider: args.provider, model: args.model, exactModel: args.exactModel, thinking: args.thinking,
     ...(resourceAgentDir === undefined ? {} : { resourceAgentDir }),
     resourceLoaderOptions: {
       extensionFactories,

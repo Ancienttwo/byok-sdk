@@ -62,7 +62,8 @@ export interface DshModelSelection {
   readonly provider: string;
   /** pi-ai id of a Host's custom endpoint. */
   readonly providerId?: string;
-  readonly model: string;
+  /** Default model in the configured route. An offer can select another model on that route. */
+  readonly model?: string;
   /** Endpoint for `custom` (required) or a catalog provider (optional). Not allowed for `deepseek`. It must not carry credentials. */
   readonly baseUrl?: string;
 }
@@ -191,6 +192,7 @@ export class DshAdapter implements RuntimeAdapter {
     return freezeRuntimeAdapterDescriptor({
       id: 'dsh',
       selectionModes: byokProviderId === undefined ? [] : ['byok'],
+      ...(byokProviderId === undefined || this.options.model.model === undefined ? {} : { defaultModelModes: ['byok'] }),
       ...(byokProviderId === undefined ? {} : { byokProviderId }),
       supportsEffort: true,
       // dsh ships no win32 build of its native addon (docs/researches/2026-11-01-dsh-adapter.md §1.9).
@@ -270,8 +272,14 @@ export class DshAdapter implements RuntimeAdapter {
     if (target.lane !== 'harness' || target.harnessId !== 'dsh' || selection?.mode !== 'byok' || selection.providerId !== this.providerId()) {
       return { kind: 'reject', reason: 'dsh requires its configured BYOK provider', retryable: false };
     }
-    if (selection.modelId !== `${dshRoute(configured)}/${configured.model}`) {
-      return { kind: 'reject', reason: 'model_rejected: dsh requires the configured model', retryable: false };
+    const modelId = selection.modelId;
+    const prefix = `${dshRoute(configured)}/`;
+    if (modelId !== undefined && (!modelId.startsWith(prefix) || modelId.slice(prefix.length).trim() === '')) {
+      return { kind: 'reject', code: 'model_unavailable', reason: 'The requested DSH model is outside the configured route', retryable: false };
+    }
+    const model = modelId === undefined ? configured.model : modelId.slice(prefix.length);
+    if (model === undefined) {
+      return { kind: 'reject', code: 'invalid_request', reason: 'DSH requires a model ID when no default is configured', retryable: false };
     }
     try {
       dshMcpRows(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');
@@ -284,10 +292,11 @@ export class DshAdapter implements RuntimeAdapter {
     if (version.kind !== 'available') {
       return { kind: 'reject', reason: `dsh installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
     }
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, configured, effort) } };
+    const resolved = { ...configured, model };
+    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, resolved, modelId, effort) } };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string, selection: DshModelSelection, effort: string | undefined): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, command: string, selection: DshModelSelection & { model: string }, modelId: string | undefined, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('dsh requires a resolved instruction');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('dsh manifest has no sealed cwd');
@@ -300,7 +309,7 @@ export class DshAdapter implements RuntimeAdapter {
       : undefined;
     const model = `${dshRoute(selection)}/${selection.model}`;
     const requested = input.manifest.selection;
-    if (requested?.mode !== 'byok' || requested.providerId !== this.providerId() || requested.modelId !== model || input.manifest.effort !== effort) {
+    if (requested?.mode !== 'byok' || requested.providerId !== this.providerId() || requested.modelId !== modelId || input.manifest.effort !== effort) {
       throw authority('dsh manifest differs from the admitted provider, model or effort');
     }
     const session = new DshSession(

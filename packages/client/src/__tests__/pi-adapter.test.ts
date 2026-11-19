@@ -64,6 +64,74 @@ const baseTask: RuntimeTaskInput = { target: PI_TARGET,
   instruction: 'say hi',
 };
 
+describe('Pi native model selection', () => {
+  const modelTarget = (modelId?: string) => ({ lane: 'harness', harnessId: 'pi', selection: { mode: 'adapter-model', modelId } } as const);
+
+  it('advertises native modes for RPC and binds the durable lane to a profile', () => {
+    const byokLauncher = { command: process.execPath, profileDbPath: FIXTURE_PATH, sessionDir: path.dirname(FIXTURE_PATH) };
+    expect(new PiAdapter().descriptor.selectionModes).toEqual(['device-default', 'adapter-model']);
+    expect(new PiAdapter({ byokLauncher }).descriptor.selectionModes).toEqual(['device-default', 'adapter-model', 'byok-profile']);
+    expect(new PiAdapter({ byokLauncher, durableLane: true }).descriptor.selectionModes).toEqual(['byok-profile']);
+  });
+
+  it.each([false, true])('returns provider-qualified native model IDs through the SDK helper (self-hosted=%s)', async selfHosted => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-catalog-'));
+    const entry = fileURLToPath(new URL('../../dist/bin/byok-pi-rpc.js', import.meta.url));
+    const catalog = new PiAdapter({ ...(selfHosted ? { sdkHelperHost: { mode: 'self-executable', entry } } : {}),
+      runtimeEnvironment: { base: 'allowlist' } });
+    const environment = await catalog.runtimeEnvironment();
+    vi.spyOn(catalog, 'runtimeEnvironment').mockResolvedValue({ ...environment, env: { ...environment.env,
+      PI_CODING_AGENT_DIR: root, ANTHROPIC_API_KEY: 'synthetic-anthropic-catalog-auth', OPENAI_API_KEY: 'synthetic-openai-catalog-auth' } });
+    try {
+      const result = await catalog.listModels();
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') throw new Error(result.kind);
+      expect(new Set(result.models.flatMap(model => model.provider?.id ?? []))).toEqual(new Set(['anthropic', 'openai']));
+      expect(result.models.every(model => model.id.startsWith(`${model.provider?.id}/`))).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('catalog-auth');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  }, 20_000);
+
+  it('matches the provider and full ID and passes them as separate arguments', async () => {
+    const spawnFn = vi.fn(realSpawn);
+    const adapter = new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }), spawnFn: spawnFn as never });
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [
+      { id: 'one/org/model:high', provider: { id: 'one' } }, { id: 'two/org/model:high', provider: { id: 'two' } },
+    ] });
+    const prepare = (modelId?: string) => adapter.prepare({ offer: { target: modelTarget(modelId), instruction: 'hi' }, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+    await expect(prepare()).resolves.toMatchObject({ kind: 'reject', code: 'invalid_request' });
+    await expect(prepare('one/org/model')).resolves.toMatchObject({ kind: 'reject', code: 'model_unavailable' });
+    await expect(prepare('three/org/model:high')).resolves.toMatchObject({ kind: 'reject', code: 'model_unavailable' });
+    expect(spawnFn).not.toHaveBeenCalled();
+    const ctx = await makeCtx();
+    try {
+      const session = await startPreparedOperation(adapter, { target: modelTarget('two/org/model:high'), instruction: 'hi' }, ctx);
+      try { expect(spawnFn.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(['--provider', 'two', '--model', 'org/model:high', '--exact-model', 'true'])); }
+      finally { await session.close(); }
+    } finally { await fs.rm(ctx.workspaceDir, { recursive: true, force: true }); }
+  });
+
+  it('refuses to launch when the manifest changes the admitted model', async () => {
+    const spawnFn = vi.fn(realSpawn);
+    const adapter = new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }), spawnFn: spawnFn as never });
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [{ id: 'one/model', provider: { id: 'one' } }] });
+    const prepare = adapter.prepare.bind(adapter);
+    vi.spyOn(adapter, 'prepare').mockImplementation(async input => {
+      const prepared = await prepare(input);
+      if (prepared.kind === 'reject') return prepared;
+      return { kind: 'prepared', operation: { ...prepared.operation, start: start => prepared.operation.start({ ...start,
+        manifest: { ...start.manifest, selection: modelTarget('two/model').selection },
+      }) } };
+    });
+    const ctx = await makeCtx();
+    try {
+      await expect(startPreparedOperation(adapter, { target: modelTarget('one/model'), instruction: 'hi' }, ctx))
+        .rejects.toThrow('manifest with different runtime selection');
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally { await fs.rm(ctx.workspaceDir, { recursive: true, force: true }); }
+  });
+});
+
 describe('PiAdapter against the fake-pi fixture', () => {
   const openSessions: Session[] = [];
 

@@ -14,10 +14,8 @@ const AGENTS_HOME_DIR = 'byok-agents-home';
 
 export function assertDshModelSelection(value: DshModelSelection, label: string): void {
   if (value === null || typeof value !== 'object') throw new TypeError(`${label} must be an object`);
-  for (const key of ['provider', 'model'] as const) {
-    if (typeof value[key] !== 'string' || value[key].trim().length === 0) throw new TypeError(`${label}.${key} must be a non-empty string`);
-  }
-  if (!PROVIDER_ID.test(value.provider)) throw new TypeError(`${label}.provider must be a lowercase dsh provider id`);
+  if (value.model !== undefined && (typeof value.model !== 'string' || value.model.trim().length === 0)) throw new TypeError(`${label}.model must be a non-empty string`);
+  if (typeof value.provider !== 'string' || !PROVIDER_ID.test(value.provider)) throw new TypeError(`${label}.provider must be a lowercase dsh provider id`);
   if (value.baseUrl !== undefined) {
     if (value.provider === 'deepseek') throw new TypeError(`${label}.baseUrl is not supported for the deepseek provider`);
     let url: URL | undefined;
@@ -51,7 +49,8 @@ export function dshPatch(model: DshModelSelection): string {
   const entry = model.provider === 'deepseek'
     ? { id: 'llm-deepseek', config: { apiKeyEnv: DSH_PROVIDER_KEY_ENV } }
     : { id: 'llm-pi-ai', config: { providers: { [dshRoute(model)]: model.provider === 'custom'
-      ? { apiKeyEnv: DSH_PROVIDER_KEY_ENV, api: 'openai-completions', baseURL: model.baseUrl, models: [{ id: model.model }] }
+      ? { apiKeyEnv: DSH_PROVIDER_KEY_ENV, api: 'openai-completions', baseURL: model.baseUrl,
+        ...(model.model === undefined ? {} : { models: [{ id: model.model }] }) }
       : { apiKeyEnv: DSH_PROVIDER_KEY_ENV, ...(model.baseUrl === undefined ? {} : { baseURL: model.baseUrl }) } } } };
   return `${JSON.stringify([entry], null, 2)}\n`;
 }

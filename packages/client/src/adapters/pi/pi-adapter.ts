@@ -7,6 +7,7 @@ import { PI_DURABLE_RUNTIME_CAPABILITIES, PI_RUNTIME_CAPABILITIES } from './pi-c
 import { parsePiAgentResources, INHERITED_PI_AGENT_RESOURCES, type PiAgentResources } from './agent-resources.js';
 import { mcpEventIdentities, type McpEventIdentities } from '../../mcp/event-identity.js';
 import type { HarnessSelection } from '@byok-sdk/protocol';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
 import { offerSelection, type RuntimeTaskInput } from '../../types.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { startDurablePi } from '../pi-durable/session.js';
@@ -294,9 +295,10 @@ export class PiAdapter implements RuntimeAdapter {
     });
     if (options.packageDir !== undefined && !isAbsolute(options.packageDir)) throw new TypeError('PiAdapterOptions.packageDir must be an absolute path');
     if (options.durableLane !== undefined && typeof options.durableLane !== 'boolean') throw new Error('PiAdapterOptions.durableLane must be boolean; pass replicaRoot through durableContext');
+    const profileModes = options.byokLauncher === undefined ? [] : ['byok-profile' as const];
     this.descriptor = freezeRuntimeAdapterDescriptor({
       ...this.descriptor,
-      selectionModes: options.byokLauncher === undefined ? [] : ['byok-profile'],
+      selectionModes: options.durableLane === true ? profileModes : ['device-default', 'adapter-model', ...profileModes],
       capabilities: {
         ...PI_RUNTIME_CAPABILITIES,
         isolation: {
@@ -324,6 +326,32 @@ export class PiAdapter implements RuntimeAdapter {
     if (this.options.durableLane !== true) lanes.push(sdkLaneReport('pi-prepared', env, PI_PREPARED_ENV_ALLOW));
     if (this.options.byokLauncher !== undefined) lanes.push({ lane: 'pi-keys-profile', narrowedBy: 'keys-launcher' });
     return { env, report: lanes.length === 0 ? report : { ...report, lanes } };
+  }
+
+  /** Reads models available through the native Pi auth store and environment. */
+  async listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
+    if (this.options.durableLane === true) return { kind: 'unsupported', reason: 'Durable Pi uses a bound provider profile' };
+    const { signal } = options;
+    signal?.throwIfAborted();
+    const { env } = await this.runtimeEnvironment();
+    const helper = this.options.sdkHelperHost === undefined
+      ? { command: process.execPath, args: [path.join(clientPackageRoot(), 'dist', 'bin', 'byok-pi-rpc.js')] }
+      : resolveSdkReservedHelperBin('pi-rpc', this.options.sdkHelperHost);
+    try {
+      const { stdout } = await execFileAsync(helper.command, [...helper.args, '--list-models-json'], {
+        env: { ...env, PI_OFFLINE: '1' }, signal, timeout: 15_000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
+      });
+      const items: unknown = JSON.parse(stdout);
+      if (!Array.isArray(items)) throw new Error('Invalid Pi model catalog');
+      const models = items.map((item: unknown) => {
+        if (!isPiCatalogRow(item)) throw new Error('Invalid Pi model catalog entry');
+        return { id: `${item.provider}/${item.id}`, displayName: item.name, provider: { id: item.provider } };
+      });
+      return models.length === 0 ? { kind: 'unauthenticated' } : { kind: 'ok', models };
+    } catch {
+      signal?.throwIfAborted();
+      return { kind: 'unsupported', reason: 'Pi model catalog unavailable' };
+    }
   }
 
   /** Pi's directory selectors and provider credentials stay with Pi; its MCP servers never inherit them. */
@@ -421,10 +449,29 @@ export class PiAdapter implements RuntimeAdapter {
     // starting a new history under the requested id.
     const { effort } = input.offer;
     const selection = offerSelection(input.offer.target);
-    if (selection !== undefined && (selection.mode !== 'byok-profile' || input.offer.target.lane !== 'harness' || input.offer.target.harnessId !== 'pi')) {
-      return { kind: 'reject', reason: 'Pi requires an exact provider profile selection', retryable: false };
+    if (input.offer.target.lane === 'harness' && (input.offer.target.harnessId !== 'pi'
+      || (selection?.mode !== 'byok-profile' && selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model'))) {
+      return { kind: 'reject', reason: 'Pi does not support the requested selection', retryable: false };
     }
-    const providerProfile = selection === undefined ? undefined : Object.freeze({
+    const modelId = selection?.mode === 'adapter-model' ? selection.modelId : undefined;
+    let nativeModel: { provider: string; id: string } | undefined;
+    if (selection?.mode === 'adapter-model') {
+      if (modelId === undefined || modelId.trim() === '') {
+        return { kind: 'reject', code: 'invalid_request', reason: 'Pi requires a model ID in provider/id form', retryable: false };
+      }
+      const slash = modelId.indexOf('/');
+      if (slash < 1 || slash === modelId.length - 1) {
+        return { kind: 'reject', code: 'model_unavailable', reason: 'The requested Pi model is absent from its catalog', retryable: false };
+      }
+      const catalog = await this.listModels({ signal: input.signal });
+      const match = catalog.kind === 'ok' ? catalog.models.find(model => model.id === modelId) : undefined;
+      if (match?.provider?.id !== modelId.slice(0, slash)) {
+        return { kind: 'reject', code: 'model_unavailable', reason: 'The requested Pi model is absent from its catalog', retryable: false };
+      }
+      nativeModel = { provider: match.provider.id, id: modelId.slice(slash + 1) };
+    }
+    const admittedMode = selection?.mode;
+    const providerProfile = selection?.mode !== 'byok-profile' ? undefined : Object.freeze({
       ...selection.providerProfile,
       requiredCapabilities: Object.freeze([...selection.providerProfile.requiredCapabilities]),
     });
@@ -524,7 +571,10 @@ export class PiAdapter implements RuntimeAdapter {
           parsePiMcpEnvironment(startInput.mcpEnv);
           const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
           const manifestSelection = startInput.manifest.selection;
-          if (!samePiProfile(manifestSelection, providerProfile) || startInput.manifest.effort !== effort) {
+          const sameSelection = manifestSelection?.mode === admittedMode && (admittedMode === 'byok-profile'
+            ? samePiProfile(manifestSelection, providerProfile)
+            : admittedMode !== 'adapter-model' || (manifestSelection?.mode === 'adapter-model' && manifestSelection.modelId === modelId));
+          if (!sameSelection || startInput.manifest.effort !== effort) {
             throw new RuntimeExecutionFailure({
               phase: 'start', retry: 'non-retryable',
               reason: 'prepared pi operation received a manifest with different runtime selection',
@@ -724,6 +774,7 @@ export class PiAdapter implements RuntimeAdapter {
             }, { cause });
           }
           const piArgs = ['--config', hostConfigPath, '--mode', 'rpc',
+            ...(nativeModel === undefined ? [] : ['--provider', nativeModel.provider, '--model', nativeModel.id, '--exact-model', 'true']),
             ...(effort === undefined ? [] : ['--thinking', effort]),
             ...(resumeSessionId === undefined ? [] : ['--session', resumeSessionId])];
           const launch = piLaunchCommand(runtimeLaunch, 'pi-rpc', hostConfigDigest, piArgs,
@@ -1227,6 +1278,14 @@ async function validateProviderProfileBindingWithLauncher(
       ? ['--secret-service-prefix', launcher.secretServicePrefix]
       : []),
   ], { timeout: DETECT_TIMEOUT_MS });
+}
+
+function isPiCatalogRow(value: unknown): value is { provider: string; id: string; name: string } {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const { provider, id, name } = value as Record<string, unknown>;
+  return typeof provider === 'string' && provider.length > 0 && !provider.includes('/')
+    && typeof id === 'string' && id.length > 0 && !id.startsWith('--')
+    && [...`${provider}${id}`].every(character => character >= ' ' && character.charCodeAt(0) !== 127) && typeof name === 'string';
 }
 
 /** Compares every part of a prepared Pi profile binding. */

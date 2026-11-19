@@ -20,13 +20,29 @@ This checklist starts after the published 0.44.1 release. Hosts on an earlier re
    advertised `harnessId`, and a supported `selection`. Use `device-default`
    to keep the executor's defaults or `subscription` with a `modelId` to pin
    the model under Claude or Codex's own CLI login. For a Host credential, use
-   `byok` with the advertised pi-ai catalog `providerId` and a `modelId`.
+   `byok` with the advertised pi-ai catalog `providerId`. For `byok` and
+   `adapter-model`, omit `modelId` only if the device advertises that selection
+   mode in `capabilities.defaultModelModes`. DSH can use a configured default
+   or an explicit model within the configured route. OpenCode without a
+   configured model list requires `adapter-model` with an explicit ID.
    Preserve the original target when replaying a task ID. Replaying the ID
    with different offer bytes returns `binding_conflict`.
 
-### Pi provider selection
+### Harness model selection
 
-Replace Pi offers that used `byok` with `byok-profile`. Read the persisted
+`task.decline.code` includes `invalid_request` for missing required model IDs
+and `model_unavailable` for a rejected model before claim. A native runtime
+model refusal after claim is reported through `task.fail.failure.class`.
+
+#### Pi provider selection
+
+Ordinary Pi supports `device-default` with the device's Pi auth store. For
+`adapter-model`, pass an exact `provider/id` from `PiAdapter.listModels()`.
+The pinned Pi 1.5.2 exposes session token and cost totals through
+`get_session_stats`. Pi does not report account usage or quotas through the SDK.
+
+Replace Pi offers that used `byok` with `byok-profile`. Durable Pi requires
+`byok-profile`. Read the persisted
 local profile and derive the exact binding with
 `exactProviderProfileBinding(profile)` from `@byok-sdk/keys`. Use the binding
 from the store assigned to the target device, and refresh it after changing

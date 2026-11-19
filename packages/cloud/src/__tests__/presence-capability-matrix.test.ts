@@ -12,7 +12,7 @@ import { createHarness, TENANT_A } from './support/harness';
 
 const MATRIX = {
   steer: false, images: true, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true,
-  selectionModes: ['device-default'], effort: false,
+  selectionModes: ['device-default', 'adapter-model'], defaultModelModes: ['adapter-model'], effort: false,
   toolAuthorizationAuto: true, durableLane: false, preparedLane: false,
   isolation: { userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: true, userMcpServers: true, sessionPersistence: true },
 } as const;
@@ -20,8 +20,10 @@ const MATRIX = {
 describe('presence capability matrix', () => {
   it('core keeps the protocol capability shape', () => {
     // Core's copy is readonly; the zod-inferred protocol type is not.
-    expectTypeOf<Required<Omit<PresenceRuntimeCapabilities, 'isolation' | 'selectionModes'>>>()
-      .toEqualTypeOf<Readonly<Required<Omit<HarnessInfo['capabilities'], 'isolation' | 'selectionModes'>>>>();
+    expectTypeOf<Required<Omit<PresenceRuntimeCapabilities, 'isolation' | 'selectionModes' | 'defaultModelModes'>>>()
+      .toEqualTypeOf<Readonly<Required<Omit<HarnessInfo['capabilities'], 'isolation' | 'selectionModes' | 'defaultModelModes'>>>>();
+    expectTypeOf<PresenceRuntimeCapabilities['defaultModelModes']>()
+      .toEqualTypeOf<Readonly<NonNullable<HarnessInfo['capabilities']['defaultModelModes']>> | undefined>();
     expectTypeOf<Required<NonNullable<PresenceRuntimeCapabilities['isolation']>>>()
       .toEqualTypeOf<Readonly<Required<NonNullable<HarnessInfo['capabilities']['isolation']>>>>();
   });

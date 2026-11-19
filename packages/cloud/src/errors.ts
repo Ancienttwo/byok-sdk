@@ -106,6 +106,8 @@ export const CLOUD_ERROR_CODES = {
   task_not_awaiting_approval: 'task_not_awaiting_approval',
   /** Durable target-device capability is absent, revoked, or unavailable. */
   agent_capability_missing: 'agent_capability_missing',
+  /** A model-bearing selection omitted its model without an advertised default. */
+  invalid_request: 'invalid_request',
   /** Inbound Agent identity did not exactly match the offered identity. */
   agent_ref_mismatch: 'agent_ref_mismatch',
   /** A strict Agent task id already names a durable attempt and cannot be re-enqueued. */
