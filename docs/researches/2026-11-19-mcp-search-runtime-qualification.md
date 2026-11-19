@@ -57,6 +57,26 @@ done
 
 `BYOK_SEARCH_RECEIPT_DIR` enables the search cases. `BYOK_SEARCH_SCENARIOS` selects the cases by name, with `*` running all applicable cases. For Pi and dsh, inspect `acceptance.status` in every JSON receipt. `BYOK_SEARCH_REQUIRE_PASS=1` is for runs requiring only positive results. The ordinary contract can pass while a separate search receipt records an unavailable or failing combination. The stable safety assertions fail the test if the probe detects a repeated write, a live retired hub token, revived unselected server, leaked fixture process, or inner attribution on a result. `qualified-launch` also records a closed production admission as a distinct outcome.
 
+## 0.45 batch retest
+
+The retest used integrated SDK `a99b126daa0d55e01ea2a360fca09e6bb9071427` on macOS 26.5 (25F71), Darwin arm64, Node 24.18.0 and Bun 1.4.4. The probes used the same synthetic homes, loopback providers and child network restrictions described above. The qualification decisions and traces below this section record the original F runs.
+
+### Pi 1.5.2
+
+All 18 candidate scenarios returned `acceptance.status: pass`. The separate `qualified-launch` control returned `closed` at admission because the production table only admitted dsh at this head. In `mixed`, the first `tool_search` entered the hub 32 ms before `task.started` and returned the selected catalog. Seven attempts produced four writes, with zero writes for the approval-denied and unselected targets. No search receipt contained the prior inactive-Attempt error. The call-deadline, 256-server discovery, cancellation, restart and retired-token cases passed their receipt checks. The production decision requires both Pi and Claude to qualify, so both rows stay closed.
+
+### Claude 2.1.326
+
+The pinned npm executable reported `2.1.326 (Claude Code)` from the environment-selected path. In `mixed` and `all`, the daemon claimed the Attempt and then emitted `task.fail` with `runtime startup failed and process ownership remains quarantined`. Each recorded zero model requests and zero writes. Other turns reached `tool_search`, including `collision-underscore`, which entered the hub 14 ms before `task.started` and returned the catalog. The cold-search liveness fix was observable in that turn.
+
+After `task.started` in `name-boundary`, the hub rejected the three expected alpha and beta dispatches with `MCP tool call is not authorized.` The only write was from the direct server. Both alias controls showed the same hub denial and wrote to their own direct target. The outer Claude call IDs still correlated with the inner identities on `tool_use`, and results kept the outer identity. The observed dispatch denials occurred with the Attempt active. The daemon's dispatch gate receives its trusted outer identity from the SDK's toolset observation map, which it populates only for adapters that require an SDK probe. Claude lists its tools itself. This explains why the native hook could resolve the outer tool while the separate dispatch gate lacked that identity.
+
+The F suite recorded 18 Claude observations and exited 1. The two in-flight scenarios timed out waiting for a write receipt after the hub denied dispatch. The recorded attempts reached no search target. A green individual Claude probe records the scenario and its safety invariants. Qualification also requires the expected target writes.
+
+### Approvals during startup
+
+E's `searches and enforces D while starting, then denies calls after cancellation` control passed on the integrated branch. It held the adapter before `task.started`. The hub token proved live and search returned the selected tool. The first inner call matched an `alwaysAsk` rule, returned `MCP tool call is not authorized.`, produced zero target calls and emitted no approval request. The SDK authorization verdict in this state is `tool_authorization_unavailable` with reason `tool approval is unavailable during runtime startup`. A first high-risk call in this window fails for that invocation. Pi's early mixed search exercised the live token before `task.started`, and its approval-denied call came later in the turn.
+
 ## Qualification decisions
 
 The attempt counts below are steps sent by the loopback model after any runtime-native discovery. Executions count only synthetic target `tools/call` receipts and include direct calls in the mixed case. Search discovery itself increments no write receipt. The outer names shown are model-visible. The runtime only emits an inner identity where the SDK has a qualified raw-arguments path and can verify a frozen match.
