@@ -13,16 +13,21 @@ const PATH_VALUE = /^(?:\/|~\/|[a-z]:\\)/iu;
 const STRUCTURAL_FIELDS = new Set([
   "kind", "type", "direction", "method", "jsonrpc", "sessionUpdate", "stopReason",
   "status", "failure", "phase", "action", "code", "placement", "admission", "queued",
-  "settledBy", "evidence", "via", "result", "outcome", "role", "mediaType", "mimeType",
+  "settledBy", "evidence", "via", "role", "mediaType", "mimeType",
   "id", "sessionId", "spanId", "requestId", "responseTo", "inputId", "turnId",
   "nativeMessageId", "messageId", "callId", "toolCallId", "compactionId", "taskId", "parent", "child",
 ]);
 const ID_LIST_FIELDS = new Set(["agentPath", "inputIds", "carries"]);
+const CONTENT_FIELD_NAMES = new Set(["native", "events", "body", "input", "output", "outputDelta", "result", "reason", "message", "cause", "text", "data", "outcome", "model", "credential", "structuredOutput"]);
 
-function preservesStructure(key: string, value: unknown): boolean {
+function preservesStructure(key: string, value: unknown, owner: object): boolean {
   if (Array.isArray(value)) return ID_LIST_FIELDS.has(key) && value.every(item => typeof item === "string");
   if (typeof value !== "string") return false;
+  const kind = Object.getOwnPropertyDescriptor(owner, "kind")?.value;
   return STRUCTURAL_FIELDS.has(key)
+    || (key === "result" && kind === "tool_call_ended" && (value === "ok" || value === "failed"))
+    || (key === "outcome" && kind === "compaction_ended" && (value === "completed" || value === "aborted" || value === "failed"))
+    || (key === "model" && kind === "model")
     || (key === "credential" && (value === "missing" || value === "rejected"));
 }
 
@@ -55,7 +60,6 @@ export interface CredentialRedactor {
 /** Explicit session credentials only; runtime-native keys can be added after SDK resolution. */
 export function sessionCredentialRedactor(options: Partial<SessionOptions>): CredentialRedactor {
   const known = new Set<string>();
-  const explicit = new Set<string>();
   const add = (value: string | null | undefined): void => { if (credentialValue(value)) { known.add(value); } };
   const env = (entries: SessionOptions["env"]): void => {
     for (const [name, value] of Object.entries(entries ?? {})) {
@@ -88,19 +92,17 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
   };
   const shape = {
     preserve: preservesStructure,
-    // Preserve the protocol's field names. Credential-bearing map keys from
-    // ambient credentials retain the original diagnostic redaction behavior.
-    key: (key: string) => known.has(key) && !explicit.has(key) && !STRUCTURAL_FIELDS.has(key) ? "[redacted]" : key,
+    // Protocol fields keep their names. A known credential used as a dynamic
+    // property name still cannot enter retained diagnostic data.
+    key: (key: string) => known.has(key) && !STRUCTURAL_FIELDS.has(key) && !ID_LIST_FIELDS.has(key) && !CONTENT_FIELD_NAMES.has(key)
+      ? "[redacted]" : key,
   };
   return {
     values: () => values,
     add(value) {
       if (credentialValue(value)) { addKnown(value); }
     },
-    addExplicit(value) {
-      explicit.add(value);
-      addKnown(value);
-    },
+    addExplicit: addKnown,
     addImage(data) {
       if (data.length !== 0) images.add(data);
     },

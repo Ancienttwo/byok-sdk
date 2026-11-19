@@ -223,10 +223,11 @@ export class CodexAdapter implements RuntimeAdapter {
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin);
       const host = runtimeInvocationHost(env);
       const named = resolved.bin.command;
-      const executableCommand = host.platform === 'win32' ? named
-        : named.includes('/') ? path.resolve(named) : findRuntimeCommandOnPath(named, host);
+      const explicitlyPathed = named.includes('/') || (host.platform === 'win32' && named.includes('\\'));
+      const executableCommand = explicitlyPathed || path.isAbsolute(named) ? path.resolve(named) : findRuntimeCommandOnPath(named, host);
       if (executableCommand === undefined) return { detected: { kind: 'not-found' } };
-      const invocation = resolveRuntimeInvocation(executableCommand, host);
+      const resolvedInvocation = resolveRuntimeInvocation(executableCommand, host);
+      const invocation = { ...resolvedInvocation, command: path.resolve(resolvedInvocation.command) };
       const { command, args, executable } = invocation;
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env, args);
       if (version.kind !== 'available') return { detected: version };

@@ -266,6 +266,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'shared/executable/process-tree.ts',
     'shared/failure-class.ts',
     'shared/record-retention.ts',
+    'shared/redact-text.ts',
     'shared/stream-json/compaction.ts',
     'shared/stream-json/projection.ts',
     'shared/stream-json/session.ts',
