@@ -114,6 +114,8 @@ const codexNotificationFields: Readonly<Record<string, readonly string[]>> = {
 };
 const isCodexNotificationKey = (method: string, key: string): boolean => key === "threadId" || key === "turnId"
   || codexNotificationFields[method]?.includes(key) === true;
+const isCodexItemKey = (fields: readonly string[] | undefined, key: string): boolean => fields !== undefined
+  && (key === "id" || key === "type" || fields.includes(key));
 
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"], normalizedDraft = false): T {
   const itemType = record.kind === "frame" && (record.body.type === "item/started" || record.body.type === "item/completed")
@@ -138,7 +140,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     if (record.kind !== "frame" || !codexObservedMethods.has(record.body.type) || path[0] !== "body" || path[1] !== "native") return false;
     return (path.length === 2 && isCodexNotificationKey(record.body.type, key))
       || (path.length === 3 && path[2] === "turn" && (record.body.type === "turn/completed" || record.body.type === "turn/started") && codexTerminalFields.has(key))
-      || (path.length === 3 && path[2] === "item" && itemFields !== undefined && (key === "id" || key === "type" || itemFields.includes(key)))
+      || (path.length === 3 && path[2] === "item" && isCodexItemKey(itemFields, key))
       || (record.body.type === "thread/tokenUsage/updated" && path[2] === "tokenUsage"
         && ((path.length === 3 && codexUsageFields.has(key))
           || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));
@@ -291,19 +293,21 @@ async function openCodexSession(
       threadTails?.delete(endedTurn);
       if (threadTails?.size === 0) draftTails.delete(notificationSession);
     }
-    const withheld = (draftMethod || method === "item/completed")
+    const itemMethod = method === "item/started" || method === "item/completed";
+    const withheld = (draftMethod || itemMethod)
       && Object.getOwnPropertyNames(params).some(key => !isCodexNotificationKey(method, key) && credentials.matches(key));
-    const completedItem = method === "item/completed" ? asRecord(params.item) : null;
-    const withheldCompletion = completedItem?.type === "agentMessage" && (withheld || Object.getOwnPropertyNames(completedItem)
-      .some(key => key !== "id" && key !== "type" && key !== "text" && credentials.matches(key)));
+    const item = itemMethod ? asRecord(params.item) : null;
+    const itemFields = typeof item?.type === "string" ? codexItemFields.get(item.type) : undefined;
+    const withheldItem = item !== null && (withheld || Object.getOwnPropertyNames(item)
+      .some(key => !isCodexItemKey(itemFields, key) && credentials.matches(key)));
     let draftTail: string | undefined;
-    if (!byokStaleTurn && typeof completedItem?.id === "string") {
-      const pending = turnTails?.get(completedItem.id);
-      if (!withheldCompletion && pending !== undefined && completedItem.type === "agentMessage"
-        && typeof completedItem.text === "string" && completedItem.text.endsWith(pending)) {
+    if (method === "item/completed" && !byokStaleTurn && typeof item?.id === "string") {
+      const pending = turnTails?.get(item.id);
+      if (!withheldItem && pending !== undefined && item.type === "agentMessage"
+        && typeof item.text === "string" && item.text.endsWith(pending)) {
         draftTail = pending;
       }
-      pruneTail(completedItem.id);
+      pruneTail(item.id);
     }
     if (credentials.hasProtectedValues() && typeof params.delta === "string" && (streamedOutput || (draftMethod && (byokStaleTurn || withheld)))) {
       if (withheld) pruneTail(itemId);
@@ -353,7 +357,7 @@ async function openCodexSession(
       state.spontaneous = false;
       state.codexTurnId = null;
     }
-    const projectionParams = withheldCompletion ? { ...params, item: undefined } : params;
+    const projectionParams = withheldItem ? { ...params, item: undefined } : params;
     const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, projectionParams);
     state.projection = nextProjection;
     const links = newSessionLinks(kernel, commands.flatMap((command) => command.kind === "link" ? [command.edge] : []));
