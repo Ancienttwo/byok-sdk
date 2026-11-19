@@ -436,6 +436,35 @@ test('reviewed package manifests admit new #byok- imports into dist', t => {
   assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
 });
 
+test('#2396: client admits its MCP hub bin and private runtime import', t => {
+  const f = fixture(t), path = 'packages/client/package.json';
+  const manifest = { ...f.manifest, bin: { 'byok-agent-team-mcp': './dist/bin/byok-agent-team-mcp.js' },
+    imports: { '#existing': './dist/existing.js' } };
+  f.write(path, manifest); rebase(f, 'client before MCP hub');
+  const bin = { ...manifest.bin, 'byok-mcp-hub': './dist/bin/byok-mcp-hub.js' };
+  const imports = { ...manifest.imports, '#byok-mcp-hub-runtime': {
+    types: './dist/bin/mcp-hub-runtime.d.ts', default: './dist/bin/mcp-hub-runtime.js',
+  } };
+  const write = changes => f.write(path, { ...manifest, bin, imports, ...changes });
+  write({});
+  assert.ok(selectImpact([path], f).dirs.includes('packages/client'));
+  write({ imports: manifest.imports });
+  assert.ok(selectImpact([path], f).dirs.includes('packages/client'));
+  for (const changes of [
+    { bin: { ...bin, 'byok-mcp-hub': './dist/bin/other.js' } },
+    { bin: { ...bin, 'byok-other': './dist/bin/other.js' } },
+    { imports: { ...imports, '#byok-mcp-hub-runtime': '../other.js' } },
+    { description: 'unreviewed' },
+  ]) {
+    write(changes);
+    assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  }
+  write({ bin: { ...bin, 'byok-mcp-hub': './dist/bin/old.js' } });
+  rebase(f, 'client with a different MCP hub bin');
+  write({});
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+});
+
 test('a different package can add its first private import with local dist targets', t => {
   const f = fixture(t), path = 'packages/core/package.json';
   const manifest = { name: '@byok-sdk/core', version: '0.43.0' };
