@@ -36,10 +36,10 @@ export function createBotPersonaProjection(options: BotPersonaProjectionOptions 
       || projectionHash !== `sha256:${hash(projection)}`) throw new Error('Invalid Bot persona projection');
     const context: BotPersonaProjectionContext = { agentRef, canonicalHome, requestId, projectionHash,
       projection: projection as BotPersonaProjectionContext['projection'] };
-    const files = await options.renderAdditionalFiles?.(context) ?? [];
+    const files = options.renderAdditionalFiles ? await options.renderAdditionalFiles(context) : [];
     if (files.some(file => file.name.toLowerCase() === 'agents.md')) throw new Error('AGENTS.md is reserved for the Bot persona');
     await writeHomeFile('AGENTS.md', projection.persona);
     for (const file of files) await writeHomeFile(file.name, file.body);
-    await options.afterWrite?.(context);
+    if (options.afterWrite) await options.afterWrite(context);
   });
 }
