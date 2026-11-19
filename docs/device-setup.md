@@ -1454,7 +1454,7 @@ Manifest transition: **0.44.1 → 0.44.1**. Versions and entries below come from
 
 | Entry | Impact | Change and migration |
 |-------|--------|----------------------|
-| mcp-toolset-exposure-config | additive | Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default. [Migration](https://github.com/Ancienttwo/byok-sdk/issues/2396) |
+| mcp-toolset-exposure-config | additive | Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default. [Migration](../docs/releases/host-upgrade-next-minor.md#mcp-toolset-search) |
 | runtime-provider-key-resolvers | breaking | dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters require a Host resolveKey callback for each authenticated spawn. Remove dsh model.keyEnv. Plain JSON configuration cannot start these runtimes. [Migration](../docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys) |
 <!-- generated:migrations:end -->
 

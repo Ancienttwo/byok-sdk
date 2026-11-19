@@ -319,9 +319,9 @@ function k8Fixture(t) {
       './testing': { types: './dist/testing.d.ts', import: './dist/testing.js' }, './package.json': './package.json' },
     files: ['dist', 'README.md', 'LICENSE'], publishConfig: { access: 'public' },
     scripts: { build: 'tsup && tsc -p tsconfig.build.json', typecheck: 'tsc --noEmit', test: 'vitest run', clean: 'rm -rf dist' },
-    dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' },
+    dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/core': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' },
     peerDependencies: peers, peerDependenciesMeta: { '@hono/node-server': { optional: true } },
-    devDependencies: { '@byok-sdk/cloud': 'workspace:*', '@byok-sdk/core': 'workspace:*', '@byok-sdk/example-host-execution-core': 'workspace:*',
+    devDependencies: { '@byok-sdk/cloud': 'workspace:*', '@byok-sdk/example-host-execution-core': 'workspace:*',
       ...peers, vitest: '^5.1.0' } };
   return { f, dir, path, manifest };
 }
@@ -346,6 +346,19 @@ test('#1845: the published K8 manifest has one reviewed shape; the K4 example st
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), reason);
   }
+});
+
+test('#2420: K8 may move only the existing core workspace dependency to runtime', t => {
+  const { f, dir, path, manifest } = k8Fixture(t);
+  const { '@byok-sdk/core': core, ...dependencies } = manifest.dependencies;
+  const prior = { ...manifest, dependencies, devDependencies: { ...manifest.devDependencies, '@byok-sdk/core': core } };
+  f.write(path, prior); rebase(f, 'published K8 with core in devDependencies');
+  f.write(path, manifest);
+  assert.ok(selectImpact([path], f).dirs.includes(dir));
+  f.write(path, { ...manifest, devDependencies: prior.devDependencies });
+  assert.throws(() => selectImpact([path], f), /dependency names/);
+  f.write(path, { ...manifest, dependencies: { ...manifest.dependencies, '@byok-sdk/core': '^0.28.0' } });
+  assert.throws(() => selectImpact([path], f), /runtime dependencies/);
 });
 
 test('#2411: the published K8 may remove only its Vitest peer', t => {

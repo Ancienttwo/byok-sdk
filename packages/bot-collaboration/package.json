@@ -55,6 +55,7 @@
   },
   "dependencies": {
     "@byok-sdk/client": "workspace:*",
+    "@byok-sdk/core": "workspace:*",
     "@byok-sdk/protocol": "workspace:*",
     "@byok-sdk/server": "workspace:*"
   },
@@ -68,7 +69,6 @@
   },
   "devDependencies": {
     "@byok-sdk/cloud": "workspace:*",
-    "@byok-sdk/core": "workspace:*",
     "@byok-sdk/example-host-execution-core": "workspace:*",
     "@hono/node-server": "^2.1.6",
     "@types/node": "^24",
