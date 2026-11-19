@@ -124,17 +124,23 @@ leave the map out.
 ### Recover provider credentials from an offline store
 
 If `inspectProviderProfileStore(path)` reports `new-path-repair` with
-`PROVIDER_STORE_SCHEMA_STALE`, preserve the old database. With the user's
-approval, enumerate and remove its obsolete credentials before provisioning a
-new store. `listProviderProfileSecretNames(path)` returns sorted, unique
-candidate entry names from known released layouts, including the current
-0.42.0–0.44.0 layout (reported as `accepted`), for recovery or uninstall. It
-reads an offline copy and returns only names evidenced by database rows. It
-never queries the credential store. An empty list does not prove cleanup is
-complete: older releases, including 0.1.0–0.7.0 and releases such as 0.12.0
-and 0.22.0 before custody, wrote the credential before the profile during
-configure and deleted the profile before the credential during delete. A crash
-between those steps can leave a credential with no database record.
+`PROVIDER_STORE_SCHEMA_STALE`, preserve the old database and provision a
+separate current store. Reset only the affected store; leave all credentials in
+the original SecretStore scope in place. Stores in the same scope can share a
+name, even across different data directories. Re-entering a key under the same
+name overwrites the existing credential; a changed name can leave an orphan,
+which is a hygiene issue.
+
+`listProviderProfileSecretNames(path)` returns sorted, unique entry names from
+known released layouts, including the current 0.42.0–0.44.0 layout (reported
+as `accepted`), for diagnostic use. Tell the user which names it found, but do
+not use them as a basis for deletion. It reads an offline copy and returns only
+names evidenced by database rows. It never queries the credential store. An
+empty list does not prove cleanup is complete: older releases, including
+0.1.0–0.7.0 and releases such as 0.12.0 and 0.22.0 before custody, wrote the
+credential before the profile during configure and deleted the profile before
+the credential during delete. A crash between those steps can leave a
+credential with no database record.
 
 Check the original credential backend's inventory or UI for orphaned entries.
 The default service prefix is `com.byok.keys`; native `scope(namespace)`
@@ -151,55 +157,19 @@ original configured prefix, account, scope and keychain if customized:
   inspect `service` values beginning with the prefix. `secret-tool` attribute
   matching is exact, not prefix matching; searching can expose secret values.
 
-The SDK cannot list orphan names itself. If the backend or available tools
-cannot enumerate by prefix, ask the user to inspect and clean the system
-credential manager manually and report cleanup as incomplete. Never delete an
-entry whose ownership or use by an active store cannot be verified.
+The SDK cannot list orphan names itself. If the Host cannot prove the scope is
+used only by the affected store, report recovery as incomplete and ask the user
+to inspect and clean the system credential manager manually. Do not delete
+credentials automatically; the user must verify ownership and active use
+before any manual cleanup.
 
-First stop the processes that use the stores, and prevent provider changes in
-the credential scope through the end of cleanup. Any `-wal`, `-shm` or
+Stop the affected store's writers before inspecting it. Any `-wal`, `-shm` or
 `-journal` file causes `PROVIDER_STORE_UNAVAILABLE`, including an open WAL
 connection. Close it normally and retry. After a crash, preserve the database
 and its sidecars together. Recover an independent backup with the old build,
-close it, and enumerate that backup once it has no sidecars. An unknown layout
+close it, and inspect that backup once it has no sidecars. An unknown layout
 returns `PROVIDER_STORE_SCHEMA_STALE`. Use the old build's settings or the OS
-credential UI if the SDK cannot enumerate an owned store.
-
-**Protect credentials used by active stores before deleting anything.** Stores
-in the same scope can share a name such as `model-openai-api-key`. This
-includes a replacement store that has already been configured. Supply every
-store still in use in the original scope, even though its processes are stopped
-for cleanup. If any of those stores cannot be enumerated, or you cannot confirm
-the original backend, account and scope, stop and report cleanup as incomplete.
-
-```ts
-import { listProviderProfileSecretNames, type SecretStore } from '@byok-sdk/keys';
-
-async function removeRetiredProviderCredentials(
-  retiredPath: string,
-  retainedPathsInOriginalScope: readonly string[],
-  originalScope: SecretStore,
-): Promise<void> {
-  const candidates = await listProviderProfileSecretNames(retiredPath);
-  const retained = new Set<string>();
-  for (const path of retainedPathsInOriginalScope) {
-    for (const name of await listProviderProfileSecretNames(path)) retained.add(name);
-  }
-  // This removes database-evidenced candidates only. Check the original
-  // backend separately for orphaned credentials before reporting completion.
-  for (const name of candidates) {
-    if (!retained.has(name)) await originalScope.delete(name);
-  }
-}
-```
-
-Use the original OS credential account, backend, prefix and scope, including
-its keychain or envelope settings if configured. A `false` deletion result
-means the entry was already absent. A deletion error can leave a partial
-cleanup. Keep the old database and report the failure so the Host can retry.
-Report cleanup as incomplete if the backend inventory cannot be checked or
-ownership cannot be verified. Once cleanup is complete, provision a separate
-store if needed and re-enter any required credentials.
+credential UI if the SDK cannot inspect the store.
 
 ### Your own OpenAI-compatible gateway
 

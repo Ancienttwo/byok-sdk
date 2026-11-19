@@ -91,14 +91,13 @@ function readNames(db: DatabaseSync): ModelProviderSecretName[] {
  * finish recovery and close before this function can read it.
  *
  * Credential names can be shared by stores in the same SecretStore scope.
- * Before deleting anything, exclude the names referenced by active stores in
- * that scope. Use the original credential backend and scope. Only names still
- * evidenced by database rows are returned: older releases could leave orphaned
- * credentials if a process crashed between writing the credential and profile,
- * or between deleting the profile and credential. An empty list does not prove
- * cleanup complete. Check the original backend's inventory or UI as described
- * in the recovery guide; if ownership cannot be verified, report cleanup
- * incomplete.
+ * Use these names only for diagnostics, not as a basis for deletion. During
+ * stale-store recovery, leave credentials in place and reset only the affected
+ * store. Only names evidenced by database rows are returned; older releases
+ * could leave orphaned credentials, so an empty list does not prove cleanup
+ * complete. If the Host cannot prove the scope is used only by the affected
+ * store, report recovery incomplete and ask the user to inspect and clean the
+ * system credential manager manually, as described in the recovery guide.
  */
 export async function listProviderProfileSecretNames(path: string): Promise<readonly ModelProviderSecretName[]> {
   try {

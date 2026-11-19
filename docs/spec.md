@@ -259,9 +259,9 @@ must explicitly provision a separate current store. Pi execution
 separately requires the declared Pi identity above; provider kind does not
 infer it.
 
-For recovery or uninstall, `@byok-sdk/keys` exposes
-`listProviderProfileSecretNames(path)`. It returns sorted, unique candidate
-entry names from recognized released profile-store layouts, including
+For diagnostics, `@byok-sdk/keys` exposes
+`listProviderProfileSecretNames(path)`. It returns sorted, unique entry names
+from recognized released profile-store layouts, including
 0.42.0–0.44.0 stores that `inspectProviderProfileStore` accepts. Names follow
 the rules of the stored layout. Profile and pending custody rows can supply
 names. Only names still evidenced by database rows are returned. Older
@@ -275,17 +275,19 @@ value. Unknown layouts fail with `PROVIDER_STORE_SCHEMA_STALE`. An offline
 store with any WAL, SHM or rollback-journal sidecar fails with
 `PROVIDER_STORE_UNAVAILABLE`, as does a store still open with WAL sidecars.
 
-The Host stops store and credential writers for the duration of cleanup. It
-uses its original credential scope and must exclude every name referenced by
-an active store in that scope before deleting any retired entry. The rule
-also protects a replacement store that reuses a profile ref. If the Host
-cannot enumerate every active store in the scope or verify credential
-ownership, it must stop cleanup and report it incomplete. Preserve the retired
-store, including any sidecars, and use the original scope's `SecretStore.delete`
-for the remaining candidates before configuring a replacement store.
+For stale-store recovery, the Host resets only the affected store, preserves the
+old database and provisions a separate current store. It leaves all credentials
+in the original SecretStore scope in place: other stores, including stores in
+other data directories, may use the same names. The Host may show the returned
+names to the user as diagnostic information, but must not use them as a basis
+for deletion. Re-entering a key under the same name overwrites that credential;
+a changed name can leave an orphan, which is a hygiene issue. If the Host cannot
+prove that the scope is used only by the affected store, it reports recovery
+incomplete and asks the user to inspect and clean the system credential manager
+manually. The user must verify ownership and active use before manual cleanup.
 
-The Host must also check the original backend's inventory or UI for orphaned
-credentials. The default service prefix is `com.byok.keys`, native scopes
+The original backend's inventory or UI can help identify orphaned credentials.
+The default service prefix is `com.byok.keys`, native scopes
 append `.scope.<namespace>` per scope, and the entry service is
 `<prefix>.<name>`; the default account is `local-device`. Use the actual
 configured prefix, account, scope and keychain when customized. On macOS,
@@ -296,9 +298,9 @@ Secret Service uses `service` and `account` attributes: search the exact
 account in an inventory or UI and inspect service values for the prefix.
 `secret-tool` matches attributes exactly, not by prefix, and searches can
 expose secret values. The SDK cannot enumerate orphan names. If the backend or
-available tools cannot enumerate by prefix, ask the user to inspect and clean
-the system credential manager manually and report cleanup incomplete; do not
-delete entries whose ownership or active use cannot be verified.
+available tools cannot enumerate by prefix, the user must inspect the system
+credential manager
+manually; entries whose ownership or active use cannot be verified must remain.
 
 `@byok-sdk/keys` can derive such a configuration from the pi-ai catalog that
 the client pins. The table is a checked-in generated file; a test fails until
