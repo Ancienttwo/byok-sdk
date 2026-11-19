@@ -223,6 +223,8 @@ export interface McpStdioServerConfig {
 
 /** A logical group of local MCP servers selectable by a wire-level toolset id. */
 export interface McpToolsetConfig {
+  /** Defaults to direct mounting. Search exposure requires a qualified runtime. Prepared inputs require direct exposure. */
+  exposure?: 'direct' | 'search';
   mcpServers: Readonly<Record<string, McpStdioServerConfig & {
     /** Exact Host-approved tool names, granted only to a runtime that declares `mcpToolApprovals`; never an admission requirement. Omitted or empty grants nothing. Local configuration only. */
     readonly approveTools?: readonly string[];

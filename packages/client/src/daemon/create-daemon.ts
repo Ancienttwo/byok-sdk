@@ -355,8 +355,8 @@ export interface DaemonConfig {
   /**
    * Device-local registry behind wire-level `requiredToolsets` ids. Only
    * logical ids cross the SaaS wire; MCP executable definitions stay here.
-   * The first slice supports stdio servers (`command` + `args`) only and
-   * deliberately has no task-provided env/header/secret surface.
+   * Toolsets define local stdio servers and default to direct exposure.
+   * Search exposure requires a qualified runtime and an ordinary offer.
    */
   mcpToolsets?: Record<string, McpToolsetConfig>;
   /**

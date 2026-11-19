@@ -6030,6 +6030,7 @@ export interface McpStdioServerConfig {
     env?: Readonly<Record<string, string>>;
 }
 export interface McpToolsetConfig {
+    exposure?: 'direct' | 'search';
     mcpServers: Readonly<Record<string, McpStdioServerConfig & {
         readonly approveTools?: readonly string[];
     }>>;

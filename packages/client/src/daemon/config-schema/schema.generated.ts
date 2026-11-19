@@ -2334,6 +2334,12 @@ export const DAEMON_CONFIG_SCHEMA: DaemonConfigJsonSchema = {
       "additionalProperties": {
         "type": "object",
         "properties": {
+          "exposure": {
+            "enum": [
+              "direct",
+              "search"
+            ]
+          },
           "mcpServers": {
             "type": "object",
             "additionalProperties": {

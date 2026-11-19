@@ -322,6 +322,23 @@ describe('one assembly entry, consumed by both preparation paths', () => {
     ]);
   });
 
+  it('refuses search exposure before probing, compiling or counting', async () => {
+    const registry = new McpToolsetRegistry({
+      team: { exposure: 'search', mcpServers: { teamserver: fixtureServer() } },
+    });
+    const probe = vi.fn(probeMcpServer);
+    const compiler = stubCompiler();
+    const counter = fixtureCounter();
+    const service = await makeService(assembler(registry, { probe }), compiler, counter);
+
+    await expect(service.prepare(localRequest())).rejects.toMatchObject({
+      code: 'unsupported_input', message: 'prepared inputs require direct exposure for MCP toolset "team"',
+    });
+    expect(probe).not.toHaveBeenCalled();
+    expect(compiler.calls).toHaveLength(0);
+    expect(counter.calls).toHaveLength(0);
+  });
+
   it('routes both the local and the remote request through the one injected assembler, once each', async () => {
     // The structural half of the property above. Both paths reach the SAME
     // assembler object, so an observation produced anywhere else is an
