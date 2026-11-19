@@ -15,7 +15,8 @@
  *
  * - `AgentMemoryService`             — task-scoped recall/save authority.
  * - `captureAgentMemorySnapshot`     — the post-close bounded snapshot.
- * - `openAgentMemoryFilesystemHelper`— admission of the host's macOS or Windows helper.
+ * - `resolveAgentMemoryFilesystemHelper` — verified path of the SDK helper.
+ * - `openAgentMemoryFilesystemHelper` — admission of the host's macOS or Windows helper.
  * - `serveAgentMemoryMcpOverStdio`   — the two memory tools over stdio.
  * - `prependAgentMemoryGuidance`     — the prompt half of the path contract.
  * - `checkAgentMemoryHome`           — the device's pre-start memory verdict for one home.
@@ -68,6 +69,8 @@ export type { AgentMemoryAuditWarning } from '../daemon/agent-memory.js';
 
 /** Whether this platform can admit an external filesystem helper at all (macOS and Windows x64 today). */
 export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper.js';
+/** Resolves the verified helper for the current platform from SDK release assets or the output of `copyAgentMemoryHelperAssets`. */
+export { resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release.js';
 /** Admits the host's absolute signed/notarized helper binary and returns the root-pinned filesystem for one Agent home. */
 export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper.js';
 

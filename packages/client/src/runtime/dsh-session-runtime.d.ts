@@ -76,6 +76,7 @@ export declare function dshSession(
     appendSystemPrompt?: string;
   },
   hooks?: {
+    credentialsForRedaction?: readonly string[];
     onReady?: (sessionId: string) => void;
     onRecord?: (record: DshRecord) => void;
   },

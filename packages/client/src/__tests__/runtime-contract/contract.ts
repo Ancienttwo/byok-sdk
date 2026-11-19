@@ -344,6 +344,17 @@ export async function readReceipt(file: string): Promise<Array<Record<string, un
   }
 }
 
+/** Finds synthetic credentials in the files a loopback run left behind. Does not follow links. */
+export async function credentialFiles(root: string, key: string): Promise<readonly string[]> {
+  const matches = [];
+  for (const entry of await fs.readdir(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    if ((await fs.readFile(file)).includes(key)) matches.push(path.relative(root, file));
+  }
+  return matches;
+}
+
 /** Whether a server written by {@link writeSubmitResultServer} was ever started. */
 export function spawned(receipt: string): boolean {
   return existsSync(`${receipt}.spawn`);

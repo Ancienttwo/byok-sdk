@@ -1235,20 +1235,19 @@ developer preview) through the vendored OAR dsh runtime. Each session runs one
 bridge plugin on, and talks JSON lines over stdio. No ACP message is exchanged
 and `@agentclientprotocol/sdk` does not load. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes no dispatch selection.
 `createDaemon` and `createRuntimeAdapters` build it when `runtimeAllowlist` lists
-`dsh`, from the required `runtimes.dsh` (`home`, `model`, and optional `sandbox`
-and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
+`dsh`. The embedded configuration requires `runtimes.dsh.home`, `model` and
+`resolveKey`, with optional `sandbox` and `versionPolicy`.
 
-- Model: the required `model` option names `provider`, `model`, `keyEnv` and,
-  for `custom`, `baseUrl`. The adapter writes the provider route, `keyEnv` and
-  `baseUrl` into a per-execution `--patch` overlay (mode 0600, in the execution
-  scratch directory), beside OAR's bridge overlay. The model travels as the
-  session's selection, not in the patch. `deepseek` uses the DeepSeek API route; `custom` is a hand-declared OpenAI-compatible
-  route; any other provider id is a dsh pi-ai catalog route. The key itself is
-  only in the environment, under `keyEnv`; `baseUrl` refuses credentials and a
-  query string. `keyEnv` must contain `KEY`,
-  `TOKEN`, `SECRET` or `PASSWORD`, which dsh strips from tool processes. It
-  must not start with `BYOK_` (the runtime environment drops those) or `DSH_`,
-  and it must not be `DEEPSEEK_API_KEY`, which dsh `web_search` also reads.
+- Model: `model` names `provider`, `model` and, for `custom`, `baseUrl`.
+  `deepseek` selects the DeepSeek API route. `custom` declares an
+  OpenAI-compatible route. Other ids select a dsh pi-ai catalog provider.
+  The 0600 `--patch` overlay in execution scratch contains the route, the
+  name `BYOK_DSH_PROVIDER_API_KEY` and the configured endpoint. `baseUrl`
+  rejects credentials and query strings.
+- Credentials: `resolveKey` supplies the API key just before every
+  authenticated spawn. Only the dsh child receives the value in its env.
+  The name matches dsh's tool-process environment scrub and is independent of
+  `DEEPSEEK_API_KEY`, which dsh's `web_search` reads.
 - Start: dsh validates the selected route when the session opens. The first
   request must then report that route and model; any other value fails closed
   as `authority`.
@@ -1310,8 +1309,8 @@ and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
   within one second of that kill is not seen.
 - Detection: `dsh --version` (a `warn` verdict when it is not the qualified
   `0.2.2-rc.1`), then `dsh --profile acp --help`, which also writes the acp
-  profile into a new root (else `refused: acp_unavailable`). `authPresent`
-  means the `keyEnv` variable is set; the key is not checked.
+  profile into a new root (else `refused: acp_unavailable`). The probe leaves
+  the callback untouched and omits `authPresent`.
 - Egress: the DeepSeek route sends `GET https://api.deepseek.com/models` when
   dsh boots with a key. That call is free, but it is traffic. The contract
   suite's custom route has no declared host.
@@ -1332,15 +1331,14 @@ one `agy acp --dangerously-skip-permissions --process-per-session
 profile, which loads lazily through the private `#byok-acp-runtime` entry. It
 runs on the custom-harness path (`harnessId: 'agy'`). It takes no dispatch
 selection. `createDaemon` and `createRuntimeAdapters` build it when
-`runtimeAllowlist` lists `agy`, from the required `runtimes.agy` (`home`, and
+`runtimeAllowlist` lists `agy`, from the required `runtimes.agy` (`home`, `resolveKey`, and
 optional `model` and `versionPolicy`). The other options stay on the
 `AgyAdapter` constructor.
 
-- Credential: put a Gemini API key in the runtime environment as
-  `GEMINI_API_KEY`. `detect()` reports `authPresent` from it, without checking
-  it against the provider, and a task without it fails as non-retryable
-  authority. Only a Gemini API key is supported, never a Google account login.
-  agy passes its whole environment to `run_command` and stdio MCP children, so
+- Credentials: `resolveKey` supplies the Gemini API key just before each
+  authenticated spawn. A missing or invalid key fails with non-retryable
+  `auth`. Installation detection omits `authPresent`. agy passes its whole
+  environment to `run_command` and stdio MCP children, so
   the key stays in the daemon process. Each agy process gets its own proxy on an
   ephemeral `127.0.0.1` port, started before agy and closed when agy exits. agy
   holds that address and a random per-session token as its `GEMINI_API_KEY`. The

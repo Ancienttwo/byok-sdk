@@ -1265,14 +1265,18 @@ it, `DSH_PERMISSION_MODE` to the `sandbox` option and
 directory, `$DSH_HOME/.env`. The process starts in the execution scratch
 directory, so a workspace `.env` never applies. A Host must not leave stored
 credentials or a `.env` in the dsh root, or dsh uses them before the key in
-the environment.
+the environment. The embedded Host's `resolveKey` callback runs for each
+authenticated spawn, including resume and an uncached catalog read. The SDK
+sets `BYOK_DSH_PROVIDER_API_KEY` in that child only and records only the
+variable name in the patch. A missing or invalid key fails before spawn as a
+non-retryable `auth` failure. Installation detection leaves `authPresent`
+unset.
 
 Sessions persist under `<home>/sessions/<encoded cwd>/<session id>/`; resume
 needs them, and the SDK removes none. The DeepSeek route sends `GET
 https://api.deepseek.com/models` at boot when a key is present. A dsh `usage`
 event carries the turn's billed tokens and the provider's context usage, both
-read from OAR's session totals. The `keyEnv` rules are in
-[adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
+read from OAR's session totals. See [dsh adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
 
 An Attempt is one prompt on one process. dsh's subagents and background jobs
 outlive the turn, and when one finishes dsh opens a root turn with no prompt. So
@@ -1299,8 +1303,12 @@ removes `antigravity/credential-user-scope` in the user config directory.
 `DBUS_SESSION_BUS_ADDRESS` names a socket in that home that does not exist, so
 agy's look for the session bus fails as on a host with no bus. agy passes its whole
 environment to `run_command` and stdio MCP children, so no real key may enter
-it. The key comes from `GEMINI_API_KEY` in the runtime environment and stays in
-the daemon process; a task without it fails as non-retryable authority.
+it. The embedded Host's `resolveKey` callback supplies the key fresh for each
+authenticated spawn, including resume, an uncached catalog read and each
+command in a quota read. The real key stays in the SDK process. An invalid
+key or a resolver failure stops the attempt before authentication with a
+non-retryable `auth` failure. Installation detection leaves `authPresent`
+unset.
 
 Each agy process gets one proxy, started before agy on an ephemeral `127.0.0.1`
 port and closed when agy exits. If it cannot start, the task fails before agy
@@ -3388,6 +3396,16 @@ No arbitrary binary path, digest override or
 PATH search is admitted. The directory is a deployment integrity boundary, not
 a signer authentication mechanism. Omitting the option retains installed SDK
 package resolution.
+
+Embedded Hosts can call `resolveAgentMemoryFilesystemHelper(assetRoot?)` from
+`@byok-sdk/client/agent-memory` to get the verified helper path for the current
+process platform and architecture. Pass that path and any explicit asset root
+to `openAgentMemoryFilesystemHelper` to open a filesystem for one Agent home.
+For a device-sync check, `checkAgentMemoryHome(home, { scope: "resident" })`
+uses the device reader and refusal codes for `MEMORY.md` without opening the
+helper or walking `notes/`. The default `full` scope also checks the commit
+start record and uses the platform's secure filesystem. Both verdicts are
+advisory.
 
 Helper builds use Go
 1.26.5, `CGO_ENABLED=0`, `-buildvcs=false` and `-trimpath`. Product re-signing is

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync, chmodSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, writeFileSync, chmodSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -24,8 +24,26 @@ assert.deepEqual(Object.fromEntries(Object.entries(manifest.entries).map(([targe
 for (const [target, entry] of Object.entries(manifest.entries)) {
   assert.equal(agentMemoryHelperTargetDigest(target, readFileSync(path.join(directory, entry.file))), entry.digest);
 }
+const clientManifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+const memory = await import(pathToFileURL(path.resolve(root, clientManifest.exports['./agent-memory'].import)));
+const target = `${process.platform}-${process.arch}`;
+if (Object.hasOwn(manifest.entries, target)) {
+  const sdk = await import(pathToFileURL(path.resolve(root, clientManifest.exports['.'].import)));
+  const relocated = mkdtempSync(path.join(tmpdir(), 'byok-packed-helper-assets-'));
+  const expectedName = manifest.entries[target].file;
+  try {
+    assert.equal(memory.resolveAgentMemoryFilesystemHelper(), realpathSync(path.join(directory, expectedName)));
+    await sdk.copyAgentMemoryHelperAssets({ outDir: relocated, platform: process.platform });
+    assert.equal(memory.resolveAgentMemoryFilesystemHelper(relocated), realpathSync(path.join(relocated, expectedName)));
+  } finally {
+    rmSync(relocated, { recursive: true, force: true });
+  }
+} else {
+  assert.throws(() => memory.resolveAgentMemoryFilesystemHelper(), /not admitted on this platform/);
+}
+
 if (process.platform === 'win32') {
-  const bin = path.join(directory, 'win32-x64.exe');
+  const bin = memory.resolveAgentMemoryFilesystemHelper();
   const original = readFileSync(bin);
   const scratch = mkdtempSync(path.join(tmpdir(), 'byok-packed-helper-pe-'));
   const copy = path.join(scratch, 'agent-memory-fs.exe');
@@ -58,10 +76,8 @@ if (process.platform === 'win32') {
   }
 }
 if (process.platform === 'darwin') {
-  const clientManifest = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
   const sdk = await import(pathToFileURL(path.resolve(root, clientManifest.exports['.'].import)));
-  const memory = await import(pathToFileURL(path.resolve(root, clientManifest.exports['./agent-memory'].import)));
-  const bin = path.join(directory, `darwin-${process.arch}`);
+  const bin = memory.resolveAgentMemoryFilesystemHelper();
   const original = readFileSync(bin);
   const manifestFile = path.join(directory, 'manifest.json');
   const originalManifest = readFileSync(manifestFile);

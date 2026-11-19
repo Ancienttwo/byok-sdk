@@ -90,10 +90,15 @@ export async function startAgyGeminiProxy({ apiKey, environment, upstreamOrigin 
     pipeline(request, forwarded, () => {});
   });
 
-  await new Promise<void>((resolve, reject) => {
-    server.on('error', reject);
-    server.listen(0, '127.0.0.1', resolve);
-  });
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+  } catch (error) {
+    agent.destroy();
+    throw error;
+  }
   const { address, port } = server.address() as AddressInfo;
   return {
     url: `http://${address}:${port}`,

@@ -31,10 +31,10 @@ export interface FakeRuntimeAdapterBehavior {
 /** The real adapter's default descriptor. Construction reads no file and spawns nothing. */
 function realDescriptor(id: FakeRuntimeAdapterId): RuntimeAdapterDescriptor {
   switch (id) {
-    case 'agy': return new AgyAdapter({ home: path.join(os.tmpdir(), 'byok-fake-agy') }).descriptor;
+    case 'agy': return new AgyAdapter({ resolveKey: async () => 'fixture-key', home: path.join(os.tmpdir(), 'byok-fake-agy') }).descriptor;
     case 'claude': return new ClaudeAdapter().descriptor;
     case 'codex': return new CodexAdapter().descriptor;
-    case 'dsh': return new DshAdapter({ home: path.join(os.tmpdir(), 'byok-fake-dsh'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'FAKE_DSH_PROVIDER_KEY' } }).descriptor;
+    case 'dsh': return new DshAdapter({ resolveKey: async () => 'fixture-key', home: path.join(os.tmpdir(), 'byok-fake-dsh'), model: { provider: 'deepseek', model: 'deepseek-v4-flash' } }).descriptor;
     case 'grok': return new GrokAdapter().descriptor;
     case 'pi': return new PiAdapter().descriptor;
     default: throw new TypeError(`unknown runtime adapter id: ${String(id)}`);

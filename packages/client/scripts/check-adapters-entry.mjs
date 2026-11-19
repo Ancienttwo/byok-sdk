@@ -126,8 +126,8 @@ assert.equal(new adapters.PiAdapter().descriptor.id, 'pi');
 assert.equal(new adapters.ClaudeAdapter().descriptor.id, 'claude');
 assert.equal(new adapters.CodexAdapter().descriptor.id, 'codex');
 assert.equal(new adapters.GrokAdapter().descriptor.id, 'grok');
-assert.equal(new adapters.AgyAdapter({ home: '/tmp/byok-agy-entry-check' }).descriptor.id, 'agy');
-assert.equal(new adapters.DshAdapter({ home: '/tmp/byok-dsh-entry-check', model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'ENTRY_CHECK_KEY' } }).descriptor.id, 'dsh');
+assert.equal(new adapters.AgyAdapter({ resolveKey: async () => 'fixture-key', home: '/tmp/byok-agy-entry-check' }).descriptor.id, 'agy');
+assert.equal(new adapters.DshAdapter({ resolveKey: async () => 'fixture-key', home: '/tmp/byok-dsh-entry-check', model: { provider: 'deepseek', model: 'deepseek-v4-flash' } }).descriptor.id, 'dsh');
 // The ACP stack and its protocol SDK are a private lazy entry, never part of this one.
 assert.doesNotMatch(bundledEntry, /@agentclientprotocol\/sdk/);
 

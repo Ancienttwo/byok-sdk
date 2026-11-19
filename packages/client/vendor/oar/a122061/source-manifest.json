@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.120.0",
-    "commit": "ebcde2e54df56b92d542e85aa734c9874a8a7c39"
+    "commit": "b63f52acf0fc7da491923978c6628fdacd837b4a"
   },
   "release": {
     "ecosystem": "npm",
@@ -610,8 +610,8 @@
       "path": "runtimes/dsh/session.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/session.ts",
       "upstreamSha256": "26f9d10a40a0a4c9c8565349bddf400a104ea77aba96d13a9f6bbda383641bfa",
-      "vendoredSha256": "a438cc187971a2e92b27c519bd466b0577cf1be7e4ad62d1fca4976b1f3f1c6e",
-      "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure. The caller's retainedBytes goes to the upstream kernel's record retention. Share Runtime.sessionCapabilities with the narrow BYOK bridge."
+      "vendoredSha256": "6cc951e20bd27d04d3879782e02f0c5667e63450f1a41d78943b77e69c16f828",
+      "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure. The caller's retainedBytes goes to the upstream kernel's record retention. Share Runtime.sessionCapabilities with the narrow BYOK bridge. Register the caller-resolved API key before kernel retention and diagnostics (#2408)."
     },
     {
       "path": "runtimes/dsh/version.ts",
@@ -894,8 +894,8 @@
       "path": "shared/acp/session.ts",
       "sourcePath": "packages/oar/src/shared/acp/session.ts",
       "upstreamSha256": "6759f4d5c2541638b62ac279eef5407271d4241108c5e8f641b8f77d29b42413",
-      "vendoredSha256": "04090c8e0ad88f77fda329d6422fe0393308ba23cb5dc45f8aab5f546d59f469",
-      "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. OAR 0.99: the session keeps its own state construction in place of upstream session-state.ts (that module builds the terminal host without the injected spawn); it wires the upstream native-turn tracker (prompt naming, tracker-fed token usage and recorder, the recorder bound after the turn driver) and the profile steerRequest RPC through steer-request.ts; upstream turn-terminals.ts is not wired because endTurnProcessesOnAbort is omitted. endTurnProcessesOnAbort is omitted from AcpSessionOptions; the caller's retainedBytes goes to the upstream kernel's record retention. Upstream #652 agentPid wiring is omitted. Dispose starts the abort (descendant read and cancel write are synchronous) and does not wait for the write before it kills the process. The process stream observes the prompt-answer boundary with the opening boundary (shared/acp/opening.ts), and the recorder gets whilePromptAwaited (shared/acp/records.ts). Redact echoed image data before recording native output. Linked child terminal usage has its own cumulative counters and replay fence (#2381)."
+      "vendoredSha256": "5ddae898f06bb1bc1438214baaedecc7300c9f75bba5f275f8627d23c3068c24",
+      "delta": "Raw adapter for the SDK: AcpSessionHooks.onPermission forwards to AcpClientHooks.permission. acpSession(profile) returns a start function that takes the injected agent-process spawn, the injected terminal spawn and a required explicit filtered env (no sessionEnvironment ambient merge). It returns AdapterSession without sealSession/withSessionCredentials, does not use the upstream shared-connection pool or lifecycle wrapper, builds one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control, and takes onReady and onRecord hooks; onRecord is registered as a kernel observer before the recorder binds. A throwing onReady releases the process and the terminal host. The exit observer terminal disposal is the same one dispose awaits, and a repeated dispose retries a failed terminal reap. No resources reader. Dispose does not call prepareShutdown or markNativeStop, and control does not wait on a pending cancellation observation. Upstream configUpdates, manual compaction and the adapter-held queue are wired in; compact goes through the redaction guard. OAR 0.99: the session keeps its own state construction in place of upstream session-state.ts (that module builds the terminal host without the injected spawn); it wires the upstream native-turn tracker (prompt naming, tracker-fed token usage and recorder, the recorder bound after the turn driver) and the profile steerRequest RPC through steer-request.ts; upstream turn-terminals.ts is not wired because endTurnProcessesOnAbort is omitted. endTurnProcessesOnAbort is omitted from AcpSessionOptions; the caller's retainedBytes goes to the upstream kernel's record retention. Upstream #652 agentPid wiring is omitted. Dispose starts the abort (descendant read and cancel write are synchronous) and does not wait for the write before it kills the process. The process stream observes the prompt-answer boundary with the opening boundary (shared/acp/opening.ts), and the recorder gets whilePromptAwaited (shared/acp/records.ts). Redact echoed image data before recording native output. Linked child terminal usage has its own cumulative counters and replay fence (#2381). Register caller-resolved provider keys and proxy tokens before kernel retention and diagnostics (#2408)."
     },
     {
       "path": "shared/acp/steer-request.ts",
@@ -952,8 +952,8 @@
       "path": "shared/credential-redactor.ts",
       "sourcePath": "packages/oar/src/shared/credential-redactor.ts",
       "upstreamSha256": "e7358de620f170bcd2b4ec1e46d98a6fe58a1e6d52dfe5dc535c090a713af6be",
-      "vendoredSha256": "4dfba9a5f9f9b4ed44fdb00b26c28bc71362f875645fceb5d268f672db0e34e8",
-      "delta": "Redact echoed image data before recording native output."
+      "vendoredSha256": "858fb634ed52b8711467ec6c883e379478a98665eba641ed3bc0b09f74503b0d",
+      "delta": "Redact echoed image data before recording native output. Register exact caller-resolved credentials, including short or path-like values, without changing the ambient heuristic (#2408)."
     },
     {
       "path": "shared/deadline.ts",

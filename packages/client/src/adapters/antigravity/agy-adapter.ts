@@ -18,7 +18,6 @@ import {
   type RuntimeDetectResult,
   type RuntimeOperationManifest,
   type RuntimeOperationStartInput,
-  type RuntimeTaskInput,
   type RuntimeVersionPolicy,
   type Session,
 } from '../../types.js';
@@ -28,6 +27,8 @@ import { requireImageInput } from '../input-images.js';
 import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
 import type { AcpControl, AcpPermissionRequest, AcpPermissionResponse, AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
+import { resolveRuntimeApiKey } from '../resolve-runtime-api-key.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 import { AsyncQueue } from '../../util/async-queue.js';
@@ -58,6 +59,8 @@ export interface AgyAdapterOptions {
    * not be the user's home or anything under the user's `~/.gemini`.
    */
   home: string;
+  /** Resolves the Gemini API key in the Host's credential scope just before each authenticated spawn. */
+  resolveKey: () => Promise<string>;
   /** Model id for every session, set again on each resume. Absent: the CLI default. */
   model?: string;
   /** Absolute product native asset directory; scoped to this adapter. */
@@ -100,17 +103,20 @@ export class AgyAdapter implements RuntimeAdapter {
       command: (env) => resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(env)).bin.command,
       version: agyVersionToken,
       versionRefusal: antigravityVersionRefusal,
-      environment: async env => {
+      environment: env => ({ env: agyEnvironment(env, this.root) }),
+      authenticate: async (env, signal) => {
         await ensureAgyHome(this.root);
-        const apiKey = env.GEMINI_API_KEY;
-        const proxy = apiKey ? await startAgyGeminiProxy({ apiKey, environment: env, upstreamOrigin: agyEndpointOf(this) }) : undefined;
-        return { env: agyEnvironment(env, this.root, proxy), close: proxy === undefined ? undefined : () => proxy.close() };
+        const { env: authenticated, proxy, credentials } = await this.authenticatedEnvironment(env, signal);
+        return { env: authenticated, credentials, close: proxy.close };
       },
     });
   }
 
   listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
-    return this.readers.listModels(options, async (installation, reader) => (await import('#byok-acp-runtime')).antigravityListModels(installation, reader));
+    return this.readers.listModels(options, async (installation, _reader, withAuthentication) => {
+      const { antigravityListModels } = await import('#byok-acp-runtime');
+      return withAuthentication(reader => antigravityListModels(installation, reader));
+    });
   }
 
   accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
@@ -146,6 +152,7 @@ export class AgyAdapter implements RuntimeAdapter {
     const userNative = comparablePath(agyNativeHome(os.homedir()));
     if (candidate === comparablePath(os.homedir()) || candidate === userNative || candidate.startsWith(`${userNative}${path.sep}`))
       throw new TypeError('AgyAdapterOptions.home must not be the user\'s home or ~/.gemini');
+    if (typeof options.resolveKey !== 'function') throw new TypeError('AgyAdapterOptions.resolveKey must be a function');
     if (options.model !== undefined && options.model.trim() === '') throw new TypeError('AgyAdapterOptions.model must not be blank');
     this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'agy');
     this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'agy');
@@ -160,7 +167,13 @@ export class AgyAdapter implements RuntimeAdapter {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
 
-  /** Reads the version. `authPresent` is whether the runtime environment carries `GEMINI_API_KEY`; the key is not checked against the provider. */
+  private async authenticatedEnvironment(base: Readonly<NodeJS.ProcessEnv>, signal?: AbortSignal) {
+    const apiKey = await resolveRuntimeApiKey('agy', this.options.resolveKey, signal);
+    const proxy = await startAgyGeminiProxy({ apiKey, environment: base, upstreamOrigin: agyEndpointOf(this) });
+    return { env: agyEnvironment(base, this.root, proxy), proxy, credentials: [apiKey, proxy.token] };
+  }
+
+  /** Reads the installation version without resolving credentials. */
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const { env: base } = await this.runtimeEnvironment();
@@ -179,7 +192,6 @@ export class AgyAdapter implements RuntimeAdapter {
         kind: 'available',
         sessionCapabilities: (await import('#byok-acp-runtime')).antigravitySessionCapabilities(),
         version: token,
-        authPresent: Boolean(base.GEMINI_API_KEY),
         ...runtimeExecutableFields(resolved, command),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, token),
       };
@@ -206,8 +218,6 @@ export class AgyAdapter implements RuntimeAdapter {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('agy requires a resolved instruction');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('agy manifest has no sealed cwd');
-    const apiKey = input.env.GEMINI_API_KEY;
-    if (!apiKey) throw authority('agy requires GEMINI_API_KEY in its runtime environment');
     const resume = input.manifest.sessionRef;
     // A writer runs in the Agent home, where agy reads AGENTS.md itself. A reader runs in `.byok/runs/<task>`, which agy
     // only walks up from when the home has `.git`, and that reader sees the persona twice; there is no root-marker option.
@@ -227,16 +237,18 @@ export class AgyAdapter implements RuntimeAdapter {
     const acp = await import('#byok-acp-runtime');
     try {
       await ensureAgyHome(this.root);
-      const proxy = await startAgyGeminiProxy({ apiKey, environment: input.env, upstreamOrigin: agyEndpointOf(this) });
+      const { env, proxy, credentials } = await this.authenticatedEnvironment({ ...input.env, ...input.scratch.env }, input.signal);
       session.useProxy(proxy);
-      const env = agyEnvironment({ ...input.env, ...input.scratch.env }, this.root, proxy);
+      if (input.signal?.aborted) throw infrastructure('agy start was aborted');
+      const redactor = sessionCredentialRedactor({ env });
+      for (const value of credentials) redactor.addExplicit(value);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'agy acp' });
       const raw = await acp.antigravitySession(
         (bin, args, options) => {
           const child = spawnAgent(bin, args, options);
           session.own(child);
-          void child.exited.then(() => session.exited(), (error) => session.fail(error));
+          void child.exited.then(() => session.exited(), (error) => session.fail(redactor.redactValue(error)));
           return haltGate(child, () => session.halted !== undefined);
         },
         // agy runs its own commands and never asks for a client terminal; the stack still requires the seam.
@@ -255,6 +267,7 @@ export class AgyAdapter implements RuntimeAdapter {
           ...(resume === undefined ? {} : { resume }),
         },
         {
+          credentialsForRedaction: credentials,
           onReady: (id) => session.ready(id),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),
@@ -399,6 +412,7 @@ class AgySession implements Session {
           await this.child?.dispose();
         } finally {
           await this.proxy?.close();
+          this.proxy = undefined;
         }
       }
     }).catch((error: unknown) => {

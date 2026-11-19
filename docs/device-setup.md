@@ -278,18 +278,14 @@ and a static tool-authorization policy in `toolAuthorization`:
   stays `runtimeAllowlist`; the Codex sandbox stays `codexSandbox`. Grok is a
   custom harness, so `createDaemon` builds it only when `runtimeAllowlist`
   lists `grok`; it runs on darwin and linux and reports `platform_unsupported`
-  elsewhere. dsh is a custom harness too: `createDaemon` builds it only when
-  `runtimeAllowlist` lists `dsh`, which then requires `runtimes.dsh` with
-  `home` (an absolute `DSH_HOME` the SDK owns, not `~/.dsh`) and `model`
-  (`provider`, `model`, `keyEnv` and, for `custom`, `baseUrl`). `sandbox`
-  defaults to `danger-full-access`. It runs on the same two platforms. The key
-  stays in the runtime environment under `keyEnv`. agy is a custom harness as
-  well: `createDaemon` builds it only when `runtimeAllowlist` lists `agy`, which
-  then requires `runtimes.agy` with `home` (an absolute home the SDK owns, not
-  your home or `~/.gemini`). It runs on darwin, linux and win32. The key stays
-  in the runtime environment as `GEMINI_API_KEY`. agy rejects Host toolset
-  entries carrying `env` or `headers`; a Host that configures env for its own
-  server cannot run it under agy.
+  elsewhere. dsh and agy require an embedded Host to supply
+  `runtimes.dsh.resolveKey` or `runtimes.agy.resolveKey` to read the provider
+  key for each authenticated spawn. Plain JSON configuration cannot start
+  either runtime. dsh runs on macOS and Linux. Configure `runtimes.dsh` with
+  an absolute SDK-owned `home` and a `model` with `provider`, `model` and
+  `baseUrl` (required for `custom`). `sandbox` defaults to `danger-full-access`.
+  agy runs on macOS, Linux and Windows. Give `runtimes.agy` an absolute
+  SDK-owned `home`. agy rejects Host toolset entries carrying `env` or `headers`.
   `createDaemonWithAdapters` rejects `runtimes`: configure injected adapters
   directly.
 - A `fileScope` is only legal when every runtime of the daemon resolves to

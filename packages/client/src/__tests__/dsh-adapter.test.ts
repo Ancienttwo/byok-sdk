@@ -5,18 +5,19 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../adapters/dsh/dsh-adapter';
-import { dshPatch } from '../adapters/dsh/dsh-profile';
+import { dshPatch, DSH_PROVIDER_KEY_ENV } from '../adapters/dsh/dsh-profile';
 import { DSH_RUNTIME_CAPABILITIES } from '../adapters/dsh/dsh-capabilities';
 import { QUALIFIED_DSH_VERSION } from '../adapters/dsh/dsh-version';
 import { PolicyUnsupportedError, type MessageDraftDelta, type RuntimeTaskInput, type Session } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { testExecutionScratch } from './fixtures/execution-scratch';
 
 const DSH_TARGET = { lane: 'harness', harnessId: 'dsh' } as const;
 
 const fixture = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url));
-const MODEL: DshModelSelection = { provider: 'custom', model: 'loop-model', baseUrl: 'http://127.0.0.1:9/v1', keyEnv: 'TEST_DSH_PROVIDER_KEY' };
+const MODEL: DshModelSelection = { provider: 'custom', model: 'loop-model', baseUrl: 'http://127.0.0.1:9/v1' };
 const sessions: Session[] = [];
 const dirs: string[] = [];
 const ambient: string[] = [];
@@ -44,10 +45,10 @@ async function setup(options: Partial<DshAdapterOptions> = {}, env: NodeJS.Proce
   const workspaceDir = await tempDir('bdw-');
   const log = path.join(await tempDir('bdl-'), 'facts.jsonl');
   const adapter = new DshAdapter({
-    home: root, model: MODEL, resolveBin: () => ({ command: fixture, source: 'path' }),
+    home: root, model: MODEL, resolveKey: async () => 'test-key', resolveBin: () => ({ command: fixture, source: 'path' }),
     runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_DSH_*', 'TEST_DSH_*'] }, ...options,
   });
-  const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), FAKE_DSH_LOG: log, TEST_DSH_PROVIDER_KEY: 'test-key', DSH_STRAY: 'ambient', ...env } };
+  const resources = { workspaceDir, env: { PATH: process.env.PATH, HOME: os.homedir(), FAKE_DSH_LOG: log, byok_dsh_provider_api_key: 'ambient-key', DSH_STRAY: 'ambient', ...env } };
   const open = async (offer: RuntimeTaskInput = { target: DSH_TARGET, instruction: 'hello' }, extra: Record<string, unknown> = {}) => {
     const session = await startPreparedOperation(adapter, offer, { ...resources, ...extra });
     sessions.push(session);
@@ -69,29 +70,26 @@ async function turn(session: Session): Promise<Array<AgentEvent | MessageDraftDe
 
 describe('DshAdapter construction and descriptor', () => {
   it('requires an absolute SDK-owned root that is not the user\'s ~/.dsh', () => {
-    expect(() => new DshAdapter({ home: 'relative/root', model: MODEL })).toThrow(/absolute/);
-    expect(() => new DshAdapter({ home: path.join(os.homedir(), '.dsh'), model: MODEL })).toThrow(/~\/\.dsh/);
-    expect(() => new DshAdapter({ home: path.join(os.homedir(), '.dsh', 'profiles'), model: MODEL })).toThrow(/~\/\.dsh/);
+    expect(() => new DshAdapter({ resolveKey: async () => 'test-key', home: 'relative/root', model: MODEL })).toThrow(/absolute/);
+    expect(() => new DshAdapter({ resolveKey: async () => 'test-key', home: path.join(os.homedir(), '.dsh'), model: MODEL })).toThrow(/~\/\.dsh/);
+    expect(() => new DshAdapter({ resolveKey: async () => 'test-key', home: path.join(os.homedir(), '.dsh', 'profiles'), model: MODEL })).toThrow(/~\/\.dsh/);
   });
 
   it('validates the model selection and sandbox', () => {
-    const at = (model: Partial<DshModelSelection>) => () => new DshAdapter({ home: '/tmp/byok-dsh-x', model: { ...MODEL, ...model } as DshModelSelection });
+    const at = (model: Partial<DshModelSelection>) => () => new DshAdapter({ resolveKey: async () => 'test-key', home: '/tmp/byok-dsh-x', model: { ...MODEL, ...model } as DshModelSelection });
     expect(at({ model: '' })).toThrow(/model/);
     expect(at({ provider: 'Open AI' })).toThrow(/provider/);
     expect(at({ provider: 'custom', baseUrl: undefined })).toThrow(/baseUrl is required/);
     expect(at({ provider: 'deepseek' })).toThrow(/not supported for the deepseek provider/);
     expect(at({ baseUrl: 'https://user:secret@example.test/v1' })).toThrow(/credentials/);
     expect(at({ baseUrl: 'https://example.test/v1?api_key=secret' })).toThrow(/query string/);
-    expect(at({ keyEnv: 'NOT A NAME' })).toThrow(/keyEnv/);
-    expect(at({ keyEnv: 'PROVIDER_CREDENTIAL' })).toThrow(/KEY, TOKEN, SECRET or PASSWORD/);
-    expect(at({ keyEnv: 'BYOK_DSH_PROVIDER_KEY' })).toThrow(/BYOK_ or DSH_/);
-    expect(at({ keyEnv: 'DSH_KEY' })).toThrow(/BYOK_ or DSH_/);
-    expect(at({ keyEnv: 'DEEPSEEK_API_KEY' })).toThrow(/web_search/);
-    expect(() => new DshAdapter({ home: '/tmp/byok-dsh-x', model: MODEL, sandbox: 'inherit' as never })).toThrow(/sandbox/);
+    expect(at({ keyEnv: 'TEST_DSH_PROVIDER_KEY' } as Partial<DshModelSelection>)).toThrow(/keyEnv was removed.*resolveKey/);
+    expect(() => new DshAdapter({ home: '/tmp/byok-dsh-x', model: MODEL } as DshAdapterOptions)).toThrow(/resolveKey must be a function/);
+    expect(() => new DshAdapter({ resolveKey: async () => 'test-key', home: '/tmp/byok-dsh-x', model: MODEL, sandbox: 'inherit' as never })).toThrow(/sandbox/);
   });
 
   it('declares the dsh descriptor', () => {
-    const descriptor = new DshAdapter({ home: '/tmp/byok-dsh-x', model: MODEL }).descriptor;
+    const descriptor = new DshAdapter({ resolveKey: async () => 'test-key', home: '/tmp/byok-dsh-x', model: MODEL }).descriptor;
     expect(descriptor).toMatchObject({ id: 'dsh', supportsDispatchSelection: false, platforms: ['darwin', 'linux'], progressMessageBoundary: 'event' });
     expect(descriptor.capabilities).toEqual(DSH_RUNTIME_CAPABILITIES);
     expect(descriptor.versionPolicy).toEqual({ qualifiedVersion: QUALIFIED_DSH_VERSION, unqualified: 'warn' });
@@ -102,20 +100,20 @@ describe('dshPatch', () => {
   const parse = (model: DshModelSelection) => JSON.parse(dshPatch(model));
 
   it('routes deepseek through dsh\'s own DeepSeek plugin', () => {
-    expect(parse({ provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'DS_KEY' })).toEqual([
-      { id: 'llm-deepseek', config: { apiKeyEnv: 'DS_KEY' } },
+    expect(parse({ provider: 'deepseek', model: 'deepseek-v4-flash' })).toEqual([
+      { id: 'llm-deepseek', config: { apiKeyEnv: DSH_PROVIDER_KEY_ENV } },
     ]);
   });
 
   it('hand-declares an OpenAI-compatible custom route', () => {
     expect(parse(MODEL)).toEqual([
-      { id: 'llm-pi-ai', config: { providers: { 'byok-custom': { apiKeyEnv: 'TEST_DSH_PROVIDER_KEY', api: 'openai-completions', baseURL: 'http://127.0.0.1:9/v1', models: [{ id: 'loop-model' }] } } } },
+      { id: 'llm-pi-ai', config: { providers: { 'byok-custom': { apiKeyEnv: DSH_PROVIDER_KEY_ENV, api: 'openai-completions', baseURL: 'http://127.0.0.1:9/v1', models: [{ id: 'loop-model' }] } } } },
     ]);
   });
 
   it('keys a pi-ai catalog route by its provider id', () => {
-    expect(parse({ provider: 'openai', model: 'gpt-5', keyEnv: 'OA_KEY' })).toEqual([
-      { id: 'llm-pi-ai', config: { providers: { openai: { apiKeyEnv: 'OA_KEY' } } } },
+    expect(parse({ provider: 'openai', model: 'gpt-5' })).toEqual([
+      { id: 'llm-pi-ai', config: { providers: { openai: { apiKeyEnv: DSH_PROVIDER_KEY_ENV } } } },
     ]);
   });
 
@@ -125,18 +123,19 @@ describe('dshPatch', () => {
 });
 
 describe('DshAdapter detect and prepare', () => {
-  it('reads the version, resolves the acp profile in the SDK root, and reports the key variable', async () => {
-    const { adapter, root } = await setup();
-    setAmbient('TEST_DSH_PROVIDER_KEY', 'test-key');
-    expect(await adapter.detect()).toEqual({ kind: 'available', version: QUALIFIED_DSH_VERSION, authPresent: true, sessionCapabilities: { images: false }, executablePath: fixture, executableSource: 'config', versionVerdict: { state: 'allow', qualifiedVersion: QUALIFIED_DSH_VERSION } });
+  it('reads the version, resolves the acp profile in the SDK root, without reading the key', async () => {
+    const resolveKey = vi.fn(async () => 'test-key');
+    const { adapter, root } = await setup({ resolveKey });
+    expect(await adapter.detect()).toEqual({ kind: 'available', version: QUALIFIED_DSH_VERSION, sessionCapabilities: { images: false }, executablePath: fixture, executableSource: 'config', versionVerdict: { state: 'allow', qualifiedVersion: QUALIFIED_DSH_VERSION } });
     await expect(fs.stat(path.join(root, 'profiles', 'acp'))).resolves.toBeDefined();
     await expect(fs.readdir(path.join(root, 'byok-agents-home'))).resolves.toEqual([]);
+    expect(resolveKey).not.toHaveBeenCalled();
   });
 
-  it('reports a missing key and an unqualified version', async () => {
+  it('reports an unqualified version', async () => {
     const { adapter } = await setup();
     setAmbient('FAKE_DSH_VERSION', '0.2.2-alpha.2');
-    expect(await adapter.detect()).toMatchObject({ kind: 'available', version: '0.2.2-alpha.2', authPresent: false, versionVerdict: { state: 'warn', qualifiedVersion: QUALIFIED_DSH_VERSION } });
+    expect(await adapter.detect()).toMatchObject({ kind: 'available', version: '0.2.2-alpha.2', versionVerdict: { state: 'warn', qualifiedVersion: QUALIFIED_DSH_VERSION } });
   });
 
   it('refuses an installation whose acp profile does not resolve', async () => {
@@ -155,14 +154,30 @@ describe('DshAdapter detect and prepare', () => {
   });
 
   it('rejects a missing binary', async () => {
-    const missing = new DshAdapter({ home: await tempDir('bd-'), model: MODEL, resolveBin: () => ({ command: path.join(os.tmpdir(), 'no-such-dsh'), source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
+    const missing = new DshAdapter({ resolveKey: async () => 'test-key', home: await tempDir('bd-'), model: MODEL, resolveBin: () => ({ command: path.join(os.tmpdir(), 'no-such-dsh'), source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
     await expect(missing.prepare({ offer: { target: DSH_TARGET, instruction: 'x' }, descriptor: missing.descriptor, requiredToolsetIds: [] })).resolves.toEqual({ kind: 'reject', reason: 'dsh installation refused: not-found', retryable: false });
+  });
+});
+
+describe('DshAdapter catalog', () => {
+  it('resolves on an authenticated catalog spawn and skips the resolver on a cache hit', async () => {
+    const resolveKey = vi.fn(async () => '/catalog-key');
+    const { adapter, log, facts } = await setup({ resolveKey });
+    setAmbient('FAKE_DSH_LOG', log);
+    const catalog = { kind: 'ok', models: [{ id: 'byok-custom/loop-model', displayName: '[redacted]', provider: { id: 'byok-custom' } }] };
+    await expect(adapter.listModels()).resolves.toEqual(catalog);
+    await expect(adapter.listModels()).resolves.toEqual(catalog);
+    expect(resolveKey).toHaveBeenCalledOnce();
+    await expect(adapter.listModels({ refresh: true })).resolves.toEqual(catalog);
+    expect(resolveKey).toHaveBeenCalledTimes(2);
+    expect((await facts()).filter(fact => fact.kind === 'start')).toHaveLength(2);
   });
 });
 
 describe('DshAdapter sessions', () => {
   it('uses the task model and effort on fresh and resumed DSH sessions', async () => {
-    const box = await setup();
+    const resolveKey = vi.fn().mockResolvedValueOnce('first-key').mockResolvedValueOnce('rotated-key');
+    const box = await setup({ resolveKey });
     const request = { target: DSH_TARGET, instruction: 'hello', modelId: 'byok-custom/task-model', effort: 'high' };
     const fresh = await box.open(request);
     await turn(fresh);
@@ -170,11 +185,27 @@ describe('DshAdapter sessions', () => {
     await fresh.close();
     await turn(await box.open({ ...request, sessionRef }));
     const log = await box.facts();
+    expect(resolveKey).toHaveBeenCalledTimes(2);
+    expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['first-key', 'rotated-key']);
     const expected = { provider: 'byok-custom', model: 'task-model', reasoningEffort: 'high' };
     expect(log.filter(fact => ['open', 'resume'].includes(fact.method)).map(row => row.request.agentOptions)).toEqual([expected, expected]);
     expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch({ ...MODEL, model: 'task-model' })));
     await expect(box.adapter.prepare({ offer: { ...request, modelId: 'other-route/task-model' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [] }))
       .resolves.toMatchObject({ kind: 'reject', retryable: false, reason: expect.stringMatching(/^model_rejected:/) });
+  });
+
+  it('keeps two concurrent launch keys scoped to their own processes', async () => {
+    const slow = Promise.withResolvers<string>();
+    const resolveKey = vi.fn().mockReturnValueOnce(slow.promise).mockResolvedValueOnce('parallel-second-key');
+    const { open, facts } = await setup({ resolveKey });
+    const first = open({ target: DSH_TARGET, instruction: 'first launch' });
+    await vi.waitFor(() => expect(resolveKey).toHaveBeenCalledOnce());
+    await turn(await open({ target: DSH_TARGET, instruction: 'second launch' }));
+    slow.resolve('parallel-first-key');
+    await turn(await first);
+    const log = await facts();
+    expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['parallel-second-key', 'parallel-first-key']);
+    expect(log.filter(row => row.method === 'prompt').map(row => row.request.text)).toEqual(['second launch', 'first launch']);
   });
 
   it('fails before prompt when DSH reports a different effort', async () => {
@@ -196,9 +227,57 @@ describe('DshAdapter sessions', () => {
     expect(start.env.TMPDIR).not.toBe(os.tmpdir());
     expect(path.dirname(start.argv[3])).toBe(start.cwd);
     expect(start.cwd).not.toBe(workspaceDir);
-    expect(start.env).toMatchObject({ DSH_HOME: root, DSH_AGENTS_HOME: path.join(root, 'byok-agents-home'), DSH_PERMISSION_MODE: 'danger-full-access', DSH_TELEMETRY_MODE: 'DISABLED', TEST_DSH_PROVIDER_KEY: 'test-key' });
+    expect(start.env).toMatchObject({ DSH_HOME: root, DSH_AGENTS_HOME: path.join(root, 'byok-agents-home'), DSH_PERMISSION_MODE: 'danger-full-access', DSH_TELEMETRY_MODE: 'DISABLED', [DSH_PROVIDER_KEY_ENV]: 'test-key' });
+    expect(start.env).not.toHaveProperty('byok_dsh_provider_api_key');
+    expect(process.env[DSH_PROVIDER_KEY_ENV]).toBeUndefined();
     expect(start.env).not.toHaveProperty('DSH_STRAY');
     expect(start.patch).toEqual(JSON.parse(dshPatch(MODEL)));
+  });
+
+  it.each([
+    ['rejected', async (): Promise<string> => { throw new Error('private resolver value', { cause: new Error('nested resolver value') }); }],
+    ['thrown', (): never => { throw new Error('private resolver value'); }],
+    ['blank', async (): Promise<string> => '  '],
+    ['invalid environment bytes', async (): Promise<string> => 'private resolver value\0'],
+  ] as const)('refuses a %s key before spawn and discards resolver diagnostics', async (_label, resolveKey) => {
+    const { open, facts } = await setup({ resolveKey });
+    const scratch = await testExecutionScratch();
+    const error = await open(undefined, { scratch }).catch(error => error);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: 'dsh provider API key resolution failed' });
+    expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain('resolver value');
+    expect((await facts()).some(row => row.kind === 'start')).toBe(false);
+    await expect(fs.stat(scratch.sdkDir)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('cancels a pending resolver, reclaims scratch, and ignores a late key', async () => {
+    const pending = Promise.withResolvers<string>();
+    const resolveKey = vi.fn(() => pending.promise);
+    const { open, facts } = await setup({ resolveKey });
+    const scratch = await testExecutionScratch();
+    const controller = new AbortController();
+    const rejected = expect(open(undefined, { scratch, signal: controller.signal })).rejects.toThrow('dsh start was cancelled');
+    await vi.waitFor(() => expect(resolveKey).toHaveBeenCalledOnce());
+    controller.abort('private cancellation value');
+    await rejected;
+    await expect(fs.stat(scratch.sdkDir)).rejects.toMatchObject({ code: 'ENOENT' });
+    pending.resolve('late-key');
+    expect((await facts()).some(row => row.kind === 'start')).toBe(false);
+  });
+
+  it('redacts echoed key bytes from an early native exit', async () => {
+    const key = '/stderr-provider-key';
+    const { open } = await setup({ resolveKey: async () => key }, { FAKE_DSH_OPEN_EXIT: '1' });
+    const error = await open().catch(error => error);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(key);
+  });
+
+  it.each(['+1', '/looks/like/a/path'])('redacts an echoed key from the native event before projection (%s)', async key => {
+    const { open } = await setup({ resolveKey: async () => key });
+    const events = await turn(await open({ target: DSH_TARGET, instruction: 'echo-provider-key' }));
+    expect(events).toContainEqual({ type: 'progress', text: 'key was [redacted]' });
+    expect(JSON.stringify(events)).not.toContain(key);
   });
 
   it('opens the session in the canonical workspace with the task MCP servers', async () => {

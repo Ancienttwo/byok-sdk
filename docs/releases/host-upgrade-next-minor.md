@@ -35,3 +35,25 @@ three fields can be taken directly from a provider profile.
 ```ts
 const models = await discoverProviderModels({ adapter, auth_mode, base_url }, secret);
 ```
+
+## dsh and agy provider keys
+
+Supply an async `resolveKey` on `DshAdapterOptions`, `AgyAdapterOptions`,
+`runtimes.dsh` or `runtimes.agy`. Read the key in that callback from the
+Host's credential store for the daemon's account. Remove `model.keyEnv`
+from dsh configuration and remove the old provider-key entries from
+`runtimeEnvironment.pass` or `allow`. The Host can stop copying keys into
+its process environment. Both adapters now omit `authPresent` during
+installation detection. Use the Host's credential store to decide whether
+the account has a saved key.
+
+**Known limitation.** Plain JSON configuration cannot start dsh or agy.
+Use an embedded Host to provide the per-spawn callback. See [#2408](https://github.com/Ancienttwo/byok-sdk/issues/2408).
+
+## Agent memory preflight and helper path
+
+Use `checkAgentMemoryHome(home, { scope: 'resident' })` from
+`@byok-sdk/client/agent-memory` to validate `MEMORY.md` during device sync
+without starting a helper. The same entry exports
+`resolveAgentMemoryFilesystemHelper(assetRoot?)` to resolve a verified helper
+path before opening a filesystem. See [#2410](https://github.com/Ancienttwo/byok-sdk/issues/2410).

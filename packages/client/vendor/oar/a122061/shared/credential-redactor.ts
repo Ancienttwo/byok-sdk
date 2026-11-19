@@ -1,3 +1,4 @@
+// BYOK change: Modified from OAR a122061 to accept explicitly resolved credentials (Apache-2.0).
 /* oxlint-disable import/prefer-default-export -- Shared named helper. */
 import type { SessionOptions } from "../contracts/session.js";
 import { redactText } from "./redact-text.js";
@@ -26,6 +27,8 @@ export interface CredentialRedactor {
   /** Private connection redaction input. Never put these values in records or diagnostics. */
   values(this: void): readonly string[];
   add(this: void, value: string | undefined): void;
+  /** BYOK change: A credential the caller resolved, including short or path-like values. */
+  addExplicit(this: void, value: string): void;
   /** BYOK change: suppress an echoed image payload from records and control errors. */
   addImage(this: void, data: string): void;
   redact(this: void, text: string): string;
@@ -59,14 +62,18 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     for (const data of images) text = text.replaceAll(data, "[redacted]");
     return values.reduce((result, value) => result.replaceAll(value, "[redacted]"), text);
   };
+  const addExplicit = (value: string): void => {
+    if (value.length !== 0 && !known.has(value)) {
+      known.add(value);
+      values = [...known].toSorted((left, right) => right.length - left.length);
+    }
+  };
   return {
     values: () => values,
     add(value) {
-      if (credentialValue(value) && !known.has(value)) {
-        known.add(value);
-        values = [...known].toSorted((left, right) => right.length - left.length);
-      }
+      if (credentialValue(value)) { addExplicit(value); }
     },
+    addExplicit,
     addImage(data) {
       if (data.length !== 0) images.add(data);
     },

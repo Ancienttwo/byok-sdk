@@ -57,6 +57,8 @@ export type AcpSessionOptions = Omit<SessionOptions, "env" | "endTurnProcessesOn
 
 // BYOK change: the record consumer is registered before any record is appended.
 export interface AcpSessionHooks {
+  /** BYOK change: Caller-resolved credentials for redaction before retention and diagnostic delivery. */
+  readonly credentialsForRedaction?: readonly string[];
   /** The native session id, before any record is delivered; a throw fails the open. */
   readonly onReady?: (sessionId: string) => void;
   /** A kernel observer from seq 0. The kernel swallows its errors, so it fails the session itself. */
@@ -81,6 +83,7 @@ export function acpSession(profile: AcpSessionProfile): StartAcpSession {
   // opening failures, retained records and later control errors under the same credential rules.
   return async (spawnLineProcess, spawnTerminal, installation, options, hooks = {}) => {
     const credentials = sessionCredentialRedactor(options);
+    for (const value of hooks.credentialsForRedaction ?? []) { credentials.addExplicit(value); }
     try { return await openAcpRuntimeSession(profile, spawnLineProcess, spawnTerminal, installation, options, hooks, credentials); }
     catch (error) { throw credentials.redactValue(error); }
   };

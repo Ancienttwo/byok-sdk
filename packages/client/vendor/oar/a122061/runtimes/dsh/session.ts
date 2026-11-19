@@ -38,6 +38,8 @@ export interface DshAdapterSession extends AdapterSession {
 }
 
 export interface DshSessionHooks {
+  /** BYOK change: Caller-resolved credentials for redaction before retention and diagnostic delivery. */
+  readonly credentialsForRedaction?: readonly string[];
   /** The session id, before any record is delivered; a throw fails the open. */
   readonly onReady?: (sessionId: string) => void;
   /** A kernel observer from seq 0. The kernel swallows its errors, so it fails the session itself. */
@@ -225,6 +227,7 @@ async function open(spawnLineProcess: SpawnDshLineProcess, command: string, opti
 export async function dshSession(spawnLineProcess: SpawnDshLineProcess, installation: AvailableInstallation, options: DshSessionOptions, hooks: DshSessionHooks = {}): Promise<DshAdapterSession> {
   // BYOK change: Upstream withSessionCredentials without sealSession, over the caller's explicit environment.
   const credentials = sessionCredentialRedactor({ ...options, env: options.launch.env });
+  for (const value of hooks.credentialsForRedaction ?? []) { credentials.addExplicit(value); }
   try {
     refuseSessionOptions(dshRefusedSessionOptions, options);
     checkSessionName(options);

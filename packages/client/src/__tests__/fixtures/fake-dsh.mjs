@@ -34,8 +34,13 @@ if (args[2] !== '--patch' || args[4] !== '--patch' || args.length !== 6) { proce
 
 const patch = JSON.parse(readFileSync(args[3], 'utf8'));
 const overlay = JSON.parse(readFileSync(args[5], 'utf8'));
-const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(DSH_|FAKE_|TEST_|TMPDIR$)/.test(name)));
+const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => /^(DSH_|FAKE_|TEST_|BYOK_DSH_PROVIDER_API_KEY$|TMPDIR$)/i.test(name)));
 log({ kind: 'start', argv: args, cwd: process.cwd(), env, patch, overlay, pid: process.pid });
+if (process.env.FAKE_DSH_OPEN_EXIT === '1') {
+  process.stderr.write(`provider key: ${process.env.BYOK_DSH_PROVIDER_API_KEY}\n`);
+  process.exitCode = 3;
+  throw new Error('failed to start the bridge');
+}
 
 const sessions = path.join(home, 'fake-sessions');
 const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
@@ -54,6 +59,10 @@ function prompt(sessionId, text) {
   if (text === 'fail') return end({ kind: 'error', error: { code: 'AUTH', status: 401, message: 'invalid api key' } });
   if (text === 'rate-limit') return end({ kind: 'error', error: { code: 'RATE_LIMIT', status: 429, message: 'rate limit exceeded' } });
   if (text === 'exit') process.exit(3);
+  if (text === 'echo-provider-key') {
+    assistant(sessionId, [{ type: 'text', text: `key was ${process.env.BYOK_DSH_PROVIDER_API_KEY}` }]);
+    return end({ kind: 'completed' });
+  }
   if (text === 'hang') { hanging = sessionId; return; }
   const [provider, ...model] = (process.env.FAKE_DSH_ROUTE ?? route).split('/');
   event(sessionId, 'request/header', { header: { config: { provider, model: model.join('/') } } });
@@ -94,6 +103,9 @@ function prompt(sessionId, text) {
 
 const modelReadback = ({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort: process.env.FAKE_DSH_EFFORT_READBACK ?? reasoningEffort });
 const commands = {
+  models() {
+    return { providers: [{ id: 'byok-custom', models: [{ id: 'loop-model', name: process.env.BYOK_DSH_PROVIDER_API_KEY }] }] };
+  },
   open(request) {
     route = `${request.agentOptions.provider}/${request.agentOptions.model}`;
     mkdirSync(sessions, { recursive: true });

@@ -3,7 +3,7 @@ import { testScratchRoot } from './fixtures/execution-scratch';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
@@ -167,14 +167,16 @@ describe('runtimes.<id>.runtimeEnvironment', () => {
 
   it.skipIf(process.platform === 'win32')('a name passed only on runtimes.dsh reaches dsh and no other runtime', async () => {
     useSnapshot(captured);
-    process.env.TEST_DSH_PROVIDER_KEY = 'fake-dsh-key';
+    process.env.TEST_DSH_SETTING = 'fixture-setting';
     try {
-      const dsh = { home: await tmpDir('byok-env-dsh-'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' }, runtimeEnvironment: { pass: ['TEST_DSH_PROVIDER_KEY'] } };
+      const resolveKey = vi.fn(async () => 'fake-dsh-key');
+      const dsh = { home: await tmpDir('byok-env-dsh-'), model: { provider: 'deepseek', model: 'deepseek-v4-flash' }, resolveKey, runtimeEnvironment: { pass: ['TEST_DSH_SETTING'] } };
       const env = await envOf(createRuntimeAdapters({ runtimeAllowlist: ['pi', 'claude', 'codex', 'grok', 'dsh'], runtimes: { dsh } }));
       expect(Object.keys(env)).toEqual(['pi', 'claude', 'codex', 'grok', 'dsh']);
-      for (const [id, childEnv] of Object.entries(env)) expect(childEnv.TEST_DSH_PROVIDER_KEY, id).toBe(id === 'dsh' ? 'fake-dsh-key' : undefined);
+      for (const [id, childEnv] of Object.entries(env)) expect(childEnv.TEST_DSH_SETTING, id).toBe(id === 'dsh' ? 'fixture-setting' : undefined);
+      expect(resolveKey).not.toHaveBeenCalled();
     } finally {
-      delete process.env.TEST_DSH_PROVIDER_KEY;
+      delete process.env.TEST_DSH_SETTING;
     }
   });
 });

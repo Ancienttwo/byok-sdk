@@ -67,8 +67,8 @@ vi.mock('../adapters/dsh/dsh-adapter', async (importOriginal) => {
 afterEach(() => { constructed.splice(0); });
 
 const versionPolicy = { qualifiedVersion: '1.0.0', unqualified: 'warn' } as const;
-const DSH = { home: path.join(os.tmpdir(), 'byok-dsh-home'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } };
-const AGY = { home: path.join(os.tmpdir(), 'byok-agy-home') };
+const DSH = { home: path.join(os.tmpdir(), 'byok-dsh-home'), model: { provider: 'deepseek', model: 'deepseek-v4-flash' }, resolveKey: async () => 'fixture-dsh-key' };
+const AGY = { home: path.join(os.tmpdir(), 'byok-agy-home'), resolveKey: async () => 'fixture-agy-key' };
 const PI_SKILLS = [path.join(os.tmpdir(), 'byok-pi-skills')];
 const FACTORY_CONFIG: RuntimeAdaptersConfig = {
   nativeAssetRoot: path.join(os.tmpdir(), 'byok-native-assets'),
@@ -132,7 +132,7 @@ describe('createRuntimeAdapters', () => {
     expect(() => createRuntimeAdapters({ runtimeAllowlist: ['agy'] })).toThrow(expect.objectContaining({
       issues: [expect.objectContaining({ code: 'missing_required', path: 'runtimes.agy' })],
     }));
-    expectInvalid({ runtimeAllowlist: ['agy'], runtimes: { agy: { home: 'relative' } } }, 'runtimes.agy', /absolute/);
+    expectInvalid({ runtimeAllowlist: ['agy'], runtimes: { agy: { ...AGY, home: 'relative' } } }, 'runtimes.agy', /absolute/);
     expectInvalid({ runtimes: { agy: { ...AGY, home: 1 as never } } }, 'runtimes.agy.home', /a string/);
   });
 
@@ -141,6 +141,12 @@ describe('createRuntimeAdapters', () => {
     expectInvalid({ runtimes: { dsh: { ...DSH, home: 1 as never } } }, 'runtimes.dsh.home', /a string/);
     expectInvalid({ runtimes: { dsh: { home: DSH.home } as never } }, 'runtimes.dsh.model', /an object/);
     expectInvalid({ runtimes: { dsh: { ...DSH, sandbox: 'auto' as never } } }, 'runtimes.dsh.sandbox', /one of "danger-full-access"/);
+    expect(constructed).toHaveLength(0);
+  });
+
+  it.each(['dsh', 'agy'] as const)('reports a missing %s resolver before constructing the adapter', id => {
+    const options = id === 'dsh' ? DSH : AGY;
+    expectInvalid({ runtimes: { [id]: { ...options, resolveKey: undefined } } }, `runtimes.${id}.resolveKey`, /must be a function/);
     expect(constructed).toHaveLength(0);
   });
 
@@ -205,13 +211,13 @@ const OPTION_SOURCES = {
     spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof GrokAdapterOptions, OptionSource>,
   agy: {
-    home: 'runtimes.agy.home', model: 'runtimes.agy.model', nativeAssetRoot: 'nativeAssetRoot',
-    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'runtimes.agy.versionPolicy',
+    home: 'embedded-only', model: 'embedded-only', resolveKey: 'embedded-only', nativeAssetRoot: 'nativeAssetRoot',
+    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'embedded-only',
     resolveBin: 'embedded-only', spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof AgyAdapterOptions, OptionSource>,
   dsh: {
-    home: 'runtimes.dsh.home', model: 'runtimes.dsh.model', sandbox: 'runtimes.dsh.sandbox', nativeAssetRoot: 'nativeAssetRoot',
-    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'runtimes.dsh.versionPolicy',
+    home: 'embedded-only', model: 'embedded-only', resolveKey: 'embedded-only', sandbox: 'embedded-only', nativeAssetRoot: 'nativeAssetRoot',
+    runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'embedded-only',
     resolveBin: 'embedded-only', spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof DshAdapterOptions, OptionSource>,
 };
