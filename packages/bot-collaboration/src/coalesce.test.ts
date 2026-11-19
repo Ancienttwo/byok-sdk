@@ -7,7 +7,9 @@ import { enqueue, hash, HostLedger, type LedgerState } from '@byok-sdk/server/ex
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type BotOptions } from './host';
 import { addTurn, stateOf, type CollaborationState, type Turn } from './model';
-import { admitUserInput, batchRequest, COALESCE_DEFAULTS, coalescePolicy, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
+import { batchRequest, COALESCE_DEFAULTS, coalescePolicy, sealBatchForCancel, sealDueBatches, type CoalescePolicy } from './coalesce';
+import { admitUserInput } from './host-kit';
+import { addTurn as addRuleTurn } from './rules/index';
 import { botLedgerOptions } from './compaction';
 
 const POLICY: CoalescePolicy = { ...COALESCE_DEFAULTS };
@@ -56,6 +58,23 @@ it('validates the policy at construction and applies the ruled defaults', async 
   // The bound follows the configured ContextPack budget: maxBytes <= floor(contextMaxBytes / 4).
   await expect(host({ contextMaxBytes: 16_384, coalesce: {} }, 'over')).rejects.toThrow('coalesce.maxBytes must be an integer from 1024 to 4096');
   await host({ contextMaxBytes: 16_384, coalesce: { maxBytes: 4096 } }, 'fits');
+});
+
+it('rejects seventeen valid image refs before admitting a user input or Turn', () => {
+  const state = team();
+  const images = Array.from({ length: 17 }, (_, index) => ({
+    mediaType: 'image/png' as const,
+    blob: { blobId: `image-${index}`, contentHash: `sha256:${index.toString(16).padStart(64, '0')}`, size: 100, contentType: 'image/png' },
+  }));
+  const input = { ...owner('images', 'Describe the images'), images };
+  const before = structuredClone(state);
+
+  expect(() => admitUserInput(state, input, undefined, 1000)).toThrow();
+  expect(() => admitUserInput(state, input, POLICY, 1000)).toThrow();
+  expect(() => addRuleTurn(state, { ...input, root: input.id, source: 'user', hop: 0 })).toThrow();
+  expect(state).toEqual(before);
+  expect(admitUserInput(state, { ...input, images: images.slice(0, 16) }, undefined, 1000)).toBe(input.id);
+  expect(state.turns[input.id]?.images).toEqual(images.slice(0, 16));
 });
 
 it('without a policy keeps the K8a state change byte for byte (S1)', () => {

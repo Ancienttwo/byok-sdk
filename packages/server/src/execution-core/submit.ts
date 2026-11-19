@@ -1,5 +1,6 @@
 import type { AgentExecutionInput } from '@byok-sdk/cloud';
 import type { ByokServer } from '../index.js';
+import { isInputImageRefError } from '../input-image-ref-error.js';
 import { canonical, isSealed, type FrozenExecutionInput, type SealedAgentExecutionInput } from './model.js';
 
 /**
@@ -55,16 +56,16 @@ export async function frozenDelivered(port: Pick<FrozenSubmitPort, 'offer'>, inp
 
 /**
  * Submits one frozen input under its own task id. It reads back first. `beforeSubmit` runs only when the readback
- * is not delivered, and returns false to stop with no submit (for example at `waitUntil`). After a throw, only a
- * delivered readback counts; otherwise the error is thrown again and the submit stays uncertain. A sealed input on a
- * port without `submitSealed` throws `SealedDispatchUnavailableError` before the readback.
+ * is not delivered, and returns false to stop with no submit (for example at `waitUntil`). A definitive image refusal
+ * propagates directly. After other submit errors, a delivered readback resolves the uncertainty; otherwise the error
+ * propagates. A sealed input on a port without `submitSealed` throws `SealedDispatchUnavailableError` before readback.
  */
 export async function submitFrozen(port: FrozenSubmitPort, input: FrozenExecutionInput, beforeSubmit: () => boolean | Promise<boolean>): Promise<'delivered' | 'stopped'> {
   const send = dispatcher(port, input);
   if (await frozenDelivered(port, input)) return 'delivered';
   if (!await beforeSubmit()) return 'stopped';
   try { await send(); }
-  catch (error) { if (!await frozenDelivered(port, input)) throw error; }
+  catch (error) { if (isInputImageRefError(error) || !await frozenDelivered(port, input)) throw error; }
   return 'delivered';
 }
 function dispatcher(port: FrozenSubmitPort, input: FrozenExecutionInput): () => Promise<unknown> {

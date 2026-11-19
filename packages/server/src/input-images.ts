@@ -1,5 +1,6 @@
 import type { EmbeddedBlobAccess } from './embedded-blob-storage-contract.js';
 import { ByokCloudError } from '@byok-sdk/cloud';
+import { INPUT_IMAGE_REF_ERROR } from './input-image-ref-error.js';
 import { ByokCoreError, isCoreError, type TenantId } from '@byok-sdk/core';
 import { INPUT_IMAGE_MAX_BYTES, InputImageBlobRefSchema, type InputImageBlobRef } from '@byok-sdk/protocol';
 import type { FacadeStoreComposition } from './stores.js';
@@ -49,7 +50,8 @@ export async function assertEmbeddedInputImages(access: EmbeddedBlobAccess, tena
     const stored = blob.size > 0 && blob.size <= limit ? await access.readCommitted(tenant, blob.blobId) : undefined;
     if (stored === undefined || stored.contentHash !== blob.contentHash || stored.size !== blob.size ||
       stored.contentType !== blob.contentType || stored.contentType !== mediaType) {
-      throw new ByokCloudError('coordination_input_invalid', 'Input images must match committed blobs of this tenant within the image size limit.');
+      throw Object.assign(new ByokCloudError('coordination_input_invalid',
+        'Input images must match committed blobs of this tenant within the image size limit.'), { [INPUT_IMAGE_REF_ERROR]: true });
     }
   }
 }

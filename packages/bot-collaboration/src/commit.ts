@@ -83,6 +83,7 @@ export function syncTurnInLedger(ledger: HostLedger, s: LedgerState, rows: Appli
   const facts: SyncFacts = {
     intent: intentFacts(s).intent,
     executionStarted: id => { const row = s.intents[hash(id)]; return !!row && !!s.executions[row.taskId]?.started; },
+    preparationError: id => s.intents[hash(id)]?.preparationError,
     retired: id => turnIntentRetired(ledger, s, turn, options.now) ? 'result_retired' : retiredIdentity('turn', id, (namespace, row) => rows.isRetired(namespace, row)) ? 'turn_retired' : undefined,
     // #957: a Turn whose Bot's device is frozen for a switch, or owned by H, is held and never frozen into an intent.
     deviceRefusal: botId => botDeviceRefusal(stateOf(s.application), botId),

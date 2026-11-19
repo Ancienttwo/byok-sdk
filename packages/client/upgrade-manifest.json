@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "886df362cc3eb69da65e0d108ff40fefcfcfa5e30777a6c862f0883d052d2f96"
+    "snapshotSha256": "83989370dbaff5539dc2d449c23af4fc3dd59a79d85b2142a9c152d0ad6f3f4c"
   },
   "configFields": {
     "status": "tracked",
@@ -152,6 +152,24 @@
       "items": [
         "behavior:k4-memory-reader-dispatch"
       ]
+    },
+    {
+      "id": "bot-input-images",
+      "impact": "additive",
+      "summary": "BotCollaboration.input accepts { request, images } and forwards ordered image refs to K4. Coalescing starts a new batch before exceeding 16 images. Hosts can read coordination_input_invalid on a Turn whose image submission was refused.",
+      "migration": "packages/bot-collaboration/README.md#input-images",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#BotCollaboration",
+        "export:@byok-sdk/bot-collaboration/host-kit#Command",
+        "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+        "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+        "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+        "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+        "export:@byok-sdk/bot-collaboration/rules#InputFields",
+        "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+        "export:@byok-sdk/bot-collaboration/rules#addTurn",
+        "export:@byok-sdk/bot-collaboration/rules#seatTurn"
+      ]
     }
   ],
   "changes": [
@@ -167,6 +185,11 @@
       "before": "optional schema-sha256=fba615fff84b94e3",
       "after": "optional schema-sha256=7d4f72ebf918d478",
       "entry": "mcp-toolset-exposure-config"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
+      "change": "changed",
+      "entry": "bot-input-images"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
@@ -189,9 +212,54 @@
       "entry": "bot-persona-and-autonomy-context"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Command",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
       "change": "changed",
       "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#InputFields",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#addTurn",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#seatTurn",
+      "change": "changed",
+      "entry": "bot-input-images"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration/rules#syncTurn",

@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { HostLedger } from '@byok-sdk/server/execution-core';
+import { hash, HostLedger } from '@byok-sdk/server/execution-core';
 import { openHost, type TestHost } from '@byok-sdk/example-host-execution-core/test-support';
 import { template } from './k4-fixtures.test-support';
 import type { ExecutionServer } from '@byok-sdk/server/execution-core';
@@ -10,6 +10,8 @@ import { CONNECTOR_OUTCOME_UNKNOWN } from './rules/commands';
 import { botRoutines } from './routines';
 import { deliverRoutine, routineOf, seedRoutine } from './routines.test-support';
 import { botLedgerOptions } from './compaction';
+
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jFJ0AAAAASUVORK5CYII=', 'base64');
 
 let fixture: TestHost;
 let bot: BotCollaboration;
@@ -37,6 +39,54 @@ async function finish(id: string, document: unknown = {}) {
   (await running(id)).finish(document);
   await vi.waitFor(async () => { await bot.drain(); expect(bot.snapshot().turns[id]?.status).toBe('succeeded'); }, { timeout: 5000 });
 }
+
+it('submits the exact images and compares ordered refs on input replay', async () => {
+  await setup();
+  const images = await Promise.all([PNG, Buffer.concat([PNG, Buffer.of(1)])].map(bytes =>
+    fixture.server.blobs.uploadInputImage({ bytes, contentType: 'image/png' })));
+  const request = 'Compare these images';
+  const id = await bot.input('images', { request, images });
+  const { taskId } = bot.core.intent(id)!;
+  expect(bot.snapshot().turns[id]?.images).toEqual(images);
+  expect((await fixture.server.tasks.offer(taskId))?.payload).toHaveProperty('images', images);
+  expect(await bot.input('images', { request, images: structuredClone(images) })).toBe(id);
+  await expect(bot.input('images', { request, images: [images[0]!] })).rejects.toThrow('Input identity conflict');
+  await expect(bot.input('images', { request, images: [...images].reverse() })).rejects.toThrow('Input identity conflict');
+  await expect(bot.input('images', request)).rejects.toThrow('Input identity conflict');
+  expect(Object.values(fixture.ledger.snapshot().intents).map(intent => intent.taskId)).toEqual([taskId]);
+});
+
+it('settles a collected image on recovery and continues with the next Turn in the FIFO', async () => {
+  const options = await setup({ history: async () => { throw new Error('History is temporarily unavailable'); } });
+  const image = await fixture.server.blobs.uploadInputImage({ bytes: PNG, contentType: 'image/png' });
+  const id = await bot.input('collected', { request: 'Describe the old image', images: [image] });
+  const next = await bot.input('successor', 'Continue with text');
+  expect(bot.core.intent(id)).toBeUndefined();
+  expect(bot.core.intent(next)).toBeUndefined();
+  await bot.close();
+
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(Date.now() + 25 * 3_600_000);
+  await fixture.server.maintenance.runNow();
+  expect(await fixture.server.blobs.getDownloadUrl(image.blob.blobId)).toBeUndefined();
+  vi.useRealTimers();
+
+  const submit = vi.spyOn(fixture.server.executions, 'submit');
+  extra = new HostLedger(`${fixture.root}/host.sqlite`, fixture.ledger.tenant, botLedgerOptions);
+  bot = new BotCollaboration(fixture.server, extra, { ...options, history: async () => [] });
+  await bot.recover();
+  const failure = { status: 'failed', conclusion: 'failed', settleCode: 'coordination_input_invalid' };
+  expect(bot.snapshot().turns[id]).toMatchObject(failure);
+  expect(extra.snapshot().outbox[`projection:${hash(`bot-turn:${id}`)}`]).toMatchObject({ value: failure });
+  const intent = bot.core.intent(id)!;
+  expect(intent).toMatchObject({ phase: 'settled', conclusion: 'failed', preparationError: 'coordination_input_invalid', attempts: 1 });
+  expect(await fixture.server.tasks.attempt(intent.taskId)).toBeUndefined();
+  expect((await fixture.server.tasks.offer(bot.core.intent(next)!.taskId))?.payload).not.toHaveProperty('images');
+  await finish(next);
+  await bot.recover();
+  expect(submit.mock.calls.filter(([input]) => input.taskId === intent.taskId)).toHaveLength(1);
+  expect(bot.snapshot().turns[id]).toMatchObject(failure);
+});
 
 it('runs submit_result -> self delegation -> confirmation -> connector -> action_result through the real SDK and daemon', async () => {
   const connector = vi.fn(async (id: string) => ({ ok: true, externalId: id }));

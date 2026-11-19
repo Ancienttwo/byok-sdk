@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import { ByokCloudError } from '@byok-sdk/cloud';
+import { INPUT_IMAGE_REF_ERROR } from '../../input-image-ref-error';
 import { FrozenOfferMismatchError, HostExecutionCore, HostLedger, submitFrozen, type ExecutionServer, type FrozenInput, type FrozenOffer, type FrozenSubmitPort } from '../../execution-core/index';
 
 const input: FrozenInput = {
@@ -99,6 +101,14 @@ describe('submitFrozen (#793 D2b)', () => {
     const p = port([readback(true, { payload: reordered } as Partial<FrozenOffer>)]);
     expect(await submitFrozen(p, input, open)).toBe('delivered');
     expect(p.submit).not.toHaveBeenCalled();
+  });
+
+  it('propagates a definitive image refusal without a second offer read', async () => {
+    const refusal = Object.assign(new ByokCloudError('coordination_input_invalid', 'Missing image'), { [INPUT_IMAGE_REF_ERROR]: true });
+    const p = port([undefined], async () => { throw refusal; });
+    await expect(submitFrozen(p, input, open)).rejects.toBe(refusal);
+    expect(p.offer).toHaveBeenCalledTimes(1);
+    expect(p.submit).toHaveBeenCalledTimes(1);
   });
 
   it('counts a throw as delivered only when the readback is delivered', async () => {

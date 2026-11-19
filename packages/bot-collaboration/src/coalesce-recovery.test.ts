@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createByokServer } from '@byok-sdk/server';
+import type { InputImageBlobRef } from '@byok-sdk/protocol';
 import { hash, HostLedger } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support';
 import { BotCollaboration, type BotOptions } from './host';
@@ -85,6 +86,42 @@ it('recovers an open batch after a crash as one Turn and one intent, and replaye
   expect(users.map(turn => [turn.id, turn.inputIds])).toEqual([[busy, [busy]], [a, [a, b]]]);
   expect(Object.values(fixture.ledger.snapshot().intents).map(intent => intent.key)).toEqual([busy, a]);
   expect(Object.keys(fixture.bot.snapshot().inputs!)).toEqual([busy, a, b]);
+});
+
+it('caps coalesced images at sixteen across recovery and preserves their arrival order', async () => {
+  let now = 1_000_000;
+  const fixture = await open({ now: () => now });
+  const images: readonly InputImageBlobRef[] = Array.from({ length: 17 }, (_, index) => ({
+    mediaType: 'image/png', blob: { blobId: `image-${index}`, contentHash: `sha256:${index.toString(16).padStart(64, '0')}`,
+      size: 100, contentType: 'image/png' },
+  }));
+  const first = { request: 'one', images: images.slice(0, 8) };
+  const second = { request: 'two', images: images.slice(8, 16) };
+  const third = { request: 'three', images: images.slice(16) };
+  await fixture.bot.input('busy', 'Long task');
+  const [a, b, c] = [idOf('a'), idOf('b'), idOf('c')];
+  expect(await fixture.bot.input('a', first)).toBe(a);
+  await expect(fixture.bot.input('oversize', { request: 'too big', images })).rejects.toThrow();
+  await expect(fixture.bot.input('empty', { request: 'empty', images: [] })).rejects.toThrow();
+  expect(fixture.bot.inputRoot('oversize')).toBeUndefined();
+  expect(fixture.bot.inputRoot('empty')).toBeUndefined();
+  expect(await fixture.bot.input('b', second)).toBe(a);
+  expect(fixture.bot.snapshot().inputBatches![a]).toMatchObject({ state: 'open', inputIds: [a, b], images: images.slice(0, 16) });
+
+  await fixture.restart();
+  expect(await fixture.bot.input('b', second)).toBe(a);
+  await expect(fixture.bot.input('b', { ...second, images: third.images })).rejects.toThrow('Input identity conflict');
+  expect(await fixture.bot.input('c', third)).toBe(c);
+  expect(fixture.bot.snapshot().inputBatches![a]).toMatchObject({ state: 'sealed', sealReason: 'images', inputIds: [a, b] });
+  expect(fixture.bot.core.intent(a)!.execution.payload).toHaveProperty('images', images.slice(0, 16));
+  expect(fixture.bot.snapshot().inputBatches![c]).toMatchObject({ state: 'open', inputIds: [c], images: third.images });
+
+  now += 10_000;
+  await fixture.restart();
+  expect(await fixture.bot.input('c', third)).toBe(c);
+  expect(fixture.bot.snapshot().inputBatches![c]).toMatchObject({ state: 'sealed', sealReason: 'window', inputIds: [c] });
+  expect(fixture.bot.core.intent(c)!.execution.payload).toHaveProperty('images', third.images);
+  expect(fixture.bot.core.intent(a)!.sequence).toBeLessThan(fixture.bot.core.intent(c)!.sequence);
 });
 
 it('projects revision 1 when a batch opens and revision 2 when it seals; an idle batch projects only revision 2', async () => {
