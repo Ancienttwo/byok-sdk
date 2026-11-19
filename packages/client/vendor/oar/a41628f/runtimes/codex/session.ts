@@ -197,7 +197,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   const isOpenReply = method === "thread/start" || method === "thread/resume" || method === "thread/fork";
   if (isOpenReply || method === "turn/completed" || method === "turn/started" || method === "thread/started") {
     const turn = asRecord(native?.turn);
-    const hiddenTurn = method === "turn/completed" && asRecord(originalNative?.turn) !== null && turn === null;
+    const hiddenTurn = (method === "turn/completed" || method === "turn/started") && asRecord(originalNative?.turn) !== null && turn === null;
     if (hiddenTurn) {
       const events = safe.body.events.map(event => {
         if (event.kind !== "turn_ended") return event;

@@ -269,7 +269,7 @@ async function openAcpRuntimeSession(
       return ledger;
     };
     const opening = createAcpOpening();
-    const configUpdates = createAcpConfigUpdates();
+    const configUpdates = createAcpConfigUpdates(credentials.redactValue);
     // BYOK change: a child's own update projects events only when it was read while a prompt awaited its answer (records.ts).
     const promptAnswers = createAcpPromptAnswers();
     const recorder = createAcpRecorder(usageGate, profile.attributeUpdate, tokenUsage, undefined, profile.projectUpdate, profile.projectExtension, nativeTurns, {

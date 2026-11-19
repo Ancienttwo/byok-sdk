@@ -130,13 +130,15 @@ function spent(session: DshSessionFold, usage: JsonRecord | null, committed: boo
 }
 
 /** A native inbox splice. No outcome means the loop claimed the input; `canceled` means it was discarded. */
-function spliced(session: DshSessionFold, data: JsonRecord, cause: unknown): { readonly session: DshSessionFold; readonly events: readonly RuntimeEventBody[] } {
+function spliced(session: DshSessionFold, data: JsonRecord, retainedData: JsonRecord | null, cause: unknown): { readonly session: DshSessionFold; readonly events: readonly RuntimeEventBody[] } {
   const target = data.target === "next-step" ? "nextStep" : "nextTurn";
   const list = session[target];
   const start = asNumber(data.start) ?? 0;
   const removedCount = asNumber(data.removedCount) ?? 0;
   const removed = list.slice(start, start + removedCount).flatMap((id) => id === null ? [] : [id]);
-  const inserted = asRecordList(data.inserted).map((message) => inputIdOf(message));
+  const visible = Array.isArray(retainedData?.inserted) ? retainedData.inserted : [];
+  const incoming = Array.isArray(data.inserted) ? data.inserted : [];
+  const inserted = incoming.map((value: unknown, index: number) => asRecord(visible[index]) === null ? null : inputIdOf(asRecord(value) ?? {}));
   const next = { ...session, [target]: list.toSpliced(start, removedCount, ...inserted) };
   if (data.outcome === "canceled") {
     return { session: next, events: cause === "withdraw" ? [] : removed.map((inputId) => ({ kind: "input_dropped", inputId, reason: "turn_interrupted" })) };
@@ -165,7 +167,7 @@ function sessionEvent(state: DshProjection, sessionId: string, session: DshSessi
     case "job/settled":
       return { ...unchanged, events: dshJobEvents(event.type, data, sessionId) };
     case "agent/inbox/spliced":
-      return { ...spliced(session, data, cause), links: state.links };
+      return { ...spliced(session, data, retainedData, cause), links: state.links };
     case "turn/start":
       // The claim that follows names the input when one is waiting.
       return { session: { ...session, turnOpen: true }, links: state.links, events: session.nextTurn.length === 0 ? [{ kind: "turn_active" }] : [] };
@@ -260,7 +262,7 @@ export function foldDsh(state: DshProjection, message: JsonRecord, credentials?:
   const native = payloadOf(message);
   if (message.channel === "session/event") {
     const event = asRecord(native) ?? {};
-    const needsReading = event.type === "assistant/message" || event.type === "assistant/attempt" || event.type === "request/context";
+    const needsReading = event.type === "assistant/message" || event.type === "assistant/attempt" || event.type === "request/context" || event.type === "agent/inbox/spliced";
     const source = needsReading ? asRecord(credentials?.redactValue(event) ?? event) : event;
     const next = sessionEvent(state, sessionId, session, event, message.cause, asRecord(source?.data));
     return {
@@ -368,8 +370,32 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     if (safe.kind !== "frame") return safe;
     const native = asRecord(safe.body.native);
     const fields = record.body.type === "goal/read" ? native : asRecord(native?.data);
-    if (fields !== null && (fields.goal === null || asRecord(fields.goal) !== null || asRecord(fields.cleared) !== null)) return safe;
+    const source = asRecord(record.body.native);
+    const original = record.body.type === "goal/read" ? source : asRecord(source?.data);
+    const cleared = original?.version === 1 && original.operation === "clear" && typeof asRecord(fields?.cleared)?.id === "string";
+    if (cleared || fields?.goal === null || asRecord(fields?.goal) !== null) return safe;
     return { ...safe, body: { ...safe.body, events: safe.body.events.filter(event => event.kind !== "goal_changed") } };
+  }
+  if (record.body.type === "dsh/opened" || record.body.type === "session/event:request/header") {
+    const safe = redact(record);
+    if (safe.kind !== "frame") return safe;
+    const native = asRecord(safe.body.native);
+    const model = record.body.type === "dsh/opened" ? native?.model : asRecord(asRecord(native?.data)?.header)?.config;
+    if (asRecord(model) !== null) return safe;
+    return { ...safe, body: { ...safe.body, events: safe.body.events.filter(event => event.kind !== "model" && event.kind !== "effort") } };
+  }
+  if (record.body.type === "session/event:job/registered" || record.body.type === "session/event:job/settled") {
+    const safe = redact(record);
+    if (safe.kind !== "frame") return safe;
+    const data = asRecord(asRecord(safe.body.native)?.data);
+    const events = safe.body.events.flatMap<RuntimeEventBody>(event => {
+      if (event.kind !== "task_started" && event.kind !== "task_ended") return [event];
+      if (data === null) return [];
+      if (event.kind === "task_ended" || asRecord(data.toolCall) !== null) return [event];
+      const { toolCallId: _withheld, ...job } = event;
+      return [job];
+    });
+    return { ...safe, body: { ...safe.body, events } };
   }
   if (record.body.type === "session/event:assistant/message") {
     const assembled = redactAssistantText(record, credentials);
