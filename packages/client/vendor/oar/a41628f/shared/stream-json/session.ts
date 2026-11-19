@@ -49,6 +49,7 @@ const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
 const streamJsonContextFields = new Set(["tokens", "contextWindow", "percent"]);
 const streamJsonDraftEnvelope = new Set(["type", "event", "session_id", "parent_tool_use_id", "api_message_id", "uuid"]);
 const streamJsonAssistantEnvelope = new Set(["type", "message", "session_id", "parent_tool_use_id", "uuid", "error", "isReplay", "tool_use_result"]);
+const streamJsonMessageFields = new Set(["id", "role", "content", "model", "usage"]);
 const streamJsonToolResultFields = new Set(["type", "tool_use_id", "is_error", "content"]);
 const streamJsonUsageFields = new Set(["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens", "server_tool_use", "cache_creation"]);
 const streamJsonResultFields = new Set(["type", "subtype", "session_id", "parent_tool_use_id", "is_error", "terminal_reason", "result", "usage", "modelUsage", "stop_reason", "api_error_status", "permission_denials", "num_turns", "duration_ms", "duration_api_ms", "total_cost_usd", "fast_mode_state", "structured_output", "errors"]);
@@ -77,6 +78,8 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   let terminalText: { text: string; continues: boolean } | undefined;
   let sanitizedText = false;
   let sanitizedFragment: "content_block" | "delta" | undefined;
+  const hasOpaqueCredentialKey = (object: JsonRecord | null, fields?: ReadonlySet<string>): boolean => object !== null
+    && Object.getOwnPropertyNames(object).some(key => fields?.has(key) !== true && credentials.matches(key));
   if (textTails !== undefined && record.kind === "frame" && record.body.type === "assistant" && native?.type === "assistant"
     && credentials.hasProtectedValues()) {
     const message = asRecord(native.message);
@@ -89,6 +92,8 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
         if (previous !== undefined) terminalText = { text: credentials.redact(previous), continues: currentMessage?.published === true };
         textTails.assistant.delete(lane);
       }
+      const withoutSnapshot = hasOpaqueCredentialKey(native, streamJsonAssistantEnvelope) || hasOpaqueCredentialKey(message, streamJsonMessageFields);
+      let withheldText = withoutSnapshot;
       const content = message.content.map((block: unknown) => {
         const part = asRecord(block);
         if (part?.type === "thinking") {
@@ -96,6 +101,10 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
           return rest;
         }
         if (part?.type !== "text" || typeof part.text !== "string") return block;
+        if (withoutSnapshot || hasOpaqueCredentialKey(part)) {
+          withheldText = true;
+          return block;
+        }
         const ready = redactTextPart(textTails.assistant, lane, part.text, credentials);
         published ||= ready.trim() !== "";
         return ready === part.text ? block : { ...part, text: ready };
@@ -104,6 +113,8 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
       const events = record.body.events.flatMap<RuntimeEventBody>(event => {
         if (event.kind === "reasoning") return [];
         if (event.kind !== "text_delta") return [event];
+        // Projected suffixes do not carry a block index. Keep the surviving native blocks authoritative.
+        if (withheldText) return [];
         const ready = redactTextPart(textTails.projected, lane, event.text, credentials);
         return ready === "" ? [] : [{ ...event, text: ready }];
       });
@@ -120,9 +131,11 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
     if (event?.type === "message_start" || event?.type === "message_stop") draftTails?.delete(lane);
     if (draftTails !== undefined && (isStart || event?.type === "content_block_delta") && typeof event.index === "number"
       && textField !== undefined && typeof delta?.text === "string") {
-      const ready = redactTextPart(draftTails, lane, delta.text, credentials);
+      const withheldText = hasOpaqueCredentialKey(native, streamJsonDraftEnvelope) || hasOpaqueCredentialKey(event) || hasOpaqueCredentialKey(delta);
+      const ready = withheldText ? "" : redactTextPart(draftTails, lane, delta.text, credentials);
       const events = record.body.events.flatMap<RuntimeEventBody>(projected => {
         if (projected.kind !== "text_delta") return [projected];
+        if (withheldText) return [];
         const text = textTails === undefined ? ready : redactTextPart(textTails.projected, lane, projected.text, credentials);
         return text === "" ? [] : [{ ...projected, text }];
       });
@@ -177,7 +190,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
     if (native?.type === "stream_event" && path.length === 2 && streamJsonDraftEnvelope.has(key)) return true;
     if (native?.type === "assistant" || native?.type === "user") {
       if (path.length === 2 && streamJsonAssistantEnvelope.has(key)) return true;
-      if (path.length === 3 && section === "message" && (key === "id" || key === "role" || key === "content" || key === "model" || key === "usage")) return true;
+      if (path.length === 3 && section === "message" && streamJsonMessageFields.has(key)) return true;
     }
     if (native?.type === "user" && path.length === 5 && section === "message" && entry === "content" && typeof index === "number") {
       const blocks = asRecord(native.message)?.content;

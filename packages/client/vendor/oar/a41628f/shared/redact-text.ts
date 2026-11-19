@@ -2,6 +2,7 @@
 /* oxlint-disable import/prefer-default-export -- Shared named helpers. */
 export type RedactionPath = readonly (string | number)[];
 type Redact = (text: string) => string;
+type Matches = (text: string) => boolean;
 type JsonField = (path: RedactionPath) => boolean;
 export interface RedactionStructure {
   readonly string: (path: RedactionPath, value: string) => boolean;
@@ -11,23 +12,23 @@ const withheld = '"[redacted]"';
 
 
 /** Copy only changed values. A credential-bearing property name hides its containing object. */
-function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefined, structure: RedactionStructure | undefined, path: RedactionPath, seen: WeakMap<object, unknown>): unknown {
+function sanitize(value: unknown, redact: Redact, matches: Matches, jsonField: JsonField | undefined, structure: RedactionStructure | undefined, path: RedactionPath, seen: WeakMap<object, unknown>): unknown {
   if (typeof value === "string") {
     if (structure?.string(path, value) === true) return value;
-    return jsonField?.(path) === true ? redactJsonText(value, redact) : redact(value);
+    return jsonField?.(path) === true ? redactJsonText(value, redact, matches) : redact(value);
   }
   if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) return seen.get(value);
   if (Array.isArray(value)) {
     const result: unknown[] = [];
     seen.set(value, result);
-    value.forEach((item: unknown, index) => { result.push(sanitize(item, redact, jsonField, structure, [...path, index], seen)); });
+    value.forEach((item: unknown, index) => { result.push(sanitize(item, redact, matches, jsonField, structure, [...path, index], seen)); });
     const sanitized = result.every((item, index) => item === value[index]) ? value : result;
     seen.set(value, sanitized);
     return sanitized;
   }
   const keys = Object.getOwnPropertyNames(value);
-  if (keys.some(key => structure?.keys(path, key) !== true && redact(key) !== key)) return "[redacted]";
+  if (keys.some(key => structure?.keys(path, key) !== true && matches(key))) return "[redacted]";
   const target = Object.create(Object.getPrototypeOf(value)) as object;
   seen.set(value, target);
   let changed = false;
@@ -36,7 +37,7 @@ function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefin
     if (descriptor === undefined) continue;
     if ("value" in descriptor) {
       const original: unknown = descriptor.value;
-      const sanitized = sanitize(original, redact, jsonField, structure, [...path, key], seen);
+      const sanitized = sanitize(original, redact, matches, jsonField, structure, [...path, key], seen);
       changed ||= sanitized !== original;
       Object.defineProperty(target, key, { ...descriptor, value: sanitized });
     } else if (value instanceof Error && key === "stack" && typeof value.stack === "string") {
@@ -51,13 +52,13 @@ function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefin
 }
 
 /** Opaque application data, never an outbound runtime message. */
-export function redactText<T>(value: T, redact: Redact, jsonField?: JsonField, structure?: RedactionStructure): T {
-  return sanitize(value, redact, jsonField, structure, [], new WeakMap()) as T;
+export function redactText<T>(value: T, redact: Redact, jsonField?: JsonField, structure?: RedactionStructure, matches: Matches = text => redact(text) !== text): T {
+  return sanitize(value, redact, matches, jsonField, structure, [], new WeakMap()) as T;
 }
 
 /** The protocol declares this field as encoded JSON. Keep its original token spans,
  * including duplicate object members, and decode each string before matching it. */
-export function redactJsonText(text: string, redact: Redact): string {
+export function redactJsonText(text: string, redact: Redact, matches: Matches = value => redact(value) !== value): string {
   try { JSON.parse(text); } catch { return "null"; }
   const objects: { start: number; firstEdit: number; withhold: boolean }[] = [];
   const edits: { start: number; end: number; replacement: string }[] = [];
@@ -77,10 +78,12 @@ export function redactJsonText(text: string, redact: Redact): string {
       const object = objects.at(-1);
       const stringToken = suffix === undefined ? token : token.slice(0, -suffix.length);
       const original = JSON.parse(stringToken) as string;
-      const replacement = redact(original);
-      if (replacement === original) continue;
-      if (suffix !== undefined && object !== undefined) object.withhold = true;
-      else edits.push({ start, end: start + token.length, replacement: JSON.stringify(replacement) });
+      if (suffix !== undefined && object !== undefined) {
+        object.withhold ||= matches(original);
+      } else {
+        const replacement = redact(original);
+        if (replacement !== original) edits.push({ start, end: start + token.length, replacement: JSON.stringify(replacement) });
+      }
     }
   }
   if (edits.length === 0) return text;

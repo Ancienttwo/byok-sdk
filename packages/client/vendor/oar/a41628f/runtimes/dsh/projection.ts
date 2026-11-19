@@ -294,7 +294,7 @@ function redactAssistantText<T extends RawEvent>(record: T, credentials: Credent
   if (!Array.isArray(message?.content)) return record;
   const blocks = message.content.map(block => {
     const part = asRecord(block);
-    return part?.type === "text" && !Object.getOwnPropertyNames(part).some(key => credentials.redact(key) !== key) ? part : null;
+    return part?.type === "text" && !Object.getOwnPropertyNames(part).some(credentials.matches) ? part : null;
   });
   const text = blocks.flatMap(block => block?.type === "text" && typeof block.text === "string" ? [block.text] : []).join("");
   const clean = credentials.redact(text);

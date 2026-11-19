@@ -276,17 +276,19 @@ async function openCodexSession(
     const draftMethod = method === "item/agentMessage/delta";
     const streamedOutput = method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta"
       || method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta";
+    const draftTurn = typeof turnId === "string" ? turnId : isRoot ? activeTurn : undefined;
     const itemId = typeof params.itemId === "string" ? params.itemId : "";
     const threadTails = draftTails.get(notificationSession);
     let draftTail: string | undefined;
-    if (method === "item/completed") {
+    if (method === "item/completed" && !byokStaleTurn) {
       const item = asRecord(params.item);
       if (typeof item?.id === "string") {
-        const pending = threadTails?.get(item.id);
+        const key = JSON.stringify([draftTurn, item.id]);
+        const pending = threadTails?.get(key);
         if (pending !== undefined && item.type === "agentMessage" && typeof item.text === "string" && item.text.endsWith(pending)) {
           draftTail = pending;
         }
-        threadTails?.delete(item.id);
+        threadTails?.delete(key);
         if (threadTails?.size === 0) draftTails.delete(notificationSession);
       }
     }
@@ -295,9 +297,10 @@ async function openCodexSession(
       params = rest;
     } else if (draftMethod && typeof params.delta === "string" && credentials.hasProtectedValues()) {
       const tails = threadTails ?? new Map<string, string>();
-      const { ready, pending } = credentials.redactChunk((tails.get(itemId) ?? "") + params.delta);
-      if (pending === "") tails.delete(itemId);
-      else tails.set(itemId, pending);
+      const key = JSON.stringify([draftTurn, itemId]);
+      const { ready, pending } = credentials.redactChunk((tails.get(key) ?? "") + params.delta);
+      if (pending === "") tails.delete(key);
+      else tails.set(key, pending);
       if (tails.size === 0) draftTails.delete(notificationSession);
       else draftTails.set(notificationSession, tails);
       params = { ...params, delta: ready };
@@ -311,7 +314,7 @@ async function openCodexSession(
       sessionId: notificationSession,
       ...(typeof params.turnId === "string" ? { spanId: params.turnId } : {}),
     });
-    if (method === "turn/completed" && byokStaleTurn) return;
+    if (byokStaleTurn && (method === "turn/completed" || method === "item/completed")) return;
     try {
     // Keep native interaction correlation private to the SDK's transport owner.
     if (isRoot && (method === "turn/started" || method === "turn/completed" || method === "serverRequest/resolved")) {

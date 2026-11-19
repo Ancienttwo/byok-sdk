@@ -26,6 +26,7 @@ export interface CredentialRedactor {
   /** Private connection redaction input. Never put these values in records or diagnostics. */
   values(this: void): readonly string[];
   hasProtectedValues(this: void): boolean;
+  matches(this: void, text: string): boolean;
   redactChunk(this: void, text: string): { readonly ready: string; readonly pending: string };
   add(this: void, value: string | undefined): void;
   /** BYOK change: A credential the caller resolved, including short or path-like values. */
@@ -85,6 +86,7 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     return { ready: parts.join(""), pending: text.slice(at) };
   };
   const redact = (text: string): string => redactTextParts(text, false).ready;
+  const matches = (text: string): boolean => values.some(value => text.includes(value)) || [...images].some(image => text.includes(image));
   const addKnown = (value: string): void => {
     if (value.length !== 0 && !known.has(value)) {
       known.add(value);
@@ -94,6 +96,7 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
   return {
     values: () => values,
     hasProtectedValues: () => values.length !== 0 || images.size !== 0,
+    matches,
     redactChunk: text => redactTextParts(text, true),
     add(value) {
       if (credentialValue(value)) { addKnown(value); }
@@ -103,7 +106,7 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
       if (data.length !== 0) images.add(data);
     },
     redact,
-    redactValue: (value, jsonField, structure) => values.length === 0 && images.size === 0 ? value : redactText(value, redact, jsonField, structure),
+    redactValue: (value, jsonField, structure) => values.length === 0 && images.size === 0 ? value : redactText(value, redact, jsonField, structure, matches),
   };
 }
 
