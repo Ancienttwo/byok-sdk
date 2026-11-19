@@ -86,7 +86,6 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
         const previous = textTails.assistant.get(lane);
         if (previous !== undefined) terminalText = { text: credentials.redact(previous), continues: currentMessage?.published === true };
         textTails.assistant.delete(lane);
-        if (currentMessage !== undefined) textTails.projected.delete(lane);
       }
       const content = message.content.map((block: unknown) => {
         const part = asRecord(block);

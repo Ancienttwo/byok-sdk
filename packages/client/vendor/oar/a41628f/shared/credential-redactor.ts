@@ -73,14 +73,19 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     values: () => values,
     hasProtectedValues: () => values.length !== 0 || images.size !== 0,
     redactChunk(text) {
-      const safe = redact(text);
-      let tail = 0;
-      for (const key of [...values, ...images]) {
-        for (let size = Math.min(key.length - 1, safe.length); size > tail; size--) {
-          if (safe.endsWith(key.slice(0, size))) { tail = size; break; }
+      const protectedValues = [...values, ...images];
+      let cut = text.length;
+      for (const key of protectedValues) {
+        for (let size = Math.min(key.length - 1, text.length); size > text.length - cut; size--) {
+          if (text.endsWith(key.slice(0, size))) { cut = text.length - size; break; }
         }
       }
-      return tail === 0 ? { ready: safe, pending: "" } : { ready: safe.slice(0, -tail), pending: safe.slice(-tail) };
+      if (cut === text.length) return { ready: redact(text), pending: "" };
+      for (const key of protectedValues) {
+        const match = text.lastIndexOf(key, cut - 1);
+        if (match >= 0 && match + key.length > cut) cut = match;
+      }
+      return { ready: redact(text.slice(0, cut)), pending: text.slice(cut) };
     },
     add(value) {
       if (credentialValue(value)) { addKnown(value); }

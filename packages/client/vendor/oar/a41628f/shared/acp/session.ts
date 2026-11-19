@@ -90,13 +90,13 @@ export function redactAcpRecord<T extends RawEvent>(
       const tail = pendingText.get(child.sessionId);
       pendingText.delete(child.sessionId);
       if (tail !== undefined) {
-        const event = { kind: "text_delta" as const, text: tail, byokChildId: credentials.redact(child.sessionId) };
+        const event = { kind: "text_delta" as const, text: credentials.redact(tail), byokChildId: credentials.redact(child.sessionId) };
         safe = { ...safe, body: { ...safe.body, events: [event, ...safe.body.events] } };
       }
     }
     if (safe.kind === "frame" && previous !== "" && record.body.events.some(event => event.kind === "turn_ended" || event.kind === "tool_call_started" || event.kind === "tool_call_ended")) {
       pendingText.delete(lane);
-      const events = [{ kind: "text_delta" as const, text: previous }, ...safe.body.events];
+      const events = [{ kind: "text_delta" as const, text: credentials.redact(previous) }, ...safe.body.events];
       safe = { ...safe, body: { ...safe.body, events } };
     }
   }
