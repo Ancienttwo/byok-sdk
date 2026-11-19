@@ -8,6 +8,7 @@ import {
   PROVIDER_CUSTODY_RECEIPT_LIMIT,
   ProcessLocalMutex,
 } from './custody.js';
+import { createCredentialNamespaceId } from './credential-namespace.js';
 import { ByokKeysError } from './errors.js';
 import {
   type ModelProviderProfile,
@@ -42,6 +43,8 @@ import {
  * registry, the provisioning applier, and the launcher are the only callers.
  */
 export interface ProviderProfileStore {
+  /** Stable store identity, `ps_` followed by 32 lowercase hexadecimal digits. Persist it at creation. */
+  readonly credentialNamespaceId: string;
   /**
    * Take the exclusive configuration lock. Cross-process for a file-backed
    * SQLite store; process-local otherwise. Fails closed with
@@ -118,6 +121,7 @@ export function providerNotConfigured(
  * SQLite store must match (`profile-store.test.ts` runs one suite against both).
  */
 export class InMemoryProviderProfileStore implements ProviderProfileStore {
+  readonly credentialNamespaceId = createCredentialNamespaceId();
   readonly #profiles = new Map<ProviderProfileRef, ModelProviderProfile>();
   readonly #mutex = new ProcessLocalMutex();
   readonly #pending = new Map<ProviderProfileRef, ProviderCustodyPending>();

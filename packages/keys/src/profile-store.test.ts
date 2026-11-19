@@ -82,6 +82,20 @@ for (const { factory, label, ready } of implementations) {
       await store?.close();
     });
 
+    it('assigns a distinct, stable credential namespace to each new store', async () => {
+      const first = open();
+      const id = first.credentialNamespaceId;
+      const second = factory();
+      try {
+        expect(id).toMatch(/^ps_[0-9a-f]{32}$/u);
+        expect(second.credentialNamespaceId).not.toBe(id);
+        await first.save(profile('openai'));
+        expect(first.credentialNamespaceId).toBe(id);
+      } finally {
+        await second.close();
+      }
+    });
+
     it('returns undefined for an unknown provider', async () => {
       await expect(open().get('openai')).resolves.toBeUndefined();
     });

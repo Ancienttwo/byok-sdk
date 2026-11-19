@@ -16,6 +16,7 @@ import {
   type ProviderCustodyReservation,
   type ProviderKeyCheckOutcome,
 } from './custody.js';
+import { createCredentialNamespaceId, readCredentialNamespaceId } from './credential-namespace.js';
 import { ByokKeysError } from './errors.js';
 import {
   type ProviderProfileStore,
@@ -120,7 +121,7 @@ function assertProviderProfileSchemaIsCurrent(
   path: string,
 ): void {
   const table = storedDdl(database, 'table', 'provider_profile');
-  const index = storedDdl(database, 'index', 'provider_profile_one_enabled');
+  const index = storedDdl(database, 'index', 'provider_profile_single_enabled');
   if (
     typeof table === 'string' && normalizeTableDdl(table) === normalizeTableDdl(SCHEMA)
     && typeof index === 'string' && normalizeTableDdl(index) === normalizeTableDdl(ENABLED_INDEX)
@@ -139,9 +140,16 @@ function assertProviderProfileSchemaIsCurrent(
  * defaults.
  */
 const ENABLED_INDEX = `
-CREATE UNIQUE INDEX IF NOT EXISTS provider_profile_one_enabled
+CREATE UNIQUE INDEX IF NOT EXISTS provider_profile_single_enabled
 ON provider_profile(kind)
 WHERE enabled = 1;
+`;
+
+const STORE_METADATA_SCHEMA = `
+CREATE TABLE IF NOT EXISTS provider_store_metadata (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  credential_namespace_id TEXT NOT NULL
+);
 `;
 
 /**
@@ -216,14 +224,21 @@ function assertCustodySchemaIsCurrent(database: DatabaseSync, path: string): voi
  * other file must hold every table and index of this version exactly. A store
  * missing part of the schema is refused, never completed.
  */
-function assertCurrentKeysStoreFormat(database: DatabaseSync, path: string): 'empty' | 'current' {
+function readCurrentKeysStoreIdentity(database: DatabaseSync, path: string): string | undefined {
   const objects = database
-    .prepare(`SELECT count(*) AS n FROM sqlite_schema WHERE ${SQLITE_USER_OBJECT}`)
+    .prepare(`SELECT count(*) AS n FROM main.sqlite_schema WHERE ${SQLITE_USER_OBJECT}`)
     .get() as { n: number };
-  if (Number(objects.n) === 0) return 'empty';
+  if (Number(objects.n) === 0) return undefined;
   assertProviderProfileSchemaIsCurrent(database, path);
   assertCustodySchemaIsCurrent(database, path);
-  return 'current';
+  const metadata = storedDdl(database, 'table', 'provider_store_metadata');
+  if (metadata === undefined || normalizeTableDdl(metadata) !== normalizeTableDdl(STORE_METADATA_SCHEMA)) {
+    throw new ByokKeysError(
+      'PROVIDER_STORE_SCHEMA_STALE',
+      `Provider profile store at ${path} lacks the current store metadata schema`,
+    );
+  }
+  return readCredentialNamespaceId(database, path);
 }
 
 /**
@@ -232,7 +247,7 @@ function assertCurrentKeysStoreFormat(database: DatabaseSync, path: string): 'em
  */
 function refuseOtherStoreFormat(path: string): void {
   try {
-    readSqliteFileUnchanged(path, (database) => assertCurrentKeysStoreFormat(database, path));
+    readSqliteFileUnchanged(path, (database) => readCurrentKeysStoreIdentity(database, path));
   } catch (error) {
     if (!(error instanceof SqliteReadOnlyOpenError)) throw error;
     throw new ByokKeysError(
@@ -246,7 +261,7 @@ function refuseOtherStoreFormat(path: string): void {
 /**
  * Decide the format on the writable connection, before its journal-mode
  * pragma, and create the schema of an empty store in the same transaction.
- * Returns whether the schema was created.
+ * Returns the store identity and whether the schema was created.
  *
  * The main file can be empty while a WAL holds a schema (a store that crashed
  * before its first checkpoint), and only this connection sees that WAL. Opening
@@ -254,17 +269,21 @@ function refuseOtherStoreFormat(path: string): void {
  * the main file: an older store's tables and rows stay as they were, but its
  * main-file bytes can change in that one case.
  */
-function createSchemaIfEmpty(database: DatabaseSync, path: string): boolean {
+function createSchemaIfEmpty(database: DatabaseSync, path: string): { id: string; created: boolean } {
   database.exec('BEGIN IMMEDIATE');
   try {
-    const empty = assertCurrentKeysStoreFormat(database, path) === 'empty';
-    if (empty) {
+    const existingId = readCurrentKeysStoreIdentity(database, path);
+    const id = existingId ?? createCredentialNamespaceId();
+    const created = existingId === undefined;
+    if (created) {
       database.exec(SCHEMA);
       database.exec(ENABLED_INDEX);
       for (const ddl of Object.values(CUSTODY_TABLES)) database.exec(ddl);
+      database.exec(STORE_METADATA_SCHEMA);
+      database.prepare('INSERT INTO main.provider_store_metadata (singleton, credential_namespace_id) VALUES (1, ?)').run(id);
     }
     database.exec('COMMIT');
-    return empty;
+    return { id, created };
   } catch (error) {
     database.exec('ROLLBACK');
     throw error;
@@ -335,6 +354,7 @@ interface ProfileRow {
  * appears in this file's bytes.
  */
 export class SqliteProviderProfileStore implements ProviderProfileStore {
+  readonly credentialNamespaceId: string;
   readonly #database: DatabaseSync;
   readonly #path: string;
   readonly #mutex = new ProcessLocalMutex();
@@ -349,26 +369,27 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
     }
     const readOnly = options.readOnly ?? false;
     if (!readOnly) refuseOtherStoreFormat(options.path);
-    let created = false;
+    let identity!: { id: string; created: boolean };
     this.#database = openSqliteDatabase(options.path, {
       readOnly,
       validateSchema: (database) => {
         if (!readOnly) {
-          created = createSchemaIfEmpty(database, options.path);
+          identity = createSchemaIfEmpty(database, options.path);
           return;
         }
-        // A read-only open cannot create the schema, nor prove the absence of
-        // a pending custody marker without it.
-        if (assertCurrentKeysStoreFormat(database, options.path) === 'empty') {
-          assertCustodySchemaIsCurrent(database, options.path);
+        const id = readCurrentKeysStoreIdentity(database, options.path);
+        if (id === undefined) {
+          throw new ByokKeysError('PROVIDER_STORE_SCHEMA_STALE', `Provider profile store at ${options.path} is empty`);
         }
+        identity = { id, created: false };
       },
     });
+    this.credentialNamespaceId = identity.id;
     if (readOnly) return;
     try {
       // A new store's schema reaches the main file at once, so the window in
       // which only a WAL describes the format stays short.
-      if (created) this.#database.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+      if (identity.created) this.#database.exec('PRAGMA wal_checkpoint(TRUNCATE)');
       secureSqliteFilePermissions(options.path);
       ensureConfigurationLockFile(options.path);
     } catch (error) {
@@ -764,7 +785,7 @@ function ensureConfigurationLockFile(databasePath: string): void {
 
 function storedDdl(database: DatabaseSync, type: 'index' | 'table', name: string): string | undefined {
   const row = database
-    .prepare('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?')
+    .prepare('SELECT sql FROM main.sqlite_schema WHERE type = ? AND name = ?')
     .get(type, name) as { sql?: string | null } | undefined;
   return typeof row?.sql === 'string' ? row.sql : undefined;
 }
