@@ -35,7 +35,10 @@ describe('agentKey', () => {
   });
 });
 
-it('settles a cancelled intent in backoff before its retry time', async () => {
+it.each([
+  ['writer', 'agent_home_writer_busy'],
+  ['memory-reader', 'agent_home_reader_busy'],
+] as const)('backs off a busy %s and settles cancellation before retry time', async (homeAccess, code) => {
   const root = mkdtempSync(join(tmpdir(), 'k4-backoff-cancel-'));
   const ledger = new HostLedger(join(root, 'host.sqlite'), 'test');
   const agentRef = { agentId: 'main', profileRevision: '1' };
@@ -46,13 +49,14 @@ it('settles a cancelled intent in backoff before its retry time', async () => {
   const server = { executions: { submit }, tasks: {
     offer: async (id: string) => offers.get(id),
     // Every attempt ends with a busy decline, so the intent goes to backoff.
-    deviceTerminal: async (id: string) => offers.has(id) ? { envelope: { task_id: id, type: 'task.decline', payload: { code: 'agent_home_writer_busy' } } } : undefined,
+    deviceTerminal: async (id: string) => offers.has(id) ? { envelope: { task_id: id, type: 'task.decline', payload: { code, retryable: true } } } : undefined,
     attempt: async (id: string) => offers.has(id) ? { taskId: id, deviceId: 'device', agentRef, status: 'declined' } : undefined,
     cancel: vi.fn(),
   }, wakes: { schedule: vi.fn(), cancel: vi.fn(), pending: async () => [] } } as unknown as ExecutionServer;
   const core = new HostExecutionCore(server, ledger, { now: () => 1000 });
   const input = { key: 'turn', source: 'user', waitUntil: 60_000, retry: { maxAttempts: 2, delaysMs: [10_000], retryFailures: false },
     execution: { deviceId: 'device', payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, instruction: 'Reply.', agentRef,
+      ...(homeAccess === 'memory-reader' ? { homeAccess } : {}),
       egressPolicy: { policyRevision: 'v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 4096 },
         reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
         transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },

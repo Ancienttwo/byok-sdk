@@ -520,6 +520,7 @@ export { resultOutcomeMaxBytes } from './result-schema.js';
 export {
   buildDreamInstruction,
 } from './dream.js';
+export type { DreamBudget, DreamInstructionInput, DreamWindow } from './dream.js';
 export {
   buildHandoffPack,
 } from './handoff-pack.js';

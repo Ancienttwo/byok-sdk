@@ -12,7 +12,7 @@ The cancellation rule includes the owner's WO-05 ruling of 2026-10-18.
 | --- | --- | --- |
 | Routine | Work, rule, time zone, Agent, destination, lifecycle and definition version. | Host service; the device holds a mirror. |
 | Occurrence | One planned time, its trigger, attempts and conclusion. | Device-local Host ledger. |
-| Intent | One item in the Agent FIFO. | Host execution core. |
+| Intent | One durable request for an Agent execution. | Host execution core. |
 | Execution | One SDK task, with offer, attempt and terminal evidence. | SDK. |
 
 A daily check is a routine. Today's check is an occurrence. Its SDK task is an execution.
@@ -105,12 +105,14 @@ Never use the SDK database or an Agent home for Host storage.
 
 ## 3. FIFO and stable task identity
 
-Use one FIFO per `(tenant, deviceId, agentId)` for user, routine and Bot triggers.
-A profile revision does not create another queue. Default order is committed enqueue order.
+K4 uses one writer FIFO per `(tenant, deviceId, agentId)` across user, routine and Bot triggers.
+A profile revision does not create another queue. Default writer order is committed enqueue order.
 Any priority rule must be explicit. Do not rely on daemon queuing for product work.
 Input coalescing is an explicit Host policy before enqueue ([example](../packages/bot-collaboration/README.md#input-coalescing)).
-The core permits at most one writer execution in flight per Agent.
-Other Agents can progress independently. SDK Agent-home admission remains the final authority.
+Only the earliest open writer is eligible for dispatch. Every open `homeAccess: 'memory-reader'`
+intent is independently eligible, including alongside an active writer. If a read needs a
+completed write, enqueue it after that writer settles. Other Agents can progress independently.
+The daemon enforces its Agent-home reader limit and can decline an excess offer retryably.
 A device terminal does not prove native session cleanup or home release.
 The next offer can still receive a typed busy decline.
 
@@ -273,12 +275,11 @@ Rules:
 The active count includes these items for this device. Count each taskId once.
 
 - A claimed execution with no device terminal.
-- The FIFO head of each Agent, which is the open intent with the lowest `sequence`.
-  Count it when its phase is `queued` or `inflight`, or `backoff` with `notBefore <= now`.
+- K4's dispatch heads for each Agent: the open writer with the lowest `sequence` and all open
+  `memory-reader` intents. Count a head in phase `queued` or `inflight`, or `backoff` with `notBefore <= now`.
 
-Do not count a head in phase `memory_blocked` or in a future `backoff`. Do not count intents behind a head.
-They cannot run until the head settles. When the head settles, the next intent becomes the head in the same commit.
-So the assertion stays between two FIFO items of one Agent.
+Exclude heads in phase `memory_blocked` or in a future `backoff`, and writers waiting behind the head.
+When the writer head settles, the next writer becomes the head in the same commit.
 Recompute after each Host ledger commit, each observed claim or device terminal,
 each power source change, each setting change and Host start.
 
@@ -430,7 +431,7 @@ Keep user model keys out of Host logs and result storage.
 - [ ] Recover uncertain submits by exact readback without a new taskId.
 - [ ] Advance generation only after eligible device terminal evidence. Cancellation alone is not enough.
 - [ ] Classify busy only through typed decline code.
-- [ ] Put user, routine and Bot work in one bounded FIFO per Agent.
+- [ ] Use one bounded writer FIFO per Agent across user, routine and Bot work. Dispatch eligible readers independently.
 - [ ] Cancel, then read attempt at the waiting deadline. Keep claimed cancellation unsettled until terminal.
 - [ ] Stop new occurrences on pause. Explicitly cancel admitted work when needed.
 - [ ] Commit application, outcome marker, result and upload outbox together.
@@ -731,7 +732,7 @@ It does not create a new generation to recover an uncertain submission.
 ### P3: Decision and accepted boundary
 
 Use the existing SQLite and public API conventions from `examples/basic`.
-Keep one FIFO per `(tenant, deviceId, agentId)`. Profile changes do not create another FIFO.
+Keep one writer FIFO per `(tenant, deviceId, agentId)`. Profile changes do not create another FIFO.
 Use the embedded wake queue for execution deadlines and backoff.
 An out-of-horizon routine candidate uses process-local backoff until K2 can accept it.
 Keep outcome semantics in a synchronous injected callback. K8 actions are outside K4.

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "ec50a58fec0b7eb1ab4d2a64bc48768eb0a9a81ad3024512613288b6986c01d5"
+    "snapshotSha256": "886df362cc3eb69da65e0d108ff40fefcfcfa5e30777a6c862f0883d052d2f96"
   },
   "configFields": {
     "status": "tracked",
@@ -130,6 +130,27 @@
       "items": [
         "bin:byok-mcp-hub",
         "export:@byok-sdk/client#SdkReservedHelperKind"
+      ]
+    },
+    {
+      "id": "dream-instruction-input-types",
+      "impact": "additive",
+      "summary": "Import DreamBudget, DreamInstructionInput and DreamWindow from @byok-sdk/protocol when typing inputs to buildDreamInstruction.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/protocol#DreamBudget",
+        "export:@byok-sdk/protocol#DreamInstructionInput",
+        "export:@byok-sdk/protocol#DreamWindow",
+        "export:@byok-sdk/protocol#buildDreamInstruction"
+      ]
+    },
+    {
+      "id": "k4-memory-reader-dispatch",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core HostExecutionCore.enqueue can dispatch a payload.homeAccess memory-reader alongside other readers and the first open writer for the same Agent. Enqueue a dependent read after the write settles if it needs the completed write.",
+      "migration": "docs/host-execution-core.md#3-fifo-and-stable-task-identity",
+      "items": [
+        "behavior:k4-memory-reader-dispatch"
       ]
     }
   ],
@@ -301,6 +322,26 @@
       "item": "export:@byok-sdk/keys#removeRetiredProviderCredentials",
       "change": "added",
       "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamBudget",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamInstructionInput",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamWindow",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#buildDreamInstruction",
+      "change": "changed",
+      "entry": "dream-instruction-input-types"
     },
     {
       "item": "store:keys-profile-store",

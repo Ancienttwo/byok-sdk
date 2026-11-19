@@ -53,6 +53,43 @@ it('uses one FIFO for routine, Bot and user triggers, independent of profile rev
   expect(host.adapter.starts.map(start => start.manifest.taskId)).toEqual([first.taskId, bot.taskId, user.taskId]);
 });
 
+it('runs two memory readers on the same Agent before either settles', async () => {
+  host = await openHost();
+  const base = template(host.deviceId);
+  const execution = { ...base, payload: { ...base.payload, homeAccess: 'memory-reader' as const } };
+  await host.core.enqueue(host.intent('first-reader', { execution }));
+  const first = await running('first-reader');
+  await host.core.enqueue(host.intent('second-reader', { execution }));
+  const second = await running('second-reader');
+
+  second.finish({ text: 'second reader' });
+  await settled('second-reader');
+  expect(host.core.intent('first-reader')?.conclusion).toBeUndefined();
+  first.finish({ text: 'first reader' });
+  await settled('first-reader');
+});
+
+it('runs a memory reader alongside an active writer and keeps the writers in FIFO order', async () => {
+  host = await openHost();
+  const base = template(host.deviceId);
+  await host.core.enqueue(host.intent('first-writer'));
+  const first = await running('first-writer');
+  await host.core.enqueue(host.intent('reader', { execution: { ...base, payload: { ...base.payload, homeAccess: 'memory-reader' } } }));
+  const reader = await running('reader');
+  const second = await host.core.enqueue(host.intent('second-writer'));
+  expect(await host.server.tasks.offer(second.taskId)).toBeUndefined();
+  expect(host.core.intent('first-writer')?.conclusion).toBeUndefined();
+
+  first.finish({ text: 'first writer' });
+  await settled('first-writer');
+  const secondWriter = await running('second-writer');
+  expect(host.core.intent('reader')?.conclusion).toBeUndefined();
+  secondWriter.finish({ text: 'second writer' });
+  reader.finish({ text: 'reader' });
+  await settled('second-writer');
+  await settled('reader');
+});
+
 it('accepts one Bot chat turn through messageEgress and settles it through the routine FIFO and outcome transaction', async () => {
   const received: Array<Parameters<NonNullable<CreateByokServerOptions['agentMessage']>['consume']>[0]> = [];
   let accept!: () => void;
