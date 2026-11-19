@@ -98,8 +98,13 @@ type CodexSessionArgs = Parameters<typeof codexSession>;
 export type CodexOpenStepRequest = (method: string, params: JsonRecord) => Promise<JsonRecord>;
 
 const codexObservedMethods = new Set(["turn/started", "turn/completed", "thread/tokenUsage/updated", "error", "item/agentMessage/delta", "item/started", "item/completed"]);
-const codexToolFields = new Set(["id", "type", "text", "message", "command", "changes", "server", "tool", "arguments", "result", "error", "query", "status", "aggregatedOutput", "exitCode"]);
-const codexItemTypes = new Set(["agentMessage", "error", "commandExecution", "fileChange", "mcpToolCall", "collabAgentToolCall", "webSearch", "sleep"]);
+const codexItemFields = new Map<string, readonly string[]>([
+  ["agentMessage", ["text"]], ["error", ["message"]],
+  ["commandExecution", ["command", "status", "aggregatedOutput", "exitCode"]],
+  ["fileChange", ["changes", "status"]], ["mcpToolCall", ["server", "tool", "arguments", "result", "error", "status"]],
+  ["collabAgentToolCall", ["tool", "prompt", "status", "receiverThreadIds", "agentsStates"]],
+  ["webSearch", ["query", "results", "status"]], ["sleep", ["durationMs"]],
+]);
 const codexTerminalFields = new Set(["id", "status", "error", "items"]);
 const codexUsageFields = new Set(["last", "total", "modelContextWindow"]);
 const codexTokenFields = new Set(["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]);
@@ -109,8 +114,9 @@ const codexNotificationFields: Readonly<Record<string, readonly string[]>> = {
 };
 
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"]): T {
-  const itemType = record.kind === "frame" && record.body.type === "item/started"
+  const itemType = record.kind === "frame" && (record.body.type === "item/started" || record.body.type === "item/completed")
     ? asRecord(asRecord(record.body.native)?.item)?.type : undefined;
+  const itemFields = typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
   const encoded = itemType === "mcpToolCall" || itemType === "fileChange" || itemType === "collabAgentToolCall" || itemType === "sleep";
   return redactRuntimeRecord(record, redact, path => encoded && isProjectedToolInput(record, path), (path, value) => {
     const [body, group, member, field] = path;
@@ -118,14 +124,14 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native")
       || (group === "byokTurnStatus" && record.body.type === "turn/completed" && (value === "completed" || value === "interrupted" || value === "failed"));
     if (path.length !== 4 || group !== "native") return false;
-    if ((record.body.type === "item/started" || record.body.type === "item/completed") && member === "item" && field === "type") return codexItemTypes.has(value);
+    if (member === "item" && field === "type") return itemFields !== undefined;
     return record.body.type === "turn/completed" && member === "turn" && field === "status"
       && (value === "completed" || value === "interrupted" || value === "failed");
   }, (path, key) => {
     if (record.kind !== "frame" || !codexObservedMethods.has(record.body.type) || path[0] !== "body" || path[1] !== "native") return false;
     return (path.length === 2 && (key === "threadId" || key === "turnId" || codexNotificationFields[record.body.type]?.includes(key)))
       || (path.length === 3 && path[2] === "turn" && (record.body.type === "turn/completed" || record.body.type === "turn/started") && codexTerminalFields.has(key))
-      || (path.length === 3 && path[2] === "item" && (record.body.type === "item/started" || record.body.type === "item/completed") && codexToolFields.has(key))
+      || (path.length === 3 && path[2] === "item" && itemFields !== undefined && (key === "id" || key === "type" || itemFields.includes(key)))
       || (record.body.type === "thread/tokenUsage/updated" && path[2] === "tokenUsage"
         && ((path.length === 3 && codexUsageFields.has(key))
           || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));

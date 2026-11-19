@@ -45,6 +45,7 @@ const streamJsonEventTypes = new Set(["message_start", "message_stop", "content_
 const streamJsonDeltaTypes = new Set(["text_delta", "thinking_delta", "input_json_delta"]);
 const streamJsonResultTypes = new Set(["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]);
 const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
+const streamJsonAssistantEnvelope = new Set(["type", "message", "session_id", "parent_tool_use_id", "uuid", "error", "isReplay", "tool_use_result"]);
 const streamJsonToolResultFields = new Set(["type", "tool_use_id", "is_error", "content"]);
 const streamJsonUsageFields = new Set(["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens", "server_tool_use", "cache_creation"]);
 const streamJsonResultFields = new Set(["type", "subtype", "session_id", "parent_tool_use_id", "is_error", "terminal_reason", "result", "usage", "modelUsage", "stop_reason", "api_error_status", "permission_denials", "num_turns", "duration_ms", "duration_api_ms", "total_cost_usd", "fast_mode_state", "structured_output", "errors"]);
@@ -154,6 +155,10 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   }, (path, key) => {
     const [body, nativeKey, section, entry, index] = path;
     if (body !== "body" || nativeKey !== "native") return false;
+    if (native?.type === "assistant" || native?.type === "user") {
+      if (path.length === 2 && streamJsonAssistantEnvelope.has(key)) return true;
+      if (path.length === 3 && section === "message" && (key === "id" || key === "role" || key === "content" || key === "model" || key === "usage")) return true;
+    }
     if (native?.type === "user" && path.length === 5 && section === "message" && entry === "content" && typeof index === "number") {
       const blocks = asRecord(native.message)?.content;
       return Array.isArray(blocks) && asRecord(blocks[index])?.type === "tool_result" && streamJsonToolResultFields.has(key);

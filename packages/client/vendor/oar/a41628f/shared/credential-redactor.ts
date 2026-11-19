@@ -105,6 +105,15 @@ export function isProjectedToolInput(record: RawEvent, path: RedactionPath): boo
   return kind === "tool_call_started" || kind === "tool_call_input";
 }
 
+const contextUsageKeys = new Set(["tokens", "contextWindow", "percent"]);
+
+function usageContextKey(record: RawEvent, path: RedactionPath, key: string): boolean {
+  const [,, index, usage, context] = path;
+  return record.kind === "frame" && path.length === 5 && eventPath(path)
+    && typeof index === "number" && record.body.events[index]?.kind === "usage"
+    && usage === "usage" && context === "context" && contextUsageKeys.has(key);
+}
+
 /** Keep the typed record and event discriminators out of the content traversal. */
 export function redactRuntimeRecord<T extends RawEvent>(
   record: T, redact: CredentialRedactor["redactValue"], jsonField?: (path: RedactionPath) => boolean,
@@ -125,6 +134,7 @@ export function redactRuntimeRecord<T extends RawEvent>(
       return path.length === 0 || (path.length === 1 && path[0] === "body")
         || (path.length === 3 && eventPath(path))
         || (path.length === 4 && eventPath(path) && path[3] === "outcome")
+        || usageContextKey(record, path, key)
         || isProtocolKey?.(path, key) === true;
     },
   });
