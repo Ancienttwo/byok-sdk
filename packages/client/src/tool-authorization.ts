@@ -728,6 +728,11 @@ export interface ToolAuthorizationGate {
   authorize(call: ToolCall, resolveMcpIdentity?: () => Promise<{ readonly server: string; readonly tool: string } | undefined>): Promise<ToolAuthorizationVerdict>;
 }
 
+export interface CancellableToolAuthorizationGate extends ToolAuthorizationGate {
+  /** The private IPC caller may withdraw its own request. */
+  authorize(call: ToolCall, resolveMcpIdentity?: Parameters<ToolAuthorizationGate['authorize']>[1], signal?: AbortSignal): Promise<ToolAuthorizationVerdict>;
+}
+
 /**
  * Internal brand of a gate whose task has an admitted file scope. The binding
  * module (`file-scope-gate-binding`) writes the three in-scope SDK tool names
@@ -828,11 +833,12 @@ export function createAutoToolAuthorizationGate(input: {
   // The reference is only used inside `authorize`, after the daemon has bound
   // (or not bound) this attempt's file-scope grant; it is never called before
   // the object exists.
-  const gate: ToolAuthorizationGate = {
+  const gate: CancellableToolAuthorizationGate = {
     timeoutMs: input.timeoutMs,
-    async authorize(rawCall: ToolCall, resolveMcpIdentity?: () => Promise<{ readonly server: string; readonly tool: string } | undefined>): Promise<ToolAuthorizationVerdict> {
+    async authorize(rawCall, resolveMcpIdentity, signal) {
       let call = rawCall;
       const withdraw = new AbortController();
+      const approvalSignal = signal === undefined ? withdraw.signal : AbortSignal.any([withdraw.signal, signal]);
       let timer: ReturnType<typeof setTimeout> | undefined;
       const expired = new Promise<'expired'>(resolve => { timer = setTimeout(() => resolve('expired'), input.timeoutMs); });
       let risk: ToolRisk | undefined;
@@ -848,6 +854,7 @@ export function createAutoToolAuthorizationGate(input: {
         return classifiedVerdict;
       };
       try {
+        signal?.throwIfAborted();
         // A runtime label is not an MCP authority. Only an exact admitted mapping
         // may attach identity to a gate request, even if the request supplies one.
         // Resolve runtime identity when a selector or an installed hub needs it.
@@ -865,8 +872,10 @@ export function createAutoToolAuthorizationGate(input: {
           withdraw.abort();
           return finish({ decision: 'deny', code: 'tool_authorization_unavailable', reason: `tool authorization timed out after ${input.timeoutMs}ms` });
         };
-        const allow = (): ToolAuthorizationVerdict => hub !== undefined && !hub.isActive()
-          ? identityUnavailable() : finish({ decision: 'allow' });
+        const allow = (): ToolAuthorizationVerdict => {
+          signal?.throwIfAborted();
+          return hub !== undefined && !hub.isActive() ? identityUnavailable() : finish({ decision: 'allow' });
+        };
         if (mcp === 'expired') return timedOut();
         if (hub !== undefined) {
           const inner = await Promise.race([hub.resolve(nativeCall, mcp), expired]);
@@ -899,7 +908,7 @@ export function createAutoToolAuthorizationGate(input: {
         const summary = call.toolName === 'subagent_launch'
           ? describeWorkflowChildLaunch(call, risk, workflowChildLaunchEffects(call, input.workspace, input.home ?? homedir(), rules, { platform: input.platform }))
           : describeHighRiskToolCall(call, risk.reasons, risk.authorization);
-        const result = await Promise.race([input.requestAuthorization(summary, withdraw.signal), expired]);
+        const result = await Promise.race([input.requestAuthorization(summary, approvalSignal), expired]);
         if (result === 'expired') return timedOut();
         if (result.approved === true) return allow();
         return finish({ decision: 'deny', code: 'tool_authorization_denied', reason: result.reason

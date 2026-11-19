@@ -2636,6 +2636,9 @@ semantic fallback to a tool-less runtime exists.
 The Host is responsible for credentials its connectors echo in tool replies
 in both direct and search exposure.
 
+In search mode, the outer runtime's MCP call timeout bounds the approval
+window for high-risk tool calls.
+
 `command` must be an absolute path. A definition carrying a bare name, a
 relative path (`mcp_toolset_command_not_absolute`) or a command starting with
 `-` (`mcp_toolset_command_option_like`) is rejected when it enters the registry

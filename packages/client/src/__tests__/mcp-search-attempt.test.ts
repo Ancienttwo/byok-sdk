@@ -13,6 +13,7 @@ import { exportPrivateKeyPem, generateDeviceKeyPair } from '../daemon/device-key
 import { startControlServer } from '../daemon/control-server';
 import type { SearchRuntimeEvidence } from '../daemon/search-runtime-qualification';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
+import { hostFor } from '../daemon/task-runner/host';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { MCP_HUB_CONTEXT_ACTIVE_METHOD, type McpHubContext } from '../sdk-reserved-helper-context';
 import { freezeRuntimeAdapterDescriptor, type McpStdioServerConfig, type RuntimeAdapterPrepareInput, type RuntimeOperationStartInput } from '../types';
@@ -143,7 +144,9 @@ async function connectHub(spec: McpStdioServerConfig) {
   return {
     client, stderr: () => stderr,
     search: () => client.callTool({ name: 'tool_search', arguments: { query: 'echo' } }),
-    call: (text = 'hello') => client.callTool({ name: 'call_tool', arguments: { server: 'inner', tool: 'echo', arguments: { text } } }),
+    call: (text = 'hello', signal?: AbortSignal) => client.callTool({
+      name: 'call_tool', arguments: { server: 'inner', tool: 'echo', arguments: { text } },
+    }, { signal }),
   };
 }
 
@@ -458,4 +461,53 @@ it('searches and enforces D while starting, then denies calls after cancellation
     await offered;
   }
   expect(sent.map(row => row.type)).toEqual(['task.claim', 'task.cancelled']);
+});
+
+it.each(['MCP cancellation', 'stdio close'] as const)('withdraws a pending search tool approval on %s', async (how) => {
+  const adapter = new FixtureAdapter();
+  const approvalRegistry = new ApprovalRegistry();
+  const stale = vi.fn();
+  const { configure, startControl, offer, receipts, runner, sent } = setup([adapter], {
+    approvalRegistry, onStaleApprovalDecision: stale,
+    toolAuthorization: () => ({ default: 'auto', rules: {
+      alwaysAsk: [{ id: 'inner-review', match: { mcpServer: 'inner', mcpTool: 'echo' } }],
+    } }),
+  });
+  await configure();
+  await startControl();
+  await offer();
+  const spec = adapter.input!.mcpServers!.byoktools!;
+  const hub = await connectHub(spec);
+  expect((await hub.search()).isError).not.toBe(true);
+
+  const cancel = new AbortController();
+  const cancelled = hub.call('cancelled', cancel.signal);
+  void cancelled.catch(() => undefined);
+  await vi.waitFor(() => expect(approvalRegistry.list()).toHaveLength(1));
+  const { approvalId } = approvalRegistry.list()[0]!;
+  expect(sent).toContainEqual(expect.objectContaining({ type: 'task.await_approval', payload: expect.objectContaining({ approvalId }) }));
+  expect((await receipts()).filter(entry => entry.method === 'tools/call')).toHaveLength(0);
+
+  const liveHub = how === 'MCP cancellation' ? hub : await connectHub(spec);
+  const next = liveHub.call('approved');
+  void next.catch(() => undefined);
+  await vi.waitFor(() => expect(hostFor(runner).current('search-task')?.approval.queue).toHaveLength(1));
+
+  if (how === 'MCP cancellation') cancel.abort();
+  else await hub.client.close();
+  await expect(cancelled).rejects.toThrow();
+  await vi.waitFor(() => expect(sent).toContainEqual(expect.objectContaining({
+    type: 'task.approval_resolved', task_id: 'search-task',
+    payload: expect.objectContaining({ approvalId, decision: 'reject', resolvedBy: 'local' }),
+  })));
+  await vi.waitFor(() => expect(sent.filter(envelope => envelope.type === 'task.await_approval')).toHaveLength(2));
+  const nextApproval = sent.filter(envelope => envelope.type === 'task.await_approval').at(-1)!.payload.approvalId;
+  expect(approvalRegistry.list().map(approval => approval.approvalId)).toEqual([nextApproval]);
+
+  await runner.handleEnvelope(createEnvelope('task.approve', { approvalId }, { taskId: 'search-task', seq: 2 }));
+  expect(stale).toHaveBeenCalledWith('search-task', 'approve', expect.stringContaining(approvalId));
+  expect((await receipts()).filter(entry => entry.method === 'tools/call')).toHaveLength(0);
+  await runner.handleEnvelope(createEnvelope('task.approve', { approvalId: nextApproval }, { taskId: 'search-task', seq: 3 }));
+  expect(await next).toMatchObject({ structuredContent: { text: 'approved' } });
+  expect((await receipts()).filter(entry => entry.method === 'tools/call').map(entry => entry.params.arguments)).toEqual([{ text: 'approved' }]);
 });

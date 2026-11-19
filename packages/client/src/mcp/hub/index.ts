@@ -62,7 +62,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void>; d
     signal.throwIfAborted();
     let active = false;
     try {
-      active = (await options.isActive?.(signal)) === true;
+      active = disconnecting === undefined && (await options.isActive?.(signal)) === true;
     } catch {
       // A missing or failed control proof denies this operation.
     }
@@ -99,8 +99,12 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void>; d
     if (catalog !== undefined) return catalog;
     // A cancelled waiter can leave a closing discovery. Wait for its children
     // to finish before granting the next run its own concurrency budget.
-    if (discovery?.abort.signal.aborted) await discovery.done.catch(() => undefined);
+    if (discovery?.abort.signal.aborted) {
+      await discovery.done.catch(() => undefined);
+      await checkActive(signal);
+    }
     signal.throwIfAborted();
+    if (disconnecting !== undefined) throw new InactiveAttemptError('MCP hub control connection is closed.');
     if (discovery === undefined) {
       const abort = new AbortController();
       discovery = { abort, waiters: 0, done: freezeCatalog(abort.signal).finally(() => { discovery = undefined; }) };

@@ -1,4 +1,4 @@
-import type { ToolAuthorizationGate, ToolCall } from '../tool-authorization.js';
+import type { CancellableToolAuthorizationGate, ToolCall } from '../tool-authorization.js';
 import { qualifiedMcpToolName } from './projection.js';
 import { readMcpHubCatalog, snapshotHubBinding, type McpHubCatalogBinding } from './hub/catalog.js';
 import { HUB_CALL_TOOL, MCP_HUB_SERVER_NAME, parseHubCall } from './hub/protocol.js';
@@ -16,13 +16,13 @@ export interface McpHubGateAuthority {
 
 /** Bind only when the daemon installs the SDK hub on this Attempt's auto gate. */
 export function bindMcpHubAuthorization(
-  gate: ToolAuthorizationGate,
+  gate: CancellableToolAuthorizationGate,
   options: {
     readonly catalog: McpHubCatalogBinding;
     readonly isActive: () => boolean;
     readonly canRequestDispatchApproval?: () => boolean;
   },
-): ToolAuthorizationGate {
+): CancellableToolAuthorizationGate {
   const catalog = snapshotHubBinding(options.catalog);
   const isActive = options.isActive;
   const dispatch = options.canRequestDispatchApproval === undefined ? undefined
@@ -49,12 +49,12 @@ export function bindMcpHubAuthorization(
   if (dispatch === undefined) return gate;
   return {
     timeoutMs: gate.timeoutMs,
-    authorize(call) {
+    authorize(call, _resolveMcpIdentity, signal) {
       if (call.toolName !== authority.outerToolName) return Promise.resolve({
         decision: 'deny', code: 'tool_authorization_unavailable', reason: 'the hub gate only accepts call_tool',
       });
       dispatch.calls.add(call);
-      return gate.authorize(call);
+      return gate.authorize(call, undefined, signal);
     },
   };
 }

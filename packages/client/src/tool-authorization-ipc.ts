@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { isAbsolute } from 'node:path';
-import type { ToolAuthorizationDenialCode, ToolAuthorizationGate, ToolAuthorizationVerdict, ToolCall } from './tool-authorization.js';
+import type { CancellableToolAuthorizationGate, ToolAuthorizationDenialCode, ToolAuthorizationVerdict, ToolCall } from './tool-authorization.js';
 import type { FileScopeGrant } from './file-scope-guard.js';
 import { parseSerializedFileScopeGrant, type SerializedFileScopeGrant } from './file-scope-serialization.js';
 import {
@@ -141,7 +141,7 @@ async function readBody(request: IncomingMessage): Promise<unknown> {
 
 /** One loopback endpoint per runtime process, closed with the runtime. */
 export async function startToolAuthorizationIpc(
-  gate: ToolAuthorizationGate,
+  gate: CancellableToolAuthorizationGate,
 ): Promise<{ readonly config: ToolAuthorizationIpcConfig; readonly fileScope?: FileScopeGrant; close(): Promise<void> }> {
   const token = randomBytes(32).toString('hex');
   const binding = fileScopeGateBinding(gate);
@@ -169,13 +169,21 @@ export async function startToolAuthorizationIpc(
       response.writeHead(404).end();
       return;
     }
+    const caller = new AbortController();
+    const disconnect = () => caller.abort();
+    // The request body may be complete while the caller still awaits approval.
+    response.once('close', disconnect);
     let verdict: ToolAuthorizationVerdict;
     try {
       const call = parseCall(await readBody(request));
-      verdict = closed ? unavailable() : await gate.authorize(call);
+      if (response.destroyed) return;
+      verdict = closed ? unavailable() : await gate.authorize(call, undefined, caller.signal);
     } catch {
       verdict = unavailable('invalid tool authorization request');
+    } finally {
+      response.off('close', disconnect);
     }
+    if (response.destroyed) return;
     if (closed && verdict.decision === 'allow') verdict = unavailable();
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify(verdict));
   });
@@ -218,11 +226,14 @@ export async function reportFileScopeDenial(config: ToolAuthorizationIpcConfig, 
 }
 
 /** Any transport or shape failure denies: a missing authority never grants execution. */
-export async function requestToolAuthorization(config: ToolAuthorizationIpcConfig, call: ToolCall): Promise<ToolAuthorizationVerdict> {
+export async function requestToolAuthorization(
+  config: ToolAuthorizationIpcConfig, call: ToolCall, signal?: AbortSignal,
+): Promise<ToolAuthorizationVerdict> {
   try {
+    const timeout = AbortSignal.timeout(config.timeoutMs + 5_000);
     const response = await fetch(config.url, {
       method: 'POST', headers: { authorization: `Bearer ${config.token}`, 'content-type': 'application/json' },
-      body: JSON.stringify(call), signal: AbortSignal.timeout(config.timeoutMs + 5_000), redirect: 'error',
+      body: JSON.stringify(call), signal: signal === undefined ? timeout : AbortSignal.any([signal, timeout]), redirect: 'error',
     });
     if (!response.ok) return unavailable();
     const value: unknown = await response.json();

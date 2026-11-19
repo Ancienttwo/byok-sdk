@@ -71,7 +71,7 @@ export async function runMcpHub(argv: readonly string[]): Promise<void> {
         toolName: qualifiedMcpToolName(MCP_HUB_SERVER_NAME, HUB_CALL_TOOL),
         cwd: binding.launchCwd,
         input: { ...call },
-      });
+      }, signal);
       return !signal.aborted && verdict.decision === 'allow';
     },
     containsPrivateValue(value) {
