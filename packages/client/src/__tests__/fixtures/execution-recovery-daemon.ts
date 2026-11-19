@@ -176,6 +176,7 @@ class ControlledAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'pi',
     selectionModes: ['device-default', 'byok-profile'],
+    defaultModelModes: ['byok-profile'],
     capabilities: {
       steer: true,
       resume: true,

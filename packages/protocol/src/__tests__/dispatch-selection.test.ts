@@ -11,7 +11,6 @@ const PROFILE = {
   profileRef: 'local-profile',
   profileRevision: '1',
   profileHash: `sha256:${'c'.repeat(64)}`,
-  modelId: 'gpt-5.2',
   requiredCapabilities: ['image-input'],
 };
 
@@ -26,6 +25,7 @@ it.each([
   target('claude', { mode: 'subscription', modelId: 'opus' }),
   target('agy', { mode: 'byok', providerId: 'google', modelId: 'gemini' }),
   target('pi', { mode: 'byok-profile', providerProfile: PROFILE }),
+  target('pi', { mode: 'byok-profile', providerProfile: PROFILE, modelId: 'org/model:high' }),
 ])('round-trips target %j', value => {
   expect(ExecutionTargetSchema.parse(value)).toEqual(value);
   expect(TaskOfferPayloadSchema.parse({ ...OFFER, target: value }).target).toEqual(value);
@@ -43,7 +43,7 @@ it.each([
   target('grok', { mode: 'adapter-model', modelId: 'grok-code', providerId: 'xai' }),
   target('claude', { mode: 'subscription', modelId: 'opus', providerId: null }),
   target('agy', { mode: 'byok', providerId: 'google', modelId: 'gemini', providerProfile: PROFILE }),
-  target('pi', { mode: 'byok-profile', providerProfile: PROFILE, modelId: 'gpt' }),
+  target('pi', { mode: 'byok-profile', providerProfile: { ...PROFILE, modelId: 'gpt' } }),
 ])('refuses a legacy or widened target %j', value => {
   expect(ExecutionTargetSchema.safeParse(value).success).toBe(false);
 });

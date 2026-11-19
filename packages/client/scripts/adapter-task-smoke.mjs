@@ -22,9 +22,9 @@ const runtimes = ['claude', 'codex', 'pi'];
 const runsAgy = process.platform !== 'win32';
 const allowedRuntimes = runsAgy ? [...runtimes, 'agy'] : runtimes;
 const piProfile = Object.freeze({ profileRef: 'smoke', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`,
-  modelId: 'smoke-model', requiredCapabilities: [] });
+  requiredCapabilities: [] });
 const smokeTarget = (harnessId) => ({ lane: 'harness', harnessId, selection: harnessId === 'pi'
-  ? { mode: 'byok-profile', providerProfile: piProfile }
+  ? { mode: 'byok-profile', providerProfile: piProfile, modelId: 'smoke-model' }
   : { mode: 'device-default' } });
 const timeoutMs = 20_000;
 // The client default Agent egress policy. The daemon below runs it (an empty

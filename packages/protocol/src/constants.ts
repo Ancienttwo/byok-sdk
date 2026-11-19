@@ -26,6 +26,12 @@ export const AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES = 512;
  */
 export const RESIDENT_MEMORY_MAX_BYTES = 8 * 1024;
 
+/** A per-task profile model is passed as one Pi launcher argument. */
+export function isProviderProfileModelId(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 160 && value.trim().length > 0
+    && !value.startsWith('--') && !/\p{Cc}/u.test(value);
+}
+
 /** The frozen wire runtime ids. Any other adapter id is a custom harness (`harnessId`). */
 export const RUNTIME_IDS = Object.freeze(['pi', 'claude', 'codex'] as const);
 

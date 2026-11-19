@@ -79,6 +79,17 @@ function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'us
   };
 }
 
+export const PI_MODEL_UNAVAILABLE_REASON = 'requested Pi model is unavailable';
+
+/** Pi's provider streams expose the native error envelope as text. */
+export function isPiModelUnavailable(error: unknown): boolean {
+  return typeof error === 'string' && (
+    /["']code["']\s*:\s*["']model_(?:not_found|not_available|unavailable)["']/u.test(error)
+    || (/"type"\s*:\s*"not_found_error"/u.test(error) && /"message"\s*:\s*"model:/u.test(error))
+    || (/\b404\b/u.test(error) && /\b(?:model not found|no such model|no endpoints found for)\b/iu.test(error))
+  );
+}
+
 /** Provider failure evidence belongs to the same assistant message as usage. */
 export function piAssistantError(msg: PiRpcMessage): string | undefined {
   if (msg.type !== 'message_end') return undefined;

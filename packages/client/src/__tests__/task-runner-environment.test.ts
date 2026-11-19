@@ -119,7 +119,7 @@ async function makeHarness(): Promise<Harness> {
     // no polling/`vi.waitFor` needed, unlike the full daemon-level tests.
     const target = modelTarget ?? (runtime === 'pi' ? {
       lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
-        profileRef: 'fixture', profileRevision: '1', modelId: 'fixture', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
+        profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
       } },
     } : { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } });
     await runner.handleEnvelope(createEnvelope('task.offer', {

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEnvelope, PROTOCOL_VERSION, HarnessIdSchema, HarnessInventorySchema, type ClaimedExecutor, type HarnessInfo } from '@byok-sdk/protocol';
+import { createEnvelope, PROTOCOL_VERSION, HarnessIdSchema, HarnessInventorySchema, type ClaimedExecutor, type HarnessInfo, type HarnessSelection } from '@byok-sdk/protocol';
 import { projectTerminalResult } from '../terminal-result';
 import { handleInboundEnvelope } from '../inbound';
 import { AGENT_HOME_CONTRACT_CAPABILITY } from '../cloud';
@@ -88,7 +88,9 @@ describe('custom harness protocol authority', () => {
 
   it.each([
     { mode: 'byok', providerId: 'google' }, { mode: 'adapter-model' },
-  ] as const)('gates missing $mode model on its advertised default at offer and first claim', async selection => {
+    { mode: 'byok-profile', providerProfile: { profileRef: 'local', profileRevision: '1',
+      profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [] } },
+  ] satisfies HarnessSelection[])('gates missing $mode model on its advertised default at offer and first claim', async selection => {
     const { h, stores, deviceId } = await setup();
     const target = { lane: 'harness', harnessId: 'acme-harness', selection } as const;
     const caps = { ...defaultCapabilities, selectionModes: [selection.mode],
@@ -107,6 +109,17 @@ describe('custom harness protocol authority', () => {
     await expect(claim()).resolves.toMatchObject({ outcome: 'accepted' });
     await advertise(false);
     await expect(claim()).resolves.toMatchObject({ outcome: 'accepted' });
+  });
+
+  it.each(['--flag', '  ', 'model\tname', 'model\u0085name', 'x'.repeat(161)])('rejects a malformed profile model before enqueue (%j)', async modelId => {
+    const { h, stores, deviceId } = await setup();
+    const taskId = 'invalid-profile-model';
+    await expect(h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { taskId, payload: { ...offerPayload(), target: {
+      lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', modelId, providerProfile: {
+        profileRef: 'local', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
+      } },
+    } } })).rejects.toMatchObject({ code: 'invalid_request' });
+    expect(await stores.tasks.get(taskId)).toBeUndefined();
   });
 
   it('seals explicit selection, claim CAS and terminal echo for the actual device', async () => {

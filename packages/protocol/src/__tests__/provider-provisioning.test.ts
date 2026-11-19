@@ -28,7 +28,6 @@ const BINDING = {
   profileRef: 'host-agent-1',
   profileRevision: '1759000000000',
   profileHash: `sha256:${'a'.repeat(64)}`,
-  modelId: 'glm-5.3-flash',
   requiredCapabilities: [],
 } as const;
 const STATUS = {
@@ -222,7 +221,7 @@ describe('provider provisioning completion', () => {
     expect(ProviderProvisioningCompletionSchema.safeParse(applied({ providerStatus: null, binding: null })).success).toBe(false);
   });
 
-  it('requires status and binding to agree on profile and model', () => {
+  it('requires a matching profile ref and reports the saved model in status', () => {
     expect(
       ProviderProvisioningCompletionSchema.safeParse(applied({ binding: { ...BINDING, profileRef: 'host-agent-2' } })).success,
     ).toBe(false);

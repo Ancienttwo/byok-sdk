@@ -885,7 +885,7 @@ export interface PiProviderLauncherOptions {
     runtimeEntry: PiLauncherRuntimeEntry;
     profileDbPath: string;
     profileRef: ProviderProfileRef;
-    modelId: string;
+    modelId?: string;
     expectedBinding?: ExactProviderProfileBinding;
     validateOnly: boolean;
     sessionDir: string;
@@ -906,8 +906,8 @@ export declare const PI_AUTH_NONE_API_KEY = "byok-sdk-auth-none";
 export declare const PI_LAUNCHER_RUNTIME_ENTRIES: readonly ['pi-rpc', 'pi-prepared', 'pi-durable'];
 // support
 export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
-export declare function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object;
-export declare function assertPiLaunchArgs(profile: ModelProviderProfile): void;
+export declare function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry, modelId?: string): object;
+export declare function assertPiLaunchArgs(profile: ModelProviderProfile, modelId?: string): void;
 // ==== @byok-sdk/keys dist/pi-runtime-defaults.generated.d.ts ====
 export declare const PI_DEFAULT_THINKING_LEVEL = "medium";
 // ==== @byok-sdk/keys dist/profile-store.d.ts ====
@@ -1008,7 +1008,6 @@ export interface ExactProviderProfileBinding {
     profileRef: ProviderProfileRef;
     profileRevision: string;
     profileHash: string;
-    modelId: string;
     requiredCapabilities: readonly ProviderModelCapability[];
 }
 export declare function exactProviderProfileBinding(profileInput: ModelProviderProfile, requiredCapabilities?: readonly ProviderModelCapability[]): ExactProviderProfileBinding;

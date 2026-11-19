@@ -53,7 +53,6 @@ function completionFor(requestId: string, kind: ReadbackKind): ProviderProvision
         profileRef: 'host-agent-1',
         profileRevision: '1759000000000',
         profileHash: `sha256:${'a'.repeat(64)}`,
-        modelId: 'glm-5.3-flash',
         requiredCapabilities: [],
       },
       keyCheck: { result: 'ok' },

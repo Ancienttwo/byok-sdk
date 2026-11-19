@@ -246,9 +246,6 @@ export const ProviderProvisioningCompletionSchema = z
     if (providerStatus.profileRef !== binding.profileRef) {
       ctx.addIssue({ code: 'custom', path: ['binding', 'profileRef'], message: 'binding profileRef must equal providerStatus profileRef' });
     }
-    if (providerStatus.modelId !== binding.modelId) {
-      ctx.addIssue({ code: 'custom', path: ['binding', 'modelId'], message: 'binding modelId must equal providerStatus modelId' });
-    }
     if ((operation === 'configure' || operation === 'replace_secret') && !providerStatus.secretConfigured) {
       ctx.addIssue({
         code: 'custom',

@@ -11,7 +11,7 @@ const selectionFor = {
   harness: ({ modelId }) => modelId === undefined ? { mode: 'device-default' } : { mode: 'adapter-model', modelId },
   subscription: ({ modelId }) => ({ mode: 'subscription', modelId }),
   byok: ({ modelId }) => ({ mode: 'byok', providerId: 'google', modelId }),
-  'byok-profile': ({ providerProfile }) => ({ mode: 'byok-profile', providerProfile }),
+  'byok-profile': ({ providerProfile: { modelId, ...providerProfile } }) => ({ mode: 'byok-profile', providerProfile, modelId }),
 };
 
 function selectionModes(id) {
@@ -26,6 +26,7 @@ function inventory({ runtimes = [], harnesses = [] }) {
     capabilities: {
       ...capabilities,
       selectionModes: selectionModes(id),
+      ...(id === 'pi' ? { defaultModelModes: ['byok-profile'] } : {}),
       effort: true,
     },
   }));
@@ -81,7 +82,7 @@ function httpValue(surface, input) {
 }
 
 const modelHarnesses = [
-  { id: 'pi', capabilities: { selectionModes: ['device-default', 'adapter-model'], effort: true } },
+  { id: 'pi', capabilities: { selectionModes: ['device-default', 'adapter-model', 'byok-profile'], defaultModelModes: ['byok-profile'], effort: true } },
   { id: 'opencode', capabilities: { selectionModes: ['adapter-model'], effort: true } },
   { id: 'grok', capabilities: { selectionModes: ['device-default', 'adapter-model'], defaultModelModes: ['adapter-model'], effort: true } },
   { id: 'dsh', capabilities: { selectionModes: ['byok'], byokProviderId: 'deepseek', defaultModelModes: ['byok'], effort: true } },
@@ -110,7 +111,15 @@ const sealedModelDeclines = modelDeclines.map((row, index) => ({
   payload: { ...sealedDecline.payload, code: row.payload.code, retryable: false },
 }));
 
-writeLines('v8.envelopes.ndjson', [...v8Envelopes, modelDefaultsHello, modelDefaultsOffer, ...modelDeclines, ...sealedModelDeclines]);
+const profileDefaultOffer = {
+  ...modelDefaultsOffer, id: '00000000-0000-4000-8000-000000004107', task_id: 'task-profile-default',
+  payload: { ...modelDefaultsOffer.payload, target: { lane: 'harness', harnessId: 'pi', selection: {
+    mode: 'byok-profile', providerProfile: { profileRef: 'local', profileRevision: '1',
+      profileHash: `sha256:${'c'.repeat(64)}`, requiredCapabilities: [] },
+  } } },
+};
+
+writeLines('v8.envelopes.ndjson', [...v8Envelopes, modelDefaultsHello, modelDefaultsOffer, ...modelDeclines, ...sealedModelDeclines, profileDefaultOffer]);
 writeLines('v8.http.ndjson', [...readLines('v7.http.ndjson').map(line => ({
   ...line, body: JSON.stringify(httpValue(line.surface, JSON.parse(line.body))), value: httpValue(line.surface, line.value),
 })), { surface: 'PresencePublishRequest', body: JSON.stringify(modelDefaultsPresence), value: modelDefaultsPresence }]);

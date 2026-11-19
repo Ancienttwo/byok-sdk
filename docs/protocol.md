@@ -827,12 +827,12 @@ executors that support `device-default`.
 | `adapter-model` | `modelId` unless a default is advertised | The executor's configuration with a task-selected or configured model |
 | `subscription` | `modelId` | The vendor CLI's own login with an explicit model |
 | `byok` | `providerId`, `modelId` unless a default is advertised | A Host credential for the executor's advertised pi-ai catalog provider |
-| `byok-profile` | `providerProfile` | An exact device-local profile binding |
+| `byok-profile` | `providerProfile`, `modelId` unless a default is advertised | An exact device-local profile binding with a task-selected or saved model |
 
 The selection variants reject extra fields. Each harness advertises
 `capabilities.selectionModes`, `capabilities.effort`, and, if it accepts
 `byok`, `capabilities.byokProviderId`. Optional `capabilities.defaultModelModes`
-lists the supported `adapter-model` and `byok` modes with a configured model
+lists the supported `adapter-model`, `byok`, and `byok-profile` modes with a configured model
 default. Cloud returns `invalid_request` before enqueue when the requested
 mode requires a model and the offer omits it. The inventory holds at most 64
 unique IDs. The daemon sends another hello when its scan changes the inventory.
@@ -841,8 +841,10 @@ Ordinary Pi accepts `device-default` and `adapter-model` using its own auth
 store. `adapter-model` requires the exact `provider/id` from Pi's model catalog.
 With a credential launcher, Pi also accepts `byok-profile`, the sole selection
 mode on the durable lane. The binding carries the opaque local `profileRef`,
-canonical decimal `profileRevision`, lowercase SHA-256 `profileHash`, `modelId`,
-and `requiredCapabilities`. The hash covers the normalized non-secret profile.
+canonical decimal `profileRevision`, lowercase SHA-256 `profileHash`, and
+`requiredCapabilities`. The hash covers the normalized non-secret profile,
+including its default model. `selection.modelId` overrides that default for
+this task while keeping the profile's endpoint, API, settings, and capabilities.
 The credential launcher checks the exact binding before resolving the key for
 the launch. A Host may derive the binding from the persisted profile using
 `exactProviderProfileBinding` from `@byok-sdk/keys`.

@@ -351,7 +351,7 @@ await runtime.dispose();
     '--pi-bin', process.execPath,
     ...(runtimeEntry === undefined ? [] : ['--runtime-entry', runtimeEntry]),
     '--pi-entry', sdkPiEntry, '--profile-db', profileDbPath, '--session-dir', sessionDir,
-    '--provider', target.profileRef, '--model', target.modelId,
+    '--provider', target.profileRef,
     '--profile-revision', target.profileRevision, '--profile-hash', target.profileHash,
     '--required-capabilities', '[]', '--validate-only', 'true',
   ], { cwd: dir, env, encoding: 'utf8', timeout: 15_000 });
@@ -396,14 +396,12 @@ await runtime.dispose();
     // adapter's resource phase, exactly as a real operation does. No credential
     // is read: this profile declares auth_mode:none and start is intercepted.
     let keysInvocation;
-    let keysConfig;
     let keysConfigBytes;
     const keysAdapter=new PiAdapter({
       byokLauncher:{command:process.execPath,args:[path.join(keysRoot,'dist/bin/pi-provider-launcher.js')],profileDbPath,sessionDir},
       spawnFn:(command,args,options)=>{
         keysInvocation={command,args,options};
         keysConfigBytes=readFileSync(args[args.indexOf('--config')+1],'utf8');
-        keysConfig=JSON.parse(keysConfigBytes);
         throw new Error('capture before prompt');
       },
     });

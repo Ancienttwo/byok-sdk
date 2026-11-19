@@ -33,7 +33,7 @@ function cancellationTarget(runtime: RuntimeId): import('@byok-sdk/protocol').Ex
     lane: 'harness', harnessId: 'pi', selection: {
       mode: 'byok-profile', providerProfile: {
         profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`,
-        modelId: 'fixture-model', requiredCapabilities: [],
+        requiredCapabilities: [],
       },
     },
   };

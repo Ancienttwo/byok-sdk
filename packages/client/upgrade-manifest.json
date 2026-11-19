@@ -258,7 +258,7 @@
       "id": "wire-v8-harness-selection",
       "impact": "breaking",
       "acceptance": "new-path-repair",
-      "summary": "Wire v8 unifies explicit executor routing under the harness lane. Ordinary Pi supports native device defaults and exact catalog model selection. Pi profile execution requires an exact local binding. Drain v7 tasks and intents, then create fresh stores and ledgers when upgrading peers together.",
+      "summary": "Wire v8 unifies explicit executor routing under the harness lane. Ordinary Pi supports native device defaults and exact catalog model selection. Pi profile execution requires an exact local binding and takes an optional per-task model ID on the selection. Drain v7 tasks and intents, then create fresh stores and ledgers when upgrading peers together.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v8-and-the-provider-store-cutover",
       "items": [
         "config:runtimes",
@@ -295,6 +295,10 @@
         "export:@byok-sdk/core#TenantReadinessPresence",
         "export:@byok-sdk/core#freezePresenceHarnessFact",
         "export:@byok-sdk/core#freezePresenceRuntimeFact",
+        "export:@byok-sdk/keys#ExactProviderProfileBinding",
+        "export:@byok-sdk/keys#PiProviderLauncherOptions",
+        "export:@byok-sdk/keys#assertPiLaunchArgs",
+        "export:@byok-sdk/keys#buildPiProviderProjection",
         "export:@byok-sdk/protocol#CAPABILITY_FLAGS",
         "export:@byok-sdk/protocol#ClaimedExecutorSchema",
         "export:@byok-sdk/protocol#ConnHelloPayload",
@@ -308,6 +312,9 @@
         "export:@byok-sdk/protocol#MESSAGE_PAYLOAD_SCHEMAS",
         "export:@byok-sdk/protocol#PROTOCOL_VERSION",
         "export:@byok-sdk/protocol#PresencePublishRequestSchema",
+        "export:@byok-sdk/protocol#ProviderProfileBindingSchema",
+        "export:@byok-sdk/protocol#ProviderProvisioningCompletion",
+        "export:@byok-sdk/protocol#ProviderProvisioningReadbackSchema",
         "export:@byok-sdk/protocol#RuntimeInfo",
         "export:@byok-sdk/protocol#RuntimeUnavailableEntry",
         "export:@byok-sdk/protocol#SEALED_SPLIT_TABLE",
@@ -370,7 +377,9 @@
         "export:@byok-sdk/protocol#DECLINE_CODES",
         "export:@byok-sdk/protocol#DefaultModelSelectionMode",
         "export:@byok-sdk/protocol#TaskDeclinePayload",
-        "export:@byok-sdk/protocol#harnessSelectionNeedsModel"
+        "export:@byok-sdk/protocol#harnessSelectionNeedsModel",
+        "export:@byok-sdk/protocol#isProviderProfileModelId",
+        "export:@byok-sdk/protocol/constants#isProviderProfileModelId"
       ]
     },
     {
@@ -829,6 +838,11 @@
       "entry": "model-list-unreachable"
     },
     {
+      "item": "export:@byok-sdk/keys#ExactProviderProfileBinding",
+      "change": "changed",
+      "entry": "wire-v8-harness-selection"
+    },
+    {
       "item": "export:@byok-sdk/keys#InMemoryProviderProfileStore",
       "change": "changed",
       "entry": "provider-store-credential-namespace"
@@ -839,6 +853,11 @@
       "entry": "model-discovery-connection-fields"
     },
     {
+      "item": "export:@byok-sdk/keys#PiProviderLauncherOptions",
+      "change": "changed",
+      "entry": "wire-v8-harness-selection"
+    },
+    {
       "item": "export:@byok-sdk/keys#ProviderProfileStore",
       "change": "changed",
       "entry": "provider-store-credential-namespace"
@@ -847,6 +866,16 @@
       "item": "export:@byok-sdk/keys#SqliteProviderProfileStore",
       "change": "changed",
       "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/keys#assertPiLaunchArgs",
+      "change": "changed",
+      "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/keys#buildPiProviderProjection",
+      "change": "changed",
+      "entry": "wire-v8-harness-selection"
     },
     {
       "item": "export:@byok-sdk/keys#removeRetiredProviderCredentials",
@@ -929,6 +958,21 @@
       "entry": "wire-v8-harness-selection"
     },
     {
+      "item": "export:@byok-sdk/protocol#ProviderProfileBindingSchema",
+      "change": "changed",
+      "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningCompletion",
+      "change": "changed",
+      "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#ProviderProvisioningReadbackSchema",
+      "change": "changed",
+      "entry": "wire-v8-harness-selection"
+    },
+    {
       "item": "export:@byok-sdk/protocol#RuntimeInfo",
       "change": "removed",
       "entry": "wire-v8-harness-selection"
@@ -999,6 +1043,11 @@
       "entry": "wire-v8-harness-selection"
     },
     {
+      "item": "export:@byok-sdk/protocol#isProviderProfileModelId",
+      "change": "added",
+      "entry": "harness-model-defaults"
+    },
+    {
       "item": "export:@byok-sdk/protocol#targetsPi",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
@@ -1012,6 +1061,11 @@
       "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#isProviderProfileModelId",
+      "change": "added",
+      "entry": "harness-model-defaults"
     },
     {
       "item": "export:@byok-sdk/server#MachineInfo",

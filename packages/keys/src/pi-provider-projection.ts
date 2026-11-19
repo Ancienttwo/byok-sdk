@@ -56,7 +56,7 @@ export function piProjectionProviderId(profile: ModelProviderProfile): string {
  * configuration is the only authority; nothing is inferred from the model name
  * or base URL.
  */
-export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object {
+export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry, modelId = profile.model): object {
   const { thinkingLevel: _, api: declaredApi, providerId: _providerId, ...modelSettings } = requirePiModelConfig(profile);
   const api = piApiOf(profile.adapter, declaredApi);
   if (api === undefined) {
@@ -76,7 +76,7 @@ export function buildPiProviderProjection(profile: ModelProviderProfile, runtime
         models: [
           {
             ...modelSettings,
-            id: profile.model,
+            id: modelId,
             name: profile.display_name,
             input: [
               'text',
@@ -141,8 +141,8 @@ function piApiKey(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntime
 /**
  * Refuse a profile whose rpc launch values the Pi rpc host would refuse.
  *
- * The launcher appends `--provider`, `--model` and `--thinking` from the
- * profile. The `@byok-sdk/client` rpc host (`parsePiRpcHostArgs`) takes each
+ * The launcher appends `--provider` and `--thinking` from the profile and
+ * `--model` from the task override or the saved default. The `@byok-sdk/client` rpc host (`parsePiRpcHostArgs`) takes each
  * value only when it is non-empty and does not start with `--`, and takes
  * `--thinking` only from Pi's thinking levels. `PiModelConfigSchema` already
  * restricts `thinkingLevel` to those levels. A Host can call this on a parsed
@@ -150,11 +150,11 @@ function piApiKey(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntime
  * and again before spawn. A client test runs the same argv through the real
  * host parser.
  */
-export function assertPiLaunchArgs(profile: ModelProviderProfile): void {
+export function assertPiLaunchArgs(profile: ModelProviderProfile, modelId = profile.model): void {
   const config = requirePiModelConfig(profile);
   const values: readonly (readonly [string, string])[] = [
     ['--provider', piProjectionProviderId(profile)],
-    ['--model', profile.model],
+    ['--model', modelId],
     ['--thinking', config.thinkingLevel],
   ];
   for (const [flag, value] of values) {
@@ -169,13 +169,14 @@ export function assertPiLaunchArgs(profile: ModelProviderProfile): void {
 
 /**
  * Validate the credential-blind RPC argv the client may delegate, then bind
- * the Pi child to the declared projection and exact configured model.
+ * the Pi child to the declared projection and effective model.
  */
 export function buildPiProviderArgs(
   profile: ModelProviderProfile,
   delegatedArgs: readonly string[],
+  modelId = profile.model,
 ): string[] {
-  assertPiLaunchArgs(profile);
+  assertPiLaunchArgs(profile, modelId);
   const config = requirePiModelConfig(profile);
   if (delegatedArgs.length > 128) throw new Error('Pi launcher delegated argument limit exceeded');
   let modeCount = 0;
@@ -231,7 +232,7 @@ export function buildPiProviderArgs(
     '--provider',
     piProjectionProviderId(profile),
     '--model',
-    profile.model,
+    modelId,
     '--thinking',
     config.thinkingLevel,
   ];

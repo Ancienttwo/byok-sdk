@@ -89,7 +89,7 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
   await runner.handleEnvelope(createEnvelope('task.offer', {
     agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'say hi',
     target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
-      profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, modelId: 'fixture', requiredCapabilities: [],
+      profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
     } } },
   }, { taskId: TASK_ID, seq: 1 }));
   // The runner publishes the record after Session.close() and lets the task go right after it.

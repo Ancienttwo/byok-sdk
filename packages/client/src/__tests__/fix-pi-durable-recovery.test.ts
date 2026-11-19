@@ -53,7 +53,7 @@ async function start(plan: WorkerPlan[], options: { blockConfigWrite?: boolean; 
         descriptor: new StubRuntimeAdapter().descriptor, requiredToolsetIds: [], forwardedEnvironmentNames: [],
         agentRef: { agentId: 'agent', profileRevision: 'revision' },
         lease: { leaseId: 'lease', canonicalHome: home },
-        selection: { mode: 'byok-profile', providerProfile: { profileRef: 'probe', modelId: 'test', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [] } },
+        selection: { mode: 'byok-profile', modelId: 'test', providerProfile: { profileRef: 'probe', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [] } },
       }),
       durableContext: { replicaRoot: path.join(root, 'replica'), tenantId: 'tenant', lifecycle: { ownsLease: () => true,
         record: async (kind: string, count: number) => { journal.push(`${kind}:${count}`); } } },

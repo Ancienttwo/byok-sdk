@@ -50,6 +50,7 @@ process.disconnect();
 writeFileSync(out, JSON.stringify({
   envKey: process.env.${PI_PROJECTED_KEY_ENV} ?? null,
   receipt,
+  model: process.argv[process.argv.indexOf('--model') + 1],
   models: JSON.parse(readFileSync(path.join(process.env.PI_CODING_AGENT_DIR, 'models.json'), 'utf8')),
 }));
 process.exit(${CHILD_EXIT_CODE});
@@ -107,7 +108,7 @@ async function fixture(overrides: Partial<ModelProviderProfileInput> = {}) {
   const base = [
     '--pi-bin', process.execPath, '--pi-entry', entry, '--runtime-entry', 'pi-rpc',
     '--profile-db', profileDb, '--session-dir', path.join(root, 'sessions'),
-    '--provider', profile.profile_ref, '--model', profile.model,
+    '--provider', profile.profile_ref,
   ];
   const launchArgs = (extra: string[] = []) => [
     ...base, ...extra, '--pi-cwd', root, '--pi-projection-dir', projection, '--pi-config-digest', 'a'.repeat(64),
@@ -118,7 +119,8 @@ async function fixture(overrides: Partial<ModelProviderProfileInput> = {}) {
   const childOutput = async () => JSON.parse(await fs.readFile(output, 'utf8')) as {
     envKey: string | null;
     receipt: { type: string; configDigest: string; secret: string | null };
-    models: { providers: Record<string, { apiKey?: string; authHeader?: boolean }> };
+    model: string;
+    models: { providers: Record<string, { apiKey?: string; authHeader?: boolean; models: Array<{ id: string }> }> };
   };
   return { root, profile, profileDb, projection, launch, launchArgs, validate, childOutput, namespaceId: writer.credentialNamespaceId };
 }
@@ -196,16 +198,32 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     const f = await fixture();
     const createSecretStore = vi.fn(() => hostKeychain(HOST_PREFIX).store);
     const binding = exactProviderProfileBinding(f.profile, []);
-    await expect(runPiProviderLauncher({ ...f.launch(), modelId: 'other-model' }, { createSecretStore }))
-      .rejects.toThrow(/does not match configured provider model/);
+    const changed = exactProviderProfileBinding({ ...f.profile, base_url: 'http://127.0.0.1:11500/v1' }, []);
     await expect(runPiProviderLauncher(f.launch([
-      '--profile-revision', binding.profileRevision, '--profile-hash', `sha256:${'0'.repeat(64)}`, '--required-capabilities', '[]',
+      '--model', 'other-model', '--profile-revision', binding.profileRevision, '--profile-hash', changed.profileHash, '--required-capabilities', '[]',
     ]), { createSecretStore })).rejects.toThrow(/provider profile hash mismatch/);
     await expect(runPiProviderLauncher(f.validate([
       '--profile-revision', binding.profileRevision, '--profile-hash', binding.profileHash, '--required-capabilities', '[]',
     ]), { createSecretStore })).resolves.toBe(0);
     expect(createSecretStore).not.toHaveBeenCalled();
     expect(await fs.readdir(f.projection)).toEqual([]);
+  });
+
+  it('launches two overrides and the saved default against one exact profile', async () => {
+    const f = await fixture();
+    const host = { createSecretStore: () => hostKeychain(HOST_PREFIX).store };
+    const binding = exactProviderProfileBinding(f.profile, []);
+    for (const modelId of ['other-model', 'org/model:high', undefined]) {
+      const options = f.launch([
+        ...(modelId === undefined ? [] : ['--model', modelId]),
+        '--profile-revision', binding.profileRevision, '--profile-hash', binding.profileHash, '--required-capabilities', '[]',
+      ]);
+      await expect(runPiProviderLauncher(options, host)).resolves.toBe(CHILD_EXIT_CODE);
+      const output = await f.childOutput();
+      expect(output.model).toBe(modelId ?? f.profile.model);
+      expect(output.models.providers['byok-sdk-local']?.models[0]?.id).toBe(output.model);
+      expect(output.receipt.secret).toBe(CANARY);
+    }
   });
 
   it('refuses an invalid database identity at admission before the host store is built', async () => {

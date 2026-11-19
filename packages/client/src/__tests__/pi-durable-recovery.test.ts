@@ -49,7 +49,7 @@ describe('durable parent recovery authority', () => {
     await expect(startPreparedOperation(adapter, {
       instruction: 'unused',
       target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
-        profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, modelId: 'unused', requiredCapabilities: [],
+        profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
       } } },
     }, { workspaceDir: home, agentHome: home, env: {} }))
       .rejects.toThrow('Pi Agent resources are supported only by the ordinary RPC lane');

@@ -3,11 +3,11 @@
 The frozen v1 BYOK device wire contract: envelope schemas, message payloads,
 codecs, version negotiation, and golden fixtures.
 
-`provider-profile-binding` is an additive v1 capability for exact device-local
-BYOK routing. Its `byok-profile` selection contains only `profileRef`, canonical
-decimal `profileRevision`, SHA-256 `profileHash`, `modelId`, and bounded
-`requiredCapabilities`. Endpoint, auth configuration, and credential material
-remain outside the protocol.
+The `byok-profile` selection binds a device-local BYOK profile using
+`profileRef`, canonical decimal `profileRevision`, SHA-256 `profileHash`, and
+bounded `requiredCapabilities`. Its optional `selection.modelId` overrides
+the model saved in that profile for the task. The endpoint, auth configuration,
+and credential material stay device-local.
 
 An Agent offer's `dispatchSelection` is the optional strict dual-lane target
 contract: subscription selects Claude/Codex + model, while BYOK selects Pi +

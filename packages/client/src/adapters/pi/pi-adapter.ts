@@ -55,8 +55,8 @@ import { locateBundledPiAssets } from './todo-locale-assets.js';
 import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelperHostConfig } from '../../sdk-reserved-helper-host.js';
 import { resolvePiBin, type ResolvedBin } from './resolve-bin.js';
 import { runtimeExecutableFields } from '../runtime-executable.js';
-import { mapPiContextUsage, mapPiMessageToAgentEvent, piAssistantError, ROUTINE_PI_EVENT_TYPES } from './events.js';
-import { boundFailureReason } from '@byok-sdk/protocol/constants';
+import { isPiModelUnavailable, mapPiContextUsage, mapPiMessageToAgentEvent, piAssistantError, PI_MODEL_UNAVAILABLE_REASON, ROUTINE_PI_EVENT_TYPES } from './events.js';
+import { boundFailureReason, isProviderProfileModelId } from '@byok-sdk/protocol/constants';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client.js';
 import { abortPiRpcAndSettle } from './interrupt-settlement.js';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame.js';
@@ -297,6 +297,7 @@ export class PiAdapter implements RuntimeAdapter {
     this.descriptor = freezeRuntimeAdapterDescriptor({
       ...this.descriptor,
       selectionModes: options.durableLane === true ? profileModes : ['device-default', 'adapter-model', ...profileModes],
+      ...(options.byokLauncher === undefined ? {} : { defaultModelModes: profileModes }),
       capabilities: {
         ...PI_RUNTIME_CAPABILITIES,
         isolation: {
@@ -400,8 +401,13 @@ export class PiAdapter implements RuntimeAdapter {
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const selection = offerSelection(input.offer.target);
+    const profileModelId = selection?.mode === 'byok-profile' ? selection.modelId : undefined;
+    if (profileModelId !== undefined && !isProviderProfileModelId(profileModelId)) {
+      return { kind: 'reject', code: 'invalid_request', reason: 'invalid provider profile model ID', retryable: false };
+    }
     if (this.options.durableLane === true && process.platform === 'win32') return { kind: 'reject', reason: 'durable Pi is unavailable on Windows until parent-death Job Object recovery is validated', retryable: false };
-    if (this.options.durableLane === true && offerSelection(input.offer.target)?.mode !== 'byok-profile') {
+    if (this.options.durableLane === true && selection?.mode !== 'byok-profile') {
       return { kind: 'reject', reason: 'durable Pi requires an ordinary BYOK selection', retryable: false };
     }
     // Fail closed BEFORE anything is spawned. pi registers one tool per
@@ -446,7 +452,6 @@ export class PiAdapter implements RuntimeAdapter {
     // lost/unknown authoritative sessionRef fails closed instead of silently
     // starting a new history under the requested id.
     const { effort } = input.offer;
-    const selection = offerSelection(input.offer.target);
     if (input.offer.target.lane === 'harness' && (input.offer.target.harnessId !== 'pi'
       || (selection?.mode !== 'byok-profile' && selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model'))) {
       return { kind: 'reject', reason: 'Pi does not support the requested selection', retryable: false };
@@ -480,9 +485,12 @@ export class PiAdapter implements RuntimeAdapter {
         return { kind: 'reject', reason: 'pi BYOK selection requires a configured credential-custody launcher', retryable: false };
       }
       try {
-        await (this.options.validateProviderProfileBinding ?? validateProviderProfileBindingWithLauncher)(
-          { ...providerProfile, requiredCapabilities: [...providerProfile.requiredCapabilities] }, launcher,
-        );
+        const binding = { ...providerProfile, requiredCapabilities: [...providerProfile.requiredCapabilities] };
+        if (this.options.validateProviderProfileBinding !== undefined) {
+          await this.options.validateProviderProfileBinding(binding, launcher);
+        } else {
+          await validateProviderProfileBindingWithLauncher(binding, launcher, profileModelId);
+        }
       } catch (error) {
         return { kind: 'reject', reason: `provider profile admission failed: ${errorMessage(error)}`, retryable: false };
       }
@@ -498,7 +506,7 @@ export class PiAdapter implements RuntimeAdapter {
           ? ['--secret-service-prefix', launcher.secretServicePrefix]
           : []),
         '--provider', providerProfile.profileRef,
-        '--model', providerProfile.modelId,
+        ...(profileModelId === undefined ? [] : ['--model', profileModelId]),
         '--profile-revision', providerProfile.profileRevision,
         '--profile-hash', providerProfile.profileHash,
         '--required-capabilities', JSON.stringify(providerProfile.requiredCapabilities),
@@ -570,7 +578,7 @@ export class PiAdapter implements RuntimeAdapter {
           const mcpEnv = startInput.mcpEnv!; // Preserve the daemon admission object through serialization.
           const manifestSelection = startInput.manifest.selection;
           const sameSelection = manifestSelection?.mode === admittedMode && (admittedMode === 'byok-profile'
-            ? samePiProfile(manifestSelection, providerProfile)
+            ? samePiProfile(manifestSelection, providerProfile, profileModelId)
             : admittedMode !== 'adapter-model' || (manifestSelection?.mode === 'adapter-model' && manifestSelection.modelId === modelId));
           if (!sameSelection || startInput.manifest.effort !== effort) {
             throw new RuntimeExecutionFailure({
@@ -620,9 +628,10 @@ export class PiAdapter implements RuntimeAdapter {
           }
           if (startInput.kind === 'prepared') {
             const preparedModel = startInput.preparation.expected.model;
-            if (nativeModel !== undefined && (preparedModel.provider !== nativeModel.provider || preparedModel.id !== nativeModel.id)) {
+            if ((nativeModel !== undefined && (preparedModel.provider !== nativeModel.provider || preparedModel.id !== nativeModel.id))
+              || (profileModelId !== undefined && preparedModel.id !== profileModelId)) {
               throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
-                reason: 'the prepared Pi model differs from the admitted adapter-model selection' });
+                reason: `the prepared Pi model differs from the admitted ${admittedMode} selection` });
             }
             return await startPreparedPiOperation({
               runtimeLaunch,
@@ -1256,6 +1265,7 @@ function preparedPiLaunchBin(): string {
 async function validateProviderProfileBindingWithLauncher(
   binding: ProviderProfileBinding,
   launcher: PiByokLauncherConfig,
+  modelId: string | undefined,
 ): Promise<void> {
   await execFileAsync(launcher.command, [
     ...(launcher.args ?? []),
@@ -1269,7 +1279,7 @@ async function validateProviderProfileBindingWithLauncher(
     '--profile-db', launcher.profileDbPath,
     '--session-dir', launcher.sessionDir,
     '--provider', binding.profileRef,
-    '--model', binding.modelId,
+    ...(modelId === undefined ? [] : ['--model', modelId]),
     '--profile-revision', binding.profileRevision,
     '--profile-hash', binding.profileHash,
     '--required-capabilities', JSON.stringify(binding.requiredCapabilities),
@@ -1294,12 +1304,12 @@ function isPiCatalogRow(value: unknown): value is { provider: string; id: string
 /** Compares every part of a prepared Pi profile binding. */
 function samePiProfile(selection: HarnessSelection | undefined, profile: Readonly<Omit<ProviderProfileBinding, 'requiredCapabilities'> & {
   requiredCapabilities: readonly ProviderProfileBinding['requiredCapabilities'][number][];
-}> | undefined): boolean {
+}> | undefined, modelId: string | undefined): boolean {
   if (selection === undefined || profile === undefined) return selection === undefined && profile === undefined;
   if (selection.mode !== 'byok-profile') return false;
   const binding = selection.providerProfile;
   return binding.profileRef === profile.profileRef && binding.profileRevision === profile.profileRevision
-    && binding.profileHash === profile.profileHash && binding.modelId === profile.modelId
+    && binding.profileHash === profile.profileHash && selection.modelId === modelId
     && binding.requiredCapabilities.length === profile.requiredCapabilities.length
     && binding.requiredCapabilities.every((capability, index) => capability === profile.requiredCapabilities[index]);
 }
@@ -1330,6 +1340,10 @@ async function resolveAuthoritativeSessionId(rpc: PiRpcClient, signal: AbortSign
     state = await untilStartAborted(rpc.send({ type: 'get_state' }), signal);
   } catch (err) {
     if (isRuntimeExecutionFailure(err)) throw err;
+    if (rpc.processExited && errorMessage(err).includes(`byok-pi-rpc: ${PI_MODEL_UNAVAILABLE_REASON}`)) {
+      throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable',
+        reason: PI_MODEL_UNAVAILABLE_REASON, failure: { class: 'model_unavailable' } });
+    }
     throw new RuntimeExecutionFailure({
       phase: 'start',
       retry: 'retryable',
@@ -1500,7 +1514,9 @@ class PiSession implements Session {
                 }) : undefined;
                 terminalFailure = abortFailure ?? (providerError === undefined ? undefined : new RuntimeExecutionFailure({
                   phase: 'run', retry: 'non-retryable',
-                  reason: boundFailureReason(providerError),
+                  ...(session.selection?.mode === 'byok-profile' && isPiModelUnavailable(providerError)
+                    ? { reason: PI_MODEL_UNAVAILABLE_REASON, failure: { class: 'model_unavailable' } }
+                    : { reason: boundFailureReason(providerError) }),
                 }));
                 // Read after settlement and deliver before turn_end, where the consumer stops.
                 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -1524,12 +1540,20 @@ class PiSession implements Session {
               // A queued prompt joins a run mid-way: a call that started before the
               // turn opened belongs to that run's earlier part, and so does its result.
               if (mapped?.type === 'tool_result' && mapped.toolCallId !== undefined && !session.turnToolCalls.has(mapped.toolCallId)) continue;
-              if (value.type === 'message_end' && mapped?.type === 'usage') providerError = piAssistantError(value);
+              if (value.type === 'message_end' && mapped?.type === 'usage') {
+                providerError = piAssistantError(value);
+                // A model refusal with no usage is not a metered prepared call.
+                // Let the settled failure reach the daemon's terminal path.
+                if (session.selection?.mode === 'byok-profile' && isPiModelUnavailable(providerError)
+                  && (mapped.inputTokens ?? 0) === 0) continue;
+              }
               if (value.type === 'auto_retry_end' && value.success === false) {
                 terminalFailure = new RuntimeExecutionFailure({
                   phase: 'run',
                   retry: 'non-retryable',
-                  reason: 'pi exhausted its native retry policy',
+                  ...(session.selection?.mode === 'byok-profile' && isPiModelUnavailable(value.finalError ?? providerError)
+                    ? { reason: PI_MODEL_UNAVAILABLE_REASON, failure: { class: 'model_unavailable' } }
+                    : { reason: 'pi exhausted its native retry policy' }),
                 });
               }
               if (mapped) return { value: mapped, done: false };
@@ -1563,8 +1587,8 @@ class PiSession implements Session {
       throw new PolicyUnsupportedError('pi persistent session cannot change effort');
     }
     const requestedSelection = offerSelection(task.target);
-    if (requestedSelection !== undefined && !samePiProfile(requestedSelection,
-      this.selection?.mode === 'byok-profile' ? this.selection.providerProfile : undefined)) {
+    const profileSelection = this.selection?.mode === 'byok-profile' ? this.selection : undefined;
+    if (requestedSelection !== undefined && !samePiProfile(requestedSelection, profileSelection?.providerProfile, profileSelection?.modelId)) {
       throw new PolicyUnsupportedError(
         'pi persistent session cannot change its authoritative BYOK provider/model selection',
       );

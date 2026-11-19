@@ -22,7 +22,7 @@ This checklist starts after the published 0.44.1 release. Hosts on an earlier re
    the model under the vendor's own CLI login. Subscription admission
    requires Claude.ai for Claude or a ChatGPT account for Codex. For a Host credential, use
    `byok` with the advertised pi-ai catalog `providerId`. For `byok` and
-   `adapter-model`, omit `modelId` only if the device advertises that selection
+   `adapter-model`, and `byok-profile`, omit `modelId` only if the device advertises that selection
    mode in `capabilities.defaultModelModes`. DSH can use a configured default
    or an explicit model within the configured route. OpenCode without a
    configured model list requires `adapter-model` with an explicit ID.
@@ -55,12 +55,23 @@ the profile.
 const target = {
   lane: 'harness',
   harnessId: 'pi',
-  selection: { mode: 'byok-profile', providerProfile: exactProviderProfileBinding(profile) },
+  selection: {
+    mode: 'byok-profile',
+    providerProfile: exactProviderProfileBinding(profile),
+    modelId: 'provider/model',
+  },
 } satisfies ExecutionTarget;
 ```
 
-AiphaBee already uses exact profile binding. Its existing profile selection
-continues to work when passed through the v8 target shape.
+Omit `selection.modelId` to use `profile.model`. An override reuses the same
+credential, provider endpoint, `api`, `pi_model` settings, and declared
+capabilities. Choose a model that works with those settings. A prepared task
+must count and execute the same model. A runtime refusal for an unavailable
+model after claim reports `task.fail.failure.class = 'model_unavailable'`.
+
+AiphaBee can use the same persisted binding for bots that select different
+models. Read the saved default from the profile or provisioning status. The
+exact binding's hash still includes the saved default.
 
 ## Managed runtime upgrades
 

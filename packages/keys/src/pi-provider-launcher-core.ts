@@ -48,7 +48,8 @@ export interface PiProviderLauncherOptions {
   profileDbPath: string;
   /** Carried by the `--provider` flag: the exact local profile to launch. */
   profileRef: ProviderProfileRef;
-  modelId: string;
+  /** Optional task model override. The saved profile supplies the default. */
+  modelId?: string;
   expectedBinding?: ExactProviderProfileBinding;
   validateOnly: boolean;
   sessionDir: string;
@@ -68,6 +69,13 @@ function parsePiFixedArgs(raw: string | undefined, runtimeEntry: PiLauncherRunti
     throw new Error(`--pi-fixed-args must be exactly ${JSON.stringify(expected)} for --runtime-entry ${runtimeEntry}`);
   }
   return expected;
+}
+
+function assertModelOverride(modelId: string | undefined): void {
+  if (modelId !== undefined && (modelId.length > 160 || modelId.trim().length === 0
+    || modelId.startsWith('--') || /\p{Cc}/u.test(modelId))) {
+    throw new Error('--model requires a valid provider profile model ID');
+  }
 }
 
 export function parsePiProviderLauncherOptions(
@@ -132,8 +140,8 @@ export function parsePiProviderLauncherOptions(
     throw new Error(`provider profile ref ${rawProfileRef} is not a valid @byok-sdk/keys identifier`);
   }
 
-  const modelId = required('--model');
-  if (modelId.length > 160) throw new Error('--model exceeds 160 characters');
+  const modelId = values.get('--model');
+  assertModelOverride(modelId);
 
   const profileDbPath = required('--profile-db');
   const sessionDir = required('--session-dir');
@@ -183,7 +191,6 @@ export function parsePiProviderLauncherOptions(
       profileRef: profileRef.data,
       profileRevision: exactValues[0],
       profileHash: exactValues[1]!,
-      modelId,
       requiredCapabilities: parsedCapabilities.data,
     };
   }
@@ -217,7 +224,7 @@ export function parsePiProviderLauncherOptions(
     ...(piCwd === undefined ? {} : { piCwd, piProjectionDir }),
     profileDbPath,
     profileRef: profileRef.data,
-    modelId,
+    ...(modelId === undefined ? {} : { modelId }),
     ...(expectedBinding === undefined ? {} : { expectedBinding }),
     validateOnly,
     sessionDir,
@@ -320,7 +327,6 @@ function assertSameProfileRecord(current: ModelProviderProfile | undefined, expe
   if (
     actual.profileRevision !== wanted.profileRevision
     || actual.profileHash !== wanted.profileHash
-    || actual.modelId !== wanted.modelId
   ) {
     throw new ByokKeysError('PROVIDER_PROFILE_CONFLICT', `${expected.profile_ref} provider profile changed before its credential was read`);
   }
@@ -637,14 +643,16 @@ export async function startPiProvider(
   // its environment.
   const ipcLane = runtimeEntry === 'pi-prepared' ? undefined : durable ? 'durable' : 'rpc';
   const configDigest = options.piConfigDigest!;
-  const projection = buildPiProviderProjection(profile, runtimeEntry);
+  assertModelOverride(options.modelId);
+  const modelId = options.modelId ?? profile.model;
+  const projection = buildPiProviderProjection(profile, runtimeEntry, modelId);
   // The ONE place the child grammars diverge. Everything after it —
   // projection write, layout assertion, secret resolution and the spawn
   // itself — is shared; only the key's delivery channel (`ipcLane`) depends
   // on which entry consumes the projected provider.
   const delegated = (runtimeEntry === 'pi-prepared' || durable)
     ? buildPiPreparedArgs(options.piArgs)
-    : buildPiProviderArgs(profile, options.piArgs);
+    : buildPiProviderArgs(profile, options.piArgs, modelId);
   const env = buildPiProviderChildEnvironment({
     ambient: dependencies.ambient, projectionDir, sessionDir: options.sessionDir,
   });
@@ -741,7 +749,7 @@ export interface PiProviderLauncherHost {
  * host-built credential store.
  *
  * It opens the profile database read-only, requires the exact configured
- * profile and model, checks the exact binding when the options carry one,
+ * profile, checks the exact binding when the options carry one,
  * refuses a profile the runtime entry cannot serve, and builds the projection.
  * A validation-only call then checks custody without reading a key. A launch
  * reads the key through the custody snapshot, spawns Pi, forwards SIGINT and
@@ -762,17 +770,14 @@ export async function runPiProviderLauncher(
     if (profile === undefined) {
       throw new Error(`provider profile ${options.profileRef} is not configured`);
     }
-    if (profile.model !== options.modelId) {
-      throw new Error(
-        `selected model ${options.modelId} does not match configured provider model ${profile.model}`,
-      );
-    }
+    assertModelOverride(options.modelId);
+    const modelId = options.modelId ?? profile.model;
     if (options.expectedBinding !== undefined) {
       assertExactProviderProfileBinding(profile, options.expectedBinding);
     }
     if (options.runtimeEntry === 'pi-prepared') assertPiPreparedProviderProfile(profile);
-    if (options.runtimeEntry === 'pi-rpc') assertPiLaunchArgs(profile);
-    buildPiProviderProjection(profile, options.runtimeEntry);
+    if (options.runtimeEntry === 'pi-rpc') assertPiLaunchArgs(profile, modelId);
+    buildPiProviderProjection(profile, options.runtimeEntry, modelId);
     if (options.validateOnly) {
       await assertProviderCustodyIdle({ profiles, profile });
       return 0;

@@ -22,11 +22,11 @@ import { observationOf } from './fixtures/mcp-observation';
 
 const PI_TARGET = { lane: 'auto' } as const;
 const PROFILE_BINDING: ProviderProfileBinding = {
-  profileRef: 'openai', modelId: 'gpt-5.2', profileRevision: 'r1',
+  profileRef: 'openai', profileRevision: 'r1',
   profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
 };
 const PI_PROFILE_TARGET = {
-  lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: PROFILE_BINDING },
+  lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: PROFILE_BINDING, modelId: 'gpt-5.2' },
 } as const;
 const validateProfile = async (binding: typeof PROFILE_BINDING) => {
   expect(binding).toEqual(PROFILE_BINDING);
@@ -72,6 +72,21 @@ describe('Pi native model selection', () => {
     expect(new PiAdapter().descriptor.selectionModes).toEqual(['device-default', 'adapter-model']);
     expect(new PiAdapter({ byokLauncher }).descriptor.selectionModes).toEqual(['device-default', 'adapter-model', 'byok-profile']);
     expect(new PiAdapter({ byokLauncher, durableLane: true }).descriptor.selectionModes).toEqual(['byok-profile']);
+    expect(new PiAdapter().descriptor.defaultModelModes).toBeUndefined();
+    for (const durableLane of [false, true]) {
+      expect(new PiAdapter({ byokLauncher, durableLane }).descriptor.defaultModelModes).toEqual(['byok-profile']);
+    }
+  });
+
+  it.each(['--flag', '  ', 'model\tname', 'model\u0085name', 'x'.repeat(161)])('rejects an invalid profile override before checking custody (%j)', async modelId => {
+    const validateProviderProfileBinding = vi.fn();
+    const adapter = new PiAdapter({ validateProviderProfileBinding, byokLauncher: {
+      command: process.execPath, profileDbPath: FIXTURE_PATH, sessionDir: path.dirname(FIXTURE_PATH),
+    } });
+    await expect(adapter.prepare({ offer: { instruction: 'hi', target: { ...PI_PROFILE_TARGET,
+      selection: { ...PI_PROFILE_TARGET.selection, modelId },
+    } } } as Parameters<PiAdapter['prepare']>[0])).resolves.toMatchObject({ kind: 'reject', code: 'invalid_request', retryable: false });
+    expect(validateProviderProfileBinding).not.toHaveBeenCalled();
   });
 
   it.each([false, true])('returns provider-qualified native model IDs through the SDK helper (self-hosted=%s)', async selfHosted => {
@@ -327,7 +342,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
       target: {
         lane: 'harness',
         harnessId: 'pi',
-        selection: { mode: 'byok-profile', providerProfile: { ...PROFILE_BINDING, modelId: 'gpt-5.3' } },
+        selection: { mode: 'byok-profile', providerProfile: PROFILE_BINDING, modelId: 'gpt-5.3' },
       },
     })).rejects.toThrow(/cannot change its authoritative BYOK provider\/model/);
   });

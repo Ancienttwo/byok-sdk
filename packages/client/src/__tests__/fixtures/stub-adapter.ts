@@ -287,7 +287,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       trajectoryEvidence,
       capabilities,
       ...(declarations.fileScope === undefined ? {} : { fileScope: declarations.fileScope }),
-      ...(declarations.providerProfileBinding === true ? { providerProfileBinding: true } : {}),
+      ...(declarations.providerProfileBinding === true ? { providerProfileBinding: true, defaultModelModes: ['byok-profile'] } : {}),
     });
     if (declarations.projectMcpEnvironment !== undefined) this.projectMcpEnvironment = declarations.projectMcpEnvironment;
   }

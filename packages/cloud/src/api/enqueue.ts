@@ -12,20 +12,22 @@ import {
   encodeEnvelope,
   harnessSelectionNeedsModel,
   harnessSupportsTarget,
+  isProviderProfileModelId,
   isSealedPayload,
   requiredReceiverCapabilities,
+  uuidFromSha256,
   type AgentContentReceiptPayload,
   type AgentEgressAckPayload,
   type AgentMessageDispositionPayload,
   type AgentMessageServerContext,
   type AgentRef,
   type Envelope,
+  type ExecutionTarget,
   type SessionSelection,
   type TaskOfferPayload,
 } from '@byok-sdk/protocol';
 import { sameAgentRef } from '../agent-message-disposition.js';
 import { ByokCloudError, DeviceRetiredError, TaskOfferAppendRefusedError } from '../errors.js';
-import { uuidFromSha256 } from '@byok-sdk/protocol';
 import { taskOfferMessageId } from '../offer-identity.js';
 import { firstSealedPayload } from '../sealed-comparison.js';
 import { retainSealedCiphertext, sealedCiphertextCommitted, sealedCiphertextRef } from '../sealed-ciphertext.js';
@@ -72,6 +74,15 @@ export function refuseSealedFields(payload: unknown, fields: readonly string[], 
       ? `${present.join(', ')} belongs to a sealed lane; this lane has no sealed counterpart`
       : `${present.join(', ')} belongs to the sealed lane; use ${sealedEntry}`;
     throw new ByokCloudError('coordination_input_invalid', message);
+  }
+}
+
+/** Give malformed overrides a typed enqueue refusal before parsing or persistence. */
+export function assertProviderProfileModelOverride(payload: { readonly target?: ExecutionTarget } | undefined): void {
+  const target = payload?.target;
+  if (target?.lane === 'harness' && target.selection?.mode === 'byok-profile'
+    && target.selection.modelId !== undefined && !isProviderProfileModelId(target.selection.modelId)) {
+    throw new ByokCloudError('invalid_request', 'invalid provider profile model ID');
   }
 }
 

@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation.js';
 import { z } from 'zod';
-import { AGENT_MEMORY_START_REFUSALS, RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type AgentMemoryStartRefusal } from './constants.js';
+import { AGENT_MEMORY_START_REFUSALS, RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, isProviderProfileModelId, type AgentMemoryStartRefusal } from './constants.js';
 import { BlobRefSchema } from './blob.js';
 import {
   SEALED_DECLINE_CODES,
@@ -143,7 +143,8 @@ export const HarnessIdSchema = z.string().min(1).max(128).regex(/^[a-z][a-z0-9]*
 
 export const SelectionModeSchema = z.enum(['device-default', 'adapter-model', 'subscription', 'byok', 'byok-profile']);
 export type SelectionMode = z.infer<typeof SelectionModeSchema>;
-export type DefaultModelSelectionMode = Extract<SelectionMode, 'byok' | 'adapter-model'>;
+const DefaultModelSelectionModeSchema = z.enum(['byok', 'adapter-model', 'byok-profile']);
+export type DefaultModelSelectionMode = z.infer<typeof DefaultModelSelectionModeSchema>;
 
 export const HarnessInfoSchema = z.object({
   id: HarnessIdSchema,
@@ -152,7 +153,7 @@ export const HarnessInfoSchema = z.object({
   capabilities: RuntimeCapabilitiesSchema.extend({
     selectionModes: z.array(SelectionModeSchema).max(SelectionModeSchema.options.length)
       .refine(modes => new Set(modes).size === modes.length, 'duplicate selection mode'),
-    defaultModelModes: z.array(z.enum(['byok', 'adapter-model'])).max(2).optional(),
+    defaultModelModes: z.array(DefaultModelSelectionModeSchema).max(DefaultModelSelectionModeSchema.options.length).optional(),
     effort: z.boolean(),
     byokProviderId: HarnessIdSchema.optional(),
   }).refine(caps => caps.selectionModes.includes('byok') === (caps.byokProviderId !== undefined),
@@ -344,7 +345,11 @@ export const HarnessSelectionSchema = z.discriminatedUnion('mode', [
   z.strictObject({ mode: z.literal('adapter-model'), modelId: DispatchTargetIdSchema.optional() }),
   z.strictObject({ mode: z.literal('subscription'), modelId: DispatchTargetIdSchema }),
   z.strictObject({ mode: z.literal('byok'), providerId: HarnessIdSchema, modelId: DispatchTargetIdSchema.optional() }),
-  z.strictObject({ mode: z.literal('byok-profile'), providerProfile: ProviderProfileBindingSchema }),
+  z.strictObject({
+    mode: z.literal('byok-profile'),
+    providerProfile: ProviderProfileBindingSchema,
+    modelId: DispatchTargetIdSchema.refine(value => isProviderProfileModelId(value), 'invalid provider profile model ID').optional(),
+  }),
 ]);
 export type HarnessSelection = z.infer<typeof HarnessSelectionSchema>;
 
@@ -381,7 +386,7 @@ export function harnessSupportsTarget(
 
 /** A model-bearing selection may omit the model only when that mode has a configured default. */
 export function harnessSelectionNeedsModel(selection: HarnessSelection, defaults?: readonly DefaultModelSelectionMode[]): boolean {
-  if (selection.mode !== 'byok' && selection.mode !== 'adapter-model') return false;
+  if (selection.mode !== 'byok' && selection.mode !== 'adapter-model' && selection.mode !== 'byok-profile') return false;
   if (selection.modelId !== undefined) return selection.modelId.trim() === '';
   return defaults?.includes(selection.mode) !== true;
 }

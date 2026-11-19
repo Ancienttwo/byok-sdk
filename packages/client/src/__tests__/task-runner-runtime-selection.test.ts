@@ -382,7 +382,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     });
 
     const providerProfile = {
-      profileRef: 'openai', modelId: 'gpt-5.2', profileRevision: '1',
+      profileRef: 'openai', profileRevision: '1',
       profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
     };
 
@@ -444,7 +444,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       const target = {
         lane: 'harness' as const,
         harnessId: 'pi' as const,
-        selection: { mode: 'byok-profile' as const, providerProfile },
+        selection: { mode: 'byok-profile' as const, providerProfile, modelId: 'gpt-5.2' },
       };
       server.send(
         createEnvelope(

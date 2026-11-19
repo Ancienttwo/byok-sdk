@@ -1138,7 +1138,7 @@ export interface PresenceRuntimeCapabilities {
     readonly durableLane?: boolean;
     readonly preparedLane?: boolean;
     readonly selectionModes: readonly string[];
-    readonly defaultModelModes?: readonly ('byok' | 'adapter-model')[];
+    readonly defaultModelModes?: readonly ('byok' | 'adapter-model' | 'byok-profile')[];
     readonly effort: boolean;
     readonly byokProviderId?: string;
     readonly isolation?: {

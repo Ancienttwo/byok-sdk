@@ -83,7 +83,7 @@ async function setup(options: { adapter?: RuntimeAdapter; gateReply?: boolean } 
       target: adapter.descriptor.id === 'custom-draft'
         ? { lane: 'harness', harnessId: 'custom-draft', selection: { mode: 'device-default' } }
         : { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
-            profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, modelId: 'fixture', requiredCapabilities: [],
+            profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
           } } },
       ...(required ? { messageEgress: {
         mode: 'required' as const, contract: 'draft.v1', contentType: 'text/plain' as const, maxBytes: 1024,

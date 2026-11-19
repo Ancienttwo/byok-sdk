@@ -475,6 +475,7 @@
 //   isKnownAgentEvent -> dist/agent-event.d.ts
 //   isPairingText -> dist/http-api.d.ts
 //   isPreparedAgentMemoryMode -> dist/capability-constants.d.ts
+//   isProviderProfileModelId -> dist/constants.d.ts
 //   isSealableMessageType -> dist/sealed-split-table.d.ts
 //   isSealedPayload -> dist/sealed-split-table.d.ts
 //   isSealedTaskPlainOutput -> dist/sealed-payload.d.ts
@@ -559,6 +560,7 @@
 //   TruncateOptions -> dist/failure-reason.d.ts
 //   boundFailureReason -> dist/failure-reason.d.ts
 //   isPreparedAgentMemoryMode -> dist/capability-constants.d.ts
+//   isProviderProfileModelId -> dist/constants.d.ts
 //   redactSecrets -> dist/failure-reason.d.ts
 //   truncateUtf8 -> dist/failure-reason.d.ts
 // ==== @byok-sdk/protocol dist/agent-egress.d.ts ====
@@ -2202,6 +2204,7 @@ export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 export declare const AGENT_MEMORY_MAX_FILE_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES = 512;
 export declare const RESIDENT_MEMORY_MAX_BYTES: number;
+export declare function isProviderProfileModelId(value: unknown): value is string;
 export declare const RUNTIME_IDS: readonly ["pi", "claude", "codex"];
 export declare const RUNTIME_UNAVAILABLE_CAUSES: readonly ["not_installed", "not_executable", "probe_timeout", "probe_failed", "app_server_unavailable", "acp_unavailable", "platform_unsupported", "environment_unavailable", "version_blocked", "runtime_not_configured", "runtime_not_allowed", "none_available", "agent_user_context_unavailable"];
 export type RuntimeUnavailableCause = (typeof RUNTIME_UNAVAILABLE_CAUSES)[number];
@@ -2490,11 +2493,11 @@ export declare const HostOfferPlainPayloadSchema: z.ZodObject<{
                 profileRef: z.ZodString;
                 profileRevision: z.ZodString;
                 profileHash: z.ZodString;
-                modelId: z.ZodString;
                 requiredCapabilities: z.ZodArray<z.ZodEnum<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "lane">;
@@ -2619,11 +2622,11 @@ export declare const HostOfferSealedPayloadSchema: z.ZodObject<{
                 profileRef: z.ZodString;
                 profileRevision: z.ZodString;
                 profileHash: z.ZodString;
-                modelId: z.ZodString;
                 requiredCapabilities: z.ZodArray<z.ZodEnum<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "lane">;
@@ -2843,6 +2846,7 @@ export declare const PresencePublishRequestSchema: z.ZodObject<{
             defaultModelModes: z.ZodOptional<z.ZodArray<z.ZodEnum<{
                 "adapter-model": "adapter-model";
                 byok: "byok";
+                "byok-profile": "byok-profile";
             }>>>;
             effort: z.ZodBoolean;
             byokProviderId: z.ZodOptional<z.ZodString>;
@@ -4080,7 +4084,13 @@ export declare const SelectionModeSchema: z.ZodEnum<{
     subscription: "subscription";
 }>;
 export type SelectionMode = z.infer<typeof SelectionModeSchema>;
-export type DefaultModelSelectionMode = Extract<SelectionMode, 'byok' | 'adapter-model'>;
+// support
+declare const DefaultModelSelectionModeSchema: z.ZodEnum<{
+    "adapter-model": "adapter-model";
+    byok: "byok";
+    "byok-profile": "byok-profile";
+}>;
+export type DefaultModelSelectionMode = z.infer<typeof DefaultModelSelectionModeSchema>;
 // support
 export declare const HarnessInfoSchema: z.ZodObject<{
     id: z.ZodString;
@@ -4115,6 +4125,7 @@ export declare const HarnessInfoSchema: z.ZodObject<{
         defaultModelModes: z.ZodOptional<z.ZodArray<z.ZodEnum<{
             "adapter-model": "adapter-model";
             byok: "byok";
+            "byok-profile": "byok-profile";
         }>>>;
         effort: z.ZodBoolean;
         byokProviderId: z.ZodOptional<z.ZodString>;
@@ -4162,6 +4173,7 @@ export declare const HarnessInventorySchema: z.ZodArray<z.ZodObject<{
         defaultModelModes: z.ZodOptional<z.ZodArray<z.ZodEnum<{
             "adapter-model": "adapter-model";
             byok: "byok";
+            "byok-profile": "byok-profile";
         }>>>;
         effort: z.ZodBoolean;
         byokProviderId: z.ZodOptional<z.ZodString>;
@@ -4251,6 +4263,7 @@ export declare const ConnHelloPayloadSchema: z.ZodObject<{
             defaultModelModes: z.ZodOptional<z.ZodArray<z.ZodEnum<{
                 "adapter-model": "adapter-model";
                 byok: "byok";
+                "byok-profile": "byok-profile";
             }>>>;
             effort: z.ZodBoolean;
             byokProviderId: z.ZodOptional<z.ZodString>;
@@ -4339,11 +4352,11 @@ export declare const HarnessSelectionSchema: z.ZodDiscriminatedUnion<[z.ZodObjec
         profileRef: z.ZodString;
         profileRevision: z.ZodString;
         profileHash: z.ZodString;
-        modelId: z.ZodString;
         requiredCapabilities: z.ZodArray<z.ZodEnum<{
             "image-input": "image-input";
         }>>;
     }, z.core.$strict>;
+    modelId: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>], "mode">;
 export type HarnessSelection = z.infer<typeof HarnessSelectionSchema>;
 export declare const ExecutionTargetSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -4369,11 +4382,11 @@ export declare const ExecutionTargetSchema: z.ZodDiscriminatedUnion<[z.ZodObject
             profileRef: z.ZodString;
             profileRevision: z.ZodString;
             profileHash: z.ZodString;
-            modelId: z.ZodString;
             requiredCapabilities: z.ZodArray<z.ZodEnum<{
                 "image-input": "image-input";
             }>>;
         }, z.core.$strict>;
+        modelId: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "mode">;
     effort: z.ZodOptional<z.ZodString>;
 }, z.core.$strict>], "lane">;
@@ -4517,11 +4530,11 @@ export declare const TaskOfferPlainPayloadSchema: z.ZodObject<{
                 profileRef: z.ZodString;
                 profileRevision: z.ZodString;
                 profileHash: z.ZodString;
-                modelId: z.ZodString;
                 requiredCapabilities: z.ZodArray<z.ZodEnum<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "lane">;
@@ -4646,11 +4659,11 @@ export declare const TaskOfferSealedPayloadSchema: z.ZodObject<{
                 profileRef: z.ZodString;
                 profileRevision: z.ZodString;
                 profileHash: z.ZodString;
-                modelId: z.ZodString;
                 requiredCapabilities: z.ZodArray<z.ZodEnum<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "lane">;
@@ -4823,11 +4836,11 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
                 profileRef: z.ZodString;
                 profileRevision: z.ZodString;
                 profileHash: z.ZodString;
-                modelId: z.ZodString;
                 requiredCapabilities: z.ZodArray<z.ZodEnum<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "lane">;
@@ -4950,11 +4963,11 @@ export declare const TaskOfferPayloadSchema: z.ZodUnion<readonly [z.ZodObject<{
                 profileRef: z.ZodString;
                 profileRevision: z.ZodString;
                 profileHash: z.ZodString;
-                modelId: z.ZodString;
                 requiredCapabilities: z.ZodArray<z.ZodEnum<{
                     "image-input": "image-input";
                 }>>;
             }, z.core.$strict>;
+            modelId: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "mode">;
         effort: z.ZodOptional<z.ZodString>;
     }, z.core.$strict>], "lane">;
@@ -6771,7 +6784,6 @@ export declare const ProviderProfileBindingSchema: z.ZodObject<{
     profileRef: z.ZodString;
     profileRevision: z.ZodString;
     profileHash: z.ZodString;
-    modelId: z.ZodString;
     requiredCapabilities: z.ZodArray<z.ZodEnum<{
         "image-input": "image-input";
     }>>;
@@ -6821,7 +6833,6 @@ export declare const ProviderProvisioningCompletionSchema: z.ZodDiscriminatedUni
         profileRef: z.ZodString;
         profileRevision: z.ZodString;
         profileHash: z.ZodString;
-        modelId: z.ZodString;
         requiredCapabilities: z.ZodArray<z.ZodEnum<{
             "image-input": "image-input";
         }>>;
@@ -6908,7 +6919,6 @@ export declare const ProviderProvisioningReadbackSchema: z.ZodObject<{
             profileRef: z.ZodString;
             profileRevision: z.ZodString;
             profileHash: z.ZodString;
-            modelId: z.ZodString;
             requiredCapabilities: z.ZodArray<z.ZodEnum<{
                 "image-input": "image-input";
             }>>;

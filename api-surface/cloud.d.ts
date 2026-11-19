@@ -718,11 +718,11 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
                     profileRef: z.ZodString;
                     profileRevision: z.ZodString;
                     profileHash: z.ZodString;
-                    modelId: z.ZodString;
                     requiredCapabilities: z.ZodArray<z.ZodEnum<{
                         "image-input": "image-input";
                     }>>;
                 }, z.core.$strict>;
+                modelId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>], "mode">;
             effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
@@ -854,11 +854,11 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
                     profileRef: z.ZodString;
                     profileRevision: z.ZodString;
                     profileHash: z.ZodString;
-                    modelId: z.ZodString;
                     requiredCapabilities: z.ZodArray<z.ZodEnum<{
                         "image-input": "image-input";
                     }>>;
                 }, z.core.$strict>;
+                modelId: z.ZodOptional<z.ZodString>;
             }, z.core.$strict>], "mode">;
             effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;

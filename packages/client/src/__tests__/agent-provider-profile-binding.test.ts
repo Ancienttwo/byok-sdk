@@ -22,7 +22,6 @@ const binding: ProviderProfileBinding = {
   profileRef: 'openrouter-primary',
   profileRevision: '1787702400000',
   profileHash: `sha256:${'a'.repeat(64)}`,
-  modelId: 'anthropic/claude-sonnet-4',
   requiredCapabilities: ['image-input'],
 };
 

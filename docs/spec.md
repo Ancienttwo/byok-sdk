@@ -373,8 +373,11 @@ and makes no network request.
   draft, change, new draft, view and submission for Hosts in other languages.
 
 The launcher accepts the adapter's bounded absolute extension paths and an
-absolute `--config` path. Provider/model/thinking selection remains local
-profile authority; delegated flags cannot override it. The Pi child gets a
+absolute `--config` path. The profile supplies provider, thinking level, and
+default model. An explicit `byok-profile` task selection can override the
+model ID through the launcher's own `--model` argument. The override reuses
+the profile's endpoint, API, Pi settings, and capabilities. The exact binding
+still hashes the saved default model. The Pi child gets a
 narrow inherited environment; arbitrary environment names, `BYOK_*` names and
 ambient provider credentials are excluded. The profile SQLite schema includes
 nullable `pi_model` and the singleton store metadata table. Launch requires the

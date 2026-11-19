@@ -16,8 +16,8 @@ import {
 const PRODUCT_ID = 'acme';
 /** Short enough that a poll expecting nothing answers in ~200ms instead of ~50s. */
 const SHORT_HOLD_MS = 200;
-const SELECTION = { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
-  profileRef: 'local-openai', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, modelId: 'gpt-5.2', requiredCapabilities: [],
+const SELECTION = { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', modelId: 'gpt-5.2', providerProfile: {
+  profileRef: 'local-openai', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
 } } } satisfies ExecutionTarget;
 const POLICY = {
   policyRevision: '1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },

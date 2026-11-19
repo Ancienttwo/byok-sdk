@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention.js';
 import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate.js';
 import { createPiSubagentAbortBoundary } from '../adapters/pi/subagent-interruption.js';
+import { PI_MODEL_UNAVAILABLE_REASON } from '../adapters/pi/events.js';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
@@ -233,12 +234,16 @@ export async function runPiSessionRuntime(options: {
         options.reject('launcher provider key could not be registered in memory');
       }
     }
-    const exact = options.exactModel === true
-      ? (await services.modelRuntime.getAvailable(options.provider, { signal: AbortSignal.timeout(12_000) }))
-        .find(model => model.provider === options.provider && model.id === options.model)
-      : undefined;
-    if (options.exactModel === true && exact === undefined) options.reject('requested Pi model is unavailable');
-    const resolved = options.model === undefined || options.exactModel === true ? undefined : resolveCliModel({
+    const profileModel = options.credentialSource === 'keys-profile';
+    let exact: ReturnType<ModelRuntime['getModel']>;
+    if (profileModel && options.provider !== undefined && options.model !== undefined) {
+      exact = services.modelRuntime.getModel(options.provider, options.model);
+    } else if (options.exactModel === true) {
+      exact = (await services.modelRuntime.getAvailable(options.provider, { signal: AbortSignal.timeout(12_000) }))
+        .find(model => model.provider === options.provider && model.id === options.model);
+    }
+    if ((profileModel || options.exactModel === true) && exact === undefined) options.reject(PI_MODEL_UNAVAILABLE_REASON);
+    const resolved = options.model === undefined || profileModel || options.exactModel === true ? undefined : resolveCliModel({
       cliProvider: options.provider, cliModel: options.model, cliThinking: options.thinking, modelRuntime: services.modelRuntime,
     });
     if (resolved?.error) options.reject(resolved.error);

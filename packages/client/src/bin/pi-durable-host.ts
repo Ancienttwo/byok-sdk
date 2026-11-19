@@ -10,7 +10,7 @@ import { applyPiHostNetworkDefaults } from './pi-host-network-defaults.js';
 import { receiveLauncherCredential } from '../adapters/pi/launcher-credential.js';
 import { PROVIDER_CREDENTIAL_ENV_DENY_NAMES } from '../adapters/provider-credential-environment.js';
 import { admitReplica, type DurableReplicaBinding } from '../adapters/pi-durable/replica.js';
-import { DurableRunInterrupted, openDurableEngine } from '../adapters/pi-durable/engine.js';
+import { DurableModelUnavailable, DurableRunInterrupted, openDurableEngine } from '../adapters/pi-durable/engine.js';
 import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events.js';
 import { parseTaskScopedMcpConfig, McpServerPool } from '../adapters/pi/mcp-server-pool.js';
 import { createPiMcpTools } from '../adapters/pi/mcp-tools.js';
@@ -31,7 +31,7 @@ const object = (value: unknown): Record<string, unknown> => {
 const string = (value: unknown): string => { if (typeof value !== 'string' || !value || /[\0\r\n]/u.test(value)) throw new Error('durable config requires a single-line string'); return value; };
 const DURABLE_APIS = ['openai-completions', 'openai-responses', 'anthropic-messages'] as const;
 type DurableApi = (typeof DURABLE_APIS)[number];
-function projection(expectedProvider: string, expectedModel: string) {
+function projection(expectedProvider: string, expectedModel: string | undefined) {
   const bytes = readFileSync(path.join(string(process.env.PI_CODING_AGENT_DIR), 'models.json'));
   const digest = createHash('sha256').update(bytes).digest('hex');
   const parsed = object(JSON.parse(bytes.toString('utf8')));
@@ -41,8 +41,9 @@ function projection(expectedProvider: string, expectedModel: string) {
   if (Object.keys(provider).some(key => !['baseUrl','api','apiKey','authHeader','models'].includes(key)) || (provider.apiKey !== undefined && provider.apiKey !== 'byok:durable-ipc') || (provider.authHeader !== undefined && provider.authHeader !== true)) throw new Error('invalid durable provider projection');
   if (!Array.isArray(provider.models) || provider.models.length !== 1) throw new Error('durable requires one projected model');
   const entry = object(provider.models[0]);
-  if (entry.id !== expectedModel || !DURABLE_APIS.includes(provider.api as DurableApi)) throw new Error('durable projected model or API differs');
-  return { provider, entry, digest };
+  const modelId = string(entry.id);
+  if ((expectedModel !== undefined && modelId !== expectedModel) || !DURABLE_APIS.includes(provider.api as DurableApi)) throw new Error('durable projected model or API differs');
+  return { provider, entry, modelId, digest };
 }
 
 export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
@@ -69,10 +70,12 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
   const file = await admitReplica(root, authority);
   if (typeof config.instruction !== 'string' || config.instruction.length === 0) throw new Error('durable instruction missing');
   const instruction = config.instruction;
-  const expectedModel = string(config.model);
+  // The digest-bound override is optional. For the default, use the model
+  // in the launcher projection built from the exact bound profile.
+  const expectedModel = config.model === null ? undefined : string(config.model);
   if (PROVIDER_CREDENTIAL_ENV_DENY_NAMES.some(name => Object.hasOwn(process.env, name))) throw new Error('durable credential environment refused');
   const { secret: key, providerId: expectedProvider } = await receiveLauncherCredential('durable', digest, string(config.profileRef));
-  const { provider, entry, digest: projectionDigest } = projection(expectedProvider, expectedModel);
+  const { provider, entry, modelId, digest: projectionDigest } = projection(expectedProvider, expectedModel);
   if (process.connected) throw new Error('durable custody IPC still connected before tool construction');
   if (provider.apiKey !== undefined && !key) throw new Error('durable launcher credential missing');
   const api = provider.api as DurableApi;
@@ -141,7 +144,7 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
       if (type !== 'start' || started || (command.resume !== false && command.resume !== true)) throw new Error('invalid durable start');
       if (command.resume === true && command.projectionDigest !== projectionDigest) throw new Error('durable provider projection drift on recovery');
       started = true;
-      engine = await openDurableEngine({ file, replicaRoot: root, binding: authority, models, model: { provider: expectedProvider, modelId: expectedModel }, instruction, resume: command.resume, ambient: process.env, tools,
+      engine = await openDurableEngine({ file, replicaRoot: root, binding: authority, models, model: { provider: expectedProvider, modelId }, instruction, resume: command.resume, ambient: process.env, tools,
         ...(fileTools === undefined ? {} : { fileTools }), ...(authorize === undefined ? {} : { authorize }),
         shellOwnership:{own:pid=>new Promise<void>((resolve,reject)=>{pendingShells.set(pid,{resolve,reject});write({type:'tool_process',pid});}),released:pid=>write({type:'tool_process_closed',pid})},
         beforeTool: (nativeId, toolCallId, call) => new Promise<void>((resolve, reject) => {
@@ -160,7 +163,12 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
         completed: async () => { write({ type: 'durable_complete' }); },
       });
       write({ type: 'response', id, success: true, projectionDigest, workerPid:process.pid });
-      void engine.run().catch((error: unknown) => { write({ type: 'durable_failed', ...(error instanceof DurableRunInterrupted ? { interrupted: true } : {}) }); });
+      void engine.run().catch((error: unknown) => {
+        write({ type: 'durable_failed',
+          ...(error instanceof DurableRunInterrupted ? { interrupted: true } : {}),
+          ...(error instanceof DurableModelUnavailable ? { code: 'model_unavailable' } : {}),
+        });
+      });
     })().catch(() => { write({ type: 'durable_failed' }); process.exitCode = 1; lines.close(); void cleanup(); });
   });
   await lines.closed;

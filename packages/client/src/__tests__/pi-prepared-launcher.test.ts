@@ -801,8 +801,8 @@ type ProjectionShape = {
  * so a case that passes the consent gate passes it because the two really are
  * the same declaration — not because the fixture restated it consistently.
  */
-function byokModel(profile: ModelProviderProfile): InputPreparationModelV1 {
-  const projection = buildPiProviderProjection(profile, 'pi-prepared') as ProjectionShape;
+function byokModel(profile: ModelProviderProfile, modelId?: string): InputPreparationModelV1 {
+  const projection = buildPiProviderProjection(profile, 'pi-prepared', modelId) as ProjectionShape;
   const provider = projection.providers[BYOK_PROVIDER_ID]!;
   const entry = provider.models[0]!;
   return {
@@ -932,7 +932,7 @@ function launcherSpawn(options: {
       sessionDir: parsed.sessionDir,
     });
     if (options.secret !== undefined) env.PI_PROVIDER_API_KEY = options.secret;
-    const projection = buildPiProviderProjection(options.profile, 'pi-prepared') as ProjectionShape;
+    const projection = buildPiProviderProjection(options.profile, 'pi-prepared', parsed.modelId) as ProjectionShape;
     options.mutateProjection?.(projection);
     const projectionDir = env.PI_CODING_AGENT_DIR!;
     record.projectionDir = projectionDir;
@@ -956,7 +956,7 @@ function launcherSpawn(options: {
   }) as PiAdapterOptions['spawnFn'];
 }
 
-async function byokFixture(endpoint: ProviderEndpoint): Promise<{
+async function byokFixture(endpoint: ProviderEndpoint, modelId?: string): Promise<{
   prepared: Prepared;
   profile: ModelProviderProfile;
   launcher: NonNullable<PiAdapterOptions['byokLauncher']>;
@@ -965,7 +965,7 @@ async function byokFixture(endpoint: ProviderEndpoint): Promise<{
 }> {
   const profile = byokProfile(endpoint.baseUrl);
   const prepared = await prepareOnThisDevice(endpoint, (snapshot) => {
-    snapshot.model = byokModel(profile);
+    snapshot.model = byokModel(profile, modelId);
   });
   const custody = await tempDir('byok-pi-prepared-custody-');
   return {
@@ -981,7 +981,8 @@ async function byokFixture(endpoint: ProviderEndpoint): Promise<{
     selection: {
       lane: 'harness',
       harnessId: 'pi',
-      selection: { mode: 'byok-profile', providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [...profile.capabilities] } },
+      selection: { mode: 'byok-profile', providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [...profile.capabilities] },
+        ...(modelId === undefined ? {} : { modelId }) },
     },
   };
 }
@@ -1030,6 +1031,39 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
     expect(f.profile.base_url).toBe(endpoint.baseUrl);
     expect(endpoint.calls[0]?.url).toBe('/v1/chat/completions');
     expect(endpoint.calls[0]?.headers.authorization).toBe(`Bearer ${SYNTHETIC_SECRET}`);
+  }, 60_000);
+
+  it('sends a prepared override only when it matches the counted model', async () => {
+    const endpoint = await providerEndpoint();
+    const modelId = 'org/alternate';
+    const f = await byokFixture(endpoint, modelId);
+    const record: LauncherRecord = { logs: [] };
+    const spawnFn = launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET });
+    await expect(startPrepared(f.prepared, { spawnFn, byok: {
+      ...f, selection: { ...f.selection, selection: { ...f.selection.selection, modelId: 'other-model' } } as PiProfileTarget,
+    } })).rejects.toMatchObject({ phase: 'start', failure: { class: 'invalid_request' } });
+    expect(record.launcherCommand).toBeUndefined();
+    const session = await startPrepared(f.prepared, { spawnFn, byok: f });
+    for await (const event of session.events) { if (event.type === 'turn_end') break; }
+    expect(endpoint.bodies.map(body => JSON.parse(body).model)).toEqual([modelId]);
+  }, 60_000);
+
+  it('reports an unavailable prepared model without an unmetered call event', async () => {
+    const endpoint = await providerEndpoint();
+    endpoint.respond = (_req, res) => {
+      res.writeHead(404, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { code: 'model_not_found', message: 'No such model' } }));
+    };
+    const f = await byokFixture(endpoint, 'absent');
+    const session = await startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record: { logs: [] }, secret: SYNTHETIC_SECRET }), byok: f,
+    });
+    const unmeteredCalls: unknown[] = [];
+    await expect((async () => { for await (const event of session.events) {
+      if (event.type === 'usage' && event.contextSource === undefined) unmeteredCalls.push(event);
+    } })()).rejects.toMatchObject({ phase: 'run', failure: { class: 'model_unavailable' } });
+    expect(unmeteredCalls).toEqual([]);
+    expect(endpoint.bodies.map(body => JSON.parse(body).model)).toEqual(['absent']);
   }, 60_000);
 
   it('keeps the synthetic secret out of the config, the argv, the logs and the artifact', async () => {

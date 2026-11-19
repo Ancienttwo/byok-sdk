@@ -121,6 +121,7 @@ describe('conn.hello harnesses', () => {
     // task-scoped pi-mcp-adapter bridge also consumes selected MCP toolsets.
     expect(byId.get('pi')).toMatchObject({
       selectionModes: ['device-default', 'adapter-model', 'byok-profile'],
+      defaultModelModes: ['byok-profile'],
       images: true,
       steer: true,
       resume: true,
