@@ -57,3 +57,13 @@ Use `checkAgentMemoryHome(home, { scope: 'resident' })` from
 without starting a helper. The same entry exports
 `resolveAgentMemoryFilesystemHelper(assetRoot?)` to resolve a verified helper
 path before opening a filesystem. See [#2410](https://github.com/Ancienttwo/byok-sdk/issues/2410).
+
+## Codex task MCP allowlists
+
+List every tool a task should use in the local server's `approveTools`. Codex now
+exposes only those exact names. Omitted and empty grants both expose zero
+tools. A tool previously available through `readOnlyHint` or an ad hoc approval
+now needs an explicit grant. Upgrade to Codex CLI 0.48.0 or later for tasks with
+required toolsets. If `codex_mcp_server_name_collision` names a server, rename the
+injected or user-configured server before retrying, including under
+`agentUserMcpServers: 'inherit'`. See [#2414](https://github.com/Ancienttwo/byok-sdk/issues/2414).

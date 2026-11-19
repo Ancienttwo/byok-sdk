@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "6e36133a3271768e039ee307cc0c23f68757e4a6affd9380c4569fa06df7d39e"
+    "snapshotSha256": "69755215a4e66dd218a0045e8475ad34a25b4907da865ffd01182a6f13aefdb3"
   },
   "configFields": {
     "status": "tracked",
@@ -112,6 +112,70 @@
         "bin:byok-mcp-hub",
         "export:@byok-sdk/client#SdkReservedHelperKind"
       ]
+    },
+    {
+      "id": "runtime-provider-key-resolvers",
+      "impact": "breaking",
+      "summary": "dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters require a Host resolveKey callback for each authenticated spawn. Remove dsh model.keyEnv. Plain JSON configuration cannot start these runtimes.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#AgyAdapter",
+        "export:@byok-sdk/client#AgyAdapterOptions",
+        "export:@byok-sdk/client#DshAdapterOptions",
+        "export:@byok-sdk/client#DshModelSelection",
+        "export:@byok-sdk/client/adapters#AgyAdapter",
+        "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+        "export:@byok-sdk/client/adapters#DshAdapterOptions",
+        "export:@byok-sdk/client/adapters#DshModelSelection",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
+    },
+    {
+      "id": "runtime-provider-key-environment",
+      "impact": "breaking",
+      "summary": "dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters authenticate through resolveKey and omit authPresent from installation detection. Remove provider key names from runtimeEnvironment.pass and allow, and use the Host store to determine whether an account has a saved key.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "items": [
+        "behavior:runtime-provider-key-environment"
+      ]
+    },
+    {
+      "id": "agent-memory-home-resident-check",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/agent-memory checkAgentMemoryHome supports resident scope so embedded Hosts can check MEMORY.md on device sync without opening the helper or walking notes.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-preflight-and-helper-path",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome"
+      ]
+    },
+    {
+      "id": "agent-memory-helper-path-resolver",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/agent-memory exports resolveAgentMemoryFilesystemHelper for embedded Hosts that need the verified installed or relocated SDK helper path.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-preflight-and-helper-path",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#resolveAgentMemoryFilesystemHelper"
+      ]
+    },
+    {
+      "id": "codex-task-mcp-allowlist",
+      "impact": "breaking",
+      "summary": "Codex exposes only the exact local approveTools for each injected Host server. Add explicit grants for tools that previously ran through readOnlyHint or ad hoc approval. Rename colliding user or injected servers under inherit and upgrade Codex to at least 0.48.0 for toolset offers.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#codex-task-mcp-allowlists",
+      "items": [
+        "behavior:codex-task-mcp-allowlist"
+      ]
+    },
+    {
+      "id": "codex-task-mcp-version-floor",
+      "impact": "breaking",
+      "summary": "CodexAdapter declines offers requiring MCP toolsets before claim if the local CLI version predates 0.48.0 or cannot be determined.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#codex-task-mcp-allowlists",
+      "items": [
+        "export:@byok-sdk/client#CodexAdapter",
+        "export:@byok-sdk/client/adapters#CodexAdapter"
+      ]
     }
   ],
   "changes": [
@@ -127,6 +191,13 @@
       "before": "optional schema-sha256=fba615fff84b94e3",
       "after": "optional schema-sha256=7d4f72ebf918d478",
       "entry": "mcp-toolset-exposure-config"
+    },
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=0274d0856fb11b28",
+      "after": "optional schema-sha256=db0784c472ee1e10",
+      "entry": "runtime-provider-key-resolvers"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
@@ -234,6 +305,31 @@
       "entry": "bot-testing-runner-injection"
     },
     {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgyAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "codex-task-mcp-version-floor"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshModelSelection",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
       "item": "export:@byok-sdk/client#McpToolsetConfig",
       "change": "changed",
       "entry": "mcp-toolset-exposure-config"
@@ -242,6 +338,46 @@
       "item": "export:@byok-sdk/client#SdkReservedHelperKind",
       "change": "changed",
       "entry": "mcp-hub-sdk-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapter",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
+      "change": "changed",
+      "entry": "codex-task-mcp-version-floor"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshModelSelection",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome",
+      "change": "changed",
+      "entry": "agent-memory-home-resident-check"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#resolveAgentMemoryFilesystemHelper",
+      "change": "added",
+      "entry": "agent-memory-helper-path-resolver"
     },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",

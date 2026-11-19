@@ -74,10 +74,17 @@ async function runPair({ root, command, arm, annotations, interactive, cases }) 
     ];
     const sent = [];
     const providerErrors = [];
+    let directNamespace;
     const provider = await startLoopbackProvider('openai-responses', request => {
       const step = steps[sent.length];
       if (step === undefined) return { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS };
-      const selected = mcpTool(step.server, step.tool)(request.tools);
+      let selected = mcpTool(step.server, step.tool)(request.tools);
+      if (arm === 'native' && step.server === 'alpha') directNamespace = selected?.namespace;
+      if (arm === 'native' && step.server === 'beta') {
+        if (selected !== undefined) providerErrors.push('Codex advertised the ungranted beta tool');
+        // Send a synthetic call even though beta was absent from the model's tool catalog.
+        selected ??= directNamespace === undefined ? { name: `mcp__beta__${tool}` } : { name: tool, namespace: 'mcp__beta' };
+      }
       if (selected === undefined || request.toolResults < sent.length) {
         providerErrors.push(`Missing ${step.server}/${step.tool} or preceding result at step ${sent.length + 1}`);
         return { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS };
@@ -142,8 +149,11 @@ async function runPair({ root, command, arm, annotations, interactive, cases }) 
         const received = await receipts(receiptPaths[server]);
         const wireInput = uses[0]?.input;
         const args = arm === 'hub' ? wireInput?.arguments?.arguments : wireInput?.arguments;
-        const complete = uses.length === 1 && result !== undefined && args?.text === `${turnId}-${server}`
-          && received.length <= 1 && received.every(call => call.name === tool && call.arguments?.text === args.text);
+        const complete = received.length === (server === 'alpha' ? 1 : 0)
+          && received.every(call => call.name === tool && call.arguments?.text === `${turnId}-${server}`)
+          && (arm === 'native' && server === 'beta' || (
+            uses.length === 1 && result !== undefined && args?.text === `${turnId}-${server}`
+          ));
         return { server, tool, granted: server === 'alpha', attempts: uses.length, callId: uses[0]?.toolCallId,
           wireInput, output: result?.output, receipts: received, complete };
       }));

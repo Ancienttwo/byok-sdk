@@ -709,6 +709,7 @@
 //   isAgentMemorySecureFilesystemAvailable -> dist/daemon/agent-memory.d.ts
 //   openAgentMemoryFilesystemHelper -> dist/daemon/agent-memory-fs-helper.d.ts
 //   prependAgentMemoryGuidance -> dist/daemon/memory-guidance.d.ts
+//   resolveAgentMemoryFilesystemHelper -> dist/util/agent-memory-helper-release.d.ts
 //   serveAgentMemoryMcpOverStdio -> dist/agent-memory/mcp-server.d.ts
 // entry @byok-sdk/client/assertion-client
 //   RequestDeviceAssertionErrorCode -> dist/daemon/assertion-client.d.ts
@@ -773,6 +774,7 @@ import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../ru
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface AgyAdapterOptions {
     home: string;
+    resolveKey: () => Promise<string>;
     model?: string;
     nativeAssetRoot?: string;
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -796,6 +798,7 @@ export declare class AgyAdapter implements RuntimeAdapter {
     get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     constructor(options: AgyAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    private authenticatedEnvironment;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
@@ -883,6 +886,7 @@ export declare class CodexAdapter implements RuntimeAdapter {
     constructor(options?: CodexAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
+    private detectInstallation;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -902,12 +906,12 @@ export interface DshModelSelection {
     readonly provider: string;
     readonly model: string;
     readonly baseUrl?: string;
-    readonly keyEnv: string;
 }
 export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only';
 export interface DshAdapterOptions {
     home: string;
     model: DshModelSelection;
+    resolveKey: () => Promise<string>;
     sandbox?: DshSandboxMode;
     nativeAssetRoot?: string;
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -1202,6 +1206,7 @@ export interface RuntimeAdaptersRuntimes {
     dsh?: {
         home: DshAdapterOptions['home'];
         model: DshAdapterOptions['model'];
+        resolveKey: DshAdapterOptions['resolveKey'];
         sandbox?: DshAdapterOptions['sandbox'];
         versionPolicy?: RuntimeVersionPolicy;
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -1214,6 +1219,7 @@ export interface RuntimeAdaptersRuntimes {
     };
     agy?: {
         home: AgyAdapterOptions['home'];
+        resolveKey: AgyAdapterOptions['resolveKey'];
         model?: AgyAdapterOptions['model'];
         versionPolicy?: RuntimeVersionPolicy;
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -1444,6 +1450,7 @@ export type { AgentMemoryRecallResult } from '../daemon/agent-memory.js';
 export type { AgentMemorySaveResult } from '../daemon/agent-memory.js';
 export type { AgentMemoryAuditWarning } from '../daemon/agent-memory.js';
 export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper.js';
+export { resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release.js';
 export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper.js';
 export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem.js';
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem.js';
@@ -1746,6 +1753,7 @@ export type AgentMemoryHomeCheck = {
     readonly reason: string;
 };
 export declare function checkAgentMemoryHome(home: string, options?: {
+    readonly scope?: 'full' | 'resident';
     readonly commit?: {
         readonly filesystem?: AgentMemoryFilesystem;
     };
@@ -6254,6 +6262,7 @@ export declare class SteerUnsupportedError extends Error {
     constructor(runtimeId: string, message: string);
 }
 // ==== @byok-sdk/client dist/util/agent-memory-helper-release.d.ts ====
+export declare function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string;
 export interface CopyAgentMemoryHelperAssetsOptions {
     readonly outDir: string;
     readonly platform?: 'darwin' | 'win32';

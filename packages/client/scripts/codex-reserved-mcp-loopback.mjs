@@ -93,8 +93,9 @@ async function runReservedToolCases() {
     { id: 'host-exact', name: 'host', expectCall: true, mcpToolApprovals: { host: ['submit_result'] } },
     { id: 'host-typo', name: 'host', expectCall: false, mcpToolApprovals: { host: ['submit_reslut'] } },
     { id: 'host-native-exact', name: 'host', expectCall: true, mcpToolApprovals: { host: ['submit_result'] }, nativeInteractions: true },
+    { id: 'host-inherit-collision', name: 'host', expectCall: false, collision: true },
   ];
-  for (const { id, name, expectCall, mcpToolApprovals, nativeInteractions = false } of cases) {
+  for (const { id, name, expectCall, mcpToolApprovals, nativeInteractions = false, collision = false } of cases) {
     const caseRoot = join(root, id);
     const caseHome = join(caseRoot, 'home');
     const workspace = join(caseRoot, 'workspace');
@@ -116,8 +117,13 @@ readline.createInterface({input: process.stdin}).on('line', line => {
  else result = {};
  send({jsonrpc:'2.0',id:frame.id,result});
 });\n`);
+    const receivedCalls = () => readFile(receipt, 'utf8').then(source => source.trim().split('\n').map(line => JSON.parse(line)), error => {
+      if (error.code === 'ENOENT') return [];
+      throw error;
+    });
     const requests = [];
     const providerErrors = [];
+    let advertised = false;
     const provider = createServer((req, res) => {
       const chunks = [];
       req.on('data', chunk => chunks.push(chunk));
@@ -132,11 +138,14 @@ readline.createInterface({input: process.stdin}).on('line', line => {
             const namespace = body.tools?.find(tool => tool.type === 'namespace' && tool.name === `mcp__${name}`);
             const nested = namespace?.tools?.find(tool => tool.type === 'function' && tool.name === 'submit_result');
             const flat = body.tools?.find(tool => tool.type === 'function' && tool.name === `mcp__${name}__submit_result`);
-            if (nested === undefined && flat === undefined) throw new Error('Codex did not advertise the configured submit_result tool');
-            respond(res, { type: 'function_call', id: `fc_${id}`, call_id: `call_${id}`, name: nested?.name ?? flat.name, ...(nested === undefined ? {} : { namespace: namespace.name }), arguments: JSON.stringify({ summary: 'loopback document' }), status: 'completed' }, requests.length, id);
-          } else {
-            respond(res, { type: 'message', id: `msg_${id}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'loopback complete', annotations: [] }] }, requests.length, id);
+            advertised = nested !== undefined || flat !== undefined;
+            if (advertised !== expectCall) throw new Error(`Unexpected submit_result visibility: ${advertised}`);
+            if (advertised) {
+              respond(res, { type: 'function_call', id: `fc_${id}`, call_id: `call_${id}`, name: nested?.name ?? flat.name, ...(nested === undefined ? {} : { namespace: namespace.name }), arguments: JSON.stringify({ summary: 'loopback document' }), status: 'completed' }, requests.length, id);
+              return;
+            }
           }
+          respond(res, { type: 'message', id: `msg_${id}`, role: 'assistant', status: 'completed', content: [{ type: 'output_text', text: 'loopback complete', annotations: [] }] }, requests.length, id);
         } catch (error) {
           providerErrors.push(error.message);
           res.writeHead(500, { connection: 'close' }); res.end(error.message);
@@ -152,10 +161,11 @@ readline.createInterface({input: process.stdin}).on('line', line => {
       process.env.HOME = caseHome;
       process.env.CODEX_HOME = codexHome;
       await writeFile(join(codexHome, 'auth.json'), JSON.stringify({ OPENAI_API_KEY: process.env.OPENAI_API_KEY, tokens: null, last_refresh: null }), { mode: 0o600 });
-      await writeFile(join(codexHome, 'config.toml'), `cli_auth_credentials_store = "file"\nmodel = "loopback-model"\nmodel_provider = "loopback"\n[features]\nplugins = false\n[model_providers.loopback]\nname = "loopback"\nbase_url = "http://127.0.0.1:${providerPort}/v1"\nwire_api = "responses"\nenv_key = "OPENAI_API_KEY"\nsupports_websockets = false\n`, { mode: 0o600 });
+      const userConfig = collision ? `\n[mcp_servers.host]\ncommand = ${JSON.stringify(process.execPath)}\nargs = [${JSON.stringify(helper)}]\n[mcp_servers.host.tools.submit_result]\napproval_mode = "approve"\n` : '';
+      await writeFile(join(codexHome, 'config.toml'), `cli_auth_credentials_store = "file"\nmodel = "loopback-model"\nmodel_provider = "loopback"\n[features]\nplugins = false\n[model_providers.loopback]\nname = "loopback"\nbase_url = "http://127.0.0.1:${providerPort}/v1"\nwire_api = "responses"\nenv_key = "OPENAI_API_KEY"\nsupports_websockets = false\n${userConfig}`, { mode: 0o600 });
       const env = { ...process.env };
       const adapter = new CodexAdapter({
-        resolveBin: () => ({ command, source: 'path' }), sandbox: 'inherit', agentUserMcpServers: 'excluded', operationTimeoutMs: 20_000,
+        resolveBin: () => ({ command, source: 'path' }), sandbox: 'inherit', agentUserMcpServers: collision ? 'inherit' : 'excluded', operationTimeoutMs: 20_000,
         ...(nativeInteractions ? { nativeInteractions: { timeoutMs: 1000, onRequest: () => { nativeRequestCount += 1; } } } : {}),
       });
       const mcpServers = { [name]: { command: process.execPath, args: [helper] } };
@@ -164,21 +174,30 @@ readline.createInterface({input: process.stdin}).on('line', line => {
       if (prepared.kind !== 'prepared') throw new Error(`Codex refused preparation: ${prepared.reason}`);
       scratch = await createExecutionScratch({ root: join(caseRoot, 's') });
       const manifest = sealRuntimeOperationManifest({ taskId: `loopback-${id}`, runtimeId: adapter.descriptor.id, descriptor: adapter.descriptor, requiredToolsetIds: [], agentRef: { agentId: `loopback-agent-${id}`, profileRevision: 'r1' }, cwd: workspace, lease: { leaseId: `loopback-${id}`, canonicalHome: workspace }, workspace: { workspaceDir: workspace }, forwardedEnvironmentNames: Object.keys(env).sort() });
-      session = await prepared.operation.start({ scratch, kind: 'instruction', instruction: offer.instruction, env, manifest, mcpServers,
+      const start = prepared.operation.start({ scratch, kind: 'instruction', instruction: offer.instruction, env, manifest, mcpServers,
         ...(mcpToolApprovals === undefined ? {} : { mcpToolApprovals }),
       });
+      if (collision) {
+        let refusal;
+        try { session = await start; } catch (error) { refusal = error.message; }
+        const toolCalls = await receivedCalls();
+        const passed = refusal?.startsWith('codex_mcp_server_name_collision:') && refusal.includes('host')
+          && requests.length === 0 && toolCalls.length === 0;
+        report.cases.push({ id, status: passed ? 'passed' : 'failed', refusal, providerRequests: requests.length, toolCalls });
+        if (!passed) throw new Error(`${id}: expected collision refusal before any provider request or tool call`);
+        continue;
+      }
+      session = await start;
       const events = [];
       await Promise.race([
         (async () => { for await (const event of session.events) { events.push(event); if (event.type === 'turn_end') return; } throw new Error('Codex ended without turn_end'); })(),
         new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('loopback turn exceeded 60 seconds')), 60_000); }),
       ]);
-      const calls = await readFile(receipt, 'utf8').then(text => text.trim().split('\n').map(line => JSON.parse(line)), error => { if (error.code === 'ENOENT') return []; throw error; });
-      const outputs = requests.flatMap(request => (request.input ?? []).filter(item => item.type === 'function_call_output'));
-      const approvalDenied = JSON.stringify(outputs).includes('MCP tool call requires approval, but approval policy is never');
-      const passed = providerErrors.length === 0 && requests.length === 2 && nativeRequestCount === 0 && (expectCall
-        ? calls.length === 1 && calls[0].name === 'submit_result' && calls[0].arguments?.summary === 'loopback document' && !approvalDenied
-        : calls.length === 0 && approvalDenied);
-      report.cases.push({ id, server: name, nativeInteractions, nativeRequestCount, status: passed ? 'passed' : 'failed', providerRequests: requests.length, toolCalls: calls, approvalDenied, providerErrors, terminalTypes: events.map(event => event.type).filter(type => type === 'error' || type === 'turn_end') });
+      const calls = await receivedCalls();
+      const passed = providerErrors.length === 0 && nativeRequestCount === 0 && advertised === expectCall && (expectCall
+        ? requests.length === 2 && calls.length === 1 && calls[0].name === 'submit_result' && calls[0].arguments?.summary === 'loopback document'
+        : requests.length === 1 && calls.length === 0);
+      report.cases.push({ id, server: name, nativeInteractions, nativeRequestCount, status: passed ? 'passed' : 'failed', advertised, providerRequests: requests.length, toolCalls: calls, providerErrors, terminalTypes: events.map(event => event.type).filter(type => type === 'error' || type === 'turn_end') });
       if (!passed) throw new Error(`${id}: real Codex loopback did not satisfy the tool invocation boundary`);
     } finally {
       clearTimeout(timer);

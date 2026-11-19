@@ -1,7 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
-import { withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
+import { CODEX_MCP_TOOL_ALLOWLIST_REFUSAL, supportsCodexMcpToolAllowlist, withCodexMcpToolGrants } from './reserved-mcp-tool-grants.js';
 import { assertCodexMcpHubQualified } from './hub-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { requireImageInput } from '../input-images.js';
@@ -49,13 +49,16 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities.js';
 import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
-import { verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers.js';
+import { codexUserMcpServerNames, verifyCodexUserMcpServersExcluded, withCodexUserMcpServersExcluded } from './agent-user-mcp-servers.js';
 import { assertCodexFileCredentials, createCodexAgentHome } from './agent-user-context.js';
 import { ownedRuntimeHomeLinksAvailable } from '../owned-runtime-home.js';
 
 const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
 const DEFAULT_OPERATION_MS = 30_000;
+type CodexInstallation =
+  | { readonly detected: Exclude<RuntimeDetectResult, { kind: 'available' }> }
+  | { readonly detected: Extract<RuntimeDetectResult, { kind: 'available' }>; readonly invocation: RuntimeInvocation };
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
 const CODEX_SANDBOX_SETTINGS: readonly string[] = ['read-only', 'workspace-write', 'danger-full-access', 'inherit'];
@@ -210,12 +213,17 @@ export class CodexAdapter implements RuntimeAdapter {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
   async detect(): Promise<RuntimeDetectResult> {
+    return (await this.detectInstallation()).detected;
+  }
+
+  private async detectInstallation(): Promise<CodexInstallation> {
     try {
       const { env } = await this.runtimeEnvironment();
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin);
-      const { command, args, executable } = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
+      const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
+      const { command, args, executable } = invocation;
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env, args);
-      if (version.kind !== 'available') return version;
+      if (version.kind !== 'available') return { detected: version };
       const text = version.stdout.trim() || version.stderr.trim();
       try {
         await execFileAsync(command, [...args, 'app-server', '--help'], {
@@ -224,17 +232,17 @@ export class CodexAdapter implements RuntimeAdapter {
           env,
         });
       } catch {
-        return { kind: 'refused', reason: 'app_server_unavailable' };
+        return { detected: { kind: 'refused', reason: 'app_server_unavailable' } };
       }
       if (this.options.agentUserContext === 'excluded') {
         let linksAvailable: boolean;
         try {
           linksAvailable = await ownedRuntimeHomeLinksAvailable();
         } catch {
-          return { kind: 'probe-failed' };
+          return { detected: { kind: 'probe-failed' } };
         }
         // Refuses the whole runtime: the option is per adapter, and detection precedes every offer.
-        if (!linksAvailable) return { kind: 'refused', reason: 'agent_user_context_unavailable' };
+        if (!linksAvailable) return { detected: { kind: 'refused', reason: 'agent_user_context_unavailable' } };
       }
       let authPresent = false;
       try {
@@ -248,16 +256,16 @@ export class CodexAdapter implements RuntimeAdapter {
       } catch {
           // An unreadable credential store leaves auth presence unconfirmed.
         }
-      return {
+      return { invocation, detected: {
         kind: 'available',
         sessionCapabilities: codexRuntime.codexSessionCapabilities(),
         version: text,
         authPresent,
         ...runtimeExecutableFields(resolved, executable),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
-      };
+      } };
     } catch (error) {
-      return classifyDetectError(error);
+      return { detected: classifyDetectError(error) };
     }
   }
   async prepare(
@@ -275,23 +283,22 @@ export class CodexAdapter implements RuntimeAdapter {
         retryable: false,
       };
     }
-    const detected = await this.detect();
-    if (detected.kind !== 'available')
+    const installation = await this.detectInstallation();
+    const { detected } = installation;
+    if (!('invocation' in installation))
       return {
         kind: 'reject',
         reason: `codex installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`,
         retryable: false,
       };
-    let invocation: RuntimeInvocation;
-    try {
-      invocation = resolveRuntimeInvocation((this.options.resolveBin ?? resolveCodexBin)().command, runtimeInvocationHost((await this.runtimeEnvironment()).env));
-    } catch (error) {
-      return { kind: 'reject', reason: `codex installation refused: ${classifyDetectError(error).kind}`, retryable: false };
+    const mcpAllowlistSupported = supportsCodexMcpToolAllowlist(installation.detected.version);
+    if (!mcpAllowlistSupported && (input.requiredToolsetIds.length > 0 || Object.keys(input.mcpServers ?? {}).length > 0)) {
+      return { kind: 'reject', reason: CODEX_MCP_TOOL_ALLOWLIST_REFUSAL, retryable: false };
     }
     return {
       kind: 'prepared',
       operation: {
-        start: (start) => this.start(start, invocation, model, effort),
+        start: (start) => this.start(start, installation.invocation, model, effort, mcpAllowlistSupported),
       },
     };
   }
@@ -300,6 +307,7 @@ export class CodexAdapter implements RuntimeAdapter {
     invocation: RuntimeInvocation,
     model: string | undefined,
     effort: string | undefined,
+    mcpAllowlistSupported: boolean,
   ): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
@@ -314,6 +322,7 @@ export class CodexAdapter implements RuntimeAdapter {
     // As OAR: the servers go in the thread/start or thread/resume config.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const taskServers = mcpServers.map(server => server.name);
+    if (taskServers.length > 0 && !mcpAllowlistSupported) throw authority(CODEX_MCP_TOOL_ALLOWLIST_REFUSAL);
     const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
     const excludeUserContext = this.options.agentUserContext === 'excluded' && input.manifest.agentRef !== undefined;
     const spawned = createOwnedLineProcessSpawn({
@@ -376,10 +385,12 @@ export class CodexAdapter implements RuntimeAdapter {
           } } : {}),
           onReady: (id) => session.ready(id),
           beforeOpen: async (request, params) => {
-            const effective = excludeUserMcp || excludeUserContext ? await request('config/read', { cwd, includeLayers: false }) : undefined;
+            const inspectUserMcp = excludeUserMcp || taskServers.length > 0;
+            const effective = inspectUserMcp || excludeUserContext ? await request('config/read', { cwd, includeLayers: false }) : undefined;
             if (excludeUserContext) assertCodexFileCredentials(effective!);
+            const userServerNames = inspectUserMcp ? codexUserMcpServerNames(effective!, taskServers) : [];
             return withCodexMcpToolGrants(
-              excludeUserMcp ? withCodexUserMcpServersExcluded(params, effective!, taskServers) : params,
+              excludeUserMcp ? withCodexUserMcpServersExcluded(params, userServerNames) : params,
               taskServers,
               input.mcpToolApprovals,
             );

@@ -65,14 +65,13 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
     const opened = frames.find(frame => frame.method === (sessionRef === undefined ? 'thread/start' : 'thread/resume')).params;
     // Native interactions relay questions only; permission never moves to a Codex approval prompt.
     expect(opened.approvalPolicy).toBe('never');
-    expect(opened.config.mcp_servers.host).toEqual({ command: process.execPath, args: ['host.mjs'], enabled: true, tools: { submit_result: approve } });
-    expect(opened.config.mcp_servers.other).toEqual({ command: process.execPath, args: ['other.mjs'], enabled: true });
-    expect(opened.config.mcp_servers.byokagentresult.tools).toEqual(expectedTools.byokagentresult);
-    expect(opened.config.mcp_servers.byoktools.tools).toEqual({ ordinary: approve });
+    expect(opened.config.mcp_servers.host).toEqual({ command: process.execPath, args: ['host.mjs'], enabled: true, enabled_tools: ['submit_result'], tools: { submit_result: approve } });
+    expect(opened.config.mcp_servers.other).toEqual({ command: process.execPath, args: ['other.mjs'], enabled: true, enabled_tools: [] });
+    expect(opened.config.mcp_servers.byokagentresult).toMatchObject({ enabled_tools: ['submit_result'], tools: expectedTools.byokagentresult });
+    expect(opened.config.mcp_servers.byoktools).toMatchObject({ enabled_tools: ['ordinary'], tools: { ordinary: approve } });
     expect(opened.config.mcp_servers.user).toEqual({ enabled: false });
     expect(opened.config.features).toEqual({ apps: false, plugins: false });
     expect(JSON.stringify(opened.config)).not.toContain('default_tools_approval_mode');
-    expect(JSON.stringify(opened.config)).not.toContain('enabled_tools');
   });
 
   it.each([undefined, 'fake-thread-1'])('refuses an installed hub before spawning Codex (resume: %s)', async sessionRef => {
@@ -105,7 +104,7 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
     const params = { config: { mcp_servers: { host: { command: 'host', enabled: true } } } };
     const result = withCodexMcpToolGrants(params, ['host'], { host: ['submit_reslut'] });
     expect(result).toEqual({ config: { mcp_servers: { host: { command: 'host', enabled: true,
-      tools: { submit_reslut: approve },
+      enabled_tools: ['submit_reslut'], tools: { submit_reslut: approve },
     } } } });
     expect(params.config.mcp_servers.host).not.toHaveProperty('tools');
   });
@@ -156,17 +155,17 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
     const open = frames.find(frame => frame.method === method).params;
     expect(open.approvalPolicy).toBe('never');
     for (const [name, tools] of Object.entries(expectedTools)) {
-      expect(open.config.mcp_servers[name]).toEqual({ command: process.execPath, args: [`${name}.mjs`], enabled: true, tools });
+      expect(open.config.mcp_servers[name]).toEqual({ command: process.execPath, args: [`${name}.mjs`], enabled: true, enabled_tools: Object.keys(tools), tools });
     }
-    // A host tool with the same name as a helper tool gains no approval.
-    expect(open.config.mcp_servers.host).toEqual({ command: process.execPath, args: ['host.mjs'], enabled: true });
+    // A Host tool with the same name as a helper tool is hidden without its own grant.
+    expect(open.config.mcp_servers.host).toEqual({ command: process.execPath, args: ['host.mjs'], enabled: true, enabled_tools: [] });
     if (excluded) {
       expect(open.config.mcp_servers.user).toEqual({ enabled: false });
       expect(open.config.features).toEqual({ apps: false, plugins: false });
       expect(frames.some(frame => frame.method === 'mcpServerStatus/list')).toBe(true);
     } else {
       expect(open.config.mcp_servers).not.toHaveProperty('user');
-      expect(frames.some(frame => frame.method === 'config/read')).toBe(false);
+      expect(frames.some(frame => frame.method === 'config/read')).toBe(true);
     }
   });
 
@@ -188,16 +187,17 @@ describe('Codex reserved MCP tool grants (#1058)', () => {
         ...input.config,
         mcp_servers: {
           ...input.config.mcp_servers,
-          byokagentresult: { command: 'helper', args: [], tools: { submit_result: { enabled: true, approval_mode: 'approve' } } },
+          byokagentresult: { command: 'helper', args: [], enabled_tools: ['submit_result'], tools: { submit_result: { enabled: true, approval_mode: 'approve' } } },
+          host: { ...input.config.mcp_servers.host, enabled_tools: [] },
         },
       },
     });
     expect(input).toEqual(snapshot);
   });
 
-  it('adds no configuration when no SDK helper was injected', () => {
+  it('preserves user configuration when no server was injected', () => {
     const input = { cwd: '/agent', config: { mcp_servers: { host: { command: 'host' } } } };
-    expect(withCodexMcpToolGrants(input, ['host'])).toBe(input);
+    expect(withCodexMcpToolGrants(input, [])).toBe(input);
   });
 
   it('refuses an injected helper missing from the generated thread config', () => {

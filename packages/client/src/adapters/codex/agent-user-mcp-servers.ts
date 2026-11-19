@@ -13,32 +13,34 @@ const MAX_STATUS_PAGES = 64;
 /**
  * Adds the `excluded` overrides to a `thread/start` or `thread/resume` request.
  *
- * `effective` is Codex's `config/read` answer for the task cwd. Every
- * `mcp_servers` entry there that is not a task server gets `enabled = false`,
- * and the `apps` (connectors) and `plugins` features are turned off: plugin
- * servers are not listed in `mcp_servers`, so the thread loses its plugins
- * altogether, not only their servers. A user entry named like a task
- * server would be merged into it field by field, keeping the user's `env`,
- * `cwd` and tool filters, so it refuses the start instead. An override the
- * request already holds for a user entry, such as its denied tools, stays.
+ * Each name comes from `config/read` for the task cwd after the collision
+ * check. Apps and plugins are disabled here because their servers can come
+ * from outside `mcp_servers`. Preserve other overrides in the open request.
  */
-export function withCodexUserMcpServersExcluded(params: JsonRecord, effective: JsonRecord, taskServers: readonly string[]): JsonRecord {
-  const configured = effective.config === undefined ? undefined : record(effective.config);
-  const servers = configured?.mcp_servers === undefined || configured.mcp_servers === null ? {} : record(configured.mcp_servers);
-  if (configured === undefined || servers === undefined) throw refuse(`${PREFIX}: config/read returned no readable configuration`);
-  const names = Object.keys(servers);
-  const shared = names.filter(name => taskServers.includes(name)).sort();
-  if (shared.length > 0) throw refuse(`${PREFIX}: user MCP servers share a name with task servers: ${shared.join(', ')}`);
+export function withCodexUserMcpServersExcluded(params: JsonRecord, userServerNames: readonly string[]): JsonRecord {
   const config = record(params.config) ?? {};
   const opened = record(config.mcp_servers) ?? {};
   return {
     ...params,
     config: {
       ...config,
-      mcp_servers: { ...opened, ...Object.fromEntries(names.map(name => [name, { ...record(opened[name]), enabled: false }])) },
+      mcp_servers: { ...opened, ...Object.fromEntries(userServerNames.map(name => [name, { ...record(opened[name]), enabled: false }])) },
       features: { ...record(config.features), apps: false, plugins: false },
     },
   };
+}
+
+/** Refuse names that Codex would merge with a task's injected server configuration. */
+export function codexUserMcpServerNames(effective: JsonRecord, taskServers: readonly string[]): string[] {
+  const configured = record(effective.config);
+  const servers = configured?.mcp_servers === undefined || configured.mcp_servers === null ? {} : record(configured.mcp_servers);
+  if (configured === undefined || servers === undefined) throw refuse('codex_mcp_config_unavailable: config/read returned no readable configuration');
+  const names = Object.keys(servers);
+  const shared = names.filter(name => taskServers.includes(name)).sort();
+  if (shared.length > 0) {
+    throw refuse(`codex_mcp_server_name_collision: user MCP servers share a name with task servers: ${shared.join(', ')}. Rename either server and try again.`);
+  }
+  return names;
 }
 
 /**

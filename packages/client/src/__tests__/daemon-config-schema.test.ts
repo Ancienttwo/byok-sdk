@@ -178,10 +178,6 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     ['a bad grok compatInstructions value', { runtimeAllowlist: ['grok'], toolAuthorization: { default: 'all' }, runtimes: { grok: { compatInstructions: 'off' } } }, 'invalid_value', 'runtimes.grok.compatInstructions'],
     ['a bad grok isolation value', { runtimeAllowlist: ['grok'], toolAuthorization: { default: 'all' }, runtimes: { grok: { agentUserMcpServers: 'none' } } }, 'invalid_value', 'runtimes.grok.agentUserMcpServers'],
     ['a grok prefix without a component boundary', { runtimeAllowlist: ['grok'], toolAuthorization: { default: 'all' }, runtimes: { grok: { versionPolicy: { qualifiedVersion: '0.2.3', unqualified: 'warn', block: [{ kind: 'prefix', prefix: '0.2' }] } } } }, 'invalid_version_policy', 'runtimes.grok.versionPolicy.block[0].prefix'],
-    ['a dsh config without a home', { runtimes: { dsh: { model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } } } }, 'missing_required', 'runtimes.dsh.home'],
-    ['a bad dsh sandbox value', { runtimes: { dsh: { home: '/tmp/byok-dsh-home', model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' }, sandbox: 'auto' } } }, 'invalid_value', 'runtimes.dsh.sandbox'],
-    ['a dsh prefix without a component boundary', { runtimes: { dsh: { home: '/tmp/byok-dsh-home', model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' }, versionPolicy: { qualifiedVersion: '0.2.3', unqualified: 'warn', block: [{ kind: 'prefix', prefix: '0.2' }] } } } }, 'invalid_version_policy', 'runtimes.dsh.versionPolicy.block[0].prefix'],
-    ['an agy config without a home', { runtimes: { agy: {} } }, 'missing_required', 'runtimes.agy.home'],
     ['an agy allowlist without runtimes.agy', { runtimeAllowlist: ['agy'], toolAuthorization: { default: 'all' } }, 'missing_required', 'runtimes.agy'],
     ['a dsh allowlist without runtimes.dsh', { runtimeAllowlist: ['dsh'], toolAuthorization: { default: 'all' } }, 'missing_required', 'runtimes.dsh'],
     ['a prefix without a component boundary', { runtimeAllowlist: ['codex'], runtimes: { codex: { versionPolicy: { qualifiedVersion: '0.160.0', unqualified: 'warn', block: [{ kind: 'prefix', prefix: '0.16' }] } } } }, 'invalid_version_policy', 'runtimes.codex.versionPolicy.block[0].prefix'],
@@ -193,6 +189,38 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     expect(fileCheck.issues).toEqual([expect.objectContaining({ code, path: issuePath })]);
     const config = await bundled(extra as Partial<DaemonConfig>);
     expect(constructionIssues(() => createDaemon(config))).toEqual(fileCheck.issues);
+  });
+
+  it.each(['dsh', 'agy'] as const)('requires an embedded %s key resolver and refuses JSON startup', async id => {
+    const home = await tmpDir(`byok-${id}-home-`);
+    const model = id === 'dsh' ? { model: { provider: 'deepseek', model: 'deepseek-v4-flash' } } : {};
+    const config = await bundled({ runtimeAllowlist: [id], toolAuthorization: { default: 'all' } });
+    const jsonConfig = { ...cliInput(config), runtimes: { [id]: { home, ...model } } };
+    expect(checkDaemonConfig(jsonConfig, { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE }).issues)
+      .toEqual([expect.objectContaining({ code: 'embedded_only', path: `runtimes.${id}` })]);
+    for (const resolveKey of [undefined, 'fixture-key']) {
+      const embedded = { ...config, runtimes: { [id]: { home, ...model, resolveKey } } };
+      const result = checkDaemonConfig(embedded, { source: 'embedded' });
+      expect(result.issues).toEqual([expect.objectContaining({ code: 'invalid_value', path: `runtimes.${id}.resolveKey` })]);
+      expect(constructionIssues(() => createDaemon(embedded as DaemonConfig))).toEqual(result.issues);
+    }
+    const resolveKey = vi.fn(async () => 'fixture-key');
+    const embedded = { ...config, runtimes: { [id]: { home, ...model, resolveKey } } };
+    expect(checkDaemonConfig(embedded, { source: 'embedded' }).ok).toBe(true);
+    expect(() => createDaemon(embedded)).not.toThrow();
+    expect(resolveKey).not.toHaveBeenCalled();
+  });
+
+  it('validates an embedded dsh version policy', async () => {
+    const dsh = {
+      home: await tmpDir('byok-dsh-home-'), model: { provider: 'deepseek', model: 'deepseek-v4-flash' },
+      resolveKey: async () => 'fixture-key',
+      versionPolicy: { qualifiedVersion: '0.2.3', unqualified: 'warn' as const, block: [{ kind: 'prefix' as const, prefix: '0.2' }] },
+    };
+    const config = await bundled({ runtimes: { dsh } });
+    const result = checkDaemonConfig(config, { source: 'embedded' });
+    expect(result.issues).toEqual([expect.objectContaining({ code: 'invalid_version_policy', path: 'runtimes.dsh.versionPolicy.block[0].prefix' })]);
+    expect(constructionIssues(() => createDaemon(config))).toEqual(result.issues);
   });
 
   it('accepts a valid version policy from DaemonConfig and reports it as effective', async () => {
@@ -231,15 +259,16 @@ describe('static toolAuthorization and runtimes (#1094)', () => {
     const DAY = 86_400_000;
     const storage = () => ({ scratchRoot: testScratchRoot(), retention: { ttlMs: { 'session-ledger': 45 * DAY, 'pi-session-dir': 46 * DAY } } });
     const home = await tmpDir('byok-agy-ttl-home-');
+    const agy = { home, resolveKey: async () => 'fixture-key' };
 
     // agy configured but not listed builds no adapter, so it holds no session store either.
-    const withoutAgy = await bundled({ storage: storage(), runtimes: { agy: { home } } });
-    expect(checkDaemonConfig(cliInput(withoutAgy), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE }).ok).toBe(true);
+    const withoutAgy = await bundled({ storage: storage(), runtimes: { agy } });
+    expect(checkDaemonConfig(withoutAgy, { source: 'embedded' }).ok).toBe(true);
     expect(() => createDaemon(withoutAgy)).not.toThrow();
 
     const message = "DaemonConfig.storage.retention.ttlMs.agy-session-store must be at least retention.ttlMs['session-ledger'] plus one day";
-    const withAgy = await bundled({ storage: storage(), runtimeAllowlist: ['agy'], toolAuthorization: { default: 'all' }, runtimes: { agy: { home } } });
-    expect(checkDaemonConfig(cliInput(withAgy), { source: 'cli', localAgentRelease: OFFICIAL_LOCAL_AGENT_RELEASE }).issues).toEqual([expect.objectContaining({ code: 'invalid_value', message })]);
+    const withAgy = await bundled({ storage: storage(), runtimeAllowlist: ['agy'], toolAuthorization: { default: 'all' }, runtimes: { agy } });
+    expect(checkDaemonConfig(withAgy, { source: 'embedded' }).issues).toEqual([expect.objectContaining({ code: 'invalid_value', message })]);
     expect(() => createDaemon(withAgy)).toThrow(message);
   });
 
