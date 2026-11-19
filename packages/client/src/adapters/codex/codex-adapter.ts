@@ -148,6 +148,8 @@ export interface CodexAdapterOptions {
  * the project root. The run directory itself has no `.byok/`.
  */
 const READER_PROJECT_ROOT_ARGS = Object.freeze(['-c', 'project_root_markers=[".byok"]']);
+const DISABLE_PLUGINS_ARGS = ['-c', 'features.plugins=false'] as const;
+const DISABLE_MEMORIES_ARGS = ['-c', 'features.memories=false'] as const;
 
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export class CodexAdapter implements RuntimeAdapter {
@@ -348,8 +350,8 @@ export class CodexAdapter implements RuntimeAdapter {
       ...(sandbox === 'inherit' ? [] : ['-c', `sandbox_mode="${sandbox}"`]),
       ...(agentHome?.access === 'memory-reader' ? READER_PROJECT_ROOT_ARGS : []),
       // Plugin sync and memory processing can start before the first thread opens.
-      ...(excludeUserMcp || excludeUserContext ? ['-c', 'features.plugins=false'] : []),
-      ...(excludeUserContext ? ['-c', 'features.memories=false'] : []),
+      ...(excludeUserMcp || excludeUserContext ? DISABLE_PLUGINS_ARGS : []),
+      ...(excludeUserContext ? DISABLE_MEMORIES_ARGS : []),
     ];
     return Object.freeze({ cwd, agentHome: agentHome === undefined ? undefined : Object.freeze({ ...agentHome }), scratch,
       env: Object.freeze(env), launchArgs: Object.freeze(launchArgs), excludeUserMcp, excludeUserContext, release: () => scratch.release() });
@@ -361,11 +363,17 @@ export class CodexAdapter implements RuntimeAdapter {
     deadline.throwIfAborted();
     const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'codex account read' });
     let child: ReturnType<typeof spawn> | undefined;
+    // account/read needs neither feature. Suppress their startup work even when the task inherits it.
+    const launchArgs = [
+      ...launch.launchArgs,
+      ...(launch.excludeUserMcp || launch.excludeUserContext ? [] : DISABLE_PLUGINS_ARGS),
+      ...(launch.excludeUserContext ? [] : DISABLE_MEMORIES_ARGS),
+    ];
     try {
       const client = codexRuntime.startAppServerClient((bin, args, options) => {
         child = spawn(bin, [...invocation.args, ...args], options);
         return child;
-      }, invocation.command, launch.env, {}, launch.cwd, { launchArgs: launch.launchArgs });
+      }, invocation.command, launch.env, {}, launch.cwd, { launchArgs });
       client.handle({ onNotification() {}, onServerRequest() {} });
       const stop = () => client.kill();
       deadline.addEventListener('abort', stop, { once: true });

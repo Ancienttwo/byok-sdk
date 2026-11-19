@@ -74,8 +74,9 @@ the staged CLI passes its version and liveness probes.
 AGY and Grok return vendor commands and reasons. Pi ships with the SDK. Read
 local status or doctor for the installed source and upgrade guidance. Stop
 sessions using a managed copy before calling `uninstallManagedRuntime` with
-an install root whose path has no symbolic links. Keep the install root
-stable during removal. A process with write access to the path can still
+the Host-configured install root. The SDK resolves that root and rejects
+symbolic links at the `runtimes` directory or the selected runtime directory.
+Keep the resolved install root stable during removal. A process with write access to the path can still
 replace a directory between the path check and the recursive delete.
 
 ## Provider store credential namespace

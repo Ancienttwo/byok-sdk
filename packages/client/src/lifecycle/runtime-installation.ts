@@ -178,13 +178,19 @@ async function validateInstallation(id: ManagedRuntimeId, command: string, cwd: 
 export async function uninstallManagedRuntime(installRoot: string, runtimeId: ManagedRuntimeId): Promise<void> {
   const release = runtimeRelease(runtimeId);
   if (release?.kind !== 'managed') throw new TypeError('runtime has no managed installation');
-  const directory = managedRuntimeDirectory(installRoot, runtimeId);
   const gate = await acquirePathMutationGate({ scope: 'install-root', targetPath: installRoot });
   try {
-    const normalized = path.resolve(directory);
-    let current = path.parse(normalized).root;
-    for (const segment of path.relative(current, normalized).split(path.sep)) {
-      current = path.join(current, segment);
+    // Host-configured aliases resolve to the same root used by the mutation gate.
+    const root = await fs.realpath(gate.targetPath).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === 'ENOENT') return undefined;
+      throw error;
+    });
+    if (root === undefined) return;
+    if (path.relative(gate.targetPath, root) !== '') {
+      throw new Error('managed runtime uninstall install root changed after acquiring its gate');
+    }
+    const directory = managedRuntimeDirectory(root, runtimeId);
+    for (const current of [path.dirname(directory), directory]) {
       const stat = await fs.lstat(current).catch((error: NodeJS.ErrnoException) => {
         if (error.code === 'ENOENT') return undefined;
         throw error;
@@ -194,7 +200,7 @@ export async function uninstallManagedRuntime(installRoot: string, runtimeId: Ma
         throw new Error('managed runtime uninstall requires a directory path without symbolic links');
       }
     }
-    const [root, target] = await Promise.all([fs.realpath(installRoot), fs.realpath(directory)]);
+    const target = await fs.realpath(directory);
     if (path.relative(root, target) !== path.join('runtimes', runtimeId)) {
       throw new Error('managed runtime uninstall target must be inside its SDK install root');
     }

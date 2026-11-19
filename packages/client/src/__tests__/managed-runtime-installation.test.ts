@@ -93,18 +93,42 @@ chmod +x '${native}'
 });
 
 describe('managed runtime uninstall', () => {
-  it.each(['install root', 'runtimes parent', 'runtime target'])('refuses a linked %s and preserves the external files', async linkAt => {
+  it('uninstalls through a trusted install root alias', async () => {
+    const root = await tempRoot();
+    const installRoot = path.join(root, 'sdk');
+    const alias = path.join(root, 'sdk-alias');
+    const runtime = managedRuntimeDirectory(installRoot, 'claude');
+    await mkdir(runtime, { recursive: true });
+    await symlink(installRoot, alias, 'junction');
+    await uninstallManagedRuntime(alias, 'claude');
+    await expect(lstat(runtime)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await lstat(alias)).isSymbolicLink()).toBe(true);
+  });
+
+  it.skipIf(process.platform !== 'darwin')('uninstalls under macOS /tmp without a caller-side realpath', async () => {
+    const root = await mkdtemp('/tmp/byok-managed-uninstall-');
+    roots.push(root);
+    const runtime = managedRuntimeDirectory(root, 'claude');
+    expect(await realpath(root)).not.toBe(root);
+    await mkdir(runtime, { recursive: true });
+    await uninstallManagedRuntime(root, 'claude');
+    await expect(lstat(runtime)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it.each(['runtimes parent', 'runtime target'])('refuses a linked %s below the install root and preserves the external files', async linkAt => {
     const root = await tempRoot();
     const installRoot = path.join(root, 'sdk');
     const managedDirectory = managedRuntimeDirectory(installRoot, 'claude');
-    const link = linkAt === 'install root' ? installRoot : linkAt === 'runtimes parent' ? path.dirname(managedDirectory) : managedDirectory;
+    const alias = path.join(root, 'sdk-alias');
+    const link = linkAt === 'runtimes parent' ? path.dirname(managedDirectory) : managedDirectory;
     const external = path.join(root, 'external');
     const externalRuntime = path.join(external, path.relative(link, managedDirectory));
     await mkdir(path.dirname(link), { recursive: true });
     await mkdir(externalRuntime, { recursive: true });
     await writeFile(path.join(externalRuntime, 'keep.txt'), 'external content');
     await symlink(external, link, 'junction');
-    await expect(uninstallManagedRuntime(installRoot, 'claude')).rejects.toThrow('without symbolic links');
+    await symlink(installRoot, alias, 'junction');
+    await expect(uninstallManagedRuntime(alias, 'claude')).rejects.toThrow('without symbolic links');
     expect((await lstat(link)).isSymbolicLink()).toBe(true);
     await expect(readFile(path.join(externalRuntime, 'keep.txt'), 'utf8')).resolves.toBe('external content');
   });

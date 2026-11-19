@@ -479,6 +479,36 @@ describe('Codex persistent app-server adapter', () => {
     expect(frames.find((f) => f.method === 'thread/start').params.model).toBe('wanted');
   });
 
+  it.each(['chatgpt', 'apiKey'])('disables plugins and memories in the inherit subscription probe for a %s account', async accountType => {
+    const userHome = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-inherit-'));
+    dirs.push(userHome);
+    const resources = await ctx({ CODEX_HOME: userHome, FAKE_CODEX_ACCOUNT_TYPE: accountType });
+    await fs.writeFile(path.join(userHome, 'config.toml'), '[features]\nplugins = true\nmemories = true\n');
+    resources.agentHome = resources.workspaceDir;
+    const launches: Array<{ args: string[]; cwd?: string; env?: NodeJS.ProcessEnv }> = [];
+    const a = adapter({ spawnFn: ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+      launches.push({ args, cwd: options?.cwd as string | undefined, env: options?.env });
+      return spawn(command, args, options);
+    }) as typeof spawn });
+    const result = open(a, { ...task, target: SUBSCRIPTION_TARGET }, resources);
+    const executionArgs = ['app-server', '-c', 'sandbox_mode="danger-full-access"', '--listen', 'stdio://'];
+    if (accountType === 'chatgpt') {
+      await turn(await result);
+      expect(launches).toHaveLength(2);
+      expect(launches[1]?.args).toEqual(executionArgs);
+      expect(launches[0]?.env).toEqual(launches[1]?.env);
+      expect(launches[0]?.cwd).toBe(launches[1]?.cwd);
+    } else {
+      await expect(result).rejects.toMatchObject({ retry: 'non-retryable', failure: { class: 'invalid_request' } });
+      expect(launches).toHaveLength(1);
+    }
+    expect(launches[0]?.args).toEqual([
+      ...executionArgs.slice(0, -2), '-c', 'features.plugins=false', '-c', 'features.memories=false', ...executionArgs.slice(-2),
+    ]);
+    expect(launches[0]?.env?.CODEX_HOME).toBe(userHome);
+    expect(launches[0]?.cwd).toBe(resources.workspaceDir);
+  });
+
   it.each(['apiKey', 'amazonBedrock', 'absent'])('declines Codex subscription at admission for a %s account', async accountType => {
     const resources = await ctx({ FAKE_CODEX_ACCOUNT_TYPE: accountType, OPENAI_API_KEY: 'host-provider-key' });
     const receipt = path.join(resources.workspaceDir, 'admission.jsonl');
