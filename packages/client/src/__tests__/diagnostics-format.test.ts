@@ -195,10 +195,10 @@ describe('diagnostics/format: formatRuntimeLines', () => {
 
   it('renders an unqualified-version warning', () => {
     const runtimes: RuntimeObservation[] = [
-      { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', qualifiedVersion: '0.160.0', steer: true, resume: true },
+      { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', qualifiedVersion: '0.169.0', steer: true, resume: true },
     ];
     expect(formatRuntimeLines(runtimes)).toEqual([
-      'codex: present version=codex-cli 0.161.0 warning=unqualified-version(qualified=0.160.0) capabilities=steer,resume',
+      'codex: present version=codex-cli 0.161.0 warning=unqualified-version(qualified=0.169.0) capabilities=steer,resume',
     ]);
   });
 

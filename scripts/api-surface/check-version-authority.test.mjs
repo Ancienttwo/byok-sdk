@@ -52,7 +52,10 @@ const SEPARATE_KEYS_SPEC = [
 ].join('\n');
 
 // Builds a fixture repo root; every part can be overridden per test.
-function makeRoot(t, { release = '0.12.0', keys = release, readme = README, spec = SPEC } = {}) {
+function makeRoot(t, {
+  release = '0.12.0', keys = release, readme = README, spec = SPEC,
+  claude = '2.1.326', codex = '0.169.0',
+} = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'version-authority-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const manifest of [
@@ -72,6 +75,22 @@ function makeRoot(t, { release = '0.12.0', keys = release, readme = README, spec
   writeFileSync(path.join(root, 'README.md'), readme);
   mkdirSync(path.join(root, 'docs'), { recursive: true });
   writeFileSync(path.join(root, 'docs', 'spec.md'), spec);
+  const vendor = path.join(root, 'packages/client/vendor/oar/abcdef0/.github');
+  mkdirSync(vendor, { recursive: true });
+  writeFileSync(path.join(vendor, 'runtime-versions.json'), JSON.stringify({
+    schemaVersion: 1,
+    runtimes: {
+      'claude-aimock': { policy: 'accepted', version: '2.1.326' },
+      'codex-aimock': { policy: 'accepted', version: '0.169.0' },
+      'grok-aimock': { policy: 'accepted', version: '1.0.70' },
+    },
+  }));
+  for (const [runtime, version] of Object.entries({ claude, codex, grok: '1.0.77' })) {
+    const adapter = path.join(root, 'packages/client/src/adapters', runtime);
+    mkdirSync(adapter, { recursive: true });
+    writeFileSync(path.join(adapter, `${runtime}-version.ts`), `export const QUALIFIED_${runtime.toUpperCase()}_VERSION = '${version}';
+`);
+  }
   return root;
 }
 
@@ -83,6 +102,20 @@ test('passes when README and spec agree with the release train', (t) => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /release train 0\.12\.0 \(packages\/core\/package\.json\)$/m);
 });
+
+test('Claude and Codex can match OAR while Grok has its own qualified version', (t) => {
+  const result = runCheck(makeRoot(t));
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /vendored OAR accepted version check passed for Claude and Codex/);
+});
+
+for (const [runtime, drifted, accepted] of [['claude', '2.1.328', '2.1.326'], ['codex', '0.170.0', '0.169.0']]) {
+  test(`reports both versions when the ${runtime} pin drifts`, (t) => {
+    const result = runCheck(makeRoot(t, { [runtime]: drifted }));
+    assert.equal(result.status, 1, result.stderr);
+    assert.ok(result.stderr.includes(`${runtime} SDK qualified version ${drifted} differs from OAR accepted version ${accepted}`), result.stderr);
+  });
+}
 
 test('a stale README version on any published train package is reported with file:line', (t) => {
   const root = makeRoot(t, { readme: README.replace('@byok-sdk/server@0.12.0', '@byok-sdk/server@0.8.1') });

@@ -98,12 +98,12 @@ describe('Codex persistent app-server adapter', () => {
   it('detects the pinned version, app-server and native auth', async () => {
     expect(await adapter().detect()).toEqual({
       kind: 'available',
-      version: 'codex-cli 0.160.0',
+      version: 'codex-cli 0.169.0',
       authPresent: true,
       sessionCapabilities: { images: true, steer: true },
       executablePath: fixture,
       executableSource: 'config',
-      versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
+      versionVerdict: { state: 'allow', qualifiedVersion: '0.169.0' },
     });
   });
   it('keeps not-logged-in detection honest', async () => {
@@ -146,33 +146,33 @@ describe('Codex persistent app-server adapter', () => {
     // Codex reads MCP tools itself; the daemon takes no tools/list observation for it.
     expect(adapter().descriptor.requiresMcpToolsetToolObservation).not.toBe(true);
   });
-  it.each(['codex-cli 0.161.0', 'codex-cli 1.0.0', 'codex-cli 0.159.1', 'codex-cli 0.160.0-alpha.1', 'codex 0.161.0'])('detect admits unqualified version %j with a warn verdict, never a refusal', async (output) => {
+  it.each(['codex-cli 0.161.0', 'codex-cli 1.0.0', 'codex-cli 0.159.1', 'codex-cli 0.169.0-alpha.1', 'codex 0.161.0'])('detect admits unqualified version %j with a warn verdict, never a refusal', async (output) => {
     vi.stubEnv('FAKE_CODEX_VERSION', output);
     expect(await adapter().detect()).toMatchObject({
       kind: 'available',
       version: output,
-      versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' },
+      versionVerdict: { state: 'warn', qualifiedVersion: '0.169.0' },
     });
   });
   it('detect admits the qualified version with an allow verdict', async () => {
     expect(await adapter().detect()).toMatchObject({
-      kind: 'available', version: 'codex-cli 0.160.0',
-      versionVerdict: { state: 'allow', qualifiedVersion: '0.160.0' },
+      kind: 'available', version: 'codex-cli 0.169.0',
+      versionVerdict: { state: 'allow', qualifiedVersion: '0.169.0' },
     });
   });
   it('keeps the Host policy as the whole effective descriptor policy, replacing the default', async () => {
     const versionPolicy = {
-      qualifiedVersion: '0.160.0',
+      qualifiedVersion: '0.169.0',
       unqualified: 'allow' as const,
       block: [{ kind: 'exact' as const, version: '0.161.0' }],
     };
     const host = adapter({ versionPolicy });
     expect(host.descriptor.versionPolicy).toEqual(versionPolicy);
     expect(host.descriptor.versionPolicy).not.toHaveProperty('warn');
-    expect(adapter().descriptor.versionPolicy).toEqual({ qualifiedVersion: '0.160.0', unqualified: 'warn' });
+    expect(adapter().descriptor.versionPolicy).toEqual({ qualifiedVersion: '0.169.0', unqualified: 'warn' });
     vi.stubEnv('FAKE_CODEX_VERSION', 'codex-cli 0.161.0');
     expect(await host.detect()).toMatchObject({
-      versionVerdict: { state: 'block', qualifiedVersion: '0.160.0', matched: '0.161.0' },
+      versionVerdict: { state: 'block', qualifiedVersion: '0.169.0', matched: '0.161.0' },
     });
   });
   it('detect refuses a missing app-server subcommand', async () => {

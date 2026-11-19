@@ -6,7 +6,7 @@ import type { RuntimeVersionPolicy } from '../../types.js';
  * this SDK was qualified against is an advisory. Native contracts the adapter
  * depends on are probed directly (app-server presence).
  */
-export const QUALIFIED_CODEX_VERSION = '0.160.0';
+export const QUALIFIED_CODEX_VERSION = '0.169.0';
 
 /** The adapter's default policy (#1103). A block is Host-only, so none is declared here. */
 export const CODEX_VERSION_POLICY: RuntimeVersionPolicy = Object.freeze({
@@ -15,7 +15,7 @@ export const CODEX_VERSION_POLICY: RuntimeVersionPolicy = Object.freeze({
 });
 
 /**
- * The normalized token the policy matches: `codex-cli 0.160.0` -> `0.160.0`.
+ * The normalized token the policy matches: `codex-cli 0.169.0` -> `0.169.0`.
  * `version` on the detect result stays the raw probe text.
  */
 export function codexVersionToken(output: string): string {

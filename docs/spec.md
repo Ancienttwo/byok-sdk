@@ -1384,6 +1384,14 @@ version_blocked` and `retryable: false`. This is not a minimum-version check:
 the SDK does not install, repair or self-update a runtime, and an unqualified
 version is still admitted unless the Host configured a block.
 
+Claude Code and Codex are qualified at `2.1.326` and `0.169.0`, respectively.
+Each OAR upgrade takes these two qualified versions from the vendored
+`.github/runtime-versions.json` entries marked `policy: accepted`.
+`check:version-authority` requires an exact match for those pins. Other
+runtimes keep their own qualification policies. The BYOK loopback runtime
+contracts qualify SDK behavior and isolation against the vendored OAR
+native adapters.
+
 Pi `authPresent` is pi's own login state, on the installed and `sdkHelperHost`
 paths alike. It is `true` when any provider credential env-var name the pinned pi reads
 (generated from pi-ai `findEnvKeys`, `packages/client/scripts/generate-pi-provider-env.mjs`) is
@@ -2576,7 +2584,7 @@ names its member context, native thread UUID, explicit loopback WebSocket or
 Unix endpoint, and starting notification sequence. The operator must configure
 each native session with that same member's Team MCP grant; the relay does not
 infer or establish that mapping. The relay reads the Codex version and warns
-when it is not the qualified `codex-cli 0.160.0`; it does not refuse, and the
+when it is not the qualified `codex-cli 0.169.0`; it does not refuse, and the
 receipt parser still fails closed on a changed receipt shape. This remains
 warn-only and is not affected by a Host-configured version block, because the
 relay is not TaskRunner admission. This is a client CLI binding,
@@ -4600,7 +4608,7 @@ native identity drift dispose the process. Opt-in launches Claude with
 `--dangerously-skip-permissions`; the pass-through above keeps that mode from
 becoming a second permission system.
 
-Codex is qualified against CLI 0.160.0. As in OAR, the version is read and by
+Codex is qualified against CLI 0.169.0. As in OAR, the version is read and by
 default does not gate: Codex updates itself, so any other version is admitted
 with a `warn` version verdict. Native contracts are probed
 instead (app-server presence). The only exception is a Host-configured version

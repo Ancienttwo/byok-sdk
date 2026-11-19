@@ -22,8 +22,8 @@ import { TestServer } from './fixtures/test-server';
 import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
 
 const ALLOW = { state: 'allow' as const, qualifiedVersion: '1.4.0' };
-const WARN = { state: 'warn' as const, qualifiedVersion: '2.1.312' };
-const BLOCK = { state: 'block' as const, qualifiedVersion: '0.160.0', matched: '0.16.' };
+const WARN = { state: 'warn' as const, qualifiedVersion: '2.1.326' };
+const BLOCK = { state: 'block' as const, qualifiedVersion: '0.169.0', matched: '0.16.' };
 
 const adapters = () => [
   new StubRuntimeAdapter('pi', { kind: 'available', version: '1.4.0', versionVerdict: ALLOW }),
@@ -95,7 +95,7 @@ describe('#1103: version verdicts in local status and doctor', () => {
       await runDoctorCommand(config, { log: (line) => doctorText.push(line) });
       const blockLine = doctorText.find((line) => line.includes('state=block'));
       expect(blockLine).toContain('runtime-version:');
-      expect(blockLine).toContain('qualifiedVersion=0.160.0');
+      expect(blockLine).toContain('qualifiedVersion=0.169.0');
       expect(blockLine).toContain('matched=0.16.');
       expect(blockLine).toContain('blocked by the device version policy');
 
@@ -139,15 +139,15 @@ describe('#1103: version verdicts in local status and doctor', () => {
     ];
     expect(formatRuntimeLines(observations)).toEqual([
       'pi: present version=1.4.0 versionVerdict=allow capabilities=steer,resume',
-      'claude: present version=2.1.400 warning=unqualified-version(qualified=2.1.312) versionVerdict=warn capabilities=steer,resume',
-      'codex: present version=codex-cli 0.161.0 versionVerdict=block blockedBy=device-version-policy(matched=0.16.,qualified=0.160.0) capabilities=steer,resume',
+      'claude: present version=2.1.400 warning=unqualified-version(qualified=2.1.326) versionVerdict=warn capabilities=steer,resume',
+      'codex: present version=codex-cli 0.161.0 versionVerdict=block blockedBy=device-version-policy(matched=0.16.,qualified=0.169.0) capabilities=steer,resume',
     ]);
   });
 });
 
 describe('#1103: runtime observation parsing', () => {
   it('reads the redacted audit observation, whose warning survives only as qualifiedVersion', () => {
-    const audited = { id: 'codex', present: true, outcome: 'available', qualifiedVersion: '0.160.0', steer: true, resume: true };
+    const audited = { id: 'codex', present: true, outcome: 'available', qualifiedVersion: '0.169.0', steer: true, resume: true };
     expect(parseRuntimeObservations([audited], 'audit')).toEqual([audited]);
     expect(parseRuntimeObservations([{ id: 'pi', present: false, outcome: 'not-found', steer: true, resume: true }], 'audit')).toEqual([
       { id: 'pi', present: false, outcome: 'not-found', steer: true, resume: true },
@@ -159,7 +159,7 @@ describe('#1103: runtime observation parsing', () => {
     const observed = { id: 'codex', present: true, outcome: 'available', version: 'codex-cli 0.161.0', versionVerdict: BLOCK, steer: true, resume: true };
     expect(parseRuntimeObservations([observed], 'status')).toEqual([observed]);
     const warned = {
-      id: 'claude', present: true, outcome: 'available', version: '2.1.400', qualifiedVersion: '2.1.312',
+      id: 'claude', present: true, outcome: 'available', version: '2.1.400', qualifiedVersion: '2.1.326',
       versionVerdict: WARN, steer: true, resume: true,
     };
     expect(parseRuntimeObservations([warned], 'status')).toEqual([warned]);
@@ -167,10 +167,10 @@ describe('#1103: runtime observation parsing', () => {
 
   it('rejects malformed verdicts and does not infer allow from an absent one', () => {
     for (const value of [
-      { id: 'codex', present: true, outcome: 'available', versionVerdict: { state: 'invented', qualifiedVersion: '0.160.0' }, steer: true, resume: true },
-      { id: 'codex', present: true, outcome: 'available', versionVerdict: { state: 'block', qualifiedVersion: '0.160.0' }, steer: true, resume: true },
+      { id: 'codex', present: true, outcome: 'available', versionVerdict: { state: 'invented', qualifiedVersion: '0.169.0' }, steer: true, resume: true },
+      { id: 'codex', present: true, outcome: 'available', versionVerdict: { state: 'block', qualifiedVersion: '0.169.0' }, steer: true, resume: true },
       { id: 'claude', present: true, outcome: 'available', versionVerdict: WARN, steer: true, resume: true },
-      { id: 'claude', present: true, outcome: 'available', qualifiedVersion: '2.1.312', steer: true, resume: true },
+      { id: 'claude', present: true, outcome: 'available', qualifiedVersion: '2.1.326', steer: true, resume: true },
       { id: 'codex', present: true, outcome: 'available', versionVerdict: { ...BLOCK, extra: true }, steer: true, resume: true },
       { id: 'codex', present: true, outcome: 'available', versionVerdict: { ...BLOCK, matched: 'x'.repeat(257) }, steer: true, resume: true },
     ]) expect(parseRuntimeObservations([value], 'status')).toBeUndefined();
@@ -189,7 +189,7 @@ describe('#1103: runtime observation parsing', () => {
     expect(validateRuntimeDetectResult({ kind: 'available', versionVerdict: WARN })).toEqual({ kind: 'available', versionVerdict: WARN });
     expect(() => validateRuntimeDetectResult({
       kind: 'available', versionVerdict: WARN,
-      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '2.1.312' },
+      advisory: { reason: 'runtime_version_unqualified', qualifiedVersion: '2.1.326' },
     })).toThrow();
   });
 });

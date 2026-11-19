@@ -21,6 +21,12 @@
   "license": "Apache-2.0",
   "files": [
     {
+      "path": ".github/runtime-versions.json",
+      "sourcePath": ".github/runtime-versions.json",
+      "upstreamSha256": "17d279f2a777bd26e37b8232ea9a2af1cfbe6559ec31ae1259f2ba149e3bcbdf",
+      "vendoredSha256": "17d279f2a777bd26e37b8232ea9a2af1cfbe6559ec31ae1259f2ba149e3bcbdf"
+    },
+    {
       "path": "LICENSE",
       "sourcePath": "LICENSE",
       "upstreamSha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",

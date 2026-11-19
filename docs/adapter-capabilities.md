@@ -47,7 +47,7 @@ checks the running model's image support before delivery.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.5.2` | `1.5.2` |
+| Qualified version (PR CI) | — | `1.5.1` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.5.2` | `1.5.2` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Image input declared by descriptor | `images` | no | no | no | no | no | no | yes | no |
@@ -422,7 +422,7 @@ Under `excluded` these still load and can reach the model:
   Not probed.
 
 Claude declares `userInstructions`, `userOutputStyle` and `userMemory` for
-`excluded`. The runtime contract suite checks each at the qualified 2.1.312
+`excluded`. The runtime contract suite checks each at the qualified version
 with a marker that appears when inherited and is absent under `excluded`: a
 user `<config>/CLAUDE.md`, a user `outputStyle`, and auto memory in
 `<config>/projects/<cwd key>/memory/MEMORY.md`. A `CLAUDE.md` in a parent of

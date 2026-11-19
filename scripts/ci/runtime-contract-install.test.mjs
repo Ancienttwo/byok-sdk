@@ -23,7 +23,7 @@ test('qualified versions come from each adapter authority and the client Pi pin'
 });
 
 test('an npm install takes one exact version, prereleases included', () => {
-  for (const version of ['1.0.70', '0.160.0', '0.2.1-rc.5', '0.2.2-alpha.2']) assert.ok(isExactVersion(version), version);
+  for (const version of ['1.0.70', '0.169.0', '0.2.1-rc.5', '0.2.2-alpha.2']) assert.ok(isExactVersion(version), version);
   for (const version of ['latest', '^1.0.0', '1.0', '0.2.1-rc.5\n', '0.2.1-', '0.2.1-rc..5', '0.2.1+build']) assert.ok(!isExactVersion(version), JSON.stringify(version));
 });
 

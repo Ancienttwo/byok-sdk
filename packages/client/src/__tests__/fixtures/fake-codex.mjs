@@ -19,7 +19,7 @@ for (let i = 0; i < argv.length; i++)
     config[value.slice(0, eq)] = value.slice(eq + 1);
   }
 if (argv.includes('--version')) {
-  console.log(process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.160.0');
+  console.log(process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.169.0');
   process.exit(0);
 }
 if (argv[0] === 'login') {

@@ -191,7 +191,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     const blockedDetect = {
       kind: 'available' as const,
       version: 'codex-cli 0.161.0',
-      versionVerdict: { state: 'block' as const, qualifiedVersion: '0.160.0', matched: '0.16.' },
+      versionVerdict: { state: 'block' as const, qualifiedVersion: '0.169.0', matched: '0.16.' },
     };
 
     it('declines an explicit blocked runtime non-retryably, without claiming or starting it', async () => {

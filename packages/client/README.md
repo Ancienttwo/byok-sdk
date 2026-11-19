@@ -390,7 +390,7 @@ task's `auto | all` mode and the runtime's own guardrails:
   the user's own MCP configuration. Claude starts with
   `--dangerously-skip-permissions`.
 - Codex: the selected servers go in the `thread/start` or `thread/resume`
-  config (`mcp_servers`, as OAR `mcpServers`), next to the user's `config.toml`. Codex is qualified against 0.160.0, needs
+  config (`mcp_servers`, as OAR `mcpServers`), next to the user's `config.toml`. Codex is qualified against 0.169.0, needs
   app-server support and uses `approval_policy=never` with sandbox
   `danger-full-access` by default (`DaemonConfig.codexSandbox`). Detection
   refuses an unavailable app-server. It never refuses a version: an
@@ -987,7 +987,7 @@ Write an absolute-path JSON file with mode `0600` (its contexts are bearer secre
 byok-agent team relay dev --bindings /absolute/private-bindings.json --codex-bin /absolute/codex --max-notifications 2 --config /absolute/agent.json
 ```
 
-POSIX only. `codex-cli 0.160.0` is the qualified native queue version; another
+POSIX only. `codex-cli 0.169.0` is the qualified native queue version; another
 version prints a warning and continues. Endpoints must be explicit loopback `ws://127.0.0.1:<port>` /
 `ws://[::1]:<port>` or `unix:///absolute/socket`. No remote server discovery. Loopback app-server queue endpoints trust local
 processes; the relay does not add authentication to the native Codex endpoint.
