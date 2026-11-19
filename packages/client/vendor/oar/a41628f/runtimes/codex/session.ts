@@ -103,7 +103,10 @@ const codexItemTypes = new Set(["agentMessage", "error", "commandExecution", "fi
 const codexTerminalFields = new Set(["id", "status", "error", "items"]);
 const codexUsageFields = new Set(["last", "total", "modelContextWindow"]);
 const codexTokenFields = new Set(["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]);
-const codexNotificationFields = new Set(["threadId", "turnId", "turn", "item", "itemId", "delta", "error", "willRetry", "tokenUsage"]);
+const codexNotificationFields: Readonly<Record<string, readonly string[]>> = {
+  "turn/started": ["turn"], "turn/completed": ["turn"], "item/started": ["item"], "item/completed": ["item"],
+  "item/agentMessage/delta": ["itemId", "delta"], "thread/tokenUsage/updated": ["tokenUsage"], error: ["error", "willRetry"],
+};
 
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"]): T {
   const itemType = record.kind === "frame" && record.body.type === "item/started"
@@ -120,7 +123,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
       && (value === "completed" || value === "interrupted" || value === "failed");
   }, (path, key) => {
     if (record.kind !== "frame" || !codexObservedMethods.has(record.body.type) || path[0] !== "body" || path[1] !== "native") return false;
-    return (path.length === 2 && codexNotificationFields.has(key))
+    return (path.length === 2 && (key === "threadId" || key === "turnId" || codexNotificationFields[record.body.type]?.includes(key)))
       || (path.length === 3 && path[2] === "turn" && (record.body.type === "turn/completed" || record.body.type === "turn/started") && codexTerminalFields.has(key))
       || (path.length === 3 && path[2] === "item" && (record.body.type === "item/started" || record.body.type === "item/completed") && codexToolFields.has(key))
       || (record.body.type === "thread/tokenUsage/updated" && path[2] === "tokenUsage"
