@@ -6,6 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
 import { ApprovalRegistry } from '../daemon/approvals';
+import type { ToolReminder } from '../tool-authorization';
 import { createControlMethods } from '../daemon/create-daemon/control-methods';
 import type { DaemonScope } from '../daemon/create-daemon/scope';
 import { connectControlClient } from '../daemon/control-client';
@@ -78,7 +79,7 @@ function setup(adapters = [new FixtureAdapter()], extra: Partial<TaskRunnerDeps>
   const probe = vi.fn(async (name: string) => observationOf({ [name]: ['other'] })[name]!);
   const row: SearchRuntimeEvidence = {
     runtimeId: 'pi', variant: 'fixture', lane: 'ordinary', platform: process.platform, arch: process.arch,
-    helper: 'dist-script', version: 'fixture-1', executableSource: 'sdk-entry', receipt: 'test fixture',
+    helper: 'dist-script', version: 'fixture-1', executableSource: 'sdk-entry', receipt: 'test fixture', innerAttempts: true,
   };
   const runner = new TaskRunner({
     ...testAgentHomeDeps(), ...freshOfferEgressDeps(), adapters, storeDir, productId,
@@ -210,6 +211,38 @@ it('projects mixed tools and proves the sealed cwd, filtered env, inner authoriz
     release();
     await offered;
   }
+});
+
+it('projects an inner attempt and reminder before progress without attributing its result or claiming execution', async () => {
+  const adapter = new FixtureAdapter();
+  const reminders: ToolReminder[] = [];
+  const { configure, startControl, offer, receipts, sent } = setup([adapter], {
+    toolAuthorization: () => ({ default: 'all', rules: {
+      alwaysAsk: [{ id: 'review-inner', match: { toolName: 'mcp__inner__echo', pathGlob: path.resolve(path.parse(process.cwd()).root, '**/fixture.txt') } }],
+    } }),
+    onToolReminder: reminder => reminders.push(reminder),
+  });
+  await configure();
+  await startControl();
+  await offer();
+  const hub = await connectHub(adapter.input!.mcpServers!.byoktools!);
+  expect((await hub.search()).isError).not.toBe(true);
+  const session = adapter.sessions[0]!;
+  const mcp = { server: 'byoktools', tool: 'call_tool' };
+  const tool = 'mcp__byoktools__call_tool';
+  session.emit({ type: 'tool_use', tool, mcp, toolCallId: 'a', input: { server: 'inner', tool: 'echo', arguments: { path: 'fixture.txt' } } });
+  session.emit({ type: 'tool_result', tool, mcp, toolCallId: 'a', isError: false, output: { result: {
+    details: { serverName: 'byoktools', toolName: 'call_tool', isError: true },
+  } } });
+  session.emit({ type: 'turn_end' });
+  await vi.waitFor(() => expect(sent.some(row => row.type === 'task.complete')).toBe(true));
+  expect(reminders).toMatchObject([{ toolName: 'mcp__inner__echo', toolCallId: 'a', authorization: { ruleIds: ['review-inner'] } }]);
+  const progress = sent.flatMap(row => row.type === 'task.progress' && 'events' in row.payload ? row.payload.events : []);
+  expect(progress.filter(event => event.type !== 'turn_end')).toMatchObject([
+    { type: 'tool_use', tool, mcp: { server: 'inner', tool: 'echo' }, toolCallId: 'a' },
+    { type: 'tool_result', tool, mcp, toolCallId: 'a', isError: true },
+  ]);
+  expect((await receipts()).filter(row => row.method === 'tools/call')).toHaveLength(0);
 });
 
 it('freezes the catalog across hub restart and reload, then uses a fresh snapshot and proof on the next Attempt', async () => {

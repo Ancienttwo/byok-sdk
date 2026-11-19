@@ -1,3 +1,4 @@
+import { defineMcpSearchProbes, spawnContractPi } from './mcp-search-probe';
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
@@ -21,7 +22,7 @@ if (pin === undefined) throw new Error('packages/client/package.json has no byok
 const mode = contractMode();
 // The ordinary RPC host the daemon launches; `bun run build` writes it.
 const rpcHost = path.resolve(import.meta.dirname, '../../../dist/bin/byok-pi-rpc.js');
-const turnAdapter = (options: PiAdapterOptions = {}) => new PiAdapter({ resolveBin: () => ({ command: rpcHost, source: 'package' }), ...options });
+const turnAdapter = (options: PiAdapterOptions = {}) => new PiAdapter({ resolveBin: () => ({ command: rpcHost, source: 'package' }), spawnFn: spawnContractPi, ...options });
 const PROJECT_MARKER = 'BYOK-CONTRACT-PI-PROJECT-91c4';
 const USER_MARKER = 'BYOK-CONTRACT-PI-USER-0d6b';
 const ANCESTOR_MARKER = 'BYOK-CONTRACT-PI-ANCESTOR-5e1a';
@@ -136,6 +137,12 @@ const descriptor = turnAdapter({ agentUserContext: 'excluded' }).descriptor;
 if (mode === 'latest') {
   skipRuntimeContract(`pi runtime contract (latest)`, 'Pi is bundled at byok.piRuntimePin and the SDK runs only that release; a newer Pi is qualified by a pin bump PR, which runs this suite in qualified mode');
 } else {
+  defineMcpSearchProbes({
+    runtime: 'pi', variant: 'agentUserContext=inherit,launcher=sdk', wire: 'openai-chat',
+    async configure(box, provider, spawnFn) {
+      return { adapter: new PiAdapter({ spawnFn }), env: { ...baseEnv(box.home), PI_CODING_AGENT_DIR: await agentDirFor(box.home, provider.baseUrl) } };
+    },
+  });
   const excluded = once(() => turn('excluded'));
   const inherited = once(() => turn('inherit'));
   const gated = once(gateTurn);

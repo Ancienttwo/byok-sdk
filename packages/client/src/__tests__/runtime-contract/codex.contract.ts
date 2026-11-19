@@ -12,6 +12,7 @@ import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvide
 import { testExecutionScratch } from '../fixtures/execution-scratch';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 
+import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('codex', QUALIFIED_CODEX_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const adapter = (options: CodexAdapterOptions = {}) => new CodexAdapter({ resolveBin, sandbox: 'inherit', operationTimeoutMs: 60_000, ...options });
@@ -116,6 +117,15 @@ const resumeTurns = once(async () => {
   } finally {
     await provider.close();
   }
+});
+
+defineMcpSearchProbes({
+  runtime: 'codex', variant: 'agentUserContext=inherit,agentUserMcpServers=inherit,sandbox=inherit', wire: 'openai-responses',
+  async configure(box, provider, spawnFn) {
+    const home = path.join(box.home, '.codex');
+    await fs.mkdir(home);
+    return { adapter: adapter({ spawnFn }), env: await writeUserHome(box, home, provider.baseUrl, {}) };
+  },
 });
 
 const excluded = once(() => turn('excluded'));

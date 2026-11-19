@@ -18,6 +18,8 @@ export interface SearchRuntimeEvidence {
   readonly version: string;
   readonly executableSource: RuntimeExecutableSource | 'sdk-entry';
   readonly receipt: string;
+  /** The receipt validates the native outer identity, call ID and raw arguments. */
+  readonly innerAttempts?: true;
 }
 
 export interface SearchRuntimeQualification {
@@ -28,7 +30,7 @@ export interface SearchRuntimeQualification {
 
 /** Match SDK construction and launch configuration before probing a runtime. */
 export function searchRuntimeCandidates(
-  config: DaemonConfig,
+  config: Pick<DaemonConfig, 'sdkHelperHost' | 'piByokLauncher'>,
   runtimes: readonly DaemonEffectiveRuntime[],
 ): SearchRuntimeQualification['candidates'] {
   const helper = config.sdkHelperHost === undefined ? 'dist-script' : config.sdkHelperHost.entry === undefined ? 'sea' : 'single-file';
@@ -78,6 +80,6 @@ export function projectSearchMcpEnvironment(env: Readonly<Record<string, string>
   })));
 }
 
-export function searchRuntimeVersionQualified(rows: readonly SearchRuntimeEvidence[], detected: Extract<RuntimeDetectResult, { kind: 'available' }>): boolean {
-  return rows.some(row => row.version === detected.version && row.executableSource === (detected.executableSource ?? 'sdk-entry'));
+export function matchSearchRuntimeEvidence(rows: readonly SearchRuntimeEvidence[], detected: Extract<RuntimeDetectResult, { kind: 'available' }>): SearchRuntimeEvidence | undefined {
+  return rows.find(row => row.version === detected.version && row.executableSource === (detected.executableSource ?? 'sdk-entry'));
 }

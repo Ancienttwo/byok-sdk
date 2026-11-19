@@ -13,6 +13,7 @@ import { startPreparedOperation } from '../fixtures/prepared-operation';
 
 const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
 
+import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('grok', QUALIFIED_GROK_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
@@ -94,6 +95,15 @@ async function turn(mode: 'inherit' | 'excluded') {
     await provider.close();
   }
 }
+
+defineMcpSearchProbes({
+  runtime: 'grok', variant: 'agentUserContext=inherit,agentUserMcpServers=inherit,compatInstructions=inherit', wire: 'openai-chat', model: MODEL,
+  async configure(box, provider, spawnFn) {
+    const home = await loopbackGrokHome(box.home, provider.baseUrl);
+    await fs.writeFile(path.join(home, 'auth.json'), '{}', { mode: 0o600 });
+    return { adapter: adapter({ spawnFn }), env: { ...baseEnv(box.home), GROK_HOME: home } };
+  },
+});
 
 const excluded = once(() => turn('excluded'));
 const inherited = once(() => turn('inherit'));

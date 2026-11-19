@@ -1,8 +1,13 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { expect, it } from 'vitest';
 import { AgentEventSchema, type AgentEvent } from '@byok-sdk/protocol';
 import { AGENT_RESULT_MCP_SERVER_NAME, AGENT_RESULT_TOOL_NAME } from '../sdk-reserved-mcp';
 import type { MessageDraftDelta } from '../types';
 import { mcpEventIdentities } from '../mcp/event-identity';
+import { attributeHubAttempt } from '../mcp/hub-event-attribution';
+import { publishMcpHubCatalog } from '../mcp/hub/catalog';
 import { mapClaudeMessageToAgentEvents, type ToolUseCorrelation } from '../adapters/claude/projection';
 import { mapPiMessageToAgentEvent } from '../adapters/pi/events';
 import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events';
@@ -13,6 +18,45 @@ const identities = mcpEventIdentities({ market__feed: { toolsetId: 'market', ser
 ] } });
 const name = 'mcp__market__feed__get__quote';
 const mcp = { server: 'market__feed', tool: 'get__quote' };
+
+it('attributes only exact, live hub attempts against the current frozen catalog', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'hub-attribution-'));
+  const binding = { catalogPath: path.join(dir, 'catalog.json'), attemptId: 'attempt', launchCwd: dir,
+    mcpEnv: {}, mcpServers: { alpha: { command: process.execPath }, beta: { command: process.execPath } } };
+  const hub = { binding, isActive: () => true, innerAttempts: true as const };
+  const use = (server: string, toolCallId: string): Extract<AgentEvent, { type: 'tool_use' }> => ({
+    type: 'tool_use', tool: 'mcp__byoktools__call_tool', mcp: { server: 'byoktools', tool: 'call_tool' },
+    toolCallId, input: { server, tool: 'same_name', arguments: { symbol: toolCallId } },
+  });
+  const first = use('alpha', 'first');
+  try {
+    expect(await attributeHubAttempt(first, hub)).toBeUndefined();
+    await publishMcpHubCatalog(binding, ['alpha', 'beta'].map(serverName => ({
+      serverName, serverInfo: { name: serverName, version: '1' }, protocolVersion: '2025-11-25',
+      tools: [{ name: 'same_name', description: '', inputSchema: { type: 'object' } }],
+    })), new AbortController().signal);
+    await expect(Promise.all([attributeHubAttempt(first, hub), attributeHubAttempt(use('beta', 'second'), hub)]))
+      .resolves.toMatchObject([
+        { mcp: { server: 'alpha', tool: 'same_name' }, toolCallId: 'first', input: { symbol: 'first' } },
+        { mcp: { server: 'beta', tool: 'same_name' }, toolCallId: 'second', input: { symbol: 'second' } },
+      ]);
+    expect(first.mcp?.server).toBe('byoktools');
+    const outer = [
+      [first, { ...hub, innerAttempts: undefined }],
+      [first, { ...hub, isActive: () => false }],
+      [first, { ...hub, binding: { ...binding, attemptId: 'retired' } }],
+      [{ ...first, mcp: undefined }, hub],
+      [{ ...first, tool: 'mcp__byoktools__tool_search' }, hub],
+      [{ ...first, toolCallId: undefined }, hub],
+      [{ ...first, input: '{"server":"alpha"}' }, hub],
+      [use('outside', 'missing'), hub],
+    ] as const;
+    await expect(Promise.all(outer.map(([event, attempt]) => attributeHubAttempt(event, attempt))))
+      .resolves.toEqual(outer.map(() => undefined));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 it('retains exact observed Claude identity across tool use/result without delimiter guessing', () => {
   const correlation: ToolUseCorrelation = { toolNameByUseId: new Map(), mcpIdentities: identities };

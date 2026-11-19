@@ -16,7 +16,7 @@ import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, unmetRequirements, requi
 import type { TaskRunner } from '../task-runner.js';
 import { mcpHubContextFile } from './mcp-contexts.js';
 import { MCP_HUB_SERVER_INFO, MCP_HUB_SERVER_NAME, MCP_HUB_TOOLS } from '../../mcp/hub/protocol.js';
-import { searchRuntimeVersionQualified } from '../search-runtime-qualification.js';
+import { matchSearchRuntimeEvidence } from '../search-runtime-qualification.js';
 import { MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS } from '../../mcp-server/index.js';
 
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {
@@ -361,8 +361,9 @@ export async function pickAdapter(
         runtimeUnavailable,
       };
     }
-    if (searchExposure && !searchRuntimeVersionQualified(rows, detected)) return searchUnavailable;
-    return { ok: true, adapter, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
+    const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
+    if (searchExposure && searchEvidence === undefined) return searchUnavailable;
+    return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
   }
 
   const eligible = allowlist ? this['deps'].adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this['deps'].adapters;
@@ -382,9 +383,10 @@ export async function pickAdapter(
     capabilityEligible += 1;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
-    if (detected.kind === 'available' && detected.versionVerdict?.state !== 'block'
-      && (!searchExposure || searchRuntimeVersionQualified(rows, detected))) {
-      return { ok: true, adapter, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
+    if (detected.kind !== 'available' || detected.versionVerdict?.state === 'block') continue;
+    const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
+    if (!searchExposure || searchEvidence !== undefined) {
+      return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
     }
   }
   if (searchExposure) return searchUnavailable;

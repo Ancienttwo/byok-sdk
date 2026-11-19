@@ -13,6 +13,7 @@ import {
   expectDetectedVersion,
   type ContractPlan,
 } from './runtime-contract/contract';
+import { startLoopbackProvider } from './runtime-contract/loopback';
 
 /**
  * #1103: the runtime contract suite's own admission rules, exercised without a
@@ -52,6 +53,21 @@ const descriptor = (capabilities: Partial<RuntimeCapabilities> = {}): RuntimeAda
     supportsDispatchSelection: false,
     capabilities: { steer: false, resume: false, approvalInteractive: false, ...capabilities },
   });
+
+it('emits two separately identified tool calls in one loopback model response', async () => {
+  const tool = { name: 'mcp__byoktools__call_tool' };
+  const args = (server: string) => ({ server, tool: 'write', arguments: { value: server } });
+  const provider = await startLoopbackProvider('openai-chat', () => ({
+    kind: 'tool', tool, args: args('first'), parallel: [{ tool, args: args('second') }],
+  }));
+  try {
+    const response = await fetch(`${provider.baseUrl}/chat/completions`, { method: 'POST', body: '{}' });
+    const body = await response.json() as { choices: Array<{ message: { tool_calls: Array<{ id: string; function: { arguments: string } }> } }> };
+    const calls = body.choices[0]!.message.tool_calls;
+    expect(calls.map(call => JSON.parse(call.function.arguments))).toEqual([args('first'), args('second')]);
+    expect(new Set(calls.map(call => call.id)).size).toBe(2);
+  } finally { await provider.close(); }
+});
 
 describe('runtime contract plan admission', () => {
   it('admits a complete plan whose every case is explicitly skipped with a reason', () => {

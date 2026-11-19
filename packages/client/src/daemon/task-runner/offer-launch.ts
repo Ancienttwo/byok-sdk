@@ -265,7 +265,8 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   if (searchServers !== undefined && !admissionWithdrawn()) {
     try {
       const nativeEnv = this['deps'].mcpSearch?.projectEnvironment?.(pick.descriptor.id, mcpEnv) ?? mcpEnv;
-      mcpHub = await sealMcpHub.call(this, taskId, scratch, workspaceDir, searchServers, projectSearchMcpEnvironment(nativeEnv), innerNonces);
+      mcpHub = await sealMcpHub.call(this, taskId, scratch, workspaceDir, searchServers,
+        projectSearchMcpEnvironment(nativeEnv), innerNonces, pick.searchEvidence?.innerAttempts);
     } catch {
       if (!admissionWithdrawn()) decline({ reason: 'the private MCP hub context could not be sealed', retryable: true });
       return;
