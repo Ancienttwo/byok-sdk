@@ -19,6 +19,9 @@ import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvide
 
 const DSH_TARGET = { lane: 'harness', harnessId: 'dsh' } as const;
 
+import { defineMcpSearchProbes } from './mcp-search-probe';
+import { searchMcpEnvironmentFor } from '../../daemon/search-runtime-qualification';
+import type { DaemonConfig } from '../../daemon/create-daemon';
 const target = contractTarget('dsh', QUALIFIED_DSH_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
@@ -358,6 +361,19 @@ async function toolInputTurn() {
     await provider.close();
   }
 }
+
+defineMcpSearchProbes({
+  runtime: 'dsh', variant: 'sandbox=danger-full-access', wire: 'openai-chat', model: MODEL,
+  async configure(box, provider, spawnFn) {
+    const model = loopbackModel(provider.baseUrl);
+    const home = path.join(box.root, 'dsh');
+    return { adapter: new DshAdapter({ home, model, spawnFn }),
+      env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', BYOK_DSH_BIN: target.bin } };
+  },
+  projectEnvironment: (env, box) => searchMcpEnvironmentFor({ runtimes: {
+    dsh: { home: path.join(box.root, 'dsh'), model: loopbackModel('http://127.0.0.1:9/v1') },
+  } } as DaemonConfig)('dsh', env),
+});
 
 const contractTurn = once(turn);
 const steered = once(steerTurn);

@@ -8,7 +8,8 @@ import { projectRuntimeBoundaryFailure } from '../../runtime-failure.js';
 import { spillOversizedEvent } from '../event-spill.js';
 import { ProgressEventTooLargeError } from '../progress-batcher.js';
 import type { ActiveTask } from './support.js';
-import { classifyToolCall, describeHighRiskToolCall } from '../../tool-authorization.js';
+import { classifyToolCall, describeHighRiskToolCall, type ToolCall } from '../../tool-authorization.js';
+import { attributeHubAttempt, projectPiHubError } from '../../mcp/hub-event-attribution.js';
 import { MAX_INLINE_ARTIFACT_BYTES, observePreparedCall, agentMessageSealing, closingReply, errorMessage, estimateEventBytes, openArtifact, NO_SEALED_SPILL, observeTerminalUsage, taskFinalizing, taskTearingDown, taskMessageAccepted, taskMessageSendAttempted } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
 import { ACTIVITY_INGRESS_EXCEEDED_REASON_PREFIX, MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX, PREPARED_USAGE_UNAVAILABLE_REASON_PREFIX } from './state.js';
@@ -47,9 +48,17 @@ export async function pump(this: TaskRunner, active: ActiveTask): Promise<void> 
         active.messageDraft?.pushDelta(event.text, event.startsMessage);
         continue;
       }
-      // `all` never blocks: classify the full reported input before any
-      // spill, and only remind. `auto` already gated the call before it ran.
-      if (event.type === 'tool_use' && active.toolAuthorization.default === 'all') noteToolReminder.call(this, active, event);
+      if (event.type === 'tool_use') {
+        const hubAttempt = active.mcpHub === undefined ? undefined : await attributeHubAttempt(event, active.mcpHub);
+        if (this['tasks'].get(active.taskId) !== active || taskFinalizing(this, active.taskId)) return;
+        if (taskTearingDown(this, active.taskId)) continue;
+        if (hubAttempt !== undefined) event = { ...event, mcp: hubAttempt.mcp };
+        // `all` classifies the full attempted input before any spill and only
+        // reminds. `auto` already gates calls before dispatch.
+        if (active.toolAuthorization.default === 'all') noteToolReminder.call(this, active, event, hubAttempt);
+      } else if (event.type === 'tool_result' && active.mcpHub !== undefined && active.adapter.descriptor.id === 'pi') {
+        event = projectPiHubError(event);
+      }
 
       // DaemonConfig.maxInlineEventBytes: bound this ONE event before it is
       // counted, batched, or sent. An oversized `tool_use.input` /
@@ -390,12 +399,12 @@ export function reportArtifactError(this: TaskRunner, active: ActiveTask, name: 
   active.batcher.push({ type: 'error', message: reason });
 }
 
-function noteToolReminder(this: TaskRunner, active: ActiveTask, event: Extract<AgentEvent, { type: 'tool_use' }>): void {
+function noteToolReminder(this: TaskRunner, active: ActiveTask, event: Extract<AgentEvent, { type: 'tool_use' }>, hubAttempt?: ToolCall): void {
   const input = event.input !== null && typeof event.input === 'object' && !Array.isArray(event.input)
     ? event.input as Record<string, unknown> : {};
-  const call = { toolName: event.tool, input, cwd: active.workspaceDir, ...(event.mcp === undefined ? {} : { mcp: event.mcp }) };
+  const call = hubAttempt ?? { toolName: event.tool, input, cwd: active.workspaceDir, ...(event.mcp === undefined ? {} : { mcp: event.mcp }) };
   const risk = classifyToolCall(call, active.workspaceDir, undefined, active.toolAuthorization.rules);
-  const identity = { taskId: active.taskId, toolName: event.tool,
+  const identity = { taskId: active.taskId, toolName: call.toolName,
     ...(event.toolCallId === undefined ? {} : { toolCallId: event.toolCallId }) };
   try {
     if (risk.level === 'normal') {

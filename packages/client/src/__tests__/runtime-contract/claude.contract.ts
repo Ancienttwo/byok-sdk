@@ -18,6 +18,7 @@ import { startPreparedOperation } from '../fixtures/prepared-operation';
 
 const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
 
+import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('claude', QUALIFIED_CLAUDE_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const adapter = (options: ClaudeAdapterOptions = {}) => new ClaudeAdapter({ resolveBin, ...options });
@@ -132,6 +133,15 @@ async function gateTurn() {
     await provider.close();
   }
 }
+
+defineMcpSearchProbes({
+  runtime: 'claude', variant: 'agentSessionPersistence=enabled,agentUserContext=inherit', wire: 'anthropic-messages', model: 'claude-sonnet-4-6',
+  async configure(box, provider, spawnFn) {
+    const config = path.join(box.home, '.claude');
+    await fs.mkdir(config);
+    return { adapter: new ClaudeAdapter({ spawnFn }), env: { ...runtimeEnv(box.home, config, provider.origin, {}), BYOK_CLAUDE_BIN: target.bin } };
+  },
+});
 
 const excluded = once(() => turn('excluded'));
 const inherited = once(() => turn('inherit'));

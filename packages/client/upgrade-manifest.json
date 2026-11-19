@@ -96,8 +96,8 @@
     {
       "id": "mcp-toolset-exposure-config",
       "impact": "additive",
-      "summary": "Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2396",
+      "summary": "Opt in to search exposure on the qualified dsh combination with DaemonConfig.mcpToolsets. Direct exposure is the default and is required for prepared inputs.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#mcp-toolset-search",
       "items": [
         "config:mcpToolsets",
         "export:@byok-sdk/client#McpToolsetConfig"

@@ -193,6 +193,7 @@ export async function sealMcpHub(
   mcpServers: Readonly<Record<string, McpStdioServerConfig>>,
   mcpEnv: Readonly<Record<string, string>>,
   innerNonces: readonly string[],
+  innerAttempts: true | undefined,
 ): Promise<McpHubAttempt> {
   const binding: McpHubCatalogBinding = Object.freeze({
     attemptId: scratch.token,
@@ -205,7 +206,7 @@ export async function sealMcpHub(
   const contextToken = freshHostToolsetContextToken();
   const isCurrent = (): boolean => this['mcpHubContextByToken'].get(contextToken) === attempt;
   const attempt: McpHubAttempt = Object.freeze({
-    binding,
+    binding, innerAttempts,
     isActive: () => this['mcpHubContextByToken'].get(contextToken) === attempt
       && (startupSignal?.aborted === false || this['tasks'].get(taskId)?.mcpHub === attempt)
       && !this['stoppingOffers'] && !taskTearingDown(this, taskId),

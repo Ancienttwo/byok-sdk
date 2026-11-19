@@ -2,9 +2,10 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { expect } from 'vitest';
-import { AgyAdapter, type AgyAdapterOptions } from '../../adapters/antigravity/agy-adapter';
+import { AgyAdapter } from '../../adapters/antigravity/agy-adapter';
 import { agyAdapterWithEndpoint } from '../../adapters/antigravity/agy-endpoint';
 import { QUALIFIED_AGY_VERSION } from '../../adapters/antigravity/agy-version';
+import { agyEnvironment } from '../../adapters/antigravity/agy-profile';
 import { AGY_ABSENT_ISOLATION_SOURCES } from '../../adapters/antigravity/agy-capabilities';
 import type { Session } from '../../types';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
@@ -13,6 +14,7 @@ import {
   fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
+import { defineMcpSearchProbes } from './mcp-search-probe';
 
 const target = contractTarget('agy', QUALIFIED_AGY_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
@@ -46,7 +48,7 @@ async function writeUserContext(home: string, userServer: { command: string; arg
  * home by default, which the adapter must hide, or the adapter's own home as
  * the positive control. `REAL_KEY` is the key in the task's runtime environment.
  */
-async function turn(where: 'user' | 'owned', script: ProviderScript = submitResult) {
+async function turn(where: 'user' | 'owned', script: ProviderScript = submitResult, definition: Readonly<Record<string, unknown>> = {}) {
   const box = await createSandbox(`agy-${where}`);
   const recorder = await fileEgress();
   const provider = await startLoopbackProvider('gemini', script);
@@ -54,7 +56,7 @@ async function turn(where: 'user' | 'owned', script: ProviderScript = submitResu
     const home = where === 'owned' ? path.join(box.root, 'agy') : await ownedHome();
     const receipt = path.join(box.root, 'host.jsonl');
     const userReceipt = path.join(box.root, 'user-mcp.jsonl');
-    const host = await writeSubmitResultServer(box.root, receipt);
+    const host = await writeSubmitResultServer(box.root, receipt, 'submit_result', definition);
     await writeUserContext(where === 'owned' ? home : box.home, await writeSubmitResultServer(box.root, userReceipt, 'user_tool'));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home, resolveBin }), provider.origin);
@@ -135,6 +137,45 @@ async function resumed() {
   } finally {
     await provider.close();
   }
+}
+
+defineMcpSearchProbes({
+  runtime: 'agy', variant: '', wire: 'gemini',
+  async configure(box, provider, spawnFn) {
+    return { adapter: agyAdapterWithEndpoint(new AgyAdapter({ home: path.join(box.root, 'agy'), resolveBin, spawnFn }), provider.origin),
+      env: { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY } };
+  },
+  projectEnvironment: (env, box) => agyEnvironment(env, path.join(box.root, 'agy')),
+});
+
+if (target.mode === 'qualified' && process.env.BYOK_SEARCH_RECEIPT_DIR !== undefined) {
+  const receiptDir = process.env.BYOK_SEARCH_RECEIPT_DIR;
+  defineRuntimeCases('agy MCP search qualification', {
+    'mcp.alwaysLoad': ['probe visible schema size and the installed CLI’s alwaysLoad marker', check(async () => {
+      const rows = [];
+      for (const words of [18_000, 22_000]) {
+        for (const alwaysLoad of [false, true]) {
+          const description = 'Synthetic tool schema. ' + 'record '.repeat(words);
+          let attempted = 0;
+          const result = await turn('owned', request => {
+            const step = submitResult(request);
+            if (step instanceof Promise) throw new Error('Expected a synchronous provider step');
+            if (step.kind === 'tool') attempted++;
+            return step;
+          }, { description, ...(alwaysLoad ? { _meta: { 'antigravity/alwaysLoad': true } } : {}) });
+          const models = result.provider.requests.filter(request => request.model);
+          rows.push({ words, descriptorBytes: Buffer.byteLength(description), alwaysLoad, attempted, executed: result.calls.length,
+            advertised: models.some(request => mcpTool('host', 'submit_result')(request.tools) !== undefined),
+            schemaReachedProvider: models.some(request => request.text.includes(description)),
+            events: result.events.filter(event => event.type === 'tool_use' || event.type === 'tool_result' || event.type === 'error'),
+          });
+        }
+      }
+      await fs.mkdir(receiptDir, { recursive: true });
+      await fs.writeFile(path.join(receiptDir, 'agy-always-load.json'), `${JSON.stringify(rows, null, 2)}\n`);
+      expect(rows.every(row => row.executed <= row.attempted)).toBe(true);
+    })],
+  });
 }
 
 const userTurn = once(() => turn('user'));

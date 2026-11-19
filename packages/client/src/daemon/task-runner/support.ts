@@ -1,7 +1,4 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
-import type { ToolAuthorizationPolicy } from '../../tool-authorization.js';
-import type { McpHubCatalogBinding } from '../../mcp/hub/catalog.js';
-import type { RuntimeTaskInput } from '../../types.js';
 // modules in this directory.
 //
 // A member module holds the bodies of `TaskRunner` methods as functions that
@@ -11,6 +8,10 @@ import type { RuntimeTaskInput } from '../../types.js';
 // A body reads private state as `this['name']`, which TypeScript type-checks
 // like the dot form, and calls other members through the runner so that a
 // stub, a test spy or a fixture override still sees every call.
+import type { ToolAuthorizationPolicy } from '../../tool-authorization.js';
+import type { McpHubCatalogBinding } from '../../mcp/hub/catalog.js';
+import type { RuntimeTaskInput } from '../../types.js';
+import type { SearchRuntimeEvidence } from '../search-runtime-qualification.js';
 import { outboundErrorMessage } from '../outbound-error.js';
 import type { ResultReplyFailure } from '../result-reply-failure.js';
 import { AgentMessageDraftPublisher } from '../agent-message-draft.js';
@@ -131,6 +132,7 @@ export function observePreparedCall(
 /** Private Attempt authority shared by the helper, authorization and event projection. */
 export interface McpHubAttempt {
   readonly binding: McpHubCatalogBinding;
+  readonly innerAttempts?: true;
   readonly isActive: () => boolean;
   beginStart(signal: AbortSignal): void;
   configureAuthorization(gate: RuntimeOperationStartInput['toolAuthorization']): Promise<void>;
@@ -289,7 +291,7 @@ export interface ClaimedAgentFailureContext {
 }
 
 export type PickResult =
-  | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor }
+  | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor; searchEvidence?: SearchRuntimeEvidence }
   | { ok: false; reason: string; retryable: boolean; runtimeUnavailable?: RuntimeUnavailableAdmission };
 
 /**
