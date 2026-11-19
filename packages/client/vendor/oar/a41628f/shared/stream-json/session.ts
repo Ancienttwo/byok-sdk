@@ -33,6 +33,7 @@ export interface StreamJsonSessionHooks {
   readonly onRecord?: (record: RawEvent) => void;
   /** The SDK resumes with the runtime's original root session identity. */
   readonly onSessionInit?: (sessionId: string) => void;
+  readonly onRequestCancelled?: (requestId: string) => void;
   /** Every `toApp` request, whatever its type. `respond` writes the native reply and records it; a request never answered stays unanswered. */
   readonly onAppRequest?: (request: { readonly id: string; readonly type: string; readonly native: JsonRecord }, respond: (reply: JsonRecord) => Promise<void>) => void;
   /** Runs before the native interrupt is written; a throw rejects the abort with code `error` and writes no interrupt. */
@@ -278,6 +279,7 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
     if (message.type === "system" && message.subtype === "init" && typeof message.parent_tool_use_id !== "string" && Array.isArray(message.capabilities)) {
       canCancelQueued = profile.cancelQueuedCapability !== undefined && message.capabilities.includes(profile.cancelQueuedCapability);
     }
+    if (message.type === "control_cancel_request" && typeof message.request_id === "string") hooks.onRequestCancelled?.(message.request_id);
     if (tasks?.consume(message) === true || profile.consume(message)) { return; }
     const { state: nextProjection, commands } = foldStreamJsonStdout(profile.projection, state.projection, message);
     state.projection = nextProjection;

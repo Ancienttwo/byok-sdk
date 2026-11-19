@@ -340,7 +340,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const ctx = await makeCtx({
       ...process.env,
       FAKE_CLAUDE_SESSION_ID: 'resume-me-123', // what the --resume-target validation checks against (so the resume itself "succeeds")
-      FAKE_CLAUDE_REPORTED_SESSION_ID: 'some-other-session', // but system/init reports a DIFFERENT id
+      ANTHROPIC_API_KEY: 'fixture-secret-session-fragment',
+      FAKE_CLAUDE_REPORTED_SESSION_ID: 'other-fixture-secret-session-fragment',
     });
     const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'resume-me-123' };
     let failure: unknown;
@@ -351,7 +352,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
     expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
-    expect(failure).toHaveProperty('message', expect.stringMatching(/echoed a different session id than requested/));
+    expect(failure).toHaveProperty('message', 'claude --resume echoed a different session id than requested');
   });
 
   it('an unresolvable sessionRef surfaces claude\'s real resume rejection as a clean start() failure, not a hang (empirically confirmed against real claude: "No conversation found with session ID: ...", exit 1)', async () => {

@@ -551,7 +551,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         throw new RuntimeExecutionFailure({
           phase: 'start',
           retry: 'non-retryable',
-          reason: `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef})`,
+          reason: 'claude --resume echoed a different session id than requested',
         });
       }
 

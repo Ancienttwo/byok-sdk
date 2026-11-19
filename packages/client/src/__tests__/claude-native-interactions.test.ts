@@ -25,7 +25,9 @@ async function start(scenario: string, native: NativeInteractionHostOptions | un
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }), nativeInteractions: native });
   const session = await startPreparedOperation(adapter, { ...task, ...(sessionRef === undefined ? {} : { sessionRef }) }, {
     workspaceDir: directory,
-    env: { ...process.env, CLAUDE_NATIVE_SCENARIO: scenario, CLAUDE_NATIVE_TRANSCRIPT: transcript },
+    env: { ...process.env, CLAUDE_NATIVE_SCENARIO: scenario, CLAUDE_NATIVE_TRANSCRIPT: transcript,
+      ...(scenario === 'provider-cancel' ? { MCP_TOKEN: 'native-request-1' } : {}),
+    },
   });
   sessions.push(session);
   const frames = async () => (await fs.readFile(transcript, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as Record<string, any>);

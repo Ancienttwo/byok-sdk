@@ -66,6 +66,7 @@ export interface ClaudeSessionHooks {
   /** Registered before any record is appended. */
   onRecord?: (record: ClaudeRecord) => void;
   onSessionInit?: (sessionId: string) => void;
+  onRequestCancelled?: (requestId: string) => void;
   /** Every runtime request, whatever its type; one the hook never answers stays unanswered. */
   onAppRequest?: (request: { readonly id: string; readonly type: string; readonly native: Record<string, unknown> }, respond: (reply: Record<string, unknown>) => Promise<void>) => void;
   /** Runs before the native interrupt is written; a throw rejects the abort and writes nothing. */

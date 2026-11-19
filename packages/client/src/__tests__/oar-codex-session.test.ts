@@ -105,6 +105,19 @@ describe('unconnected OAR Codex adapter', () => {
     await session.dispose();
   });
 
+  it('keeps the completed Codex draft suffix in its derived text exactly once', async () => {
+    const fake = fakeServer();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { API_KEY: 'synthetic-secret-for-codex' },
+    });
+    fake.frame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-root', itemId: 'm', delta: 'A synthetic' } });
+    fake.frame({ method: 'item/completed', params: { threadId: 'thread-root', item: { id: 'm', type: 'agentMessage', text: 'A synthetic' } } });
+    const text = session.records().flatMap(record => record.kind === 'frame'
+      ? record.body.events.flatMap(event => event.kind === 'text_delta' ? [event.text] : []) : []);
+    expect(text).toEqual(['A ', 'synthetic']);
+    await session.dispose();
+  });
+
   it('rejects an invalid MCP server name without encoding the protected value into the error', async () => {
     const key = 'fixture-"quoted"';
     const fake = fakeServer();

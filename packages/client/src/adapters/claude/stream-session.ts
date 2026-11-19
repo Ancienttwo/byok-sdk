@@ -126,6 +126,7 @@ export class ClaudeStreamSession {
     }, {
       onRecord: record => this.#record(record, options.onFrame),
       onSessionInit: id => this.#resolveRef(id),
+      onRequestCancelled: id => options.onFrame({ type: 'control_cancel_request', request_id: id }),
       // After a halt no reply reaches Claude, whatever a bridge still decides.
       onAppRequest: (request, respond) => options.onAppRequest(request.native as ClaudeStreamMessage,
         reply => this.#fatal === undefined ? respond(reply) : Promise.reject(this.#fatal)),
@@ -241,7 +242,7 @@ export class ClaudeStreamSession {
     }
     const native = record.kind === 'frame' ? (record.body as { native?: unknown }).native as ClaudeStreamMessage | undefined : undefined;
     // A runtime request reaches the bridges once, through onAppRequest.
-    if (native !== undefined && native.type !== 'control_request') onFrame(native);
+    if (native !== undefined && native.type !== 'control_request' && native.type !== 'control_cancel_request') onFrame(native);
     const projected = claudeRecordFrame(record);
     if (projected === undefined) return;
     const { native: frame, agentPath } = projected;

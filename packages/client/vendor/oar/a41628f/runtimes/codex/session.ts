@@ -269,9 +269,17 @@ async function openCodexSession(
     const streamedOutput = method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta"
       || method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta";
     const lane = JSON.stringify([notificationSession, typeof params.itemId === "string" ? params.itemId : ""]);
+    let draftTail: string | undefined;
     if (method === "item/completed") {
-      const itemId = asRecord(params.item)?.id;
-      if (typeof itemId === "string") draftTails.delete(JSON.stringify([notificationSession, itemId]));
+      const item = asRecord(params.item);
+      if (typeof item?.id === "string") {
+        const key = JSON.stringify([notificationSession, item.id]);
+        if (item.type === "agentMessage" && typeof item.text === "string") {
+          const pending = draftTails.get(key);
+          if (pending !== undefined && item.text.endsWith(pending)) draftTail = credentials.redact(pending);
+        }
+        draftTails.delete(key);
+      }
     }
     if (credentials.hasProtectedValues() && typeof params.delta === "string" && (streamedOutput || (draftMethod && byokStaleTurn))) {
       const { delta: _omitted, ...rest } = params;
@@ -323,7 +331,9 @@ async function openCodexSession(
     for (const command of commands) {
       switch (command.kind) {
         case "frame":
-          const body = { ...command.body, events: [...command.body.events, ...links], byokRoot: isRoot, ...terminalStatus };
+          const events = [...command.body.events, ...links];
+          if (draftTail !== undefined && !events.some(event => event.kind === "text_delta")) events.push({ kind: "text_delta", text: draftTail });
+          const body = { ...command.body, events, byokRoot: isRoot, ...terminalStatus };
           kernel.frame(body, {
             ...(command.sessionId === undefined ? {} : { sessionId: command.sessionId }),
             ...(command.spanId === undefined ? {} : { spanId: command.spanId }),
