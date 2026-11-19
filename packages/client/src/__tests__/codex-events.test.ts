@@ -27,6 +27,21 @@ function setup() {
   return { kernel, projection, output, feed };
 }
 describe('required Codex native projection', () => {
+  it('preserves Codex counters when a credential coincides with a metering field', () => {
+    const credentials = sessionCredentialRedactor({ env: { API_KEY: 'inputTokens' } });
+    const kernel = createSessionKernel('root', record => redactCodexRecord(record, credentials.redactValue));
+    const projection = new CodexProjection('/workspace', 'root');
+    const out: Array<AgentEvent | MessageDraftDelta> = [];
+    const feed = (type: string, native: unknown) => {
+      const body = { type, native, events: [], origin: 'byok-native', byokRoot: true };
+      projection.consume(kernel, kernel.frame(body), event => out.push(event));
+    };
+    feed('turn/started', { turn: { id: 't' } });
+    feed('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 7, outputTokens: 4 }, last: { totalTokens: 11 } } });
+    feed('turn/completed', { turn: { status: 'completed' } });
+    expect(out).toEqual([expect.objectContaining({ type: 'usage', inputTokens: 7, outputTokens: 4, contextTokens: 11 }), { type: 'turn_end' }]);
+  });
+
   it('ends a Codex turn when a credential-bearing key withholds the native turn object', () => {
     const key = 'synthetic-opaque-extension';
     const credentials = sessionCredentialRedactor({ env: { API_KEY: key } });

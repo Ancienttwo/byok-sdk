@@ -101,6 +101,8 @@ const codexObservedMethods = new Set(["turn/started", "turn/completed", "thread/
 const codexToolFields = new Set(["id", "type", "text", "message", "command", "changes", "server", "tool", "arguments", "result", "error", "query", "status", "aggregatedOutput", "exitCode"]);
 const codexItemTypes = new Set(["agentMessage", "error", "commandExecution", "fileChange", "mcpToolCall", "collabAgentToolCall", "webSearch", "sleep"]);
 const codexTerminalFields = new Set(["id", "status", "error", "items"]);
+const codexUsageFields = new Set(["last", "total", "modelContextWindow"]);
+const codexTokenFields = new Set(["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]);
 const codexNotificationFields = new Set(["threadId", "turnId", "turn", "item", "itemId", "delta", "error", "willRetry", "tokenUsage"]);
 
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"]): T {
@@ -120,7 +122,10 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     if (record.kind !== "frame" || !codexObservedMethods.has(record.body.type) || path[0] !== "body" || path[1] !== "native") return false;
     return (path.length === 2 && codexNotificationFields.has(key))
       || (path.length === 3 && path[2] === "turn" && (record.body.type === "turn/completed" || record.body.type === "turn/started") && codexTerminalFields.has(key))
-      || (path.length === 3 && path[2] === "item" && (record.body.type === "item/started" || record.body.type === "item/completed") && codexToolFields.has(key));
+      || (path.length === 3 && path[2] === "item" && (record.body.type === "item/started" || record.body.type === "item/completed") && codexToolFields.has(key))
+      || (record.body.type === "thread/tokenUsage/updated" && path[2] === "tokenUsage"
+        && ((path.length === 3 && codexUsageFields.has(key))
+          || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));
   });
 }
 

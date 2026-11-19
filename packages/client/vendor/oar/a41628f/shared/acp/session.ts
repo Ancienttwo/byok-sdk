@@ -46,8 +46,10 @@ export function redactAcpRecord<T extends RawEvent>(
 ): T {
   const native = record.kind === "frame" ? asRecord(record.body.native) : null;
   const direct = asRecord(native?.update);
-  const update = record.kind !== "frame" || native === null ? null
-    : record.body.type === direct?.sessionUpdate ? direct : childNotification?.(record.body.type, native)?.update ?? null;
+  const method = record.kind === "frame" ? record.body.type : "";
+  const directUpdate = method === direct?.sessionUpdate || method === "session/update";
+  const child = native === null ? null : childNotification?.(method.replace(/\/after_answer$/u, ""), native);
+  const update = directUpdate ? direct : child?.update ?? null;
   const toolUpdate = update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update";
   const rawInput = update?.rawInput;
   // ACP projects string rawInput verbatim and serializes the other JSON values.
@@ -57,8 +59,9 @@ export function redactAcpRecord<T extends RawEvent>(
     return toolUpdate && path.length === 4 && body === "body" && native === "native" && update === "update" && field === "status"
       && (value === "pending" || value === "in_progress" || value === "completed" || value === "failed" || value === "cancelled");
   });
+  const fragment = update?.sessionUpdate;
   if (record.kind === "frame" && safe.kind === "frame" && credentials.hasProtectedValues()
-    && update?.sessionUpdate === "agent_thought_chunk") {
+    && (fragment === "agent_thought_chunk" || (fragment === "agent_message_chunk" && !record.body.events.some(event => event.kind === "text_delta")))) {
     const packet = asRecord(safe.body.native);
     const thought = asRecord(packet?.update);
     const { content: _withheld, ...safeUpdate } = thought ?? {};
@@ -82,7 +85,6 @@ export function redactAcpRecord<T extends RawEvent>(
         : ready.length === 0 ? [] : [{ ...event, text: ready }]);
       return { ...safe, body: { ...safe.body, native, events } };
     }
-    const child = native === null ? null : childNotification?.(record.body.type, native);
     const closedChild = child != null && record.body.events.some(event => event.kind === "task_ended" && event.taskId === child.sessionId);
     if (closedChild) {
       const tail = pendingText.get(child.sessionId);
