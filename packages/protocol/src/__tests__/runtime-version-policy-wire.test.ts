@@ -58,7 +58,17 @@ describe('conn.hello version policy projection (#1103 D8/D9)', () => {
     expect(parsed).not.toHaveProperty('runtimeUnavailable');
   });
 
-  it('rejects duplicate and oversized runtimeUnavailable lists', () => {
+  const unavailable = Array.from({ length: 65 }, (_, index) => ({
+    id: HarnessIdSchema.parse(`harness-${index}`), cause: 'not_installed', retryable: true,
+  }));
+
+  it('accepts 64 unavailable entries in hello and presence', () => {
+    const entries = unavailable.slice(0, 64);
+    expect(ConnHelloPayloadSchema.parse({ ...helloBase, runtimeUnavailable: entries }).runtimeUnavailable).toEqual(entries);
+    expect(PresencePublishRequestSchema.parse({ level: 'online', runtimeUnavailable: entries }).runtimeUnavailable).toEqual(entries);
+  });
+
+  it('rejects duplicate runtimeUnavailable identities', () => {
     expect(() => ConnHelloPayloadSchema.parse({
       ...helloBase,
       runtimeUnavailable: [
@@ -66,12 +76,11 @@ describe('conn.hello version policy projection (#1103 D8/D9)', () => {
         { id: 'pi', cause: 'not_executable', retryable: true },
       ],
     })).toThrow(/duplicate runtime-unavailable/);
-    expect(() => ConnHelloPayloadSchema.parse({
-      ...helloBase,
-      runtimeUnavailable: Array.from({ length: 17 }, (_, index) => ({
-        id: HarnessIdSchema.parse(`harness-${index}`), cause: 'not_installed', retryable: true,
-      })),
-    })).toThrow();
+  });
+
+  it('rejects 65 unavailable entries in hello and presence', () => {
+    expect(ConnHelloPayloadSchema.safeParse({ ...helloBase, runtimeUnavailable: unavailable }).success).toBe(false);
+    expect(PresencePublishRequestSchema.safeParse({ level: 'online', runtimeUnavailable: unavailable }).success).toBe(false);
   });
 
   it('rejects a malformed projection while preserving the existing closed runtime shape', () => {

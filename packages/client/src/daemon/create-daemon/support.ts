@@ -95,6 +95,8 @@ export function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIde
   };
 }
 
+const RUNTIME_PROBE_CONCURRENCY = 8;
+
 /**
  * Runtimes actually detected as present on this device, typed per protocol
  * §10 gap #4 (`ConnHelloPayload.runtimes`), plus the optional
@@ -112,12 +114,27 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
   observations: RuntimeObservation[];
   runtimeUnavailable: RuntimeUnavailableEntry[];
 }> {
-  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
+  const pending = adapters.entries();
+  const detections: Awaited<ReturnType<typeof observeRuntimeDetection>>[] = [];
+  let failed = false;
+  async function probe(): Promise<void> {
+    try {
+      for (const [index, adapter] of pending) {
+        if (failed) return;
+        detections[index] = await observeRuntimeDetection(adapter);
+      }
+    } catch (error) {
+      failed = true;
+      throw error;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(adapters.length, RUNTIME_PROBE_CONCURRENCY) }, probe));
   const runtimes: RuntimeInfo[] = [];
   const harnesses: HarnessInfo[] = [];
   const observations: RuntimeObservation[] = [];
   const unavailable = new Map<string, RuntimeUnavailableEntry>();
-  for (const { adapter, detected } of detections) {
+  for (const [index, adapter] of adapters.entries()) {
+    const detected = detections[index]!;
     observations.push(projectRuntimeObservation(adapter.descriptor, detected));
     if (detected.kind !== 'available') {
       // One typed cause per failure, with the same retryable default the
@@ -157,10 +174,7 @@ export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
     if (versionPolicy !== undefined) info.versionPolicy = versionPolicy;
     runtimes.push(info);
   }
-  // `RuntimeUnavailableListSchema` caps a hello at 16 unique entries. A
-  // daemon with more adapters than that keeps the first sixteen; identity is
-  // never duplicated.
-  return { runtimes, harnesses, observations, runtimeUnavailable: [...unavailable.values()].slice(0, 16) };
+  return { runtimes, harnesses, observations, runtimeUnavailable: [...unavailable.values()] };
 }
 
 /**

@@ -3,6 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
+import { detectRuntimes } from '../daemon/create-daemon/support';
 import { PresencePublisher } from '../daemon/presence-publisher';
 import type { AuthManager } from '../daemon/auth-manager';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -14,6 +15,25 @@ const WARN = { state: 'warn' as const, qualifiedVersion: '1.0.52' };
 const BLOCK = { state: 'block' as const, qualifiedVersion: '0.169.0', matched: '0.16.' };
 // The wire projection carries state + qualified token only.
 const WIRE_BLOCK = { state: 'block' as const, qualifiedVersion: '0.169.0' };
+
+it('bounds concurrent probes and reports every unavailable executor in scan order', async () => {
+  const adapters = Array.from({ length: 64 }, (_, index) => new StubRuntimeAdapter(`test-${index}`));
+  let active = 0;
+  let peak = 0;
+  for (const adapter of adapters) {
+    vi.spyOn(adapter, 'detect').mockImplementation(async () => {
+      active++;
+      peak = Math.max(peak, active);
+      await Promise.resolve();
+      active--;
+      return { kind: 'not-found' };
+    });
+  }
+
+  const { runtimeUnavailable } = await detectRuntimes(adapters);
+  expect(peak).toBe(8);
+  expect(runtimeUnavailable.map(({ id }) => id)).toEqual(adapters.map(({ descriptor }) => descriptor.id));
+});
 
 async function tmpDir(prefix: string): Promise<string> {
   return fs.mkdtemp(path.join(os.tmpdir(), prefix));
