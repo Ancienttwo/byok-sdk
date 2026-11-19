@@ -481,7 +481,8 @@ it('searches and enforces D while starting, then denies calls after cancellation
     expect(JSON.stringify(await hub.search())).toContain('inner');
     expect(await hub.call()).toMatchObject({ isError: true, content: [{ text: 'MCP tool call is not authorized.' }] });
     expect(onDecision).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
-      toolName: 'mcp__inner__echo', decision: 'deny', authorization: { source: 'rule', ruleIds: ['startup-review'] },
+      toolName: 'mcp__inner__echo', decision: 'deny', code: 'tool_authorization_unavailable',
+      authorization: { source: 'rule', ruleIds: ['startup-review'] },
     }));
     expect(sent.map(row => row.type)).toEqual(['task.claim']);
     await cancel();

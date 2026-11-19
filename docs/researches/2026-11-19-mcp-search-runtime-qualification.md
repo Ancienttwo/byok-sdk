@@ -1,6 +1,6 @@
 # MCP search runtime qualification for #2396
 
-SDK-built dsh is the only qualified runtime combination for the initial release. Its production row binds dsh `0.2.2-rc.1`, macOS arm64, the ordinary lane, `sandbox: 'danger-full-access'`, the `BYOK_DSH_BIN` executable source and the Node distribution helper. Prepared inputs, native-sessions, Pi durable and injected adapters are outside this release scope. [Issue and owner decision](https://github.com/Ancienttwo/byok-sdk/issues/2396#issuecomment-6999561320)
+The initial release qualifies SDK-built Pi `1.5.2` and dsh `0.2.2-rc.1` in the ordinary lane on macOS arm64 with the Node distribution helper. [Pi](#pi-152) uses the bundled SDK entry and default launcher with `agentUserContext: 'inherit'` and SDK authorization `auto` or `all`. [dsh](#dsh-022-rc1) uses `sandbox: 'danger-full-access'`, the `BYOK_DSH_BIN` executable source and SDK authorization `all`. Prepared inputs, native-sessions, Pi durable and injected adapters are outside this release scope. [Issue and owner decision](https://github.com/Ancienttwo/byok-sdk/issues/2396#issuecomment-6999561320)
 
 ## Environment and receipts
 
@@ -26,8 +26,9 @@ printf '%s\n' '(version 1)' '(allow default)' \
   '(deny network-outbound (remote unix-socket (path "/private/var/run/mDNSResponder")))' \
   > "$BYOK_SEARCH_SANDBOX"
 
-BYOK_SEARCH_SCENARIOS='*' bun run --filter @byok-sdk/client test:runtime-contract -- \
-  src/__tests__/runtime-contract/pi.contract.ts
+BYOK_SEARCH_REQUIRE_PASS=1 BYOK_SEARCH_SCENARIOS='*' \
+  bun run --filter @byok-sdk/client test:runtime-contract -- \
+  src/__tests__/runtime-contract/pi.contract.ts -t 'MCP search qualification'
 
 for runtime in claude codex grok dsh agy opencode1 opencode2; do
   install_dir="$receipt_dir/install"
@@ -63,11 +64,11 @@ The retest used integrated SDK `a99b126daa0d55e01ea2a360fca09e6bb9071427` on mac
 
 ### Pi 1.5.2
 
-All 18 candidate scenarios returned `acceptance.status: pass`. The separate `qualified-launch` control returned `closed` at admission because the production table only admitted dsh at this head. In `mixed`, the first `tool_search` entered the hub 32 ms before `task.started` and returned the selected catalog. Seven attempts produced four writes, with zero writes for the approval-denied and unselected targets. No search receipt contained the prior inactive-Attempt error. The call-deadline, 256-server discovery, cancellation, restart and retired-token cases passed their receipt checks. The production decision requires both Pi and Claude to qualify, so both rows stay closed.
+All 18 candidate scenarios returned `acceptance.status: pass`. The separate `qualified-launch` control returned `closed` at admission because the production table only admitted dsh at the retest head. In `mixed`, the first `tool_search` entered the hub 32 ms before `task.started` and returned the selected catalog. Seven attempts produced four writes, with zero writes for the approval-denied and unselected targets. No search receipt contained the prior inactive-Attempt error. The call-deadline, 256-server discovery, cancellation, restart and retired-token cases passed their receipt checks. This qualifies the exact Pi combination in the production table, including inner attribution on matching `tool_use` events.
 
 ### Claude 2.1.326
 
-The pinned npm executable reported `2.1.326 (Claude Code)` from the environment-selected path. In `mixed` and `all`, the daemon claimed the Attempt and then emitted `task.fail` with `runtime startup failed and process ownership remains quarantined`. Each recorded zero model requests and zero writes. Other turns reached `tool_search`, including `collision-underscore`, which entered the hub 14 ms before `task.started` and returned the catalog. The cold-search liveness fix was observable in that turn.
+Claude 2.1.326 remains closed. In `mixed` and `all`, the pinned npm executable reported `2.1.326 (Claude Code)` from the environment-selected path. The daemon claimed each Attempt and then emitted `task.fail` with `runtime startup failed and process ownership remains quarantined`. Each recorded zero model requests and zero writes. Other turns reached `tool_search`, including `collision-underscore`, which entered the hub 14 ms before `task.started` and returned the catalog. The cold-search liveness fix was observable in that turn.
 
 After `task.started` in `name-boundary`, the hub rejected the three expected alpha and beta dispatches with `MCP tool call is not authorized.` The only write was from the direct server. Both alias controls showed the same hub denial and wrote to their own direct target. The outer Claude call IDs still correlated with the inner identities on `tool_use`, and results kept the outer identity. The observed dispatch denials occurred with the Attempt active. The daemon's dispatch gate receives its trusted outer identity from the SDK's toolset observation map, which it populates only for adapters that require an SDK probe. Claude lists its tools itself. This explains why the native hook could resolve the outer tool while the separate dispatch gate lacked that identity.
 
@@ -75,9 +76,9 @@ The F suite recorded 18 Claude observations and exited 1. The two in-flight scen
 
 ### Approvals during startup
 
-E's `searches and enforces D while starting, then denies calls after cancellation` control passed on the integrated branch. It held the adapter before `task.started`. The hub token proved live and search returned the selected tool. The first inner call matched an `alwaysAsk` rule, returned `MCP tool call is not authorized.`, produced zero target calls and emitted no approval request. The SDK authorization verdict in this state is `tool_authorization_unavailable` with reason `tool approval is unavailable during runtime startup`. A first high-risk call in this window fails for that invocation. Pi's early mixed search exercised the live token before `task.started`, and its approval-denied call came later in the turn.
+E's P3 startup control held the adapter before `task.started`. The hub token proved live and search returned the selected tool. The first high-risk inner call matched an `alwaysAsk` rule and yielded the SDK verdict `tool_authorization_unavailable` with reason `tool approval is unavailable during runtime startup`. The hub returned `MCP tool call is not authorized.` The invocation produced zero target calls and emitted no approval request. Pi's early mixed search exercised the live token before `task.started`, and its approval-denied call came later in the turn.
 
-## Qualification decisions
+## Original F qualification results
 
 The attempt counts below are steps sent by the loopback model after any runtime-native discovery. Executions count only synthetic target `tools/call` receipts and include direct calls in the mixed case. Search discovery itself increments no write receipt. The outer names shown are model-visible. The runtime only emits an inner identity where the SDK has a qualified raw-arguments path and can verify a frozen match.
 
@@ -94,7 +95,7 @@ The attempt counts below are steps sent by the loopback model after any runtime-
 
 The mixed fixtures selected `alpha` and `beta` with the same `submit_result` name, plus `blocked`. The model attempted `outside`, an unselected server with its own target receipt path. Across the mixed runs, `outside` had zero starts and zero writes. Pi and Claude ran the SDK `auto` rule with a rejected approval for `blocked`, yielding zero writes on that server. Other probes ran `all`, and their selected `blocked` tool was intentionally callable under that policy.
 
-### Pi 1.5.2
+### Original Pi 1.5.2 runs
 
 This candidate was SDK-built Pi semantics with the default `agentUserContext: 'inherit'`, SDK ordinary RPC launcher, Node distribution helper, and no `packageDir` override. The test wraps the real bundled Pi process for egress denial and captures its stdout JSONL. The native frames carry the exact `args` object and `toolCallId` and run on the root Session stream, with no per-frame child key. One successful mixed run has the following trace. Each row is a separate model step and the result shares the same call ID.
 
@@ -127,7 +128,7 @@ On successful repetitions, `byok-tools` and `byok_tools` each retained a distinc
 | Cancel while discovery was blocked | 1 / 0 | Claim and start preceded cancellation. No discovery result or target write followed. All tracked fixture PIDs were gone at teardown. |
 | End and next offer | 7 / 4 | Retired nonce was revoked. A new Attempt proved active while the old token and restored old catalog failed live search and call checks. The target receipt captured the Agent workspace cwd and a synthetic marker in the filtered environment. |
 
-The important failures were intermittent. One cold `inner-idle` run attempted search while the daemon still considered the Attempt inactive. The response was `MCP hub Attempt is inactive or could not be verified.`, with zero writes. The later `call_tool` was denied because no catalog had been published, and the turn ended after Pi exhausted its native retry policy. Further cold runs reproduced a first-search refusal in the drift and cancellation scenarios. Successful repetitions include the direct SDK helper launch and all individual scenarios. The failing repetitions keep the entire Pi row closed. `PiAdapter.start()` submits its first prompt before the daemon writes the session handoff and installs `ActiveTask.mcpHub` as active. The remedy needs to preserve the claim, cancellation and liveness boundaries while making the first discovery reachable.
+The important failures were intermittent. One cold `inner-idle` run attempted search while the daemon still considered the Attempt inactive. The response was `MCP hub Attempt is inactive or could not be verified.`, with zero writes. The later `call_tool` was denied because no catalog had been published, and the turn ended after Pi exhausted its native retry policy. Further cold runs reproduced a first-search refusal in the drift and cancellation scenarios. Successful repetitions include the direct SDK helper launch and all individual scenarios. The failing repetitions kept the Pi row closed on the F branch. `PiAdapter.start()` submits its first prompt before the daemon writes the session handoff and installs `ActiveTask.mcpHub` as active. The remedy needs to preserve the claim, cancellation and liveness boundaries while making the first discovery reachable.
 
 ### Claude and Codex
 

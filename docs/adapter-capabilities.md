@@ -75,7 +75,8 @@ adapter's support for task-scoped toolsets.
 | Runtime | Ordinary search qualification |
 | --- | --- |
 | dsh | `0.2.2-rc.1` on macOS arm64, SDK-built, `sandbox: 'danger-full-access'`, `BYOK_DSH_BIN` executable source, Node distribution helper and SDK authorization `all` |
-| Pi, Claude, Codex, Grok, agy, OpenCode 1.x and 2.x | Closed |
+| Pi | `1.5.2` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
+| Claude, Codex, Grok, agy, OpenCode 1.x and 2.x | Closed |
 
 The [runtime evidence](researches/2026-11-19-mcp-search-runtime-qualification.md)
 records the exact launch conditions and the unavailable combinations.
