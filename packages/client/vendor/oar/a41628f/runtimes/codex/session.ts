@@ -135,6 +135,20 @@ function redactCodexTurnItems(source: JsonRecord | null, safe: JsonRecord | null
   return items.every((item: unknown, index: number) => item === retainedItems[index]) ? safe : { ...safe, items };
 }
 
+function redactCodexSnapshot(source: JsonRecord | null, safe: JsonRecord | null, redact: CredentialRedactor["redactValue"]): JsonRecord | null {
+  if (source === null || safe === null) return safe;
+  const turn = asRecord(safe.turn);
+  const updated = redactCodexTurnItems(asRecord(source.turn), turn, redact);
+  const originalTurns = asRecord(source.thread)?.turns;
+  const thread = asRecord(safe.thread);
+  const retainedTurns = thread?.turns;
+  const reply = updated === turn ? safe : { ...safe, turn: updated };
+  if (!Array.isArray(originalTurns) || !Array.isArray(retainedTurns)) return reply;
+  const turns = retainedTurns.map((value: unknown, index: number) => redactCodexTurnItems(asRecord(originalTurns[index]), asRecord(value), redact) ?? value);
+  return turns.every((value: unknown, index: number) => value === retainedTurns[index]) ? reply
+    : { ...reply, thread: { ...thread, turns } };
+}
+
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"], normalizedDraft = false): T {
   const method = record.kind === "frame" ? record.body.type : "";
   const originalNative = record.kind === "frame" ? asRecord(record.body.native) : null;
@@ -143,8 +157,9 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   const isRawItem = method === "rawResponseItem/completed";
   const rawFunction = isRawItem && originalItem?.type === "function_call";
   const rawReasoning = isRawItem && originalItem?.type === "reasoning";
+  const rawMessage = isRawItem && originalItem?.type === "message";
   const itemFields = rawFunction ? ["arguments", "call_id", "name"] : rawReasoning ? ["summary", "content", "encrypted_content"]
-    : typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
+    : rawMessage ? ["role", "content", "status", "phase"] : typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
   const encoded = itemType === "mcpToolCall" || itemType === "fileChange" || itemType === "collabAgentToolCall" || itemType === "sleep";
   const safe = redactRuntimeRecord(record, redact, path => (encoded && isProjectedToolInput(record, path))
     || (rawFunction && path.length === 4 && path[0] === "body" && path[1] === "native" && path[2] === "item" && path[3] === "arguments"), (path, value) => {
@@ -170,26 +185,19 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
         && ((path.length === 3 && codexUsageFields.has(key))
           || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));
   });
+  if (record.kind === "response" && safe.kind === "response" && (record.body.kind === "accepted" || record.body.kind === "rejected")
+    && (safe.body.kind === "accepted" || safe.body.kind === "rejected")) {
+    const native = asRecord(safe.body.native);
+    const snapshot = redactCodexSnapshot(asRecord(record.body.native), native, redact);
+    return snapshot === native ? safe : { ...safe, body: { ...safe.body, native: snapshot } };
+  }
   if (safe.kind !== "frame") return safe;
   const native = asRecord(safe.body.native);
   const safeItem = asRecord(native?.item);
-  if (method === "turn/completed" || method === "turn/started") {
-    const turn = asRecord(native?.turn);
-    const updated = redactCodexTurnItems(asRecord(originalNative?.turn), turn, redact);
-    return updated === turn ? safe : { ...safe, body: { ...safe.body, native: { ...native, turn: updated } } };
-  }
-  if (method === "thread/start" || method === "thread/resume") {
-    const originalTurns = asRecord(originalNative?.thread)?.turns;
-    const thread = asRecord(native?.thread);
-    const retainedTurns = thread?.turns;
-    if (!Array.isArray(originalTurns) || !Array.isArray(retainedTurns)) return safe;
-    const turns = retainedTurns.map((turn: unknown, index: number) => {
-      const original = asRecord(originalTurns[index]);
-      const retained = asRecord(turn);
-      return redactCodexTurnItems(original, retained, redact) ?? turn;
-    });
-    return turns.every((turn: unknown, index: number) => turn === retainedTurns[index]) ? safe
-      : { ...safe, body: { ...safe.body, native: { ...native, thread: { ...thread, turns } } } };
+  if (method === "turn/completed" || method === "turn/started" || method === "thread/start" || method === "thread/resume"
+    || method === "thread/fork" || method === "thread/started") {
+    const snapshot = redactCodexSnapshot(originalNative, native, redact);
+    return snapshot === native ? safe : { ...safe, body: { ...safe.body, native: snapshot } };
   }
   if (method === "error" && asRecord(originalNative?.error) !== null && asRecord(native?.error) === null) {
     const events = safe.body.events.map(event => {
@@ -199,8 +207,9 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     });
     return { ...safe, body: { ...safe.body, events } };
   }
-  if (itemType === "userMessage" && Array.isArray(originalItem?.content)) {
-    const { content, input } = redactJoinedText(originalItem.content, safeItem?.content, redact);
+  if ((itemType === "userMessage" || rawMessage) && Array.isArray(originalItem?.content)) {
+    const { content, input } = redactJoinedText(originalItem.content, safeItem?.content, redact, "",
+      rawMessage ? block => block.type === "input_text" || block.type === "output_text" : undefined);
     const events = safe.body.events.map(event => event.kind === "user_message" ? { ...event, input } : event);
     const updated = safeItem !== null && content !== safeItem.content ? { ...native, item: { ...safeItem, content } } : safe.body.native;
     return { ...safe, body: { ...safe.body, native: updated, events } };
