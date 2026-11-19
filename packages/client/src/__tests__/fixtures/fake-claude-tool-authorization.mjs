@@ -37,7 +37,8 @@ async function handle(frame) {
   emit({ type: 'system', subtype: 'init', session_id: sessionId, model: 'claude-test' });
   const toolId = `write-${turn}`;
   const filePath = process.env.FAKE_TOOL_FILE ?? path.join(process.cwd(), `tool-${turn}.txt`);
-  const input = { file_path: filePath, content: 'actual fixture write' };
+  const input = process.env.FAKE_TOOL_INPUT ? JSON.parse(process.env.FAKE_TOOL_INPUT)
+    : { file_path: filePath, content: 'actual fixture write' };
   const toolName = process.env.FAKE_TOOL_NAME ?? 'Write';
   emit({ type: 'assistant', session_id: sessionId, message: { id: `message-${turn}`, role: 'assistant', model: 'claude-test', content: [{ type: 'tool_use', id: toolId, name: toolName, input }] } });
   let decision;
@@ -52,7 +53,7 @@ async function handle(frame) {
     pending.delete(requestId);
   }
   const denied = decision?.permissionDecision === 'deny';
-  if (!denied) writeFileSync(filePath, input.content);
+  if (!denied) writeFileSync(filePath, 'actual fixture write');
   emit({ type: 'user', session_id: sessionId, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolId,
     content: denied ? decision.permissionDecisionReason : 'written', is_error: denied }] } });
   emit({ type: 'assistant', session_id: sessionId, message: { id: `final-${turn}`, role: 'assistant', model: 'claude-test', content: [{ type: 'text', text: denied ? 'Blocked; finished.' : 'Written; finished.' }] } });
