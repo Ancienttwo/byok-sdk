@@ -204,12 +204,16 @@ describe('Codex persistent app-server adapter', () => {
     const runtimePath = process.env.PATH ?? '';
     vi.stubEnv('BYOK_CODEX_BIN', 'codex');
     vi.stubEnv('PATH', `${probedDir}:${runtimePath}`);
-    const spawnFn = vi.fn<typeof spawn>((command, args, options) => spawn(command, args, options));
+    const commands: string[] = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+      commands.push(command);
+      return spawn(command, args, options);
+    }) as typeof spawn;
     const runtime = new CodexAdapter({ runtimeEnvironment: { base: 'allowlist' }, spawnFn });
     resources.env.PATH = `${startDir}:${runtimePath}`;
     resources.mcpServers = { host: { command: '/fixture/server' } };
     expect((await turn(await open(runtime, task, resources))).at(-1)).toEqual({ type: 'turn_end' });
-    expect(spawnFn.mock.calls[0]?.[0]).toBe(probed);
+    expect(commands).toEqual([probed]);
   });
   it('detect refuses a missing app-server subcommand', async () => {
     vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');
