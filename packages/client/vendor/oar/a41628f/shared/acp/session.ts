@@ -122,9 +122,10 @@ export function redactAcpRecord<T extends RawEvent>(
       return output === undefined ? progress : { ...progress, output };
     }
     if (event.kind === "tool_call_ended") {
-      const { content: _original, ...ended } = event;
+      const { content: _original, exitCode, ...ended } = event;
       const output = acpToolTerminalContent(content, rawOutput);
-      return output === undefined ? ended : { ...ended, content: output };
+      const safeExitCode = exitCode !== undefined && asRecord(rawOutput) !== null ? { exitCode } : {};
+      return { ...ended, ...safeExitCode, ...(output === undefined ? {} : { content: output }) };
     }
     return event;
   }) } };

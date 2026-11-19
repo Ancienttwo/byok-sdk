@@ -15,6 +15,7 @@ import { asRecord, parseJson, type JsonRecord } from "../json.js";
 import type { LineProcess } from "../../runtimes/codex/app-server-client.js";
 import { isProjectedToolInput, redactRuntimeRecord, type CredentialRedactor } from "../credential-redactor.js";
 import { createSessionKernel } from "../session-kernel.js";
+import { toolContent } from "../tool-output.js";
 import { streamJsonUserMessage, streamJsonPrompted } from "./input-lifecycle.js";
 import { foldStreamJsonStdout } from "./projection.js";
 import { streamJsonAbortRequested, type StreamJsonProjectionState, type StreamJsonSessionState } from "./state.js";
@@ -220,6 +221,25 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
       || (path.length === 3 && section === "usage" && streamJsonUsageFields.has(key))
       || (path.length === 4 && section === "modelUsage" && key === "contextWindow");
   });
+  if (redacted.kind === "frame" && safe.kind === "frame" && native?.type === "user") {
+    const original = asRecord(native.message)?.content;
+    const sanitized = asRecord(asRecord(redacted.body.native)?.message)?.content;
+    if (Array.isArray(original) && Array.isArray(sanitized) && original !== sanitized) {
+      const events = redacted.body.events.map((event, index) => {
+        const source = safe.kind === "frame" ? safe.body.events[index] : undefined;
+        if (event.kind !== "tool_call_ended" || source?.kind !== "tool_call_ended") return event;
+        const slot = original.findIndex(block => {
+          const part = asRecord(block);
+          return part?.type === "tool_result" && part.tool_use_id === source.callId;
+        });
+        if (slot < 0 || original[slot] === sanitized[slot]) return event;
+        const { content: _original, ...rest } = event;
+        const content = toolContent(asRecord(sanitized[slot])?.content);
+        return content === undefined ? rest : { ...rest, content };
+      });
+      redacted = { ...redacted, body: { ...redacted.body, events } };
+    }
+  }
   if (redacted.kind === "frame" && native?.type === "result" && asRecord(redacted.body.native) === null && record.kind === "frame") {
     // Keep terminal evidence even if an opaque native key requires withholding the native map.
     const fields = Object.fromEntries(Object.entries(native).filter(([key]) => streamJsonResultFields.has(key)));
