@@ -199,6 +199,17 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     const snapshot = redactCodexSnapshot(originalNative, native, redact);
     return snapshot === native ? safe : { ...safe, body: { ...safe.body, native: snapshot } };
   }
+  if (method.startsWith("thread/goal/") && asRecord(originalNative?.goal) !== null && asRecord(native?.goal) === null) {
+    const events = safe.body.events.filter(event => event.kind !== "goal_changed");
+    return { ...safe, body: { ...safe.body, events } };
+  }
+  if (method === "thread/tokenUsage/updated") {
+    const usage = asRecord(native?.tokenUsage);
+    const source = asRecord(originalNative?.tokenUsage);
+    if (usage === null || asRecord(usage.total) === null || (asRecord(source?.last) !== null && asRecord(usage.last) === null)) {
+      return { ...safe, body: { ...safe.body, events: safe.body.events.filter(event => event.kind !== "usage") } };
+    }
+  }
   if (method === "thread/settings/updated" && asRecord(native?.threadSettings) === null) {
     const events = safe.body.events.filter(event => event.kind !== "model" && event.kind !== "effort" && event.kind !== "service_tier");
     return { ...safe, body: { ...safe.body, events } };
@@ -433,7 +444,7 @@ async function openCodexSession(
     const terminalStatus = byokTurnStatus === "completed" || byokTurnStatus === "interrupted" || byokTurnStatus === "failed"
       ? { byokTurnStatus } : {};
     const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot, byokStaleTurn, ...terminalStatus } as const;
-    kernel.frame(nativeBody, {
+    const nativeRecord = kernel.frame(nativeBody, {
       sessionId: notificationSession,
       ...(typeof params.turnId === "string" ? { spanId: params.turnId } : {}),
     });
@@ -466,7 +477,11 @@ async function openCodexSession(
     const error = method === "error" ? asRecord(params.error) : null;
     const withheldError = error !== null && (Object.getOwnPropertyNames(error).some(credentials.matches)
       || Object.getOwnPropertyNames(params).some(key => !isCodexNotificationKey(method, key) && credentials.matches(key)));
-    const projectionParams = withheldItem ? { ...params, item: undefined } : withheldError ? { ...params, error: undefined } : params;
+    let projectionParams = withheldItem ? { ...params, item: undefined } : withheldError ? { ...params, error: undefined } : params;
+    if (method === "thread/tokenUsage/updated") {
+      const usage = asRecord(asRecord(nativeRecord.body.native)?.tokenUsage);
+      projectionParams = { ...params, tokenUsage: usage };
+    }
     const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, projectionParams);
     state.projection = nextProjection;
     const links = newSessionLinks(kernel, commands.flatMap((command) => command.kind === "link" ? [command.edge] : []));
@@ -475,7 +490,7 @@ async function openCodexSession(
         case "frame":
           const events = [...command.body.events, ...links];
           if (draftTail !== undefined && !events.some(event => event.kind === "text_delta")) events.push({ kind: "text_delta", text: draftTail });
-          const body = { ...command.body, events, byokRoot: isRoot, ...terminalStatus };
+          const body = { ...command.body, ...(method === "thread/tokenUsage/updated" ? { native: params } : {}), events, byokRoot: isRoot, ...terminalStatus };
           kernel.frame(body, {
             ...(command.sessionId === undefined ? {} : { sessionId: command.sessionId }),
             ...(command.spanId === undefined ? {} : { spanId: command.spanId }),

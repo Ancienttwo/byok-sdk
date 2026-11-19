@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `bbb36285a162594ceb845b2c711f39ebc73d6f04` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `5b9e125fa2e9c1cca46876e783b8b30c41982263` (the manifest's `fork`).
 
 For #2380, `cff0aa94` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
@@ -150,7 +150,7 @@ All 44 branch deltas from `byok/0.120.0` through `7eb600dc99581a4633c4a0a22a5167
 | New | `5a5e3e47` | Keep native executable launching outside process-table diagnostics |
 | `b63f52ac` | `6979077e` | Register caller-resolved credentials and redact decoded values before retaining native or derived records |
 
-`bbb36285` is the final net delta above `6979077e`. It redacts complete encoded tool inputs and assembled text, withholds incomplete argument, reasoning and tool-output fragments, and bounds the retained terminal payload. Native control IDs and typed terminal facts remain available to the adapters through their private transport boundary. Protocol key exceptions apply only to the variant that owns the field.
+`5b9e125f` is the final net delta above `6979077e`. It redacts complete encoded tool inputs and assembled text, withholds incomplete argument, reasoning and tool-output fragments, and bounds the retained terminal payload. Native control IDs and typed terminal facts remain available to the adapters through their private transport boundary. Protocol key exceptions apply only to the variant that owns the field.
 
 The decoded-value credential boundary supersedes `82ccb2f2`, `73743394`, `bd8fa0c7`, `7c194335` and `e9e50220`. It preserves JSON literals and unchanged encoded arguments, withholds credential-bearing maps and derives dsh tool input from sanitized native arguments.
 
