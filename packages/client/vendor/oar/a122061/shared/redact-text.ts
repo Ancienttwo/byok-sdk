@@ -1,7 +1,7 @@
 /* oxlint-disable import/prefer-default-export -- Shared named helper. */
 interface RedactionShape {
-  readonly key: (key: string) => string;
-  readonly preserve: (key: string, value: unknown, owner: object) => boolean;
+  readonly key: (key: string, path: readonly string[]) => string;
+  readonly preserve: (key: string, value: unknown, owner: object, path: readonly string[]) => boolean;
 }
 
 /** Copy diagnostic data, including Error fields and cause chains, replacing known strings without mutating native inputs. */
@@ -9,31 +9,31 @@ export function redactText<T>(value: T, redact: (text: string) => string, contai
   const redactKey = shape?.key ?? redact;
   const preserve = shape?.preserve;
   const scanned = new Set<object>();
-  const matches = (entry: unknown): boolean => {
+  const matches = (entry: unknown, path: readonly string[]): boolean => {
     if (typeof entry === "string") { return contains(entry); }
     if (entry === null || typeof entry !== "object" || scanned.has(entry)) { return false; }
     scanned.add(entry);
-    if (Array.isArray(entry)) { return entry.some((item) => matches(item)); }
+    if (Array.isArray(entry)) { return entry.some((item) => matches(item, path)); }
     return Object.getOwnPropertyNames(entry).some((key) => {
-      if (shape === undefined ? contains(key) : redactKey(key) !== key) { return true; }
+      if (shape === undefined ? contains(key) : redactKey(key, path) !== key) { return true; }
       const descriptor = Object.getOwnPropertyDescriptor(entry, key);
       if (descriptor !== undefined && "value" in descriptor) {
-        return preserve?.(key, descriptor.value, entry) !== true && matches(descriptor.value);
+        return preserve?.(key, descriptor.value, entry, path) !== true && matches(descriptor.value, [...path, key]);
       }
-      return entry instanceof Error && key === "stack" && matches(entry.stack);
+      return entry instanceof Error && key === "stack" && matches(entry.stack, [...path, key]);
     });
   };
-  if (!matches(value)) { return value; }
+  if (!matches(value, [])) { return value; }
 
   const seen = new Map<object, unknown>();
-  const copy = (entry: unknown): unknown => {
+  const copy = (entry: unknown, path: readonly string[]): unknown => {
     if (typeof entry === "string") { return redact(entry); }
     if (entry === null || typeof entry !== "object") { return entry; }
     if (seen.has(entry)) { return seen.get(entry); }
     if (Array.isArray(entry)) {
       const result: unknown[] = [];
       seen.set(entry, result);
-      for (const item of entry) { result.push(copy(item)); }
+      for (const item of entry) { result.push(copy(item, path)); }
       return result;
     }
     // Keep native Error classes (notably RuntimeFailureError) and non-enumerable
@@ -44,8 +44,8 @@ export function redactText<T>(value: T, redact: (text: string) => string, contai
     for (const key of Object.getOwnPropertyNames(entry)) {
       const descriptor = Object.getOwnPropertyDescriptor(entry, key);
       if (descriptor !== undefined && "value" in descriptor) {
-        const value = preserve?.(key, descriptor.value, entry) === true ? descriptor.value : copy(descriptor.value);
-        Object.defineProperty(result, redactKey(key), { ...descriptor, value });
+        const value = preserve?.(key, descriptor.value, entry, path) === true ? descriptor.value : copy(descriptor.value, [...path, key]);
+        Object.defineProperty(result, redactKey(key, path), { ...descriptor, value });
       } else if (entry instanceof Error && key === "stack" && typeof entry.stack === "string") {
         // Node 24 exposes the lazily computed stack as an accessor. Copy its
         // redacted text, never a getter closing over the original Error.
@@ -56,5 +56,5 @@ export function redactText<T>(value: T, redact: (text: string) => string, contai
   };
   // Text leaves keep their types; only strings change, never the structure's kinds.
   // oxlint-disable-next-line typescript/consistent-type-assertions, typescript/no-unsafe-type-assertion -- The recursive copy preserves scalar types, descriptors and array/object structure.
-  return copy(value) as T;
+  return copy(value, []) as T;
 }

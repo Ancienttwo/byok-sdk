@@ -18,9 +18,15 @@ const STRUCTURAL_FIELDS = new Set([
   "nativeMessageId", "messageId", "callId", "toolCallId", "compactionId", "taskId", "parent", "child",
 ]);
 const ID_LIST_FIELDS = new Set(["agentPath", "inputIds", "carries"]);
-const CONTENT_FIELD_NAMES = new Set(["native", "events", "body", "input", "output", "outputDelta", "result", "reason", "message", "cause", "text", "data", "outcome", "model", "credential", "structuredOutput"]);
+const CONTENT_FIELD_NAMES = new Set([
+  "native", "events", "body", "input", "output", "outputDelta", "result", "reason", "message", "cause", "text", "data",
+  "outcome", "model", "credential", "structuredOutput", "update", "arguments", "rawInput", "rawOutput", "content",
+  "usage", "tokens", "context", "metadata", "header", "config", "error", "tool", "toolName", "server", "name",
+]);
+const OPAQUE_CONTENT = new Set(["arguments", "rawInput", "rawOutput", "structuredOutput", "cause", "metadata", "value"]);
 
-function preservesStructure(key: string, value: unknown, owner: object): boolean {
+function preservesStructure(key: string, value: unknown, owner: object, path: readonly string[]): boolean {
+  if (path.some(segment => OPAQUE_CONTENT.has(segment))) return false;
   if (Array.isArray(value)) return ID_LIST_FIELDS.has(key) && value.every(item => typeof item === "string");
   if (typeof value !== "string") return false;
   const kind = Object.getOwnPropertyDescriptor(owner, "kind")?.value;
@@ -28,6 +34,8 @@ function preservesStructure(key: string, value: unknown, owner: object): boolean
     || (key === "result" && kind === "tool_call_ended" && (value === "ok" || value === "failed"))
     || (key === "outcome" && kind === "compaction_ended" && (value === "completed" || value === "aborted" || value === "failed"))
     || (key === "model" && kind === "model")
+    || ((key === "tool" || key === "server" || key === "toolName") && kind === "tool_call_started")
+    || (key === "reason" && (kind === "released" || kind === "input_dropped"))
     || (key === "credential" && (value === "missing" || value === "rejected"));
 }
 
@@ -94,8 +102,10 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     preserve: preservesStructure,
     // Protocol fields keep their names. A known credential used as a dynamic
     // property name still cannot enter retained diagnostic data.
-    key: (key: string) => known.has(key) && !STRUCTURAL_FIELDS.has(key) && !ID_LIST_FIELDS.has(key) && !CONTENT_FIELD_NAMES.has(key)
-      ? "[redacted]" : key,
+    key: (key: string, path: readonly string[]) => {
+      if (path.some(segment => OPAQUE_CONTENT.has(segment))) return redact(key);
+      return STRUCTURAL_FIELDS.has(key) || ID_LIST_FIELDS.has(key) || CONTENT_FIELD_NAMES.has(key) ? key : redact(key);
+    },
   };
   return {
     values: () => values,

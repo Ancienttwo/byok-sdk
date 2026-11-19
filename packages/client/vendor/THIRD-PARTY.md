@@ -120,7 +120,7 @@ THE SOFTWARE.
 
 ## OAR 0.120.0 a122061 (Apache-2.0)
 
-Fixed upstream commit a12206106fa12b7e11c09c4ff6d60c322712018e from https://github.com/botiverse/oar. SDK-owned private runtime fork; selected source inventory and original/maintained SHA256 are recorded in oar/a122061/source-manifest.json. The maintained fork commit is 7eb600dc99581a4633c4a0a22a5167c9faa8bf03. BYOK changes are documented in oar/a122061/PROVENANCE.md and marked in modified files.
+Fixed upstream commit a12206106fa12b7e11c09c4ff6d60c322712018e from https://github.com/botiverse/oar. SDK-owned private runtime fork; selected source inventory and original/maintained SHA256 are recorded in oar/a122061/source-manifest.json. The maintained fork commit is e4188f9fe4fb6a99bbca21c4bb58c8c3a2538c41. BYOK changes are documented in oar/a122061/PROVENANCE.md and marked in modified files.
 
 
                                  Apache License
