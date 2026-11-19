@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "fb5cb33f7deaa64fab44daf4b651e60c86138429d9e1a739da743451b640c0b3"
+    "snapshotSha256": "c3931ced72deb6d9490378234f1af4cfce076e9aed50eba10d9bfdfbd2c62055"
   },
   "configFields": {
     "status": "tracked",
@@ -55,9 +55,151 @@
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
       ]
+    },
+    {
+      "id": "bot-testing-runner-injection",
+      "impact": "breaking",
+      "summary": "Each bot-collaboration testing vector now requires the Host's describe, it and expect as its first argument. Update every vector call to pass these test runner APIs, including the asymmetric matchers.",
+      "migration": "packages/bot-collaboration/README.md#shared-vector-migration",
+      "items": [
+        "export:@byok-sdk/bot-collaboration/testing#VectorMatchers",
+        "export:@byok-sdk/bot-collaboration/testing#VectorTestApi",
+        "export:@byok-sdk/bot-collaboration/testing#cardCallVectors",
+        "export:@byok-sdk/bot-collaboration/testing#cardVectors",
+        "export:@byok-sdk/bot-collaboration/testing#coalesceVectors",
+        "export:@byok-sdk/bot-collaboration/testing#commitVectors",
+        "export:@byok-sdk/bot-collaboration/testing#deliveryVectors",
+        "export:@byok-sdk/bot-collaboration/testing#deviceVectors",
+        "export:@byok-sdk/bot-collaboration/testing#homeVectors",
+        "export:@byok-sdk/bot-collaboration/testing#replyVectors",
+        "export:@byok-sdk/bot-collaboration/testing#retentionVectors",
+        "export:@byok-sdk/bot-collaboration/testing#roomVectors",
+        "export:@byok-sdk/bot-collaboration/testing#routineVectors",
+        "export:@byok-sdk/bot-collaboration/testing#settlementVectors",
+        "export:@byok-sdk/bot-collaboration/testing#syncVectors"
+      ]
+    },
+    {
+      "id": "bot-persona-and-autonomy-context",
+      "impact": "additive",
+      "summary": "Bot collaboration Hosts can render additional persona home files and run an idempotent post-write hook; context rules now receive the Bot's optional autonomy for observe-mode instructions.",
+      "migration": "packages/bot-collaboration/README.md#persona-delivery-failures",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
+        "export:@byok-sdk/bot-collaboration#BotPersonaProjectionOptions",
+        "export:@byok-sdk/bot-collaboration#createBotPersonaProjection",
+        "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
+        "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
+        "export:@byok-sdk/bot-collaboration/rules#syncTurn"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
+      "change": "added",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionOptions",
+      "change": "added",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#createBotPersonaProjection",
+      "change": "changed",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#BotTurnInstructionOptions",
+      "change": "changed",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
+      "change": "changed",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#syncTurn",
+      "change": "changed",
+      "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#VectorMatchers",
+      "change": "added",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#VectorTestApi",
+      "change": "added",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#cardCallVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#cardVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#coalesceVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#commitVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#deliveryVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#deviceVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#homeVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#replyVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#retentionVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#roomVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#routineVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#settlementVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/testing#syncVectors",
+      "change": "changed",
+      "entry": "bot-testing-runner-injection"
+    },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",

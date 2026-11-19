@@ -56,7 +56,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H card calls on real Postgres (#793
     };
   }
 
-  cardCallVectors('H HostedCollaborationStore on Postgres', cardSubject);
+  cardCallVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', cardSubject);
 
   /** A scope whose card `c1` was confirmed by a command, so its card row exists. */
   async function confirmed() {

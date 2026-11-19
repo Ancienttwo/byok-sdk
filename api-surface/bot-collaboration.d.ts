@@ -7,6 +7,8 @@
 //   AgentMessageInput -> dist/host.d.ts
 //   BotCollaboration -> dist/host.d.ts
 //   BotOptions -> dist/host.d.ts
+//   BotPersonaProjectionContext -> dist/persona.d.ts
+//   BotPersonaProjectionOptions -> dist/persona.d.ts
 //   HostIntentCancelResult -> dist/host.d.ts
 //   HostIntentHandler -> dist/host.d.ts
 //   HostIntentMessageHandler -> dist/host.d.ts
@@ -298,6 +300,8 @@
 //   SyncIntentRecord -> dist/commit-vectors.test-support.d.ts
 //   SyncSubject -> dist/commit-vectors.test-support.d.ts
 //   VECTOR_NOW -> dist/commit-vectors.test-support.d.ts
+//   VectorMatchers -> dist/vector-test-api.d.ts
+//   VectorTestApi -> dist/vector-test-api.d.ts
 //   cardCallVectors -> dist/commit-vectors.test-support.d.ts
 //   cardVectors -> dist/commit-vectors.test-support.d.ts
 //   coalesceVectors -> dist/commit-vectors.test-support.d.ts
@@ -444,6 +448,7 @@ import * as rules from './rules/coalesce.js';
 export { type CoalescePolicy } from './rules/coalesce.js';
 export declare function admitUserInput(state: CollaborationState, input: rules.InputFields, policy: rules.CoalescePolicy | undefined, now: number): string;
 // ==== @byok-sdk/bot-collaboration dist/commit-vectors.test-support.d.ts ====
+import type { VectorTestApi } from './vector-test-api.js';
 import { type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model.js';
 import { type CommitRequest, type CommitResult } from './rules/commit.js';
@@ -463,7 +468,7 @@ export interface CommitSubject {
 export declare const VECTOR_NOW = 1000;
 export type SeedTeam = 'local' | 'external' | 'rooms';
 export declare function seedCollaboration(state: CollaborationState, team?: SeedTeam): void;
-export declare function commitVectors(name: string, open: (team?: SeedTeam) => CommitSubject | Promise<CommitSubject>): void;
+export declare function commitVectors({ describe, it, expect }: VectorTestApi, name: string, open: (team?: SeedTeam) => CommitSubject | Promise<CommitSubject>): void;
 export interface SyncSubject extends CommitSubject {
     change(edit: (state: CollaborationState) => void): void | Promise<void>;
     sync(): void | Promise<void>;
@@ -475,7 +480,7 @@ export type SyncIntentRecord = Extract<SyncStep<unknown>, {
     kind: 'freeze';
 }>['input'];
 export declare const SYNC_OPTIONS: SyncOptions<never>;
-export declare function syncVectors(name: string, open: () => SyncSubject | Promise<SyncSubject>): void;
+export declare function syncVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => SyncSubject | Promise<SyncSubject>): void;
 export interface SettlementSubject extends SyncSubject {
     settle(now: number, timers?: DelegationTimers): void | Promise<void>;
     submit(turnId: string): void | Promise<void>;
@@ -483,39 +488,39 @@ export interface SettlementSubject extends SyncSubject {
     terminal(turnId: string, type: string, payload: Json): void | Promise<void>;
     conclude(turnId: string, conclusion: Conclusion, cancelReason?: 'cancelled' | 'expired'): void | Promise<void>;
 }
-export declare function settlementVectors(name: string, open: () => SettlementSubject | Promise<SettlementSubject>): void;
+export declare function settlementVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => SettlementSubject | Promise<SettlementSubject>): void;
 // support
 export type ReplyRead = (taskId: string, deviceId: string, agentRef: ExecutionTemplate['payload']['agentRef']) => Promise<ReplyReadback>;
 export interface ReplySubject extends SettlementSubject {
     checkReplies(now: number, read: ReplyRead, timers?: DelegationTimers): void | Promise<void>;
 }
-export declare function replyVectors(name: string, open: () => ReplySubject | Promise<ReplySubject>): void;
+export declare function replyVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => ReplySubject | Promise<ReplySubject>): void;
 export interface CoalesceSubject extends Omit<SyncSubject, 'sync'> {
     sync(now: number): void | Promise<void>;
 }
-export declare function coalesceVectors(name: string, open: (policy?: CoalescePolicy) => CoalesceSubject | Promise<CoalesceSubject>): void;
+export declare function coalesceVectors({ describe, it, expect }: VectorTestApi, name: string, open: (policy?: CoalescePolicy) => CoalesceSubject | Promise<CoalesceSubject>): void;
 export interface CardSubject extends Omit<SyncSubject, 'sync'> {
     sync(now: number): void | Promise<void>;
 }
-export declare function cardVectors(name: string, open: () => CardSubject | Promise<CardSubject>): void;
+export declare function cardVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => CardSubject | Promise<CardSubject>): void;
 export interface RoomSubject extends Omit<SyncSubject, 'sync'> {
     sync(now: number): void | Promise<void>;
     claim(turnId: string): void | Promise<void>;
     cancelReason(turnId: string): string | undefined | Promise<string | undefined>;
 }
 export declare function seedRoom(state: CollaborationState): void;
-export declare function roomVectors(name: string, open: () => RoomSubject | Promise<RoomSubject>): void;
+export declare function roomVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => RoomSubject | Promise<RoomSubject>): void;
 export interface DeviceSubject extends SettlementSubject {
     observeDevices(devices: ReadonlyMap<string, boolean>): void | Promise<void>;
     deliver(turnId: string, status?: 'offered' | 'running'): void | Promise<void>;
 }
-export declare function deviceVectors(name: string, open: () => DeviceSubject | Promise<DeviceSubject>): void;
+export declare function deviceVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => DeviceSubject | Promise<DeviceSubject>): void;
 // support
 export type CardConnector = (id: string, action: string, draft: Json, signal: AbortSignal) => Promise<unknown>;
 export interface CardCallSubject extends CardSubject {
     callCards(connector: CardConnector): void | Promise<void>;
 }
-export declare function cardCallVectors(name: string, open: () => CardCallSubject | Promise<CardCallSubject>): void;
+export declare function cardCallVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => CardCallSubject | Promise<CardCallSubject>): void;
 export interface HomeCalls {
     read(request: HomeOperation['request']): Promise<HomeReadback | undefined>;
     enqueue(request: HomeOperation['request']): Promise<unknown>;
@@ -523,7 +528,7 @@ export interface HomeCalls {
 export interface HomeSubject extends SyncSubject {
     flushHomes(now: number, calls: HomeCalls): void | Promise<void>;
 }
-export declare function homeVectors(name: string, open: () => HomeSubject | Promise<HomeSubject>): void;
+export declare function homeVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => HomeSubject | Promise<HomeSubject>): void;
 // ==== @byok-sdk/bot-collaboration dist/commit.d.ts ====
 import { type HostLedger, type LedgerState } from '@byok-sdk/server/execution-core';
 import { type Command, type CommandPorts } from './rules/commands.js';
@@ -580,6 +585,7 @@ export declare function echoCandidates(state: CollaborationState, message: Inbou
 import type { Delivery } from './channel.js';
 export declare function supersededDeliveryIds(deliveries: Readonly<Record<string, Delivery>>): Set<string>;
 // ==== @byok-sdk/bot-collaboration dist/delivery-vectors.test-support.d.ts ====
+import type { VectorTestApi } from './vector-test-api.js';
 import type { Json } from '@byok-sdk/server/execution-core';
 import { type ChannelPort, type Delivery } from './channel.js';
 import type { CollaborationState } from './model.js';
@@ -615,7 +621,7 @@ export interface DeliverySubject {
 }
 export declare const FINAL_BODY = "Final answer";
 export declare const replyToken: (key: string) => string;
-export declare function deliveryVectors(name: string, open: (port: ChannelPort) => Promise<DeliverySubject>): void;
+export declare function deliveryVectors({ describe, it, expect }: VectorTestApi, name: string, open: (port: ChannelPort) => Promise<DeliverySubject>): void;
 // ==== @byok-sdk/bot-collaboration dist/delivery.d.ts ====
 import type { ChannelPort, Delivery } from './channel.js';
 // support
@@ -958,7 +964,7 @@ export { BotCollaboration } from './host.js';
 export { botCompactVeto, botLedgerOptions } from './compaction.js';
 export type { AgentMessageInput, BotOptions, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer } from './host.js';
 export { TEAM_ROOM_LIMIT, TeamModeError, teamSnapshot, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team.js';
-export { createBotPersonaProjection } from './persona.js';
+export { createBotPersonaProjection, type BotPersonaProjectionContext, type BotPersonaProjectionOptions } from './persona.js';
 // ==== @byok-sdk/bot-collaboration dist/k4-fixtures.test-support.d.ts ====
 import type { AgentEgressPolicy } from '@byok-sdk/client';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
@@ -1217,8 +1223,30 @@ export interface CollaborationState extends AutonomyState {
 }
 export declare function stateOf(application: Record<string, Json>): CollaborationState;
 // ==== @byok-sdk/bot-collaboration dist/persona.d.ts ====
-export declare function createBotPersonaProjection(): import("@byok-sdk/client").AgentHomeProjection;
+import { type AgentHomeProjectionApplyInput } from '@byok-sdk/client';
+export interface BotPersonaProjectionContext {
+    readonly agentRef: AgentHomeProjectionApplyInput['agentRef'];
+    readonly canonicalHome: string;
+    readonly requestId: string;
+    readonly projectionHash: string;
+    readonly projection: {
+        readonly schemaVersion: 'bot-profile.v1';
+        readonly persona: string;
+    };
+}
+export interface BotPersonaProjectionOptions {
+    readonly renderAdditionalFiles?: (input: BotPersonaProjectionContext) => readonly {
+        name: string;
+        body: string | Uint8Array;
+    }[] | Promise<readonly {
+        name: string;
+        body: string | Uint8Array;
+    }[]>;
+    readonly afterWrite?: (input: BotPersonaProjectionContext) => void | Promise<void>;
+}
+export declare function createBotPersonaProjection(options?: BotPersonaProjectionOptions): import("@byok-sdk/client").AgentHomeProjection;
 // ==== @byok-sdk/bot-collaboration dist/retention-vectors.test-support.d.ts ====
+import type { VectorTestApi } from './vector-test-api.js';
 import { type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model.js';
 import { type RetentionInput, type RetentionLimits, type RetentionResult } from './retention.js';
@@ -1229,7 +1257,7 @@ export interface RetentionSubject extends CommitSubject {
     archived(namespace: string, id: string): Json | undefined | Promise<Json | undefined>;
 }
 export declare const RETENTION_NOW = 10000;
-export declare function retentionVectors(name: string, open: () => RetentionSubject | Promise<RetentionSubject>): void;
+export declare function retentionVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => RetentionSubject | Promise<RetentionSubject>): void;
 // ==== @byok-sdk/bot-collaboration dist/retention.d.ts ====
 import { type HandoffPackBudgets } from '@byok-sdk/protocol';
 import { type Json } from '@byok-sdk/server/execution-core';
@@ -1274,6 +1302,7 @@ export declare function retainRoots(state: CollaborationState, input: RetentionI
 export { DEFAULT_MEMBER_MENTIONS, ROOM_GRACE_MS, memberMentions, type MemberMentions, type Mentions, type RoomMessage } from './rules/rooms.js';
 export { ROOM_CONTEXT_BYTES, ROOM_CONTEXT_MESSAGES } from './rules/rooms.js';
 // ==== @byok-sdk/bot-collaboration dist/routine-vectors.test-support.d.ts ====
+import type { VectorTestApi } from './vector-test-api.js';
 import { type RoutineScheduleFields, type UpdateRoutineAction } from '@byok-sdk/protocol';
 import { type Conclusion, type Intent, type Json, type Occurrence, type Routine } from '@byok-sdk/server/execution-core';
 import { type CollaborationState } from './model.js';
@@ -1329,7 +1358,7 @@ export interface RoutineIntentRow {
     tried: boolean;
     instruction: string;
 }
-export declare function routineVectors(name: string, open: () => RoutineSubject | Promise<RoutineSubject>): void;
+export declare function routineVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => RoutineSubject | Promise<RoutineSubject>): void;
 // ==== @byok-sdk/bot-collaboration dist/routines.d.ts ====
 import { type CreateRoutineAction, type RoutineScheduleFields, type UpdateRoutineAction } from '@byok-sdk/protocol';
 import { type ExecutionTemplate, type HostOccurrenceRoutineDefinition, type HostOccurrenceRun, type LedgerState, type NextOccurrence, type Routine } from '@byok-sdk/server/execution-core';
@@ -2204,6 +2233,7 @@ export declare function advanceRoomSeats(state: {
 import { type ResultSchema } from '@byok-sdk/protocol';
 import type { Turn } from './turn.js';
 import type { RoomsState } from './rooms.js';
+import type { Autonomy } from './autonomy.js';
 import { type DelegationView } from './delegation.js';
 // support
 export interface ContextBot {
@@ -2214,6 +2244,7 @@ export interface ContextBot {
     readonly archived: boolean;
     readonly participation?: 'suspended';
     readonly readyRevision: string | null;
+    readonly autonomy?: Autonomy;
 }
 // support
 export interface ContextState extends DelegationView {
@@ -2646,6 +2677,7 @@ export declare function writeSnapshotBot(state: CollaborationState, row: TeamSna
 export declare function applyModels(state: CollaborationState, models: Readonly<Record<string, ExecutionTemplate>>, readOnlyToolsets: readonly string[]): void;
 export declare function applyManagement(state: CollaborationState, actor: string, taskId: string, outcome: BotTurnOutcome, models: Record<string, ExecutionTemplate>, accept: (action: string, work: () => void) => void, readOnlyToolsets?: readonly string[]): void;
 // ==== @byok-sdk/bot-collaboration dist/testing.d.ts ====
+export type { VectorTestApi, VectorMatchers } from './vector-test-api.js';
 export { cardCallVectors, cardVectors, coalesceVectors, commitVectors, deviceVectors, homeVectors, replyVectors, roomVectors, seedCollaboration, seedRoom, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CardCallSubject, type CardSubject, type CoalesceSubject, type CommitSubject, type DeviceSubject, type HomeCalls, type HomeSubject, type ReplySubject, type RoomSubject, type SeedTeam, type SettlementSubject, type SyncIntentRecord, type SyncSubject } from './commit-vectors.test-support.js';
 export { deliveryVectors, FINAL_BODY, replyToken, type DeliverySubject } from './delivery-vectors.test-support.js';
 export { policy, template } from './k4-fixtures.test-support.js';
@@ -2671,4 +2703,39 @@ export declare class DeviceModeError extends Error {
     readonly code = "device_not_bound";
     readonly reason: 'mode';
     constructor(deviceId: string, mode: 'H', revision: number);
+}
+// ==== @byok-sdk/bot-collaboration dist/vector-test-api.d.ts ====
+export interface VectorMatchers {
+    readonly not: VectorMatchers;
+    readonly rejects: VectorMatchers;
+    toBe(expected: unknown): void;
+    toEqual(expected: unknown): void;
+    toMatchObject(expected: Record<string, unknown> | readonly unknown[]): void;
+    toBeDefined(): void;
+    toBeUndefined(): void;
+    toBeInstanceOf(expected: Function): void;
+    toBeGreaterThan(expected: number): void;
+    toBeGreaterThanOrEqual(expected: number): void;
+    toBeLessThan(expected: number): void;
+    toContain(expected: unknown): void;
+    toContainEqual(expected: unknown): void;
+    toHaveLength(expected: number): void;
+    toHaveProperty(path: string, value?: unknown): void;
+    toThrow(expected?: string | RegExp | Function): void;
+}
+export interface VectorTestApi {
+    describe(name: string, body: () => void): void;
+    it: {
+        (name: string, body: () => void | Promise<void>, timeout?: number): void;
+        each<T>(cases: readonly T[]): (name: string, body: (...args: T extends readonly unknown[] ? [...T] : [T]) => void | Promise<void>, timeout?: number) => void;
+    };
+    expect: {
+        (value: unknown, message?: string): VectorMatchers;
+        any(constructor: Function): {
+            asymmetricMatch(value: unknown): boolean;
+        };
+        objectContaining(value: Record<string, unknown>): {
+            asymmetricMatch(value: unknown): boolean;
+        };
+    };
 }

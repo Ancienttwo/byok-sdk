@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import type { VectorTestApi } from './vector-test-api.js';
 import { hash, taskId, type ExecutionTemplate } from '@byok-sdk/server/execution-core';
 import { template } from './k4-fixtures.test-support.js';
 import type { CollaborationState } from './model.js';
@@ -58,7 +58,7 @@ const teamError = async (work: () => unknown) => {
   try { await work(); } catch (cause) { return cause instanceof TeamModeError ? cause.code : cause; }
   return 'no error';
 };
-export function commitVectors(name: string, open: (team?: SeedTeam) => CommitSubject | Promise<CommitSubject>): void {
+export function commitVectors({ describe, it, expect }: VectorTestApi, name: string, open: (team?: SeedTeam) => CommitSubject | Promise<CommitSubject>): void {
   describe(`commit contract: ${name}`, () => {
     const request = (subject: CommitSubject, commandId: string, command: Command, expectedRevision?: number): CommitRequest<Command> =>
       ({ scope: subject.scope, commandId, command, ...(expectedRevision === undefined ? {} : { expectedRevision }) });
@@ -324,7 +324,7 @@ function seedSync(state: CollaborationState): void {
   state.turns.q2 = { id: 'q2', root: 'q1', botId: 'main', source: 'continuation', request: 'Next', hop: 0, status: 'queued', authority: 'owner' };
 }
 const NO_FACTS: SyncFacts = { intent: () => undefined, executionStarted: () => false, retired: () => undefined };
-export function syncVectors(name: string, open: () => SyncSubject | Promise<SyncSubject>): void {
+export function syncVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => SyncSubject | Promise<SyncSubject>): void {
   describe(`sync contract: ${name}`, () => {
     const seeded = async () => { const subject = await open(); await subject.change(seedSync); return subject; };
 
@@ -379,7 +379,7 @@ export function syncVectors(name: string, open: () => SyncSubject | Promise<Sync
  * The sync vector of a stored template that differs from the Host's (#1358): only L keeps such a template at freeze time,
  * since H re-projects the scope config's templates at each sync.
  */
-export function staleTemplateSyncVectors(name: string, open: () => SyncSubject | Promise<SyncSubject>): void {
+export function staleTemplateSyncVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => SyncSubject | Promise<SyncSubject>): void {
   describe(`sync contract, stored template: ${name}`, () => {
     const seeded = async () => { const subject = await open(); await subject.change(seedSync); return subject; };
 
@@ -418,7 +418,7 @@ export interface SettlementSubject extends SyncSubject {
   conclude(turnId: string, conclusion: Conclusion, cancelReason?: 'cancelled' | 'expired'): void | Promise<void>;
 }
 /** The settlement vectors' steps on the subjects that `open` gives. */
-function settlementSteps<Subject extends SettlementSubject>(open: () => Subject | Promise<Subject>) {
+function settlementSteps<Subject extends SettlementSubject>(expect: VectorTestApi['expect'], open: () => Subject | Promise<Subject>) {
   /** Syncs until a sync writes nothing. */
   const settled = async (subject: SettlementSubject, now = VECTOR_NOW, timers?: DelegationTimers) => {
     for (let round = 0; round < 5; round++) {
@@ -458,10 +458,10 @@ function settlementSteps<Subject extends SettlementSubject>(open: () => Subject 
   };
   return { settled, commit, owner, delegated };
 }
-export function settlementVectors(name: string, open: () => SettlementSubject | Promise<SettlementSubject>): void {
+export function settlementVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => SettlementSubject | Promise<SettlementSubject>): void {
   describe(`settlement contract: ${name}`, () => {
     const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
-    const { settled, commit, owner, delegated } = settlementSteps(open);
+    const { settled, commit, owner, delegated } = settlementSteps(expect, open);
     const unit = (state: CollaborationState, id: string) => state.units[hash([id, 'B'])]!.state;
 
     const ends: Array<[string, (subject: SettlementSubject, id: string) => Promise<void>, { verdict: string; reason?: string }, 'spent' | 'released']> = [
@@ -683,10 +683,10 @@ export type ReplyRead = (taskId: string, deviceId: string, agentRef: ExecutionTe
 export interface ReplySubject extends SettlementSubject {
   checkReplies(now: number, read: ReplyRead, timers?: DelegationTimers): void | Promise<void>;
 }
-export function replyVectors(name: string, open: () => ReplySubject | Promise<ReplySubject>): void {
+export function replyVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => ReplySubject | Promise<ReplySubject>): void {
   describe(`reply check contract: ${name}`, () => {
     const TIMERS: DelegationTimers = { cancelGraceMs: 1_000, uncertainAfterMs: 5_000 };
-    const { settled, commit, delegated } = settlementSteps(open);
+    const { settled, commit, delegated } = settlementSteps(expect, open);
     /** B's chain end succeeded with no Host reply record, so its delegation waits for a reply check at `VECTOR_NOW`. */
     const pending = async () => {
       const h = await delegated();
@@ -777,7 +777,7 @@ export interface CoalesceSubject extends Omit<SyncSubject, 'sync'> {
 }
 /** The policy of the vectors: a 1 s window and two inputs a batch. */
 const COALESCE_POLICY: CoalescePolicy = { windowMs: 1000, maxItems: 2, maxBytes: 8192 };
-export function coalesceVectors(name: string, open: (policy?: CoalescePolicy) => CoalesceSubject | Promise<CoalesceSubject>): void {
+export function coalesceVectors({ describe, it, expect }: VectorTestApi, name: string, open: (policy?: CoalescePolicy) => CoalesceSubject | Promise<CoalesceSubject>): void {
   describe(`coalesce contract: ${name}`, () => {
     const user = (key: string) => hash(['user', 'main', key]);
     /** `t1` is concluded and `q1` holds the Bot: it freezes at the first sync and stays open. */
@@ -872,7 +872,7 @@ export function coalesceVectors(name: string, open: (policy?: CoalescePolicy) =>
 export interface CardSubject extends Omit<SyncSubject, 'sync'> {
   sync(now: number): void | Promise<void>;
 }
-export function cardVectors(name: string, open: () => CardSubject | Promise<CardSubject>): void {
+export function cardVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => CardSubject | Promise<CardSubject>): void {
   describe(`card contract: ${name}`, () => {
     const result = hash(['action_result', 'c1']);
     /** `t1` is concluded and reported, so Bot `main` is idle. Card `c1` of `t1` expires at `expiresAt`. */
@@ -964,7 +964,7 @@ export function seedRoom(state: CollaborationState): void {
   state.team.rooms.r = { id: 'r', ...roomFields(state.team, { name: 'Room', members: ['main', 'b'] }), messages: [] };
   roomInput(state.team, 'm1', 'r', 'Hello', ['b', 'main'], noPublish);
 }
-export function roomVectors(name: string, open: () => RoomSubject | Promise<RoomSubject>): void {
+export function roomVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => RoomSubject | Promise<RoomSubject>): void {
   describe(`room contract: ${name}`, () => {
     const opened = async () => {
       const subject = await open();
@@ -1078,9 +1078,9 @@ export interface DeviceSubject extends SettlementSubject {
    */
   deliver(turnId: string, status?: 'offered' | 'running'): void | Promise<void>;
 }
-export function deviceVectors(name: string, open: () => DeviceSubject | Promise<DeviceSubject>): void {
+export function deviceVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => DeviceSubject | Promise<DeviceSubject>): void {
   describe(`device observation contract: ${name}`, () => {
-    const { settled, commit, delegated } = settlementSteps(open);
+    const { settled, commit, delegated } = settlementSteps(expect, open);
     const offline = new Map([['device', false]]), online = new Map([['device', true]]);
     /** A delegation to `b`, whose chain end froze on device `device`, with the subject's device step. */
     const opened = async () => {
@@ -1162,7 +1162,7 @@ export type CardConnector = (id: string, action: string, draft: Json, signal: Ab
 export interface CardCallSubject extends CardSubject {
   callCards(connector: CardConnector): void | Promise<void>;
 }
-export function cardCallVectors(name: string, open: () => CardCallSubject | Promise<CardCallSubject>): void {
+export function cardCallVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => CardCallSubject | Promise<CardCallSubject>): void {
   describe(`card call contract: ${name}`, () => {
     const result = hash(['action_result', 'c1']);
     /** `t1` is concluded and reported, card `c1` is pending until a minute after `VECTOR_NOW`, and `decide` decides it. */
@@ -1252,7 +1252,7 @@ export interface HomeCalls {
 export interface HomeSubject extends SyncSubject {
   flushHomes(now: number, calls: HomeCalls): void | Promise<void>;
 }
-export function homeVectors(name: string, open: () => HomeSubject | Promise<HomeSubject>): void {
+export function homeVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => HomeSubject | Promise<HomeSubject>): void {
   describe(`Agent home flush contract: ${name}`, () => {
     const HOUR = 3_600_000;
     /** Bot `bot` at profile revision 2, ready at 1, with a pending home operation for revision 2. Returns its sequence. */

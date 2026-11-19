@@ -241,11 +241,9 @@
       },
       "peerDependencies": {
         "@hono/node-server": "^2.1.6",
-        "vitest": "^5.1.0",
       },
       "optionalPeers": [
         "@hono/node-server",
-        "vitest",
       ],
     },
     "packages/client": {

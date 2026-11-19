@@ -32,7 +32,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H store on real Postgres (#793 D2a)
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
-  commitVectors('H HostedCollaborationStore on Postgres', hosted);
+  commitVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', hosted);
 
   // #793 O2: only a byte compare sees drift in map order, key order or optional-field presence.
   it.each<[SeedTeam, Array<[string, Command]>]>([

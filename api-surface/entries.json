@@ -385,7 +385,6 @@
         "os",
         "path",
         "readline",
-        "vitest",
         "zod"
       ],
       "lazyImports": [
@@ -408,15 +407,10 @@
         "@hono/node-server",
         "@modelcontextprotocol/client",
         "@modelcontextprotocol/core",
-        "chai",
         "eventsource",
         "eventsource-parser",
-        "expect-type",
         "hono",
         "pkce-challenge",
-        "tinybench",
-        "vite",
-        "vitest",
         "zod"
       ],
       "unavailableOptional": [],
@@ -459,31 +453,6 @@
         {
           "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
           "line": 2594,
-          "rule": "Function constructor"
-        },
-        {
-          "file": "vite/dist/node/module-runner.js",
-          "line": 824,
-          "rule": "opaque import()"
-        },
-        {
-          "file": "vitest/dist/chunks/index.CZzC1gGg.js",
-          "line": 1475,
-          "rule": "Function reference"
-        },
-        {
-          "file": "vitest/dist/chunks/index.CZzC1gGg.js",
-          "line": 1488,
-          "rule": "Function reference"
-        },
-        {
-          "file": "vitest/dist/chunks/index.CZzC1gGg.js",
-          "line": 2565,
-          "rule": "Function reference"
-        },
-        {
-          "file": "vitest/dist/chunks/rawSnapshot.DqSiqIEx.js",
-          "line": 85,
           "rule": "Function constructor"
         },
         {
