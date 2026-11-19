@@ -183,6 +183,7 @@ class BoundedStdioTransport implements Transport {
   private child?: ChildProcessWithoutNullStreams;
   private readonly readBuffer = new ReadBuffer({ maxBufferSize: MCP_MAX_FRAME_BYTES });
   private stdoutBytes = 0;
+  private maxStdoutBytes: number | undefined;
   private stderrText = '';
   private closed = false;
   private closing?: Promise<void>;
@@ -197,6 +198,7 @@ class BoundedStdioTransport implements Transport {
     private readonly label: string,
     private readonly checkDeadline: () => void,
   ) {
+    this.maxStdoutBytes = options.maxStdoutBytes;
     this.childEnv = Object.freeze({ ...options.env, ...(server.env ?? {}) });
   }
 
@@ -216,6 +218,7 @@ class BoundedStdioTransport implements Transport {
 
   async start(): Promise<void> {
     this.checkDeadline();
+    if (this.closed) throw new McpTransportError(`${this.label} transport is closed`);
     if (this.child !== undefined) throw new Error(`${this.label} transport already started`);
     try {
       assertNoNulSpawnInput(this.server.command, this.server.args ?? [], this.childEnv, this.options.cwd);
@@ -268,29 +271,24 @@ class BoundedStdioTransport implements Transport {
   private receive(chunk: Buffer): void {
     if (this.closed) return;
     this.stdoutBytes += chunk.byteLength;
-    const cap = this.options.maxStdoutBytes;
+    const cap = this.maxStdoutBytes;
     if (cap !== undefined && this.stdoutBytes > cap) {
       this.fail(new McpAuthorityError(
         `${this.label} wrote more than ${cap} bytes of stdout before completing the exchange`,
       ));
       return;
     }
-    this.readBuffer.append(chunk);
-    for (;;) {
-      let message: JSONRPCMessage | null;
-      try {
-        message = this.readBuffer.readMessage();
-      } catch (cause) {
-        // A frame over `MCP_MAX_FRAME_BYTES`, or one that is not a valid
-        // JSON-RPC message. Both are the server's own answer.
-        this.fail(new McpAuthorityError(
-          `${this.label} sent a frame this client refuses: ${cause instanceof Error ? cause.message : String(cause)}`,
-          { cause },
-        ));
-        return;
+    try {
+      this.readBuffer.append(chunk);
+      for (let message = this.readBuffer.readMessage(); message !== null; message = this.readBuffer.readMessage()) {
+        this.onmessage?.(message);
       }
-      if (message === null) return;
-      this.onmessage?.(message);
+    } catch (cause) {
+      // The SDK buffer can refuse the append itself, before any line is read.
+      this.fail(new McpAuthorityError(
+        `${this.label} sent a frame this client refuses: ${cause instanceof Error ? cause.message : String(cause)}`,
+        { cause },
+      ));
     }
   }
 
@@ -334,22 +332,30 @@ class BoundedStdioTransport implements Transport {
     return this.closing;
   }
 
+  /** The initial exchange is complete. Only the per-frame ceiling applies from here. */
+  finishObservation(): void {
+    this.maxStdoutBytes = undefined;
+  }
+
   private async terminate(): Promise<void> {
     this.closed = true;
     const child = this.child;
     this.child = undefined;
     this.readBuffer.clear();
-    if (child === undefined || child.exitCode !== null || child.signalCode !== null) {
-      this.onclose?.();
-      return;
+    if (child?.pid !== undefined && child.exitCode === null && child.signalCode === null) {
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+      child.stdin.end();
+      child.kill('SIGTERM');
+      const forced = setTimeout(() => child.kill('SIGKILL'), CHILD_TERMINATION_GRACE_MS);
+      forced.unref?.();
+      await exited;
+      clearTimeout(forced);
     }
-    const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
-    child.stdin.end();
-    child.kill('SIGTERM');
-    const forced = setTimeout(() => child.kill('SIGKILL'), CHILD_TERMINATION_GRACE_MS);
-    forced.unref?.();
-    await exited;
-    clearTimeout(forced);
+    // A failed spawn has no pid or exit event. A descendant can also hold
+    // the stdio pipes after the immediate child exits. Release our pipe ends.
+    child?.stdin.destroy();
+    child?.stdout.destroy();
+    child?.stderr.destroy();
     this.onclose?.();
   }
 }
@@ -370,10 +376,7 @@ export class McpStdioClient {
   private connected = false;
   private deadline: number | undefined;
 
-  constructor(
-    private readonly server: McpStdioServerSpec,
-    private readonly options: McpStdioClientOptions,
-  ) {
+  constructor(server: McpStdioServerSpec, options: McpStdioClientOptions) {
     this.label = options.label ?? 'MCP server';
     this.timeoutMs = options.timeoutMs ?? MCP_DEFAULT_REQUEST_TIMEOUT_MS;
     this.transport = new BoundedStdioTransport(server, options, this.label, () => this.checkDeadline());
@@ -492,6 +495,17 @@ export class McpStdioClient {
     }
   }
 
+  /** A pool can discard a connection that failed while idle before dispatching work to it. */
+  get isConnected(): boolean {
+    return this.connected && this.transport.failure === undefined;
+  }
+
+  /** Switch an observation connection to normal call framing after verification. */
+  finishObservation(): void {
+    this.deadline = undefined;
+    this.transport.finishObservation();
+  }
+
   /**
    * Invoke one tool. An aborted `signal` cancels in band — the protocol layer
    * sends `notifications/cancelled` for the in-flight request — so a cancelled
@@ -500,7 +514,7 @@ export class McpStdioClient {
   async callTool(
     name: string,
     args: Readonly<Record<string, unknown>> | undefined,
-    options?: { readonly signal?: AbortSignal; readonly timeoutMs?: number },
+    options?: { readonly signal?: AbortSignal; readonly timeoutMs?: number; readonly toolDefinition?: Tool },
   ): Promise<CallToolResult> {
     try {
       return await this.client.callTool(
@@ -508,6 +522,8 @@ export class McpStdioClient {
         {
           timeout: options?.timeoutMs ?? this.timeoutMs,
           ...(options?.signal === undefined ? {} : { signal: options.signal }),
+          // An explicit verified definition prevents the SDK from refreshing and replaying a call.
+          ...(options?.toolDefinition === undefined ? {} : { toolDefinition: options.toolDefinition }),
         },
       );
     } catch (cause) {

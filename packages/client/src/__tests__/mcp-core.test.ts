@@ -56,6 +56,16 @@ describe('MCP core — initialize, list, call, cancel, close', () => {
     expect(observation.tools[1]?.inputSchema).toMatchObject({ required: ['query'] });
   });
 
+  it('reaps a failed spawn and settles before its request deadline', async () => {
+    const dir = await tempDir();
+    const client = new McpStdioClient({ command: path.join(dir, 'missing-server') }, { env: ENV, timeoutMs: 15_000 });
+    try {
+      await expect(client.connect()).rejects.toThrow(/ENOENT/u);
+    } finally {
+      await client.close();
+    }
+  }, 3_000);
+
   it('calls a tool and returns the server\'s own result', async () => {
     const client = new McpStdioClient(server(), { env: ENV, label: 'fixture' });
     try {

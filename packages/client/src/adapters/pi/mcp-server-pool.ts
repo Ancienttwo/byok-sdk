@@ -1,14 +1,12 @@
 import { parsePiMcpEnvironment } from './mcp-environment.js';
 import { isAbsolute } from 'node:path';
-import type { CallToolResult } from '@modelcontextprotocol/client';
-import { McpAuthorityError, McpStdioClient, type McpStdioServerSpec } from '../../mcp/client.js';
+import { McpAuthorityError, type McpStdioServerSpec } from '../../mcp/client.js';
 import {
-  diffMcpObservation,
   GRANTABLE_TOOL_NAME,
-  type McpServerObservation,
   type McpToolDescriptor,
   type McpToolsetServerObservation,
 } from '../../mcp/observation.js';
+import { McpServerPool as SharedMcpServerPool } from '../../mcp/server-pool.js';
 import type { McpToolProjection } from '../../mcp/projection.js';
 import type { McpToolCallHost } from './mcp-tools.js';
 import { isReservedMcpServerName } from '../../sdk-reserved-mcp.js';
@@ -35,13 +33,6 @@ import { isReservedMcpServerName } from '../../sdk-reserved-mcp.js';
  * one is stripped from MCP server children by existing.
  */
 const BYOK_PI_CONTROL_ENV_PREFIX = /^BYOK_PI_/u;
-
-/**
- * Ceiling for one `tools/call`. A host tool doing real work (a database query,
- * an API round trip) is not a handshake and must not inherit the admission
- * deadline; the task's own cancellation remains the real bound.
- */
-export const MCP_TOOL_CALL_TIMEOUT_MS = 120_000;
 
 /**
  * How one entry refuses a malformed configuration.
@@ -176,131 +167,49 @@ export function parseTaskScopedMcpConfig(parsed: unknown, fail: McpConfigFailure
   });
 }
 
-/**
- * One connected server per projected server, opened on first use and verified
- * against the frozen observation before any tool runs.
- *
- * Lazy because a session that never calls a toolset tool should not pay to
- * start its servers, and eager startup would move a server fault into session
- * start where neither entry can report it usefully.
- *
- * Verified because admission and execution are two different spawns of the same
- * command. Between them a server can be upgraded, and the tools the model was
- * shown would then not be the tools it is calling. The comparison is set
- * equality with the frozen descriptors — a tool that appeared is as much a
- * refusal as one that vanished, because an extra tool is authority nobody
- * admitted this task for.
- */
+/** Pi's config, environment and drift checks stay on its existing entry path. */
 export class McpServerPool implements McpToolCallHost {
-  private readonly clients = new Map<string, Promise<McpStdioClient>>();
-  private closed = false;
+  private readonly pool: SharedMcpServerPool;
 
-  constructor(private readonly config: TaskScopedMcpConfig, private readonly fail: McpConfigFailure) {
-    // Direct callers cannot bypass the same strict admission shape.
+  constructor(config: TaskScopedMcpConfig, private readonly fail: McpConfigFailure) {
     parsePiMcpEnvironment(config.mcpEnv);
-  }
-
-  /**
-   * The environment an MCP server child is spawned with.
-   *
-   * The daemon's one admitted MCP environment. Pi's runtime env contains
-   * credential-custody and resource directories which are not MCP authority.
-   * The task config must carry the measured environment explicitly; there is
-   * no process.env fallback. The existing BYOK_PI_* filter remains as defence
-   * in depth after the strict parser has already refused such names.
-   */
-  private childEnv(): Record<string, string> {
-    const env: Record<string, string> = {};
-    for (const [name, value] of Object.entries(this.config.mcpEnv)) {
-      if (value === undefined || BYOK_PI_CONTROL_ENV_PREFIX.test(name)) continue;
-      env[name] = value;
-    }
-    return env;
-  }
-
-  private async open(serverName: string): Promise<McpStdioClient> {
-    const server = this.config.mcpServers[serverName];
-    if (server === undefined) {
-      throw new McpAuthorityError(`MCP server "${serverName}" is not projected for this task`);
-    }
-    const frozen = this.config.observation[serverName];
-    const launchCwd = this.config.launchCwd;
-    if (launchCwd === undefined) {
-      this.fail(`MCP server "${serverName}" has no launchCwd; refusing to start it in this process's own directory`);
-    }
-    const client = new McpStdioClient(server, {
-      label: `MCP toolset server "${serverName}"`,
-      env: this.childEnv(),
-      cwd: launchCwd,
-    });
-    try {
-      await client.connect();
-      const observed: McpServerObservation = {
+    this.pool = new SharedMcpServerPool((name) => {
+      const spec = config.mcpServers[name];
+      if (spec === undefined) throw new McpAuthorityError(`MCP server "${name}" is not projected for this task`);
+      if (config.launchCwd === undefined) {
+        fail(`MCP server "${name}" has no launchCwd; refusing to start it in this process's own directory`);
+      }
+      const env: Record<string, string> = {};
+      for (const [key, value] of Object.entries(config.mcpEnv)) {
+        if (value !== undefined && !BYOK_PI_CONTROL_ENV_PREFIX.test(key)) env[key] = value;
+      }
+      return {
+        spec,
+        cwd: config.launchCwd,
+        env,
+        label: `MCP toolset server "${name}"`,
+        frozen: config.observation[name],
+      };
+    }, {
+      describe: (serverName, client, tools) => ({
         serverName,
         serverInfo: client.serverInfo(),
         protocolVersion: client.protocolVersion(),
-        tools: (await client.listTools()).map((tool) => parseMcpTool(serverName, tool, this.fail)),
-      };
-      // An SDK-reserved helper has no daemon observation to compare against —
-      // its tool set is fixed by the protocol the SDK itself defines, and it is
-      // read live below rather than frozen at admission.
-      if (frozen !== undefined) {
-        const drifts = diffMcpObservation(frozen, observed);
-        if (drifts.length > 0) {
-          throw new McpAuthorityError(
-            `MCP toolset server "${serverName}" no longer matches the tools this task was admitted with: `
-            + drifts.map((drift) => `${drift.reason} (${drift.detail})`).join('; '),
-          );
-        }
-      }
-      return client;
-    } catch (error) {
-      await client.close();
-      throw error;
-    }
-  }
-
-  private client(serverName: string): Promise<McpStdioClient> {
-    let pending = this.clients.get(serverName);
-    if (pending === undefined) {
-      pending = this.open(serverName);
-      this.clients.set(serverName, pending);
-      // A failed open must not be cached as a permanently poisoned entry with an
-      // unhandled rejection attached; the next call re-opens and fails again
-      // with its own reason.
-      pending.catch(() => this.clients.delete(serverName));
-    }
-    return pending;
-  }
-
-  async call(
-    tool: McpToolProjection,
-    args: Readonly<Record<string, unknown>>,
-    signal?: AbortSignal,
-  ): Promise<CallToolResult> {
-    if (this.closed) throw new McpAuthorityError('the MCP toolset connections for this task are closed');
-    const client = await this.client(tool.serverName);
-    return client.callTool(tool.toolName, args, {
-      ...(signal === undefined ? {} : { signal }),
-      // A tool call is the model's work, not a handshake: it gets a real budget
-      // rather than the admission deadline.
-      timeoutMs: MCP_TOOL_CALL_TIMEOUT_MS,
+        tools: tools.map((tool) => parseMcpTool(serverName, tool, fail)),
+      }),
     });
   }
 
-  /** Connect if needed and report what the server says its tools are. */
-  async observe(serverName: string): Promise<readonly McpToolDescriptor[]> {
-    const client = await this.client(serverName);
-    return (await client.listTools()).map((tool) => parseMcpTool(serverName, tool, this.fail));
+  call(tool: McpToolProjection, args: Readonly<Record<string, unknown>>, signal?: AbortSignal) {
+    return this.pool.call(tool.serverName, tool.toolName, args, signal);
   }
 
-  async close(): Promise<void> {
-    this.closed = true;
-    const pending = [...this.clients.values()];
-    this.clients.clear();
-    await Promise.all(pending.map(async (entry) => {
-      const client = await entry.catch(() => undefined);
-      await client?.close();
-    }));
+  async observe(serverName: string): Promise<readonly McpToolDescriptor[]> {
+    const tools = await this.pool.listTools(serverName);
+    return tools.map((tool) => parseMcpTool(serverName, tool, this.fail));
+  }
+
+  close(): Promise<void> {
+    return this.pool.close();
   }
 }
