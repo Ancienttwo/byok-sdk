@@ -224,7 +224,7 @@ describe('PiAdapter.detect() authPresent', () => {
   });
 
   for (const [name, adapter] of [['installed', installed], ['sdkHelperHost', bundled]] as const) {
-    test(`${name}: reflects pi's own auth.json login and env names, never surfacing a value`, async () => {
+    test(`${name}: reports stored Pi login without treating environment keys as login or surfacing a value`, async () => {
       const first = await adapter().detect();
       expect(first).toMatchObject({ kind: 'available', authPresent: false });
 
@@ -245,10 +245,11 @@ describe('PiAdapter.detect() authPresent', () => {
       expect(byModels).toMatchObject({ kind: 'available', authPresent: true });
       expect(JSON.stringify(byModels)).not.toContain(SECRET);
 
-      await write('auth.json', '{ not json');
+      await fs.rm(path.join(agentDir, 'auth.json'));
+      await fs.rm(path.join(agentDir, 'models.json'));
       vi.stubEnv('ANTHROPIC_API_KEY', SECRET);
       const byEnv = await adapter().detect();
-      expect(byEnv).toMatchObject({ kind: 'available', authPresent: true });
+      expect(byEnv).toMatchObject({ kind: 'available', authPresent: false });
       expect(JSON.stringify(byEnv)).not.toContain(SECRET);
     });
   }
