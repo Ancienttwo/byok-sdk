@@ -19,8 +19,8 @@ import { startEgressRecorder, type EgressAttempt, type EgressRecorder } from './
  */
 export const CONTRACT_CASES = Object.freeze({
   'detect.version': 'detect() is available and names the expected version, with a warn verdict exactly when it is not the qualified one',
-  'detect.auth.absent': 'detect() reports authPresent false with no credential',
-  'detect.auth.apiKey': 'detect() reports authPresent true for an API key in the environment',
+  'detect.auth.absent': 'detect() reports the expected authentication evidence without an ambient key',
+  'detect.auth.apiKey': 'detect() reports the expected authentication evidence for the provider key source',
   'detect.auth.login': 'detect() reports authPresent true for the runtime\'s own stored login',
   'mcp.submitResult': 'a Host MCP server reaches the model and its submit_result call reaches the server',
   'instructions.project': 'the project instruction file in the workspace reaches the model (folder trust)',
