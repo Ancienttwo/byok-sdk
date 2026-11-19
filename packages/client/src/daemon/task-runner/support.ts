@@ -1,5 +1,6 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
 import type { ToolAuthorizationPolicy } from '../../tool-authorization.js';
+import type { McpHubCatalogBinding } from '../../mcp/hub/catalog.js';
 import type { RuntimeTaskInput } from '../../types.js';
 // modules in this directory.
 //
@@ -127,7 +128,14 @@ export function observePreparedCall(
   return undefined;
 }
 
+/** Private Attempt authority shared by the helper, authorization and event projection. */
+export interface McpHubAttempt {
+  readonly binding: McpHubCatalogBinding;
+  readonly isActive: () => boolean;
+}
+
 export interface ActiveTask {
+  readonly mcpHub?: McpHubAttempt;
   readonly memoryLane?: typeof import('../../adapters/pi/memory-lane-contract.js').PI_MEMORY_LANE;
   taskId: string;
   /** Cancels every blob transfer owned by this task before its terminal path runs. */

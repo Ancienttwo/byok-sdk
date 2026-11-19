@@ -22,8 +22,11 @@ export interface AgentMemoryMcpContext extends SdkReservedMcpContext {
   readonly toolList: 'granted' | 'complete';
 }
 
+export const MCP_HUB_CONTEXT_ACTIVE_METHOD = 'mcp_hub.is_active';
+
 export interface McpHubContext extends SdkReservedMcpContext {
   readonly binding: McpHubCatalogBinding;
+  readonly innerNonces?: readonly string[];
 }
 
 /** The daemon's context file, the one source of a task-scoped MCP server's identity. Throws when unusable. */

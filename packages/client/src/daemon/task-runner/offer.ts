@@ -271,7 +271,7 @@ export async function handleOffer(
     });
     if (runtime === undefined) return;
     stageSucceeded('runtime');
-    const { scratch, offered, pick, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, prepared } = runtime;
+    const { scratch, offered, pick, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, prepared, searchServers, innerNonces } = runtime;
     let taskMcpServers = runtime.taskMcpServers;
 
     stage('workspace');
@@ -286,11 +286,11 @@ export async function handleOffer(
     const sealed = await sealOfferManifest.call(this, phase, {
       agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
       mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, workspaceDir, blobAbort,
-      preparationLane, terminalProjection,
+      preparationLane, terminalProjection, searchServers, innerNonces,
     });
     if (sealed === undefined) return;
     stageSucceeded('manifest');
-    const { runtimeLaunch, manifest, preparedLaunch, preparedObservation, toolAuthorization } = sealed;
+    const { runtimeLaunch, manifest, preparedLaunch, preparedObservation, toolAuthorization, mcpHub } = sealed;
 
     // The manifest/pin are done, so the reducer records the claim
     // precondition. A cancel/shutdown/terminal selected while the manifest
@@ -312,7 +312,7 @@ export async function handleOffer(
       preparedLaunch, runtimeLaunch, resolvedInstruction, images, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
     }, {
       agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation, toolAuthorization,
-      workspaceDir, blobAbort, payload, messageRequirement, terminalProjection,
+      workspaceDir, blobAbort, payload, messageRequirement, terminalProjection, mcpHub,
     });
   } finally {
     clearTimeout(startupTimer);
@@ -327,6 +327,7 @@ export async function handleOffer(
         // closed. A runtime may drain pending memory calls in close(): revoke
         // and wake them before disposal can await them.
         this['revokeAgentMemoryContext'](taskId);
+        this['revokeMcpHubContext'](taskId);
         endMemoryStartWait.call(this, taskId);
         await this['startupOwnership'].dispose(taskId);
       }

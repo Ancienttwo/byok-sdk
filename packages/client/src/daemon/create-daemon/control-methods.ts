@@ -1,5 +1,5 @@
 import type { ControlMethods } from '../control-server.js';
-import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BYTES, parseToolsetsReloadParams, parseApprovalsResolveParams, parseApprovalsRequestParams, parseTeamWorkspaceCreateParams, parseTeamWorkspaceJoinParams, parseTeamContextParams, parseTeamMessagePostParams, parseTeamMessageReadParams, parseTeamMessageAckParams, parseTeamNotificationSnapshotParams, parseTeamMessageInspectParams, parseAgentMessagePublishParams, parseAgentResultDescribeParams, parseAgentResultSubmitParams, parseAgentMemoryRecallParams, parseAgentMemorySaveParams, type AssertionIssueResult, parseAssertionIssueParams, type TaskAssertionIssueResult, parseTaskAssertionIssueParams, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, parseShutdownParams } from '../control-protocol.js';
+import { ControlError, parseEnrollmentPairParams, ENROLLMENT_PAIRING_CODE_MAX_BYTES, parseToolsetsReloadParams, parseApprovalsResolveParams, parseApprovalsRequestParams, parseTeamWorkspaceCreateParams, parseTeamWorkspaceJoinParams, parseTeamContextParams, parseTeamMessagePostParams, parseTeamMessageReadParams, parseTeamMessageAckParams, parseTeamNotificationSnapshotParams, parseTeamMessageInspectParams, parseAgentMessagePublishParams, parseMcpContextTokenParams, parseAgentResultSubmitParams, parseAgentMemoryRecallParams, parseAgentMemorySaveParams, type AssertionIssueResult, parseAssertionIssueParams, type TaskAssertionIssueResult, parseTaskAssertionIssueParams, TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES, parseShutdownParams } from '../control-protocol.js';
 import { checkVerificationSecret } from '../device-member.js';
 import { type DeviceRecord, DeviceRecordRePairRequiredError } from '../store.js';
 import { PairedWithoutMemberError } from './support.js';
@@ -19,6 +19,7 @@ import { RUNTIMES_MODELS_METHOD, RUNTIMES_USAGE_METHOD, parseRuntimeReadParams }
 import { boundRuntimeRead } from '../../runtime/runtime-readers.js';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
 import type { RuntimeAdapter } from '../../types.js';
+import { MCP_HUB_CONTEXT_ACTIVE_METHOD } from '../../sdk-reserved-helper-context.js';
 
 /** The control-socket methods of one daemon (#926). */
 
@@ -356,8 +357,13 @@ function operationControlMethods(daemonScope: DaemonScope): ControlMethods['unar
       if (!daemonState.runner) throw new ControlError('not_found', 'daemon is not started');
       return daemonState.runner.publishAgentMessage(parsed);
     },
+    [MCP_HUB_CONTEXT_ACTIVE_METHOD]: (params) => {
+      const parsed = parseMcpContextTokenParams(params);
+      if (!parsed) throw new ControlError('bad_request', 'The MCP hub proof requires exactly {contextToken}');
+      return !daemonState.shuttingDown && daemonState.runner?.isMcpHubContextActive(parsed.contextToken) === true;
+    },
     'agent_results.describe': (params) => {
-      const parsed = parseAgentResultDescribeParams(params);
+      const parsed = parseMcpContextTokenParams(params);
       if (!parsed) throw new ControlError('bad_request', 'agent_results.describe requires exactly {contextToken}');
       if (!daemonState.runner) throw new ControlError('not_found', 'daemon is not started');
       return daemonState.runner.describeAgentResult(parsed);

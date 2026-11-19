@@ -37,13 +37,10 @@ const LIFECYCLE_STATES = new Set<McpToolsetLifecycleState>([
 export type McpToolsetConfigInput = Record<string, McpToolsetConfig> | undefined;
 
 export interface McpToolsetRegistrySnapshot {
-  revision: string;
-  toolsets: ReadonlyMap<string, McpToolsetConfig>;
-  configuredToolsets: readonly ToolsetId[];
-}
-
-interface RegistryState extends McpToolsetRegistrySnapshot {
-  definitionRevisions: ReadonlyMap<string, string>;
+  readonly revision: string;
+  readonly toolsets: ReadonlyMap<string, McpToolsetConfig>;
+  readonly configuredToolsets: readonly ToolsetId[];
+  readonly definitionRevisions: ReadonlyMap<string, string>;
 }
 
 interface StoredObservation {
@@ -122,7 +119,7 @@ function canonicalToolset(toolset: McpToolsetConfig): unknown {
   return { servers: canonicalServers(toolset), ...(toolset.exposure === 'search' ? { exposure: toolset.exposure } : {}) };
 }
 
-function buildState(configured: McpToolsetConfigInput): RegistryState {
+function buildState(configured: McpToolsetConfigInput): McpToolsetRegistrySnapshot {
   if (configured !== undefined && (configured === null || typeof configured !== 'object' || Array.isArray(configured))) {
     throw new Error('DaemonConfig.mcpToolsets must be an object keyed by logical toolset id');
   }
@@ -268,7 +265,7 @@ function validateObservation(input: McpToolsetObservation): Readonly<McpToolsetO
 
 /** Single mutable owner of immutable-at-a-time device-local toolset snapshots. */
 export class McpToolsetRegistry {
-  private state: RegistryState;
+  private state: McpToolsetRegistrySnapshot;
   private observations = new Map<string, StoredObservation>();
 
   constructor(configured?: McpToolsetConfigInput) {

@@ -3,15 +3,16 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { AgentMessageEgressRequirement, TerminalProjectionSelection } from '@byok-sdk/protocol';
-import type { McpStdioServerConfig, McpToolsetConfig } from '../../types.js';
+import type { McpStdioServerConfig } from '../../types.js';
 import type { AgentRef } from '../../agent-home.js';
 import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp.js';
-import type { AgentMemoryMcpContext, SdkReservedMcpContext } from '../../sdk-reserved-helper-context.js';
+import type { AgentMemoryMcpContext, McpHubContext, SdkReservedMcpContext } from '../../sdk-reserved-helper-context.js';
+import { MCP_HUB_SERVER_NAME } from '../../mcp/hub/protocol.js';
+import type { McpHubCatalogBinding } from '../../mcp/hub/catalog.js';
 import { atomicWriteFile } from '../../util/atomic-write.js';
 import type { ExecutionScratch } from '../retention/scratch.js';
-import type { AgentResultContext } from './support.js';
-import { freshHostToolsetContextToken } from './support.js';
-import type { TaskRunner } from '../task-runner.js';
+import { freshHostToolsetContextToken, taskTearingDown, type AgentResultContext, type McpHubAttempt } from './support.js';
+import type { TaskRunner, TaskRunnerDeps } from '../task-runner.js';
 
 /**
  * One server's context, in the Execution's SDK directory: private to this user
@@ -117,6 +118,7 @@ export async function withHostToolsetContext(
   agentRef: AgentRef,
   toolsetIdByServer: ReadonlyMap<string, string>,
   scratch: ExecutionScratch,
+  search?: { readonly names: ReadonlySet<string>; readonly nonces: string[] },
 ): Promise<Readonly<Record<string, McpStdioServerConfig>>> {
   // A re-offer of the same taskId must not leave the previous attempt's
   // nonces mintable: the old child is gone, so its tokens are authority
@@ -149,6 +151,7 @@ export async function withHostToolsetContext(
     });
     tokens.add(contextToken);
     tokenByServer.set(serverName, contextToken);
+    if (search?.names.has(serverName)) search.nonces.push(contextToken);
   }
   // Every nonce is registered before the first write, so a cancel landing
   // during one revokes them all.
@@ -176,47 +179,91 @@ export async function withHostToolsetContext(
   return Object.freeze(injected);
 }
 
-export function resolveMcpServers(
-  requiredToolsets: readonly string[],
-  registry: ReadonlyMap<string, McpToolsetConfig> | undefined,
-):
+export function mcpHubContextFile(scratch: ExecutionScratch): string {
+  return mcpContextFile(scratch, MCP_HUB_SERVER_NAME);
+}
+
+export async function sealMcpHub(
+  this: TaskRunner,
+  taskId: string,
+  scratch: ExecutionScratch,
+  launchCwd: string,
+  mcpServers: Readonly<Record<string, McpStdioServerConfig>>,
+  mcpEnv: Readonly<Record<string, string>>,
+  innerNonces: readonly string[],
+): Promise<McpHubAttempt> {
+  const binding: McpHubCatalogBinding = Object.freeze({
+    attemptId: scratch.token,
+    catalogPath: path.join(scratch.sdkDir, 'mcp-hub-catalog.json'),
+    launchCwd, mcpServers, mcpEnv,
+  });
+  const contextToken = freshHostToolsetContextToken();
+  const attempt: McpHubAttempt = Object.freeze({
+    binding,
+    isActive: () => this['mcpHubContextByToken'].get(contextToken) === attempt
+      && this['tasks'].get(taskId)?.mcpHub === attempt && !this['stoppingOffers'] && !taskTearingDown(this, taskId),
+  });
+  this['mcpHubContextByToken'].set(contextToken, attempt);
+  this['mcpHubContextByTask'].set(taskId, contextToken);
+  const context: McpHubContext = {
+    storeDir: this['deps'].storeDir, productId: this['deps'].productId, contextToken, binding, innerNonces,
+  };
+  await writeMcpContextFile(mcpHubContextFile(scratch), context);
+  return attempt;
+}
+
+export type ResolvedMcpServers =
   | {
       ok: true;
       servers: Readonly<Record<string, McpStdioServerConfig>>;
+      searchServers: Readonly<Record<string, McpStdioServerConfig>>;
       toolsetIdByServer: ReadonlyMap<string, string>;
+      definitionRevisions: Readonly<Record<string, string>>;
       mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
     }
-  | { ok: false; reason: string } {
-  if (!registry || registry.size === 0) {
+  | { ok: false; reason: string };
+
+export function resolveMcpServers(
+  requiredToolsets: readonly string[],
+  snapshot: ReturnType<NonNullable<TaskRunnerDeps['getMcpToolsetSnapshot']>> | undefined,
+): ResolvedMcpServers {
+  if (snapshot === undefined || snapshot.toolsets.size === 0) {
     return { ok: false, reason: 'offer requires MCP toolsets, but this device has no local mcpToolsets registry' };
   }
   const servers = Object.create(null) as Record<string, McpStdioServerConfig>;
+  const searchServers: Record<string, McpStdioServerConfig> = Object.create(null);
   const toolsetIdByServer = new Map<string, string>();
+  const definitions: Record<string, string> = Object.create(null);
   const approvals: Record<string, readonly string[]> = Object.create(null);
   for (const toolsetId of requiredToolsets) {
-    const toolset = registry.get(toolsetId);
+    const toolset = snapshot.toolsets.get(toolsetId);
     if (!toolset) {
       return { ok: false, reason: `required MCP toolset "${toolsetId}" is not configured on this device` };
     }
+    const revision = snapshot.definitionRevisions.get(toolsetId);
+    if (revision !== undefined) definitions[toolsetId] = revision;
+    const search = toolset.exposure === 'search';
+    const destination = search ? searchServers : servers;
     for (const [serverName, server] of Object.entries(toolset.mcpServers)) {
-      if (Object.prototype.hasOwnProperty.call(servers, serverName)) {
+      if (toolsetIdByServer.has(serverName)) {
         return {
           ok: false,
           reason: `required MCP toolsets collide on server name "${serverName}"; refusing ambiguous projection`,
         };
       }
-      servers[serverName] = Object.freeze({
+      destination[serverName] = Object.freeze({
         command: server.command,
         ...(server.args ? { args: Object.freeze([...server.args]) } : {}),
       });
-      if (server.approveTools?.length) approvals[serverName] = Object.freeze([...server.approveTools]);
+      if (!search && server.approveTools?.length) approvals[serverName] = Object.freeze([...server.approveTools]);
       toolsetIdByServer.set(serverName, toolsetId);
     }
   }
-  if (Object.keys(servers).length === 0) {
+  if (toolsetIdByServer.size === 0) {
     return { ok: false, reason: 'required MCP toolsets resolved to no servers; refusing to run without tools' };
   }
-  return { ok: true, servers: Object.freeze(servers), toolsetIdByServer,
+  return { ok: true, servers: Object.freeze(servers), searchServers: Object.freeze(searchServers), toolsetIdByServer,
+    definitionRevisions: Object.freeze(definitions),
     ...(Object.keys(approvals).length > 0 ? { mcpToolApprovals: Object.freeze(approvals) } : {}),
   };
 }

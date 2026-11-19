@@ -166,7 +166,7 @@ describe('local paths in outbound handleOffer reasons', () => {
     const adapter = new StubRuntimeAdapter('pi');
     const missingServer = path.join(await temporary('byok outbound offer toolset-'), 'missing server', 'team mcp server');
     const { runner: taskRunner, sent, localRoots } = await runner(adapter, {
-      getMcpToolsets: () => new Map([['team', { mcpServers: { team: { command: missingServer } } }]]),
+      getMcpToolsetSnapshot: () => ({ toolsets: new Map([['team', { mcpServers: { team: { command: missingServer } } }]]), definitionRevisions: new Map() }),
     });
     localRoots.push(path.dirname(path.dirname(missingServer)));
 

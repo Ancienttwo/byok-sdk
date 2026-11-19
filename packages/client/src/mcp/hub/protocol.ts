@@ -2,6 +2,7 @@ import type { McpServerToolDefinition } from '../../mcp-server/index.js';
 import { GRANTABLE_MCP_SERVER_NAME, GRANTABLE_TOOL_NAME } from '../observation.js';
 
 export const MCP_HUB_SERVER_NAME = 'byoktools';
+export const MCP_HUB_SERVER_INFO = Object.freeze({ name: MCP_HUB_SERVER_NAME, version: '1' });
 export const HUB_SEARCH_TOOL = 'tool_search';
 export const HUB_CALL_TOOL = 'call_tool';
 const MAX_QUERY_LENGTH = 256;

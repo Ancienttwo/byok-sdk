@@ -176,8 +176,6 @@ export async function resolvePreparedToolBinding(
   // contribute a definition revision from one state and a server list from
   // another.
   const snapshot = deps.toolsetRegistry.snapshot();
-  const status = deps.toolsetRegistry.status();
-  const revisionByToolsetId = new Map(status.toolsets.map((row) => [row.id as string, row.definitionRevision]));
 
   const toolsetDefinitionRevisions: Record<string, string> = {};
   const servers = new Map<string, {
@@ -186,7 +184,7 @@ export async function resolvePreparedToolBinding(
   }>();
   for (const toolsetId of input.requiredToolsets) {
     const toolset = snapshot.toolsets.get(toolsetId);
-    const definitionRevision = revisionByToolsetId.get(toolsetId);
+    const definitionRevision = snapshot.definitionRevisions.get(toolsetId);
     if (toolset === undefined || definitionRevision === undefined) {
       return refuse(
         'unsupported_input',

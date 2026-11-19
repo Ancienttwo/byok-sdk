@@ -137,7 +137,7 @@ async function harness() {
   const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(), adapters: [], deviceId: 'device-1', storeDir: dir, productId: 'retention-test', send: () => {},
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
     approvalRegistry: new ApprovalRegistry(),
-    inputPreparationLane: { store: service.store, open: () => service.open(), authorizeAgentMemory: async () => {}, runtime: compiler.runtime, policyRevision: LIMITS.revision, toolsetDefinitionRevisions: () => new Map() },
+    inputPreparationLane: { store: service.store, open: () => service.open(), authorizeAgentMemory: async () => {}, runtime: compiler.runtime, policyRevision: LIMITS.revision },
   });
   const terminal = runner as unknown as { preparationPinsByTask: Map<string, string>; releasePreparationPin: (taskId: string) => Promise<void> };
   terminal.preparationPinsByTask.set(taskId, recordId);

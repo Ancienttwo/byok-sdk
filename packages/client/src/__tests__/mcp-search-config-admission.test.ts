@@ -12,10 +12,10 @@ import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 function snapshot(exposure: 'direct' | 'search', command: string) {
-  return new McpToolsetRegistry({ host: { exposure, mcpServers: { host: { command } } } }).snapshot().toolsets;
+  return new McpToolsetRegistry({ host: { exposure, mcpServers: { host: { command } } } }).snapshot();
 }
 
-function setup(getMcpToolsets: () => ReturnType<typeof snapshot>) {
+function setup(getMcpToolsetSnapshot: () => ReturnType<typeof snapshot>) {
   const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, {
     steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
   });
@@ -39,7 +39,7 @@ function setup(getMcpToolsets: () => ReturnType<typeof snapshot>) {
     awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe: probe,
-    getMcpToolsets,
+    getMcpToolsetSnapshot,
   });
   const taskId = 'search-admission';
   const offer = createEnvelope('task.offer', {
@@ -61,7 +61,7 @@ it('declines ordinary search offers before runtime detection, probing or claim',
     await run();
     expect(sent.map((envelope) => envelope.type)).toEqual(['task.decline']);
     expect(sent[0]!.payload).toMatchObject({
-      reason: 'MCP toolset "host" requires search exposure, which is unavailable on this device', retryable: true,
+      reason: 'MCP search exposure is unavailable on this device for the requested runtime or version', retryable: true,
     });
     expect(detect).not.toHaveBeenCalled();
     expect(probe).not.toHaveBeenCalled();
@@ -74,11 +74,11 @@ it('declines ordinary search offers before runtime detection, probing or claim',
 it('checks exposure and projects servers from the same registry snapshot', async () => {
   const direct = snapshot('direct', process.execPath);
   const search = snapshot('search', process.execPath + '-search');
-  const getMcpToolsets = vi.fn(() => search).mockReturnValueOnce(direct);
-  const { adapter, sent, probe, run, cancel } = setup(getMcpToolsets);
+  const getMcpToolsetSnapshot = vi.fn(() => search).mockReturnValueOnce(direct);
+  const { adapter, sent, probe, run, cancel } = setup(getMcpToolsetSnapshot);
   try {
     await run();
-    expect(getMcpToolsets).toHaveBeenCalledTimes(1);
+    expect(getMcpToolsetSnapshot).toHaveBeenCalledTimes(1);
     expect(probe).toHaveBeenCalledTimes(1);
     expect(sent.map((envelope) => envelope.type)).toEqual(['task.claim', 'task.started']);
     expect(adapter.startCalls[0]?.ctx.mcpServers?.host?.command).toBe(process.execPath);

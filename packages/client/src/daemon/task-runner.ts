@@ -26,7 +26,6 @@ import {
 } from '@byok-sdk/protocol';
 import {
   type McpStdioServerConfig,
-  type McpToolsetConfig,
   type RuntimeAdapter,
 } from '../types.js';
 import type { InputPreparationStore } from './input-preparation-store.js';
@@ -84,14 +83,16 @@ import {
 } from './agent-memory.js';
 import type { AgentMemoryCommitStore } from './agent-memory-commit.js';
 import type { AgentMemoryFilesystem } from './agent-memory-filesystem.js';
-import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry, RuntimeRequirements } from './task-runner/support.js';
+import type { ActiveTask, AgentResultContext, PendingMessageTask, ClaimedAgentFailureContext, PickResult, OfferPhaseContext, OfferRuntimeInput, HostToolsetContextEntry, McpHubAttempt, RuntimeRequirements } from './task-runner/support.js';
 import { offerSettlements, trackOffer, taskTearingDown } from './task-runner/support.js';
 import { publishAgentMessage, describeAgentResult, submitAgentResult, recoverAgentMessageOutboxes, agentMessageOutbox, cancelRecoveredAgentMessage, activateAgentMessage, sendAgentMessageRecord, handleAgentMessageDisposition, agentResultStore } from './task-runner/agent-message.js';
-import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers } from './task-runner/mcp-contexts.js';
+import { withAgentMessageMcp, withAgentResultMcp, withAgentMemoryMcp, withHostToolsetContext, resolveMcpServers, type ResolvedMcpServers } from './task-runner/mcp-contexts.js';
 import { activeMemoryContext, runMemoryOperation, quiesceAndSnapshotAgentMemory, bindAgentMemoryFilesystem } from './task-runner/agent-memory.js';
 import { stopAcceptingOffers, closeActiveSession, awaitActiveSessionClose, interruptBounded, teardownActiveTask, shutdownTask, armMaxDurationTimer, handleCancel, handleSteer, refuseSteer } from './task-runner/lifecycle.js';
 import { reserveOfferHome, admitOfferLimits, handleSealedOffer, declineSealedOffer, declineOfferMissingCapabilities } from './task-runner/offer-admission.js';
 import { prepareOfferRuntime, pickAdapter } from './task-runner/offer-runtime.js';
+import type { SearchRuntimeQualification } from './search-runtime-qualification.js';
+import type { McpToolsetRegistrySnapshot } from './toolset-registry.js';
 import { requestApproval, handleApprove, handleReject } from './task-runner/approvals.js';
 import { terminalInferenceUsagePayload, preparedObservationPayload, agentTerminalPayload, resolveStagedResult, persistAgentTerminalEvidence, measureReaderMemoryChange, retryAgentTerminalEvidence, reportAgentTerminalEvidenceFailure } from './task-runner/terminal-evidence.js';
 import { fail, failClaimedAgent, homeFinalizations, finishOnce, publishExecutionRecord, settleSemanticTerminal, releasePreparationPin, retryTerminalFinalization, type TerminalPlan } from './task-runner/finish.js';
@@ -144,8 +145,8 @@ export interface TaskRunnerDeps {
    * through.
    */
   runtimePreference?: RuntimeId[];
-  /** Reads the daemon's current validated device-local registry once per offer. */
-  getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>;
+  /** One registry read per offer, including the exact definitions' revisions. */
+  getMcpToolsetSnapshot?: () => Pick<McpToolsetRegistrySnapshot, 'toolsets' | 'definitionRevisions'>;
   /**
    * The prepared-Execution lane. Absent on a daemon with no `inputPreparation`
    * section, and a prepared `task.offer` arriving there is declined by name
@@ -176,8 +177,7 @@ export interface TaskRunnerDeps {
     readonly runtime: InputPreparationRuntimeIdentityV1;
     /** The operator's configured limits-policy revision currently in force. */
     readonly policyRevision: string;
-    /** `toolsetId` -> definition revision, from one registry read per call. */
-    readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
+
   };
   /** Agent offer authority. Absent, every offer is declined. */
   agentHome?: AgentHomeManager;
@@ -411,6 +411,8 @@ export interface TaskRunnerDeps {
   agentMessageMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
   /** SDK-owned, task-scoped `submit_result` helper. Required only for result-document offers. */
   agentResultMcpBin?: Readonly<ResolvedAgentMessageMcpBin>;
+  /** Internal search launch and qualification, set only for SDK-built runtimes. */
+  mcpSearch?: SearchRuntimeQualification;
   /** Pre-runtime handshake gate for the exact result helper config; same contract as `agentMessageMcpPreflight`. */
   agentResultMcpPreflight?: (
     server: Readonly<McpStdioServerConfig>,
@@ -570,6 +572,8 @@ export class TaskRunner {
   private readonly hostToolsetContextByToken = new Map<string, HostToolsetContextEntry>();
   /** Per-task index over {@link hostToolsetContextByToken}, so one cancel revokes every server's nonce at once. */
   private readonly hostToolsetContextTokensByTask = new Map<string, Set<string>>();
+  private readonly mcpHubContextByToken = new Map<string, McpHubAttempt>();
+  private readonly mcpHubContextByTask = new Map<string, string>();
   private readonly recoveredMessageOutboxes = new Map<string, AgentMessageOutbox>();
   private readonly cancelledRecoveredMessages = new Set<string>();
   private readonly recoveredMessageRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -1144,8 +1148,9 @@ export class TaskRunner {
     agentRef: AgentRef,
     toolsetIdByServer: ReadonlyMap<string, string>,
     scratch: ExecutionScratch,
+    search?: { readonly names: ReadonlySet<string>; readonly nonces: string[] },
   ): Promise<Readonly<Record<string, McpStdioServerConfig>>> {
-    return withHostToolsetContext.call(this, servers, taskId, agentRef, toolsetIdByServer, scratch);
+    return withHostToolsetContext.call(this, servers, taskId, agentRef, toolsetIdByServer, scratch, search);
   }
 
   /**
@@ -1165,6 +1170,7 @@ export class TaskRunner {
    * refuses one.
    */
   private revokeHostToolsetContexts(taskId: string): void {
+    this.revokeMcpHubContext(taskId);
     const tokens = this.hostToolsetContextTokensByTask.get(taskId);
     if (tokens === undefined) return;
     for (const token of tokens) {
@@ -1175,11 +1181,14 @@ export class TaskRunner {
 
   /** Shutdown (contract §8.2(1)): no task on this device keeps a mintable context across it. */
   private revokeAllHostToolsetContexts(): void {
+    this.mcpHubContextByToken.clear();
+    this.mcpHubContextByTask.clear();
     for (const entry of this.hostToolsetContextByToken.values()) entry.state = 'revoked';
   }
 
   /** Task resource cleanup: drop the entries entirely, after which the refusal is `context_token_invalid`. */
   private deleteHostToolsetContexts(taskId: string): void {
+    this.revokeMcpHubContext(taskId);
     const tokens = this.hostToolsetContextTokensByTask.get(taskId);
     if (tokens === undefined) return;
     for (const token of tokens) this.hostToolsetContextByToken.delete(token);
@@ -1201,6 +1210,17 @@ export class TaskRunner {
     return { status: 'active', taskId: entry.taskId, agentRef: entry.agentRef, toolsetId: entry.toolsetId };
   }
 
+  private revokeMcpHubContext(taskId: string): void {
+    const token = this.mcpHubContextByTask.get(taskId);
+    if (token !== undefined) this.mcpHubContextByToken.delete(token);
+    this.mcpHubContextByTask.delete(taskId);
+  }
+
+  /** Internal control socket proof. The token grants only this boolean read. */
+  isMcpHubContextActive(token: string): boolean {
+    return this.mcpHubContextByToken.get(token)?.isActive() === true;
+  }
+
   /** Protocol §7: an instruction too large to inline arrives as a `blobRef` — resolve it via the blob client rather than failing closed. */
   private async resolveInstruction(instruction: RuntimeTaskInput['instruction'], signal: AbortSignal): Promise<string> {
     if (typeof instruction === 'string') return instruction;
@@ -1220,16 +1240,9 @@ export class TaskRunner {
    */
   private resolveMcpServers(
     requiredToolsets: readonly string[],
-    registry: ReadonlyMap<string, McpToolsetConfig> | undefined,
-  ):
-    | {
-        ok: true;
-        servers: Readonly<Record<string, McpStdioServerConfig>>;
-        toolsetIdByServer: ReadonlyMap<string, string>;
-        mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
-      }
-    | { ok: false; reason: string } {
-    return resolveMcpServers(requiredToolsets, registry);
+    snapshot: ReturnType<NonNullable<TaskRunnerDeps['getMcpToolsetSnapshot']>> | undefined,
+  ): ResolvedMcpServers {
+    return resolveMcpServers(requiredToolsets, snapshot);
   }
 
   private pump(active: ActiveTask): Promise<void> {
@@ -1614,7 +1627,8 @@ export class TaskRunner {
     requestedRuntime: string | undefined,
     requirements: RuntimeRequirements,
     signal: AbortSignal,
+    searchExposure = false,
   ): Promise<PickResult> {
-    return pickAdapter.call(this, requestedRuntime, requirements, signal);
+    return pickAdapter.call(this, requestedRuntime, requirements, signal, searchExposure);
   }
 }

@@ -1173,7 +1173,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private MCP hub runtime for SDK helper dispatch",
-      "budgetBytes": 55062,
+      "budgetBytes": 71422,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1207,6 +1207,7 @@
         "node:events",
         "node:fs",
         "node:fs/promises",
+        "node:net",
         "node:path",
         "node:stream/promises",
         "path"
@@ -1230,6 +1231,7 @@
           "node:events",
           "node:fs",
           "node:fs/promises",
+          "node:net",
           "node:path",
           "node:stream/promises",
           "path"
@@ -3323,7 +3325,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Task-bound MCP discovery and dispatch helper",
-      "budgetBytes": 55410,
+      "budgetBytes": 71770,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -3354,6 +3356,7 @@
         "node:events",
         "node:fs",
         "node:fs/promises",
+        "node:net",
         "node:path",
         "node:stream/promises",
         "path"
@@ -3377,6 +3380,7 @@
           "node:events",
           "node:fs",
           "node:fs/promises",
+          "node:net",
           "node:path",
           "node:stream/promises",
           "path"

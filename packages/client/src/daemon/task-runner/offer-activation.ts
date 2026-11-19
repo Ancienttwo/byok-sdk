@@ -21,7 +21,7 @@ export interface OfferActivationInput
   extends Pick<OfferRequest, 'readerAttempt'>,
     Pick<OfferRuntime, 'pick' | 'scratch'>,
     Pick<OfferWorkspace, 'appliedAgentHomeProjection' | 'readerMemoryBaseline'>,
-    Pick<OfferManifest, 'preparedObservation' | 'toolAuthorization'>,
+    Pick<OfferManifest, 'preparedObservation' | 'toolAuthorization' | 'mcpHub'>,
     Pick<OfferWorkspace, 'workspaceDir'> {
   readonly agentBinding: OfferWorkspace['agentBinding'];
   readonly blobAbort: AbortController;
@@ -42,7 +42,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   const { taskId } = phase;
   const {
     agentBinding, readerAttempt, pick, scratch, appliedAgentHomeProjection, readerMemoryBaseline, preparedObservation,
-    workspaceDir, blobAbort, payload, session, sessionMembers, messageRequirement, terminalProjection, toolAuthorization, residentMemoryStart,
+    workspaceDir, blobAbort, payload, session, sessionMembers, messageRequirement, terminalProjection, toolAuthorization, residentMemoryStart, mcpHub,
   } = input;
   const failActivation = (reason: string): Promise<boolean> => {
     hostFor(this).dispatchSync({ type: 'runtime.activation_failed', taskId, atMs: Date.now(), reason });
@@ -64,6 +64,7 @@ export async function activateOffer(this: TaskRunner, phase: OfferPhaseContext, 
   let active!: ActiveTask;
   active = {
     taskId,
+    ...(mcpHub === undefined ? {} : { mcpHub }),
     ...(payload.nativeSessions === undefined ? {} : { memoryLane: PI_MEMORY_LANE }),
     blobAbort,
     egressEnabled: payload.egressPolicy !== undefined,

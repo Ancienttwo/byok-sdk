@@ -9,6 +9,7 @@ import type { DaemonScope } from './scope.js';
 import type { StartRun } from './start-run.js';
 import type { StartLanes } from './start-lanes.js';
 import type { StartTerminals } from './start-terminals.js';
+import { searchMcpEnvironmentFor, searchRuntimeCandidates } from '../search-runtime-qualification.js';
 
 /**
  * The fourth stage of `runStartUnderLease` (#926), synchronous: builds the
@@ -43,7 +44,7 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
     scratchRoot,
     ...(agentSessionHandoffs === undefined ? {} : { agentSessionHandoffs }),
     deviceId: record.deviceId,
-    getMcpToolsets: () => toolsetRegistry.snapshot().toolsets,
+    getMcpToolsetSnapshot: () => toolsetRegistry.snapshot(),
     // The prepared-Execution lane, present only on a daemon whose input
     // preparation service actually constructed — which is also the only
     // daemon that advertises `agent-input-preparation-v9` and can hold a record
@@ -64,9 +65,6 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
           runtime: daemonState.inputPreparationService.runtime,
           policyRevision: inputPreparationLimits.revision,
           authorizeAgentMemory: (binding) => daemonState.inputPreparationService!.authorizeAgentMemory(binding),
-          toolsetDefinitionRevisions: () => new Map(
-            toolsetRegistry.status().toolsets.map((row) => [row.id as string, row.definitionRevision]),
-          ),
         },
       }),
     // Queue the exact bytes; observer delivery projections run only after
@@ -137,6 +135,13 @@ export function composeStartRunnerDeps(daemonScope: DaemonScope, run: Pick<Start
       })(),
       agentResultMcpPreflight: preflightAgentResultMcp,
     }),
+    ...(daemonScope.effectiveConfig.runtimes.some(runtime => runtime.source === 'sdk-built') ? {
+      mcpSearch: {
+        get bin() { return resolveSdkReservedHelperBin('mcp-hub', config.sdkHelperHost); },
+        candidates: searchRuntimeCandidates(config, daemonScope.effectiveConfig.runtimes),
+        projectEnvironment: searchMcpEnvironmentFor(config),
+      },
+    } : {}),
     ...(agentMemoryMcpBin === undefined ? {} : { agentMemoryMcpBin }),
     ...(config.agentMemoryMcp === undefined ? {} : { agentMemoryMcp: config.agentMemoryMcp }),
     ...(agentMemoryDescribeBin === undefined ? {} : { agentMemoryDescribeBin }),

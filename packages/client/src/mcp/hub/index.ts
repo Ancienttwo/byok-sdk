@@ -7,7 +7,7 @@ import { McpQualifiedToolNameCollisionError } from '../projection.js';
 import { McpCallOutcomeUnknownError, McpServerDriftError, McpServerPool } from '../server-pool.js';
 import { publishMcpHubCatalog, readMcpHubCatalog, snapshotHubBinding, type McpHubCatalog, type McpHubCatalogBinding } from './catalog.js';
 import { discoverMcpHubServers } from './discovery.js';
-import { HUB_CALL_TOOL, HUB_SEARCH_TOOL, MCP_HUB_SERVER_NAME, MCP_HUB_TOOLS, hubText, parseHubCall, parseHubQuery, type McpHubCall } from './protocol.js';
+import { HUB_CALL_TOOL, HUB_SEARCH_TOOL, MCP_HUB_SERVER_INFO, MCP_HUB_TOOLS, hubText, parseHubCall, parseHubQuery, type McpHubCall } from './protocol.js';
 import { searchMcpHubCatalog } from './search.js';
 
 export { readMcpHubCatalog, type McpHubCatalog, type McpHubCatalogBinding } from './catalog.js';
@@ -18,6 +18,7 @@ interface McpHubOptions extends Pick<McpServerOptions, 'input' | 'output'> {
   readonly isActive?: (signal: AbortSignal) => boolean | Promise<boolean>;
   readonly authorizeCall?: (call: McpHubCall, signal: AbortSignal) => boolean | Promise<boolean>;
   readonly toolCallTimeoutMs?: number;
+  readonly containsPrivateValue?: (value: unknown) => boolean;
 }
 
 class InactiveAttemptError extends Error {}
@@ -82,6 +83,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     const published = await readPublishedCatalog();
     if (published !== undefined) return published;
     const servers = await discoverMcpHubServers(binding, signal);
+    if (options.containsPrivateValue?.(servers)) throw new Error('MCP search metadata contains private launch data.');
     try {
       catalog = await publishMcpHubCatalog(binding, servers, signal);
       return catalog;
@@ -122,6 +124,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
       try {
         await checkActive(signal);
         const matches = searchMcpHubCatalog(await searchCatalog(signal), query);
+        if (options.containsPrivateValue?.(matches)) return hubText('MCP search metadata contains private launch data.', true);
         return withOversizeToolResult(matches, hubText('Search results exceed the output frame limit.', true));
       } catch (error) {
         return hubText(error instanceof Error ? error.message : 'MCP hub search failed.', true);
@@ -153,6 +156,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
       const result = await pool.callVerified(
         call.server, call.tool, call.arguments, signal, () => checkActive(signal), options.toolCallTimeoutMs,
       );
+      if (options.containsPrivateValue?.(result)) return hubText('MCP tool call reply contained private launch data and was withheld.', true);
       return withOversizeToolResult(result, hubText('MCP tool call result unknown: its reply exceeds the output frame limit.', true));
     } catch (error) {
       if (error instanceof InactiveAttemptError) return hubText(error.message, true);
@@ -163,7 +167,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
   }
 
   const stdio = serveMcpOverStdio({
-    input, output, serverInfo: { name: MCP_HUB_SERVER_NAME, version: '1' }, tools: MCP_HUB_TOOLS, callTool,
+    input, output, serverInfo: MCP_HUB_SERVER_INFO, tools: MCP_HUB_TOOLS, callTool,
     onClose: closeStreams,
   });
   input.once('close', closeStreams);
