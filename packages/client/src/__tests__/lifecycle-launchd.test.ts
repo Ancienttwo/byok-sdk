@@ -355,6 +355,12 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(await lifecycle.status()).toMatchObject({ installed: true, running: false, determinate: true, detail: 'state = waiting' });
   });
 
+  it.each(['', 'state = exiting', 'state = unknown'])('leaves successful print output %j indeterminate without a known state', async stdout => {
+    const run = vi.fn<Runner>().mockResolvedValue(ok(stdout));
+    const lifecycle = createLaunchdLifecycle(def(), { run, fs: installedFs(), homedir: () => '/h', getuid: () => 501 });
+    expect(await lifecycle.status()).toMatchObject({ running: false, determinate: false });
+  });
+
   it.each([
     [37, 'Unexpected failure'],
     [3, 'Could not find service'],

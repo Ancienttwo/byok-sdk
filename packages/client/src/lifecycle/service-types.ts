@@ -135,6 +135,9 @@ export interface ServiceInstallOptions {
   replaceUnmarked?: boolean;
 }
 
+/** Native service-manager observation, without unit or log inspection. @internal */
+export type ServiceManagerQuery = Pick<ServiceStatusResult, 'running' | 'determinate' | 'detail'>;
+
 export interface ServiceStatusResult {
   /** Whether the platform's own service manager has this service registered at all (a plist/unit/WinSW-config file present — checked directly, not inferred from `running`). */
   installed: boolean;

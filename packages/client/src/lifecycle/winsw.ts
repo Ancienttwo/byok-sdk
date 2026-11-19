@@ -5,7 +5,7 @@ import { runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '
 import { defaultRunner, runBounded } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_LIMITS } from './service-log.js';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
+import { sanitizeServiceName, type ServiceManagerQuery, type ServiceDefinition, type ServiceProgram } from './service-types.js';
 import { SERVICE_UNIT_MARKER } from './service-unit.js';
 
 const ERROR_SERVICE_DOES_NOT_EXIST = 1060;
@@ -312,18 +312,21 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       // must be surfaced rather than reported as "stopped" (P1 #7, round 2).
       await runIdempotent(runWinsw, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
     },
-    async query() {
-      const result = await run('sc.exe', ['query', id]);
-      const detail = (result.stdout || result.stderr).trim();
-      const denied = WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
-      if (!denied) {
-        if (result.code === 0 && /\bSTATE\s*:\s*4\s+RUNNING\b/i.test(result.stdout)) return { running: true, determinate: true, detail };
-        if (result.code === ERROR_SERVICE_DOES_NOT_EXIST || (result.code === 0 && /\bSTATE\s*:\s*1\s+STOPPED\b/i.test(result.stdout))) {
-          return { running: false, determinate: true, detail };
-        }
-      }
-      const error = (result.stderr || result.stdout).trim();
-      return { running: false, determinate: false, detail: `sc.exe query failed (exit ${result.code})${error ? `: ${error}` : ''}` };
-    },
+    query: () => queryWinswService(id, { run }),
   }, fs, gateRoot);
+}
+
+/** Query a service by its recorded manager name. @internal */
+export async function queryWinswService(id: string, { run = defaultRunner }: WinswDeps = {}): Promise<ServiceManagerQuery> {
+  const result = await run('sc.exe', ['query', id]);
+  const detail = (result.stdout || result.stderr).trim();
+  const denied = WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
+  if (!denied) {
+    if (result.code === 0 && /\bSTATE\s*:\s*4\s+RUNNING\b/i.test(result.stdout)) return { running: true, determinate: true, detail };
+    if (result.code === ERROR_SERVICE_DOES_NOT_EXIST || (result.code === 0 && /\bSTATE\s*:\s*1\s+STOPPED\b/i.test(result.stdout))) {
+      return { running: false, determinate: true, detail };
+    }
+  }
+  const error = (result.stderr || result.stdout).trim();
+  return { running: false, determinate: false, detail: `sc.exe query failed (exit ${result.code})${error ? `: ${error}` : ''}` };
 }

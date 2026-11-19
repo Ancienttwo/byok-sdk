@@ -132,6 +132,10 @@ persist a unique `ps_` identifier with 32 lowercase hexadecimal digits when
 created and keep it across opens. The envelope backend does not guarantee
 concurrent write safety across stores.
 
+`inspectProviderProfileStore(path)` checks a private copy under `os.tmpdir()`
+with the store's SQLite open rules. All writes during the check target that copy.
+The original store and nearby files, including SQLite sidecars, are only read.
+
 If `inspectProviderProfileStore(path)` reports `new-path-repair` with
 `PROVIDER_STORE_SCHEMA_STALE`, preserve the database, create a new store on
 another path and re-enter the provider keys. Older shared-scope databases lack

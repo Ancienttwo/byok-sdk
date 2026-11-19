@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createManagedServiceLifecycle, createServiceLifecycle } from '../lifecycle/create-service-lifecycle';
+import { inspectStoreServiceState, inspectStoreServiceStateWith } from '../lifecycle/store-service-state';
 import type { Runner } from '../util/exec-runner';
 import type { ServiceDefinition, ServiceLifecycle } from '../lifecycle/service-types';
 import {
@@ -16,7 +17,7 @@ import {
   withServiceOwnerGate,
   type ServiceOwnerFs,
 } from '../lifecycle/service-unit';
-import { acquireDaemonOwner, type DaemonOwnerLease } from '../util/daemon-owner';
+import { acquireDaemonOwner, DAEMON_OWNER_FILENAME, type DaemonOwnerLease } from '../util/daemon-owner';
 import * as mutationGate from '../util/path-mutation-gate';
 import { acquirePathMutationGate } from '../util/path-mutation-gate';
 import { DRIFTED_MARKED_UNIT, memoryServiceFs, UNMARKED_UNIT, type MemoryServiceFs } from './support/service-fs';
@@ -74,6 +75,86 @@ async function codeOf(promise: Promise<unknown>): Promise<string | undefined> {
     return (error as ServiceUnitError).code;
   }
 }
+
+describe('inspectStoreServiceState (#2421)', () => {
+  const owner = { owner: 'cli', service: 'production' };
+  const cases = [
+    { platform: 'darwin', command: 'launchctl', args: ['print', 'gui/501/production'], stopped: { code: 0, stdout: 'state = waiting', stderr: '' }, running: 'state = running' },
+    { platform: 'linux', command: 'systemctl', args: ['--user', 'is-active', 'production.service'], stopped: { code: 3, stdout: 'inactive', stderr: '' }, running: 'active' },
+    { platform: 'win32', command: 'sc.exe', args: ['query', 'production'], stopped: { code: 0, stdout: 'STATE : 1 STOPPED', stderr: '' }, running: 'STATE : 4 RUNNING' },
+  ] as const;
+
+  async function withStore(test: (storeDir: string) => Promise<void>) {
+    const storeDir = await nodeFs.mkdtemp(path.join(os.tmpdir(), 'byok-status-'));
+    try { await test(storeDir); } finally { await nodeFs.rm(storeDir, { recursive: true, force: true }); }
+  }
+
+  it('returns unknown when the store has no lifecycle owner', () => withStore(async storeDir => {
+    expect(await inspectStoreServiceState(storeDir)).toEqual({ state: 'unknown' });
+    expect(await nodeFs.readdir(storeDir)).toEqual([]);
+  }));
+
+  describe.each(cases)('$platform', ({ platform, command, args, stopped, running }) => {
+    function manager(result = stopped as { code: number; stdout: string; stderr: string }) {
+      const run = vi.fn<Runner>().mockImplementation(async (binary, argv) => {
+        if (platform === 'win32' && binary === 'powershell') return { code: 0, stdout: '', stderr: '' };
+        expect([binary, argv]).toEqual([command, args]);
+        return result;
+      });
+      return { run, getuid: () => 501 };
+    }
+
+    it('returns stopped only with a recorded owner, a stopped service and a free store', () => withStore(async storeDir => {
+      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      const deps = manager();
+      expect(await inspectStoreServiceStateWith(storeDir, platform, deps)).toEqual({ state: 'stopped', owner });
+      expect(deps.run).toHaveBeenCalledWith(command, args);
+      expect(await nodeFs.readdir(storeDir)).toEqual(['service']);
+    }));
+
+    it('queries the service recorded for the store, even when a different installation is stopped', () => withStore(async storeDir => {
+      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      const deps = manager({ code: 0, stdout: running, stderr: '' });
+      expect(await inspectStoreServiceStateWith(storeDir, platform, deps)).toEqual({ state: 'running', owner });
+      expect(deps.run).toHaveBeenCalledWith(command, args);
+    }));
+
+    it('returns running for a held store mutex even before its owner marker is published', () => withStore(async storeDir => {
+      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      const lease = await acquireDaemonOwner(storeDir, 'daemon');
+      const marker = path.join(storeDir, DAEMON_OWNER_FILENAME);
+      const saved = `${marker}.saved`;
+      try {
+        await nodeFs.rename(marker, saved);
+        try {
+          expect(await inspectStoreServiceStateWith(storeDir, platform, manager())).toEqual({ state: 'running', owner });
+        } finally { await nodeFs.rename(saved, marker); }
+      } finally { await lease.release(); }
+    }));
+
+    it('returns unknown when the service query fails', () => withStore(async storeDir => {
+      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      expect(await inspectStoreServiceStateWith(storeDir, platform, manager({ code: 37, stdout: '', stderr: 'unknown failure' })))
+        .toEqual({ state: 'unknown', owner });
+    }));
+
+    it('returns unknown for an unreadable lock marker and leaves it in place', () => withStore(async storeDir => {
+      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      const marker = path.join(storeDir, DAEMON_OWNER_FILENAME);
+      await nodeFs.writeFile(marker, 'corrupt');
+      expect(await inspectStoreServiceStateWith(storeDir, platform, manager())).toEqual({ state: 'unknown', owner });
+      expect(await nodeFs.readFile(marker, 'utf8')).toBe('corrupt');
+    }));
+  });
+
+  it('recognizes a live Windows Startup launcher when SCM reports the service absent', () => withStore(async storeDir => {
+    await claimServiceLifecycleOwner({ storeDir, ...owner });
+    const run = vi.fn<Runner>().mockImplementation(async command => command === 'sc.exe'
+      ? { code: 1060, stdout: '', stderr: '' } : { code: 0, stdout: '123', stderr: '' });
+    expect(await inspectStoreServiceStateWith(storeDir, 'win32', { run })).toEqual({ state: 'running', owner });
+    expect(run).toHaveBeenCalledWith('powershell', expect.arrayContaining([expect.stringContaining('production.launcher.cmd')]));
+  }));
+});
 
 describe.each(PLATFORMS)('lifecycle (#1097) unit classification on $platform', ({ platform, unitPath, launcherPath }) => {
   it('absent before install, exact after, repairable after a hand edit, exact again after repair', async () => {

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "69755215a4e66dd218a0045e8475ad34a25b4907da865ffd01182a6f13aefdb3"
+    "snapshotSha256": "47e9685c3c42ee094ed3b36e8edd688e85e5c6dc12c3bb28bb029648b36ac5d3"
   },
   "configFields": {
     "status": "tracked",
@@ -176,6 +176,16 @@
         "export:@byok-sdk/client#CodexAdapter",
         "export:@byok-sdk/client/adapters#CodexAdapter"
       ]
+    },
+    {
+      "id": "inspect-store-service-state",
+      "impact": "additive",
+      "summary": "Embedded Hosts can inspect the lifecycle owner’s service and the daemon lock with inspectStoreServiceState before recovering a specific store. Proceed only on stopped and hold exclusive ownership through the write.",
+      "migration": "packages/client/README.md#service-state-for-a-store-directory",
+      "items": [
+        "export:@byok-sdk/client#inspectStoreServiceState",
+        "export:@byok-sdk/client#StoreServiceState"
+      ]
     }
   ],
   "changes": [
@@ -338,6 +348,16 @@
       "item": "export:@byok-sdk/client#SdkReservedHelperKind",
       "change": "changed",
       "entry": "mcp-hub-sdk-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#StoreServiceState",
+      "change": "added",
+      "entry": "inspect-store-service-state"
+    },
+    {
+      "item": "export:@byok-sdk/client#inspectStoreServiceState",
+      "change": "added",
+      "entry": "inspect-store-service-state"
     },
     {
       "item": "export:@byok-sdk/client/adapters#AgyAdapter",

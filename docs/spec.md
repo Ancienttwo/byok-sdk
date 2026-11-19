@@ -1189,6 +1189,14 @@ it once, before its `store` gates, so the order is always `service-lifecycle`
 then `store`. A held gate fails at once with `lifecycle_owner_busy`, without
 retry; the gate frees itself when its holder process exits.
 
+`inspectStoreServiceState(storeDir)` reads the lifecycle owner for an absolute
+store directory and queries that recorded service. It reports `running` if
+the manager or the store lock shows a live process. It reports `stopped` only
+when the owner is known, the platform confirms a stop or absence, and the lock
+is clear. Otherwise it reports `unknown`. This observation holds no reservation
+against a later start. A Host performing recovery must hold exclusive store
+ownership for its writes.
+
 Under `--service` everything the daemon writes to stdout and stderr goes to its
 own log, `<logDir>/daemon.log`, rotated by size while it runs at
 `DAEMON_LOG_LIMITS` (10 MiB, 5 files). The service manager's

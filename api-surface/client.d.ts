@@ -458,6 +458,7 @@
 //   StorageConfig -> dist/daemon/retention/config.d.ts
 //   StoragePressureState -> dist/daemon/retention/pressure.d.ts
 //   StoreCompatibility -> @byok-sdk/core#StoreCompatibility
+//   StoreServiceState -> dist/lifecycle/store-service-state.d.ts
 //   SweepReport -> dist/daemon/retention/registry.d.ts
 //   SystemToolUnavailableError -> @byok-sdk/core/system-tool#SystemToolUnavailableError
 //   TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES -> dist/daemon/control-protocol.d.ts
@@ -544,6 +545,7 @@
 //   inspectDaemonStores -> dist/diagnostics/store-compatibility.d.ts
 //   inspectDeviceEnrollmentClear -> dist/daemon/enrollment-clear.d.ts
 //   inspectServiceLogs -> dist/lifecycle/service-log.d.ts
+//   inspectStoreServiceState -> dist/lifecycle/store-service-state.d.ts
 //   installSkillPacks -> dist/daemon/skill-pack-installer.d.ts
 //   isAgentMemorySecureFilesystemAvailable -> dist/daemon/agent-memory.d.ts
 //   isDaemonHaltReason -> dist/daemon/daemon-lifecycle.d.ts
@@ -4329,6 +4331,8 @@ export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnR
 export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record.js';
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle.js';
 export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle.js';
+export { inspectStoreServiceState } from './lifecycle/store-service-state.js';
+export type { StoreServiceState } from './lifecycle/store-service-state.js';
 export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types.js';
 export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram, ServiceStatusResult, ServiceWindowsOptions, } from './lifecycle/service-types.js';
 export { generateLaunchdPlist } from './lifecycle/launchd.js';
@@ -5013,6 +5017,15 @@ export declare function readServiceLifecycleOwner(storeDir: string, fs?: Service
 } | undefined>;
 export declare function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs?: ServiceOwnerFs): Promise<void>;
 export declare function releaseServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs?: ServiceOwnerFs): Promise<void>;
+// ==== @byok-sdk/client dist/lifecycle/store-service-state.d.ts ====
+export interface StoreServiceState {
+    readonly state: 'stopped' | 'running' | 'unknown';
+    readonly owner?: {
+        readonly owner: string;
+        readonly service: string;
+    };
+}
+export declare function inspectStoreServiceState(storeDir: string): Promise<StoreServiceState>;
 // ==== @byok-sdk/client dist/lifecycle/systemd.d.ts ====
 import { type Runner } from '../util/exec-runner.js';
 import { type ManagedLifecycleFs } from './managed-lifecycle.js';

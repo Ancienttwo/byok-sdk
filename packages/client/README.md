@@ -20,6 +20,28 @@ status and pairing never adopt an OS enrollment that this storeDir's
 `device.json` does not name. Pairing over another store's enrollment needs
 `byok-agent pair --replace-other-store` (`Daemon.pair(code, { replaceOtherStore: true })`).
 
+### Service state for a store directory
+
+Use `inspectStoreServiceState(storeDir)` from `@byok-sdk/client` before a
+recovery operation that requires a stopped service. Pass the absolute store
+directory. The SDK queries the service named by that store's lifecycle owner
+and checks the store's daemon lock.
+
+```ts
+import { inspectStoreServiceState } from '@byok-sdk/client';
+
+const status = await inspectStoreServiceState(storeDir);
+if (status.state !== 'stopped') {
+  throw new Error(`Store recovery needs a confirmed stop (${status.state})`);
+}
+```
+
+The result includes the recorded `owner` and `service` when available.
+A live service or lock gives `running`. A missing owner, unreadable lock
+or unresolved service status gives `unknown` in the absence of live evidence.
+This query observes current state. Keep the service stopped and hold exclusive
+store ownership through the recovery write.
+
 ## Exact provider-profile admission
 
 When `DaemonConfig.piByokLauncher` is configured, the daemon advertises the

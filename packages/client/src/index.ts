@@ -490,6 +490,8 @@ export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, Execut
 // M3-4: OS service lifecycle (launchd/systemd/WinSW) — see `lifecycle/create-service-lifecycle.ts`.
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle.js';
 export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle.js';
+export { inspectStoreServiceState } from './lifecycle/store-service-state.js';
+export type { StoreServiceState } from './lifecycle/store-service-state.js';
 export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types.js';
 export type {
   NodeAgentProgramOptions,

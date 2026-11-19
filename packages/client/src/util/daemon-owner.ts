@@ -4,7 +4,7 @@ import { createServer, type Server, type Socket } from 'node:net';
 import path from 'node:path';
 import { sameContent } from './file-state.js';
 import { ensureSecureStoreRoot } from './secure-dir.js';
-import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket.js';
+import { listenPrivateUnixSocket, privateSocketEndpoint, PrivateSocketInUseError, probeSocketListener, reclaimPrivateSocketFallbackDirectory } from './private-unix-socket.js';
 import { withRelease } from './with-release.js';
 import {
   acquirePathMutationGate,
@@ -123,7 +123,7 @@ function isOwnerRecord(value: unknown): value is OwnerRecord {
   );
 }
 
-async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
+async function readOwner(filePath: string, strict = false): Promise<OwnerRecord | undefined> {
   let namedBefore: import('node:fs').BigIntStats;
   try {
     namedBefore = await fs.lstat(filePath, { bigint: true });
@@ -156,7 +156,10 @@ async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
     ) {
       throw new Error('store mutation owner path changed before safe open');
     }
-    if (stat.size <= 0 || stat.size > MAX_OWNER_BYTES) return undefined;
+    if (stat.size <= 0 || stat.size > MAX_OWNER_BYTES) {
+      if (strict) throw new Error('store mutation owner record has an invalid size');
+      return undefined;
+    }
     const size = Number(stat.size);
     const buffer = Buffer.alloc(size);
     const { bytesRead } = await handle.read(buffer, 0, size, 0);
@@ -171,9 +174,11 @@ async function readOwner(filePath: string): Promise<OwnerRecord | undefined> {
     }
     const raw = buffer.toString('utf8');
     const parsed: unknown = JSON.parse(raw);
-    return isOwnerRecord(parsed) ? parsed : undefined;
+    if (isOwnerRecord(parsed)) return parsed;
+    if (strict) throw new Error('store mutation owner record has an invalid shape');
+    return undefined;
   } catch (err) {
-    if (err instanceof Error && err.message.startsWith('store mutation owner path changed')) throw err;
+    if (strict || (err instanceof Error && err.message.startsWith('store mutation owner path changed'))) throw err;
     return undefined;
   } finally {
     await handle.close();
@@ -312,6 +317,26 @@ async function reclaimExistsAndIsActive(reclaimPath: string): Promise<boolean> {
   // malformed, never an alternate compatibility authority. Keep only a short
   // fail-closed grace for a creator that may have crashed mid-publication.
   return Date.now() - stat.mtimeMs <= RECLAIM_MALFORMED_GRACE_MS;
+}
+
+/** Read the lease markers and probe the store mutex without acquiring ownership. @internal */
+export async function inspectDaemonStoreLock(canonicalStoreDir: string): Promise<'held' | 'free' | 'unknown'> {
+  const endpoint = storeMutexEndpoint(canonicalStoreDir, storeMutexIdentity(canonicalStoreDir));
+  const markers = await Promise.allSettled([DAEMON_OWNER_FILENAME, RECLAIM_FILENAME].map(async name => {
+    const record = await readOwner(path.join(canonicalStoreDir, name), true);
+    return record !== undefined && await processOwnsRecord(record);
+  }));
+  if (markers.some(marker => marker.status === 'fulfilled' && marker.value)) return 'held';
+  if (process.platform !== 'win32') {
+    const stat = await fs.lstat(endpoint).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (stat && !stat.isSocket()) return 'unknown';
+  }
+  const mutex = await probeSocketListener(endpoint);
+  if (mutex === 'listening') return 'held';
+  return mutex === 'absent' && markers.every(marker => marker.status === 'fulfilled') ? 'free' : 'unknown';
 }
 
 /** Observe published store ownership without acquiring or reclaiming a lease. @internal */

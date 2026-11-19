@@ -5,7 +5,7 @@ import { runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '
 import { defaultRunner } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
-import { sanitizeServiceName, type ServiceDefinition } from './service-types.js';
+import { sanitizeServiceName, type ServiceManagerQuery, type ServiceDefinition } from './service-types.js';
 import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit.js';
 import { hasControlChar } from './control-chars.js';
 
@@ -238,20 +238,23 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
       // be surfaced rather than reported as "stopped" (P1 #7, round 2).
       await runIdempotent(run, 'systemctl', ['--user', 'stop', unitName], 'systemctl stop', SYSTEMD_NOT_LOADED);
     },
-    async query() {
-      const result = await run('systemctl', ['--user', 'is-active', unitName]);
-      const state = result.stdout.trim();
-      const denied = SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
-      if (!denied) {
-        if (result.code === 0 && (state === 'active' || state === 'reloading' || state === 'refreshing')) {
-          return { running: true, determinate: true, detail: state };
-        }
-        if (result.code === SYSTEMCTL_UNIT_NOT_FOUND || (result.code === SYSTEMCTL_NOT_RUNNING && (state === 'inactive' || state === 'failed'))) {
-          return { running: false, determinate: true, detail: state || result.stderr.trim() };
-        }
-      }
-      const detail = (result.stderr || result.stdout).trim();
-      return { running: false, determinate: false, detail: `systemctl --user is-active failed (exit ${result.code})${detail ? `: ${detail}` : ''}` };
-    },
+    query: () => querySystemdService(name, { run }),
   }, fs, gateRoot);
+}
+
+/** Query a service by its recorded manager name. @internal */
+export async function querySystemdService(name: string, { run = defaultRunner }: SystemdDeps = {}): Promise<ServiceManagerQuery> {
+  const result = await run('systemctl', ['--user', 'is-active', `${name}.service`]);
+  const state = result.stdout.trim();
+  const denied = SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
+  if (!denied) {
+    if (result.code === 0 && (state === 'active' || state === 'reloading' || state === 'refreshing')) {
+      return { running: true, determinate: true, detail: state };
+    }
+    if (result.code === SYSTEMCTL_UNIT_NOT_FOUND || (result.code === SYSTEMCTL_NOT_RUNNING && (state === 'inactive' || state === 'failed'))) {
+      return { running: false, determinate: true, detail: state || result.stderr.trim() };
+    }
+  }
+  const detail = (result.stderr || result.stdout).trim();
+  return { running: false, determinate: false, detail: `systemctl --user is-active failed (exit ${result.code})${detail ? `: ${detail}` : ''}` };
 }
