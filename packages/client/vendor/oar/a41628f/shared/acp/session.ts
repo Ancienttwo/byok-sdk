@@ -69,13 +69,19 @@ export function redactAcpRecord<T extends RawEvent>(
     }
   }
   const fragment = update?.sessionUpdate;
-  if (record.kind === "frame" && safe.kind === "frame" && credentials.hasProtectedValues()
-    && (fragment === "agent_thought_chunk" || (fragment === "agent_message_chunk" && !record.body.events.some(event => event.kind === "text_delta")))) {
+  if (credentials.hasProtectedValues() && (fragment === "agent_thought_chunk" || fragment === "user_message_chunk"
+    || (fragment === "agent_message_chunk" && !record.body.events.some(event => event.kind === "text_delta")))) {
     const packet = asRecord(safe.body.native);
-    const thought = asRecord(packet?.update);
-    const { content: _withheld, ...safeUpdate } = thought ?? {};
-    const native = thought === null ? safe.body.native : { ...packet, update: safeUpdate };
-    return { ...safe, body: { ...safe.body, native, events: safe.body.events.filter(event => event.kind !== "reasoning") } };
+    const safeUpdate = asRecord(packet?.update);
+    let native = safe.body.native;
+    if (safeUpdate !== null) {
+      const { content: _withheld, ...rest } = safeUpdate;
+      native = { ...packet, update: rest };
+    } else if (packet !== null) {
+      native = "[redacted]";
+    }
+    const events = safe.body.events.filter(event => event.kind !== "reasoning" && event.kind !== "user_message");
+    return { ...safe, body: { ...safe.body, native, events } };
   }
   if (pendingText !== undefined && safe.kind === "frame" && record.kind === "frame" && credentials.hasProtectedValues()) {
     const lane = record.sessionId;
@@ -144,11 +150,15 @@ export function redactAcpRecord<T extends RawEvent>(
     }
     return [event];
   });
-  if (!withholdProgress) return { ...safe, body: { ...safe.body, events } };
+  // Some ACP implementations stream incomplete JSON input in nonterminal content. Full rawInput is a separate field.
+  const withholdInputFragments = !terminal && update.content !== undefined;
+  if (!withholdProgress && !withholdInputFragments) return { ...safe, body: { ...safe.body, events } };
   const packet = asRecord(safe.body.native);
   const sanitizedUpdate = packet !== null && (directUpdate || child !== null) ? asRecord(packet.update) : null;
   if (sanitizedUpdate === null) return { ...safe, body: { ...safe.body, native: "[redacted]", events } };
-  const { rawOutput: _withheld, ...safeUpdate } = sanitizedUpdate;
+  const safeUpdate = { ...sanitizedUpdate };
+  if (withholdProgress) delete safeUpdate.rawOutput;
+  if (withholdInputFragments) delete safeUpdate.content;
   return { ...safe, body: { ...safe.body, native: { ...packet, update: safeUpdate }, events } };
 }
 
