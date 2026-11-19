@@ -30,6 +30,7 @@ import { newSessionLinks } from "../../shared/session-links.js";
 import { startAppServerClient, type RpcOutcome, type SpawnLineProcess } from "./app-server-client.js";
 import { CODEX_SETTINGS_REPORT_MS, codexOpenReadback, codexResumeEffortRefusal, codexThreadName, codexThreadOpen } from "./open.js";
 import { codexToolContent } from "./item-detail.js";
+import { codexReasoningContent } from "./reasoning.js";
 import { foldCodexNotification, initialCodexProjection, type CodexProjectionState } from "./projection.js";
 import { prepareCodexToolDenials } from "./tool-denials.js";
 import { missingDirectoryError, nameThread, openThread, rpcControl, updateThreadEffort, type RpcControlPlan } from "./rpc-control.js";
@@ -123,8 +124,11 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   const method = record.kind === "frame" ? record.body.type : "";
   const originalItem = record.kind === "frame" ? asRecord(asRecord(record.body.native)?.item) : null;
   const itemType = method === "item/started" || method === "item/completed" ? originalItem?.type : undefined;
-  const rawFunction = method === "rawResponseItem/completed" && originalItem?.type === "function_call";
-  const itemFields = rawFunction ? ["arguments", "call_id", "name"] : typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
+  const isRawItem = method === "rawResponseItem/completed";
+  const rawFunction = isRawItem && originalItem?.type === "function_call";
+  const rawReasoning = isRawItem && originalItem?.type === "reasoning";
+  const itemFields = rawFunction ? ["arguments", "call_id", "name"] : rawReasoning ? ["summary", "content", "encrypted_content"]
+    : typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
   const encoded = itemType === "mcpToolCall" || itemType === "fileChange" || itemType === "collabAgentToolCall" || itemType === "sleep";
   const safe = redactRuntimeRecord(record, redact, path => (encoded && isProjectedToolInput(record, path))
     || (rawFunction && path.length === 4 && path[0] === "body" && path[1] === "native" && path[2] === "item" && path[3] === "arguments"), (path, value) => {
@@ -153,10 +157,30 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   if (safe.kind !== "frame") return safe;
   const native = asRecord(safe.body.native);
   const safeItem = asRecord(native?.item);
-  if (itemType === "userMessage" && method === "item/started" && Array.isArray(originalItem?.content)) {
+  if (itemType === "userMessage" && Array.isArray(originalItem?.content)) {
     const { content, input } = redactJoinedText(originalItem.content, safeItem?.content, redact);
     const events = safe.body.events.map(event => event.kind === "user_message" ? { ...event, input } : event);
     const updated = safeItem !== null && content !== safeItem.content ? { ...native, item: { ...safeItem, content } } : safe.body.native;
+    return { ...safe, body: { ...safe.body, native: updated, events } };
+  }
+  if (rawReasoning && originalItem !== null) {
+    const originalSummary = Array.isArray(originalItem.summary) ? originalItem.summary : [];
+    const originalContent = Array.isArray(originalItem.content) ? originalItem.content : [];
+    const summary = Array.isArray(safeItem?.summary) ? safeItem.summary : [];
+    const blocks = Array.isArray(safeItem?.content) ? safeItem.content : [];
+    const retained = [...summary, ...blocks];
+    const joined = redactJoinedText([...originalSummary, ...originalContent], retained, redact, "\n", () => true);
+    const content = joined.input === "" ? codexReasoningContent(safeItem) : { kind: "text" as const, text: joined.input };
+    const events = safe.body.events.flatMap(event => event.kind !== "reasoning" ? [event]
+      : content === null ? [] : [{ ...event, content }]);
+    let updated = safe.body.native;
+    if (safeItem !== null && Array.isArray(joined.content) && joined.content !== retained) {
+      const item = { ...safeItem,
+        ...(Array.isArray(safeItem.summary) ? { summary: joined.content.slice(0, summary.length) } : {}),
+        ...(Array.isArray(safeItem.content) ? { content: joined.content.slice(summary.length) } : {}),
+      };
+      updated = { ...native, item };
+    }
     return { ...safe, body: { ...safe.body, native: updated, events } };
   }
   if (itemType !== "mcpToolCall" || method !== "item/completed") return safe;
