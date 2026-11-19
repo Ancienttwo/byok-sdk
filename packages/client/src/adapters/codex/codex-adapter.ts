@@ -544,10 +544,11 @@ class CodexSession implements Session {
         this.active = false;
         this.turnWaiters.settleAll();
         const nativeTurn = recordOf(recordOf(body.native)?.turn);
-        if (outcome.kind === 'failed' && nativeTurn?.status === 'failed') {
+        if (outcome.kind === 'failed' && (body.byokTurnStatus ?? nativeTurn?.status) === 'failed') {
           // Establish the typed terminal before a required SDK record consumer can throw.
-          const nativeError = recordOf(nativeTurn.error);
-          const reason = typeof nativeError?.message === 'string' ? nativeError.message : 'codex turn failed';
+          const nativeError = recordOf(nativeTurn?.error);
+          const reason = typeof nativeError?.message === 'string' ? nativeError.message
+            : typeof outcome.reason === 'string' ? outcome.reason : 'codex turn failed';
           const failure = outcome.fromText === true ? 'unknown' : runtimeFailureClassOf(outcome.failure);
           this.fail(new RuntimeExecutionFailure({
             phase: 'run',

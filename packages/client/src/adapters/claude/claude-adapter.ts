@@ -787,8 +787,8 @@ class ClaudeSession implements Session {
               }
               pending = mapped.events;
               if (textTail !== undefined) {
-                const continuation: AgentEvent = { type: 'progress', text: textTail, ...(root ? {} : { agentPath: [...agentPath] }) };
-                assistantMessages.continueMessage(continuation);
+                const continuation: AgentEvent = { type: 'progress', text: textTail.text, ...(root ? {} : { agentPath: [...agentPath] }) };
+                if (textTail.continues) assistantMessages.continueMessage(continuation);
                 pending.unshift(continuation);
               }
               // Nothing to yield yet (routine frame, or an unmapped one) —

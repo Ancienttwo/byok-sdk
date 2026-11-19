@@ -135,8 +135,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
-  it('keeps a Claude reply suffix in the original final message', async () => {
-    const resources = await makeCtx();
+  it.each([false, true])('keeps a deferred Claude suffix in its message (separate message: %s)', async separateMessage => {
+    const resources = await makeCtx(separateMessage ? { PATH: process.env.PATH, FAKE_CLAUDE_FINAL_SHORT_MESSAGE: 'sk' } : undefined);
     try {
       const session = await startAdapter(fakeClaudeAdapter(), { ...baseTask, instruction: 'The task' }, { ...resources,
         mcpServers: { fixture: { command: process.execPath, env: { MCP_TOKEN: 'sk-fixture' } } },
@@ -150,7 +150,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
         }
         if (event.type === 'turn_end') break;
       }
-      expect(finalText).toBe('reply-1:The task');
+      expect(finalText).toBe(separateMessage ? 'sk' : 'reply-1:The task');
     } finally {
       await fs.rm(resources.workspaceDir, { recursive: true, force: true });
     }

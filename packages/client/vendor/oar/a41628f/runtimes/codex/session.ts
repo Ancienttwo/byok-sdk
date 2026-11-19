@@ -110,7 +110,8 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   return redactRuntimeRecord(record, redact, path => encoded && isProjectedToolInput(record, path), (path, value) => {
     const [body, group, member, field] = path;
     if (body !== "body" || record.kind !== "frame") return false;
-    if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native");
+    if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native")
+      || (group === "byokTurnStatus" && record.body.type === "turn/completed" && (value === "completed" || value === "interrupted" || value === "failed"));
     if (path.length !== 4 || group !== "native") return false;
     if ((record.body.type === "item/started" || record.body.type === "item/completed") && member === "item" && field === "type") return codexItemTypes.has(value);
     return record.body.type === "turn/completed" && member === "turn" && field === "status"
@@ -258,7 +259,10 @@ async function openCodexSession(
       params = { ...params, delta: ready };
     }
     // BYOK change: label native frames and anchor root and turn membership before redaction can change ids.
-    const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot, byokStaleTurn } as const;
+    const byokTurnStatus = method === "turn/completed" ? asRecord(params.turn)?.status : undefined;
+    const terminalStatus = byokTurnStatus === "completed" || byokTurnStatus === "interrupted" || byokTurnStatus === "failed"
+      ? { byokTurnStatus } : {};
+    const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot, byokStaleTurn, ...terminalStatus } as const;
     kernel.frame(nativeBody, {
       sessionId: notificationSession,
       ...(typeof params.turnId === "string" ? { spanId: params.turnId } : {}),
@@ -295,7 +299,7 @@ async function openCodexSession(
     for (const command of commands) {
       switch (command.kind) {
         case "frame":
-          const body = { ...command.body, events: [...command.body.events, ...links], byokRoot: isRoot };
+          const body = { ...command.body, events: [...command.body.events, ...links], byokRoot: isRoot, ...terminalStatus };
           kernel.frame(body, {
             ...(command.sessionId === undefined ? {} : { sessionId: command.sessionId }),
             ...(command.spanId === undefined ? {} : { spanId: command.spanId }),

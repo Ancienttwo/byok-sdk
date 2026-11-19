@@ -187,7 +187,7 @@ export class CodexProjection {
     }
     if (method === 'turn/completed') {
       const turn = record(params.turn);
-      const status = turn?.status;
+      const status = body.byokTurnStatus ?? turn?.status;
       const events: AgentEvent[] = [];
       if (status === 'interrupted') {
         for (const active of state.active.values())

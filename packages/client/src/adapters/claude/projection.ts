@@ -33,7 +33,7 @@ export interface ClaudeFrame {
   readonly native: ClaudeStreamMessage;
   readonly agentPath: readonly string[];
   readonly context?: Record<string, unknown>;
-  readonly textTail?: string;
+  readonly textTail?: { readonly text: string; readonly continues: boolean };
 }
 
 export function claudeRecordFrame(record: ClaudeRecord): ClaudeFrame | undefined {
@@ -50,7 +50,8 @@ export function claudeRecordFrame(record: ClaudeRecord): ClaudeFrame | undefined
       if (event?.kind === 'usage') context = object(object(event.usage)?.context);
     }
   }
-  const textTail = typeof body?.byokTextTail === 'string' ? body.byokTextTail : undefined;
+  const tail = object(body?.byokTextTail);
+  const textTail = typeof tail?.text === 'string' && typeof tail.continues === 'boolean' ? { text: tail.text, continues: tail.continues } : undefined;
   return { native: frame, agentPath: record.agentPath, context, ...(textTail === undefined ? {} : { textTail }) };
 }
 

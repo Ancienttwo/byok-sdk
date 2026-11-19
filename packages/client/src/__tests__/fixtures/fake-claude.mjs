@@ -714,6 +714,10 @@ function runProbeOrTurnFlow() {
       await sendAssistant({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}c`, role: 'assistant', content: [{ type: 'text', text: finalText }] }, session_id: reportedSessionId });
     }
 
+    if (process.env.FAKE_CLAUDE_FINAL_SHORT_MESSAGE) {
+      await sendAssistant({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}short`, role: 'assistant',
+        content: [{ type: 'text', text: process.env.FAKE_CLAUDE_FINAL_SHORT_MESSAGE }] }, session_id: reportedSessionId });
+    }
     send({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' }, session_id: reportedSessionId });
 
     if (process.env.FAKE_CLAUDE_RESULT_MALFORMED === '1') {

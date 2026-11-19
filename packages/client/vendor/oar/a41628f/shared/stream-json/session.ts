@@ -51,6 +51,7 @@ interface StreamTextTails {
   readonly drafts: Map<string, Map<number, string>>;
   readonly assistant: Map<string, string>;
   readonly projected: Map<string, string>;
+  readonly messages: Map<string, { id: unknown; published: boolean }>;
 }
 
 function redactTextPart(tails: Map<string, string>, lane: string, text: string, credentials: CredentialRedactor): string {
@@ -67,16 +68,28 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   const lane = JSON.stringify(record.agentPath);
   const draftTails = textTails?.drafts;
   const assistantTails = textTails?.assistant;
+  let terminalText: { text: string; continues: boolean } | undefined;
   if (textTails !== undefined && record.kind === "frame" && record.body.type === "assistant" && native?.type === "assistant"
     && credentials.hasProtectedValues()) {
     const message = asRecord(native.message);
     if (Array.isArray(message?.content)) {
+      const currentMessage = textTails.messages.get(lane);
+      const continues = currentMessage?.id === message.id;
+      let published = continues && currentMessage?.published === true;
+      if (!continues) {
+        const previous = textTails.assistant.get(lane);
+        if (previous !== undefined) terminalText = { text: credentials.redact(previous), continues: currentMessage?.published === true };
+        textTails.assistant.delete(lane);
+        textTails.projected.delete(lane);
+      }
       const content = message.content.map((block: unknown) => {
         const part = asRecord(block);
         if (part?.type !== "text" || typeof part.text !== "string") return block;
         const ready = redactTextPart(textTails.assistant, lane, part.text, credentials);
+        published ||= ready.trim() !== "";
         return ready === part.text ? block : { ...part, text: ready };
       });
+      textTails.messages.set(lane, { id: message.id, published });
       const events = record.body.events.flatMap<RuntimeEventBody>(event => {
         if (event.kind !== "text_delta") return [event];
         const ready = redactTextPart(textTails.projected, lane, event.text, credentials);
@@ -87,10 +100,13 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   }
   if (credentials.hasProtectedValues() && record.kind === "frame" && record.body.type === "stream_event") {
     const event = asRecord(native?.event);
-    const delta = asRecord(event?.delta);
+    const isStart = event?.type === "content_block_start";
+    const delta = asRecord(isStart ? event.content_block : event?.delta);
+    const textField = delta?.type === "text" || delta?.type === "text_delta" ? "text" : undefined;
+    const fragmentField = isStart ? "content_block" : "delta";
     if (event?.type === "message_start" || event?.type === "message_stop") draftTails?.delete(lane);
-    if (draftTails !== undefined && event?.type === "content_block_delta" && typeof event.index === "number"
-      && delta?.type === "text_delta" && typeof delta.text === "string") {
+    if (draftTails !== undefined && (isStart || event?.type === "content_block_delta") && typeof event.index === "number"
+      && textField !== undefined && typeof delta?.text === "string") {
       const tails = draftTails.get(lane) ?? new Map<number, string>();
       const { ready, pending } = credentials.redactChunk((tails.get(event.index) ?? "") + delta.text);
       if (pending === "") tails.delete(event.index);
@@ -100,8 +116,13 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
       if (ready !== delta.text) {
         const events = record.body.events.flatMap<RuntimeEventBody>(projected => projected.kind !== "text_delta" ? [projected]
           : ready === "" ? [] : [{ ...projected, text: ready }]);
-        safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, delta: { ...delta, text: ready } } }, events } };
+        safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, [fragmentField]: { ...delta, text: ready } } }, events } };
       }
+    }
+    if ((isStart && delta?.type === "thinking") || (event?.type === "content_block_delta" && delta?.type === "thinking_delta")) {
+      const { thinking: _omitted, ...rest } = delta;
+      safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, [fragmentField]: rest } },
+        events: record.body.events.filter(projected => projected.kind !== "reasoning") } };
     }
     if (event?.type === "content_block_delta" && delta?.type === "input_json_delta") {
       const { partial_json: _omitted, ...rest } = delta;
@@ -136,13 +157,18 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
     const body = { ...redacted.body, byokResult: result };
     redacted = { ...redacted, body };
   }
-  if (assistantTails === undefined || redacted.kind !== "frame" || native?.type !== "result") return redacted;
-  draftTails?.delete(lane);
-  textTails?.projected.delete(lane);
-  const tail = assistantTails.get(lane);
-  assistantTails.delete(lane);
-  if (tail === undefined) return redacted;
-  const body = { ...redacted.body, byokTextTail: credentials.redact(tail) };
+  if (redacted.kind !== "frame") return redacted;
+  if (textTails !== undefined && assistantTails !== undefined && native?.type === "result") {
+    draftTails?.delete(lane);
+    textTails.projected.delete(lane);
+    const tail = assistantTails.get(lane);
+    const message = textTails.messages.get(lane);
+    assistantTails.delete(lane);
+    textTails.messages.delete(lane);
+    if (tail !== undefined) terminalText = { text: credentials.redact(tail), continues: message?.published === true };
+  }
+  if (terminalText === undefined) return redacted;
+  const body = { ...redacted.body, byokTextTail: terminalText };
   return { ...redacted, body };
 }
 
@@ -156,7 +182,7 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
   retainedBytes?: number, // BYOK change: the caller's retained-record budget; old frame payloads are elided past it.
 ): Promise<AdapterSession> {
   // BYOK change: the upstream kernel with the redactor as its redact hook; the record consumer is registered before any record is appended.
-  const textTails: StreamTextTails = { drafts: new Map(), assistant: new Map(), projected: new Map() };
+  const textTails: StreamTextTails = { drafts: new Map(), assistant: new Map(), projected: new Map(), messages: new Map() };
   const kernel = createSessionKernel(sessionId, record => redactStreamJsonRecord(record, credentials, textTails), retainedBytes);
   if (hooks.onRecord !== undefined) { kernel.rawEvents(hooks.onRecord); }
   const tasks = profile.stopTask === undefined ? undefined : streamJsonTaskControl(kernel, child, profile.stopTask);

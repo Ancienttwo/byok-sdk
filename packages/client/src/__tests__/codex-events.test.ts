@@ -5,6 +5,8 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta } from '../types';
 import { CodexProjection } from '../adapters/codex/projection';
 import { createSessionKernel } from '../../vendor/oar/a41628f/shared/session-kernel';
+import { sessionCredentialRedactor } from '../../vendor/oar/a41628f/shared/credential-redactor';
+import { redactCodexRecord } from '../../vendor/oar/a41628f/runtimes/codex/session';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 function setup() {
   const kernel = createSessionKernel('root');
@@ -25,6 +27,20 @@ function setup() {
   return { kernel, projection, output, feed };
 }
 describe('required Codex native projection', () => {
+  it('ends a Codex turn when a credential-bearing key withholds the native turn object', () => {
+    const key = 'synthetic-opaque-extension';
+    const credentials = sessionCredentialRedactor({ env: { API_KEY: key } });
+    const kernel = createSessionKernel('root', record => redactCodexRecord(record, credentials.redactValue));
+    const projection = new CodexProjection('/workspace', 'root');
+    const native = { threadId: 'root', turn: { id: 't', status: 'completed', [key]: 'value' } };
+    const body = { type: 'turn/completed', native, events: [], origin: 'byok-native', byokRoot: true, byokTurnStatus: 'completed' };
+    const frame = kernel.frame(body);
+    const out: Array<AgentEvent | MessageDraftDelta> = [];
+    projection.consume(kernel, frame, event => out.push(event));
+    expect(frame.body.native).toEqual({ ...native, turn: '[redacted]' });
+    expect(out).toEqual([{ type: 'turn_end' }]);
+  });
+
   it('maps structured command input and output without stringification', () => {
     const s = setup();
     s.feed('item/started', {
