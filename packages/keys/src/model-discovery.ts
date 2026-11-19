@@ -1,6 +1,6 @@
 import { ByokKeysError } from './errors.js';
 import { providerHeaders, requiredProviderSecret } from './headers.js';
-import { fetchWithProviderGuards, isProviderTransportError, objectValue, parseBoundedJsonResponse, PROVIDER_TIMEOUT_MS, type ProviderFetch } from './http.js';
+import { fetchWithProviderGuards, isProviderTransportError, objectValue, parseBoundedJsonResponseWithReadError, PROVIDER_TIMEOUT_MS, type ProviderFetch } from './http.js';
 import type { ProviderAuthMode } from './provider-profile.js';
 import { normalizeProviderUrl } from './url.js';
 
@@ -38,10 +38,7 @@ export async function discoverProviderModels(
       response = await fetchWithProviderGuards((_url, init) => fetchImpl(target.href, init), base.href,
         { method: 'GET', headers, redirect: 'error' }, signal);
     } catch (error) {
-      if (isProviderTransportError(error)) {
-        throw new ByokKeysError('MODEL_LIST_UNREACHABLE', 'Model list provider is unreachable', { cause: error });
-      }
-      throw error;
+      throw mapModelListTransportError(error);
     }
     if (!response.ok) {
       void response.body?.cancel().catch(() => {});
@@ -51,7 +48,7 @@ export async function discoverProviderModels(
     }
     let body: unknown;
     try {
-      body = await parseBoundedJsonResponse(response);
+      body = await parseBoundedJsonResponseWithReadError(response, mapModelListTransportError);
     } catch (error) {
       if (error instanceof ByokKeysError && error.code === 'PROVIDER_RESPONSE_INVALID') {
         throw new ByokKeysError('MODEL_LIST_INVALID_RESPONSE', 'Invalid model list response', { cause: error });
@@ -83,4 +80,10 @@ export async function discoverProviderModels(
     afterId = cursor;
   }
   throw new ByokKeysError('MODEL_LIST_INVALID_PAGINATION', 'Model list has too many pages');
+}
+
+function mapModelListTransportError(error: unknown) {
+  return isProviderTransportError(error)
+    ? new ByokKeysError('MODEL_LIST_UNREACHABLE', 'Model list provider is unreachable', { cause: error })
+    : error;
 }

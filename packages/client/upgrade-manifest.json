@@ -50,7 +50,7 @@
     {
       "id": "model-list-unreachable",
       "impact": "additive",
-      "summary": "Hosts can recognize an unreachable provider in discoverProviderModels by the MODEL_LIST_UNREACHABLE error code; the original transport error is available as the cause.",
+      "summary": "discoverProviderModels reports transport failures while connecting or reading a successful response body as MODEL_LIST_UNREACHABLE and preserves the original error as the cause.",
       "migration": "CHANGELOG.md#unreleased",
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"

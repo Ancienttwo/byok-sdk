@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ByokKeysError } from './errors.js';
-import type { ProviderFetch } from './http.js';
-import { discoverProviderModels, type ModelDiscoveryConnection } from './model-discovery.js';
+import { ByokKeysError, discoverProviderModels, type ModelDiscoveryConnection } from './index.js';
+import { PROVIDER_RESPONSE_MAX_BYTES, PROVIDER_TIMEOUT_MS, type ProviderFetch } from './http.js';
 
 const connection: ModelDiscoveryConnection = {
   adapter: 'openai_compatible', auth_mode: 'bearer', base_url: 'https://example.com/v1/',
@@ -43,6 +42,63 @@ describe('discoverProviderModels', () => {
     const error = await discoverProviderModels(connection, 'secret', fetchImpl).catch(error => error);
     expect(error).toBeInstanceOf(ByokKeysError);
     expect(error).toMatchObject({ code: 'MODEL_LIST_UNREACHABLE', message: 'Model list provider is unreachable', cause });
+  });
+
+  it('maps a transport failure while reading an HTTP 200 response and preserves its cause', async () => {
+    const cause = new TypeError('terminated', { cause: new Error('socket closed') });
+    const first = new TextEncoder().encode('{"data":');
+    let reads = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        reads += 1;
+        if (reads === 1) controller.enqueue(first);
+        else controller.error(cause);
+      },
+    }, { highWaterMark: 0 });
+    const fetchImpl: ProviderFetch = async () => new Response(body, { status: 200 });
+    const error = await discoverProviderModels(connection, 'secret', fetchImpl).catch(error => error);
+    expect(reads).toBe(2);
+    expect(error).toBeInstanceOf(ByokKeysError);
+    expect(error).toMatchObject({ code: 'MODEL_LIST_UNREACHABLE', message: 'Model list provider is unreachable' });
+    expect(error.cause).toBe(cause);
+  });
+
+  it('preserves a TypeError from decoding instead of classifying it as transport failure', async () => {
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue('not a byte chunk');
+        controller.close();
+      },
+    });
+    await expect(discoverProviderModels(connection, 'secret', async () => new Response(body)))
+      .rejects.toBeInstanceOf(TypeError);
+  });
+
+  it('preserves the request timeout for a stalled successful response body', async () => {
+    vi.useFakeTimers();
+    const overallTimeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(new AbortController().signal);
+    try {
+      const pull = vi.fn();
+      const body = new ReadableStream({ pull }, { highWaterMark: 0 });
+      const outcome = discoverProviderModels(connection, 'secret', async () => new Response(body)).catch(error => error);
+      await vi.advanceTimersByTimeAsync(PROVIDER_TIMEOUT_MS);
+      expect(pull).toHaveBeenCalled();
+      expect(await outcome).toMatchObject({ code: 'PROVIDER_REQUEST_TIMEOUT' });
+    } finally {
+      overallTimeout.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('preserves the invalid JSON classification', async () => {
+    await expect(discoverProviderModels(connection, 'secret', async () => new Response('{invalid')))
+      .rejects.toMatchObject({ code: 'MODEL_LIST_INVALID_RESPONSE' });
+  });
+
+  it('preserves the response byte limit classification', async () => {
+    const body = new Uint8Array(PROVIDER_RESPONSE_MAX_BYTES + 1);
+    await expect(discoverProviderModels(connection, 'secret', async () => new Response(body)))
+      .rejects.toMatchObject({ code: 'PROVIDER_RESPONSE_TOO_LARGE' });
   });
 
   it('maps HTTP 401 to the auth failure code', async () => {
