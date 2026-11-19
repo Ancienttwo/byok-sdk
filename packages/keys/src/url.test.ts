@@ -26,6 +26,16 @@ describe('normalizeProviderUrl', () => {
     );
   });
 
+  it('is idempotent for paths with trailing slashes and the root path', () => {
+    for (const path of ['', '/v1']) {
+      for (let slashCount = 0; slashCount <= 8; slashCount += 1) {
+        const normalized = normalizeProviderUrl(`https://api.example.com${path}${'/'.repeat(slashCount)}`);
+        expect(normalized).toBe(`https://api.example.com${path}`);
+        expect(normalizeProviderUrl(normalized)).toBe(normalized);
+      }
+    }
+  });
+
   it('rejects plain HTTP on a public host', () => {
     expectUrlRejected('http://api.openai.com/v1');
   });

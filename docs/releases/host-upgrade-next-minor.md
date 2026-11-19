@@ -25,3 +25,13 @@ This checklist starts after the published 0.44.1 release. Hosts on an earlier re
    `removeRetiredProviderCredentials(retiredPath, originalBaseSecretStore)`.
    Preserve the original DB and credential configuration for rollback. If
    credentials have been removed, users will need to re-enter them.
+
+## Model discovery connection fields
+
+Update calls to `discoverProviderModels` to pass `auth_mode` and `base_url`.
+Remove `providerKind` from the connection object and keep `adapter`. The same
+three fields can be taken directly from a provider profile.
+
+```ts
+const models = await discoverProviderModels({ adapter, auth_mode, base_url }, secret);
+```

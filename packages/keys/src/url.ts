@@ -9,7 +9,7 @@ import { ByokKeysError } from './errors.js';
  * - no embedded credentials, no fragment, no query string;
  * - HTTPS only, except that HTTP is allowed for loopback hosts;
  * - private-network literals are rejected unless they are loopback;
- * - one trailing slash is stripped.
+ * - trailing slashes are stripped.
  */
 export function normalizeProviderUrl(value: string): string {
   let url: URL;
@@ -40,7 +40,7 @@ export function normalizeProviderUrl(value: string): string {
       'Private-network provider IPs are not allowed',
     );
   }
-  return url.toString().replace(/\/$/u, '');
+  return url.toString().replace(/\/+$/u, '');
 }
 
 /** Whether an already-parseable provider URL points at a loopback host. */

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "449f0f21e381ef087f328fac56478e7748fe2a374002c2c8534555944d2d8cf0"
+    "snapshotSha256": "fb5cb33f7deaa64fab44daf4b651e60c86138429d9e1a739da743451b640c0b3"
   },
   "configFields": {
     "status": "tracked",
@@ -39,6 +39,15 @@
       ]
     },
     {
+      "id": "model-discovery-connection-fields",
+      "impact": "breaking",
+      "summary": "ModelDiscoveryConnection uses auth_mode and base_url to match provider profiles. Remove providerKind from the connection object and keep adapter.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#model-discovery-connection-fields",
+      "items": [
+        "export:@byok-sdk/keys#ModelDiscoveryConnection"
+      ]
+    },
+    {
       "id": "model-list-unreachable",
       "impact": "additive",
       "summary": "Hosts can recognize an unreachable provider in discoverProviderModels by the MODEL_LIST_UNREACHABLE error code; the original transport error is available as the cause.",
@@ -58,6 +67,11 @@
       "item": "export:@byok-sdk/keys#InMemoryProviderProfileStore",
       "change": "changed",
       "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ModelDiscoveryConnection",
+      "change": "changed",
+      "entry": "model-discovery-connection-fields"
     },
     {
       "item": "export:@byok-sdk/keys#ProviderProfileStore",

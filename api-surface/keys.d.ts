@@ -508,12 +508,11 @@ export declare class MacOsKeychainSecretStore<TName extends string = string> imp
 }
 // ==== @byok-sdk/keys dist/model-discovery.d.ts ====
 import { type ProviderFetch } from './http.js';
-import type { ModelProviderKind, ProviderAuthMode } from './provider-profile.js';
+import type { ProviderAuthMode } from './provider-profile.js';
 export interface ModelDiscoveryConnection {
     adapter: 'openai_compatible' | 'anthropic';
-    authMode: ProviderAuthMode;
-    baseUrl: string;
-    providerKind: ModelProviderKind;
+    auth_mode: ProviderAuthMode;
+    base_url: string;
 }
 export interface DiscoveredModel {
     id: string;

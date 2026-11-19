@@ -4,9 +4,9 @@ import type { ProviderFetch } from './http.js';
 import { discoverProviderModels, type ModelDiscoveryConnection } from './model-discovery.js';
 
 const connection: ModelDiscoveryConnection = {
-  adapter: 'openai_compatible', authMode: 'bearer', baseUrl: 'https://example.com/v1/', providerKind: 'custom',
+  adapter: 'openai_compatible', auth_mode: 'bearer', base_url: 'https://example.com/v1/',
 };
-const anthropic: ModelDiscoveryConnection = { ...connection, adapter: 'anthropic', authMode: 'x_api_key' };
+const anthropic: ModelDiscoveryConnection = { ...connection, adapter: 'anthropic', auth_mode: 'x_api_key' };
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
 describe('discoverProviderModels', () => {

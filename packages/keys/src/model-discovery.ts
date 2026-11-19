@@ -1,14 +1,13 @@
 import { ByokKeysError } from './errors.js';
 import { providerHeaders, requiredProviderSecret } from './headers.js';
 import { fetchWithProviderGuards, isProviderTransportError, objectValue, parseBoundedJsonResponse, PROVIDER_TIMEOUT_MS, type ProviderFetch } from './http.js';
-import type { ModelProviderKind, ProviderAuthMode } from './provider-profile.js';
+import type { ProviderAuthMode } from './provider-profile.js';
 import { normalizeProviderUrl } from './url.js';
 
 export interface ModelDiscoveryConnection {
   adapter: 'openai_compatible' | 'anthropic';
-  authMode: ProviderAuthMode;
-  baseUrl: string;
-  providerKind: ModelProviderKind;
+  auth_mode: ProviderAuthMode;
+  base_url: string;
 }
 
 export interface DiscoveredModel { id: string; name: string }
@@ -21,9 +20,10 @@ export async function discoverProviderModels(
   secret: string | undefined,
   fetchImpl: ProviderFetch = fetch,
 ): Promise<DiscoveredModel[]> {
-  const base = new URL(normalizeProviderUrl(connection.baseUrl));
+  const base = URL.parse(normalizeProviderUrl(connection.base_url));
+  if (base === null) throw new ByokKeysError('PROVIDER_URL_INVALID', 'Provider URL is not valid');
   base.pathname = base.pathname.replace(/\/$/u, '') + '/models';
-  const auth = { kind: 'model', auth_mode: connection.authMode };
+  const auth = { kind: 'model', auth_mode: connection.auth_mode };
   const headers = providerHeaders(auth, requiredProviderSecret(auth, secret));
   if (connection.adapter === 'anthropic') headers['anthropic-version'] = '2023-06-01';
   const models = new Map<string, DiscoveredModel>();
@@ -31,14 +31,11 @@ export async function discoverProviderModels(
   let afterId: string | undefined;
   const signal = AbortSignal.timeout(PROVIDER_TIMEOUT_MS);
   for (let page = 0; page < MAX_PAGES; page += 1) {
-    const pageFetch: ProviderFetch = (url, init) => {
-      const target = new URL(String(url));
-      if (afterId !== undefined) target.searchParams.set('after_id', afterId);
-      return fetchImpl(target.href, init);
-    };
     let response: Response;
     try {
-      response = await fetchWithProviderGuards(pageFetch, base.href,
+      const target = new URL(base);
+      if (afterId !== undefined) target.searchParams.set('after_id', afterId);
+      response = await fetchWithProviderGuards((_url, init) => fetchImpl(target.href, init), base.href,
         { method: 'GET', headers, redirect: 'error' }, signal);
     } catch (error) {
       if (isProviderTransportError(error)) {
