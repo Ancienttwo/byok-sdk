@@ -13,7 +13,8 @@ const fixture = JSON.parse(readFileSync(options.profileDbPath, 'utf8')) as { pro
 const profile = parseModelProviderProfile(fixture.profile);
 if (options.validateOnly) process.exit(0);
 const profiles = new InMemoryProviderProfileStore(); await profiles.save(profile);
-const secrets = new InMemorySecretStore(); await secrets.set(modelProviderSecretName(profile.profile_ref), fixture.secret);
+const secrets = new InMemorySecretStore();
+await secrets.scope(profiles.credentialNamespaceId).set(modelProviderSecretName(profile.profile_ref), fixture.secret);
 const launched = await startPiProvider(profile, options, { ambient: process.env, profiles, createSecretStore: () => secrets,
   spawn: (command, args, spawnOptions) => {
     // Unmodified spawn options: stdio stays inherited by the rpc host, and

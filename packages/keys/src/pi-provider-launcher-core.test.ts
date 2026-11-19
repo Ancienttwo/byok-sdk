@@ -5,6 +5,7 @@ import { promises as fs } from 'node:fs';
 import { describe, expect, it, vi, afterEach } from 'vitest';
 
 import { ChildProcess, spawn as nodeSpawn } from 'node:child_process';
+import { observeProviderCredentials } from './fixtures/observe-provider-credentials';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { ByokKeysError } from './errors';
 import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
@@ -185,24 +186,28 @@ describe('Pi provider launcher core', () => {
 
   it('does not construct or require a keychain for auth-free providers', async () => {
     const createStore = vi.fn(() => new InMemorySecretStore());
-    await expect(resolvePiProviderSecret(profile('none'), createStore)).resolves.toBeUndefined();
+    await expect(resolvePiProviderSecret(profile('none'), new InMemoryProviderProfileStore(), createStore)).resolves.toBeUndefined();
     expect(createStore).not.toHaveBeenCalled();
   });
 
   it('reads the exact provider secret and fails closed when it is absent', async () => {
     const store = new InMemorySecretStore();
-    await store.set(modelProviderSecretName('custom'), CANARY);
-    await expect(resolvePiProviderSecret(profile('bearer'), () => store)).resolves.toBe(CANARY);
+    const profiles = new InMemoryProviderProfileStore();
+    const name = modelProviderSecretName('custom');
+    await store.scope(profiles.credentialNamespaceId).set(name, CANARY);
+    await store.set(name, 'base-decoy');
+    await expect(resolvePiProviderSecret(profile('bearer'), profiles, () => store)).resolves.toBe(CANARY);
 
-    await expect(
-      resolvePiProviderSecret(profile('bearer'), () => new InMemorySecretStore()),
-    ).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
+    await expect(resolvePiProviderSecret(profile('bearer'), new InMemoryProviderProfileStore(), () => store))
+      .rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
   });
 
   it('passes an availability check error on only through the secret-store boundary (#2096)', async () => {
     const store = new InMemorySecretStore();
-    vi.spyOn(store, 'available').mockRejectedValueOnce(new ByokKeysError('PROVIDER_STORE_UNAVAILABLE', CANARY, { cause: new Error(CANARY) }));
-    const error = await resolvePiProviderSecret(profile('bearer'), () => store).catch((caught: unknown) => caught as Error);
+    const profiles = new InMemoryProviderProfileStore();
+    const scoped = observeProviderCredentials(store, profiles);
+    vi.spyOn(scoped, 'available').mockRejectedValueOnce(new ByokKeysError('PROVIDER_STORE_UNAVAILABLE', CANARY, { cause: new Error(CANARY) }));
+    const error = await resolvePiProviderSecret(profile('bearer'), profiles, () => store).catch((caught: unknown) => caught as Error);
     expect(error).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
     expect((error as Error).cause).toBeUndefined();
     expect(`${(error as Error).message} ${(error as Error).stack}`).not.toContain(CANARY);
@@ -283,9 +288,10 @@ describe('committed Pi spawn boundary', () => {
     ]);
     const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
     const store = new InMemorySecretStore();
-    await store.set(modelProviderSecretName('custom'), CANARY);
     const profiles = await profilesWith(provider);
-    return { root, projection, sessions, launch, options, provider, store, profiles };
+    const scoped = observeProviderCredentials(store, profiles);
+    await scoped.set(modelProviderSecretName('custom'), CANARY);
+    return { root, projection, sessions, launch, options, provider, store, scoped, profiles };
   }
 
   it('requires one launcher-owned digest and refuses delegated overrides', async () => {
@@ -442,8 +448,8 @@ describe('committed Pi spawn boundary', () => {
     const f = await fixture();
     try {
       const order: string[] = [];
-      const read = f.store.get.bind(f.store);
-      vi.spyOn(f.store, 'get').mockImplementation(async (name) => { order.push('secret'); return read(name); });
+      const read = f.scoped.get.bind(f.scoped);
+      vi.spyOn(f.scoped, 'get').mockImplementation(async (name) => { order.push('secret'); return read(name); });
       const child = new ChildProcess(); const send = vi.fn((_frame: unknown) => true); const kill = vi.spyOn(child,'kill').mockReturnValue(true);
       Object.assign(child, { connected: true, send });
       const spawn = vi.fn(() => {order.push('spawn'); return child;});
@@ -502,7 +508,7 @@ describe('committed Pi spawn boundary', () => {
     const f = await fixture();
     try {
       await f.profiles.markPending({ profileRef: 'custom', operation: 'configure', requestId: 'r1', requestDigest: `sha256:${'3'.repeat(64)}`, operationGeneration: 2, since: timestamps.created_at });
-      const get = vi.spyOn(f.store, 'get');
+      const get = vi.spyOn(f.scoped, 'get');
       const spawn = vi.fn(() => new ChildProcess());
       await expect(startPiProvider(f.provider, f.options, { ambient: {}, createSecretStore: () => f.store, spawn, profiles: f.profiles }))
         .rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_PENDING' });
@@ -708,9 +714,11 @@ describe('the prepared runtime entry spawn', () => {
       ]);
       const provider = parseModelProviderProfile({ ...profile('bearer'), pi_model: PI_MODEL_FIXTURE });
       const store = new InMemorySecretStore();
-      await store.set(modelProviderSecretName('custom'), CANARY);
+      const profiles = await profilesWith(provider);
+      const scoped = observeProviderCredentials(store, profiles);
+      await scoped.set(modelProviderSecretName('custom'), CANARY);
       const spawn = vi.fn(() => new ChildProcess());
-      const launched = await startPiProvider(provider, options, { ambient: { PATH: '/usr/bin' }, createSecretStore: () => store, spawn, profiles: await profilesWith(provider) });
+      const launched = await startPiProvider(provider, options, { ambient: { PATH: '/usr/bin' }, createSecretStore: () => store, spawn, profiles });
       const [command, args, spawnOptions] = spawn.mock.calls[0] as unknown as [string, string[], { cwd: string; env: Record<string, string> }];
       expect(command).toBe(launch.command);
       expect(args).toEqual([launch.entry, `--config-digest=${'a'.repeat(64)}`, '--config', configPath]);
@@ -725,7 +733,7 @@ describe('the prepared runtime entry spawn', () => {
       expect(await fs.readdir(projection)).toEqual([]);
       // Same slots and messages as the client spawn helper's case. LC_* and XDG_* ambient names pass through.
       const secret = 'fake-key\0tail';
-      vi.spyOn(store, 'get').mockResolvedValueOnce(secret); // a custom SecretStore; the built-in ones refuse NUL
+      vi.spyOn(scoped, 'get').mockResolvedValueOnce(secret); // a custom SecretStore; the built-in ones refuse NUL
       const carriesSecret = (value: unknown, depth = 0): boolean => typeof value === 'string' ? value.includes('fake-key')
         : depth < 5 && typeof value === 'object' && value !== null && Object.getOwnPropertyNames(value).some(key => carriesSecret((value as Record<string, unknown>)[key], depth + 1));
       for (const [input, ambient, message] of [[{}, {}, 'spawn env variable PI_PROVIDER_API_KEY contains a NUL byte'],
@@ -733,7 +741,7 @@ describe('the prepared runtime entry spawn', () => {
         [{ piCwd: `/sealed/${secret}` }, {}, 'spawn cwd contains a NUL byte'],
         [{}, { [`LC_${secret}`]: 'x' }, 'spawn env variable name contains a NUL byte']] as Array<[{ piBin?: string; piFixedArgs?: string[]; piCwd?: string }, Record<string, string>, string]>) {
         const spawnChild = vi.fn(nodeSpawn);
-        const error = await startPiProvider(provider, { ...options, ...input }, { ambient, createSecretStore: () => store, spawn: spawnChild, profiles: await profilesWith(provider) })
+        const error = await startPiProvider(provider, { ...options, ...input }, { ambient, createSecretStore: () => store, spawn: spawnChild, profiles })
           .then(() => undefined, (caught: Error) => caught);
         expect.soft(error?.message).toBe(message);
         expect.soft(carriesSecret(error)).toBe(false);

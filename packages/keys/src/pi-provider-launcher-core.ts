@@ -12,6 +12,7 @@ import {
   PI_LAUNCHER_RUNTIME_ENTRIES, PI_PROJECTED_KEY_ENV, assertPiLaunchArgs, buildPiPreparedArgs, buildPiProviderArgs,
   buildPiProviderProjection, piProjectionProviderId, type PiLauncherRuntimeEntry,
 } from './pi-provider-projection.js';
+import { bindProviderCredentialStore } from './provider-credential-store.js';
 import type { ProviderProfileStore } from './profile-store.js';
 import {
   ProviderModelCapabilitySchema,
@@ -288,11 +289,12 @@ export function assertPiPreparedProviderProfile(profile: ModelProviderProfile): 
  */
 export async function resolvePiProviderSecret(
   profile: ModelProviderProfile,
+  profiles: ProviderProfileStore,
   createStore: () => SecretStore,
 ): Promise<string | undefined> {
   if (profile.auth_mode === 'none') return undefined;
 
-  const secrets = createStore();
+  const secrets = bindProviderCredentialStore(createStore(), profiles.credentialNamespaceId);
   if (!(await secretStoreCall(() => secrets.available()))) {
     throw new ByokKeysError(
       'KEYCHAIN_UNAVAILABLE',
@@ -340,7 +342,7 @@ export async function readProviderCustodySnapshot(options: {
   return withConfigurationLock(options.profiles, async () => {
     const current = assertSameProfileRecord(await options.profiles.get(options.profile.profile_ref), options.profile);
     if ((await options.profiles.getPending(current.profile_ref)) !== undefined) throw configurationPendingError();
-    return resolvePiProviderSecret(current, options.createSecretStore);
+    return resolvePiProviderSecret(current, options.profiles, options.createSecretStore);
   });
 }
 
@@ -722,9 +724,10 @@ export async function ensurePiSessionDirectory(sessionDir: string): Promise<void
 /** What a host supplies to {@link runPiProviderLauncher}. */
 export interface PiProviderLauncherHost {
   /**
-   * Builds the credential store that holds the selected profile's key. The
-   * launcher calls it only for a profile that requires a credential, and only
-   * under the profile store's configuration lock. A host that stores keys with
+   * Builds the base credential store. The launcher adds the namespace of
+   * the database it opened. It calls the factory only for a profile that
+   * requires a credential and only under the store's configuration lock.
+   * A host that stores keys with
    * its own options (for example a `MacOsKeychainSecretStore` `storagePrefix`
    * or `account`) builds that store here. The parsed launcher options carry
    * `secretServicePrefix` and `macosKeychainPath` for the host to apply.

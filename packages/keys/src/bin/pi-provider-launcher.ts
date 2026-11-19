@@ -11,7 +11,7 @@ import {
 import { type SecretStore } from '../secret-store.js';
 import { WindowsCredentialManagerSecretStore } from '../windows-credential-manager.js';
 
-/** The bundled executable's store: the platform OS store with the default storage options. */
+/** The base OS credential store. The launcher adds the selected DB's namespace. */
 function createSecretStore(options: PiProviderLauncherOptions): SecretStore {
   switch (process.platform) {
     case 'darwin':

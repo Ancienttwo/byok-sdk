@@ -16,7 +16,8 @@ import { ProviderRegistry, type ProviderConfiguration } from './registry';
 import type { CommandRunner } from './command-runner';
 import { LinuxSecretServiceSecretStore } from './linux-secret-service';
 import { MacOsKeychainSecretStore } from './macos-keychain';
-import { InMemorySecretStore, type ModelProviderSecretName, modelProviderSecretName } from './secret-store';
+import { observeProviderCredentials } from './fixtures/observe-provider-credentials';
+import { InMemorySecretStore, type SecretStore, type ModelProviderSecretName, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore, providerConfigurationLockPath } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
@@ -42,6 +43,7 @@ let directory: string;
 let dbPath: string;
 let profiles: SqliteProviderProfileStore;
 let secrets: InMemorySecretStore;
+let credentials: SecretStore;
 let clock: number;
 
 const registry = () => new ProviderRegistry({ now: () => new Date(clock), profileStore: profiles, secretStore: secrets });
@@ -51,6 +53,7 @@ beforeEach(() => {
   dbPath = join(directory, 'provider-profile.sqlite');
   profiles = new SqliteProviderProfileStore({ path: dbPath });
   secrets = new InMemorySecretStore();
+  credentials = observeProviderCredentials(secrets, profiles);
   clock = Date.parse('2026-09-28T05:00:00.000Z');
 });
 
@@ -71,7 +74,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     expect(replaced.updated_at).toBe(configured.updated_at);
     expect(replaced).toEqual({ ...configured, secret_configured: true, configuration_pending: false });
     expect(await profiles.get('openai')).toEqual(profileBefore);
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+    await expect(credentials.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
 
     const statusText = JSON.stringify({ replaced, list: await registry().list() });
     expect(statusText).not.toContain(OLD_KEY);
@@ -95,7 +98,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(registry().replaceSecret('local', NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_NOT_ALLOWED' });
     await registry().configure(OPENAI, OLD_KEY);
     await expect(registry().replaceSecret('openai', '')).rejects.toMatchObject({ code: 'PROVIDER_SECRET_EMPTY' });
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    await expect(credentials.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
   });
 
   it('refuses an undefined replacement secret for an unauthenticated profile', async () => {
@@ -109,13 +112,13 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       await expect(registry().replaceSecret('openai', invalid)).rejects.toMatchObject({ code: 'SECRET_VALUE_INVALID' });
     }
     await expect(profiles.getPending('openai')).resolves.toBeUndefined();
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    await expect(credentials.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
   });
 
   it('a failed key write or commit restores the previous key and clears its own marker (#1946)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     const logged = [vi.spyOn(console, 'error'), vi.spyOn(console, 'warn'), vi.spyOn(console, 'log')];
-    vi.spyOn(secrets, 'set').mockImplementationOnce(async (_name, value) => { throw new Error(`refused ${value}`); });
+    vi.spyOn(credentials, 'set').mockImplementationOnce(async (_name, value) => { throw new Error(`refused ${value}`); });
     const writeError = await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error);
     expect(writeError).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
     expect((writeError as Error).cause).toBeUndefined();
@@ -123,7 +126,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toThrow('commit failed');
 
     await expect(profiles.getPending('openai')).resolves.toBeUndefined();
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    await expect(credentials.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
     await expect(registry().resolveDefaultModelProvider()).resolves.toBeDefined();
     const text = JSON.stringify([String(writeError), (writeError as Error).stack, logged.map((spy) => spy.mock.calls)]);
     expect(text).not.toContain(NEW_KEY);
@@ -132,10 +135,10 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
   it('passes on store errors only as a fixed message for a known code (#1946)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     const echo = (code: unknown, value: unknown) => new ByokKeysError(code as string, `echo ${String(value)} ${OLD_KEY}`);
-    const set = secrets.set.bind(secrets);
+    const set = credentials.set.bind(secrets);
     // A non-string code whose primitive form is a known code must not pass either.
     const failures: unknown[] = ['KEYCHAIN_WRITE_FAILED', 'STORE_DEFINED_CODE', `SECRET_${NEW_KEY}`, primitiveCode()];
-    vi.spyOn(secrets, 'set').mockImplementation(async (name, value) => {
+    vi.spyOn(credentials, 'set').mockImplementation(async (name, value) => {
       if (value === NEW_KEY && failures.length > 0) throw echo(failures.shift()!, value);
       return set(name, value);
     });
@@ -145,7 +148,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
       await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error),
     ];
-    vi.spyOn(secrets, 'has').mockRejectedValueOnce(echo('KEYCHAIN_UNAVAILABLE', NEW_KEY));
+    vi.spyOn(credentials, 'has').mockRejectedValueOnce(echo('KEYCHAIN_UNAVAILABLE', NEW_KEY));
     errors.push(await registry().configure({ ...OPENAI, model: 'gpt-5.2-mini' }).catch((error: unknown) => error));
     expect(errors.map((error) => (error as ByokKeysError).code)).toEqual(['KEYCHAIN_WRITE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'PROVIDER_SECRET_STORE_FAILED', 'KEYCHAIN_UNAVAILABLE']);
     expect(JSON.stringify(errors)).not.toContain('sk-fake');
@@ -155,18 +158,18 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
 
   it('keeps the marker when the restore fails or the change was already unfinished (#1946)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
-    vi.spyOn(secrets, 'set').mockImplementation(async (_name, value) => { throw new Error(`refused ${value}`); });
+    vi.spyOn(credentials, 'set').mockImplementation(async (_name, value) => { throw new Error(`refused ${value}`); });
     const rollbackError = await registry().replaceSecret('openai', NEW_KEY).catch((error: unknown) => error);
     expect(rollbackError).toMatchObject({ code: 'PROVIDER_SECRET_ROLLBACK_FAILED' });
     expect((rollbackError as Error).cause).toBeUndefined();
     expect(`${String(rollbackError)} ${(rollbackError as Error).stack}`).not.toMatch(new RegExp(`${OLD_KEY}|${NEW_KEY}`, 'u'));
     await expect(profiles.getPending('openai')).resolves.toMatchObject({ operation: 'replace_secret' });
-    vi.mocked(secrets.set).mockRestore();
+    vi.mocked(credentials.set).mockRestore();
 
     vi.spyOn(profiles, 'commitCustody').mockRejectedValueOnce(new Error('commit failed'));
     await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toThrow('commit failed');
     await expect(profiles.getPending('openai')).resolves.toBeDefined();
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    await expect(credentials.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
   });
 
   it('never overwrites an entry the SDK did not write, even when the commit would fail (#1946)', async () => {
@@ -227,19 +230,57 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
 
   it('a new key overwrites a previous entry the store cannot read (#1946)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
-    const corrupted = () => vi.spyOn(secrets, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_SECRET_CORRUPTED', 'undecodable'));
+    const corrupted = () => vi.spyOn(credentials, 'get').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_SECRET_CORRUPTED', 'undecodable'));
     corrupted();
-    vi.spyOn(secrets, 'set').mockRejectedValueOnce(new Error('store refused'));
+    vi.spyOn(credentials, 'set').mockRejectedValueOnce(new Error('store refused'));
     await expect(registry().replaceSecret('openai', NEW_KEY)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_ROLLBACK_FAILED' });
     await expect(profiles.getPending('openai')).resolves.toBeDefined();
 
     corrupted();
     await expect(registry().replaceSecret('openai', NEW_KEY)).resolves.toMatchObject({ configuration_pending: false });
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+    await expect(credentials.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
   });
 });
 
 describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'))('registry custody (A4, A8)', () => {
+  it.each(['delete', 'keyless', 'parallel deletes'] as const)('isolates %s across two databases sharing one base credential store', async (operation) => {
+    const other = new SqliteProviderProfileStore({ path: join(directory, 'other.sqlite') });
+    const base = new InMemorySecretStore<ModelProviderSecretName>();
+    const name = modelProviderSecretName('openai');
+    const first = new ProviderRegistry({ profileStore: profiles, secretStore: base });
+    const second = new ProviderRegistry({ profileStore: other, secretStore: base });
+    const firstCredentials = base.scope(profiles.credentialNamespaceId);
+    const secondCredentials = base.scope(other.credentialNamespaceId);
+    try {
+      await Promise.all([first.configure(OPENAI, OLD_KEY), second.configure(OPENAI, NEW_KEY)]);
+      await expect(base.get(name)).resolves.toBeUndefined();
+      await expect(firstCredentials.get(name)).resolves.toBe(OLD_KEY);
+      await expect(secondCredentials.get(name)).resolves.toBe(NEW_KEY);
+      await base.set(name, 'base-decoy');
+
+      if (operation === 'parallel deletes') {
+        await expect(Promise.all([first.delete('openai'), second.delete('openai')])).resolves.toEqual([true, true]);
+        await expect(second.get('openai')).resolves.toBeUndefined();
+        await expect(secondCredentials.get(name)).resolves.toBeUndefined();
+      } else {
+        if (operation === 'keyless') {
+          await expect(first.configure({ ...OPENAI, auth_mode: 'none', base_url: 'http://127.0.0.1:11434/v1', provider_kind: 'custom' }))
+            .resolves.toMatchObject({ secret_configured: false, auth_mode: 'none' });
+        } else {
+          await expect(first.delete('openai')).resolves.toBe(true);
+          await expect(first.get('openai')).resolves.toBeUndefined();
+        }
+        await expect(second.get('openai')).resolves.toMatchObject({ secret_configured: true });
+        await expect(second.resolveDefaultModelProvider()).resolves.toBeDefined();
+        await expect(secondCredentials.get(name)).resolves.toBe(NEW_KEY);
+      }
+      await expect(firstCredentials.get(name)).resolves.toBeUndefined();
+      await expect(base.get(name)).resolves.toBe('base-decoy');
+    } finally {
+      await other.close();
+    }
+  });
+
   it('every writer leaves no pending marker behind on success', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     await registry().replaceSecret('openai', NEW_KEY);
@@ -272,8 +313,8 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       return { release: async () => { held -= 1; await lock.release(); } };
     });
     const lockedReads: boolean[] = [];
-    const has = secrets.has.bind(secrets);
-    const hasSpy = vi.spyOn(secrets, 'has').mockImplementation(async (name) => { lockedReads.push(held === 1); return has(name); });
+    const has = credentials.has.bind(secrets);
+    const hasSpy = vi.spyOn(credentials, 'has').mockImplementation(async (name) => { lockedReads.push(held === 1); return has(name); });
     for (const read of [() => registry().get('openai'), () => registry().list(), () => registry().setDefaultModelProvider('openai')]) {
       lockedReads.length = 0;
       await read();
@@ -298,8 +339,10 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
   it('no public method passes on a store error that echoes a key (#2029)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
     const echo = async () => { throw new Error(`echo ${OLD_KEY}`, { cause: new Error(NEW_KEY) }); };
-    const echoing = Object.assign(Object.create(secrets) as InMemorySecretStore, { get: echo, has: echo, set: echo, delete: echo });
-    const subject = new ProviderRegistry({ now: () => new Date(clock), profileStore: profiles, secretStore: echoing });
+    for (const operation of ['get', 'has', 'set', 'delete'] as const) {
+      vi.spyOn(credentials, operation).mockImplementation(echo);
+    }
+    const subject = registry();
     const calls = [
       () => subject.get('openai'), () => subject.list(), () => subject.configure(OPENAI, NEW_KEY),
       () => subject.configure({ ...OPENAI, model: 'gpt-5.2-mini' }), () => subject.replaceSecret('openai', NEW_KEY),
@@ -326,7 +369,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
         return original(...args);
       }) as never);
     };
-    failAfterCommit(secrets, 'has');
+    failAfterCommit(credentials, 'has');
     failAfterCommit(profiles, 'get');
     failAfterCommit(profiles, 'getPending');
 
@@ -340,12 +383,12 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
 
   it('a failure after the commit rejects as PROVIDER_CHANGE_COMMITTED (#2023)', async () => {
     await registry().configure(OPENAI, OLD_KEY);
-    vi.spyOn(secrets, 'delete').mockRejectedValueOnce(new Error('store refused'));
+    vi.spyOn(credentials, 'delete').mockRejectedValueOnce(new Error('store refused'));
     const local = { ...OPENAI, auth_mode: 'none' as const, base_url: 'http://127.0.0.1:11434/v1', provider_kind: 'custom' as const };
     await expect(registry().configure(local)).rejects.toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
     await expect(profiles.get('openai')).resolves.toMatchObject({ auth_mode: 'none' });
     await expect(profiles.getPending('openai')).resolves.toBeUndefined();
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    await expect(credentials.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
     // The leftover key never follows the profile back to authentication.
     await expect(registry().configure({ ...OPENAI, base_url: 'https://elsewhere.example/v1' })).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
     await expect(registry().configure(OPENAI)).rejects.toMatchObject({ code: 'PROVIDER_SECRET_MISSING' });
@@ -376,7 +419,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     expect(unchecked).toMatchObject({ code: 'PROVIDER_CHANGE_COMMITTED' });
     expect((unchecked as Error).cause).toBeUndefined();
     expect(JSON.stringify([unchecked, (unchecked as Error).cause])).not.toContain('sk-fake');
-    await expect(secrets.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+    await expect(credentials.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
 
     // A lock connection that fails to close still frees the process-local lock.
     vi.spyOn(process.getBuiltinModule('node:sqlite').DatabaseSync.prototype, 'close').mockImplementationOnce(() => { throw new Error('close failed'); });
@@ -394,7 +437,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(registry().setDefaultModelProvider('other')).resolves.toMatchObject({ enabled: true });
     vi.mocked(profiles.get).mockRestore();
 
-    vi.spyOn(secrets, 'has').mockRejectedValueOnce(new Error('store refused'));
+    vi.spyOn(credentials, 'has').mockRejectedValueOnce(new Error('store refused'));
     await expect(registry().setDefaultModelProvider('missing')).rejects.toMatchObject({ code: 'PROVIDER_NOT_CONFIGURED' });
   });
 
@@ -417,7 +460,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     expect(markSpy).toHaveBeenCalledWith(expect.objectContaining({ operation: 'delete' }));
     await expect(profiles.get('openai')).resolves.toBeUndefined();
     await expect(profiles.getPending('openai')).resolves.toBeUndefined();
-    await expect(secrets.has(modelProviderSecretName('openai'))).resolves.toBe(false);
+    await expect(credentials.has(modelProviderSecretName('openai'))).resolves.toBe(false);
     await expect(profiles.getOperationWatermark('openai')).resolves.toBe(7);
   });
 
@@ -484,17 +527,16 @@ describe('launcher custody snapshot (A4)', () => {
     const { store, keys, subject, profile } = await setup();
     let releaseRead!: () => void;
     const gate = new Promise<void>((resolve) => { releaseRead = resolve; });
-    const slowKeys = Object.assign(Object.create(keys) as InMemorySecretStore, {
-      get: async (name: Parameters<InMemorySecretStore['get']>[0]) => { await gate; return keys.get(name); },
-      available: () => keys.available(),
-    });
-    const read = readProviderCustodySnapshot({ profiles: store, profile, createSecretStore: () => slowKeys });
+    const scoped = observeProviderCredentials(keys, store);
+    const get = scoped.get.bind(scoped);
+    vi.spyOn(scoped, 'get').mockImplementationOnce(async name => { await gate; return get(name); });
+    const read = readProviderCustodySnapshot({ profiles: store, profile, createSecretStore: () => keys });
     const write = subject.configure({ ...OPENAI, provider_kind: 'openrouter', base_url: 'https://openrouter.ai/api/v1' }, NEW_KEY);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    await expect(keys.get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
+    await expect(get(modelProviderSecretName('openai'))).resolves.toBe(OLD_KEY);
     releaseRead();
     await expect(read).resolves.toBe(OLD_KEY);
     await write;
-    await expect(keys.get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
+    await expect(get(modelProviderSecretName('openai'))).resolves.toBe(NEW_KEY);
   });
 });

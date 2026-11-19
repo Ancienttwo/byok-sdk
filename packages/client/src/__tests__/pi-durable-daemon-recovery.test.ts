@@ -223,15 +223,21 @@ it.skipIf(process.platform !== 'darwin')('real built keys launcher bin completes
 const __executionScratch = await testExecutionScratch();
 
   const {SqliteProviderProfileStore,parseModelProviderProfile,MacOsKeychainSecretStore,modelProviderSecretName}=await import('../../../keys/src/index');
-  const keychain = await createTestKeychain();
-  const servicePrefix=`byok-knife5-${randomUUID()}`;const secrets=new MacOsKeychainSecretStore({servicePrefix,keychainPath:keychain.path});const secretName=modelProviderSecretName('probe');
-  secretCleanup.push(async()=>{try { await secrets.delete(secretName); } finally { await keychain.dispose(); }});await secrets.set(secretName,SENTINEL);
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-real-bin-')));roots.push(root);
   const home=path.join(root,'home'),store=path.join(root,'store');await Promise.all([home,store].map(dir=>fs.mkdir(dir)));
   const headers:unknown[]=[];provider=createServer((req,res)=>{req.resume();req.on('end',()=>{headers.push(req.headers.authorization);reply(res,'real CLI result');});});
   await new Promise<void>(resolve=>provider!.listen(0,'127.0.0.1',resolve));const address=provider.address();if(!address||typeof address==='string')throw new Error('no port');
   const profilePath=path.join(root,'profiles.db');const profiles=new SqliteProviderProfileStore({path:profilePath});
   try{await profiles.save(parseModelProviderProfile({adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-03T00:00:00.000Z',updated_at:'2026-10-03T00:00:00.000Z',display_name:'OS custody fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}));}finally{await profiles.close();}
+  const keychain = await createTestKeychain();
+  const servicePrefix = `byok-test-2405-durable-${randomUUID()}`;
+  const secrets = new MacOsKeychainSecretStore({ servicePrefix, keychainPath: keychain.path })
+    .scope(profiles.credentialNamespaceId);
+  const secretName = modelProviderSecretName('probe');
+  secretCleanup.push(async () => {
+    try { await secrets.delete(secretName); } finally { await keychain.dispose(); }
+  });
+  await secrets.set(secretName, SENTINEL);
   const adapter=new PiAdapter({durableLane:true,byokLauncher:{command:process.execPath,args:[path.resolve(clientRoot,'../keys/dist/bin/pi-provider-launcher.js')],profileDbPath:profilePath,sessionDir:path.join(root,'sessions'),secretServicePrefix:servicePrefix,macosKeychainPath:keychain.path}});
   const selection={lane:'byok' as const,runtimeId:'pi' as const,providerId:'probe',modelId:'probe'};const prepared=await adapter.prepare({offer:{instruction:'real bin',target:selection}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
   const env=testRuntimeEnv();const launch=await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch, kind:'instruction',cwd:home,env,});

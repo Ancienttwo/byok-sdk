@@ -28,7 +28,8 @@ import { parseModelProviderProfile } from './provider-profile';
 import { exactProviderProfileBinding } from './provider-profile-binding';
 import { ProviderRegistry } from './registry';
 import { applySealedProviderProvisioning, type ApplySealedProviderProvisioningOptions } from './sealed-provisioning';
-import { InMemorySecretStore, modelProviderSecretName } from './secret-store';
+import { observeProviderCredentials } from './fixtures/observe-provider-credentials';
+import { InMemorySecretStore, type SecretStore, modelProviderSecretName } from './secret-store';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable } from './sqlite-support';
 
@@ -42,6 +43,7 @@ let directory: string;
 let dbPath: string;
 let profiles: SqliteProviderProfileStore;
 let secrets: InMemorySecretStore;
+let credentials: SecretStore;
 let sealingKey: DeviceSealingKey;
 let clock: Date;
 const thrown: unknown[] = [];
@@ -51,6 +53,7 @@ beforeEach(async () => {
   dbPath = join(directory, 'provider-profile.sqlite');
   profiles = new SqliteProviderProfileStore({ path: dbPath });
   secrets = new InMemorySecretStore();
+  credentials = observeProviderCredentials(secrets, profiles);
   sealingKey = await new DeviceSealingKeyStore({ secretStore: secrets }).loadOrCreate({ tenantId: TENANT, deviceId: DEVICE });
   clock = new Date(NOW);
   thrown.length = 0;
@@ -110,7 +113,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
         pi_model: PI_MODEL_FIXTURE,
         enabled: false,
       });
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(KEY_A);
       expect(result).toEqual({
         requestId: 'req-1',
         requestDigest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
@@ -134,7 +137,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
         expect(result).toMatchObject({ outcome: 'rejected', code: 'provider_kind_unsupported' });
       }
       await expect(profiles.get(PROFILE_REF)).resolves.toBeUndefined();
-      await expect(secrets.has(SECRET_NAME)).resolves.toBe(false);
+      await expect(credentials.has(SECRET_NAME)).resolves.toBe(false);
     });
 
     it('rejects an invalid pi_model and an unsupported capability', async () => {
@@ -142,7 +145,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       expect(await apply(badPi)).toMatchObject({ code: 'pi_model_invalid' });
       const badCapability = await configureRequest(sealingKey, KEY_A, { requestId: 'cap', generation: 2, capabilities: ['vision'] });
       expect(await apply(badCapability)).toMatchObject({ code: 'capabilities_invalid' });
-      await expect(secrets.has(SECRET_NAME)).resolves.toBe(false);
+      await expect(credentials.has(SECRET_NAME)).resolves.toBe(false);
     });
 
     it('requires the expected provider triple to match under the lock', async () => {
@@ -153,11 +156,11 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
         requestId: 'req-3', generation: 3, expected: { ...(await expectedOf()), profileRevision: '1' },
       });
       expect(await apply(wrong)).toMatchObject({ outcome: 'rejected', code: 'profile_changed' });
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(KEY_A);
       const right = await configureRequest(sealingKey, KEY_B, { requestId: 'req-4', generation: 4, expected: await expectedOf(), providerKind: 'openai', modelId: 'gpt-5.2' });
       expect(await apply(right)).toMatchObject({ outcome: 'applied' });
       await expect(profiles.get(PROFILE_REF)).resolves.toMatchObject({ provider_kind: 'openai', base_url: 'https://api.openai.com/v1' });
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_B);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(KEY_B);
     });
   });
 
@@ -196,12 +199,12 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     it('returns the stored result for the same request and rejects a different body under the same id', async () => {
       const request = await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 });
       const first = await apply(request);
-      const setSpy = vi.spyOn(secrets, 'set');
+      const setSpy = vi.spyOn(credentials, 'set');
       expect(await apply(request)).toEqual(first);
       expect(setSpy).not.toHaveBeenCalled();
       const sameId = await configureRequest(sealingKey, KEY_B, { requestId: 'req-1', generation: 1 });
       expect(await apply(sameId)).toMatchObject({ outcome: 'rejected', code: 'request_conflict' });
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(KEY_A);
     });
 
     // 257 real seal/open + custody commits (~0.6 s locally): an explicit budget so
@@ -217,7 +220,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       expect(await apply(first)).toMatchObject({ outcome: 'rejected', code: 'operation_generation_stale' });
       const lower = await replaceSecretRequest(sealingKey, KEY_B, { requestId: 'op-new', generation: 5, expected: await expectedOf() });
       expect(await apply(lower)).toMatchObject({ code: 'operation_generation_stale' });
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(KEY_A);
     }, 60_000);
 
     it('enforces 0 < ttl <= 15 min, bounded skew, and expiry; a rolled-back clock cannot revive an expired request', async () => {
@@ -237,7 +240,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       clock = new Date(NOW);
       expect(await apply(late)).toEqual(expired);
       await expect(profiles.get(PROFILE_REF)).resolves.toBeUndefined();
-      await expect(secrets.has(SECRET_NAME)).resolves.toBe(false);
+      await expect(credentials.has(SECRET_NAME)).resolves.toBe(false);
     });
 
     it('reads back an applied result after its deadline (applied, ACK late)', async () => {
@@ -257,7 +260,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       const after = await expectedOf();
       expect(after.profileRevision).not.toBe(before.profileRevision);
       expect(result.binding).toEqual({ ...after, modelId: 'glm-5.3' });
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(KEY_A);
     });
 
     it('refuses a different provider kind', async () => {
@@ -300,7 +303,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       expect(result).toMatchObject({ outcome: 'applied', binding: { ...expected, modelId: 'glm-5.3-flash' }, secretConfigured: true });
       expect(await profiles.get(PROFILE_REF)).toEqual(before);
       expect(await expectedOf()).toEqual(expected);
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_B);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(KEY_B);
     });
 
     it('refuses a key declared for a different provider kind or a missing profile', async () => {
@@ -308,7 +311,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       expect(await apply(await configureRequest(sealingKey, KEY_A, { requestId: 'req-2', generation: 2 }))).toMatchObject({ outcome: 'applied' });
       const result = await apply(await replaceSecretRequest(sealingKey, KEY_B, { requestId: 'r3', generation: 3, expected: await expectedOf(), providerKind: 'openai' }));
       expect(result).toMatchObject({ code: 'credential_scope_mismatch' });
-      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_A);
+      await expect(credentials.get(SECRET_NAME)).resolves.toBe(KEY_A);
     });
   });
 
@@ -319,16 +322,59 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       const result = await apply(await deleteRequest({ requestId: 'd1', generation: 2, expected: await expectedOf() }));
       expect(result).toMatchObject({ outcome: 'applied', binding: null, secretConfigured: false });
       await expect(profiles.get(PROFILE_REF)).resolves.toBeUndefined();
-      await expect(secrets.has(SECRET_NAME)).resolves.toBe(false);
+      await expect(credentials.has(SECRET_NAME)).resolves.toBe(false);
       const replay = await configureRequest(sealingKey, KEY_C, { requestId: 'old-2', generation: 2 });
       expect(await apply(replay)).toMatchObject({ code: 'operation_generation_stale' });
       const fresh = await configureRequest(sealingKey, KEY_C, { requestId: 'req-3', generation: 3 });
       expect(await apply(fresh)).toMatchObject({ outcome: 'applied' });
     });
 
-    it('treats deleting an absent profile with no expectation as applied', async () => {
-      expect(await apply(await deleteRequest({ requestId: 'd1', generation: 1 }))).toMatchObject({ outcome: 'applied', secretConfigured: false });
+    it('deletes only the target store’s credential and preserves the other store’s receipt', async () => {
+      const other = new SqliteProviderProfileStore({ path: join(directory, 'other.sqlite') });
+      try {
+        await configured();
+        await apply(await configureRequest(sealingKey, KEY_B, { requestId: 'req-1', generation: 1 }), { profileStore: other });
+        const otherReceipt = await other.getReceipt('req-1');
+        expect(otherReceipt?.result.outcome).toBe('applied');
+        const otherProfile = await other.get(PROFILE_REF);
+        await expect(secrets.get(SECRET_NAME)).resolves.toBeUndefined();
+        await secrets.set(SECRET_NAME, KEY_C);
+
+        expect(await apply(await deleteRequest({ requestId: 'isolated-delete', generation: 2, expected: await expectedOf() })))
+          .toMatchObject({ outcome: 'applied', secretConfigured: false });
+        expect((await profiles.getReceipt('isolated-delete'))?.result.outcome).toBe('applied');
+        await expect(credentials.get(SECRET_NAME)).resolves.toBeUndefined();
+        await expect(other.get(PROFILE_REF)).resolves.toEqual(otherProfile);
+        await expect(other.getReceipt('req-1')).resolves.toEqual(otherReceipt);
+        await expect(secrets.scope(other.credentialNamespaceId).get(SECRET_NAME)).resolves.toBe(KEY_B);
+        await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_C);
+      } finally {
+        await other.close();
+      }
     });
+
+    it('clears its own orphan key when deleting an absent profile', async () => {
+      await credentials.set(SECRET_NAME, KEY_A);
+      await secrets.set(SECRET_NAME, KEY_B);
+      expect(await apply(await deleteRequest({ requestId: 'd1', generation: 1 }))).toMatchObject({ outcome: 'applied', secretConfigured: false });
+      await expect(credentials.get(SECRET_NAME)).resolves.toBeUndefined();
+      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_B);
+    });
+  });
+
+  it('sanitizes scope failures before writing pending state, without losing the error code', async () => {
+    const failure = vi.spyOn(secrets, 'scope').mockImplementationOnce(() => { throw new Error(KEY_A, { cause: KEY_A }); });
+    const request = await configureRequest(sealingKey, KEY_A, { requestId: 'scope-failure', generation: 1 });
+    const error = await apply(request).catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED', message: 'Provider credential store operation failed' });
+    expect((error as Error).cause).toBeUndefined();
+    await expect(profiles.getPending(PROFILE_REF)).resolves.toBeUndefined();
+    await expect(profiles.getOperationWatermark(PROFILE_REF)).resolves.toBeUndefined();
+    expect(failure).toHaveBeenCalledExactlyOnceWith(profiles.credentialNamespaceId);
+    await expect(apply(request)).resolves.toMatchObject({ outcome: 'applied' });
+    failure.mockClear();
+    await expect(apply(request)).resolves.toMatchObject({ outcome: 'applied' });
+    expect(failure).not.toHaveBeenCalled();
   });
 
   describe('pending markers (D5)', () => {
@@ -337,7 +383,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
         profileRef: PROFILE_REF, operation: 'configure', requestId: request.header.requestId,
         requestDigest: await providerProvisioningRequestDigest(request), operationGeneration: request.header.operationGeneration, since: NOW,
       });
-      await secrets.set(SECRET_NAME, KEY_B);
+      await credentials.set(SECRET_NAME, KEY_B);
     }
 
     it('never auto-recovers: the same request, update_model and readers all refuse; a new key resolves it', async () => {
@@ -364,7 +410,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
 
     it('records a credential-store failure as secret_store_unavailable and keeps the marker', async () => {
       await configured();
-      vi.spyOn(secrets, 'set').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_WRITE_FAILED', `security: ${KEY_B} exit 45`));
+      vi.spyOn(credentials, 'set').mockRejectedValueOnce(new ByokKeysError('KEYCHAIN_WRITE_FAILED', `security: ${KEY_B} exit 45`));
       const result = await apply(await replaceSecretRequest(sealingKey, KEY_B, { requestId: 'r2', generation: 2, expected: await expectedOf() }));
       expect(result).toMatchObject({ outcome: 'rejected', code: 'secret_store_unavailable' });
       expect(JSON.stringify(result)).not.toContain('exit 45');
@@ -374,10 +420,10 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     it('passes a credential-store error on only through the shared boundary (#2051)', async () => {
       await configured();
       const echo = () => new ByokKeysError('KEYCHAIN_UNAVAILABLE', `secret-tool: ${KEY_A}`, { cause: new Error(KEY_A) });
-      vi.spyOn(secrets, 'has').mockRejectedValueOnce(echo());
+      vi.spyOn(credentials, 'has').mockRejectedValueOnce(echo());
       const updated = await apply(await updateModelRequest({ requestId: 'u1', generation: 2, expected: await expectedOf(), modelId: 'glm-5.3' }))
         .catch((thrown: unknown) => thrown as Error);
-      vi.spyOn(secrets, 'get').mockRejectedValueOnce(echo());
+      vi.spyOn(credentials, 'get').mockRejectedValueOnce(echo());
       const checked = await apply(await replaceSecretRequest(sealingKey, KEY_B, { requestId: 'r3', generation: 3, expected: await expectedOf() }), { keyCheck: { fetchImpl: vi.fn() } })
         .catch((thrown: unknown) => thrown as Error);
       for (const error of [updated, checked]) {
@@ -388,7 +434,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     });
 
     it('passes an availability check error on only through the shared boundary (#2096)', async () => {
-      vi.spyOn(secrets, 'available').mockRejectedValueOnce(new ByokKeysError('PROVIDER_STORE_UNAVAILABLE', KEY_A, { cause: new Error(KEY_A) }));
+      vi.spyOn(credentials, 'available').mockRejectedValueOnce(new ByokKeysError('PROVIDER_STORE_UNAVAILABLE', KEY_A, { cause: new Error(KEY_A) }));
       const error = await apply(await configureRequest(sealingKey, KEY_B, { requestId: 'req-1', generation: 1 }))
         .catch((thrown: unknown) => thrown as Error);
       expect(error).toMatchObject({ code: 'PROVIDER_SECRET_STORE_FAILED' });
@@ -397,7 +443,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     });
 
     it('rejects an unavailable credential store without a receipt, so the same request applies later (#2132)', async () => {
-      vi.spyOn(secrets, 'available').mockResolvedValueOnce(false);
+      vi.spyOn(credentials, 'available').mockResolvedValueOnce(false);
       const request = await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 });
       expect(await apply(request)).toMatchObject({ code: 'secret_store_unavailable' });
       await expect(profiles.getPending(PROFILE_REF)).resolves.toBeUndefined();
@@ -424,6 +470,20 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       expect(result.keyCheck).toBe(outcome);
       expect(fetchImpl).toHaveBeenCalledOnce();
       expect((await profiles.getReceipt('req-1'))?.result.keyCheck).toBe(outcome);
+    });
+
+    it('checks an update with its own credential even when the base scope holds the same name', async () => {
+      await configured();
+      await secrets.set(SECRET_NAME, KEY_B);
+      const fetchImpl = vi.fn(async () => response(200));
+      const result = await apply(await updateModelRequest({ requestId: 'u1', generation: 2, expected: await expectedOf(), modelId: 'glm-5.3' }), {
+        keyCheck: { fetchImpl },
+      });
+      expect(result).toMatchObject({ outcome: 'applied', secretConfigured: true, keyCheck: 'ok' });
+      expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.objectContaining({ headers: expect.anything() }));
+      const [, init] = fetchImpl.mock.calls[0] as unknown as [unknown, RequestInit];
+      expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${KEY_A}`);
+      await expect(secrets.get(SECRET_NAME)).resolves.toBe(KEY_B);
     });
 
     it('maps a network failure to unreachable and its own deadline to timeout', async () => {
@@ -465,7 +525,7 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       results.push(await apply(await configureRequest(sealingKey, KEY_A, { requestId: 'req-1', generation: 1 })));
       results.push(await apply(await replaceSecretRequest(sealingKey, KEY_B, { requestId: 'r2', generation: 2, expected: await expectedOf() })));
       results.push(await apply(await replaceSecretRequest(sealingKey, KEY_C, { requestId: 'r3', generation: 3 })));
-      vi.spyOn(secrets, 'set').mockRejectedValueOnce(new Error(`os said ${KEY_C}`));
+      vi.spyOn(credentials, 'set').mockRejectedValueOnce(new Error(`os said ${KEY_C}`));
       results.push(await apply(await replaceSecretRequest(sealingKey, KEY_C, { requestId: 'r4', generation: 4, expected: await expectedOf() })));
       const registry = new ProviderRegistry({ profileStore: profiles, secretStore: secrets });
       const statuses = JSON.stringify(await registry.list());
