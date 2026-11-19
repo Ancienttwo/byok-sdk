@@ -60,15 +60,16 @@ export function redactAcpRecord<T extends RawEvent>(
       && (value === "pending" || value === "in_progress" || value === "completed" || value === "failed" || value === "cancelled");
   });
   if (record.kind !== "frame" || safe.kind !== "frame") return safe;
-  if (toolUpdate) {
+  const fragment = update?.sessionUpdate;
+  if (toolUpdate || fragment === "usage_update") {
     const packet = asRecord(safe.body.native);
     const safeUpdate = packet === null ? null : directUpdate ? asRecord(packet.update) : childNotification?.(method.replace(/\/after_answer$/u, ""), packet)?.update ?? null;
     if (safeUpdate === null) {
-      return { ...safe, body: { ...safe.body, events: safe.body.events.filter(event => event.kind !== "tool_call_started"
-        && event.kind !== "tool_call_input" && event.kind !== "tool_call_progress" && event.kind !== "tool_call_ended") } };
+      const events = safe.body.events.filter(event => fragment === "usage_update" ? event.kind !== "usage"
+        : event.kind !== "tool_call_started" && event.kind !== "tool_call_input" && event.kind !== "tool_call_progress" && event.kind !== "tool_call_ended");
+      return { ...safe, body: { ...safe.body, events } };
     }
   }
-  const fragment = update?.sessionUpdate;
   if (credentials.hasProtectedValues() && (fragment === "agent_thought_chunk" || fragment === "user_message_chunk"
     || (fragment === "agent_message_chunk" && !record.body.events.some(event => event.kind === "text_delta")))) {
     const packet = asRecord(safe.body.native);

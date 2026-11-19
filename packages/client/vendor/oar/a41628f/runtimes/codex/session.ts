@@ -197,7 +197,9 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   if (method === "turn/completed" || method === "turn/started" || method === "thread/start" || method === "thread/resume"
     || method === "thread/fork" || method === "thread/started") {
     const snapshot = redactCodexSnapshot(originalNative, native, redact);
-    return snapshot === native ? safe : { ...safe, body: { ...safe.body, native: snapshot } };
+    if (snapshot !== native) return { ...safe, body: { ...safe.body, native: snapshot } };
+    if (native === null && (method === "thread/start" || method === "thread/resume")) return { ...safe, body: { ...safe.body, events: [] } };
+    return safe;
   }
   if (method.startsWith("thread/goal/") && asRecord(originalNative?.goal) !== null && asRecord(native?.goal) === null) {
     const events = safe.body.events.filter(event => event.kind !== "goal_changed");
@@ -478,10 +480,9 @@ async function openCodexSession(
     const withheldError = error !== null && (Object.getOwnPropertyNames(error).some(credentials.matches)
       || Object.getOwnPropertyNames(params).some(key => !isCodexNotificationKey(method, key) && credentials.matches(key)));
     let projectionParams = withheldItem ? { ...params, item: undefined } : withheldError ? { ...params, error: undefined } : params;
-    if (method === "thread/tokenUsage/updated") {
-      const usage = asRecord(asRecord(nativeRecord.body.native)?.tokenUsage);
-      projectionParams = { ...params, tokenUsage: usage };
-    }
+    const safeNative = asRecord(nativeRecord.body.native);
+    if (method === "thread/tokenUsage/updated") projectionParams = { ...params, tokenUsage: safeNative?.tokenUsage };
+    if (method === "account/rateLimits/updated") projectionParams = { ...params, rateLimits: safeNative?.rateLimits };
     const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, projectionParams);
     state.projection = nextProjection;
     const links = newSessionLinks(kernel, commands.flatMap((command) => command.kind === "link" ? [command.edge] : []));
