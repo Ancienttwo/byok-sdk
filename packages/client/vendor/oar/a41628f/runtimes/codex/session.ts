@@ -112,6 +112,8 @@ const codexNotificationFields: Readonly<Record<string, readonly string[]>> = {
   "turn/started": ["turn"], "turn/completed": ["turn"], "item/started": ["item"], "item/completed": ["item"],
   "item/agentMessage/delta": ["itemId", "delta"], "thread/tokenUsage/updated": ["tokenUsage"], error: ["error", "willRetry"],
 };
+const isCodexNotificationKey = (method: string, key: string): boolean => key === "threadId" || key === "turnId"
+  || codexNotificationFields[method]?.includes(key) === true;
 
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"], normalizedDraft = false): T {
   const itemType = record.kind === "frame" && (record.body.type === "item/started" || record.body.type === "item/completed")
@@ -134,7 +136,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
       && (value === "completed" || value === "interrupted" || value === "failed");
   }, (path, key) => {
     if (record.kind !== "frame" || !codexObservedMethods.has(record.body.type) || path[0] !== "body" || path[1] !== "native") return false;
-    return (path.length === 2 && (key === "threadId" || key === "turnId" || codexNotificationFields[record.body.type]?.includes(key)))
+    return (path.length === 2 && isCodexNotificationKey(record.body.type, key))
       || (path.length === 3 && path[2] === "turn" && (record.body.type === "turn/completed" || record.body.type === "turn/started") && codexTerminalFields.has(key))
       || (path.length === 3 && path[2] === "item" && itemFields !== undefined && (key === "id" || key === "type" || itemFields.includes(key)))
       || (record.body.type === "thread/tokenUsage/updated" && path[2] === "tokenUsage"
@@ -261,7 +263,7 @@ async function openCodexSession(
   // fold owns event translation, attribution and graph links; this owns the
   // transport-only turn id and the control decisions (busy, spontaneous).
   let lastNotifiedRootTurnId: string | undefined;
-  const draftTails = new Map<string, Map<string, string>>();
+  const draftTails = new Map<string, Map<string | undefined, Map<string, string>>>();
   const onNotification = (method: string, params: JsonRecord): void => {
     // BYOK change: Retain the exact native notification before any potentially throwing fold.
     // The record envelope's sessionId puts a foreign thread in the graph (observe/graph.ts); no out-of-band node.
@@ -272,37 +274,48 @@ async function openCodexSession(
     const turnId = method === "turn/completed" ? wireTurn : params.turnId;
     const activeTurn = state.codexTurnId ?? lastNotifiedRootTurnId;
     const byokStaleTurn = isRoot && typeof turnId === "string" && activeTurn !== undefined && turnId !== activeTurn;
-    if (!byokStaleTurn && (method === "turn/started" || method === "turn/completed")) draftTails.delete(notificationSession);
     const draftMethod = method === "item/agentMessage/delta";
     const streamedOutput = method === "item/commandExecution/outputDelta" || method === "item/fileChange/outputDelta"
       || method === "item/reasoning/summaryTextDelta" || method === "item/reasoning/textDelta";
     const draftTurn = typeof turnId === "string" ? turnId : isRoot ? activeTurn : undefined;
     const itemId = typeof params.itemId === "string" ? params.itemId : "";
     const threadTails = draftTails.get(notificationSession);
-    let draftTail: string | undefined;
-    if (method === "item/completed" && !byokStaleTurn) {
-      const item = asRecord(params.item);
-      if (typeof item?.id === "string") {
-        const key = JSON.stringify([draftTurn, item.id]);
-        const pending = threadTails?.get(key);
-        if (pending !== undefined && item.type === "agentMessage" && typeof item.text === "string" && item.text.endsWith(pending)) {
-          draftTail = pending;
-        }
-        threadTails?.delete(key);
-        if (threadTails?.size === 0) draftTails.delete(notificationSession);
-      }
+    const turnTails = threadTails?.get(draftTurn);
+    const pruneTail = (item: string): void => {
+      turnTails?.delete(item);
+      if (turnTails?.size === 0) threadTails?.delete(draftTurn);
+      if (threadTails?.size === 0) draftTails.delete(notificationSession);
+    };
+    if (method === "turn/completed" || method === "turn/started") {
+      const endedTurn = method === "turn/completed" ? draftTurn : undefined;
+      threadTails?.delete(endedTurn);
+      if (threadTails?.size === 0) draftTails.delete(notificationSession);
     }
-    if (credentials.hasProtectedValues() && typeof params.delta === "string" && (streamedOutput || (draftMethod && byokStaleTurn))) {
+    const withheld = (draftMethod || method === "item/completed")
+      && Object.getOwnPropertyNames(params).some(key => !isCodexNotificationKey(method, key) && credentials.matches(key));
+    const completedItem = method === "item/completed" ? asRecord(params.item) : null;
+    const withheldCompletion = completedItem?.type === "agentMessage" && (withheld || Object.getOwnPropertyNames(completedItem)
+      .some(key => key !== "id" && key !== "type" && key !== "text" && credentials.matches(key)));
+    let draftTail: string | undefined;
+    if (!byokStaleTurn && typeof completedItem?.id === "string") {
+      const pending = turnTails?.get(completedItem.id);
+      if (!withheldCompletion && pending !== undefined && completedItem.type === "agentMessage"
+        && typeof completedItem.text === "string" && completedItem.text.endsWith(pending)) {
+        draftTail = pending;
+      }
+      pruneTail(completedItem.id);
+    }
+    if (credentials.hasProtectedValues() && typeof params.delta === "string" && (streamedOutput || (draftMethod && (byokStaleTurn || withheld)))) {
+      if (withheld) pruneTail(itemId);
       const { delta: _omitted, ...rest } = params;
       params = rest;
     } else if (draftMethod && typeof params.delta === "string" && credentials.hasProtectedValues()) {
-      const tails = threadTails ?? new Map<string, string>();
-      const key = JSON.stringify([draftTurn, itemId]);
-      const { ready, pending } = credentials.redactChunk((tails.get(key) ?? "") + params.delta);
-      if (pending === "") tails.delete(key);
-      else tails.set(key, pending);
-      if (tails.size === 0) draftTails.delete(notificationSession);
-      else draftTails.set(notificationSession, tails);
+      const { ready, pending } = credentials.redactChunk((turnTails?.get(itemId) ?? "") + params.delta);
+      if (pending === "") pruneTail(itemId);
+      else {
+        const items = (turnTails ?? new Map()).set(itemId, pending);
+        draftTails.set(notificationSession, (threadTails ?? new Map()).set(draftTurn, items));
+      }
       params = { ...params, delta: ready };
     }
     // BYOK change: label native frames and anchor root and turn membership before redaction can change ids.
@@ -340,7 +353,8 @@ async function openCodexSession(
       state.spontaneous = false;
       state.codexTurnId = null;
     }
-    const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, params);
+    const projectionParams = withheldCompletion ? { ...params, item: undefined } : params;
+    const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, projectionParams);
     state.projection = nextProjection;
     const links = newSessionLinks(kernel, commands.flatMap((command) => command.kind === "link" ? [command.edge] : []));
     for (const command of commands) {
