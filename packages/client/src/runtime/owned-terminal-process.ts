@@ -46,7 +46,7 @@ export function createOwnedTerminalSpawn(deps: SpawnDependencies = {}) {
       child.once('error', (error: NodeJS.ErrnoException) => reject(spawnStartError(error)));
       child.once('spawn', () => {
         // Fail closed: a tree nothing owns is ended before the agent hears of it.
-        adoptOwnedProcessTree({ child, label: LABEL, platform: deps.platform, jobObject: deps.jobObject, nativeAssetRoot: deps.nativeAssetRoot })
+        adoptOwnedProcessTree({ child, label: LABEL, platform: deps.platform, jobObject: deps.jobObject, nativeAssetRoot: deps.nativeAssetRoot, boundOutputPipes: true })
           .then(resolve, (error: unknown) => { void dispose().catch(() => {}); reject(error); });
       });
     });

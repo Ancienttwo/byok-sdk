@@ -6,7 +6,7 @@
 // manifest assertion from. Since 0.28.2 keys carries that version too.
 // Manifest alignment stays owned by `check:release-graph`. This check proves
 // that `README.md` and `docs/spec.md` advertise the release train version
-// and that the Claude and Codex adapter pins follow the vendored OAR policy.
+// and that SDK runtime qualification follows the vendored OAR policy.
 //
 // A README train mention is `@byok-sdk/<name>@x.y.z` for any published
 // (non-private) workspace package, keys included, so the set of names is
@@ -21,7 +21,8 @@
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { qualifiedVersions } from '../ci/runtime-contract-install.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const defaultRoot = path.resolve(scriptDir, '..', '..');
@@ -126,26 +127,66 @@ function checkSpecPhrase(errors, relative, source, pattern, expected, label) {
   }
 }
 
-async function checkOarVersions(errors, root) {
+// OpenCode's two native lines have independent contract pins under one adapter.
+const OAR_RUNTIME_TO_SDK = Object.freeze({
+  'claude-aimock': 'claude',
+  'codex-aimock': 'codex',
+  'antigravity-aimock': 'agy',
+  'grok-aimock': 'grok',
+  'dsh-aimock': 'dsh',
+  'pi-rpc-minimum': 'pi',
+  'opencode-aimock': 'opencode1',
+  'opencode-cleanup': 'opencode2',
+});
+
+function versionParts(version) {
+  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version);
+  if (match === null) throw new Error(`invalid runtime version ${JSON.stringify(version)}`);
+  return { core: match.slice(1, 4).map(BigInt), prerelease: match[4]?.split('.') };
+}
+
+function isOlder(version, floor) {
+  const a = versionParts(version);
+  const b = versionParts(floor);
+  for (let index = 0; index < a.core.length; index++) {
+    if (a.core[index] !== b.core[index]) return a.core[index] < b.core[index];
+  }
+  if (a.prerelease === undefined) return false;
+  if (b.prerelease === undefined) return true;
+  for (let index = 0; index < a.prerelease.length; index++) {
+    const left = a.prerelease[index];
+    const right = b.prerelease[index];
+    if (right === undefined) return false;
+    if (left === right) continue;
+    const leftNumeric = /^\d+$/.test(left);
+    const rightNumeric = /^\d+$/.test(right);
+    if (leftNumeric && rightNumeric) return BigInt(left) < BigInt(right);
+    return leftNumeric !== rightNumeric ? leftNumeric : left < right;
+  }
+  return a.prerelease.length < b.prerelease.length;
+}
+
+export async function checkOarVersions(errors, root, mapping = OAR_RUNTIME_TO_SDK) {
   const vendor = 'packages/client/vendor/oar';
   const snapshots = readdirSync(path.join(root, vendor), { withFileTypes: true })
     .filter(entry => entry.isDirectory() && /^[a-f0-9]{7,40}$/.test(entry.name));
   if (snapshots.length !== 1) throw new Error(`${vendor}: expected one pinned OAR snapshot, found ${snapshots.length}`);
   const relative = `${vendor}/${snapshots[0].name}/.github/runtime-versions.json`;
   const { runtimes } = readJson(root, relative);
-
-  for (const [runtime, constant] of [['claude', 'QUALIFIED_CLAUDE_VERSION'], ['codex', 'QUALIFIED_CODEX_VERSION']]) {
-    const key = `${runtime}-aimock`;
+  const qualified = await qualifiedVersions(root);
+  const mapped = new Set(Object.values(mapping));
+  for (const runtime of Object.keys(qualified)) {
+    if (!mapped.has(runtime)) errors.push(`${runtime}: SDK qualified pin has no OAR runtime mapping`);
+  }
+  for (const [key, runtime] of Object.entries(mapping)) {
     const entry = runtimes?.[key];
-    if (typeof entry?.policy !== 'string') throw new Error(`${relative}: missing policy for ${key}`);
-    if (entry.policy !== 'accepted') continue;
-    if (typeof entry.version !== 'string' || entry.version.length === 0) {
-      throw new Error(`${relative}: ${key} version must be a non-empty string`);
+    if (typeof entry?.policy !== 'string') {
+      errors.push(`${relative}: missing policy for mapped OAR runtime ${key} (${runtime})`);
+      continue;
     }
-    const adapter = `packages/client/src/adapters/${runtime}/${runtime}-version.ts`;
-    const qualified = (await import(pathToFileURL(path.join(root, adapter)).href))[constant];
-    if (qualified !== entry.version) {
-      errors.push(`${adapter}: ${runtime} SDK qualified version ${qualified} differs from OAR accepted version ${entry.version} (${relative})`);
+    if (entry.policy !== 'accepted' && entry.policy !== 'minimum') continue;
+    if (isOlder(qualified[runtime], entry.version)) {
+      errors.push(`${runtime} SDK qualified version ${qualified[runtime]} is below OAR ${entry.policy} version ${entry.version} (${relative}: ${key})`);
     }
   }
 }
@@ -170,7 +211,7 @@ export async function run(argv, out = console) {
   out.log(
     `version-authority: README.md and docs/spec.md agree with the release train ${releaseVersion} (packages/core/package.json)`,
   );
-  out.log('version-authority: vendored OAR accepted version check passed for Claude and Codex');
+  out.log('version-authority: SDK qualified versions meet the mapped OAR accepted and minimum versions');
   return 0;
 }
 

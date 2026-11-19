@@ -2,6 +2,7 @@ import path from 'node:path';
 import { findRuntimeCommandOnPath, resolveRuntimeInvocation, runtimeInvocationHost } from '../adapters/runtime-invocation.js';
 import type { RuntimeAdapter } from '../types.js';
 import { sessionCredentialRedactor } from './claude-session-runtime.js';
+import { withQueryDeadline, type OwnQueryProcess } from './oar-process-tree.js';
 import { createOwnedLineProcessSpawn } from './owned-line-process.js';
 import type { ModelReader, OwnedReaderOptions, ReaderCommandOptions, ReaderCommandResult, UsageReader, VersionRefusal } from './oar-reader-contract.js';
 import type { RuntimeAccountUsage, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions } from './runtime-reader-types.js';
@@ -10,21 +11,26 @@ export const RUNTIME_READ_TIMEOUT_MS = 30_000;
 const MAX_OUTPUT_BYTES = 4 * 1024 * 1024;
 
 /** Bounds the whole query, including environment resolution and native startup. */
-export async function boundRuntimeRead<T>(caller: AbortSignal | undefined, query: (signal: AbortSignal, stopped: Promise<never>) => Promise<T>): Promise<T> {
-  const controller = new AbortController();
-  const signal = caller === undefined ? controller.signal : AbortSignal.any([caller, controller.signal]);
-  signal.throwIfAborted();
-  let rejectStopped!: (error: Error) => void;
-  const stopped = new Promise<never>((_, reject) => { rejectStopped = reject; });
-  const abort = () => rejectStopped(controller.signal.aborted ? new Error('runtime read timed out') : new Error('runtime read cancelled'));
-  signal.addEventListener('abort', abort, { once: true });
-  const timer = setTimeout(() => controller.abort(), RUNTIME_READ_TIMEOUT_MS);
-  timer.unref();
+export async function boundRuntimeRead<T>(caller: AbortSignal | undefined, query: (
+  signal: AbortSignal, stopped: Promise<never>, own: OwnQueryProcess,
+) => Promise<T>): Promise<T> {
+  caller?.throwIfAborted();
   try {
-    return await Promise.race([stopped, query(signal, stopped)]);
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener('abort', abort);
+    return await withQueryDeadline('runtime read', RUNTIME_READ_TIMEOUT_MS, async (signal, own) => {
+      const stopped = Promise.withResolvers<never>();
+      void stopped.promise.catch(() => {});
+      const abort = () => stopped.reject(signal.reason);
+      signal.addEventListener('abort', abort, { once: true });
+      try {
+        return await query(signal, stopped.promise, own);
+      } finally {
+        signal.removeEventListener('abort', abort);
+      }
+    }, undefined, caller);
+  } catch (error) {
+    if (caller?.aborted) throw new Error('runtime read cancelled');
+    if (error instanceof DOMException && error.name === 'TimeoutError') throw new Error('runtime read timed out');
+    throw error;
   }
 }
 
@@ -46,7 +52,7 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
   const read = <T>(options: RuntimeReadOptions, query: (
     installation: Parameters<ModelReader>[0], reader: OwnedReaderOptions, key: string | undefined,
     redactValue: <Value>(value: Value) => Value,
-  ) => Promise<T>, unsupported: (refusal?: VersionRefusal) => T) => boundRuntimeRead(options.signal, async (signal, stopped) => {
+  ) => Promise<T>, unsupported: (refusal?: VersionRefusal) => T) => boundRuntimeRead(options.signal, async (signal, stopped, own) => {
     const { env: base } = await adapter.runtimeEnvironment();
     signal.throwIfAborted();
     const { env, close } = await (config.environment?.(base) ?? { env: base });
@@ -56,45 +62,28 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
       for (const value of sessionCredentialRedactor({ env }).values()) redactor.add(value);
       if (config.credentialName !== undefined) redactor.add(base[config.credentialName]);
       const { redact } = redactor;
-      const children = new Set<ReturnType<typeof spawn>>();
-      const terminate = () => { for (const child of children) child.kill(); };
       const ownedSpawn: typeof spawn = (command, args, processOptions) => {
         signal.throwIfAborted();
         const invocation = resolveRuntimeInvocation(command, runtimeInvocationHost(processOptions.env));
-        const child = spawn(invocation.command, [...invocation.args, ...args], processOptions);
-        children.add(child);
-        const release = () => { children.delete(child); };
-        void child.exited.then(release, release);
-        if (signal.aborted) child.kill();
-        return child;
+        return own(spawn(invocation.command, [...invocation.args, ...args], processOptions));
       };
       async function run(command: string, args: readonly string[], commandOptions: ReaderCommandOptions): Promise<ReaderCommandResult> {
-        const commandSignal = commandOptions.signal;
-        commandSignal?.throwIfAborted();
-        const chunks = { stdout: [] as Buffer[], stderr: [] as Buffer[] };
-        let bytes = 0;
-        let overflow = false;
-        const child = ownedSpawn(command, args, { ...commandOptions, onOutput(stream, chunk) {
-          bytes += chunk.length;
-          if (bytes > MAX_OUTPUT_BYTES) { overflow = true; child.kill(); }
-          else chunks[stream].push(chunk);
-        } });
-        const stop = () => child.kill();
-        commandSignal?.addEventListener('abort', stop, { once: true });
-        const timer = setTimeout(stop, commandOptions.timeoutMs);
-        timer.unref();
-        try {
+        return withQueryDeadline('runtime reader command', commandOptions.timeoutMs, async (_signal, ownCommand) => {
+          const chunks = { stdout: [] as Buffer[], stderr: [] as Buffer[] };
+          let bytes = 0;
+          let overflow = false;
+          const child = ownCommand(ownedSpawn(command, args, { ...commandOptions, onOutput(stream, chunk) {
+            bytes += chunk.length;
+            if (bytes > MAX_OUTPUT_BYTES) { overflow = true; child.kill(); }
+            else chunks[stream].push(chunk);
+          } }));
           await child.spawned;
           const exitCode = await child.exited;
           if (overflow) throw new Error('runtime reader output exceeded its byte limit');
           if (!child.exitedOnItsOwn) throw new Error('runtime reader command did not complete');
           return { ok: exitCode === 0, exitCode, stdout: Buffer.concat(chunks.stdout).toString(), stderr: Buffer.concat(chunks.stderr).toString() };
-        } finally {
-          clearTimeout(timer);
-          commandSignal?.removeEventListener('abort', stop);
-        }
+        }, undefined, commandOptions.signal);
       }
-      signal.addEventListener('abort', terminate, { once: true });
       try {
         const command = config.command(base);
         const host = runtimeInvocationHost(env);
@@ -114,9 +103,6 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
         if (signal.aborted) throw error;
         // Native exception text/causes can also contain credentials from a runtime's own store.
         throw new Error('runtime reader failed');
-      } finally {
-        signal.removeEventListener('abort', terminate);
-        terminate();
       }
     } finally {
       await close?.();

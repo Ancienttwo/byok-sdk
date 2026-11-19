@@ -118,7 +118,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     child.stderr.on('error', fail);
     child.once('error', (error: NodeJS.ErrnoException) => fail(spawnStartError(error)));
     child.once('spawn', () => {
-      void adoptOwnedProcessTree({ child, label, platform: deps.platform, jobObject: deps.jobObject, nativeAssetRoot: deps.nativeAssetRoot }).then(() => {
+      void adoptOwnedProcessTree({ child, label, platform: deps.platform, jobObject: deps.jobObject, nativeAssetRoot: deps.nativeAssetRoot, boundOutputPipes: true }).then(() => {
         adopted = true;
         resolveSpawn();
         flush();

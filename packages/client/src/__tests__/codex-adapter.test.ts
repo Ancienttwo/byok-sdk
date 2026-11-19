@@ -24,7 +24,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/a122061/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/a41628f/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
 const fixture = fileURLToPath(
@@ -479,6 +479,17 @@ describe('Codex persistent app-server adapter', () => {
     );
     expect(out.some((e) => e.type === 'turn_end')).toBe(false);
   });
+  it('projects the reset of a native Codex account quota window', async () => {
+    const s = await open(adapter(), task, await ctx({
+      FAKE_CODEX_TURN_FAILS: '1',
+      FAKE_CODEX_ERROR_INFO: '"usageLimitExceeded"',
+      FAKE_CODEX_QUOTA_RESET_AT: '1795068000',
+    }));
+    await expect(turn(s)).rejects.toMatchObject({
+      phase: 'run', failure: { class: 'quota', resetsAt: '2026-11-19T06:00:00.000Z' },
+    });
+  });
+
   it('unexpected process exit closes the stream with a typed non-retryable run failure', async () => {
     const s = await open(
       adapter(),
@@ -508,6 +519,7 @@ describe('Codex persistent app-server adapter', () => {
     ['Anthropic limit wording', { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }, { class: 'unknown' }],
     ['an invalid_request_error type', { type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long' } }, { class: 'invalid_request' }],
     ['an error code', { error: { code: 'insufficient_quota', message: 'You exceeded your current quota.' } }, { class: 'quota' }],
+    ['a structured quota reset', { error: { type: 'usage_limit_reached', resets_at: 1795068000 } }, { class: 'quota', resetsAt: '2026-11-19T06:00:00.000Z' }],
   ] as const)('classifies codexErrorInfo other with %s from the body, sending unknown for a text rule (#869)', async (_label, body, failure) => {
     const message = JSON.stringify(body);
     const s = await open(adapter(), task, await ctx({

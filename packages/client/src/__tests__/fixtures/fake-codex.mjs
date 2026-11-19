@@ -312,6 +312,9 @@ async function runTurn(id, input) {
     },
   });
   if (process.env.FAKE_CODEX_TURN_FAILS === '1') {
+    if (process.env.FAKE_CODEX_QUOTA_RESET_AT) {
+      notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, resetsAt: Number(process.env.FAKE_CODEX_QUOTA_RESET_AT) } } });
+    }
     notify('error', {
       threadId,
       error: {

@@ -4,7 +4,7 @@ import { RuntimeDisposalFailure } from '../runtime-failure.js';
 import { resolveSystemTool } from '@byok-sdk/core/system-tool';
 import { walkTaskkillPidSet } from './taskkill-pid-set.js';
 // OAR 0.37.0 `shared/executable/process-tree.ts`, vendored with upstream bytes.
-import { descendantsOf, killEntries, parseProcessPs, readProcessTable, type ProcessEntry, type ProcessTable } from '../runtime/oar-process-tree.js';
+import { closePipesAfterExit, descendantsOf, killEntries, parseProcessPs, PIPE_CLOSE_MS, readProcessTable, type ProcessEntry, type ProcessTable } from '../runtime/oar-process-tree.js';
 import { killProcessGroupsUntilGone, processSignalState } from '../util/process-signal-state.js';
 
 const DEFAULT_TERM_GRACE_MS = 750;
@@ -36,6 +36,7 @@ interface OwnedTerminationState {
   requested: boolean;
   /** win32 only: the process ids `taskkill /T /F` reported walking. This set — not taskkill's exit status — is what disposal measures for quiescence. */
   acceptedPids: Set<number>;
+  boundOutputPipes?: true;
   /** POSIX only: the root's descendants seen while it ran (each observation, and the read just before the SIGTERM), those that left its group or its tree included, until they have had their SIGKILL. */
   descendants: readonly ProcessEntry[];
 }
@@ -304,6 +305,8 @@ export function attachOwnedProcessGroupLedger(ledger: OwnedProcessGroupLedger): 
 
 export interface AdoptOwnedProcessTreeOptions {
   nativeAssetRoot?: string;
+  /** OAR transports bound the wait for output pipes after the root exits. */
+  boundOutputPipes?: true;
   child: ChildProcess;
   label: string;
   /** DI seam — defaults to `process.platform`, mirroring {@link OwnedProcessTreeOptions}. */
@@ -402,7 +405,19 @@ export async function adoptOwnedProcessTree(options: AdoptOwnedProcessTreeOption
   options.child.once('exit', forget);
 
   if (platform !== 'win32') {
-    observeOwnedRoot(options.child, pid);
+    const { child } = options;
+    if (options.boundOutputPipes) {
+      const state = stateFor(child);
+      state.boundOutputPipes = true;
+      child.once('exit', () => {
+        void closePipesAfterExit(child, [
+          { name: 'stdout', stream: child.stdout }, { name: 'stderr', stream: child.stderr },
+        ], undefined, undefined, undefined, (_root, holders) => {
+          state.descendants = [...state.descendants, ...holders];
+        });
+      });
+    }
+    observeOwnedRoot(child, pid);
     await recordOwnedGroup(options.child, options.label, options.readProcessTableFn ?? readOwnedProcessTable);
     return;
   }
@@ -747,11 +762,12 @@ function groupExists(pid: number, label: string, kill: KillFn): boolean {
 }
 
 /** win32 counterpart of {@link groupExists} for one walked pid; EPERM carries the identical "taken by a live process" reading. */
-function processExists(pid: number, label: string, kill: KillFn): boolean {
+function processExists(pid: number, label: string, kill: KillFn, ignoreForeign = false): boolean {
   try {
     kill(pid, 0);
     return true;
   } catch (cause) {
+    if (ignoreForeign && (cause as NodeJS.ErrnoException).code === 'EPERM') return false;
     const state = processSignalState(cause);
     if (state === 'gone') return false;
     if (state === 'live') return true;
@@ -762,13 +778,18 @@ function processExists(pid: number, label: string, kill: KillFn): boolean {
   }
 }
 
-async function signalGroup(pid: number, signal: NodeJS.Signals, label: string, kill: KillFn, retry = false): Promise<void> {
+async function signalGroup(child: ChildProcess, pid: number, signal: NodeJS.Signals, label: string, kill: KillFn, retry = false): Promise<boolean> {
   try {
     kill(-pid, signal);
+    return true;
   } catch (cause) {
     const state = processSignalState(cause);
-    if (state === 'gone' || (state === 'live' && retry)) return;
-    if (state === 'live' && await waitUntil(() => processSignalState(cause, pid) !== 'gone', DEFAULT_KILL_GRACE_MS)) return;
+    if (state === 'gone') return false;
+    if (state === 'live') {
+      if (!isRunning(child)) return false;
+      if (retry) return true;
+      if (await waitUntil(() => isRunning(child) && processSignalState(cause, pid) !== 'gone', DEFAULT_KILL_GRACE_MS)) return false;
+    }
     const code = (cause as NodeJS.ErrnoException).code;
     throw new RuntimeDisposalFailure({
       stage: 'signal',
@@ -896,7 +917,7 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
     return;
   }
   rememberDescendants(options.child, pid, () => readDisposalTable(options));
-  await signalGroup(pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
+  await signalGroup(options.child, pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
   stateFor(options.child).requested = true;
 }
 
@@ -1016,21 +1037,22 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   }
 
   const readTable = (): ProcessTable => readDisposalTable(options);
-  if (groupExists(pid, options.label, kill) && !terminationState.get(options.child)?.requested) {
+  let groupReachable = groupExists(pid, options.label, kill);
+  if (groupReachable && !terminationState.get(options.child)?.requested) {
     rememberDescendants(options.child, pid, readTable);
-    await signalGroup(pid, 'SIGTERM', options.label, kill);
+    groupReachable = await signalGroup(options.child, pid, 'SIGTERM', options.label, kill);
     stateFor(options.child).requested = true;
   }
   const killed: number[] = [];
-  if (!(await waitUntil(() => groupExists(pid, options.label, kill), termGraceMs))) {
+  if (groupReachable && !(await waitUntil(() => groupExists(pid, options.label, kill), termGraceMs))) {
     // Read again first: the root may have started more since the SIGTERM.
     const table = readTable();
     const more = isRunning(options.child) ? descendantsOf(table, pid) : [];
-    await signalGroup(pid, 'SIGKILL', options.label, kill);
+    groupReachable = await signalGroup(options.child, pid, 'SIGKILL', options.label, kill);
     killed.push(...killDescendants(options.child, () => table, more));
     if (!(await killProcessGroupsUntilGone(
-      () => signalGroup(pid, 'SIGKILL', options.label, kill, true),
-      () => !groupExists(pid, options.label, kill),
+      async () => { groupReachable = await signalGroup(options.child, pid, 'SIGKILL', options.label, kill, true); },
+      () => !groupReachable || !groupExists(pid, options.label, kill),
       Date.now() + killGraceMs,
     ))) {
       throw new RuntimeDisposalFailure({
@@ -1039,19 +1061,21 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
       });
     }
   }
-  // The group is gone. What the root left running outside it, from the read
-  // before the SIGTERM, goes now (OAR does this when the root exits).
   killed.push(...killDescendants(options.child, readTable));
-  if (!(await waitUntil(() => killed.some((descendant) => processExists(descendant, options.label, kill)), killGraceMs))) {
-    throw new RuntimeDisposalFailure({
-      stage: 'quiescence',
-      reason: `${options.label} runtime descendants outside its process group remained live after SIGKILL`,
-    });
-  }
-  if (!(await waitWithDeadline(options.waitClosed(), killGraceMs))) {
+  // The group is gone or foreign. Once stdio closes, OAR has also reported
+  // any holders it observed, so include their identities in the final sweep.
+  const closeGrace = stateFor(options.child).boundOutputPipes ? PIPE_CLOSE_MS + killGraceMs : killGraceMs;
+  if (!(await waitWithDeadline(options.waitClosed(), closeGrace))) {
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
       reason: `${options.label} runtime root did not emit close after its process group exited`,
+    });
+  }
+  killed.push(...killDescendants(options.child, readTable));
+  if (!(await waitUntil(() => killed.some((descendant) => processExists(descendant, options.label, kill, true)), killGraceMs))) {
+    throw new RuntimeDisposalFailure({
+      stage: 'quiescence',
+      reason: `${options.label} runtime descendants outside its process group remained live after SIGKILL`,
     });
   }
   await forgetOwnedGroup(options.child);
