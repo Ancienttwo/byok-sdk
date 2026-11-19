@@ -338,8 +338,8 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     });
   });
 
-  it('status() reports running=false, determinate=true when launchctl print fails (not loaded), even though the plist file exists', async () => {
-    const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'Could not find service'));
+  it('status() confirms absence on launchctl print exit 113 even when the plist exists', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(ABSENT);
     const fs = installedFs();
     const lifecycle = createLaunchdLifecycle(def(), { run, fs, homedir: () => '/h', getuid: () => 501 });
 
@@ -347,6 +347,22 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
     expect(status.installed).toBe(true);
     expect(status.running).toBe(false);
     expect(status.determinate).toBe(true);
+  });
+
+  it('status() confirms a loaded, non-running service after a clean print', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(ok('state = waiting'));
+    const lifecycle = createLaunchdLifecycle(def(), { run, fs: installedFs(), homedir: () => '/h', getuid: () => 501 });
+    expect(await lifecycle.status()).toMatchObject({ installed: true, running: false, determinate: true, detail: 'state = waiting' });
+  });
+
+  it.each([
+    [37, 'Unexpected failure'],
+    [3, 'Could not find service'],
+    [113, 'Operation not permitted'],
+  ])('status() leaves launchctl print exit %d with %s indeterminate', async (code, stderr) => {
+    const run = vi.fn<Runner>().mockResolvedValue({ code, stdout: 'partial output', stderr });
+    const lifecycle = createLaunchdLifecycle(def(), { run, fs: installedFs(), homedir: () => '/h', getuid: () => 501 });
+    expect(await lifecycle.status()).toMatchObject({ installed: true, running: false, determinate: false, detail: `launchctl print failed (exit ${code}): ${stderr}` });
   });
 
   it('status() reports installed=false when no plist file exists on disk', async () => {

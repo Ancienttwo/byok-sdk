@@ -40,6 +40,10 @@ const SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE: readonly RegExp[] = [
   /interactive authentication required/i,
 ];
 
+/** `systemctl is-active` LSB exit codes. */
+const SYSTEMCTL_NOT_RUNNING = 3;
+const SYSTEMCTL_UNIT_NOT_FOUND = 4;
+
 /**
  * What `systemctl --user disable --now`/`systemctl --user stop` prints/exits
  * with when the unit isn't installed/loaded at all — as opposed to a
@@ -236,13 +240,18 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
     },
     async query() {
       const result = await run('systemctl', ['--user', 'is-active', unitName]);
-      const detail = (result.stdout || result.stderr).trim();
-      const running = result.code === 0 && detail === 'active';
-      // Finding P1 #2 (residual, round 3): a bus-connect/permission failure
-      // on THIS query is not evidence of "inactive"; see
-      // `service-types.ts`'s `ServiceStatusResult.determinate`.
-      const determinate = running || !SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
-      return { running, determinate, detail };
+      const state = result.stdout.trim();
+      const denied = SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
+      if (!denied) {
+        if (result.code === 0 && (state === 'active' || state === 'reloading' || state === 'refreshing')) {
+          return { running: true, determinate: true, detail: state };
+        }
+        if (result.code === SYSTEMCTL_UNIT_NOT_FOUND || (result.code === SYSTEMCTL_NOT_RUNNING && (state === 'inactive' || state === 'failed'))) {
+          return { running: false, determinate: true, detail: state || result.stderr.trim() };
+        }
+      }
+      const detail = (result.stderr || result.stdout).trim();
+      return { running: false, determinate: false, detail: `systemctl --user is-active failed (exit ${result.code})${detail ? `: ${detail}` : ''}` };
     },
   }, fs, gateRoot);
 }

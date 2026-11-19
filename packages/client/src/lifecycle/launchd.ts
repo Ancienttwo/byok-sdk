@@ -1,7 +1,7 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { runIdempotent, runOrThrow, type IdempotentAbsence, type RunResult, type Runner } from '../util/exec-runner.js';
 import { defaultRunner } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
@@ -74,6 +74,16 @@ export interface LaunchdDeps {
 
 /** `launchctl print`'s exit for a service the domain does not have (`Could not find service ...`). */
 const LAUNCHCTL_PRINT_ABSENT = 113;
+
+function launchctlPrintAbsent(result: RunResult): boolean {
+  // A domain or permission failure in either stream outweighs the absence code.
+  return result.code === LAUNCHCTL_PRINT_ABSENT
+    && !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
+}
+
+function launchctlPrintFailure(result: RunResult): string {
+  return `launchctl print failed (exit ${result.code}): ${(result.stderr || result.stdout).trim()}`;
+}
 
 /** How long a booted-out job may stay in the domain before `stop()` gives up with `service_unload_timeout`. */
 export const LAUNCHD_UNLOAD_TIMEOUT_MS = 10_000;
@@ -199,10 +209,8 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   async function loaded(): Promise<boolean> {
     const result = await run('launchctl', ['print', serviceTarget()]);
     if (result.code === 0) return true;
-    // Both streams: a permission failure on either one is never an absent job.
-    const output = `${result.stdout}\n${result.stderr}`;
-    if (result.code === LAUNCHCTL_PRINT_ABSENT && !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(output))) return false;
-    throw new Error(`launchctl print failed (exit ${result.code}): ${(result.stderr || result.stdout).trim()}`);
+    if (launchctlPrintAbsent(result)) return false;
+    throw new Error(launchctlPrintFailure(result));
   }
 
   /**
@@ -268,12 +276,9 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
     async query() {
       const result = await run('launchctl', ['print', serviceTarget()]);
       const detail = result.stdout || result.stderr;
-      const running = result.code === 0 && /\bstate\s*=\s*running\b/i.test(detail);
-      // Finding P1 #2 (residual, round 3): an unreachable GUI domain or a
-      // permission failure on THIS query is not evidence of "not running";
-      // see `service-types.ts`'s `ServiceStatusResult.determinate`.
-      const determinate = running || !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
-      return { running, determinate, detail };
+      if (result.code === 0) return { running: /\bstate\s*=\s*running\b/i.test(detail), determinate: true, detail };
+      if (launchctlPrintAbsent(result)) return { running: false, determinate: true, detail };
+      return { running: false, determinate: false, detail: launchctlPrintFailure(result) };
     },
   }, fs, gateRoot);
 }
