@@ -532,7 +532,8 @@ class CodexSession implements Session {
       const nativeFrame = record.body as { origin?: string; type?: string; native?: Record<string, unknown> };
       if (record.kind === 'frame' && nativeFrame.origin === 'byok-native' && nativeFrame.type && nativeFrame.native) this.native?.notification(nativeFrame.type, nativeFrame.native);
       const body = recordOf(record.body);
-      if (record.kind === 'frame' && record.sessionId === this.sessionRef && body?.type === 'turn/completed' && body.origin !== 'byok-native' && Array.isArray(body.events)) {
+      const rootRecord = typeof body?.byokRoot === 'boolean' ? body.byokRoot : record.sessionId === this.sessionRef;
+      if (record.kind === 'frame' && rootRecord && body?.type === 'turn/completed' && body.origin !== 'byok-native' && Array.isArray(body.events)) {
         const ended = body.events.map(recordOf).find(event => event?.kind === 'turn_ended');
         const outcome = recordOf(ended?.outcome);
         if (outcome === undefined) return;

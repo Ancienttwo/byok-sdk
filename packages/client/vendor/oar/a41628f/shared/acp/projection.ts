@@ -7,6 +7,7 @@ import type {
 import { asNumber, asRecord, type JsonRecord } from "../json.js";
 import { addTokens } from "../token-totals.js";
 import { toolContent } from "../tool-output.js";
+import type { ToolOutputPart } from "../../contracts/tool-output.js";
 import { AcpError } from "./errors.js";
 import { acpReportedEffort, acpReportedModel } from "./model.js";
 
@@ -77,6 +78,14 @@ export function acpToolProgressOutput(value: unknown): string | undefined {
   return text === undefined ? undefined : truncate(text);
 }
 
+export function acpToolTerminalContent(content: unknown, rawOutput: unknown): readonly ToolOutputPart[] | undefined {
+  const parts = toolContent(content, (item: unknown) => {
+    const wrapper = asRecord(item);
+    return wrapper?.type === "content" ? wrapper.content : item;
+  }) ?? toolContent(rawOutput);
+  return parts?.map(part => part.type === "text" ? { type: "text", text: truncate(part.text) } : part);
+}
+
 function toolName(update: JsonRecord): string {
   if (typeof update.name === "string") {
     return update.name;
@@ -140,11 +149,7 @@ function projectTool(state: AcpProjectionState, update: JsonRecord): RuntimeEven
     // `content` is what the runtime wants shown (grok's bash text; kimi's
     // terminal reference); each ToolCallContent wraps its ContentBlock as
     // `{type: "content", content}`. Without content, `rawOutput` is the result.
-    const unwrapped = toolContent(update.content, (item: unknown) => {
-      const wrapper = asRecord(item);
-      return wrapper?.type === "content" ? wrapper.content : item;
-    }) ?? toolContent(update.rawOutput);
-    const content = unwrapped?.map((part) => (part.type === "text" ? { type: "text" as const, text: truncate(part.text) } : part));
+    const content = acpToolTerminalContent(update.content, update.rawOutput);
     let result: "ok" | "failed" | undefined = undefined;
     if (update.status === "completed") {
       result = "ok";

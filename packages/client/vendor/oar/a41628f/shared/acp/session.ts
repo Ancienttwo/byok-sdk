@@ -29,7 +29,7 @@ import { acpLaunchArgs } from "./launch-args.js";
 import { startAcpProcess, type SpawnAcpLineProcess } from "./process.js";
 import { acpRequestTimeoutError } from "./errors.js";
 import { createAcpRecorder } from "./records.js";
-import { acpToolProgressOutput } from "./projection.js";
+import { acpToolProgressOutput, acpToolTerminalContent } from "./projection.js";
 import { createAcpTerminalHost, type SpawnAcpTerminal } from "./terminal.js";
 import { createAcpTurns, type ActiveTurn } from "./turns.js";
 import { acpTakesImages } from "./prompt.js";
@@ -55,18 +55,23 @@ export function redactAcpRecord<T extends RawEvent>(
     return toolUpdate && path.length === 4 && body === "body" && native === "native" && update === "update" && field === "status"
       && (value === "pending" || value === "in_progress" || value === "completed" || value === "failed" || value === "cancelled");
   });
-  if (!toolUpdate || safe.kind !== "frame" || update.rawOutput === undefined
-    || !safe.body.events.some(event => event.kind === "tool_call_progress")) return safe;
-  // The progress view formats structured output, sometimes truncating its JSON.
-  // Format the sanitized value so even a truncated view never contains the key.
-  const rawOutput: unknown = update.rawOutput;
-  const cleanOutput = credentials.redactValue(rawOutput);
-  if (rawOutput === cleanOutput) return safe;
-  const output = acpToolProgressOutput(cleanOutput);
+  if (!toolUpdate || safe.kind !== "frame") return safe;
+  const rawOutput = credentials.redactValue(update.rawOutput);
+  const content = credentials.redactValue(update.content);
+  if (rawOutput === update.rawOutput && content === update.content) return safe;
+  // Serialize and truncate output only after removing credentials from the full source.
   return { ...safe, body: { ...safe.body, events: safe.body.events.map(event => {
-    if (event.kind !== "tool_call_progress") return event;
-    const { output: _original, ...progress } = event;
-    return output === undefined ? progress : { ...progress, output };
+    if (event.kind === "tool_call_progress") {
+      const { output: _original, ...progress } = event;
+      const output = acpToolProgressOutput(rawOutput);
+      return output === undefined ? progress : { ...progress, output };
+    }
+    if (event.kind === "tool_call_ended") {
+      const { content: _original, ...ended } = event;
+      const output = acpToolTerminalContent(content, rawOutput);
+      return output === undefined ? ended : { ...ended, content: output };
+    }
+    return event;
   }) } };
 }
 

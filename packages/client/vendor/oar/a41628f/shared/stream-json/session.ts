@@ -67,10 +67,15 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
         if (field === "terminal_reason") return streamJsonAbortReasons.has(value);
       }
     }
-    if (path.length === 4 && field === "event" && group === "type") return streamJsonEventTypes.has(value);
-    if (path.length === 5 && field === "event" && group === "delta" && block === "type") return streamJsonDeltaTypes.has(value);
-    return path.length === 6 && field === "message" && group === "content" && typeof block === "number"
-      && member === "type" && streamJsonContentTypes.has(value);
+    const types = asRecord(record.body.native);
+    if (types?.type === "stream_event" && record.body.type === "stream_event") {
+      if (path.length === 4 && field === "event" && group === "type") return streamJsonEventTypes.has(value);
+      if (path.length === 5 && field === "event" && group === "delta" && block === "type") {
+        return asRecord(types.event)?.type === "content_block_delta" && streamJsonDeltaTypes.has(value);
+      }
+    }
+    return (types?.type === "assistant" || types?.type === "user") && path.length === 6 && field === "message"
+      && group === "content" && typeof block === "number" && member === "type" && streamJsonContentTypes.has(value);
   });
 }
 

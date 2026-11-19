@@ -447,7 +447,11 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (method === 'turn/interrupt') {
     if (process.env.FAKE_CODEX_LATE_INTERRUPT === '1') return;
     send({ id, result: {} });
-    if (active) complete(active, 'interrupted');
+    if (active && process.env.FAKE_CODEX_CHILD_COMPLETES_FIRST) {
+      const interrupted = active;
+      notify('turn/completed', { threadId: process.env.FAKE_CODEX_CHILD_COMPLETES_FIRST, turn: { id: interrupted, status: 'completed' } });
+      setTimeout(() => complete(interrupted, 'interrupted'), 50);
+    } else if (active) complete(active, 'interrupted');
     return;
   }
   send({ id, error: { code: -32601, message: 'unsupported fake method' } });

@@ -107,7 +107,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     if (body !== "body" || record.kind !== "frame") return false;
     if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native");
     if (path.length !== 4 || group !== "native") return false;
-    if (member === "item" && field === "type") return codexToolItemTypes.has(value);
+    if ((record.body.type === "item/started" || record.body.type === "item/completed") && member === "item" && field === "type") return codexToolItemTypes.has(value);
     return record.body.type === "turn/completed" && member === "turn" && field === "status"
       && (value === "completed" || value === "interrupted" || value === "failed");
   });
@@ -230,15 +230,15 @@ async function openCodexSession(
     // BYOK change: Retain the exact native notification before any potentially throwing fold.
     // The record envelope's sessionId puts a foreign thread in the graph (observe/graph.ts); no out-of-band node.
     const notificationSession = typeof params.threadId === "string" ? params.threadId : threadId;
-    // BYOK change: Structural extra metadata distinguishes native frames even when derived events are empty.
-    const nativeBody = { type: method, native: params, events: [], origin: "byok-native" } as const;
+    const isRoot = notificationSession === threadId;
+    // BYOK change: label native frames and anchor root membership before redaction can change ids.
+    const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot } as const;
     kernel.frame(nativeBody, {
       sessionId: notificationSession,
       ...(typeof params.turnId === "string" ? { spanId: params.turnId } : {}),
     });
     try {
     tasks.observe(method, params);
-    const isRoot = typeof params.threadId !== "string" || params.threadId === threadId;
     if (isRoot && method === "turn/started") {
       state.queuePausedAfterInterrupt = false;
       const startedTurn = asRecord(params.turn)?.id;
@@ -263,7 +263,8 @@ async function openCodexSession(
     for (const command of commands) {
       switch (command.kind) {
         case "frame":
-          kernel.frame({ ...command.body, events: [...command.body.events, ...links] }, {
+          const body = { ...command.body, events: [...command.body.events, ...links], byokRoot: isRoot };
+          kernel.frame(body, {
             ...(command.sessionId === undefined ? {} : { sessionId: command.sessionId }),
             ...(command.spanId === undefined ? {} : { spanId: command.spanId }),
           });

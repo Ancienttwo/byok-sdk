@@ -100,8 +100,8 @@ export class CodexProjection {
     const method = body.type;
     const sessionId =
       typeof params.threadId === 'string' ? params.threadId : input.sessionId;
-    const isRoot =
-      sessionId === this.rootThreadId && input.agentPath.length === 0;
+    const isRoot = input.agentPath.length === 0 && (typeof body.byokRoot === 'boolean'
+      ? body.byokRoot : sessionId === this.rootThreadId);
     // Child terminal/usage cannot complete or charge the parent; child tool identities are qualified below.
     if (
       !isRoot &&

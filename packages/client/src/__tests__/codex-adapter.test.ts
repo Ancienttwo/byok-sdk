@@ -620,6 +620,21 @@ describe('Codex persistent app-server adapter', () => {
       }),
     );
   });
+  it('settles an interrupt from the root when redacted root and child IDs coincide', async () => {
+    const first = 'synthetic-root-api-key';
+    const second = 'synthetic-child-api-key';
+    const resources = await ctx({
+      OPENAI_API_KEY: first, FIXTURE_TOKEN: second, FAKE_CODEX_HANG: '1',
+      FAKE_CODEX_THREAD_ID: `fixture-${first}`, FAKE_CODEX_CHILD_COMPLETES_FIRST: `fixture-${second}`,
+    });
+    const session = await open(adapter(), task, resources);
+    const events = session.events[Symbol.asyncIterator]();
+    expect((await events.next()).value).toMatchObject({ type: 'tool_use' });
+    await session.interrupt();
+    expect((await events.next()).value).toMatchObject({ type: 'tool_result', output: { status: 'interrupted' } });
+    expect((await events.next()).value).toEqual({ type: 'turn_end' });
+    await events.return?.();
+  });
   it.skipIf(process.platform === 'win32')('reaps the aborted turn child and keeps the attached stdio MCP process for follow-up', async () => {
     const resources = await ctx();
     const receipt = path.join(resources.workspaceDir, 'turn-processes.json');
