@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `0e0933d43e9292024f13dc9471ee5e12a8943a9c` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `1f26f23d14e9734eed450d62aebb5237aa28af18` (the manifest's `fork`).
 
 For #2380, `cff0aa94` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
@@ -150,39 +150,7 @@ All 44 branch deltas from `byok/0.120.0` through `7eb600dc99581a4633c4a0a22a5167
 | New | `5a5e3e47` | Keep native executable launching outside process-table diagnostics |
 | `b63f52ac` | `6979077e` | Register caller-resolved credentials and redact decoded values before retaining native or derived records |
 
-`e3649ff7` extends the decoded-value boundary to duplicate object members and incomplete dsh argument fragments. It checks the native root route before redacting observer records.
-
-`dbce96f5` applies the same content boundary to Claude, ACP and Codex projected tool inputs. It withholds partial Claude JSON deltas and preserves typed record discriminators.
-
-`44db63b0` formats ACP progress from sanitized raw output and limits enum preservation to the runtime fields that provide authoritative evidence.
-
-`a3fbb40b` derives Codex root membership from native identities before redaction, scopes runtime enums to their owning frames and formats ACP terminal output from sanitized values before truncation.
-
-`846e5e91` keeps native identities for transport control while redacting record IDs, extends root attribution to ACP and dsh, and withholds argument fragments for image-only sessions.
-
-`d9b011be` redacts ACP text spanning multiple chunks, preserves schema-owned dsh and Codex keys and keeps stale Codex completion frames from changing the active turn.
-
-`505b2f9f` redacts assembled dsh text and streamed Codex and Claude drafts before delivery. Codex also uses the accepted turn ID for stale completion checks, and OpenCode flushes withheld text when a child ends.
-
-`b5ce9818` protects Claude assistant prose across durable blocks and frames while preserving structural keys on terminal results.
-
-`6faba6e9` withholds incomplete dsh text and reasoning and preserves sanitized Claude terminal evidence when an opaque key causes the native result to be withheld.
-
-`4ce64048` preserves Claude message boundaries and charges retained terminal fallbacks to the existing budget. Codex carries its native terminal status even when opaque data is withheld.
-
-`033df01d` extends stream protection to Codex child drafts, tool-output fragments, and ACP reasoning. Codex reports its MCP name constraint without embedding a rejected value.
-
-`dea1f13f` withholds native-only ACP child fragments and preserves declared Codex counter keys.
-
-`26860be4` extends the typed metering projection to native Claude usage and Codex cache-write counters.
-
-`ff77a94e` narrows Codex structural keys to the owning notifications and preserves the Claude context-window and tool-result identification fields at their typed paths.
-
-`668ce980` protects typed Claude message envelopes and projected context counts. Codex applies item fields by native item variant.
-
-`9733288a` keeps the Claude projected context exception on the stream-JSON runtime boundary.
-
-`0e0933d4` relays Claude cancellation by native ID, restores completed Codex suffixes, and preserves dsh context usage keys.
+`1f26f23d` is the final net delta above `6979077e`. It redacts complete encoded tool inputs and assembled text, withholds incomplete argument, reasoning and tool-output fragments, and bounds the retained terminal payload. Native control IDs and typed terminal facts remain available to the adapters through their private transport boundary. Protocol key exceptions apply only to the variant that owns the field.
 
 The decoded-value credential boundary supersedes `82ccb2f2`, `73743394`, `bd8fa0c7`, `7c194335` and `e9e50220`. It preserves JSON literals and unchanged encoded arguments, withholds credential-bearing maps and derives dsh tool input from sanitized native arguments.
 
