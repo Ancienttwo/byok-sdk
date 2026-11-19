@@ -59,9 +59,8 @@ async function queryRecordedService(
       return { running: current.running, determinate: current.running };
     }
     case 'linux': {
-      const current = await querySystemdService(service, deps);
-      const local = registration?.manager === 'systemd' && systemdLocalUserUid(deps.getuid) === registration.uid;
-      return { running: current.running, determinate: (local && current.determinate) || current.running };
+      if (registration?.manager !== 'systemd' || systemdLocalUserUid(deps.getuid) !== registration.uid) return undefined;
+      return querySystemdService(service, deps);
     }
     case 'win32': {
       if (registration?.manager === 'winsw') return queryWinswService(service, deps);

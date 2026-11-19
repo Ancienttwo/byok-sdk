@@ -172,10 +172,11 @@ describe('inspectStoreServiceState (#2421)', () => {
     expect(await inspectStoreServiceStateWith(storeDir, 'darwin', { run, getuid: () => 999 })).toEqual({ state: 'unknown', owner });
   }));
 
-  it('leaves an absent systemd unit unknown in a different user namespace', () => withStore(async storeDir => {
+  it('never queries a different systemd user namespace for a recorded service', () => withStore(async storeDir => {
     await claim(storeDir, { manager: 'systemd', uid: 501 });
-    const run = vi.fn<Runner>().mockResolvedValue({ code: 4, stdout: 'inactive', stderr: '' });
+    const run = vi.fn<Runner>().mockResolvedValue({ code: 0, stdout: 'active', stderr: '' });
     expect(await inspectStoreServiceStateWith(storeDir, 'linux', { run, getuid: () => 999 })).toEqual({ state: 'unknown', owner });
+    expect(run).not.toHaveBeenCalled();
   }));
 
   it.skipIf(process.platform === 'win32')('does not follow a service owner record symlink', () => withStore(async storeDir => {
