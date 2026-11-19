@@ -11,6 +11,7 @@ import { createTestKeychain } from '../../../scripts/testing/macos-keychain.mjs'
 import type { CommandResult } from './command-runner';
 import { parseModelProviderProfile, type ModelProviderProfileInput } from './provider-profile';
 import { exactProviderProfileBinding } from './provider-profile-binding';
+import { MODEL_PROVIDER_VENDORS } from './provider-catalog';
 import { PI_MODEL_FIXTURE } from './fixtures/pi-model-config';
 import { MacOsKeychainSecretStore } from './macos-keychain';
 import { LinuxSecretServiceSecretStore } from './linux-secret-service';
@@ -238,6 +239,22 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
     await expect(runPiProviderLauncher({ ...options, modelId: 'amazon/nova-pro-v1',
       expectedBinding: exactProviderProfileBinding(f.profile) }, host)).resolves.toBe(CHILD_EXIT_CODE);
     expect(await readInput()).toEqual(['text', 'image']);
+  });
+
+  it.each([
+    ['anthropic', 'claude-sonnet-4-6', undefined],
+    ['openai', 'gpt-5.2', 'openai-responses'],
+  ] as const)('admits image input for %s/%s with saved Pi settings', async (provider_kind, modelId, api) => {
+    const { adapter, auth_mode, base_url } = MODEL_PROVIDER_VENDORS[provider_kind];
+    const f = await fixture({ provider_kind, adapter, auth_mode, base_url,
+      pi_model: { ...PI_MODEL_FIXTURE, api, compat: {} } });
+    const createSecretStore = vi.fn(() => hostKeychain(HOST_PREFIX).store);
+    const expectedBinding = exactProviderProfileBinding(f.profile, ['image-input']);
+    await expect(runPiProviderLauncher({ ...f.validate(), modelId, expectedBinding }, { createSecretStore })).resolves.toBe(0);
+    expect(createSecretStore).not.toHaveBeenCalled();
+    await expect(runPiProviderLauncher({ ...f.launch(), modelId, expectedBinding }, { createSecretStore })).resolves.toBe(CHILD_EXIT_CODE);
+    expect((await f.childOutput()).models.providers['byok-sdk-local']?.models[0])
+      .toMatchObject({ id: modelId, input: ['text', 'image'] });
   });
 
   it('refuses an invalid database identity at admission before the host store is built', async () => {

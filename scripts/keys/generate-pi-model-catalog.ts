@@ -75,12 +75,14 @@ export async function renderPiModelCatalog(): Promise<string> {
       .sort((left, right) => compareCodeUnits(String(left.id), String(right.id)));
     for (const model of models) {
       const api = String(model.api);
-      const entry = classifyPiCatalogModel(model, adapter);
-      const line = `      ${JSON.stringify(model.id)}: ${JSON.stringify(entry)},`;
-      byApi.set(api, [...(byApi.get(api) ?? []), line]);
-      if ('input' in entry && entry.input.includes('image')) {
-        ((imageModels[provider] ??= {})[api] ??= []).push(String(model.id));
+      const modelId = String(model.id);
+      // Overrides keep the saved Pi settings and only need the model's input modalities.
+      if (Array.isArray(model.input) && model.input.includes('image')) {
+        ((imageModels[provider] ??= {})[api] ??= []).push(modelId);
       }
+      const entry = classifyPiCatalogModel(model, adapter);
+      const line = `      ${JSON.stringify(modelId)}: ${JSON.stringify(entry)},`;
+      byApi.set(api, [...(byApi.get(api) ?? []), line]);
     }
     if (byApi.size === 0) continue;
     providerLines.push(`  ${JSON.stringify(provider)}: {`);
@@ -107,7 +109,7 @@ export async function renderPiModelCatalog(): Promise<string> {
     ...providerLines,
     '};',
     '',
-    '/** Image-capable entries from the same catalog, projected for the credential launcher. */',
+    '/** Image input declared by the pinned Pi catalog for each provider and API. */',
     'export const PI_CATALOG_IMAGE_MODELS: Readonly<Record<string, Readonly<Partial<Record<PiModelApi, readonly string[]>>>>> = {',
     ...Object.entries(imageModels).map(([provider, apis]) => `  ${JSON.stringify(provider)}: ${JSON.stringify(apis)},`),
     '};',
