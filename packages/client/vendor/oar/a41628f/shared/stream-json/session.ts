@@ -47,6 +47,7 @@ const streamJsonDeltaTypes = new Set(["text_delta", "thinking_delta", "input_jso
 const streamJsonResultTypes = new Set(["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]);
 const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
 const streamJsonContextFields = new Set(["tokens", "contextWindow", "percent"]);
+const streamJsonDraftEnvelope = new Set(["type", "event", "session_id", "parent_tool_use_id", "api_message_id", "uuid"]);
 const streamJsonAssistantEnvelope = new Set(["type", "message", "session_id", "parent_tool_use_id", "uuid", "error", "isReplay", "tool_use_result"]);
 const streamJsonToolResultFields = new Set(["type", "tool_use_id", "is_error", "content"]);
 const streamJsonUsageFields = new Set(["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens", "server_tool_use", "cache_creation"]);
@@ -85,7 +86,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
         const previous = textTails.assistant.get(lane);
         if (previous !== undefined) terminalText = { text: credentials.redact(previous), continues: currentMessage?.published === true };
         textTails.assistant.delete(lane);
-        textTails.projected.delete(lane);
+        if (currentMessage !== undefined) textTails.projected.delete(lane);
       }
       const content = message.content.map((block: unknown) => {
         const part = asRecord(block);
@@ -118,11 +119,12 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
       else tails.set(event.index, pending);
       if (tails.size === 0) draftTails.delete(lane);
       else draftTails.set(lane, tails);
-      if (ready !== delta.text) {
-        const events = record.body.events.flatMap<RuntimeEventBody>(projected => projected.kind !== "text_delta" ? [projected]
-          : ready === "" ? [] : [{ ...projected, text: ready }]);
-        safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, [fragmentField]: { ...delta, text: ready } } }, events } };
-      }
+      const events = record.body.events.flatMap<RuntimeEventBody>(projected => {
+        if (projected.kind !== "text_delta") return [projected];
+        const text = textTails === undefined ? ready : redactTextPart(textTails.projected, lane, projected.text, credentials);
+        return text === "" ? [] : [{ ...projected, text }];
+      });
+      safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, [fragmentField]: { ...delta, text: ready } } }, events } };
     }
     if ((isStart && delta?.type === "thinking") || (event?.type === "content_block_delta" && delta?.type === "thinking_delta")) {
       const { thinking: _omitted, ...rest } = delta;
@@ -159,6 +161,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
     if (body === "body" && nativeKey === "events" && typeof section === "number" && entry === "usage" && index === "context"
       && path.length === 5 && record.kind === "frame" && record.body.events[section]?.kind === "usage") return streamJsonContextFields.has(key);
     if (body !== "body" || nativeKey !== "native") return false;
+    if (native?.type === "stream_event" && path.length === 2 && streamJsonDraftEnvelope.has(key)) return true;
     if (native?.type === "assistant" || native?.type === "user") {
       if (path.length === 2 && streamJsonAssistantEnvelope.has(key)) return true;
       if (path.length === 3 && section === "message" && (key === "id" || key === "role" || key === "content" || key === "model" || key === "usage")) return true;
@@ -182,14 +185,19 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   if (redacted.kind !== "frame") return redacted;
   if (textTails !== undefined && assistantTails !== undefined && native?.type === "result") {
     draftTails?.delete(lane);
+    const projectedTail = textTails.projected.get(lane);
     textTails.projected.delete(lane);
+    if (projectedTail !== undefined) {
+      redacted = { ...redacted, body: { ...redacted.body,
+        events: [{ kind: "text_delta", text: credentials.redact(projectedTail) }, ...redacted.body.events] } };
+    }
     const tail = assistantTails.get(lane);
     const message = textTails.messages.get(lane);
     assistantTails.delete(lane);
     textTails.messages.delete(lane);
     if (tail !== undefined) terminalText = { text: credentials.redact(tail), continues: message?.published === true };
   }
-  if (terminalText === undefined) return redacted;
+  if (terminalText === undefined || redacted.kind !== "frame") return redacted;
   const body = { ...redacted.body, byokTextTail: terminalText };
   return { ...redacted, body };
 }

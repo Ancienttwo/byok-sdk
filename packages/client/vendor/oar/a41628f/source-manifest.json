@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.121.0",
-    "commit": "1f26f23d14e9734eed450d62aebb5237aa28af18"
+    "commit": "cd87fdc1113d242ad83ec4d420b9ab834adbc146"
   },
   "release": {
     "ecosystem": "npm",
@@ -1223,7 +1223,7 @@
       "path": "shared/stream-json/session.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/session.ts",
       "upstreamSha256": "4e2ec5c6d575ffaa1c976a1580b9cfbdf9058e2c0f51da29abd689ea148fbc7b",
-      "vendoredSha256": "6b64e634b2a2ea7452f8425e9b79922de2559de81a6303366c2c86678d3b29c0",
+      "vendoredSha256": "4ad1560044c70f450a18912224d1a29a68c497764c9b68dc23eb42c6827e5f51",
       "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it; profile.permissionResponse is not read, and a request no hook answers stays unanswered. An optional retainedBytes goes to the upstream kernel's record retention, which elides the oldest native payloads past it after every observer has the complete record. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing. A refused or unwritten interrupt withdraws its abort mark and kill fallback: the interrupt goes through the acknowledged write, a write that throws or rejects rejects the abort with code error, a write not acknowledged within 10 s counts as written, the fallback is armed once the write is acknowledged or that bound passes unless Claude refused the interrupt, once the fallback fires the queue does not drain and the held result waits for the exit, and a root result arriving while an interrupt is pending is held, with later lines except control responses, until every pending interrupt settles. Redact echoed image data before recording native output."
     },
     {
