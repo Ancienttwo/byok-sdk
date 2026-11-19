@@ -100,7 +100,7 @@ async function makeRunner(
   adapter: StubRuntimeAdapter | StubRuntimeAdapter[],
   sent: Envelope[],
   mcpToolsets?: ReadonlyMap<string, McpToolsetConfig>,
-  getMcpToolsets?: () => ReadonlyMap<string, McpToolsetConfig>,
+  getMcpToolsetSnapshot?: TaskRunnerDeps['getMcpToolsetSnapshot'],
   mcpToolsetToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = stubToolsProbe,
 ): Promise<TaskRunner> {
   const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
@@ -113,7 +113,7 @@ async function makeRunner(
     approvalRegistry: new ApprovalRegistry(),
     storeDir: 'unused-store-dir',
     productId: 'unused-product-id',
-    ...(getMcpToolsets ? { getMcpToolsets } : mcpToolsets ? { getMcpToolsets: () => mcpToolsets } : {}),
+    getMcpToolsetSnapshot: getMcpToolsetSnapshot ?? (mcpToolsets === undefined ? undefined : () => ({ toolsets: mcpToolsets, definitionRevisions: new Map() })),
   };
   return new TaskRunner(deps);
 }
@@ -129,7 +129,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       registry.reload(config(['read', 'write']), registry.status().revision);
       return { kind: 'available' };
     });
-    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot().toolsets, probe);
+    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot(), probe);
     try {
       for (const [index, taskId] of ['before-reload', 'after-reload'].entries()) {
         await runner.handleEnvelope(createEnvelope('task.offer', {
@@ -152,7 +152,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     const registry = new McpToolsetRegistry({ host: { mcpServers: { host: { command: '/opt/host-mcp', approveTools: ['read'] } } } });
     const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot().toolsets);
+    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot());
     try {
       await runner.handleEnvelope(createEnvelope('task.offer', {
         agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['host'],
@@ -171,7 +171,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     const unsupported = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const supported = new HostApprovalAdapter();
     const registry = new McpToolsetRegistry({ host: { mcpServers: { host: { command: '/opt/host-mcp', approveTools: ['read'] } } } });
-    const runner = await makeRunner([supported, unsupported], [], undefined, () => registry.snapshot().toolsets);
+    const runner = await makeRunner([supported, unsupported], [], undefined, () => registry.snapshot());
     try {
       await runner.handleEnvelope(createEnvelope('task.offer', {
         target: { lane: 'auto' },
@@ -191,7 +191,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     const codex = new HostApprovalAdapter();
     const claude = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
-    const runner = await makeRunner([codex, claude], sent, undefined, () => registry.snapshot().toolsets);
+    const runner = await makeRunner([codex, claude], sent, undefined, () => registry.snapshot());
     try {
       for (const [index, runtime] of (['codex', 'claude'] as const).entries()) {
         await runner.handleEnvelope(createEnvelope('task.offer', {
@@ -365,7 +365,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     });
     const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
-    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot().toolsets);
+    const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot());
 
     await runner.handleEnvelope(
       createEnvelope(
@@ -810,7 +810,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
       storeDir,
       productId: 'host-toolset-product',
       tenantId: 'tenant-host-toolset',
-      getMcpToolsets: () => mcpToolsets,
+      getMcpToolsetSnapshot: () => ({ toolsets: mcpToolsets, definitionRevisions: new Map() }),
       // Contract §8.1's capability gate, open unless a case closes it via
       // `extra`. These cases are about WHAT is injected once the lane is open;
       // the gate itself gets its own case at the end of this block.

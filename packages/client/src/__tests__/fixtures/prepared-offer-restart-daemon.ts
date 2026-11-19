@@ -157,7 +157,7 @@ const unusedBlobClient: BlobResolver = {
 const toolsets: ReadonlyMap<string, McpToolsetConfig> = new Map([
   [TOOLSET_ID, { mcpServers: { [SERVER_NAME]: { command: config.serverCommand, args: ['--stdio'] } } }],
 ]);
-const toolsetDefinitionRevisions = (): ReadonlyMap<string, string> => new Map([[TOOLSET_ID, TOOLSET_REVISION]]);
+const definitionRevisions = new Map([[TOOLSET_ID, TOOLSET_REVISION]]);
 
 const observation = observationOf({ [SERVER_NAME]: ['echo'] }, { toolsetId: TOOLSET_ID });
 
@@ -206,7 +206,7 @@ const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimS
     leaseManager: new AgentHomeLeaseManager({ ownerId: stableAgentHomeOwnerId(config.runnerStoreDir, PRODUCT_ID), reclaimsResidue: () => true }),
   }),
   agentSessionHandoffs: new AgentSessionHandoffStore(),
-  getMcpToolsets: () => toolsets,
+  getMcpToolsetSnapshot: () => ({ toolsets, definitionRevisions }),
   mcpToolsetToolsProbe: async (serverName) => observation[serverName]!,
   inputPreparationLane: {
     store,
@@ -214,7 +214,6 @@ const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimS
     open: ensureOpen,
     runtime: RUNTIME,
     policyRevision: POLICY_REVISION,
-    toolsetDefinitionRevisions,
   },
 });
 

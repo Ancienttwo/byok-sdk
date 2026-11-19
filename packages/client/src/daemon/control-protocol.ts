@@ -572,7 +572,7 @@ export interface AgentResultDescribeParams {
   contextToken: string;
 }
 
-export function parseAgentResultDescribeParams(value: unknown): AgentResultDescribeParams | undefined {
+export function parseMcpContextTokenParams(value: unknown): AgentResultDescribeParams | undefined {
   if (!isRecord(value) || Object.keys(value).some((key) => key !== 'contextToken')) return undefined;
   if (typeof value.contextToken !== 'string' || value.contextToken.length < 32 || value.contextToken.length > 160) return undefined;
   return { contextToken: value.contextToken };

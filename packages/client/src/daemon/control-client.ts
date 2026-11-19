@@ -45,6 +45,8 @@ export interface ControlClientOptions {
   handshakeTimeoutMs?: number;
   /** Default 10000ms — applied per `request()` call; never applied to `subscribe()`, which is expected to stay open indefinitely. */
   requestTimeoutMs?: number;
+  /** Invoked once when an authenticated connection closes. */
+  onClose?: () => void;
 }
 
 export interface ControlClient {
@@ -326,6 +328,7 @@ function createControlClient(socket: net.Socket, reader: NdjsonLineReader, opts:
     closed = true;
     for (const entry of pending.values()) entry.reject(new Error('control connection closed'));
     pending.clear();
+    opts.onClose?.();
   });
   socket.on('error', () => {
     // 'close' always follows and rejects every pending call above — swallow

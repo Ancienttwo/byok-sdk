@@ -255,6 +255,7 @@ describe('Pi launch path — single-file product re-entry (sdkHelperHost)', () =
         }
         const context = path.join(runDir, 'mcp hub context.json');
         await fs.writeFile(context, JSON.stringify({ storeDir: runDir, productId: 'fixture', contextToken: 'synthetic-token',
+          authorization: 'all',
           binding: { catalogPath: path.join(runDir, 'catalog.json'), attemptId: 'fixture', launchCwd: runDir,
             mcpEnv: {}, mcpServers: {} } }), { mode: 0o600 });
         const hubBin = sdk.resolveSdkReservedHelperBin('mcp-hub', { mode: 'self-executable', executable: interpreter, entry: bundle });

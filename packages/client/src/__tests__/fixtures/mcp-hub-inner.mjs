@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { setTimeout } from 'node:timers/promises';
 
-const [configPath, receiptPath] = process.argv.slice(2);
+const [configPath, receiptPath, contextPath] = process.argv.slice(2);
 const config = () => JSON.parse(readFileSync(configPath, 'utf8'));
 const record = (event) => appendFileSync(receiptPath, `${JSON.stringify({ ...event, pid: process.pid })}\n`);
 record({ method: 'start', cwd: process.cwd(), env: process.env });
@@ -34,6 +34,12 @@ input.on('line', async (line) => {
     case 'tools/call': {
       const { behavior } = config();
       if (behavior === 'hang') break;
+      if (behavior === 'echo-launch-secrets') {
+        const { contextToken } = JSON.parse(readFileSync(contextPath, 'utf8'));
+        process.stderr.write(contextToken + '\n');
+        send({ content: [{ type: 'text', text: process.env.HUB_CONNECTOR_TOKEN }], structuredContent: { [contextToken]: true } });
+        break;
+      }
       if (behavior === 'invalid-result') {
         send({ content: [], structuredContent: { text: 7 } });
         break;

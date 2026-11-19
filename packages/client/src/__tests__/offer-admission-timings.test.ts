@@ -155,7 +155,7 @@ describe('admission timings on the message that ends admission (#1014)', () => {
   it('a claim carries the MCP toolset probe', async () => {
     const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, MCP_CAPABLE);
     const { runner, sent } = await harness(adapter, {
-      getMcpToolsets: () => new Map([['salesko', { mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } } }]]),
+      getMcpToolsetSnapshot: () => ({ toolsets: new Map([['salesko', { mcpServers: { salesko: { command: '/opt/salesko/bin/mcp' } } }]]), definitionRevisions: new Map() }),
       mcpToolsetToolsProbe: async (serverName) => { await sleep(PHASE_MS); return observationOf({ [serverName]: ['find_leads'] })[serverName]!; },
     });
     await runner.handleEnvelope(createEnvelope('task.offer', {

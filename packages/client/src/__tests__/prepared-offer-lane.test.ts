@@ -228,7 +228,7 @@ interface Lane {
   readonly observation: ReturnType<typeof observationOf>;
   readonly toolsets: ReadonlyMap<string, McpToolsetConfig>;
   readonly serverCommand: string;
-  readonly toolsetDefinitionRevisions: () => ReadonlyMap<string, string>;
+  readonly definitionRevisions: ReadonlyMap<string, string>;
 }
 
 function binding(overrides: Partial<InputPreparationBindingV1> = {}): InputPreparationBindingV1 {
@@ -289,8 +289,7 @@ async function lane(options: {
   const revision = options.registryRevision
     ? new McpToolsetRegistry(Object.fromEntries(toolsets)).status().toolsets[0]!.definitionRevision
     : TOOLSET_REVISION;
-  const toolsetDefinitionRevisions = (): ReadonlyMap<string, string> =>
-    new Map([[TOOLSET_ID, revision]]);
+  const definitionRevisions = new Map([[TOOLSET_ID, revision]]);
 
   const observation = observationOf({ [SERVER_NAME]: ['echo'] }, { toolsetId: TOOLSET_ID });
   const fingerprinted = await fingerprintPreparedToolSurface({
@@ -363,7 +362,7 @@ async function lane(options: {
     observation,
     toolsets,
     serverCommand,
-    toolsetDefinitionRevisions,
+    definitionRevisions,
   };
 }
 
@@ -382,7 +381,7 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
     agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentHome: new AgentHomeManager({ hostStorageRoot: await tempDir('byok-prepared-home-') }),
     agentSessionHandoffs: new AgentSessionHandoffStore(),
-    getMcpToolsets: () => built.toolsets,
+    getMcpToolsetSnapshot: () => built,
     mcpToolsetToolsProbe: async (serverName) => built.observation[serverName]!,
     inputPreparationLane: {
       store: built.store,
@@ -390,7 +389,6 @@ async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelo
       open: () => built.store.open(),
       runtime: RUNTIME,
       policyRevision: POLICY_REVISION,
-      toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
     },
     ...extra,
   });
@@ -547,14 +545,10 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
     const sent: Envelope[] = [];
     const runner = await makeRunner(built, adapter, sent, {
-      inputPreparationLane: {
-        store: built.store,
-        authorizeAgentMemory: async () => {},
-        open: () => built.store.open(),
-        runtime: RUNTIME,
-        policyRevision: POLICY_REVISION,
-        toolsetDefinitionRevisions: () => new Map([[TOOLSET_ID, TOOLSET_REVISION], ['unrelated', 'unrelated-definition-r1']]),
-      },
+      getMcpToolsetSnapshot: () => ({
+        toolsets: built.toolsets,
+        definitionRevisions: new Map([...built.definitionRevisions, ['unrelated', 'unrelated-definition-r1']]),
+      }),
     });
 
     await runner.handleEnvelope(preparedOffer('task-unrelated-registry-toolset', reference(built)));
@@ -587,8 +581,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
         open: () => record.store.open(),
         runtime: RUNTIME,
         policyRevision: POLICY_REVISION,
-        // A configured toolset the record never named: it must not enter the binding.
-        toolsetDefinitionRevisions: () => new Map([['unrelated', 'unrelated-definition-r1']]),
+
       },
     });
 
@@ -767,7 +760,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
       open: () => memoryRecord.store.open(),
       runtime: RUNTIME,
       policyRevision: POLICY_REVISION,
-      toolsetDefinitionRevisions: () => new Map<string, string>(),
     };
     try {
       runner = await makeRunner(support, adapter, sent, {
@@ -827,7 +819,7 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
         ...MEMORY_BINS,
         inputPreparationLane: {
           store: record.store, authorizeAgentMemory: async () => {}, open: () => record.store.open(),
-          runtime: RUNTIME, policyRevision: POLICY_REVISION, toolsetDefinitionRevisions: () => new Map(),
+          runtime: RUNTIME, policyRevision: POLICY_REVISION,
         },
       });
       await runner.handleEnvelope(preparedOffer('task-prepared-reader-write', {
@@ -898,7 +890,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
         open: ensureOpen,
         runtime: RUNTIME,
         policyRevision: POLICY_REVISION,
-        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
       },
     });
 
@@ -1141,7 +1132,6 @@ describe('a prepared offer is admitted only by item-by-item equality with its re
         }),
         runtime: RUNTIME,
         policyRevision: POLICY_REVISION,
-        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
       },
     });
     const taskId = 'task-prepared-overlap';
@@ -1448,11 +1438,7 @@ describe('every compared item declines by its own name, with no claim and no pin
       build: async () => {
         const built = await lane();
         return { built, offered: reference(built), runnerOverrides: {
-          inputPreparationLane: {
-            store: built.store, authorizeAgentMemory: async () => {},
-            open: () => built.store.open(), runtime: RUNTIME, policyRevision: POLICY_REVISION,
-            toolsetDefinitionRevisions: () => new Map(),
-          },
+          getMcpToolsetSnapshot: () => ({ toolsets: built.toolsets, definitionRevisions: new Map() }),
         } };
       },
     },
@@ -1492,6 +1478,33 @@ describe('every compared item declines by its own name, with no claim and no pin
     expect(built.store.get(built.recordId)?.pin).toBeUndefined();
   });
 
+  it('admits a counted direct preparation when exposure reloads during runtime detection', async () => {
+    const built = await lane({ registryRevision: true });
+    const direct = Object.fromEntries(built.toolsets);
+    const registry = new McpToolsetRegistry(direct);
+    const admittedSnapshot = registry.snapshot();
+    const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, MCP_CAPABLE);
+    vi.spyOn(adapter, 'detect').mockImplementationOnce(async () => {
+      registry.reload({ [TOOLSET_ID]: { mcpServers: direct[TOOLSET_ID]!.mcpServers, exposure: 'search' } }, admittedSnapshot.revision);
+      return { kind: 'available' };
+    });
+    const sent: Envelope[] = [];
+    const getMcpToolsetSnapshot = vi.fn(() => registry.snapshot());
+    const runner = await makeRunner(built, adapter, sent, { getMcpToolsetSnapshot });
+    try {
+      await runner.handleEnvelope(preparedOffer('task-prepared-reload-during-detect', reference(built)));
+
+      expect(registry.snapshot().definitionRevisions.get(TOOLSET_ID)).not.toBe(admittedSnapshot.definitionRevisions.get(TOOLSET_ID));
+      expect(getMcpToolsetSnapshot).toHaveBeenCalledTimes(1);
+      expect(sent.map(envelope => envelope.type)).toEqual(['task.claim', 'task.started']);
+      const start = adapter.preparedStartCalls[0]!;
+      expect(start.preparation.toolsetDefinitionRevisions).toEqual({ [TOOLSET_ID]: admittedSnapshot.definitionRevisions.get(TOOLSET_ID) });
+      expect(start.input.mcpServers?.[SERVER_NAME]?.command).toBe(built.serverCommand);
+    } finally {
+      await runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId: 'task-prepared-reload-during-detect', seq: 2 }));
+    }
+  });
+
   it('rejects a counted direct preparation when its toolset now uses search exposure', async () => {
     const built = await lane({ registryRevision: true });
     const direct = Object.fromEntries(built.toolsets);
@@ -1502,7 +1515,7 @@ describe('every compared item declines by its own name, with no claim and no pin
     const pin = vi.spyOn(built.store, 'pin');
     const sent: Envelope[] = [];
     const runner = await makeRunner(built, adapter, sent, {
-      getMcpToolsets: () => registry.snapshot().toolsets,
+      getMcpToolsetSnapshot: () => registry.snapshot(),
       mcpToolsetToolsProbe: probe,
     });
     const revision = registry.snapshot().revision;
@@ -1553,7 +1566,6 @@ describe('every compared item declines by its own name, with no claim and no pin
         open: () => Promise.reject(new Error('disk gone')),
         runtime: RUNTIME,
         policyRevision: POLICY_REVISION,
-        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
       },
     });
 
@@ -1592,7 +1604,6 @@ describe('every compared item declines by its own name, with no claim and no pin
         open: () => brokenStore.open(),
         runtime: RUNTIME,
         policyRevision: POLICY_REVISION,
-        toolsetDefinitionRevisions: built.toolsetDefinitionRevisions,
       },
     });
 
@@ -1653,7 +1664,6 @@ describe('prepared Agent memory admission declines with its exact typed reason',
         open: () => memoryRecord.store.open(),
         runtime: RUNTIME,
         policyRevision: POLICY_REVISION,
-        toolsetDefinitionRevisions: () => new Map<string, string>(),
       },
       ...extra,
     });
@@ -1693,7 +1703,6 @@ describe('prepared Agent memory admission declines with its exact typed reason',
           open: () => fixture.memoryRecord.store.open(),
           runtime: RUNTIME,
           policyRevision: POLICY_REVISION,
-          toolsetDefinitionRevisions: () => new Map<string, string>(),
         },
       });
       // The record was prepared under a read ceiling; the operator lowers it.
@@ -1948,18 +1957,13 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
   const selector = SUMMARY_SELECTION;
   const document = { schemaVersion: 'test.internal-summary.v1', text: 'Frozen input summary.' };
 
-  function toollessLane(
-    record: { readonly store: InputPreparationStore },
-    revisions: ReadonlyMap<string, string> = new Map([['unrelated', 'unrelated-definition-r1']]),
-  ) {
+  function toollessLane(record: { readonly store: InputPreparationStore }) {
     return {
       store: record.store,
       authorizeAgentMemory: async () => {},
       open: () => record.store.open(),
       runtime: RUNTIME,
       policyRevision: POLICY_REVISION,
-      // Includes a configured toolset the record never named.
-      toolsetDefinitionRevisions: () => revisions,
     };
   }
 
@@ -1988,7 +1992,6 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
       readonly adapter?: StubRuntimeAdapter;
       readonly extra?: Partial<TaskRunnerDeps>;
       readonly support?: Lane;
-      readonly revisions?: ReadonlyMap<string, string>;
     } = {},
   ) {
     const support = options.support ?? await lane();
@@ -1996,7 +1999,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     const sent: Envelope[] = [];
     const pin = vi.spyOn(record.store, 'pin');
     const runner = await makeRunner(support, adapter, sent, {
-      inputPreparationLane: toollessLane(record, options.revisions),
+      inputPreparationLane: toollessLane(record),
       ...options.extra,
     });
     await runner.handleEnvelope(offer(record.recordId));
@@ -2063,7 +2066,6 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, ALL_MODES);
     const { sent, pin } = await run(record, (id) => toollessOffer(id, 'task-toolless-for-toolbearing', { requiredToolsets: [TOOLSET_ID] }), {
       adapter,
-      revisions: new Map([[TOOLSET_ID, TOOLSET_REVISION], ['unrelated', 'unrelated-definition-r1']]),
     });
     expect(declineCode(sent)).toBe('preparation_tool_set_mismatch');
     expectNothingCommitted(sent, adapter, record);
