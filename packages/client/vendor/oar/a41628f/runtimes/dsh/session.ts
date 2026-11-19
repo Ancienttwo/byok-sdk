@@ -74,17 +74,18 @@ function openFailure(error: unknown, sessionId: string, resuming: boolean): unkn
 }
 
 /** Where the runtime already reports its selection, a request it did not take is refused rather than run on another route. */
-function refuseUnappliedRoute(opened: JsonRecord, requested: DshAgentOptions, requestedModel: string | undefined): void {
+function refuseUnappliedRoute(opened: JsonRecord, requested: DshAgentOptions, requestedModel: string | undefined, credentials: CredentialRedactor): void {
   const reported = asRecord(opened.model);
   if (reported === null) { return; }
+  const visible = asRecord(asRecord(credentials.redactValue(opened))?.model) === null ? null : reported;
   if (requestedModel !== undefined && requested.provider !== undefined && (reported.provider !== requested.provider || reported.model !== requested.model)) {
-    throw new ModelConfirmationError(`DSH did not apply model ${requested.provider}/${String(requested.model)}: it reports ${String(reported.provider)}/${String(reported.model)}`, {
-      requested: requestedModel,
-      reported: typeof reported.provider === "string" && typeof reported.model === "string" ? `${reported.provider}/${reported.model}` : null,
-    });
+    const label = typeof visible?.provider === "string" && typeof visible.model === "string" ? `${visible.provider}/${visible.model}` : null;
+    const detail = visible === null ? "" : `: it reports ${String(visible.provider)}/${String(visible.model)}`;
+    throw new ModelConfirmationError(`DSH did not apply model ${requestedModel}${detail}`, { requested: requestedModel, reported: label });
   }
   if (requested.reasoningEffort !== undefined && reported.reasoningEffort !== requested.reasoningEffort) {
-    throw new UnsupportedOptionError("effort", `DSH did not apply effort ${requested.reasoningEffort}: it reports ${String(reported.reasoningEffort)}`);
+    const detail = visible === null ? "" : `: it reports ${String(visible.reasoningEffort)}`;
+    throw new UnsupportedOptionError("effort", `DSH did not apply effort ${requested.reasoningEffort}${detail}`);
   }
 }
 
@@ -154,7 +155,7 @@ async function open(spawnLineProcess: SpawnDshLineProcess, command: string, opti
       const route = await savedRoute(control, sessionId, options.cwd);
       opened = await control.request("resume", { ...fields, ...(route === undefined ? {} : { route }) }, OPEN_TIMEOUT_MS);
     }
-    refuseUnappliedRoute(opened, agentOptions, options.model);
+    refuseUnappliedRoute(opened, agentOptions, options.model, credentials);
     if (opened.sessionId !== sessionId) { throw new Error(`DSH opened ${String(opened.sessionId)}, not ${sessionId}`); }
     if (options.name !== undefined) { await control.request("name", { sessionId, name: options.name, resuming: options.resume !== undefined }, OPEN_TIMEOUT_MS); }
   } catch (error) {

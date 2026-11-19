@@ -160,6 +160,9 @@ function toolEnd(message: JsonRecord): readonly RuntimeEventBody[] {
 function sessionEvent(state: DshProjection, sessionId: string, session: DshSessionFold, event: JsonRecord, cause: unknown, retainedData: JsonRecord | null): { readonly session: DshSessionFold; readonly links: readonly string[]; readonly events: readonly RuntimeEventBody[] } {
   const data = asRecord(event.data) ?? {};
   const unchanged = { session, links: state.links };
+  if (retainedData === null && event.type !== "turn/start" && event.type !== "turn/end" && event.type !== "request/header") {
+    return { ...unchanged, events: [] };
+  }
   switch (event.type) {
     case "goal/change":
       return { ...unchanged, events: dshGoalEvents(data) };
@@ -250,6 +253,19 @@ function payloadOf(message: JsonRecord): unknown {
   return rest;
 }
 
+function isDshToolKey(path: RedactionPath, key: string): boolean {
+  return (path.length === 0 && (key === "type" || key === "data"))
+    || (path.length === 1 && path[0] === "data" && (key === "callId" || key === "name" || key === "arguments"));
+}
+
+function dshDataWithheld(native: JsonRecord, type: unknown, credentials: CredentialRedactor): boolean {
+  const toolCall = type === "tool/call";
+  const hidden = (record: JsonRecord, path: RedactionPath) => Object.getOwnPropertyNames(record).some(key =>
+    !(toolCall && isDshToolKey(path, key)) && credentials.matches(key));
+  const data = asRecord(native.data);
+  return hidden(native, []) || (data !== null && hidden(data, ["data"]));
+}
+
 /** Fold one line of the bridge into its frame. Pure: replay of the same lines gives the same records. */
 export function foldDsh(state: DshProjection, message: JsonRecord, credentials?: CredentialRedactor): DshFolded {
   if (message.type !== "native") {
@@ -262,9 +278,12 @@ export function foldDsh(state: DshProjection, message: JsonRecord, credentials?:
   const native = payloadOf(message);
   if (message.channel === "session/event") {
     const event = asRecord(native) ?? {};
-    const needsReading = event.type === "assistant/message" || event.type === "assistant/attempt" || event.type === "request/context" || event.type === "agent/inbox/spliced";
-    const source = needsReading ? asRecord(credentials?.redactValue(event) ?? event) : event;
-    const next = sessionEvent(state, sessionId, session, event, message.cause, asRecord(source?.data));
+    const type = event.type;
+    const hidden = credentials !== undefined && dshDataWithheld(event, type, credentials);
+    const nested = type === "assistant/message" || type === "assistant/attempt" || type === "request/context" || type === "agent/inbox/spliced";
+    const source = nested ? asRecord(credentials?.redactValue(event) ?? event) : event;
+    const retainedData = hidden ? null : asRecord(source?.data) ?? {};
+    const next = sessionEvent(state, sessionId, session, event, message.cause, retainedData);
     return {
       state: { ...state, links: next.links, sessions: { ...state.sessions, [sessionId]: next.session } },
       frame: { ...at, body: { type: `session/event:${String(event.type)}`, native, events: next.events } },
@@ -348,10 +367,19 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
         return key === "tokens" || key === "contextWindow" || key === "percent";
       }
       if (record.kind !== "frame" || record.body.type !== "session/event:tool/call") return false;
-      return body === "body" && native === "native" && ((path.length === 2 && (key === "type" || key === "data"))
-        || (path.length === 3 && index === "data" && (key === "callId" || key === "name" || key === "arguments")));
+      return body === "body" && native === "native" && isDshToolKey(path.slice(2), key);
     });
   if (record.kind !== "frame") return redact(record);
+  const native = asRecord(record.body.native);
+  const eventType = record.body.type;
+  if (native !== null && eventType.startsWith("session/event:") && eventType !== "session/event:turn/start" && eventType !== "session/event:turn/end"
+    && dshDataWithheld(native, native.type, credentials)) {
+    return redact({ ...record, body: { ...record.body, events: [] } });
+  }
+  if (native !== null && (eventType === "subagent/start" || eventType === "subagent/end")
+    && Object.getOwnPropertyNames(native).some(credentials.matches)) {
+    return redact({ ...record, body: { ...record.body, events: [] } });
+  }
   if (credentials.hasProtectedValues() && record.body.type === "agent/assistant-stream") {
     const native = withholdStreamFragment(record.body.native);
     return redact({ ...record, body: { ...record.body, native,

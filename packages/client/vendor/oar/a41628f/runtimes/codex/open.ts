@@ -210,6 +210,7 @@ export function codexOpenReadback(
   method: CodexOpenMethod,
   options: SessionOptions,
   reply: JsonRecord,
+  visibleReply: JsonRecord | null = reply,
 ): { readonly events: readonly RuntimeEventBody[]; readonly refusal: string | ModelConfirmationError | UnsupportedOptionError | null; readonly resumeEffort: string | null } {
   const model = typeof reply.model === "string" ? reply.model : null;
   const effort = effortIn(reply);
@@ -229,10 +230,12 @@ export function codexOpenReadback(
     return { events, refusal: `codex ${method} did not confirm the requested additionalDirectories in runtimeWorkspaceRoots`, resumeEffort: null };
   }
   if (options.model !== undefined && model !== null && model !== options.model) {
-    return { events, refusal: new ModelConfirmationError(`codex ${method} kept model ${model} although ${options.model} was requested`, { requested: options.model, reported: model }), resumeEffort: null };
+    const reported = typeof visibleReply?.model === "string" ? visibleReply.model : null;
+    const detail = reported === null ? `did not confirm requested model ${options.model}` : `kept model ${reported} although ${options.model} was requested`;
+    return { events, refusal: new ModelConfirmationError(`codex ${method} ${detail}`, { requested: options.model, reported }), resumeEffort: null };
   }
   if (options.serviceTier !== undefined && codexServiceTier(reply) !== options.serviceTier) {
-    const actual = codexServiceTier(reply) ?? "unreported";
+    const actual = codexServiceTier(visibleReply) ?? "unreported";
     return { events, refusal: `codex ${method} reports serviceTier ${actual} although ${options.serviceTier} was requested`, resumeEffort: null };
   }
   if (options.effort === undefined || effort === options.effort) {
@@ -241,7 +244,7 @@ export function codexOpenReadback(
   if (method !== "thread/start") {
     return { events, refusal: null, resumeEffort: options.effort };
   }
-  const said = "reasoningEffort" in reply ? `kept effort ${effort ?? "none (the model's default)"}` : "reports no reasoningEffort";
+  const said = visibleReply !== null && "reasoningEffort" in visibleReply ? `kept effort ${effortIn(visibleReply) ?? "none (the model's default)"}` : "reports no reasoningEffort";
   return { events, refusal: new UnsupportedOptionError("effort", `codex ${method} ${said} although effort ${options.effort} was requested`), resumeEffort: null };
 }
 

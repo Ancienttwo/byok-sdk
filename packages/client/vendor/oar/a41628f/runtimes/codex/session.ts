@@ -161,7 +161,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   const itemFields = rawFunction ? ["arguments", "call_id", "name"] : rawReasoning ? ["summary", "content", "encrypted_content"]
     : rawMessage ? ["role", "content", "status", "phase"] : typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
   const encoded = itemType === "mcpToolCall" || itemType === "fileChange" || itemType === "collabAgentToolCall" || itemType === "sleep";
-  const safe = redactRuntimeRecord(record, redact, path => (encoded && isProjectedToolInput(record, path))
+  const projected = redactRuntimeRecord(record, redact, path => (encoded && isProjectedToolInput(record, path))
     || (rawFunction && path.length === 4 && path[0] === "body" && path[1] === "native" && path[2] === "item" && path[3] === "arguments"), (path, value) => {
     const [body, group, member, field] = path;
     if (body !== "body" || record.kind !== "frame") return false;
@@ -185,14 +185,18 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
         && ((path.length === 3 && codexUsageFields.has(key))
           || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));
   });
-  if (record.kind === "response" && safe.kind === "response" && (record.body.kind === "accepted" || record.body.kind === "rejected")
-    && (safe.body.kind === "accepted" || safe.body.kind === "rejected")) {
-    const native = asRecord(safe.body.native);
+  if (record.kind === "response" && projected.kind === "response" && (record.body.kind === "accepted" || record.body.kind === "rejected")
+    && (projected.body.kind === "accepted" || projected.body.kind === "rejected")) {
+    const native = asRecord(projected.body.native);
     const snapshot = redactCodexSnapshot(asRecord(record.body.native), native, redact);
-    return snapshot === native ? safe : { ...safe, body: { ...safe.body, native: snapshot } };
+    return snapshot === native ? projected : { ...projected, body: { ...projected.body, native: snapshot } };
   }
+  if (projected.kind !== "frame") return projected;
+  const native = asRecord(projected.body.native);
+  const hideSpan = originalNative !== null && native === null && projected.spanId !== undefined;
+  const safe = hideSpan ? { ...projected } : projected;
+  if (hideSpan) Reflect.deleteProperty(safe, "spanId");
   if (safe.kind !== "frame") return safe;
-  const native = asRecord(safe.body.native);
   const safeItem = asRecord(native?.item);
   const isOpenReply = method === "thread/start" || method === "thread/resume" || method === "thread/fork";
   if (isOpenReply || method === "turn/completed" || method === "turn/started" || method === "thread/started") {
@@ -356,7 +360,8 @@ async function openCodexSession(
   if (options.approvalPolicy === "on-request" && started.approvalPolicy !== "on-request") {
     throw new Error("codex native interaction approval policy readback mismatch");
   }
-  const readback = codexOpenReadback(openMethod, options, started);
+  const publicReadback = asRecord(redactValue(started)) === null ? null : started;
+  const readback = codexOpenReadback(openMethod, options, started, publicReadback);
   if (readback.refusal !== null) {
     throw typeof readback.refusal === "string" ? new Error(readback.refusal) : readback.refusal;
   }

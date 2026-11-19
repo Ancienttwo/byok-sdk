@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.121.0",
-    "commit": "bf084cdd991718454f9d2d1411c7c0a24edaa47e"
+    "commit": "bcd9be1efd38bdfdec4296c8269dfb7e44c154f6"
   },
   "release": {
     "ecosystem": "npm",
@@ -471,7 +471,7 @@
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
       "upstreamSha256": "3f147791ba9602a5700c4f348a9ccb9e26205f56554ec6d22afec6b6c34a45b8",
-      "vendoredSha256": "acc6711fe5c6edca6c205752bdb1d2ffb977cc1c68ed922447ecd21133e219c3",
+      "vendoredSha256": "3bb325af36448ce2e4d6eb8eea5abd4c7028a45a7174501b91ab54b0829c6b56",
       "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\". Type explicit fresh and resumed effort readback mismatches as UnsupportedOptionError(effort). Upstream: planned contribution (#2378)."
     },
     {
@@ -522,7 +522,7 @@
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
       "upstreamSha256": "b86ac107394dce5b477d7e2b4ab9e849146cd089ad3be074c2614f3294a38545",
-      "vendoredSha256": "f0272b398eef9d5e7cca3988e9eccb0b342fff1ec6aeb7d408c2b649ace0adcd",
+      "vendoredSha256": "11fe19d683b9e0035cf9a13ed2a7358753e5c7af8e309adc0bbc52a5e3fdcf48",
       "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort uses the caller-owned isolated POSIX process reader and stays a no-op on Windows (#2381); the caller's retainedBytes goes to the upstream kernel's record retention. Propagate the typed resume effort refusal. Upstream: planned contribution (#2378). Share Runtime.sessionCapabilities with the narrow BYOK bridge."
     },
     {
@@ -624,14 +624,14 @@
       "path": "runtimes/dsh/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/projection.ts",
       "upstreamSha256": "c83aa677b6a0a5f82e60282b1ca6e3c96c1837fd215e57180c5b0ccb03de94dd",
-      "vendoredSha256": "d83744011ddd943975591952573099396039f2a6ff38e0c6ba56560f7dd50ed2",
+      "vendoredSha256": "71c2fe7d65f9f13eb8775f0ce5bcab831c49ae661023053f018ad868a061bb5a",
       "delta": "Project dsh tool-call input from decoded, sanitized native arguments and keep native and projected JSON consistent (#2408)."
     },
     {
       "path": "runtimes/dsh/session.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/session.ts",
       "upstreamSha256": "ee193814b049ba244a002158552f85e742b61d8a215371f7a434063796585e4e",
-      "vendoredSha256": "0d573aa4e3818f3fb7ccba1f30fea82a578ed9b97827fdb5ed18030a1d49ee7f",
+      "vendoredSha256": "afac7c6ce0275d2b3f3e77de0d9e22c74d396d77fbba3e7a69a29f2f88668603",
       "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure. The caller's retainedBytes goes to the upstream kernel's record retention. Share Runtime.sessionCapabilities with the narrow BYOK bridge."
     },
     {
