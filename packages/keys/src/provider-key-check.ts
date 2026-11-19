@@ -2,7 +2,7 @@ import packageManifest from '../package.json' with { type: 'json' };
 import { AnthropicMessagesClient } from './anthropic-client.js';
 import type { ProviderKeyCheckOutcome } from './custody.js';
 import { ByokKeysError } from './errors.js';
-import type { ProviderFetch } from './http.js';
+import { isProviderTransportError, type ProviderFetch } from './http.js';
 import { OpenAiCompatibleChatClient } from './openai-client.js';
 import type { ModelProviderProfile } from './provider-profile.js';
 
@@ -80,7 +80,7 @@ export function classifyProviderKeyCheckFailure(
         return 'provider_error';
     }
   }
-  if (error instanceof TypeError) return 'unreachable';
+  if (isProviderTransportError(error)) return 'unreachable';
   const name = (error as { name?: unknown } | null)?.name;
   if (name === 'TimeoutError') return 'timeout';
   if (name === 'AbortError') return 'unreachable';

@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed (keys; #2402)** — `discoverProviderModels` reports unreachable providers as `MODEL_LIST_UNREACHABLE` with the original error in `cause`. Timeout and HTTP error codes remain unchanged.
+
 ## 0.44.1 — 2026-11-19 (published)
 
 [Release notes](docs/releases/v0.44.1.md)
