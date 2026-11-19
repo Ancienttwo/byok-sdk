@@ -483,7 +483,14 @@ export class HostExecutionCore {
           }
         });
         const state = this.ledger.snapshot();
-        const heads = fifoHeads(Object.values(state.outbox).flatMap(row => row.kind === 'intent' ? [state.intents[row.intentId]!] : []));
+        const writers: Intent[] = [], readers: Intent[] = [];
+        for (const row of Object.values(state.outbox)) {
+          if (row.kind !== 'intent') continue;
+          const intent = state.intents[row.intentId]!;
+          if (intent.execution.payload.homeAccess === 'memory-reader') readers.push(intent);
+          else writers.push(intent);
+        }
+        const heads = [...fifoHeads(writers), ...readers];
         let changed = false;
         for (const intent of heads) {
           try { changed = await this.reconcile(intent) || changed; }

@@ -16,6 +16,15 @@
   },
   "entries": [
     {
+      "id": "k4-memory-reader-dispatch",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core HostExecutionCore.enqueue can dispatch a payload.homeAccess memory-reader alongside other readers and the first open writer for the same Agent. Enqueue a dependent read after the write settles if it needs the completed write.",
+      "migration": "docs/host-execution-core.md#3-fifo-and-stable-task-identity",
+      "items": [
+        "behavior:k4-memory-reader-dispatch"
+      ]
+    },
+    {
       "id": "provider-store-credential-namespace",
       "impact": "breaking",
       "acceptance": "new-path-repair",
