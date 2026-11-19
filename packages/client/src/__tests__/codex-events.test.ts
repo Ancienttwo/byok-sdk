@@ -56,6 +56,32 @@ describe('required Codex native projection', () => {
     expect(out).toEqual([{ type: 'turn_end' }]);
   });
 
+  it('redacts id and type values inside Codex MCP arguments and structured results', () => {
+    const key = 'synthetic-codex-mcp-credential';
+    const credentials = sessionCredentialRedactor({ env: { API_KEY: key } });
+    const kernel = createSessionKernel('root', record => redactCodexRecord(record, credentials.redactValue));
+    const projection = new CodexProjection('/workspace', 'root');
+    const output: Array<AgentEvent | MessageDraftDelta> = [];
+    const item = { id: 'tool-call', type: 'mcpToolCall', server: 'host', tool: 'lookup' };
+    const payload = { id: key, type: key, nested: [{ id: key, type: key }], keep: true };
+    const expected = { id: '[redacted]', type: '[redacted]', nested: [{ id: '[redacted]', type: '[redacted]' }], keep: true };
+    const feed = (type: string, native: unknown) => {
+      const body = { type, native, events: [], origin: 'byok-native', byokRoot: true };
+      projection.consume(kernel, kernel.frame(body), event => output.push(event));
+    };
+    feed('item/started', { item: { ...item, arguments: payload } });
+    feed('item/completed', { item: { ...item, result: { structuredContent: payload }, status: 'completed' } });
+    expect(JSON.stringify(kernel.records())).not.toContain(key);
+    expect(kernel.records()).toMatchObject([
+      { body: { native: { item: { ...item, arguments: expected } } } },
+      { body: { native: { item: { ...item, result: { structuredContent: expected } } } } },
+    ]);
+    expect(output).toMatchObject([
+      { type: 'tool_use', toolCallId: 'tool-call', input: { arguments: expected } },
+      { type: 'tool_result', toolCallId: 'tool-call', output: { result: { structuredContent: expected } } },
+    ]);
+  });
+
   it('maps structured command input and output without stringification', () => {
     const s = setup();
     s.feed('item/started', {

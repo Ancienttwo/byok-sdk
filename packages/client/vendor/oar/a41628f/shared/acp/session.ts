@@ -59,6 +59,15 @@ export function redactAcpRecord<T extends RawEvent>(
     return toolUpdate && path.length === 4 && body === "body" && native === "native" && update === "update" && field === "status"
       && (value === "pending" || value === "in_progress" || value === "completed" || value === "failed" || value === "cancelled");
   });
+  if (record.kind !== "frame" || safe.kind !== "frame") return safe;
+  if (toolUpdate) {
+    const packet = asRecord(safe.body.native);
+    const safeUpdate = packet === null ? null : directUpdate ? asRecord(packet.update) : childNotification?.(method.replace(/\/after_answer$/u, ""), packet)?.update ?? null;
+    if (safeUpdate === null) {
+      return { ...safe, body: { ...safe.body, events: safe.body.events.filter(event => event.kind !== "tool_call_started"
+        && event.kind !== "tool_call_input" && event.kind !== "tool_call_progress" && event.kind !== "tool_call_ended") } };
+    }
+  }
   const fragment = update?.sessionUpdate;
   if (record.kind === "frame" && safe.kind === "frame" && credentials.hasProtectedValues()
     && (fragment === "agent_thought_chunk" || (fragment === "agent_message_chunk" && !record.body.events.some(event => event.kind === "text_delta")))) {

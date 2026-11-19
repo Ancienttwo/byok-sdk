@@ -368,11 +368,14 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
   }
   if (record.body.type !== "session/event:tool/call") return redact(record);
   const safe = redact(record, isToolArguments);
-  const body = asRecord(safe.body);
-  const args = asRecord(asRecord(body?.native)?.data)?.arguments;
-  if (safe.kind !== "frame" || typeof args !== "string" || !Array.isArray(body?.events)) return safe;
-  return { ...safe, body: { ...safe.body, events: safe.body.events.map(event =>
-    event.kind === "tool_call_started" ? { ...event, input: args } : event) } };
+  if (safe.kind !== "frame") return safe;
+  const data = asRecord(asRecord(safe.body.native)?.data);
+  const events = safe.body.events.flatMap<RuntimeEventBody>(event => {
+    if (event.kind !== "tool_call_started") return [event];
+    if (data === null) return [];
+    return typeof data.arguments === "string" ? [{ ...event, input: data.arguments }] : [event];
+  });
+  return { ...safe, body: { ...safe.body, events } };
 }
 
 /** The frame that says what a native open returned; alpha releases report a model selection already. */

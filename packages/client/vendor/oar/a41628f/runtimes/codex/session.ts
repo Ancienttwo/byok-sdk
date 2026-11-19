@@ -28,6 +28,7 @@ import { createSessionKernel } from "../../shared/session-kernel.js";
 import { newSessionLinks } from "../../shared/session-links.js";
 import { startAppServerClient, type RpcOutcome, type SpawnLineProcess } from "./app-server-client.js";
 import { CODEX_SETTINGS_REPORT_MS, codexOpenReadback, codexResumeEffortRefusal, codexThreadName, codexThreadOpen } from "./open.js";
+import { codexToolContent } from "./item-detail.js";
 import { foldCodexNotification, initialCodexProjection, type CodexProjectionState } from "./projection.js";
 import { prepareCodexToolDenials } from "./tool-denials.js";
 import { missingDirectoryError, nameThread, openThread, rpcControl, updateThreadEffort, type RpcControlPlan } from "./rpc-control.js";
@@ -122,7 +123,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     ? asRecord(asRecord(record.body.native)?.item)?.type : undefined;
   const itemFields = typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
   const encoded = itemType === "mcpToolCall" || itemType === "fileChange" || itemType === "collabAgentToolCall" || itemType === "sleep";
-  return redactRuntimeRecord(record, redact, path => encoded && isProjectedToolInput(record, path), (path, value) => {
+  const safe = redactRuntimeRecord(record, redact, path => encoded && isProjectedToolInput(record, path), (path, value) => {
     const [body, group, member, field] = path;
     if (body !== "body" || record.kind !== "frame") return false;
     if (normalizedDraft && record.body.type === "item/agentMessage/delta") {
@@ -145,6 +146,17 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
         && ((path.length === 3 && codexUsageFields.has(key))
           || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));
   });
+  if (record.kind !== "frame" || safe.kind !== "frame" || itemType !== "mcpToolCall" || record.body.type !== "item/completed") return safe;
+  const originalItem = asRecord(asRecord(record.body.native)?.item);
+  const safeItem = asRecord(asRecord(safe.body.native)?.item);
+  if (safeItem?.result === originalItem?.result && safeItem?.error === originalItem?.error) return safe;
+  const content = safeItem === null ? undefined : codexToolContent({ ...safeItem, type: "mcpToolCall" });
+  const events = safe.body.events.map(event => {
+    if (event.kind !== "tool_call_ended") return event;
+    const { content: _original, ...rest } = event;
+    return content === undefined ? rest : { ...rest, content };
+  });
+  return { ...safe, body: { ...safe.body, events } };
 }
 
 async function openCodexSession(

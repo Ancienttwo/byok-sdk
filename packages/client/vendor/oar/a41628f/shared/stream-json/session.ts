@@ -154,6 +154,25 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
         events: record.body.events.filter(projected => projected.kind !== "tool_call_input_delta") } };
     }
   }
+  if (safe.kind === "frame" && native !== null && credentials.hasProtectedValues()) {
+    const isContentMessage = native.type === "assistant" || native.type === "user";
+    const message = isContentMessage ? asRecord(native.message) : null;
+    const draft = native.type === "stream_event" ? asRecord(native.event) : null;
+    const draftBlock = draft?.type === "content_block_start" ? asRecord(draft.content_block) : null;
+    const blocks: readonly unknown[] = Array.isArray(message?.content) ? message.content : draftBlock === null ? [] : [draftBlock];
+    const envelope = isContentMessage ? streamJsonAssistantEnvelope : streamJsonDraftEnvelope;
+    const withheldMessage = hasOpaqueCredentialKey(native, envelope) || hasOpaqueCredentialKey(message, streamJsonMessageFields) || hasOpaqueCredentialKey(draft);
+    const withheldCalls = new Set<unknown>();
+    for (const block of blocks) {
+      const part = asRecord(block);
+      if (part?.type === "tool_use" && (withheldMessage || hasOpaqueCredentialKey(part))) withheldCalls.add(part.id ?? "unknown");
+      if (part?.type === "tool_result" && (withheldMessage || hasOpaqueCredentialKey(part, streamJsonToolResultFields))) withheldCalls.add(part.tool_use_id);
+    }
+    if (withheldCalls.size !== 0) {
+      const events = safe.body.events.filter(event => !("callId" in event) || !withheldCalls.has(event.callId));
+      safe = { ...safe, body: { ...safe.body, events } };
+    }
+  }
   let redacted = redactRuntimeRecord(safe, credentials.redactValue, path => isProjectedToolInput(safe, path), (path, value) => {
     const [body, native, field, group, block, member] = path;
     if (body !== "body" || safe.kind !== "frame") return false;
