@@ -239,6 +239,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'runtimes/dsh/control.ts',
     'runtimes/dsh/launch.ts',
     'runtimes/dsh/list-models.ts',
+    'runtimes/dsh/options.ts',
     'runtimes/dsh/projection.ts',
     'runtimes/dsh/session.ts',
     'runtimes/dsh/version.ts',

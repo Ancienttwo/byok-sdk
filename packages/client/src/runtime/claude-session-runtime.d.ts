@@ -37,13 +37,14 @@ export declare const resumedClaudeProjection: ClaudeProjectionState;
 export interface ClaudeCredentialRedactor {
   values(this: void): readonly string[];
   hasProtectedValues(this: void): boolean;
+  redactChunk(this: void, text: string): { readonly ready: string; readonly pending: string };
   add(this: void, value: string | undefined): void;
   addExplicit(this: void, value: string): void;
   addImage(this: void, data: string): void;
   redact(this: void, text: string): string;
   redactValue<T>(this: void, value: T, jsonField?: (path: readonly (string | number)[]) => boolean, structure?: {
     readonly string: (path: readonly (string | number)[], value: string) => boolean;
-    readonly keys: (path: readonly (string | number)[]) => boolean;
+    readonly keys: (path: readonly (string | number)[], key: string) => boolean;
   }): T;
 }
 export declare function sessionCredentialRedactor(options: {

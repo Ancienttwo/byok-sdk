@@ -98,7 +98,9 @@ type CodexSessionArgs = Parameters<typeof codexSession>;
 export type CodexOpenStepRequest = (method: string, params: JsonRecord) => Promise<JsonRecord>;
 
 const codexObservedMethods = new Set(["turn/started", "turn/completed", "thread/tokenUsage/updated", "error", "item/agentMessage/delta", "item/started", "item/completed"]);
-const codexToolItemTypes = new Set(["commandExecution", "fileChange", "mcpToolCall", "collabAgentToolCall", "webSearch", "sleep"]);
+const codexItemTypes = new Set(["agentMessage", "error", "commandExecution", "fileChange", "mcpToolCall", "collabAgentToolCall", "webSearch", "sleep"]);
+const codexTerminalFields = new Set(["id", "status", "error", "items"]);
+const codexNotificationFields = new Set(["threadId", "turnId", "turn", "item", "itemId", "delta", "error", "willRetry", "tokenUsage"]);
 
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"]): T {
   const itemType = record.kind === "frame" && record.body.type === "item/started"
@@ -109,9 +111,13 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     if (body !== "body" || record.kind !== "frame") return false;
     if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native");
     if (path.length !== 4 || group !== "native") return false;
-    if ((record.body.type === "item/started" || record.body.type === "item/completed") && member === "item" && field === "type") return codexToolItemTypes.has(value);
+    if ((record.body.type === "item/started" || record.body.type === "item/completed") && member === "item" && field === "type") return codexItemTypes.has(value);
     return record.body.type === "turn/completed" && member === "turn" && field === "status"
       && (value === "completed" || value === "interrupted" || value === "failed");
+  }, (path, key) => {
+    if (record.kind !== "frame" || !codexObservedMethods.has(record.body.type) || path[0] !== "body" || path[1] !== "native") return false;
+    return (path.length === 2 && codexNotificationFields.has(key))
+      || (path.length === 3 && path[2] === "turn" && (record.body.type === "turn/completed" || record.body.type === "turn/started") && codexTerminalFields.has(key));
   });
 }
 
@@ -237,13 +243,15 @@ async function openCodexSession(
     const isRoot = notificationSession === threadId;
     const wireTurn = asRecord(params.turn)?.id;
     if (isRoot && method === "turn/started" && typeof wireTurn === "string") lastNotifiedRootTurnId = wireTurn;
-    const byokStaleTurn = isRoot && typeof params.turnId === "string" && lastNotifiedRootTurnId !== undefined && params.turnId !== lastNotifiedRootTurnId;
+    const turnId = method === "turn/completed" ? wireTurn : params.turnId;
+    const byokStaleTurn = isRoot && typeof turnId === "string" && lastNotifiedRootTurnId !== undefined && turnId !== lastNotifiedRootTurnId;
     // BYOK change: label native frames and anchor root and turn membership before redaction can change ids.
     const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot, byokStaleTurn } as const;
     kernel.frame(nativeBody, {
       sessionId: notificationSession,
       ...(typeof params.turnId === "string" ? { spanId: params.turnId } : {}),
     });
+    if (method === "turn/completed" && byokStaleTurn) return;
     try {
     // Keep native interaction correlation private to the SDK's transport owner.
     if (isRoot && (method === "turn/started" || method === "turn/completed" || method === "serverRequest/resolved")) {

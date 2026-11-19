@@ -5,7 +5,7 @@ type Redact = (text: string) => string;
 type JsonField = (path: RedactionPath) => boolean;
 export interface RedactionStructure {
   readonly string: (path: RedactionPath, value: string) => boolean;
-  readonly keys: (path: RedactionPath) => boolean;
+  readonly keys: (path: RedactionPath, key: string) => boolean;
 }
 const withheld = '"[redacted]"';
 
@@ -27,7 +27,7 @@ function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefin
     return sanitized;
   }
   const keys = Object.getOwnPropertyNames(value);
-  if (structure?.keys(path) !== true && keys.some(key => redact(key) !== key)) return "[redacted]";
+  if (keys.some(key => structure?.keys(path, key) !== true && redact(key) !== key)) return "[redacted]";
   const target = Object.create(Object.getPrototypeOf(value)) as object;
   seen.set(value, target);
   let changed = false;

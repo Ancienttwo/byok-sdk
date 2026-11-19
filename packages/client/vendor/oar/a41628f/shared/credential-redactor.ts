@@ -26,6 +26,7 @@ export interface CredentialRedactor {
   /** Private connection redaction input. Never put these values in records or diagnostics. */
   values(this: void): readonly string[];
   hasProtectedValues(this: void): boolean;
+  redactChunk(this: void, text: string): { readonly ready: string; readonly pending: string };
   add(this: void, value: string | undefined): void;
   /** BYOK change: A credential the caller resolved, including short or path-like values. */
   addExplicit(this: void, value: string): void;
@@ -71,6 +72,16 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
   return {
     values: () => values,
     hasProtectedValues: () => values.length !== 0 || images.size !== 0,
+    redactChunk(text) {
+      const safe = redact(text);
+      let tail = 0;
+      for (const key of [...values, ...images]) {
+        for (let size = Math.min(key.length - 1, safe.length); size > tail; size--) {
+          if (safe.endsWith(key.slice(0, size))) { tail = size; break; }
+        }
+      }
+      return tail === 0 ? { ready: safe, pending: "" } : { ready: safe.slice(0, -tail), pending: safe.slice(-tail) };
+    },
     add(value) {
       if (credentialValue(value)) { addKnown(value); }
     },
@@ -98,6 +109,7 @@ export function isProjectedToolInput(record: RawEvent, path: RedactionPath): boo
 export function redactRuntimeRecord<T extends RawEvent>(
   record: T, redact: CredentialRedactor["redactValue"], jsonField?: (path: RedactionPath) => boolean,
   isProtocolString?: (path: RedactionPath, value: string) => boolean,
+  isProtocolKey?: (path: RedactionPath, key: string) => boolean,
 ): T {
   return redact(record, jsonField, {
     string(path, value) {
@@ -109,10 +121,11 @@ export function redactRuntimeRecord<T extends RawEvent>(
           || (path.length === 5 && eventField === "outcome" && (nestedField === "kind" || nestedField === "failure"))))
         || isProtocolString?.(path, value) === true;
     },
-    keys(path) {
+    keys(path, key) {
       return path.length === 0 || (path.length === 1 && path[0] === "body")
         || (path.length === 3 && eventPath(path))
-        || (path.length === 4 && eventPath(path) && path[3] === "outcome");
+        || (path.length === 4 && eventPath(path) && path[3] === "outcome")
+        || isProtocolKey?.(path, key) === true;
     },
   });
 }

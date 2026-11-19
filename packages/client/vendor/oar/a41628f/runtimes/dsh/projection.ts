@@ -299,7 +299,12 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
   const protocolString = (path: RedactionPath) => record.kind === "frame"
     && record.body.type === "session/event:assistant/message" && path.length === 2 && path[0] === "body" && path[1] === "type";
   const redact = <R extends RawEvent>(value: R, jsonField?: (path: RedactionPath) => boolean): R =>
-    redactRuntimeRecord(value, credentials.redactValue, jsonField, protocolString);
+    redactRuntimeRecord(value, credentials.redactValue, jsonField, protocolString, (path, key) => {
+      if (record.kind !== "frame" || record.body.type !== "session/event:tool/call") return false;
+      const [body, native, data] = path;
+      return body === "body" && native === "native" && ((path.length === 2 && (key === "type" || key === "data"))
+        || (path.length === 3 && data === "data" && (key === "callId" || key === "name" || key === "arguments")));
+    });
   if (record.kind !== "frame") return redact(record);
   if (credentials.hasProtectedValues() && record.body.type === "agent/assistant-stream") {
     const native = withholdArgumentDelta(record.body.native);

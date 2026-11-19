@@ -71,6 +71,22 @@ describe('unconnected OAR Codex adapter', () => {
     await session.dispose();
   });
 
+  it('retains a stale Codex completion without settling the active root turn', async () => {
+    const fake = fakeServer();
+    const identity = vi.fn();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' },
+      { cwd: '/workspace', env: {} }, 1000, { onNativeIdentity: identity });
+    fake.frame({ method: 'turn/started', params: { threadId: 'thread-root', turn: { id: 'turn-B' } } });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { id: 'turn-A', status: 'completed' } } });
+    expect(session.records().at(-1)).toMatchObject({ body: { origin: 'byok-native', byokStaleTurn: true, events: [] } });
+    expect(identity).not.toHaveBeenCalledWith('turn/completed', expect.anything());
+    expect((await session.prompt('another input')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { id: 'turn-B', status: 'completed' } } });
+    expect(session.records().at(-1)).toMatchObject({ body: { events: [expect.objectContaining({ kind: 'turn_ended' })] } });
+    expect(identity).toHaveBeenCalledWith('turn/completed', { threadId: 'thread-root', turn: { id: 'turn-B' } });
+    await session.dispose();
+  });
+
   it('passes launch arguments to the owned spawn without adding them to records', async () => {
     const fake = fakeServer();
     const launchArgs = ['-c', 'service_tier="fast"'];

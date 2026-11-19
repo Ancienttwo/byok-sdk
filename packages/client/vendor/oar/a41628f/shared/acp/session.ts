@@ -10,6 +10,7 @@ import type {
   RequestBody,
   RequestRecord,
   ResponseBody,
+  RuntimeEventBody,
   SessionOptions,
 } from "../../contracts/session.js";
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
@@ -41,6 +42,7 @@ import { sendAcpSteerRequest } from "./steer-request.js";
 
 export function redactAcpRecord<T extends RawEvent>(
   record: T, credentials: CredentialRedactor, childNotification?: AcpSessionProfile["childNotification"],
+  pendingText?: Map<string, string>,
 ): T {
   const native = record.kind === "frame" ? asRecord(record.body.native) : null;
   const direct = asRecord(native?.update);
@@ -50,11 +52,34 @@ export function redactAcpRecord<T extends RawEvent>(
   const rawInput = update?.rawInput;
   // ACP projects string rawInput verbatim and serializes the other JSON values.
   const encoded = toolUpdate && rawInput !== null && rawInput !== undefined && typeof rawInput !== "string";
-  const safe = redactRuntimeRecord(record, credentials.redactValue, path => encoded && isProjectedToolInput(record, path), (path, value) => {
+  let safe = redactRuntimeRecord(record, credentials.redactValue, path => encoded && isProjectedToolInput(record, path), (path, value) => {
     const [body, native, update, field] = path;
     return toolUpdate && path.length === 4 && body === "body" && native === "native" && update === "update" && field === "status"
       && (value === "pending" || value === "in_progress" || value === "completed" || value === "failed" || value === "cancelled");
   });
+  if (pendingText !== undefined && safe.kind === "frame" && record.kind === "frame" && credentials.hasProtectedValues()) {
+    const lane = record.sessionId;
+    const previous = pendingText.get(lane) ?? "";
+    const delta = update?.sessionUpdate === "agent_message_chunk" ? record.body.events.find(event => event.kind === "text_delta") : undefined;
+    if (delta !== undefined && update !== null) {
+      const { ready, pending } = credentials.redactChunk(previous + delta.text);
+      if (pending.length === 0) pendingText.delete(lane);
+      else pendingText.set(lane, pending);
+      if (ready === delta.text) return safe;
+      const safeNative = asRecord(safe.body.native);
+      const safeUpdate = asRecord(safeNative?.update);
+      const content = { ...asRecord(safeUpdate?.content), type: "text", text: ready };
+      const native = safeUpdate === null ? safe.body.native : { ...safeNative, update: { ...safeUpdate, content } };
+      const events = safe.body.events.flatMap<RuntimeEventBody>(event => event.kind !== "text_delta" ? [event]
+        : ready.length === 0 ? [] : [{ ...event, text: ready }]);
+      return { ...safe, body: { ...safe.body, native, events } };
+    }
+    if (previous !== "" && record.body.events.some(event => event.kind === "turn_ended" || event.kind === "tool_call_started" || event.kind === "tool_call_ended")) {
+      pendingText.delete(lane);
+      const events = [{ kind: "text_delta" as const, text: previous }, ...safe.body.events];
+      safe = { ...safe, body: { ...safe.body, events } };
+    }
+  }
   if (!toolUpdate || safe.kind !== "frame") return safe;
   const rawOutput = credentials.redactValue(update.rawOutput);
   const content = credentials.redactValue(update.content);
@@ -214,8 +239,9 @@ async function openAcpRuntimeSession(
       } finally { releaseStartup?.(); }
     })();
     // BYOK change: the record consumer observes from seq 0: it registers before the recorder binds.
+    const pendingText = new Map<string, string>();
     const kernel = createSessionKernel(opened.sessionId, record => {
-      const safe = redactAcpRecord(record, credentials, profile.childNotification);
+      const safe = redactAcpRecord(record, credentials, profile.childNotification, pendingText);
       if (safe.kind !== "frame") return safe;
       const body = { ...safe.body, byokRoot: record.sessionId === opened.sessionId && record.agentPath.length === 0 };
       return { ...safe, body };
