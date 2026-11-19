@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.121.0",
-    "commit": "a67cc709163749279a31139999bd7b9768780310"
+    "commit": "b99247f55ff2b4c56fbf3ee701a0310c24114524"
   },
   "release": {
     "ecosystem": "npm",
@@ -974,7 +974,7 @@
       "path": "shared/credential-redactor.ts",
       "sourcePath": "packages/oar/src/shared/credential-redactor.ts",
       "upstreamSha256": "e7358de620f170bcd2b4ec1e46d98a6fe58a1e6d52dfe5dc535c090a713af6be",
-      "vendoredSha256": "cced2adbdefbebbd4c10d1a0c0be3eecaecc4dc375bb7f4b6072f46164202ac3",
+      "vendoredSha256": "a1e7b8b1a88a9f34639c41741c1e7d0cf4e6eb57fe043a71a86434503dac18b9",
       "delta": "Register caller-resolved provider credentials and apply one content redactor to retained records, errors and protocol-declared encoded fields (#2380, #2408)."
     },
     {

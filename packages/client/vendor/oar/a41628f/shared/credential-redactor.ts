@@ -59,10 +59,32 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
   }
   let values = [...known].toSorted((left, right) => right.length - left.length);
   const images = new Set<string>();
-  const redact = (text: string): string => {
-    for (const data of images) text = text.replaceAll(data, "[redacted]");
-    return values.reduce((result, value) => result.replaceAll(value, "[redacted]"), text);
+  const redactTextParts = (text: string, streaming: boolean): { ready: string; pending: string } => {
+    const keys = [...values, ...images].toSorted((left, right) => right.length - left.length);
+    let cut = text.length;
+    if (streaming) {
+      for (const key of keys) {
+        for (let size = Math.min(key.length - 1, text.length); size > text.length - cut; size--) {
+          if (text.endsWith(key.slice(0, size))) { cut = text.length - size; break; }
+        }
+      }
+    }
+    const parts: string[] = [];
+    let at = 0;
+    while (at < cut) {
+      let next = cut;
+      let length = 0;
+      for (const key of keys) {
+        const match = text.indexOf(key, at);
+        if (match >= 0 && match < next) { next = match; length = key.length; }
+      }
+      parts.push(text.slice(at, next));
+      if (length !== 0) parts.push("[redacted]");
+      at = next + length;
+    }
+    return { ready: parts.join(""), pending: text.slice(at) };
   };
+  const redact = (text: string): string => redactTextParts(text, false).ready;
   const addKnown = (value: string): void => {
     if (value.length !== 0 && !known.has(value)) {
       known.add(value);
@@ -72,21 +94,7 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
   return {
     values: () => values,
     hasProtectedValues: () => values.length !== 0 || images.size !== 0,
-    redactChunk(text) {
-      const protectedValues = [...values, ...images];
-      let cut = text.length;
-      for (const key of protectedValues) {
-        for (let size = Math.min(key.length - 1, text.length); size > text.length - cut; size--) {
-          if (text.endsWith(key.slice(0, size))) { cut = text.length - size; break; }
-        }
-      }
-      if (cut === text.length) return { ready: redact(text), pending: "" };
-      for (const key of protectedValues) {
-        const match = text.lastIndexOf(key, cut - 1);
-        if (match >= 0 && match + key.length > cut) cut = match;
-      }
-      return { ready: redact(text.slice(0, cut)), pending: text.slice(cut) };
-    },
+    redactChunk: text => redactTextParts(text, true),
     add(value) {
       if (credentialValue(value)) { addKnown(value); }
     },
