@@ -34,13 +34,13 @@ export function openCodeContract(
   const adapter = () => new OpenCodeAdapter({ resolveBin, models: [`loopback/${MODEL}`] });
   const identifies = (version: string, expected: string) => version === expected;
 
-  async function openCodeEnv(label: string, baseURL: string, bash: 'allow' | 'ask' = 'allow', sandbox?: Sandbox) {
+  async function openCodeEnv(label: string, baseURL: string, bash: 'allow' | 'ask' = 'allow', sandbox?: Sandbox, denyMcp = false) {
     const box = sandbox ?? await createSandbox(label);
     // PowerShell, which OpenCode 2.x runs shell tools in on Windows, exits 0 without running the command when PATHEXT is unset (#1696); the
     // runtime environment the SDK builds for win32 always carries it (runtime/environment.ts), so the contract's environment does too.
     const env: NodeJS.ProcessEnv = { ...baseEnv(box.home), ...(process.platform === 'win32' && process.env.PATHEXT !== undefined ? { PATHEXT: process.env.PATHEXT } : {}) };
     const config = {
-      $schema: 'https://opencode.ai/config.json', autoupdate: false, permission: { bash, edit: bash }, share: 'disabled', model: `loopback/${MODEL}`, small_model: `loopback/${MODEL}`,
+      $schema: 'https://opencode.ai/config.json', autoupdate: false, permission: { bash, edit: bash, ...(denyMcp ? { alpha_submit_result: 'deny', 'alpha.submit_result': 'deny' } : {}) }, share: 'disabled', model: `loopback/${MODEL}`, small_model: `loopback/${MODEL}`,
       provider: { loopback: { npm: '@ai-sdk/openai-compatible', name: 'Loopback', options: { baseURL, apiKey: 'runtime-contract-placeholder' }, models: { [MODEL]: { name: 'Contract', tool_call: true, limit: { context: 32_000, output: 4096 } } } } },
     };
     await fs.mkdir(path.join(env.XDG_CONFIG_HOME!, 'opencode'), { recursive: true });
@@ -111,8 +111,8 @@ export function openCodeContract(
 
   defineMcpSearchProbes({
     runtime, variant: '', wire: 'openai-chat', model: MODEL,
-    async configure(box, provider, spawnFn) {
-      const { env } = await openCodeEnv(`${runtime}-search`, provider.baseUrl, 'allow', box);
+    async configure(box, provider, spawnFn, scenario) {
+      const { env } = await openCodeEnv(`${runtime}-search`, provider.baseUrl, 'allow', box, scenario.startsWith('native-deny'));
       return { adapter: new OpenCodeAdapter({ resolveBin, spawnFn, models: [`loopback/${MODEL}`] }), env };
     },
   });

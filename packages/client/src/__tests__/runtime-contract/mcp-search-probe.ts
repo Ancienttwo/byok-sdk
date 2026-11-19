@@ -40,9 +40,9 @@ const text = { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS } as const;
 const spawnProbe = promisify(execFile);
 const terminalTypes = new Set(['task.complete', 'task.fail', 'task.decline', 'task.cancelled']);
 
-type Scenario = 'mixed' | 'qualified-launch' | 'all' | 'name-boundary' | 'parallel' | 'collision-dash' | 'collision-underscore' | 'collision-exact' | 'hub-idle' | 'hub-in-flight'
+type Scenario = 'mixed' | 'qualified-launch' | 'native-deny-control' | 'native-deny-search' | 'all' | 'name-boundary' | 'parallel' | 'collision-dash' | 'collision-underscore' | 'collision-exact' | 'hub-idle' | 'hub-in-flight'
   | 'inner-idle' | 'inner-in-flight' | 'drift' | 'outer-slow' | 'slow-below' | 'slow-above' | 'call-budget' | 'maximum' | 'cancel';
-const scenarios: readonly Scenario[] = ['mixed', 'qualified-launch', 'all', 'name-boundary', 'parallel', 'collision-dash', 'collision-underscore', 'collision-exact', 'hub-idle', 'hub-in-flight',
+const scenarios: readonly Scenario[] = ['mixed', 'qualified-launch', 'native-deny-control', 'native-deny-search', 'all', 'name-boundary', 'parallel', 'collision-dash', 'collision-underscore', 'collision-exact', 'hub-idle', 'hub-in-flight',
   'inner-idle', 'inner-in-flight', 'drift', 'outer-slow', 'slow-below', 'slow-above', 'call-budget', 'maximum', 'cancel'];
 
 interface ProbeOptions {
@@ -50,7 +50,7 @@ interface ProbeOptions {
   variant: string;
   wire: ProviderWire;
   model?: string;
-  configure(box: Sandbox, provider: LoopbackProvider, capture: typeof spawn): Promise<{ adapter: RuntimeAdapter; env: NodeJS.ProcessEnv }>;
+  configure(box: Sandbox, provider: LoopbackProvider, capture: typeof spawn, scenario: Scenario): Promise<{ adapter: RuntimeAdapter; env: NodeJS.ProcessEnv }>;
   projectEnvironment?: (env: Readonly<Record<string, string>>, box: Sandbox) => Readonly<Record<string, string>>;
 }
 
@@ -79,11 +79,16 @@ const search: Action = { server: MCP_HUB_SERVER_NAME, tool: HUB_SEARCH_TOOL, arg
 const call = (server: string, summary: string, name = exact): Action => ({ server: MCP_HUB_SERVER_NAME, tool: HUB_CALL_TOOL,
   args: { server, tool: name, arguments: { summary } } });
 
-function selectTool(request: ProviderRequest, action: Action, bridges: Set<string>): ProviderStep | undefined {
+function selectTool(request: ProviderRequest, action: Action, bridges: Set<string>, runtime: ContractRuntime): ProviderStep | undefined {
   const { server, tool, args } = action;
   const picked = mcpTool(server, tool)(request.tools);
   if (picked !== undefined) return { kind: 'tool', tool: picked, args };
   const nativeName = `mcp__${server}__${tool}`;
+  if (runtime === 'dsh' && nativeName.length > 64) {
+    const shortened = request.tools.find(candidate => candidate.name.startsWith(nativeName.slice(0, 45))
+      && /_[a-z0-9]{12}$/.test(candidate.name));
+    if (shortened !== undefined) return { kind: 'tool', tool: shortened, args };
+  }
   const claude = request.tools.find(candidate => candidate.name === 'ToolSearch');
   if (claude !== undefined && !bridges.has(nativeName) && request.text.includes(nativeName)) {
     bridges.add(nativeName);
@@ -101,7 +106,8 @@ function selectTool(request: ProviderRequest, action: Action, bridges: Set<strin
   }
   const execute = request.tools.find(candidate => candidate.name === 'execute');
   if (execute !== undefined && request.text.includes(`tools.${server}.${tool}(`)) {
-    return { kind: 'tool', tool: execute, args: { code: `return await tools[${JSON.stringify(server)}][${JSON.stringify(tool)}](${JSON.stringify(args)})` } };
+    const code = `return await tools[${JSON.stringify(server)}][${JSON.stringify(tool)}](${JSON.stringify(args)})`;
+    return { kind: 'tool', tool: execute, args: { code } };
   }
   return undefined;
 }
@@ -145,6 +151,8 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
     ? Array.from({ length: 256 }, (_, index) => `s${String(index).padStart(3, '0')}`)
     : ['alpha', 'beta', 'blocked'];
   const qualifiedLaunch = scenario === 'qualified-launch';
+  const nativeDenyControl = scenario === 'native-deny-control';
+  const nativeDenySearch = scenario === 'native-deny-search';
   const paired = scenario === 'mixed' || qualifiedLaunch || scenario === 'all' || scenario === 'name-boundary' || collision !== undefined;
   const longDirectServer = options.runtime === 'dsh' ? longServer.slice(0, 32) : longServer;
   const first = call(names[0]!, 'first');
@@ -152,7 +160,9 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
     call('outside', 'not-in-attempt'), { server: 'native', tool: exact, args: { summary: 'direct' } },
     ...(collision === undefined ? [] : [{ server: collision, tool: HUB_CALL_TOOL, args: { summary: 'collision-control' } }]),
     ...(scenario === 'name-boundary' ? [{ server: longDirectServer, tool: longName, args: { summary: 'long-native' } }] : [])]
-    : scenario === 'parallel' ? [search, first, call('beta', 'parallel-second')]
+    : nativeDenyControl ? [{ server: 'alpha', tool: exact, args: { summary: 'first' } }]
+      : nativeDenySearch ? [search, first]
+        : scenario === 'parallel' ? [search, first, call('beta', 'parallel-second')]
       : ['cancel', 'slow-above', 'outer-slow'].includes(scenario) ? [search]
         : [search, first, ...(scenario.includes('idle') || scenario.includes('flight') || scenario === 'drift' ? [call('alpha', 'explicit-next')] : [])];
   let step = 0;
@@ -204,13 +214,17 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
     }
     const action = actions[step];
     if (action === undefined || requestsAfterLastStep++ >= 4) return text;
-    const picked = selectTool(request, action, bridges);
+    let picked = selectTool(request, action, bridges, options.runtime);
+    if (picked === undefined && killed && scenario.startsWith('hub') && step === 2) {
+      const prior = attempted.at(-1);
+      if (prior !== undefined) picked = { kind: 'tool', tool: prior.native, args: action.args };
+    }
     if (picked?.kind !== 'tool') return text;
     const selected = options.runtime === 'agy' ? { ...picked, args: { ...picked.args, toolSummary: 'Synthetic contract call' } } : picked;
     if (selected.tool.name === 'ToolSearch' || selected.tool.name === 'search_tool') { providerSteps.push(selected); return selected; }
     if (scenario === 'parallel' && step === 1 && options.wire === 'openai-chat') {
       const second = actions[2]!;
-      const parallel = selectTool(request, second, bridges);
+      const parallel = selectTool(request, second, bridges, options.runtime);
       if (parallel?.kind === 'tool') {
         attempted.push({ action, native: selected.tool }, { action: second, native: parallel.tool });
         const response = { ...selected, parallel: [parallel] };
@@ -240,7 +254,7 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
   }, options.model);
 
   try {
-    const { adapter, env } = await options.configure(box, provider, captureRuntime(nativeFrames, options.runtime === 'pi' ? spawnContractPi : spawn));
+    const { adapter, env } = await options.configure(box, provider, captureRuntime(nativeFrames, options.runtime === 'pi' ? spawnContractPi : spawn), scenario);
     await withProcessEnv({ ...env, ...recorder.env, HUB_CONTRACT_MARKER: 'loopback' }, async () => {
       vi.spyOn(adapter, 'runtimeEnvironment').mockImplementation(async () => testRuntimeEnvironment(process.env));
       mode = await adapter.detect();
@@ -277,7 +291,8 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
         ...(collision === undefined ? {} : { [collision]: await writeSubmitResultServer(box.root, collisionFile, HUB_CALL_TOOL) }),
         ...(scenario === 'name-boundary' ? { [longDirectServer]: await writeSubmitResultServer(box.root, boundaryReceipt, longName) } : {}),
       };
-      const registry = new McpToolsetRegistry({ ...Object.fromEntries(searchSets), ...(paired ? {
+      const registry = new McpToolsetRegistry(nativeDenyControl ? { nativecontrol: { mcpServers: Object.fromEntries(servers) } } : {
+        ...Object.fromEntries(searchSets), ...(paired ? {
         direct: { mcpServers: directServers },
         unselected: { exposure: 'search', mcpServers: { outside: { command: process.execPath, args: [innerBin, configPaths.get('alpha')!, receiptPaths.get('outside')!] } } },
       } : {}) });
@@ -286,8 +301,9 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
       const auto = scenario !== 'all' && adapter.descriptor.capabilities.toolAuthorizationAuto === true;
       const cancellations: Promise<void>[] = [];
       const terminal = Promise.withResolvers<Envelope>();
+      const isolation: Readonly<Record<string, string>> = options.runtime === 'dsh' ? { sandbox: 'danger-full-access' } : { agentUserContext: 'inherit' };
       const productionCandidates = searchRuntimeCandidates({}, [{
-        id: adapter.descriptor.id, source: 'sdk-built', toolAuthorizationAuto: auto, isolation: { agentUserContext: 'inherit' },
+        id: adapter.descriptor.id, source: 'sdk-built', toolAuthorizationAuto: auto, isolation,
       }]);
       const runner = new TaskRunner({
         ...testAgentHomeDeps(), ...freshOfferRunnerDeps(), adapters: [adapter], storeDir: box.root, productId,
@@ -336,7 +352,7 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
         methods: createControlMethods({ daemonState: { runner, shuttingDown: false }, adapters: [adapter] } as unknown as DaemonScope) });
       try {
         cancel = () => runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 3 }));
-        const requiredToolsets = [...searchSets.map(([id]) => id), ...(paired ? ['direct'] : [])].slice(0, 16);
+        const requiredToolsets = nativeDenyControl ? ['nativecontrol'] : [...searchSets.map(([id]) => id), ...(paired ? ['direct'] : [])].slice(0, 16);
         const makeOffer = (id: string, sets = requiredToolsets) => createEnvelope('task.offer', {
           ...FRESH_OFFER, agentRef: freshTestAgentRef(), instruction: 'Run the synthetic MCP fixture.',
           target: { lane: 'auto' }, requiredToolsets: sets,
@@ -420,7 +436,10 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
     const parsed = AgentEventSchema.safeParse(event);
     return parsed.success && (parsed.data.type === 'tool_use' || parsed.data.type === 'tool_result') ? [parsed.data] : [];
   });
-  const observedSession = sent.find(envelope => envelope.task_id === 'search-contract' && envelope.session_ref !== undefined)?.session_ref;
+  const completion = sent.find((envelope): envelope is Extract<Envelope, { type: 'task.complete' }> =>
+    envelope.task_id === 'search-contract' && envelope.type === 'task.complete');
+  const observedSession = sent.find(envelope => envelope.task_id === 'search-contract' && envelope.session_ref !== undefined)?.session_ref
+    ?? completion?.payload.sessionRef;
   return {
     runtime: options.runtime, variant: options.variant, detected: mode, platform: platform(), arch: arch(), release: release(),
     observedSession,
@@ -551,27 +570,131 @@ function assertPiReceipt(result: Awaited<ReturnType<typeof probe>>): void {
   }
 }
 
+function assertDshReceipt(result: Awaited<ReturnType<typeof probe>>): void {
+  expect(result.error).toBeUndefined();
+  expect(result.detected).toMatchObject({ kind: 'available', version: '0.2.2-rc.1', executableSource: 'env' });
+  if (result.scenario === 'collision-exact') {
+    expect(result.order).toEqual(['task.decline']);
+    expect(result.terminals[0]?.payload).toMatchObject({ reason: expect.stringContaining('conflicts with the search hub name') });
+    expect(result.attempted).toHaveLength(0);
+    return;
+  }
+  expect(result.order.slice(0, 2)).toEqual(['task.claim', 'task.started']);
+  expect(result.terminals[0]?.type).toBe(result.scenario === 'cancel' ? 'task.cancelled' : 'task.complete');
+  expect(result.staleActive).toBe(false);
+  expect(result.staleNonce).toMatch(/^(revoked|unknown)$/);
+  const calls = (server: string) => result.servers[server]?.writes.length ?? 0;
+  const resultErrors = result.toolEvents.filter(event => event.type === 'tool_result' && event.isError === true);
+  const outer = result.toolEvents.filter(event => event.tool.startsWith('mcp__byoktools__'));
+  expect(outer.every(event => event.mcp === undefined && Boolean(event.toolCallId))).toBe(true);
+  switch (result.scenario) {
+    case 'mixed':
+    case 'qualified-launch':
+    case 'all':
+    case 'name-boundary':
+    case 'collision-dash':
+    case 'collision-underscore': {
+      expect([calls('alpha'), calls('beta'), calls('blocked'), calls('native')]).toEqual([2, 1, 1, 1]);
+      expect(resultErrors).toHaveLength(1);
+      const firstCall = outer.find(event => event.tool.endsWith('__call_tool') && event.type === 'tool_use');
+      expect(firstCall?.type === 'tool_use' ? firstCall.input : undefined)
+        .toEqual({ server: 'alpha', tool: exact, arguments: { summary: 'first' } });
+      if (result.scenario === 'mixed') {
+        expect(result.staleCall).toBe(true);
+        expect(result.nextTaskActive).toBe(true);
+      } else if (result.scenario === 'name-boundary') {
+        expect(calls(longServer.slice(0, 32))).toBe(1);
+      } else if (result.scenario === 'collision-dash' || result.scenario === 'collision-underscore') {
+        expect(calls(result.scenario === 'collision-dash' ? 'byok-tools' : 'byok_tools')).toBe(1);
+      }
+      break;
+    }
+    case 'parallel':
+      expect([calls('alpha'), calls('beta')]).toEqual([1, 1]);
+      expect(result.providerSteps.some(step => step.kind === 'tool' && step.parallel?.length === 1)).toBe(true);
+      break;
+    case 'hub-idle':
+    case 'hub-in-flight':
+      expect(result.killed).toBe(true);
+      expect(result.attempted).toHaveLength(3);
+      expect(calls('alpha')).toBe(1);
+      expect(resultErrors).toHaveLength(result.scenario === 'hub-idle' ? 1 : 2);
+      break;
+    case 'inner-idle':
+    case 'inner-in-flight':
+      expect(result.killed).toBe(true);
+      expect(calls('alpha')).toBe(2);
+      expect(resultErrors).toHaveLength(result.scenario === 'inner-idle' ? 0 : 1);
+      break;
+    case 'drift':
+      expect(result.killed).toBe(true);
+      expect(calls('alpha')).toBe(1);
+      expect(JSON.stringify(resultErrors)).toContain('changed since search');
+      break;
+    case 'outer-slow':
+      expect(result.attempted).toHaveLength(1);
+      expect(resultErrors).toHaveLength(0);
+      expect(JSON.stringify(outer)).toContain('submit_result');
+      break;
+    case 'slow-below':
+      expect(calls('alpha')).toBe(1);
+      expect(resultErrors).toHaveLength(0);
+      break;
+    case 'slow-above':
+      expect(JSON.stringify(resultErrors)).toContain('exceeded its 10-second budget');
+      break;
+    case 'call-budget': {
+      expect(calls('alpha')).toBe(1);
+      const dispatch = result.hub.findLast(frame => frame.method === 'tools/call');
+      const cancel = result.hub.find(frame => frame.method === 'notifications/cancelled');
+      const elapsed = Number(cancel?.ms) - Number(dispatch?.ms);
+      expect(elapsed).toBeGreaterThan(55_000);
+      expect(elapsed).toBeLessThan(90_000);
+      expect(JSON.stringify(resultErrors)).toContain('Request timed out');
+      break;
+    }
+    case 'maximum':
+      expect(Object.values(result.servers).filter(server => server.lists > 0)).toHaveLength(256);
+      expect(calls('s000')).toBe(1);
+      expect(result.innerPeak).toBeLessThanOrEqual(8);
+      break;
+    case 'cancel':
+      expect(result.attempted).toHaveLength(1);
+      expect(calls('alpha')).toBe(0);
+      expect(outer.some(event => event.type === 'tool_result')).toBe(false);
+      break;
+  }
+}
+
+function assessReceipt(runtime: ContractRuntime, result: Awaited<ReturnType<typeof probe>>) {
+  if (runtime !== 'pi' && runtime !== 'dsh') return { status: 'observation' as const };
+  try {
+    if (result.scenario === 'qualified-launch' && result.order[0] === 'task.decline') {
+      expect(result.order).toEqual(['task.decline']);
+      expect(result.terminals[0]?.payload).toMatchObject({ reason: expect.stringContaining('MCP search exposure is unavailable') });
+      expect(result.attempted).toHaveLength(0);
+      return { status: 'closed' as const };
+    }
+    if (runtime === 'pi') assertPiReceipt(result);
+    else assertDshReceipt(result);
+    return { status: 'pass' as const };
+  } catch (error) {
+    return { status: 'fail' as const, reason: String(error) };
+  }
+}
+
 export function defineMcpSearchProbes(options: ProbeOptions): void {
   if (outputDir === undefined || contractMode() !== 'qualified') return;
   const requested = process.env.BYOK_SEARCH_SCENARIOS;
   const selected = requested === '*' ? scenarios : requested?.split(',') ?? ['mixed'];
   if (selected.some(entry => !scenarios.includes(entry as Scenario))) throw new Error(`Unknown MCP search scenario: ${selected.join(', ')}`);
   describe(`${options.runtime} MCP search qualification`, () => {
-    for (const scenario of scenarios.filter(entry => selected.includes(entry) && (entry !== 'qualified-launch' || options.runtime === 'pi'))) {
+    for (const scenario of scenarios.filter(entry => selected.includes(entry)
+      && (entry !== 'qualified-launch' || options.runtime === 'pi' || options.runtime === 'dsh')
+      && (!entry.startsWith('native-deny') || options.runtime.startsWith('opencode')))) {
       it(scenario, async () => {
         const result = await probe(options, scenario);
-        const acceptance = options.runtime === 'pi' ? (() => {
-          try {
-            if (scenario === 'qualified-launch' && result.order[0] === 'task.decline') {
-              expect(result.order).toEqual(['task.decline']);
-              expect(result.terminals[0]?.payload).toMatchObject({ reason: expect.stringContaining('MCP search exposure is unavailable') });
-              expect(result.attempted).toHaveLength(0);
-              return { status: 'closed' as const };
-            }
-            assertPiReceipt(result);
-            return { status: 'pass' as const };
-          } catch (error) { return { status: 'fail' as const, reason: String(error) }; }
-        })() : { status: 'observation' as const };
+        const acceptance = assessReceipt(options.runtime, result);
         await fs.mkdir(outputDir, { recursive: true });
         await fs.writeFile(path.join(outputDir, `${options.runtime}-${scenario}.json`), `${JSON.stringify({ ...result, acceptance }, null, 2)}\n`);
         // A closed runtime can supply a negative observation. These invariants
