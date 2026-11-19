@@ -33,6 +33,8 @@ export default defineConfig({
     'src/bin/byok-agent-memory-mcp.ts',
     'src/bin/byok-agent-memory-describe.ts',
     'src/bin/byok-agent-team-mcp.ts',
+    'src/bin/byok-mcp-hub.ts',
+    'src/bin/mcp-hub-runtime.ts',
   ],
   format: ['esm'],
   target: 'es2022',
@@ -70,7 +72,7 @@ export default defineConfig({
   // non-win32 install (where the addon may be absent) never has it inlined,
   // and so the win32 branch loads the host's own prebuilt addon.
   external: [
-    'koffi', '#byok-acp-runtime', '#byok-oar-readers', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
+    'koffi', '#byok-acp-runtime', '#byok-mcp-hub-runtime', '#byok-oar-readers', '#byok-pi-runtime-host', '#byok-pi-todo-runtime',
     /^typebox(?:\/|$)/,
     'undici',
   ],

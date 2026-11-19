@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "d2a79c695dd511c158bbb3a9e7ac8a48e5cb8b530f5b048a6a6ccc45961e41aa"
+    "snapshotSha256": "20512f8cd4fcf605fea4fd68156338bd7124a15061596337b6f4acf8ab9992ec"
   },
   "configFields": {
     "status": "tracked",
@@ -33,9 +33,25 @@
         "config:mcpToolsets",
         "export:@byok-sdk/client#McpToolsetConfig"
       ]
+    },
+    {
+      "id": "mcp-hub-sdk-helper",
+      "impact": "additive",
+      "summary": "Handle mcp-hub in exhaustive SdkReservedHelperKind switches and include byok-mcp-hub in fixed distribution lists. Single-file Hosts continue routing SDK helpers through runSdkReservedHelperCommand.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2396",
+      "items": [
+        "bin:byok-mcp-hub",
+        "export:@byok-sdk/client#SdkReservedHelperKind"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "bin:byok-mcp-hub",
+      "change": "added",
+      "after": "@byok-sdk/client ./dist/bin/byok-mcp-hub.js",
+      "entry": "mcp-hub-sdk-helper"
+    },
     {
       "item": "config:mcpToolsets",
       "change": "changed",
@@ -47,6 +63,11 @@
       "item": "export:@byok-sdk/client#McpToolsetConfig",
       "change": "changed",
       "entry": "mcp-toolset-exposure-config"
+    },
+    {
+      "item": "export:@byok-sdk/client#SdkReservedHelperKind",
+      "change": "changed",
+      "entry": "mcp-hub-sdk-helper"
     },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",

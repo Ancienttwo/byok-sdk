@@ -4,6 +4,7 @@
   "byok-agent-message-mcp": { "package": "@byok-sdk/client", "role": "reserved-helper", "kind": "agent-message-mcp" },
   "byok-agent-result-mcp": { "package": "@byok-sdk/client", "role": "reserved-helper", "kind": "agent-result-mcp" },
   "byok-agent-team-mcp": { "package": "@byok-sdk/client", "role": "reserved-helper", "kind": "agent-team-mcp" },
+  "byok-mcp-hub": { "package": "@byok-sdk/client", "role": "reserved-helper", "kind": "mcp-hub" },
   "byok-pi-durable": { "package": "@byok-sdk/client", "role": "pi-host", "kind": "pi-durable" },
   "byok-pi-prepared": { "package": "@byok-sdk/client", "role": "pi-host", "kind": "pi-prepared" },
   "byok-pi-provider-launcher": { "package": "@byok-sdk/keys", "role": "provider-launcher" },

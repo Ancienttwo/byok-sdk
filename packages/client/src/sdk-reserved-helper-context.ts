@@ -1,5 +1,6 @@
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
+import type { McpHubCatalogBinding } from './mcp/hub/catalog.js';
 import type { SdkReservedHelperKind } from './sdk-reserved-helper-host.js';
 
 /**
@@ -19,6 +20,10 @@ export interface SdkReservedMcpContext {
 export interface AgentMemoryMcpContext extends SdkReservedMcpContext {
   readonly mode: 'read' | 'read-write';
   readonly toolList: 'granted' | 'complete';
+}
+
+export interface McpHubContext extends SdkReservedMcpContext {
+  readonly binding: McpHubCatalogBinding;
 }
 
 /** The daemon's context file, the one source of a task-scoped MCP server's identity. Throws when unusable. */
@@ -42,7 +47,7 @@ export async function readMcpContextFile(file: string): Promise<SdkReservedMcpCo
 /** Arguments after `kind`: a task helper takes its context file. Pi hosts parse their own argv, so `undefined`. */
 export function sdkReservedHelperArgumentCount(kind: SdkReservedHelperKind): number | undefined {
   switch (kind) {
-    case 'agent-message-mcp': case 'agent-result-mcp': case 'agent-memory-mcp': return 1;
+    case 'agent-message-mcp': case 'agent-result-mcp': case 'agent-memory-mcp': case 'mcp-hub': return 1;
     case 'agent-memory-describe': case 'agent-team-mcp': return 0;
     case 'pi-rpc': case 'pi-prepared': case 'pi-durable': return undefined;
   }

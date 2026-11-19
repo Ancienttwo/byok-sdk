@@ -66,6 +66,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-mcp-hub-runtime",
         "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
@@ -390,6 +391,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-mcp-hub-runtime",
         "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "./input-image-upload.js",
@@ -565,6 +567,7 @@
       ],
       "lazyImports": [
         "#byok-acp-runtime",
+        "#byok-mcp-hub-runtime",
         "#byok-oar-readers",
         "#byok-pi-runtime-host",
         "@earendil-works/chord/context",
@@ -1166,6 +1169,99 @@
       ]
     }
   },
+  "@byok-sdk/client#byok-mcp-hub-runtime": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private MCP hub runtime for SDK helper dispatch",
+      "budgetBytes": 55062,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      },
+      "thirdParty": [
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "eventsource",
+        "eventsource-parser",
+        "pkce-challenge",
+        "zod"
+      ]
+    },
+    "facts": {
+      "target": "packages/client/dist/bin/mcp-hub-runtime.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/bin/mcp-hub-runtime.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/core/system-tool",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/client/validators/cf-worker",
+        "fs",
+        "node:child_process",
+        "node:crypto",
+        "node:events",
+        "node:fs",
+        "node:fs/promises",
+        "node:path",
+        "node:stream/promises",
+        "path"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "eventsource",
+        "eventsource-parser",
+        "pkce-challenge",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "fs",
+          "node:child_process",
+          "node:crypto",
+          "node:events",
+          "node:fs",
+          "node:fs/promises",
+          "node:path",
+          "node:stream/promises",
+          "path"
+        ],
+        "thirdParty": [
+          "node:crypto"
+        ]
+      },
+      "codegen": [
+        {
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
+          "line": 2594,
+          "rule": "Function constructor"
+        },
+        {
+          "file": "zod/v4/core/compile.js",
+          "line": 180,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 33,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 228,
+          "rule": "Function reference"
+        }
+      ]
+    }
+  },
   "@byok-sdk/client#byok-oar-readers": {
     "kind": "imports",
     "policy": {
@@ -1321,6 +1417,7 @@
         "zod"
       ],
       "lazyImports": [
+        "#byok-mcp-hub-runtime",
         "#byok-pi-runtime-host",
         "#byok-pi-todo-runtime",
         "@earendil-works/pi-ai",
@@ -3075,6 +3172,7 @@
         "node:path"
       ],
       "lazyImports": [
+        "#byok-mcp-hub-runtime",
         "#byok-pi-runtime-host"
       ],
       "thirdParty": [],
@@ -3117,6 +3215,7 @@
         "node:path"
       ],
       "lazyImports": [
+        "#byok-mcp-hub-runtime",
         "#byok-pi-runtime-host"
       ],
       "thirdParty": [],
@@ -3159,6 +3258,7 @@
         "node:path"
       ],
       "lazyImports": [
+        "#byok-mcp-hub-runtime",
         "#byok-pi-runtime-host"
       ],
       "thirdParty": [],
@@ -3201,6 +3301,7 @@
         "node:path"
       ],
       "lazyImports": [
+        "#byok-mcp-hub-runtime",
         "#byok-pi-runtime-host"
       ],
       "thirdParty": [],
@@ -3216,6 +3317,96 @@
         "thirdParty": []
       },
       "codegen": []
+    }
+  },
+  "bin:byok-mcp-hub": {
+    "kind": "bin",
+    "policy": {
+      "purpose": "Task-bound MCP discovery and dispatch helper",
+      "budgetBytes": 55410,
+      "zod": true,
+      "codegen": true,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": true
+      },
+      "thirdParty": [
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "eventsource",
+        "eventsource-parser",
+        "pkce-challenge",
+        "zod"
+      ]
+    },
+    "facts": {
+      "target": "packages/client/dist/bin/byok-mcp-hub.js",
+      "conditions": [],
+      "types": [],
+      "bareImports": [
+        "#byok-mcp-hub-runtime",
+        "@byok-sdk/core/system-tool",
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/client/validators/cf-worker",
+        "fs",
+        "node:child_process",
+        "node:crypto",
+        "node:events",
+        "node:fs",
+        "node:fs/promises",
+        "node:path",
+        "node:stream/promises",
+        "path"
+      ],
+      "lazyImports": [],
+      "thirdParty": [
+        "@modelcontextprotocol/client",
+        "@modelcontextprotocol/core",
+        "eventsource",
+        "eventsource-parser",
+        "pkce-challenge",
+        "zod"
+      ],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "fs",
+          "node:child_process",
+          "node:crypto",
+          "node:events",
+          "node:fs",
+          "node:fs/promises",
+          "node:path",
+          "node:stream/promises",
+          "path"
+        ],
+        "thirdParty": [
+          "node:crypto"
+        ]
+      },
+      "codegen": [
+        {
+          "file": "@modelcontextprotocol/client/dist/ajvProvider-BIwGVY6G.mjs",
+          "line": 2594,
+          "rule": "Function constructor"
+        },
+        {
+          "file": "zod/v4/core/compile.js",
+          "line": 180,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/doc.js",
+          "line": 33,
+          "rule": "Function reference"
+        },
+        {
+          "file": "zod/v4/core/util.js",
+          "line": 228,
+          "rule": "Function reference"
+        }
+      ]
     }
   },
   "bin:byok-pi-durable": {
