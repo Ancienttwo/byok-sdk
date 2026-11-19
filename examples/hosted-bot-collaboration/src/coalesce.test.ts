@@ -46,7 +46,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H input coalescing on real Postgres
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
-  coalesceVectors('H HostedCollaborationStore on Postgres', hosted);
+  coalesceVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', hosted);
 
   it('checks the policy at construction with K8 coalescePolicy', () => {
     expect(() => new HostedCollaborationStore(opened!.pool, opened!.store.schema, { host: TEST_HOST, coalesce: { windowMs: 10, maxItems: 2, maxBytes: 4096 } }))

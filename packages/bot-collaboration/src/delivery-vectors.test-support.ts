@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import type { VectorTestApi } from './vector-test-api.js';
 import type { Json } from '@byok-sdk/server/execution-core';
 import { inboundKey, type ChannelPort, type Delivery } from './channel.js';
 import type { CollaborationState } from './model.js';
@@ -83,7 +83,7 @@ function scripted(...results: Array<SendResult | Error | 'hang'>) {
   return { calls, send };
 }
 
-export function deliveryVectors(name: string, open: (port: ChannelPort) => Promise<DeliverySubject>): void {
+export function deliveryVectors({ describe, it, expect }: VectorTestApi, name: string, open: (port: ChannelPort) => Promise<DeliverySubject>): void {
   describe(`delivery contract: ${name}`, () => {
     it('1. sends a reply-route delivery once, with the token only in the route, and settles it accepted', async () => {
       const port = scripted(accepted('p1')), subject = await open(port);

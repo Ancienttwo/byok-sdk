@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll } from 'vitest';
+import { afterAll, describe, it, expect } from 'vitest';
 import { canonical, hash, HostLedger, project, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf } from './model';
 import { admitUserInput } from './coalesce';
@@ -58,4 +58,4 @@ function homeSubject(): HomeSubject {
   };
 }
 
-homeVectors('L HostLedger', homeSubject);
+homeVectors({ describe, it, expect }, 'L HostLedger', homeSubject);

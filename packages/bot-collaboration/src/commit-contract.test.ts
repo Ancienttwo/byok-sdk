@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, expect, it } from 'vitest';
+import { afterAll, expect, it, describe } from 'vitest';
 import { canonical, hash, HostLedger, project, taskId, type Json, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf, type CollaborationState } from './model';
 import { admitUserInput, projectInputBatches, sealDueBatches } from './coalesce';
@@ -154,14 +154,14 @@ function cardSubject(): CardSubject {
     });
   } };
 }
-commitVectors('pure rules in memory', memorySubject);
-commitVectors('L HostLedger', ledgerSubject);
-retentionVectors('pure rules in memory', memorySubject);
-retentionVectors('L HostLedger', ledgerSubject);
-syncVectors('pure rules in memory', () => memorySubject());
-syncVectors('L HostLedger', () => ledgerSubject());
-staleTemplateSyncVectors('pure rules in memory', () => memorySubject());
-staleTemplateSyncVectors('L HostLedger', () => ledgerSubject());
+commitVectors({ describe, it, expect }, 'pure rules in memory', memorySubject);
+commitVectors({ describe, it, expect }, 'L HostLedger', ledgerSubject);
+retentionVectors({ describe, it, expect }, 'pure rules in memory', memorySubject);
+retentionVectors({ describe, it, expect }, 'L HostLedger', ledgerSubject);
+syncVectors({ describe, it, expect }, 'pure rules in memory', () => memorySubject());
+syncVectors({ describe, it, expect }, 'L HostLedger', () => ledgerSubject());
+staleTemplateSyncVectors({ describe, it, expect }, 'pure rules in memory', () => memorySubject());
+staleTemplateSyncVectors({ describe, it, expect }, 'L HostLedger', () => ledgerSubject());
 
 it('L: a projection identity conflict in a decision leaves the ledger unchanged', () => {
   const subject = ledgerSubject(), card = hash(['task-1', 'confirmable_action', 0]);
@@ -260,7 +260,7 @@ function settlementSubject(): SettlementSubject & { ledger: HostLedger } {
     },
   };
 }
-settlementVectors('L HostLedger', settlementSubject);
+settlementVectors({ describe, it, expect }, 'L HostLedger', settlementSubject);
 
 /**
  * The L settlement ledger with L's reply check (K8 host.ts `flushReplies`), written out here: each due delegation's chain end
@@ -286,7 +286,7 @@ function replySubject(): ReplySubject {
     },
   };
 }
-replyVectors('L HostLedger', replySubject);
+replyVectors({ describe, it, expect }, 'L HostLedger', replySubject);
 
 /**
  * The L ledger with L's coalescing (K8 host.ts `commitOwner` and `sync`): the owner commands admit inputs with the policy, and
@@ -310,8 +310,8 @@ function coalesceSubject(policy?: CoalescePolicy): CoalesceSubject {
     },
   };
 }
-coalesceVectors('L HostLedger', coalesceSubject);
-cardVectors('L HostLedger', cardSubject);
+coalesceVectors({ describe, it, expect }, 'L HostLedger', coalesceSubject);
+cardVectors({ describe, it, expect }, 'L HostLedger', cardSubject);
 
 /** The L ledger with L's room step and Turn steps, through the function that K8 host.ts `sync` runs. */
 function roomSubject(): RoomSubject {
@@ -327,4 +327,4 @@ function roomSubject(): RoomSubject {
     cancelReason: turnId => ledger.snapshot().intents[hash(turnId)]?.cancelReason,
   };
 }
-roomVectors('L HostLedger', roomSubject);
+roomVectors({ describe, it, expect }, 'L HostLedger', roomSubject);

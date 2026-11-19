@@ -1,5 +1,6 @@
 // The `./testing` entry: the shared vectors a Host runs against its own store, the L test host,
-// and the K4 test data they use. It runs on vitest.
+// and the K4 test data they use. The caller supplies its test runner to the vectors.
+export type { VectorTestApi, VectorMatchers } from './vector-test-api.js';
 export { cardCallVectors, cardVectors, coalesceVectors, commitVectors, deviceVectors, homeVectors, replyVectors, roomVectors, seedCollaboration,
   seedRoom, settlementVectors, SYNC_OPTIONS, syncVectors, VECTOR_NOW, type CardCallSubject, type CardSubject, type CoalesceSubject, type CommitSubject,
   type DeviceSubject, type HomeCalls, type HomeSubject, type ReplySubject, type RoomSubject, type SeedTeam, type SettlementSubject,

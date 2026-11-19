@@ -76,8 +76,8 @@ describe.skipIf(POSTGRES_URL === undefined)('H sync step on real Postgres (#793 
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
 
-  syncVectors('H HostedCollaborationStore on Postgres', hosted);
-  cardVectors('H HostedCollaborationStore on Postgres', hostedCards);
+  syncVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', hosted);
+  cardVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', hostedCards);
 
   it('freezes a decided card\'s action_result Turn in the same sync that adds it: the new Turn starts another round', async () => {
     const h = await hostedCards(), result = hash(['action_result', 'c1']);

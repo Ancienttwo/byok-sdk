@@ -59,14 +59,10 @@
     "@byok-sdk/server": "workspace:*"
   },
   "peerDependencies": {
-    "@hono/node-server": "^2.1.6",
-    "vitest": "^4.0.0 || ^5.1.0"
+    "@hono/node-server": "^2.1.6"
   },
   "peerDependenciesMeta": {
     "@hono/node-server": {
-      "optional": true
-    },
-    "vitest": {
       "optional": true
     }
   },

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe } from 'vitest';
+import { afterAll, beforeAll, describe, it, expect } from 'vitest';
 import type { DeviceTerminal, TaskAttempt } from '@byok-sdk/cloud';
 import { hash, taskId, type Conclusion, type FrozenInput, type FrozenSubmitPort, type Intent, type RoutineDefinition } from '@byok-sdk/server/execution-core';
 import { template } from '@byok-sdk/example-host-execution-core/test-support';
@@ -134,5 +134,5 @@ type RoutineSubjectRow = NonNullable<Awaited<ReturnType<RoutineSubject['routine'
 describe.skipIf(POSTGRES_URL === undefined)('H routine vectors on real Postgres (#793 D2f-4)', () => {
   beforeAll(async () => { opened = await openStore(); });
   afterAll(async () => { await opened?.close(); });
-  routineVectors('H HostedCollaborationStore on Postgres', hostedSubject);
+  routineVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', hostedSubject);
 });

@@ -76,7 +76,7 @@ describe.skipIf(POSTGRES_URL === undefined)('H Agent home flush on real Postgres
     };
   }
 
-  homeVectors('H HostedCollaborationStore on Postgres', homeSubject);
+  homeVectors({ describe, it, expect }, 'H HostedCollaborationStore on Postgres', homeSubject);
 
   /** A scope where `retry_persona` committed a new pending operation for Bot `b`, through the store's own home index. */
   async function retried() {

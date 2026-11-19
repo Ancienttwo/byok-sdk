@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import type { VectorTestApi } from './vector-test-api.js';
 import { nextRoutineOccurrence, type RoutineSchedule, type RoutineScheduleFields, type UpdateRoutineAction } from '@byok-sdk/protocol';
 import { hash, taskId, type Conclusion, type Intent, type Json, type Occurrence, type Routine } from '@byok-sdk/server/execution-core';
 import { json, type CollaborationState } from './model.js';
@@ -77,7 +77,7 @@ const slotAfter = (schedule: RoutineScheduleFields, after: number): number => ne
 const occurrenceKey = (id: string, version: number, kind: Occurrence['trigger']['kind'], plannedAt: number) => hash([id, version, { kind, plannedAt }]);
 const routineTurn = (key: string) => `occurrence:${key}`;
 
-export function routineVectors(name: string, open: () => RoutineSubject | Promise<RoutineSubject>): void {
+export function routineVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => RoutineSubject | Promise<RoutineSubject>): void {
   describe(`routine contract: ${name}`, () => {
     /** Turn `key` of the owner creates one routine through its outcome. Returns the routine id and its schedule. */
     async function created(subject: RoutineSubject, key = 'plan', prompt = PROMPT) {

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, expect, it } from 'vitest';
+import { afterAll, expect, it, describe } from 'vitest';
 import { canonical, hash, HostLedger, MIN_TOMBSTONE_RETENTION_MS, project, type LedgerState } from '@byok-sdk/server/execution-core';
 import { stateOf } from './model';
 import { admitUserInput } from './coalesce';
@@ -59,7 +59,7 @@ function cardCallSubject(): CardCallSubject & { ledger: HostLedger } {
   };
 }
 
-cardCallVectors('L HostLedger', cardCallSubject);
+cardCallVectors({ describe, it, expect }, 'L HostLedger', cardCallSubject);
 
 /** #958: `t1` concluded and reported, and card `c1` confirmed and due for its call. */
 async function confirmed() {
