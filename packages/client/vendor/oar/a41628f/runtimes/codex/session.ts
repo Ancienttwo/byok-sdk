@@ -14,6 +14,7 @@ import type {
   InputOptions,
   RawEvent,
   RequestRecord,
+  RuntimeEventBody,
   AdapterSession,
   SessionOptions,
 } from "../../contracts/session.js";
@@ -171,7 +172,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     const retained = [...summary, ...blocks];
     const joined = redactJoinedText([...originalSummary, ...originalContent], retained, redact, "\n", () => true);
     const content = joined.input === "" ? codexReasoningContent(safeItem) : { kind: "text" as const, text: joined.input };
-    const events = safe.body.events.flatMap(event => event.kind !== "reasoning" ? [event]
+    const events = safe.body.events.flatMap<RuntimeEventBody>(event => event.kind !== "reasoning" ? [event]
       : content === null ? [] : [{ ...event, content }]);
     let updated = safe.body.native;
     if (safeItem !== null && Array.isArray(joined.content) && joined.content !== retained) {

@@ -995,7 +995,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 628000,
+      "budgetBytes": 630000,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
