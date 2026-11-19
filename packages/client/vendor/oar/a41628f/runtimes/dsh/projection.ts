@@ -286,6 +286,27 @@ function isAssistantToolArguments(path: RedactionPath, native: unknown): boolean
   return Array.isArray(content) && asRecord(content[path[5]])?.type === "tool-call";
 }
 
+function redactAssistantText<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
+  if (record.kind !== "frame") return record;
+  const native = asRecord(record.body.native);
+  const data = asRecord(native?.data);
+  const message = asRecord(data?.message);
+  if (!Array.isArray(message?.content)) return record;
+  const blocks = message.content.map(asRecord);
+  const text = blocks.flatMap(block => block?.type === "text" && typeof block.text === "string" ? [block.text] : []).join("");
+  const clean = credentials.redact(text);
+  if (clean === text) return record;
+  let delivered = false;
+  const content = message.content.map((block, index) => {
+    const part = blocks[index];
+    if (part?.type !== "text" || typeof part.text !== "string") return block;
+    const result = { ...part, text: delivered ? "" : clean };
+    delivered = true;
+    return result;
+  });
+  return { ...record, body: { ...record.body, native: { ...native, data: { ...data, message: { ...message, content } } } } };
+}
+
 function withholdArgumentDelta(frame: unknown): unknown {
   const native = asRecord(frame);
   const chunk = asRecord(native?.chunk);
@@ -320,7 +341,7 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     }
   }
   if (record.body.type === "session/event:assistant/message") {
-    return redact(record, path => isAssistantToolArguments(path, record.body.native));
+    return redact(redactAssistantText(record, credentials), path => isAssistantToolArguments(path, record.body.native));
   }
   if (record.body.type !== "session/event:tool/call") return redact(record);
   const safe = redact(record, isToolArguments);

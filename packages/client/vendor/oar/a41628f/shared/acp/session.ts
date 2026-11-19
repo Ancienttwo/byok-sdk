@@ -74,7 +74,17 @@ export function redactAcpRecord<T extends RawEvent>(
         : ready.length === 0 ? [] : [{ ...event, text: ready }]);
       return { ...safe, body: { ...safe.body, native, events } };
     }
-    if (previous !== "" && record.body.events.some(event => event.kind === "turn_ended" || event.kind === "tool_call_started" || event.kind === "tool_call_ended")) {
+    const child = native === null ? null : childNotification?.(record.body.type, native);
+    const closedChild = child != null && record.body.events.some(event => event.kind === "task_ended" && event.taskId === child.sessionId);
+    if (closedChild) {
+      const tail = pendingText.get(child.sessionId);
+      pendingText.delete(child.sessionId);
+      if (tail !== undefined) {
+        const event = { kind: "text_delta" as const, text: tail, byokChildId: credentials.redact(child.sessionId) };
+        safe = { ...safe, body: { ...safe.body, events: [event, ...safe.body.events] } };
+      }
+    }
+    if (safe.kind === "frame" && previous !== "" && record.body.events.some(event => event.kind === "turn_ended" || event.kind === "tool_call_started" || event.kind === "tool_call_ended")) {
       pendingText.delete(lane);
       const events = [{ kind: "text_delta" as const, text: previous }, ...safe.body.events];
       safe = { ...safe, body: { ...safe.body, events } };

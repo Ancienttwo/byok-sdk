@@ -71,19 +71,36 @@ describe('unconnected OAR Codex adapter', () => {
     await session.dispose();
   });
 
-  it('retains a stale Codex completion without settling the active root turn', async () => {
+  it.each(['notification first', 'reply first'])('retains stale Codex completion without settling the active turn (%s)', async ordering => {
     const fake = fakeServer();
     const identity = vi.fn();
     const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' },
       { cwd: '/workspace', env: {} }, 1000, { onNativeIdentity: identity });
-    fake.frame({ method: 'turn/started', params: { threadId: 'thread-root', turn: { id: 'turn-B' } } });
+    const activeId = ordering === 'reply first' ? 'turn-root' : 'turn-B';
+    if (ordering === 'reply first') expect((await session.prompt('accepted input')).response.body.kind).toBe('accepted');
+    else fake.frame({ method: 'turn/started', params: { threadId: 'thread-root', turn: { id: activeId } } });
     fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { id: 'turn-A', status: 'completed' } } });
     expect(session.records().at(-1)).toMatchObject({ body: { origin: 'byok-native', byokStaleTurn: true, events: [] } });
     expect(identity).not.toHaveBeenCalledWith('turn/completed', expect.anything());
     expect((await session.prompt('another input')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
-    fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { id: 'turn-B', status: 'completed' } } });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { id: activeId, status: 'completed' } } });
     expect(session.records().at(-1)).toMatchObject({ body: { events: [expect.objectContaining({ kind: 'turn_ended' })] } });
-    expect(identity).toHaveBeenCalledWith('turn/completed', { threadId: 'thread-root', turn: { id: 'turn-B' } });
+    expect(identity).toHaveBeenCalledWith('turn/completed', { threadId: 'thread-root', turn: { id: activeId } });
+    await session.dispose();
+  });
+
+  it('redacts a Codex credential split across draft notifications', async () => {
+    const key = 'synthetic-secret-for-codex';
+    const fake = fakeServer();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' },
+      { cwd: '/workspace', env: { OPENAI_API_KEY: key } });
+    for (const delta of [key.slice(0, 12), key.slice(12)]) {
+      fake.frame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-root', itemId: 'm', delta } });
+      expect(JSON.stringify(session.records())).not.toContain(delta);
+    }
+    expect(session.records()).toContainEqual(expect.objectContaining({ kind: 'frame', body: expect.objectContaining({
+      origin: 'byok-native', type: 'item/agentMessage/delta', native: expect.objectContaining({ delta: '[redacted]' }),
+    }) }));
     await session.dispose();
   });
 

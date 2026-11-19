@@ -138,6 +138,10 @@ export class AcpChildTurns {
     return sessionId === this.rootId ? [] : this.paths.get(sessionId);
   }
 
+  childPath(sessionId: string): readonly string[] {
+    return this.paths.get(sessionId) ?? [sessionId];
+  }
+
   buffer(sessionId: string, path: readonly string[]): AcpTurnBuffer {
     const key = JSON.stringify([sessionId, path]);
     let turn = this.turns.get(key);

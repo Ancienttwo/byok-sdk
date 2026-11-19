@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `d9b011be594779622bf208a8f1c97392e7e7fafa` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `505b2f9f2fb9c7cb806de893c96b3ee5e8a17417` (the manifest's `fork`).
 
 For #2380, `cff0aa94` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
@@ -161,6 +161,8 @@ All 44 branch deltas from `byok/0.120.0` through `7eb600dc99581a4633c4a0a22a5167
 `846e5e91` keeps native identities for transport control while redacting record IDs, extends root attribution to ACP and dsh, and withholds argument fragments for image-only sessions.
 
 `d9b011be` redacts ACP text spanning multiple chunks, preserves schema-owned dsh and Codex keys and keeps stale Codex completion frames from changing the active turn.
+
+`505b2f9f` redacts assembled dsh text and streamed Codex and Claude drafts before delivery. Codex also uses the accepted turn ID for stale completion checks, and OpenCode flushes withheld text when a child ends.
 
 The decoded-value credential boundary supersedes `82ccb2f2`, `73743394`, `bd8fa0c7`, `7c194335` and `e9e50220`. It preserves JSON literals and unchanged encoded arguments, withholds credential-bearing maps and derives dsh tool input from sanitized native arguments.
 

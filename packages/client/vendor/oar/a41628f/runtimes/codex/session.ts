@@ -98,6 +98,7 @@ type CodexSessionArgs = Parameters<typeof codexSession>;
 export type CodexOpenStepRequest = (method: string, params: JsonRecord) => Promise<JsonRecord>;
 
 const codexObservedMethods = new Set(["turn/started", "turn/completed", "thread/tokenUsage/updated", "error", "item/agentMessage/delta", "item/started", "item/completed"]);
+const codexToolFields = new Set(["id", "type", "text", "message", "command", "changes", "server", "tool", "arguments", "result", "error", "query", "status", "aggregatedOutput", "exitCode"]);
 const codexItemTypes = new Set(["agentMessage", "error", "commandExecution", "fileChange", "mcpToolCall", "collabAgentToolCall", "webSearch", "sleep"]);
 const codexTerminalFields = new Set(["id", "status", "error", "items"]);
 const codexNotificationFields = new Set(["threadId", "turnId", "turn", "item", "itemId", "delta", "error", "willRetry", "tokenUsage"]);
@@ -117,7 +118,8 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   }, (path, key) => {
     if (record.kind !== "frame" || !codexObservedMethods.has(record.body.type) || path[0] !== "body" || path[1] !== "native") return false;
     return (path.length === 2 && codexNotificationFields.has(key))
-      || (path.length === 3 && path[2] === "turn" && (record.body.type === "turn/completed" || record.body.type === "turn/started") && codexTerminalFields.has(key));
+      || (path.length === 3 && path[2] === "turn" && (record.body.type === "turn/completed" || record.body.type === "turn/started") && codexTerminalFields.has(key))
+      || (path.length === 3 && path[2] === "item" && (record.body.type === "item/started" || record.body.type === "item/completed") && codexToolFields.has(key));
   });
 }
 
@@ -236,6 +238,7 @@ async function openCodexSession(
   // fold owns event translation, attribution and graph links; this owns the
   // transport-only turn id and the control decisions (busy, spontaneous).
   let lastNotifiedRootTurnId: string | undefined;
+  const draftTails = new Map<string, string>();
   const onNotification = (method: string, params: JsonRecord): void => {
     // BYOK change: Retain the exact native notification before any potentially throwing fold.
     // The record envelope's sessionId puts a foreign thread in the graph (observe/graph.ts); no out-of-band node.
@@ -244,7 +247,16 @@ async function openCodexSession(
     const wireTurn = asRecord(params.turn)?.id;
     if (isRoot && method === "turn/started" && typeof wireTurn === "string") lastNotifiedRootTurnId = wireTurn;
     const turnId = method === "turn/completed" ? wireTurn : params.turnId;
-    const byokStaleTurn = isRoot && typeof turnId === "string" && lastNotifiedRootTurnId !== undefined && turnId !== lastNotifiedRootTurnId;
+    const activeTurn = state.codexTurnId ?? lastNotifiedRootTurnId;
+    const byokStaleTurn = isRoot && typeof turnId === "string" && activeTurn !== undefined && turnId !== activeTurn;
+    if (isRoot && !byokStaleTurn && (method === "turn/started" || method === "turn/completed")) draftTails.clear();
+    if (isRoot && !byokStaleTurn && method === "item/agentMessage/delta" && typeof params.delta === "string" && credentials.hasProtectedValues()) {
+      const lane = typeof params.itemId === "string" ? params.itemId : "";
+      const { ready, pending } = credentials.redactChunk((draftTails.get(lane) ?? "") + params.delta);
+      if (pending === "") draftTails.delete(lane);
+      else draftTails.set(lane, pending);
+      params = { ...params, delta: ready };
+    }
     // BYOK change: label native frames and anchor root and turn membership before redaction can change ids.
     const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot, byokStaleTurn } as const;
     kernel.frame(nativeBody, {

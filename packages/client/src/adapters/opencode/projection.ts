@@ -41,7 +41,8 @@ export class OpenCodeProjection {
         case 'text_delta':
           if (typeof event.text === 'string' && event.text.length > 0) {
             this.output = true;
-            emit({ type: 'progress', text: event.text, ...attribution });
+            const textAt = typeof event.byokChildId === 'string' ? { agentPath: [...this.children.childPath(event.byokChildId)] } : attribution;
+            emit({ type: 'progress', text: event.text, ...textAt });
           }
           break;
         case 'reasoning':

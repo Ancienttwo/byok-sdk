@@ -6,7 +6,7 @@ export const claudeSessionCapabilities = () => ({ steer: true, images: true } as
 import { streamJsonTaskControl } from "./task-control.js";
 import { streamJsonCompaction } from "./compaction.js";
 /* oxlint-disable import/max-dependencies -- The driver composes protocol, input and process-lifetime mechanisms. */
-import type { AdapterSession, ControlResult, InputOptions, RawEvent, RequestRecord } from "../../contracts/session.js";
+import type { AdapterSession, ControlResult, InputOptions, RawEvent, RequestRecord, RuntimeEventBody } from "../../contracts/session.js";
 import { createAbortFallback } from "../abort-fallback.js";
 import { withInputImages } from "../input-images.js";
 import { withdrawControl } from "../held-input.js";
@@ -47,12 +47,28 @@ const streamJsonResultTypes = new Set(["success", "error_during_execution", "err
 const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
 
 /** Encoded fragments can span frames. The complete assistant tool block carries the usable input. */
-export function redactStreamJsonRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
+export function redactStreamJsonRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor, draftTails?: Map<string, Map<number, string>>): T {
   let safe = record;
   if (credentials.hasProtectedValues() && record.kind === "frame" && record.body.type === "stream_event") {
     const native = asRecord(record.body.native);
     const event = asRecord(native?.event);
     const delta = asRecord(event?.delta);
+    const lane = JSON.stringify(record.agentPath);
+    if (event?.type === "message_start" || event?.type === "message_stop") draftTails?.delete(lane);
+    if (draftTails !== undefined && event?.type === "content_block_delta" && typeof event.index === "number"
+      && delta?.type === "text_delta" && typeof delta.text === "string") {
+      const tails = draftTails.get(lane) ?? new Map<number, string>();
+      const { ready, pending } = credentials.redactChunk((tails.get(event.index) ?? "") + delta.text);
+      if (pending === "") tails.delete(event.index);
+      else tails.set(event.index, pending);
+      if (tails.size === 0) draftTails.delete(lane);
+      else draftTails.set(lane, tails);
+      if (ready !== delta.text) {
+        const events = record.body.events.flatMap<RuntimeEventBody>(projected => projected.kind !== "text_delta" ? [projected]
+          : ready === "" ? [] : [{ ...projected, text: ready }]);
+        safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, delta: { ...delta, text: ready } } }, events } };
+      }
+    }
     if (event?.type === "content_block_delta" && delta?.type === "input_json_delta") {
       const { partial_json: _omitted, ...rest } = delta;
       safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, delta: rest } },
@@ -91,7 +107,8 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
   retainedBytes?: number, // BYOK change: the caller's retained-record budget; old frame payloads are elided past it.
 ): Promise<AdapterSession> {
   // BYOK change: the upstream kernel with the redactor as its redact hook; the record consumer is registered before any record is appended.
-  const kernel = createSessionKernel(sessionId, record => redactStreamJsonRecord(record, credentials), retainedBytes);
+  const draftTails = new Map<string, Map<number, string>>();
+  const kernel = createSessionKernel(sessionId, record => redactStreamJsonRecord(record, credentials, draftTails), retainedBytes);
   if (hooks.onRecord !== undefined) { kernel.rawEvents(hooks.onRecord); }
   const tasks = profile.stopTask === undefined ? undefined : streamJsonTaskControl(kernel, child, profile.stopTask);
   const nativeUserMessage = profile.userMessage ?? streamJsonUserMessage;
