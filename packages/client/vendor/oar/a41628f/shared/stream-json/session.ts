@@ -45,15 +45,49 @@ const streamJsonEventTypes = new Set(["message_start", "message_stop", "content_
 const streamJsonDeltaTypes = new Set(["text_delta", "thinking_delta", "input_json_delta"]);
 const streamJsonResultTypes = new Set(["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]);
 const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
+const streamJsonResultFields = new Set(["type", "subtype", "session_id", "parent_tool_use_id", "is_error", "terminal_reason", "result", "usage", "modelUsage", "stop_reason", "api_error_status", "permission_denials", "num_turns", "duration_ms", "duration_api_ms", "total_cost_usd"]);
+
+interface StreamTextTails {
+  readonly drafts: Map<string, Map<number, string>>;
+  readonly assistant: Map<string, string>;
+  readonly projected: Map<string, string>;
+}
+
+function redactTextPart(tails: Map<string, string>, lane: string, text: string, credentials: CredentialRedactor): string {
+  const { ready, pending } = credentials.redactChunk((tails.get(lane) ?? "") + text);
+  if (pending === "") tails.delete(lane);
+  else tails.set(lane, pending);
+  return ready;
+}
 
 /** Encoded fragments can span frames. The complete assistant tool block carries the usable input. */
-export function redactStreamJsonRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor, draftTails?: Map<string, Map<number, string>>): T {
+export function redactStreamJsonRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor, textTails?: StreamTextTails): T {
   let safe = record;
+  const native = record.kind === "frame" ? asRecord(record.body.native) : null;
+  const lane = JSON.stringify(record.agentPath);
+  const draftTails = textTails?.drafts;
+  const assistantTails = textTails?.assistant;
+  if (textTails !== undefined && record.kind === "frame" && record.body.type === "assistant" && native?.type === "assistant"
+    && credentials.hasProtectedValues()) {
+    const message = asRecord(native.message);
+    if (Array.isArray(message?.content)) {
+      const content = message.content.map((block: unknown) => {
+        const part = asRecord(block);
+        if (part?.type !== "text" || typeof part.text !== "string") return block;
+        const ready = redactTextPart(textTails.assistant, lane, part.text, credentials);
+        return ready === part.text ? block : { ...part, text: ready };
+      });
+      const events = record.body.events.flatMap<RuntimeEventBody>(event => {
+        if (event.kind !== "text_delta") return [event];
+        const ready = redactTextPart(textTails.projected, lane, event.text, credentials);
+        return ready === "" ? [] : [{ ...event, text: ready }];
+      });
+      safe = { ...record, body: { ...record.body, native: { ...native, message: { ...message, content } }, events } };
+    }
+  }
   if (credentials.hasProtectedValues() && record.kind === "frame" && record.body.type === "stream_event") {
-    const native = asRecord(record.body.native);
     const event = asRecord(native?.event);
     const delta = asRecord(event?.delta);
-    const lane = JSON.stringify(record.agentPath);
     if (event?.type === "message_start" || event?.type === "message_stop") draftTails?.delete(lane);
     if (draftTails !== undefined && event?.type === "content_block_delta" && typeof event.index === "number"
       && delta?.type === "text_delta" && typeof delta.text === "string") {
@@ -75,7 +109,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
         events: record.body.events.filter(projected => projected.kind !== "tool_call_input_delta") } };
     }
   }
-  return redactRuntimeRecord(safe, credentials.redactValue, path => isProjectedToolInput(safe, path), (path, value) => {
+  const redacted = redactRuntimeRecord(safe, credentials.redactValue, path => isProjectedToolInput(safe, path), (path, value) => {
     const [body, native, field, group, block, member] = path;
     if (body !== "body" || native !== "native" || record.kind !== "frame") return false;
     if (path.length === 3) {
@@ -94,7 +128,15 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
     }
     return (types?.type === "assistant" || types?.type === "user") && path.length === 6 && field === "message"
       && group === "content" && typeof block === "number" && member === "type" && streamJsonContentTypes.has(value);
-  });
+  }, (path, key) => native?.type === "result" && path.length === 2 && path[0] === "body" && path[1] === "native" && streamJsonResultFields.has(key));
+  if (assistantTails === undefined || redacted.kind !== "frame" || native?.type !== "result") return redacted;
+  draftTails?.delete(lane);
+  textTails?.projected.delete(lane);
+  const tail = assistantTails.get(lane);
+  assistantTails.delete(lane);
+  if (tail === undefined) return redacted;
+  const body = { ...redacted.body, byokTextTail: credentials.redact(tail) };
+  return { ...redacted, body };
 }
 
 /** Shared line protocol driver. A runtime launches its own process and supplies its own readbacks. */
@@ -107,8 +149,8 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
   retainedBytes?: number, // BYOK change: the caller's retained-record budget; old frame payloads are elided past it.
 ): Promise<AdapterSession> {
   // BYOK change: the upstream kernel with the redactor as its redact hook; the record consumer is registered before any record is appended.
-  const draftTails = new Map<string, Map<number, string>>();
-  const kernel = createSessionKernel(sessionId, record => redactStreamJsonRecord(record, credentials, draftTails), retainedBytes);
+  const textTails: StreamTextTails = { drafts: new Map(), assistant: new Map(), projected: new Map() };
+  const kernel = createSessionKernel(sessionId, record => redactStreamJsonRecord(record, credentials, textTails), retainedBytes);
   if (hooks.onRecord !== undefined) { kernel.rawEvents(hooks.onRecord); }
   const tasks = profile.stopTask === undefined ? undefined : streamJsonTaskControl(kernel, child, profile.stopTask);
   const nativeUserMessage = profile.userMessage ?? streamJsonUserMessage;

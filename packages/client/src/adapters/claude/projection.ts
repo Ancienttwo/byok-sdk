@@ -33,6 +33,7 @@ export interface ClaudeFrame {
   readonly native: ClaudeStreamMessage;
   readonly agentPath: readonly string[];
   readonly context?: Record<string, unknown>;
+  readonly textTail?: string;
 }
 
 export function claudeRecordFrame(record: ClaudeRecord): ClaudeFrame | undefined {
@@ -49,7 +50,8 @@ export function claudeRecordFrame(record: ClaudeRecord): ClaudeFrame | undefined
       if (event?.kind === 'usage') context = object(object(event.usage)?.context);
     }
   }
-  return { native: frame, agentPath: record.agentPath, context };
+  const textTail = typeof body?.byokTextTail === 'string' ? body.byokTextTail : undefined;
+  return { native: frame, agentPath: record.agentPath, context, ...(textTail === undefined ? {} : { textTail }) };
 }
 
 /** The context window of the model `system/init` named, else the one window `result.modelUsage` reports. */

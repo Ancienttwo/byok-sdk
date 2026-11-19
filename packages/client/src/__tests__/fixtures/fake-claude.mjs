@@ -695,6 +695,11 @@ function runProbeOrTurnFlow() {
     if (process.env.FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK === '1' && turn === 1) {
       content.push({ type: 'totally_novel_block_type', payload: 'x' });
     }
+    if (process.env.FAKE_CLAUDE_MULTI_BLOCK_CLOSING_TEXT === '1') {
+      const text = content.pop().text;
+      const half = Math.ceil(text.length / 2);
+      content.push({ type: 'text', text: text.slice(0, half) }, { type: 'text', text: text.slice(half) });
+    }
     if (process.env.FAKE_CLAUDE_SPLIT_CLOSING_TEXT === '1') {
       const half = Math.ceil(finalText.length / 2);
       const blocks = [content[0], { type: 'text', text: finalText.slice(0, half) }, { type: 'text', text: finalText.slice(half) }];

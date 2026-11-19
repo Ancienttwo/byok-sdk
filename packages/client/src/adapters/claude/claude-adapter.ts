@@ -757,7 +757,7 @@ class ClaudeSession implements Session {
                 }, { cause: stream.terminalError });
               }
 
-              const { native: value, agentPath, context } = frame;
+              const { native: value, agentPath, context, textTail } = frame;
               const root = agentPath.length === 0;
               if (root && value.type === 'result') turnSettled = true;
               if (root) failureEvidence.observe(value);
@@ -785,9 +785,10 @@ class ClaudeSession implements Session {
               if (mapped.unmappedLabel) {
                 stream.recordUnmappedFrame(mapped.unmappedLabel);
               }
-              if (mapped.events.length > 0) {
-                pending = mapped.events;
-              }
+              pending = textTail === undefined ? mapped.events : [
+                { type: 'progress', text: textTail, ...(root ? {} : { agentPath: [...agentPath] }) },
+                ...mapped.events,
+              ];
               // Nothing to yield yet (routine frame, or an unmapped one) —
               // loop around and pull the next raw line.
             }

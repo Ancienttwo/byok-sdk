@@ -104,6 +104,37 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
+  it.each(['FAKE_CLAUDE_MULTI_BLOCK_CLOSING_TEXT', 'FAKE_CLAUDE_SPLIT_CLOSING_TEXT'])('redacts a durable assistant credential split by %s', async shape => {
+    const key = 'fixture-claude-split-assistant-credential';
+    const resources = await makeCtx({ PATH: process.env.PATH, ANTHROPIC_API_KEY: key, [shape]: '1' });
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), { ...baseTask, instruction: key }, resources);
+      openSessions.push(session);
+      const events: AgentEvent[] = [];
+      for await (const event of session.events) {
+        if (event.type !== 'message_draft_delta') events.push(event);
+        if (event.type === 'turn_end') break;
+      }
+      expect(events.filter(event => event.type === 'progress').map(event => event.text).join('')).toBe('reply-1:[redacted]');
+      expect(events.filter(event => event.type === 'turn_end')).toHaveLength(1);
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('settles a Claude result whose status field matches an MCP credential', async () => {
+    const resources = await makeCtx();
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), baseTask, { ...resources,
+        mcpServers: { fixture: { command: process.execPath, env: { MCP_TOKEN: 'is_error' } } },
+      });
+      openSessions.push(session);
+      expect(await takeEvents(session, 5)).toContainEqual({ type: 'turn_end' });
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('detect() reports present + version + authPresent from the fake binary', async () => {
     const adapter = fakeClaudeAdapter();
     const result = await adapter.detect();
