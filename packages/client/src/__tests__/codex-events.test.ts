@@ -27,8 +27,8 @@ function setup() {
   return { kernel, projection, output, feed };
 }
 describe('required Codex native projection', () => {
-  it('preserves Codex counters when a credential coincides with a metering field', () => {
-    const credentials = sessionCredentialRedactor({ env: { API_KEY: 'inputTokens' } });
+  it.each(['inputTokens', 'cacheWriteInputTokens'])('preserves Codex counters when a credential coincides with %s', key => {
+    const credentials = sessionCredentialRedactor({ env: { API_KEY: key } });
     const kernel = createSessionKernel('root', record => redactCodexRecord(record, credentials.redactValue));
     const projection = new CodexProjection('/workspace', 'root');
     const out: Array<AgentEvent | MessageDraftDelta> = [];
@@ -37,7 +37,7 @@ describe('required Codex native projection', () => {
       projection.consume(kernel, kernel.frame(body), event => out.push(event));
     };
     feed('turn/started', { turn: { id: 't' } });
-    feed('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 7, outputTokens: 4 }, last: { totalTokens: 11 } } });
+    feed('thread/tokenUsage/updated', { tokenUsage: { total: { inputTokens: 7, outputTokens: 4, cacheWriteInputTokens: 2 }, last: { totalTokens: 11, cacheWriteInputTokens: 2 } } });
     feed('turn/completed', { turn: { status: 'completed' } });
     expect(out).toEqual([expect.objectContaining({ type: 'usage', inputTokens: 7, outputTokens: 4, contextTokens: 11 }), { type: 'turn_end' }]);
   });

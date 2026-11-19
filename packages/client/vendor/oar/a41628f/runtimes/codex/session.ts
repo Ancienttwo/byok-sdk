@@ -102,7 +102,7 @@ const codexToolFields = new Set(["id", "type", "text", "message", "command", "ch
 const codexItemTypes = new Set(["agentMessage", "error", "commandExecution", "fileChange", "mcpToolCall", "collabAgentToolCall", "webSearch", "sleep"]);
 const codexTerminalFields = new Set(["id", "status", "error", "items"]);
 const codexUsageFields = new Set(["last", "total", "modelContextWindow"]);
-const codexTokenFields = new Set(["inputTokens", "cachedInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]);
+const codexTokenFields = new Set(["inputTokens", "cachedInputTokens", "cacheWriteInputTokens", "outputTokens", "reasoningOutputTokens", "totalTokens"]);
 const codexNotificationFields = new Set(["threadId", "turnId", "turn", "item", "itemId", "delta", "error", "willRetry", "tokenUsage"]);
 
 export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"]): T {
