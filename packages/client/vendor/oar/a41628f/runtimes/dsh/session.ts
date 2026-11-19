@@ -42,6 +42,8 @@ export interface DshSessionHooks {
   readonly credentialsForRedaction?: readonly string[];
   /** The session id, before any record is delivered; a throw fails the open. */
   readonly onReady?: (sessionId: string) => void;
+  /** BYOK change: Check the root request route before sanitizing it for observers. */
+  readonly onRouteMismatch?: () => void;
   /** A kernel observer from seq 0. The kernel swallows its errors, so it fails the session itself. */
   readonly onRecord?: (record: RawEvent) => void;
 }
@@ -122,6 +124,11 @@ async function open(spawnLineProcess: SpawnDshLineProcess, command: string, opti
   const control = dshControl(child, (message) => {
     const { state, frame } = foldDsh(projection, message);
     projection = state;
+    if (frame.sessionId === undefined && options.model !== undefined && hooks.onRouteMismatch !== undefined
+      && frame.body.events.some(event => event.kind === "model" && event.model !== options.model)) {
+      hooks.onRouteMismatch();
+      return;
+    }
     kernel.frame(frame.body, frame.sessionId === undefined ? undefined : { sessionId: frame.sessionId });
     if (frame.sessionId === undefined && frame.body.events.some((event) => event.kind === "turn_ended")) { fallback.clear(); }
   });

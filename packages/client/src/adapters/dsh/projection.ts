@@ -19,10 +19,10 @@ const authority = (reason: string) =>
 /**
  * The structured tool input: dsh's complete native `arguments` string, never the
  * event's text. dsh replaces a model's malformed JSON with `{}` and refuses the
- * call, so anything but an object means the wire changed. Tool authorization
- * reads this object, so the session fails rather than run on an unseen input.
+ * call. The private record can withhold a credential-bearing object. The
+ * public event omits that input and retains the tool identity.
  */
-function toolInput(native: unknown): Record<string, unknown> {
+function toolInput(native: unknown): Record<string, unknown> | undefined {
   const text = record(record(native)?.data)?.arguments;
   let parsed: unknown;
   try {
@@ -30,6 +30,7 @@ function toolInput(native: unknown): Record<string, unknown> {
   } catch {
     parsed = undefined;
   }
+  if (parsed === '[redacted]') return undefined;
   const input = record(parsed);
   if (input === undefined) throw authority('dsh tool call arguments are not a JSON object');
   return input;
@@ -60,7 +61,7 @@ export class DshProjection {
 
   private readonly children: AcpChildTurns;
 
-  constructor(private readonly rootSessionId: string, private readonly model: string) {
+  constructor(private readonly rootSessionId: string) {
     this.children = new AcpChildTurns(rootSessionId);
   }
 
@@ -88,15 +89,12 @@ export class DshProjection {
       }
       if (path === undefined) continue;
       switch (event?.kind) {
-        case 'model':
-          // The SDK patch and the open name this route; a request on another one means they did not apply.
-          if (root && event.model !== this.model) throw authority('dsh session does not run the configured provider route and model');
-          break;
         case 'tool_call_started':
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           const callId = identify(event.callId);
           this.tools.set(callId, { tool: event.tool, ...attribution });
-          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: callId, input: toolInput(body?.native), ...attribution });
+          const args = toolInput(body?.native);
+          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: callId, ...(args === undefined ? {} : { input: args }), ...attribution });
           this.buffered.observe(callId, undefined, false, true, emit);
           break;
         case 'tool_call_ended': {

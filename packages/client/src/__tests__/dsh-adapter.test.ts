@@ -290,6 +290,23 @@ describe('DshAdapter sessions', () => {
     expect(events.at(-1)).toEqual({ type: 'turn_end' });
   });
 
+  it('keeps a dsh tool event when its root input object was withheld', async () => {
+    const { open } = await setup();
+    const events = await turn(await open({ target: DSH_TARGET, instruction: 'echo-key-as-tool-field' }));
+    expect(events.find(event => event.type === 'tool_use')).toEqual({
+      type: 'tool_use', tool: 'fixture-tool', toolCallId: 'call_redacted',
+    });
+    expect(events.at(-1)).toEqual({ type: 'turn_end' });
+  });
+
+  it('checks the native route when the resolved key matches the model name', async () => {
+    const key = 'example-model-and-key-name';
+    const { open } = await setup({ model: { ...MODEL, model: key }, resolveKey: async () => key });
+    const events = await turn(await open());
+    expect(events.at(-1)).toEqual({ type: 'turn_end' });
+    expect(JSON.stringify(events)).not.toContain(key);
+  });
+
   it('opens the session in the canonical workspace with the task MCP servers', async () => {
     const { open, facts, workspaceDir } = await setup();
     const session = await open({ target: DSH_TARGET, instruction: 'hello' }, {

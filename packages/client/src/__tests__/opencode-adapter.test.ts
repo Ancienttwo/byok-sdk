@@ -625,7 +625,7 @@ it.each(['status', 'input', 'completion'] as const)('buffers ACP tool input unti
 
 it('emits dsh tool use when complete native arguments arrive', async () => {
   const { DshProjection } = await import('../adapters/dsh/projection');
-  const projection = new DshProjection('root', 'model');
+  const projection = new DshProjection('root');
   const events: AgentEvent[] = [];
   projection.consume({ kind: 'frame', sessionId: 'root', agentPath: [], body: {
     native: { data: { arguments: '{"command":"sleep 600"}' } },

@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.121.0",
-    "commit": "6979077e156610e44953c84011030fe6c70cbc7e"
+    "commit": "e3649ff79456a7dc84b1458b3bf85da75907eaf9"
   },
   "release": {
     "ecosystem": "npm",
@@ -623,14 +623,14 @@
       "path": "runtimes/dsh/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/projection.ts",
       "upstreamSha256": "c83aa677b6a0a5f82e60282b1ca6e3c96c1837fd215e57180c5b0ccb03de94dd",
-      "vendoredSha256": "a6239df287309f2ca2277136a3ae203135eaccb3941d5d5b19b7c1dfb48e8791",
+      "vendoredSha256": "853ee75907899613aa9a4284c628763bf5fd66791745e2720418845551519b0a",
       "delta": "Project dsh tool-call input from decoded, sanitized native arguments and keep native and projected JSON consistent (#2408)."
     },
     {
       "path": "runtimes/dsh/session.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/session.ts",
       "upstreamSha256": "ee193814b049ba244a002158552f85e742b61d8a215371f7a434063796585e4e",
-      "vendoredSha256": "08f9c7214e6bd4c65e72610f0e282dc1916fcc4548d23a40c3688576233643a9",
+      "vendoredSha256": "c031790448c3a0b533c7d6a14af75a7b33e05db8e2299fe40833209a1a60883d",
       "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure. The caller's retainedBytes goes to the upstream kernel's record retention. Share Runtime.sessionCapabilities with the narrow BYOK bridge."
     },
     {
@@ -1152,7 +1152,7 @@
       "path": "shared/redact-text.ts",
       "sourcePath": "packages/oar/src/shared/redact-text.ts",
       "upstreamSha256": "30fe17becb13c6439e251752b8fad2b74f71d66c284a66751e9e49d3d70de966",
-      "vendoredSha256": "2d188852b19bb9dc5c0cc187adda7b7f3376e7ef279ffd48644ec06a224c5d22",
+      "vendoredSha256": "1575c925b0380b07cfe05ba12bf19c57ba9993f715251054de6bb8bb5f5dce60",
       "delta": "Redact strings on decoded values. Withhold maps whose keys carry credentials and preserve numeric JSON lexemes and unchanged encoded bytes (#2408)."
     },
     {

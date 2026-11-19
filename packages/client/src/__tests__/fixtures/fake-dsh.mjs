@@ -70,9 +70,10 @@ function prompt(sessionId, text) {
   const [provider, ...model] = (process.env.FAKE_DSH_ROUTE ?? route).split('/');
   event(sessionId, 'request/header', { header: { config: { provider, model: model.join('/') } } });
   event(sessionId, 'request/context', { contextWindow: 1000 });
-  if (text === 'echo-key-in-tool-field') {
+  if (text === 'echo-key-in-tool-field' || text === 'echo-key-as-tool-field') {
     const key = process.env.BYOK_DSH_PROVIDER_API_KEY;
-    toolCall(sessionId, 'call_redacted', 'fixture-tool', JSON.stringify({ keep: true, payload: { [key]: 1 } }));
+    const input = text === 'echo-key-in-tool-field' ? { keep: true, payload: { [key]: 1 } } : { [key]: 1 };
+    toolCall(sessionId, 'call_redacted', 'fixture-tool', JSON.stringify(input));
     return end({ kind: 'completed' });
   }
   if (text === 'long-input') {

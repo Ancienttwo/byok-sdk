@@ -3,18 +3,13 @@
 export type RedactionPath = readonly (string | number)[];
 type Redact = (text: string) => string;
 type JsonField = (path: RedactionPath) => boolean;
-// Node 24 and Bun implement JSON source access. OAR's ES2024 library
-// predates the standard library declarations for it.
-const jsonSource = JSON as unknown as {
-  parse(text: string, reviver: (key: string, value: unknown, context?: { source?: string }) => unknown): unknown;
-  rawJSON(text: string): object;
-  isRawJSON(value: unknown): boolean;
-};
+const withheld = '"[redacted]"';
+
 
 /** Copy only changed values. A credential-bearing property name hides its containing object. */
 function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefined, path: RedactionPath, seen: WeakMap<object, unknown>): unknown {
   if (typeof value === "string") return jsonField?.(path) === true ? redactJsonText(value, redact) : redact(value);
-  if (value === null || typeof value !== "object" || jsonSource.isRawJSON(value)) return value;
+  if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) return seen.get(value);
   if (Array.isArray(value)) {
     const result: unknown[] = [];
@@ -53,16 +48,41 @@ export function redactText<T>(value: T, redact: Redact, jsonField?: JsonField): 
   return sanitize(value, redact, jsonField, [], new WeakMap()) as T;
 }
 
-/** The protocol declares this field as encoded JSON. Malformed input is withheld. */
+/** The protocol declares this field as encoded JSON. Keep its original token spans,
+ * including duplicate object members, and decode each string before matching it. */
 export function redactJsonText(text: string, redact: Redact): string {
-  let parsed: unknown;
-  try {
-    // Preserve every number's exact spelling even when a sibling value changes.
-    parsed = jsonSource.parse(text, (_key, value, context) =>
-      typeof value === "number" && context?.source !== undefined ? jsonSource.rawJSON(context.source) : value);
-  } catch {
-    return '"[redacted]"';
+  try { JSON.parse(text); } catch { return "null"; }
+  const objects: { start: number; firstEdit: number; withhold: boolean }[] = [];
+  const edits: { start: number; end: number; replacement: string }[] = [];
+  for (const match of text.matchAll(/"(?:[^"\\]|\\.)*"([\t\n\r ]*:)?|[{}]/gu)) {
+    const start = match.index;
+    const token = match[0];
+    if (token === "{") {
+      objects.push({ start, firstEdit: edits.length, withhold: false });
+    } else if (token === "}") {
+      const object = objects.pop();
+      if (object?.withhold === true) {
+        edits.length = object.firstEdit;
+        edits.push({ start: object.start, end: start + 1, replacement: withheld });
+      }
+    } else {
+      const suffix = match[1];
+      const object = objects.at(-1);
+      const stringToken = suffix === undefined ? token : token.slice(0, -suffix.length);
+      const original = JSON.parse(stringToken) as string;
+      const replacement = redact(original);
+      if (replacement === original) continue;
+      if (suffix !== undefined && object !== undefined) object.withhold = true;
+      else edits.push({ start, end: start + token.length, replacement: JSON.stringify(replacement) });
+    }
   }
-  const sanitized = sanitize(parsed, redact, undefined, [], new WeakMap());
-  return sanitized === parsed ? text : JSON.stringify(sanitized);
+  if (edits.length === 0) return text;
+  const chunks: string[] = [];
+  let end = 0;
+  for (const edit of edits) {
+    chunks.push(text.slice(end, edit.start), edit.replacement);
+    end = edit.end;
+  }
+  chunks.push(text.slice(end));
+  return chunks.join("");
 }

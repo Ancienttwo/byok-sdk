@@ -286,9 +286,30 @@ function isAssistantToolArguments(path: RedactionPath, native: unknown): boolean
   return Array.isArray(content) && asRecord(content[path[5]])?.type === "tool-call";
 }
 
-/** BYOK change: the projected input is derived from the same sanitized JSON as the native payload. */
+function withholdArgumentDelta(frame: unknown): unknown {
+  const native = asRecord(frame);
+  const chunk = asRecord(native?.chunk);
+  if (chunk?.type !== "tool-call-delta" || typeof chunk.argumentsDelta !== "string") return frame;
+  const { argumentsDelta: _omitted, ...safeChunk } = chunk;
+  return { ...native, chunk: safeChunk };
+}
+
+/** BYOK change: only complete tool arguments can be decoded safely. Use the same sanitized JSON for both views. */
 export function redactDshRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
   if (record.kind !== "frame") return credentials.redactValue(record);
+  if (credentials.values().length !== 0 && record.body.type === "agent/assistant-stream") {
+    const native = withholdArgumentDelta(record.body.native);
+    return credentials.redactValue({ ...record, body: { ...record.body, native,
+      events: record.body.events.filter(event => event.kind !== "tool_call_input_delta") } });
+  }
+  if (credentials.values().length !== 0 && record.body.type === "session/event:assistant/attempt") {
+    const native = asRecord(record.body.native);
+    const data = asRecord(native?.data);
+    if (Array.isArray(data?.stream)) {
+      return credentials.redactValue({ ...record, body: { ...record.body,
+        native: { ...native, data: { ...data, stream: data.stream.map(withholdArgumentDelta) } } } });
+    }
+  }
   if (record.body.type === "session/event:assistant/message") {
     return credentials.redactValue(record, path => isAssistantToolArguments(path, record.body.native));
   }

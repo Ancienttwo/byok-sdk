@@ -25,6 +25,7 @@ export interface ClaudeStreamSessionOptions {
   /** Exact reasoning effort passed to the child as `--effort`. */
   effort?: string;
   env: Readonly<Record<string, string>>;
+  credentials?: readonly string[];
   /** The kernel's retention limit: past it the oldest native payloads are elided. */
   maxRetainedBytes: number;
   mcpServers: Readonly<Record<string, McpStdioServerConfig>>;
@@ -103,7 +104,9 @@ export class ClaudeStreamSession {
         void written.catch(() => {});
       },
     };
-    this.#raw = await streamJsonSession(child, options.resume ?? randomUUID(), sessionCredentialRedactor({ env: options.env, mcpServers }), {
+    const redactor = sessionCredentialRedactor({ env: options.env, mcpServers });
+    for (const key of options.credentials ?? []) redactor.addExplicit(key);
+    this.#raw = await streamJsonSession(child, options.resume ?? randomUUID(), redactor, {
       projection: claudeProjectionProfile,
       initial: options.resume === undefined ? initialClaudeProjection : resumedClaudeProjection,
       capabilities: { queue: { durable: false }, attribution: 'attributed', images: claudeSessionCapabilities().images },

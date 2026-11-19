@@ -280,7 +280,6 @@ export class DshAdapter implements RuntimeAdapter {
     const session = new DshSession(
       input.scratch,
       this.interruptTimeoutMs,
-      model,
     );
     try {
       // dsh compares the canonical workspace on resume.
@@ -317,6 +316,7 @@ export class DshAdapter implements RuntimeAdapter {
         {
           credentialsForRedaction: [key],
           onReady: (id) => session.ready(id),
+          onRouteMismatch: () => session.refuseRoute(),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),
         },
@@ -357,7 +357,6 @@ class DshSession implements Session {
   constructor(
     private readonly scratch: ExecutionScratch,
     private readonly interruptMs: number,
-    private readonly model: string,
   ) {}
 
   own(child: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean }): void {
@@ -377,7 +376,14 @@ class DshSession implements Session {
   }
   ready(id: string): void {
     this.sessionRef = id;
-    this.projection = new DshProjection(id, this.model);
+    this.projection = new DshProjection(id);
+  }
+  refuseRoute(): void {
+    if (this.turnClosed || this.halted !== undefined) return;
+    this.fail(new RuntimeExecutionFailure({
+      phase: 'run', retry: 'non-retryable', reason: 'dsh session does not run the configured provider route and model',
+    }));
+    this.halted = this.failure;
   }
   bind(raw: RawDshSession): void {
     this.raw = raw;

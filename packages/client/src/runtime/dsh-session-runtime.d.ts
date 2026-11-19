@@ -76,8 +76,9 @@ export declare function dshSession(
     appendSystemPrompt?: string;
   },
   hooks?: {
-    credentialsForRedaction?: readonly string[];
+    readonly credentialsForRedaction?: readonly string[];
     onReady?: (sessionId: string) => void;
+    readonly onRouteMismatch?: () => void;
     onRecord?: (record: DshRecord) => void;
   },
 ): Promise<RawDshSession>;

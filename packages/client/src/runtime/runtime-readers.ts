@@ -36,13 +36,18 @@ export async function boundRuntimeRead<T>(caller: AbortSignal | undefined, query
 }
 
 type ReaderEnv = Readonly<Record<string, string>>;
+interface ReaderEnvironment {
+  readonly env: ReaderEnv;
+  readonly credentials?: readonly string[];
+  readonly close?: () => Promise<void>;
+}
 interface ReaderConfig {
   readonly nativeAssetRoot?: string;
   readonly spawnFn?: NonNullable<Parameters<typeof createOwnedLineProcessSpawn>[0]>['spawnFn'];
   readonly command: (env: ReaderEnv) => string;
   readonly version: (stdout: string) => string | undefined;
   readonly versionRefusal?: (version: string | undefined) => VersionRefusal | null;
-  readonly environment?: (env: ReaderEnv) => { env: ReaderEnv; close?: () => Promise<void> } | Promise<{ env: ReaderEnv; close?: () => Promise<void> }>;
+  readonly environment?: (env: ReaderEnv) => ReaderEnvironment | Promise<ReaderEnvironment>;
   readonly authenticate?: (env: ReaderEnv, signal: AbortSignal) => Promise<{
     readonly env: ReaderEnv;
     readonly credentials: readonly string[];
@@ -66,11 +71,12 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
   ) => Promise<T>, unsupported: (refusal?: VersionRefusal) => T) => boundRuntimeRead(options.signal, async (signal, stopped, own) => {
     const { env: base } = await adapter.runtimeEnvironment();
     signal.throwIfAborted();
-    const { env, close } = await (config.environment?.(base) ?? { env: base });
+    const { env, credentials, close } = await (config.environment?.(base) ?? { env: base });
     try {
       signal.throwIfAborted();
       const redactor = sessionCredentialRedactor({ env: base });
       for (const value of sessionCredentialRedactor({ env }).values()) redactor.add(value);
+      for (const value of credentials ?? []) redactor.addExplicit(value);
       const authenticate: AuthenticateReader = async (baseEnv, requestSignal, use) => {
         if (config.authenticate === undefined) return use(baseEnv);
         const { env: authenticated, credentials, close } = await config.authenticate(baseEnv, requestSignal);

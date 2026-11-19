@@ -76,6 +76,20 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
+  it.each(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])('redacts a path-like %s echoed by Claude', async name => {
+    const key = '/synthetic/provider/credential';
+    const resources = await makeCtx({ PATH: process.env.PATH, [name]: key });
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), { ...baseTask, instruction: key }, resources);
+      openSessions.push(session);
+      const events = await takeEvents(session, 5);
+      expect(events).toContainEqual({ type: 'progress', text: 'reply-1:[redacted]' });
+      expect(JSON.stringify(events)).not.toContain(key);
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('detect() reports present + version + authPresent from the fake binary', async () => {
     const adapter = fakeClaudeAdapter();
     const result = await adapter.detect();

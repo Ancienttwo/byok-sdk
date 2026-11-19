@@ -160,11 +160,13 @@ export interface ClaudeAdapterOptions {
 const CLAUDE_PROVIDER_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
 const CLAUDE_PROVIDER_NAMES = ['ANTHROPIC_BASE_URL', ...CLAUDE_PROVIDER_KEYS];
 
-function validateClaudeProviderCredentials(env: Readonly<Record<string, string | undefined>>): void {
+function claudeProviderCredentials(env: Readonly<Record<string, string | undefined>>): string[] {
+  const credentials: string[] = [];
   for (const [name, key] of Object.entries(env)) {
     const providerKey = CLAUDE_PROVIDER_KEYS.find(candidate => process.platform === 'win32' ? candidate === name.toUpperCase() : candidate === name);
-    if (providerKey !== undefined && key !== undefined) requireRuntimeApiKey(key, `Claude ${providerKey}`);
+    if (providerKey !== undefined && key !== undefined) credentials.push(requireRuntimeApiKey(key, `Claude ${providerKey}`));
   }
+  return credentials;
 }
 const claudeEnvironmentConflicts: RuntimeEnvironmentConflictRule = (passed) =>
   CLAUDE_PROVIDER_NAMES.some((name) => passed.has(name))
@@ -180,7 +182,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin).bin.command,
       version: claudeVersionToken,
-      environment: env => { validateClaudeProviderCredentials(env); return { env }; },
+      environment: env => ({ env, credentials: claudeProviderCredentials(env) }),
     });
   }
 
@@ -249,7 +251,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const { env } = await this.runtimeEnvironment();
-      validateClaudeProviderCredentials(env);
+      claudeProviderCredentials(env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin);
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
@@ -359,7 +361,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     try {
       throwIfCancelled();
       const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
-      validateClaudeProviderCredentials(env);
+      const credentials = claudeProviderCredentials(env);
       const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
       // Built before any write, so a refusal leaves no file behind.
       const userContextSettings = this.options.agentUserContext === 'excluded' && startInput.manifest.agentRef !== undefined
@@ -491,6 +493,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
           effort,
           ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
           env,
+          credentials,
           maxRetainedBytes: this.maxRetainedBytes,
           mcpServers: taskMcpServers,
           ...(native === undefined && gate === undefined ? {} : { initialize: { hooks: gate?.hooks ?? null } }),
