@@ -118,6 +118,8 @@ describe('the embedded agent-memory entry module graph', () => {
     // util/machine-id.ts and runs its probes through the leaf
     // util/system-command.ts, moved out of the device credential store so no
     // credential surface comes along. Inert here like the rest of this tail.
+    // #2396: mcp-server/index.ts imports call-frame.ts to encode tool results;
+    // its only import is a type from the already-reachable dispatch.ts.
     expect(GRAPH.modules).toEqual([
       'agent-home-readers.ts',
       'agent-home-writer.ts',
@@ -134,6 +136,7 @@ describe('the embedded agent-memory entry module graph', () => {
       'daemon/agent-memory.ts',
       'daemon/memory-guidance.ts',
       'daemon/outbound-error.ts',
+      'mcp-server/call-frame.ts',
       'mcp-server/dispatch.ts',
       'mcp-server/framing.ts',
       'mcp-server/index.ts',
