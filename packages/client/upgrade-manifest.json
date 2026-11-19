@@ -27,7 +27,7 @@
     {
       "id": "mcp-toolset-exposure-config",
       "impact": "additive",
-      "summary": "Adds an exposure field to DaemonConfig.mcpToolsets. Direct exposure is the default and is required for prepared inputs. Search admission stays closed pending runtime qualification.",
+      "summary": "Opt in to search exposure on the qualified dsh combination with DaemonConfig.mcpToolsets. Direct exposure is the default and is required for prepared inputs.",
       "migration": "docs/releases/host-upgrade-next-minor.md#mcp-toolset-search",
       "items": [
         "config:mcpToolsets",
