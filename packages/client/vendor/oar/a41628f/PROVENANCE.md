@@ -4,7 +4,7 @@ Source: https://github.com/botiverse/oar, version 0.121.0, fixed commit `a41628f
 
 `source-manifest.json` lists every selected upstream path and its original and maintained SHA256. The 194 entries include LICENSE and the upstream `.github/runtime-versions.json` for SDK qualification. Source rows with BYOK changes are marked by `delta`. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the ACP derived-session lineage (`shared/acp/derived-sessions.ts`), the Codex goal-event projection, the manual-compaction operation that the Codex session composes, and the typed open refusals (`contracts/model-confirmation-error.ts`, `contracts/resume-cwd-error.ts`). The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`, with its native-turn reader `runtimes/grok/native-turns.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options,state-directory,model-selection}.ts`) with their import closure, which includes the shared ACP model configuration (`shared/acp/model-configuration.ts`). The OpenCode session and its prompt, attribution, compaction, steering, startup gate and version helpers are also selected, with shared environment and private-temp helpers. The shared stream-json session (`shared/stream-json/`, 9 files) and the Claude projection with its import closure (`runtimes/claude/{projection,context-usage,failure,service-tier,tasks,token-usage}.ts`) are selected for the Claude adapter; the Claude launch, settings readback, compaction, MCP config and prompt files are not. No Cursor, CLI, arena, executable manager or branded resources are included. The on-demand model, usage and auth-status readers are selected for #2379. The executable manager, login, logout and usage reset operations are excluded.
 
-Upstream's native dsh runtime is selected through `runtimes/dsh/`: `bridge.ts` with its embedded prompt source `bridge-prompt.ts`, `jobs.ts`, `mcp.ts`, `options.ts` and `projection.ts` keep upstream bytes, and `launch.ts`, `control.ts` and `session.ts` carry BYOK changes. `version.ts`, `install.ts`, `installation.ts`, `list-models.ts` and `index.ts` are not selected: the SDK adapter owns version reading, installation and model selection.
+Upstream's native dsh runtime is selected through `runtimes/dsh/`: `bridge.ts` with its embedded prompt source `bridge-prompt.ts`, `jobs.ts`, and `mcp.ts` keep upstream bytes. `launch.ts`, `control.ts`, `options.ts`, `session.ts` and `projection.ts` carry BYOK changes. `version.ts`, `install.ts`, `installation.ts`, `list-models.ts` and `index.ts` are not selected: the SDK adapter owns version reading, installation and model selection.
 
 OpenCode uses the SDK-owned process, explicit environment and SDK-probed version. The startup gate uses the same filtered environment to key a process-local queue by canonical data directory. The queue, spawn and initialize share a 60-second budget. The lock releases on initialize, exit or failed open. Cancellation removes the waiter before spawn. Directory resolution failures and timeouts remain typed.
 
@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `bd8fa0c78788265b77d5ab024764c0a5e16e883d` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `9bd00c53df7c014ffb15b41412527d247504ea1b` (the manifest's `fork`).
 
 For #2380, `cff0aa94` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
@@ -38,6 +38,8 @@ Bump to upstream tag `vX.Y.Z`:
 `source-manifest.json` records the release identity and hash for each selected upstream file. The npm identity covers the upstream base. The fork record identifies the BYOK source projection.
 
 ## Maintained deltas
+
+- `shared/credential-redactor.ts`, `shared/redact-text.ts`, `shared/acp/session.ts`, `runtimes/dsh/{session,projection}.ts`. Register Host-resolved credentials before open. Sanitize decoded string values within the protocol-defined payloads and withhold objects whose keys contain credentials. Decode each complete dsh argument string token, including duplicate members, and preserve unchanged bytes and numeric literals. Derive the projected tool input from the same sanitized JSON. Withhold incomplete argument fragments from live and durable records while credentials are registered. Check the native root route before redaction. Upstream: none (SDK credential custody).
 
 - `shared/session-credentials.ts` and the DSH and ACP session constructors add caller-resolved credential values to the redactor before the kernel records or emits data. The redactor preserves protocol field names and discriminators while removing known values from data and diagnostics. Upstream: none (SDK owns launch credentials).
 - The held-pipe helper reports process identities to the SDK-owned cleanup authority. Its process-table diagnostics leave native executable launching outside the projection. Upstream: draft D1.
@@ -140,15 +142,17 @@ All 44 branch deltas from `byok/0.120.0` through `7eb600dc99581a4633c4a0a22a5167
 | `fbc91d5a` | `5ffbd620` | Keep Claude root context across child results |
 | `46d35dcf` | `27b93b0f` | Project linked Grok child turn ledgers independently |
 | `ebcde2e5` | `9b056535` | Keep OAR startup and stream settlement within caller ownership |
-| `b63f52ac` | `82ccb2f2` | Keep caller-resolved credentials inside the session redaction boundary |
 | New | `aa621a57` | Use the shared OAR disposal lifecycle for caller-owned sessions |
 | New | `e24c10f6` | Use the OAR query deadline with caller-owned native readers |
 | New | `b6c65b6f` | Keep native Codex session fork outside the SDK projection |
 | New | `539bac93` | Keep synchronous Codex turn cleanup on the shared disposal path |
 | New | `675815a4` | Keep held-pipe holders in the caller’s process-tree authority |
 | New | `5a5e3e47` | Keep native executable launching outside process-table diagnostics |
-| `40d28b4a` | `73743394` | Preserve protocol structure when redacting resolved credentials |
-| `7eb600dc` | `bd8fa0c7` | Redact native result text while preserving typed model routes |
+| `b63f52ac` | `6979077e` | Register caller-resolved credentials and redact decoded values before retaining native or derived records |
+
+`cbb44e88` is the decoded-value redesign above `6979077e`. It redacts complete encoded tool inputs and assembled text, withholds incomplete argument, reasoning and tool-output fragments, and bounds the retained terminal payload. Native control IDs and typed terminal facts remain available to the adapters through their private transport boundary. Protocol key exceptions apply only to the variant that owns the field. Its direct successor `9bd00c53` merges overlapping and adjacent credential matches. Streaming retains a suffix shorter than the longest credential and tracks coverage across chunks.
+
+The decoded-value credential boundary supersedes `82ccb2f2`, `73743394`, `bd8fa0c7`, `7c194335` and `e9e50220`. It preserves JSON literals and unchanged encoded arguments, withholds credential-bearing maps and derives dsh tool input from sanitized native arguments. `shared/acp/token-usage.ts` reads sanitized prompt usage before accounting so withheld reports cannot affect later totals.
 
 The rebased failure and ACP turn code preserve upstream receipt timestamps and caller-owned cancel ordering. The ACP, Codex, dsh and Claude stream-json drivers use the upstream kernel for exit and dispose. The reader adapters preserve filtered environments, credential redaction and process adoption while using the upstream deadline. Codex session fork remains outside the SDK projection. OAR `4015fb11` changes `reduceSessionView` and `observe`; the SDK product code imports neither export.
 

@@ -10,7 +10,7 @@ import { AGY_ABSENT_ISOLATION_SOURCES } from '../../adapters/antigravity/agy-cap
 import type { Session } from '../../types';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
-  absent, baseEnv, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck, expectAuth, expectDetectedVersion,
+  absent, baseEnv, check, contractTarget, createSandbox, credentialFiles, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck, expectDetectedVersion,
   fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, writeSubmitResultServer,
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
@@ -23,11 +23,12 @@ const USER_MARKER = 'BYOK-CONTRACT-AGY-USER-c92e';
 const SKILL_MARKER = 'BYOK-CONTRACT-AGY-SKILL-17ae';
 const HOOK_MARKER = 'BYOK-CONTRACT-AGY-HOOK-b6d4';
 const REAL_KEY = 'byok-contract-agy-real-key-5f08';
+const resolveKey = async () => REAL_KEY;
 
 /** One SDK-owned home for the file, as a Host keeps one across executions. */
 const ownedBox = once(() => createSandbox('agy-owned'));
 const ownedHome = async () => path.join((await ownedBox()).root, 'agy');
-const detectAdapter = async () => new AgyAdapter({ home: await ownedHome(), resolveBin, runtimeEnvironment: { base: 'allowlist', pass: ['GEMINI_API_KEY'] } });
+const detectAdapter = async () => new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey, runtimeEnvironment: { base: 'allowlist' } });
 
 const submitResult = callOnceThenReply(mcpTool('host', 'submit_result'), { summary: 'runtime contract', toolSummary: 'Submit the result' });
 
@@ -46,7 +47,7 @@ async function writeUserContext(home: string, userServer: { command: string; arg
 /**
  * One contract turn with user context in `userContextHome`: the ambient user
  * home by default, which the adapter must hide, or the adapter's own home as
- * the positive control. `REAL_KEY` is the key in the task's runtime environment.
+ * the positive control. `REAL_KEY` is the synthetic key returned by the Host resolver.
  */
 async function turn(where: 'user' | 'owned', script: ProviderScript = submitResult, definition: Readonly<Record<string, unknown>> = {}) {
   const box = await createSandbox(`agy-${where}`);
@@ -59,8 +60,8 @@ async function turn(where: 'user' | 'owned', script: ProviderScript = submitResu
     const host = await writeSubmitResultServer(box.root, receipt, 'submit_result', definition);
     await writeUserContext(where === 'owned' ? home : box.home, await writeSubmitResultServer(box.root, userReceipt, 'user_tool'));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
-    const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home, resolveBin }), provider.origin);
-    const env = { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY, ...recorder.env };
+    const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home, resolveBin, resolveKey }), provider.origin);
+    const env = { ...baseEnv(box.home), ...recorder.env };
     const events = await runTurn(runtime, 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } });
     return { events, provider, box, calls: await readReceipt(receipt), userSpawned: spawned(userReceipt), mcpEnv: await fs.readFile(`${receipt}.env`, 'utf8') };
   } finally {
@@ -83,8 +84,8 @@ async function shellEnvironment() {
   const provider = await startLoopbackProvider('gemini', script);
   try {
     const recorder = await fileEgress();
-    const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin }), provider.origin);
-    const events = await runTurn(runtime, 'Run the command.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY, ...recorder.env } });
+    const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
+    const events = await runTurn(runtime, 'Run the command.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } });
     return { text: await fs.readFile(file, 'utf8'), events, command, provider };
   } finally {
     await provider.close();
@@ -105,8 +106,8 @@ async function daemonPid(): Promise<number> {
   });
   try {
     const recorder = await fileEgress();
-    const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin }), provider.origin);
-    await runTurn(runtime, 'Start the daemon.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY, ...recorder.env } });
+    const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
+    await runTurn(runtime, 'Start the daemon.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } });
     return Number(await fs.readFile(file, 'utf8'));
   } finally {
     await provider.close();
@@ -119,8 +120,8 @@ async function resumed() {
   const recorder = await fileEgress();
   const provider = await startLoopbackProvider('gemini', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }));
   try {
-    const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin }), provider.origin);
-    const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY, ...recorder.env } };
+    const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
+    const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } };
     const opened: Session = await startPreparedOperation(runtime, { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'First.' }, resources);
     for await (const event of opened.events) if (event.type === 'turn_end') break;
     const sessionRef = opened.sessionRef;
@@ -142,8 +143,8 @@ async function resumed() {
 defineMcpSearchProbes({
   runtime: 'agy', variant: '', wire: 'gemini',
   async configure(box, provider, spawnFn) {
-    return { adapter: agyAdapterWithEndpoint(new AgyAdapter({ home: path.join(box.root, 'agy'), resolveBin, spawnFn }), provider.origin),
-      env: { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY } };
+    return { adapter: agyAdapterWithEndpoint(new AgyAdapter({ home: path.join(box.root, 'agy'), resolveBin, spawnFn, resolveKey }), provider.origin),
+      env: baseEnv(box.home) };
   },
   projectEnvironment: (env, box) => agyEnvironment(env, path.join(box.root, 'agy')),
 });
@@ -183,7 +184,7 @@ const ownedTurn = once(() => turn('owned'));
 const shellEnv = once(shellEnvironment);
 const daemon = once(daemonPid);
 const resume = once(resumed);
-const descriptor = new AgyAdapter({ home: path.resolve('/agy-descriptor-only') }).descriptor;
+const descriptor = new AgyAdapter({ home: path.resolve('/agy-descriptor-only'), resolveKey }).descriptor;
 
 defineRuntimeContract(`agy runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
   'detect.version': check(async () => {
@@ -192,11 +193,15 @@ defineRuntimeContract(`agy runtime contract (${target.mode} ${target.expectedVer
   }),
   'detect.auth.absent': check(async () => {
     const box = await createSandbox('agy-auth-absent');
-    expectAuth(await detectWith(await detectAdapter(), baseEnv(box.home)), false);
+    expect(await detectWith(await detectAdapter(), baseEnv(box.home))).not.toHaveProperty('authPresent');
   }),
   'detect.auth.apiKey': check(async () => {
     const box = await createSandbox('agy-auth-key');
-    expectAuth(await detectWith(await detectAdapter(), { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY }), true);
+    const refusedResolver = async () => { throw new Error('detection must not resolve a key'); };
+    const adapter = new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey: refusedResolver });
+    const result = await detectWith(adapter, baseEnv(box.home));
+    expect(result.kind).toBe('available');
+    expect(result).not.toHaveProperty('authPresent');
   }),
   'detect.auth.login': skip('the SDK supports no Google account login: the vendor forbids third-party use of one'),
   'mcp.submitResult': check(async () => {
@@ -246,7 +251,10 @@ defineRuntimeCases(`agy runtime contract: agy cases (${target.mode} ${target.exp
     expect(text).toMatch(/GEMINI_API_KEY=\S/);
     expect(text).not.toContain(REAL_KEY);
     expect(provider.requests.some(request => request.apiKey === REAL_KEY)).toBe(true);
-    const { mcpEnv } = await userTurn();
+    const { mcpEnv, box } = await userTurn();
+    expect(await credentialFiles(box.root, REAL_KEY)).toEqual([]);
+    expect(await credentialFiles((await ownedBox()).root, REAL_KEY)).toEqual([]);
+    expect(JSON.stringify(events)).not.toContain(REAL_KEY);
     expect(mcpEnv).toContain('"GEMINI_API_KEY"');
     expect(mcpEnv).not.toContain(REAL_KEY);
     // The projection reads `rawInput` from the opening frame only; this proves real agy sends it there.
@@ -258,8 +266,8 @@ defineRuntimeCases(`agy runtime contract: agy cases (${target.mode} ${target.exp
     try {
       // This case tests an independently configured proxy, so its traffic cannot use the egress recorder.
       const dead = 'http://127.0.0.1:9';
-      const env = { ...baseEnv(box.home), GEMINI_API_KEY: REAL_KEY, HTTP_PROXY: dead, HTTPS_PROXY: dead, NO_PROXY: new URL(provider.origin).host };
-      const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin }), provider.origin);
+      const env = { ...baseEnv(box.home), HTTP_PROXY: dead, HTTPS_PROXY: dead, NO_PROXY: new URL(provider.origin).host };
+      const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
       const events = await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env });
       expect(events.at(-1)?.type).toBe('turn_end');
       expect(provider.requests.some(request => request.model && request.apiKey === REAL_KEY)).toBe(true);

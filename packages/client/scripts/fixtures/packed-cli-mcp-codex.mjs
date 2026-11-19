@@ -24,7 +24,7 @@ assert.equal(argv[0], 'app-server', 'fixture supports only app-server');
 assert.equal(argv[argv.indexOf('--listen') + 1], 'stdio://');
 assert.equal(overrides.get('sandbox_mode'), 'danger-full-access');
 // Task MCP servers arrive in the thread/start or thread/resume config, as
-// OAR `mcpServers`, never in argv. Only fixed SDK helper tools carry grants.
+// OAR `mcpServers`, never in argv. Each server carries its exact grants.
 assert.ok(![...overrides.keys()].some(key => key.startsWith('mcp_servers')), 'MCP servers must not be in argv');
 let echoServer;
 let resultServer;
@@ -117,19 +117,24 @@ createInterface({ input: process.stdin }).on('line', line => {
     initialized = true; send({ jsonrpc: '2.0', id, result: { userAgent: 'packed-codex-probe' } }); return;
   }
   assert.ok(ready, 'initialize/initialized must precede session requests');
+  if (method === 'config/read') {
+    send({ jsonrpc: '2.0', id, result: { config: { mcp_servers: {} } } }); return;
+  }
   if (method === 'thread/start' || method === 'thread/resume') {
     assert.equal(params.approvalPolicy, 'never');
     if (method === 'thread/resume') assert.equal(params.threadId, threadId);
     const servers = params.config?.mcp_servers ?? {};
-    const helperGrants = new Map([
+    const grants = new Map([
+      ['echo', { echo: { approval_mode: 'approve' } }],
       ['byokagentmessage', { send_agent_message: { approval_mode: 'approve' } }],
       ['byokagentmemory', { memory_recall: { approval_mode: 'approve' }, memory_save: { approval_mode: 'approve' } }],
       ['byokagentteam', { post_team_message: { approval_mode: 'approve' }, read_team_messages: { approval_mode: 'approve' }, ack_team_messages: { approval_mode: 'approve' } }],
       ['byokagentresult', { submit_result: { approval_mode: 'approve' } }],
     ]);
     for (const [name, server] of Object.entries(servers)) {
-      assert.equal(server.enabled_tools, undefined, `${name}: no runtime tool allowlist`);
-      assert.deepEqual(server.tools, helperGrants.get(name), `${name}: exact SDK grants; no default Host grant`);
+      const tools = grants.get(name);
+      assert.deepEqual(server.enabled_tools, Object.keys(tools ?? {}), `${name}: exact tool visibility`);
+      assert.deepEqual(server.tools, tools, `${name}: exact approval modes`);
     }
     echoServer = servers.echo;
     resultServer = servers.byokagentresult;

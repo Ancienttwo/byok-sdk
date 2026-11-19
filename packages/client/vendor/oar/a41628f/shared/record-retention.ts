@@ -21,14 +21,21 @@ function withoutPayload(event: RuntimeEventBody): RuntimeEventBody {
 
 const encoder = new TextEncoder();
 
-/** UTF-8 bytes of the frame's `native` and of the tool events that elision changes. */
+type FramePayload = Frame["body"] & { readonly byokResult?: unknown; readonly byokTextTail?: { readonly text: string } };
+
+/** UTF-8 bytes of the frame's native and derived payloads that elision changes. */
 function payloadBytes(frame: Frame): number {
-  const tools = frame.body.events.filter((event) => event !== withoutPayload(event));
-  return encoder.encode(JSON.stringify(frame.body.native ?? null)).length + (tools.length === 0 ? 0 : encoder.encode(JSON.stringify(tools)).length);
+  const body: FramePayload = frame.body;
+  const tools = body.events.filter(event => event !== withoutPayload(event));
+  return encoder.encode(JSON.stringify(body.native ?? null)).length
+    + (body.byokResult === undefined ? 0 : encoder.encode(JSON.stringify(body.byokResult)).length)
+    + (body.byokTextTail === undefined ? 0 : encoder.encode(body.byokTextTail.text).length)
+    + (tools.length === 0 ? 0 : encoder.encode(JSON.stringify(tools)).length);
 }
 
 function elided(frame: Frame): Frame {
-  return { ...frame, body: { ...frame.body, native: null, events: frame.body.events.map((event) => withoutPayload(event)), elided: true } };
+  const { byokResult: _result, byokTextTail: _textTail, ...body } = frame.body as FramePayload;
+  return { ...frame, body: { ...body, native: null, events: body.events.map(event => withoutPayload(event)), elided: true } };
 }
 
 // BYOK change: a runtime request or a reply carries a native payload too (an ACP

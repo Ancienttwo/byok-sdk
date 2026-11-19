@@ -494,7 +494,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/bot-collaboration/rules` | K8 pure rules; Worker-safe, no node:sqlite | `@cfworker/json-schema`, `zod` | allowed | 270635 B |
 | `@byok-sdk/bot-collaboration/testing` | K8 shared vectors and L test Host | `@cfworker/json-schema`, `@hono/node-server`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `hono`, `pkce-challenge`, `zod` | allowed | 3671596 B |
 | `@byok-sdk/client` | Local daemon composition | `@cfworker/json-schema`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 2816845 B |
-| `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 672767 B |
+| `@byok-sdk/client/adapters` | Runtime adapters; private hosts load lazily | — | forbidden | 686500 B |
 | `@byok-sdk/client/agent-memory` | Embedded Agent memory service | — | forbidden | 93214 B |
 | `@byok-sdk/client/assertion-client` | Task/device assertions; core includes protected Zod probes | `zod` | allowed | 136108 B |
 | `@byok-sdk/client/host-layout` | Pure Host directory layout for shells and installers; no client daemon or runtime SDKs | — | forbidden | 4589 B |
@@ -502,8 +502,8 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/client/mcp-server/http` | Tools-only MCP Streamable HTTP framing | — | forbidden | 31292 B |
 | `@byok-sdk/client/package.json` | Package metadata | — | forbidden | 5393 B |
 | `@byok-sdk/client/packaging` | Single-file Host build: esbuild packaging plugin and SDK asset copy | — | forbidden | 38169 B |
-| `@byok-sdk/client/testing` | Runtime adapter and device credential test doubles; no daemon | — | forbidden | 626020 B |
-| `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok, agy, OpenCode) | `@agentclientprotocol/sdk`, `zod` | allowed | 175062 B |
+| `@byok-sdk/client/testing` | Runtime adapter and device credential test doubles; no daemon | — | forbidden | 643000 B |
+| `@byok-sdk/client#byok-acp-runtime` | Private ACP runtime stack (Grok, agy, OpenCode) | `@agentclientprotocol/sdk`, `zod` | allowed | 181000 B |
 | `@byok-sdk/client#byok-mcp-hub-runtime` | Private MCP hub runtime for SDK helper dispatch | `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 71422 B |
 | `@byok-sdk/client#byok-oar-readers` | Private on-demand OAR runtime readers | — | forbidden | 67358 B |
 | `@byok-sdk/client#byok-pi-runtime-host` | Private Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-schema`, `@earendil-works/pi-telemetry`, `@earendil-works/pi-tui`, `@isaacs/nonrecursive-glob-match`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `balanced-match`, `brace-expansion`, `chalk`, `cross-spawn`, `diff`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `highlight.js`, `hosted-git-info`, `ignore`, `isexe`, `lovely-mermaid`, `lru-cache`, `marked`, `marked-cjk-friendly`, `minimatch`, `openai`, `p-limit`, `partial-json`, `path-key`, `pi-web-access`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `typebox`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 653444 B |

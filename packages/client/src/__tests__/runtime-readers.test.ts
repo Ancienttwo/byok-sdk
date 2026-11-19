@@ -11,6 +11,8 @@ import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper.js';
 import { formatLiveStatusLines } from '../diagnostics/format.js';
 import { parseControlStatusRuntimes } from '../runtime-detection.js';
 import { createRuntimeReaders } from '../runtime/runtime-readers.js';
+import { agyAdapterWithEndpoint } from '../adapters/antigravity/agy-endpoint.js';
+import { startLoopbackProvider, CONTRACT_REPLY_CHUNKS } from './runtime-contract/loopback.js';
 
 const dirs: string[] = [];
 async function tempDir() {
@@ -202,13 +204,22 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   const dir = await tempDir();
   const argsSeen: string[] = [];
   const key = 'gemini-credential-test-value';
-  vi.stubEnv('GEMINI_API_KEY', key);
-  const adapter = new AgyAdapter({ home: path.join(dir, 'owned'), resolveBin: () => ({ command: process.execPath, source: 'env' }),
+  vi.stubEnv('GEMINI_API_KEY', 'ambient-gemini-key');
+  const resolveKey = vi.fn(async () => key);
+  const proxies: string[] = [];
+  const tokens: string[] = [];
+  const adapter = new AgyAdapter({ home: path.join(dir, 'owned'), resolveKey, resolveBin: () => ({ command: process.execPath, source: 'env' }),
     runtimeEnvironment: { base: 'allowlist', allow: ['GEMINI_API_KEY'] },
     spawnFn: ((_command: string, args: readonly string[], options: SpawnOptions) => {
       argsSeen.push(args[0]!);
       expect(options.env?.GEMINI_API_KEY).not.toBe(key);
-      expect(options.env?.GEMINI_API_KEY).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      if (args[0] === '--version') {
+        expect(options.env?.GEMINI_API_KEY).toBeUndefined();
+      } else {
+        expect(options.env?.GEMINI_API_KEY).toMatch(/^[A-Za-z0-9_-]{43}$/);
+        tokens.push(options.env!.GEMINI_API_KEY!);
+        proxies.push(options.env!.GOOGLE_GEMINI_BASE_URL!);
+      }
       return spawn(process.execPath, ['-e', script, '--', ...args], options);
     }) as typeof spawn,
   });
@@ -216,16 +227,64 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
     { id: 'model-a', default: true, effortLevels: ['low', 'high'], defaultEffort: 'low' },
     { id: 'model-b', effortUnavailableReason: 'Native model selection did not return a confirmed effort menu.' },
   ] });
-  expect(argsSeen).toEqual(['--version', 'acp']);
+  await expect(adapter.listModels()).resolves.toMatchObject({ kind: 'ok' });
+  expect(argsSeen).toEqual(['--version', 'acp', '--version']);
+  expect(resolveKey).toHaveBeenCalledTimes(1);
   await expect(adapter.accountUsage()).resolves.toEqual({ kind: 'reauth_required', reason: 'not_authenticated' });
-  expect(argsSeen).toEqual(['--version', 'acp', '--version', 'models']);
+  expect(argsSeen).toEqual(['--version', 'acp', '--version', '--version', 'models']);
+  expect(resolveKey).toHaveBeenCalledTimes(2);
+  expect(new Set(tokens).size).toBe(2);
+  for (const url of proxies) await expect(fetch(url)).rejects.toThrow();
+  expect(process.env.GEMINI_API_KEY).toBe('ambient-gemini-key');
+});
+
+it.each([false, true])('resolves a fresh agy key per quota command (exhausted=%s)', async exhausted => {
+  const provider = await startLoopbackProvider('gemini', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }));
+  const childScript = String.raw`
+const [ratio, command, query] = process.argv.slice(1);
+if (command === '--version') { console.log('1.5.9'); process.exit(0); }
+fetch(process.env.GOOGLE_GEMINI_BASE_URL + '/v1beta/models', { headers: { 'x-goog-api-key': process.env.GEMINI_API_KEY } }).then(async response => {
+  if (!response.ok) process.exit(1);
+  await response.text();
+  if (command === 'models') return;
+  console.log(JSON.stringify({ status: 'SUCCESS', command: query === '/usage'
+    ? { name: 'usage', data: { groups: [{ name: 'Shared', buckets: [{ remaining_fraction: Number(ratio) }] }] } }
+    : { name: 'credits', data: { remaining_credits: 0 } } }));
+}).catch(() => process.exit(1));`;
+  const resolved: string[] = [];
+  const proxies: string[] = [];
+  const commands: string[][] = [];
+  const adapter = agyAdapterWithEndpoint(new AgyAdapter({
+    home: path.join(await tempDir(), 'owned'),
+    resolveKey: async () => {
+      const key = `quota-fixture-credential-${resolved.length}`;
+      resolved.push(key);
+      return key;
+    },
+    resolveBin: () => ({ command: process.execPath, source: 'env' }),
+    runtimeEnvironment: { base: 'allowlist' },
+    spawnFn: ((_command: string, args: readonly string[], options: SpawnOptions) => {
+      if (options.env?.GOOGLE_GEMINI_BASE_URL !== undefined) proxies.push(options.env.GOOGLE_GEMINI_BASE_URL);
+      commands.push([...args]);
+      return spawn(process.execPath, ['-e', childScript, '--', exhausted ? '0' : '0.5', ...args], options);
+    }) as typeof spawn,
+  }), provider.origin);
+  try {
+    await expect(adapter.accountUsage()).resolves.toMatchObject({ kind: 'available', rateLimited: exhausted });
+    expect(commands.map(args => args[0] === '-p' ? args[1] : args[0])).toEqual(['--version', 'models', '/usage', ...(exhausted ? ['/credits'] : [])]);
+    expect(resolved).toHaveLength(exhausted ? 3 : 2);
+    expect(provider.requests.map(request => request.apiKey)).toEqual(resolved);
+    for (const url of proxies) await expect(fetch(url)).rejects.toThrow();
+  } finally {
+    await provider.close();
+  }
 });
 
 it.skipIf(process.platform === 'win32')('keeps native version floor evidence local to status and doctor', async () => {
   const dir = await tempDir();
   const executable = path.join(dir, 'agy');
   await fs.writeFile(executable, '#!/bin/sh\n[ "$1" = "--version" ] || exit 1\nprintf "1.4.9\\n"\n', { mode: 0o700 });
-  const adapter = new AgyAdapter({ home: path.join(dir, 'owned'), resolveBin: () => ({ command: executable, source: 'env' }),
+  const adapter = new AgyAdapter({ home: path.join(dir, 'owned'), resolveKey: async () => 'fixture-key', resolveBin: () => ({ command: executable, source: 'env' }),
     runtimeEnvironment: { base: 'allowlist' } });
   const { observations, ...hello } = await detectRuntimes([adapter]);
   const versions = { installedVersion: '1.4.9', requiredVersion: '1.5.0' };

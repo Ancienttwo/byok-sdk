@@ -636,6 +636,16 @@ describe('lifecycle/winsw: createWinswLifecycle', () => {
     expect(status.determinate).toBe(true);
   });
 
+  it.each([
+    [37, '', 'Unexpected failure'],
+    [0, 'STATE : 3 STOP_PENDING', ''],
+    [1060, 'The specified service does not exist as an installed service.', 'Access is denied.'],
+  ])('leaves unknown or conflicting sc.exe exit %d indeterminate', async (code, stdout, stderr) => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(code, stdout, stderr));
+    const lifecycle = createWinswLifecycle(def(), { run, fs: installedFs() });
+    expect(await lifecycle.status()).toMatchObject({ running: false, determinate: false, detail: `sc.exe query failed (exit ${code}): ${stderr || stdout}` });
+  });
+
   it('finding P1 #2 (residual, round 3): status() reports determinate=false (never a confirmed "not running") when sc.exe reports access denied', async () => {
     const fs = installedFs();
     const run = vi.fn<Runner>().mockResolvedValue(fail(5, '', 'Access is denied.'));

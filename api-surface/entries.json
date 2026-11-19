@@ -56,6 +56,7 @@
         "node:os",
         "node:path",
         "node:stream",
+        "node:string_decoder",
         "node:url",
         "node:util",
         "node:worker_threads",
@@ -105,6 +106,7 @@
           "node:os",
           "node:path",
           "node:stream",
+          "node:string_decoder",
           "node:url",
           "node:util",
           "node:worker_threads",
@@ -377,6 +379,7 @@
         "node:os",
         "node:path",
         "node:stream",
+        "node:string_decoder",
         "node:url",
         "node:util",
         "node:worker_threads",
@@ -434,6 +437,7 @@
           "node:os",
           "node:path",
           "node:stream",
+          "node:string_decoder",
           "node:url",
           "node:util",
           "node:worker_threads",
@@ -525,6 +529,7 @@
         "node:os",
         "node:path",
         "node:stream",
+        "node:string_decoder",
         "node:url",
         "node:util",
         "node:worker_threads",
@@ -572,6 +577,7 @@
           "node:os",
           "node:path",
           "node:stream",
+          "node:string_decoder",
           "node:url",
           "node:util",
           "node:worker_threads",
@@ -610,7 +616,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 672767,
+      "budgetBytes": 686500,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -642,6 +648,7 @@
         "node:os",
         "node:path",
         "node:stream",
+        "node:string_decoder",
         "node:url",
         "node:util",
         "path"
@@ -670,6 +677,7 @@
           "node:os",
           "node:path",
           "node:stream",
+          "node:string_decoder",
           "node:url",
           "node:util",
           "path"
@@ -993,7 +1001,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 626020,
+      "budgetBytes": 643000,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1025,6 +1033,7 @@
         "node:os",
         "node:path",
         "node:stream",
+        "node:string_decoder",
         "node:url",
         "node:util",
         "path"
@@ -1053,6 +1062,7 @@
           "node:os",
           "node:path",
           "node:stream",
+          "node:string_decoder",
           "node:url",
           "node:util",
           "path"
@@ -1066,7 +1076,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 175062,
+      "budgetBytes": 181000,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -3036,6 +3046,7 @@
         "node:readline",
         "node:readline/promises",
         "node:stream",
+        "node:string_decoder",
         "node:url",
         "node:util",
         "node:worker_threads",
@@ -3083,6 +3094,7 @@
           "node:readline",
           "node:readline/promises",
           "node:stream",
+          "node:string_decoder",
           "node:url",
           "node:util",
           "node:worker_threads",

@@ -53,6 +53,80 @@ describe('unconnected OAR Codex adapter', () => {
     await session.dispose(); expect(fake.child.kill).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps wire identities for native interaction while withholding quoted credentials from record IDs', async () => {
+    const key = 'fixture-"quoted"';
+    const fake = fakeServer();
+    const native = vi.fn();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' },
+      { cwd: '/workspace', env: { OPENAI_API_KEY: key } }, 1000, { onNativeIdentity: native });
+    fake.frame({ method: 'turn/started', params: { threadId: 'thread-root', turn: { id: key } } });
+    fake.frame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-root', turnId: '[redacted]', itemId: 'm', delta: 'stale' } });
+    fake.frame({ id: key, method: 'item/tool/requestUserInput', params: { turnId: key } });
+    expect(native).toHaveBeenCalledWith('turn/started', { threadId: 'thread-root', turn: { id: key } });
+    expect(session.records()).toContainEqual(expect.objectContaining({ kind: 'frame', body: expect.objectContaining({
+      origin: 'byok-native', type: 'item/agentMessage/delta', byokStaleTurn: true,
+    }) }));
+    expect(session.records()).toContainEqual(expect.objectContaining({ kind: 'request', direction: 'toApp', id: expect.stringMatching(/^native:redacted:/u) }));
+    expect(JSON.stringify(session.records())).not.toContain('quoted');
+    await session.dispose();
+  });
+
+  it.each(['notification first', 'reply first'])('retains stale Codex completion without settling the active turn (%s)', async ordering => {
+    const fake = fakeServer();
+    const identity = vi.fn();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' },
+      { cwd: '/workspace', env: {} }, 1000, { onNativeIdentity: identity });
+    const activeId = ordering === 'reply first' ? 'turn-root' : 'turn-B';
+    if (ordering === 'reply first') expect((await session.prompt('accepted input')).response.body.kind).toBe('accepted');
+    else fake.frame({ method: 'turn/started', params: { threadId: 'thread-root', turn: { id: activeId } } });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { id: 'turn-A', status: 'completed' } } });
+    expect(session.records().at(-1)).toMatchObject({ body: { origin: 'byok-native', byokStaleTurn: true, events: [] } });
+    expect(identity).not.toHaveBeenCalledWith('turn/completed', expect.anything());
+    expect((await session.prompt('another input')).response.body).toMatchObject({ kind: 'rejected', code: 'busy' });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'thread-root', turn: { id: activeId, status: 'completed' } } });
+    expect(session.records().at(-1)).toMatchObject({ body: { events: [expect.objectContaining({ kind: 'turn_ended' })] } });
+    expect(identity).toHaveBeenCalledWith('turn/completed', { threadId: 'thread-root', turn: { id: activeId } });
+    await session.dispose();
+  });
+
+  it.each(['item/agentMessage/delta', 'item/commandExecution/outputDelta'])('redacts or withholds Codex streamed content for %s', async method => {
+    const key = 'synthetic-secret-for-codex';
+    const fake = fakeServer();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' },
+      { cwd: '/workspace', env: { OPENAI_API_KEY: key } });
+    for (const delta of [key.slice(0, 12), key.slice(12)]) {
+      fake.frame({ method, params: { threadId: method === 'item/agentMessage/delta' ? 'child' : 'thread-root', itemId: 'm', delta } });
+      expect(JSON.stringify(session.records())).not.toContain(delta);
+    }
+    expect(session.records()).toContainEqual(expect.objectContaining({ kind: 'frame', body: expect.objectContaining({
+      origin: 'byok-native', type: method, native: method === 'item/agentMessage/delta'
+        ? expect.objectContaining({ delta: '[redacted]' }) : { threadId: 'thread-root', itemId: 'm' },
+    }) }));
+    await session.dispose();
+  });
+
+  it('keeps the completed Codex draft suffix in its derived text exactly once', async () => {
+    const fake = fakeServer();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { API_KEY: 'synthetic-secret-for-codex' },
+    });
+    fake.frame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-root', itemId: 'm', delta: 'A synthetic' } });
+    fake.frame({ method: 'item/completed', params: { threadId: 'thread-root', item: { id: 'm', type: 'agentMessage', text: 'A synthetic' } } });
+    const text = session.records().flatMap(record => record.kind === 'frame'
+      ? record.body.events.flatMap(event => event.kind === 'text_delta' ? [event.text] : []) : []);
+    expect(text).toEqual(['A ', 'synthetic']);
+    await session.dispose();
+  });
+
+  it('rejects an invalid MCP server name without encoding the protected value into the error', async () => {
+    const key = 'fixture-"quoted"';
+    const fake = fakeServer();
+    await expect(codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, {
+      cwd: '/workspace', env: { API_KEY: key }, mcpServers: [{ name: key, command: 'fake' }],
+    })).rejects.toThrow('codex MCP server names must match');
+    expect(fake.spawn).not.toHaveBeenCalled();
+  });
+
   it('passes launch arguments to the owned spawn without adding them to records', async () => {
     const fake = fakeServer();
     const launchArgs = ['-c', 'service_tier="fast"'];

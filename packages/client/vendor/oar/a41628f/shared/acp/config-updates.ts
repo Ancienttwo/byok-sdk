@@ -1,4 +1,5 @@
 import { asRecord, asRecordList, type JsonRecord } from "../json.js";
+import type { CredentialRedactor } from "../credential-redactor.js";
 import { ModelConfirmationError } from "../../contracts/model-confirmation-error.js";
 import { acpReportedEffort } from "./model.js";
 import { AcpError } from "./errors.js";
@@ -12,23 +13,26 @@ export interface AcpConfigUpdates {
 }
 
 /** Observe before sending; wait after the native answer, inside the same request deadline. */
-export function createAcpConfigUpdates(): AcpConfigUpdates {
-  const listeners = new Set<(sessionId: string, update: JsonRecord) => void>();
+export function createAcpConfigUpdates(redact?: CredentialRedactor["redactValue"]): AcpConfigUpdates {
+  const listeners = new Set<(sessionId: string, update: JsonRecord, safe: JsonRecord | null) => void>();
   return {
     observe(notification): void {
       const params = asRecord(notification), update = asRecord(params?.update);
       if (typeof params?.sessionId !== "string" || update?.sessionUpdate !== "config_option_update") { return; }
-      for (const listener of listeners) { listener(params.sessionId, update); }
+      const safe = redact === undefined ? update : asRecord(asRecord(redact(params))?.update);
+      for (const listener of listeners) listener(params.sessionId, update, safe);
     },
     async confirm(sessionId, configId, value, run) {
-      const state: { observed: boolean; current: unknown; effort?: string | null; changed?: () => void } = { observed: false, current: null };
-      const listener = (id: string, update: JsonRecord): void => {
+      const state: { observed: boolean; current: unknown; reported: unknown; effort?: string | null; changed?: () => void } = { observed: false, current: null, reported: null };
+      const listener = (id: string, update: JsonRecord, safe: JsonRecord | null): void => {
         if (id !== sessionId) { return; }
         const option = asRecordList(update.configOptions).find(entry => entry.id === configId);
         if (option === undefined) { return; }
+        const retained = asRecordList(safe?.configOptions).find(entry => entry.id === configId);
         state.observed = true;
         state.current = option.currentValue;
-        state.effort = acpReportedEffort(update);
+        state.reported = retained?.currentValue;
+        state.effort = acpReportedEffort(safe);
         state.changed?.();
       };
       listeners.add(listener);
@@ -55,8 +59,9 @@ export function createAcpConfigUpdates(): AcpConfigUpdates {
         // A conflicting notification is an observation, not proof of refusal,
         // until the request's existing deadline runs out.
         if (error instanceof AcpError && error.kind === "timeout" && state.observed && state.current !== value) {
-          const message = `ACP config_option_update left ${configId} at ${String(state.current)} although ${value} was requested${configId === "model" && typeof state.effort === "string" ? ` (native thought_level=${state.effort})` : ""}`;
-          throw configId === "model" ? new ModelConfirmationError(message, { requested: value, reported: typeof state.current === "string" ? state.current : null }) : new UnsupportedOptionError("effort", message);
+          const message = state.reported === undefined ? `ACP config_option_update did not confirm requested ${configId}`
+            : `ACP config_option_update left ${configId} at ${String(state.reported)} although ${value} was requested${configId === "model" && typeof state.effort === "string" ? ` (native thought_level=${state.effort})` : ""}`;
+          throw configId === "model" ? new ModelConfirmationError(message, { requested: value, reported: typeof state.reported === "string" ? state.reported : null }) : new UnsupportedOptionError("effort", message);
         }
         throw error;
       } finally {

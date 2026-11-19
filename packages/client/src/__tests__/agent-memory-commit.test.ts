@@ -460,8 +460,35 @@ describe.skipIf(!supported)('a commit Attempt on the device', () => {
   });
 });
 
-describe.skipIf(!supported)('checkAgentMemoryHome on a resident MEMORY.md', () => {
-  it('passes a compliant home', async () => {
+describe('checkAgentMemoryHome with resident scope', () => {
+  it('checks only MEMORY.md, even when notes would fail a full check', async () => {
+    const home = await temp('byok-check-resident-');
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'valid UTF-8');
+    await fs.writeFile(path.join(home, 'notes'), 'not a real directory');
+    const options = { scope: 'resident' as const, get commit(): never { throw new Error('commit was read'); } };
+    expect(await checkAgentMemoryHome(home, options)).toEqual({ ok: true });
+    if (supported) expect(await checkHome(home)).toMatchObject({ ok: false, code: 'agent_memory_snapshot_refused' });
+  });
+
+  it.skipIf(process.platform === 'linux')('requires the secure filesystem for the default scope', async () => {
+    const home = await temp('byok-check-full-');
+    await fs.writeFile(path.join(home, 'MEMORY.md'), 'valid UTF-8');
+    await expect(checkAgentMemoryHome(home)).rejects.toThrow('needs a secure memory filesystem');
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a symlink to a valid resident file', async () => {
+    const home = await temp('byok-check-resident-link-');
+    const target = path.join(home, 'target');
+    await fs.writeFile(target, 'valid UTF-8');
+    await fs.symlink(target, path.join(home, 'MEMORY.md'));
+    expect(await checkAgentMemoryHome(home, { scope: 'resident' })).toEqual({
+      ok: false, code: 'agent_memory_resident_not_regular_file', reason: 'agent_memory_resident_unreadable: not a regular file',
+    });
+  });
+});
+
+describe('checkAgentMemoryHome resident verdicts', () => {
+  it.skipIf(!supported)('passes a compliant home in full scope', async () => {
     const home = await temp('byok-check-home-');
     await seed(home);
     expect(await checkHome(home)).toEqual({ ok: true });
@@ -480,13 +507,16 @@ describe.skipIf(!supported)('checkAgentMemoryHome on a resident MEMORY.md', () =
     await seed(home);
     await fs.rm(path.join(home, 'MEMORY.md'));
     await plant(path.join(home, 'MEMORY.md'));
-    expect(await checkHome(home)).toEqual({ ok: false, code, reason });
+    const verdict = { ok: false, code, reason };
+    expect(await checkAgentMemoryHome(home, { scope: 'resident' })).toEqual(verdict);
+    if (supported) expect(await checkHome(home)).toEqual(verdict);
   });
 
   it('decides nothing for a MEMORY.md that is missing', async () => {
     const home = await temp('byok-check-home-');
     await seed(home);
     await fs.rm(path.join(home, 'MEMORY.md'));
-    await expect(checkHome(home)).rejects.toThrow('cannot be judged');
+    await expect(checkAgentMemoryHome(home, { scope: 'resident' })).rejects.toThrow('cannot be judged');
+    if (supported) await expect(checkHome(home)).rejects.toThrow('cannot be judged');
   });
 });

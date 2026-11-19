@@ -41,7 +41,7 @@ export function codexMcpServersConfig(servers: readonly McpServer[]): JsonRecord
   checkMcpServerNames(servers);
   const invalid = servers.find((server) => !CODEX_MCP_SERVER_NAME.test(server.name));
   if (invalid !== undefined) {
-    throw new Error(`codex starts no MCP server named ${JSON.stringify(invalid.name)}: its names match ${CODEX_MCP_SERVER_NAME.source}`);
+    throw new Error(`codex MCP server names must match ${CODEX_MCP_SERVER_NAME.source}`);
   }
   return Object.fromEntries(servers.map((server) => [server.name, isHttpMcpServer(server)
     ? { url: server.url, ...(server.headers === undefined ? {} : { http_headers: server.headers }), enabled: true }
@@ -210,6 +210,7 @@ export function codexOpenReadback(
   method: CodexOpenMethod,
   options: SessionOptions,
   reply: JsonRecord,
+  visibleReply: JsonRecord | null = reply,
 ): { readonly events: readonly RuntimeEventBody[]; readonly refusal: string | ModelConfirmationError | UnsupportedOptionError | null; readonly resumeEffort: string | null } {
   const model = typeof reply.model === "string" ? reply.model : null;
   const effort = effortIn(reply);
@@ -229,10 +230,12 @@ export function codexOpenReadback(
     return { events, refusal: `codex ${method} did not confirm the requested additionalDirectories in runtimeWorkspaceRoots`, resumeEffort: null };
   }
   if (options.model !== undefined && model !== null && model !== options.model) {
-    return { events, refusal: new ModelConfirmationError(`codex ${method} kept model ${model} although ${options.model} was requested`, { requested: options.model, reported: model }), resumeEffort: null };
+    const reported = typeof visibleReply?.model === "string" ? visibleReply.model : null;
+    const detail = reported === null ? `did not confirm requested model ${options.model}` : `kept model ${reported} although ${options.model} was requested`;
+    return { events, refusal: new ModelConfirmationError(`codex ${method} ${detail}`, { requested: options.model, reported }), resumeEffort: null };
   }
   if (options.serviceTier !== undefined && codexServiceTier(reply) !== options.serviceTier) {
-    const actual = codexServiceTier(reply) ?? "unreported";
+    const actual = codexServiceTier(visibleReply) ?? "unreported";
     return { events, refusal: `codex ${method} reports serviceTier ${actual} although ${options.serviceTier} was requested`, resumeEffort: null };
   }
   if (options.effort === undefined || effort === options.effort) {
@@ -241,7 +244,7 @@ export function codexOpenReadback(
   if (method !== "thread/start") {
     return { events, refusal: null, resumeEffort: options.effort };
   }
-  const said = "reasoningEffort" in reply ? `kept effort ${effort ?? "none (the model's default)"}` : "reports no reasoningEffort";
+  const said = visibleReply !== null && "reasoningEffort" in visibleReply ? `kept effort ${effortIn(visibleReply) ?? "none (the model's default)"}` : "reports no reasoningEffort";
   return { events, refusal: new UnsupportedOptionError("effort", `codex ${method} ${said} although effort ${options.effort} was requested`), resumeEffort: null };
 }
 
@@ -258,12 +261,15 @@ export const CODEX_SETTINGS_REPORT_MS = 10_000;
 export function codexResumeEffortRefusal(
   requested: string,
   settings: JsonRecord | null,
+  settingsVisible = true,
 ): Error | null {
   if (settings === null) {
     return new Error(`codex reported no thread/settings/updated within ${String(CODEX_SETTINGS_REPORT_MS)} ms, so effort ${requested} cannot be confirmed`);
   }
   const effort = effortIn(asRecord(settings.threadSettings));
-  return effort === requested ? null : new UnsupportedOptionError("effort", `codex thread/settings/update left effort ${effort ?? "none (the model's default)"} although ${requested} was requested`);
+  if (effort === requested) return null;
+  const detail = settingsVisible ? `left effort ${effort ?? "none (the model's default)"} although ${requested} was requested` : `did not confirm requested effort ${requested}`;
+  return new UnsupportedOptionError("effort", `codex thread/settings/update ${detail}`);
 }
 
 /** Null explicitly means no tier; an absent field is no evidence. */

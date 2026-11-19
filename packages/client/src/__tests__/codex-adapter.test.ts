@@ -175,6 +175,46 @@ describe('Codex persistent app-server adapter', () => {
       versionVerdict: { state: 'block', qualifiedVersion: '0.169.0', matched: '0.161.0' },
     });
   });
+  it.each([
+    ['codex-cli 0.47.0', 'reject'],
+    ['codex-cli 0.48.0-alpha.1', 'reject'],
+    ['codex-cli 0.48.0', 'prepared'],
+    ['codex-cli development', 'reject'],
+  ])('applies the MCP allowlist floor at prepare for %s', async (version, kind) => {
+    vi.stubEnv('FAKE_CODEX_VERSION', version);
+    const runtime = adapter();
+    const prepare = { offer: task, descriptor: runtime.descriptor };
+    const required = await runtime.prepare({ ...prepare, requiredToolsetIds: ['receipt'] });
+    expect(required.kind).toBe(kind);
+    if (kind === 'reject') {
+      expect(required).toEqual({ kind: 'reject', retryable: false,
+        reason: 'codex_mcp_tool_allowlist_unsupported: task MCP tools require Codex CLI 0.48.0 or later' });
+    }
+    expect(await runtime.prepare({ ...prepare, requiredToolsetIds: [] })).toMatchObject({ kind: 'prepared' });
+  });
+  it.skipIf(process.platform === 'win32')('opens the executable probed during prepare even when the start PATH differs', async () => {
+    const resources = await ctx();
+    const probedDir = path.join(resources.workspaceDir, 'probed');
+    const startDir = path.join(resources.workspaceDir, 'start');
+    const probed = path.join(probedDir, 'codex');
+    await fs.mkdir(probedDir);
+    await fs.mkdir(startDir);
+    await fs.symlink(fixture, probed);
+    await fs.writeFile(path.join(startDir, 'codex'), '#!/bin/sh\nexit 86\n', { mode: 0o755 });
+    const runtimePath = process.env.PATH ?? '';
+    vi.stubEnv('BYOK_CODEX_BIN', 'codex');
+    vi.stubEnv('PATH', `${probedDir}:${runtimePath}`);
+    const commands: string[] = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+      commands.push(command);
+      return spawn(command, args, options);
+    }) as typeof spawn;
+    const runtime = new CodexAdapter({ runtimeEnvironment: { base: 'allowlist' }, spawnFn });
+    resources.env.PATH = `${startDir}:${runtimePath}`;
+    resources.mcpServers = { host: { command: '/fixture/server' } };
+    expect((await turn(await open(runtime, task, resources))).at(-1)).toEqual({ type: 'turn_end' });
+    expect(commands).toEqual([probed]);
+  });
   it('detect refuses a missing app-server subcommand', async () => {
     vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');
     expect(await adapter().detect()).toEqual({
@@ -580,6 +620,21 @@ describe('Codex persistent app-server adapter', () => {
       }),
     );
   });
+  it('settles an interrupt from the root when redacted root and child IDs coincide', async () => {
+    const first = 'synthetic-root-api-key';
+    const second = 'synthetic-child-api-key';
+    const resources = await ctx({
+      OPENAI_API_KEY: first, FIXTURE_TOKEN: second, FAKE_CODEX_HANG: '1',
+      FAKE_CODEX_THREAD_ID: `fixture-${first}`, FAKE_CODEX_CHILD_COMPLETES_FIRST: `fixture-${second}`,
+    });
+    const session = await open(adapter(), task, resources);
+    const events = session.events[Symbol.asyncIterator]();
+    expect((await events.next()).value).toMatchObject({ type: 'tool_use' });
+    await session.interrupt();
+    expect((await events.next()).value).toMatchObject({ type: 'tool_result', output: { status: 'interrupted' } });
+    expect((await events.next()).value).toEqual({ type: 'turn_end' });
+    await events.return?.();
+  });
   it.skipIf(process.platform === 'win32')('reaps the aborted turn child and keeps the attached stdio MCP process for follow-up', async () => {
     const resources = await ctx();
     const receipt = path.join(resources.workspaceDir, 'turn-processes.json');
@@ -797,14 +852,14 @@ describe('Codex persistent app-server adapter', () => {
     expect(captured).toHaveLength(1);
     const frames = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map((line) => JSON.parse(line) as { method?: string; params?: { config?: { mcp_servers?: unknown } } });
     expect(frames.find((frame) => frame.method === 'thread/start')?.params?.config?.mcp_servers).toEqual({
-      byokagentmessage: { command: '/fixture/server', args: [], env: { SERVER_ONLY: 'secret' }, enabled: true, tools: { send_agent_message: { approval_mode: 'approve' } } },
+      byokagentmessage: { command: '/fixture/server', args: [], env: { SERVER_ONLY: 'secret' }, enabled: true, enabled_tools: ['send_agent_message'], tools: { send_agent_message: { approval_mode: 'approve' } } },
     });
     // Helper grants stay in thread configuration, never process arguments.
     expect(captured[0]!.some((arg) => arg.includes('mcp_servers') || arg.includes('enabled_tools') || arg.includes('approval_mode'))).toBe(false);
     expect(Object.values(envs[0]!).some((value) => value?.includes('secret'))).toBe(false);
   });
-  it('projected MCP toolsets reach the runtime without a per-tool grant', async () => {
-    const resources = await ctx({ FAKE_CODEX_MCP_TOOL_CALL: 'host/echo' });
+  it('opens with a projected MCP server carrying no tool grants', async () => {
+    const resources = await ctx();
     resources.mcpServers = { host: { command: '/fixture/server' } };
     resources.mcpToolsetTools = observationOf({ host: ['echo'] });
     const s = await open(adapter(), task, resources);
@@ -851,18 +906,18 @@ describe('CodexAdapter agentUserMcpServers (#935)', () => {
     // The user's model and sandbox still apply: the open sets neither.
     expect(open_).not.toHaveProperty('model');
     expect(open_.config).toEqual({
-      mcp_servers: { gmail: { enabled: false }, 'notes.v2': { enabled: false }, host: { command: process.execPath, args: ['host-mcp.js'], enabled: true } },
+      mcp_servers: { gmail: { enabled: false }, 'notes.v2': { enabled: false }, host: { command: process.execPath, args: ['host-mcp.js'], enabled: true, enabled_tools: [] } },
       features: { apps: false, plugins: false },
     });
     expect(frames[3].params).toEqual({ threadId: 'fake-thread-1', detail: 'toolsAndAuthOnly' });
   });
 
-  it('fails the start on a user server named like a task server, before the thread opens', async () => {
-    const { resources, rpc } = await agentCtx({ FAKE_CODEX_USER_CONFIG: JSON.stringify({ mcp_servers: { host: { command: 'user-host', env: { NODE_OPTIONS: '--require /x' } } } }) });
-    const error = await startPreparedOperation(adapter({ agentUserMcpServers: 'excluded' }), task, resources).catch(e => e);
+  it.each(['inherit', 'excluded'] as const)('refuses a task server name collision before opening the thread under %s', async (agentUserMcpServers) => {
+    const { resources, rpc } = await agentCtx({ FAKE_CODEX_USER_CONFIG: JSON.stringify({ mcp_servers: { host: { command: 'user-host', tools: { echo: { approval_mode: 'approve' } } } } }) });
+    const error = await startPreparedOperation(adapter({ agentUserMcpServers }), task, resources).catch(e => e);
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
     expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'unknown' },
-      message: 'codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: host' });
+      message: 'codex_mcp_server_name_collision: user MCP servers share a name with task servers: host. Rename either server and try again.' });
     expect((await rpc()).map(frame => frame.method)).toEqual(['initialize', 'config/read']);
   });
 
@@ -875,14 +930,14 @@ describe('CodexAdapter agentUserMcpServers (#935)', () => {
       message: 'codex Agent thread still runs MCP servers outside the task: codex_apps, gdrive (plugin drive@market)' });
   });
 
-  it('changes nothing under inherit or for a task that is not an Agent task', async () => {
+  it('preserves unrelated user configuration under inherit and for non-Agent tasks', async () => {
     for (const [options, agent] of [[{}, true], [{ agentUserMcpServers: 'inherit' as const }, true], [{ agentUserMcpServers: 'excluded' as const }, false]] as const) {
       const { resources, rpc } = await agentCtx({}, agent);
       await turn(await open(adapter(options), task, resources));
       const frames = await rpc();
-      expect(frames.map(frame => frame.method).slice(0, 2)).toEqual(['initialize', 'thread/start']);
+      expect(frames.map(frame => frame.method).slice(0, 3)).toEqual(['initialize', 'config/read', 'thread/start']);
       expect(frames.map(frame => frame.method)).not.toContain('mcpServerStatus/list');
-      expect(frames[1].params.config).toEqual({ mcp_servers: { host: { command: process.execPath, args: ['host-mcp.js'], enabled: true } } });
+      expect(frames[2].params.config).toEqual({ mcp_servers: { host: { command: process.execPath, args: ['host-mcp.js'], enabled: true, enabled_tools: [] } } });
     }
   });
 });

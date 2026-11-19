@@ -27,6 +27,8 @@ import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDispos
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { dshMcpRows, dshSession, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
+import { resolveRuntimeApiKey } from '../resolve-runtime-api-key.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { comparablePath } from '../../util/comparable-path.js';
@@ -35,16 +37,12 @@ import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-execu
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { DSH_RUNTIME_CAPABILITIES } from './dsh-capabilities.js';
-import { assertDshModelSelection, assertDshSandboxMode, dshAgentsHome, dshEnvironment, dshPatch, dshRoute } from './dsh-profile.js';
+import { assertDshModelSelection, assertDshSandboxMode, dshAgentsHome, dshEnvironment, dshPatch, dshRoute, DSH_PROVIDER_KEY_ENV } from './dsh-profile.js';
 import { DSH_VERSION_POLICY, dshVersionToken } from './dsh-version.js';
 import { DshProjection, type DshTurnOutcome } from './projection.js';
 import { resolveDshBin } from './resolve-bin.js';
 
-/**
- * Provider and model for every dsh execution (#1258 O4). Credentials stay in
- * the environment: `keyEnv` names the variable, its value never enters the
- * patch file.
- */
+/** Provider and model for dsh. The patch names the route and the SDK's child-only key variable. */
 export interface DshModelSelection {
   /**
    * `deepseek` routes through dsh's own DeepSeek API plugin
@@ -56,15 +54,6 @@ export interface DshModelSelection {
   readonly model: string;
   /** Endpoint for `custom` (required) or a catalog provider (optional). Not allowed for `deepseek`. It must not carry credentials. */
   readonly baseUrl?: string;
-  /**
-   * The environment variable that holds the provider key. Its name must
-   * contain `KEY`, `TOKEN`, `SECRET` or `PASSWORD`: dsh removes such names
-   * from every tool process it starts, so the key never reaches the model's
-   * shell. It must not be `DEEPSEEK_API_KEY`, which dsh's `web_search` tool
-   * also reads, nor start with `BYOK_` (the runtime environment drops those)
-   * or `DSH_` (the adapter owns them).
-   */
-  readonly keyEnv: string;
 }
 
 /** dsh's own sandbox modes (`DSH_PERMISSION_MODE`). `danger-full-access` also sets approval to `never`; the other two ask, but the bridge has no approval channel, so dsh refuses the request and returns it to the model as a tool error. */
@@ -85,8 +74,10 @@ export interface DshAdapterOptions {
    * composition the SDK relies on.
    */
   home: string;
-  /** Provider, model and key variable of every execution. */
+  /** Provider and default model of every execution. */
   model: DshModelSelection;
+  /** Resolves the provider API key in the Host's credential scope just before each authenticated spawn. */
+  resolveKey: () => Promise<string>;
   /**
    * dsh's sandbox for every session (`DSH_PERMISSION_MODE`). Default
    * `danger-full-access`, as for Codex: the bridge has no approval channel, so
@@ -146,22 +137,23 @@ export class DshAdapter implements RuntimeAdapter {
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveDshBin).bin.command,
       version: dshVersionToken,
       versionRefusal: dshVersionUnsupported,
-      environment: async env => {
+      environment: env => ({ env: dshEnvironment(env, this.root, this.sandbox) }),
+      authenticate: async (env, signal) => {
         await this.ensureRoot();
-        return { env: dshEnvironment(env, this.root, this.sandbox) };
+        const key = await resolveRuntimeApiKey('dsh', this.options.resolveKey, signal);
+        return { env: { ...env, [DSH_PROVIDER_KEY_ENV]: key }, credentials: [key] };
       },
-      credentialName: this.options.model.keyEnv,
     });
   }
 
   listModels(options: RuntimeListModelsOptions = {}): Promise<RuntimeModelCatalog> {
-    return this.readers.listModels(options, async (installation, reader) => {
+    return this.readers.listModels(options, async (installation, _reader, withAuthentication) => {
       const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-dsh-catalog-'));
       try {
         const patch = path.join(directory, PATCH_FILE);
         await fs.writeFile(patch, dshPatch(this.options.model), { mode: 0o600 });
         const { dshListModels } = await import('#byok-oar-readers');
-        return await dshListModels(installation, reader, { directory, patches: [patch], env: reader.env });
+        return await withAuthentication(reader => dshListModels(installation, reader, { directory, patches: [patch], env: reader.env }));
       } finally {
         await fs.rm(directory, { recursive: true, force: true });
       }
@@ -197,6 +189,7 @@ export class DshAdapter implements RuntimeAdapter {
     const userHome = comparablePath(path.join(os.homedir(), '.dsh'));
     if (candidate === userHome || candidate.startsWith(`${userHome}${path.sep}`)) throw new TypeError('DshAdapterOptions.home must not be the user\'s dsh home (~/.dsh)');
     assertDshModelSelection(options.model, 'DshAdapterOptions.model');
+    if (typeof options.resolveKey !== 'function') throw new TypeError('DshAdapterOptions.resolveKey must be a function');
     const sandbox = options.sandbox ?? 'danger-full-access';
     assertDshSandboxMode(sandbox, 'DshAdapterOptions.sandbox');
     this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'dsh');
@@ -218,9 +211,8 @@ export class DshAdapter implements RuntimeAdapter {
 
   /**
    * Prepares the SDK root, reads `dsh --version`, then resolves the acp
-   * profile (which writes it into a new root). `authPresent` is whether the
-   * runtime environment carries the `model.keyEnv` variable; the key is not
-   * checked against the provider.
+   * profile, which writes it into a new root. Detection leaves key resolution
+   * to authenticated spawns.
    */
   async detect(): Promise<RuntimeDetectResult> {
     try {
@@ -238,12 +230,10 @@ export class DshAdapter implements RuntimeAdapter {
         return { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion } };
       }
       if (!await probeAcpProfile(command, this.root, env)) return { kind: 'refused', reason: 'acp_unavailable' };
-      const key = base[this.options.model.keyEnv];
       return {
         kind: 'available',
         sessionCapabilities: dshRuntime.dshSessionCapabilities(),
         version: token,
-        authPresent: typeof key === 'string' && key.length > 0,
         ...runtimeExecutableFields(resolved, command),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, token),
       };
@@ -290,7 +280,6 @@ export class DshAdapter implements RuntimeAdapter {
     const session = new DshSession(
       input.scratch,
       this.interruptTimeoutMs,
-      model,
     );
     try {
       // dsh compares the canonical workspace on resume.
@@ -301,11 +290,15 @@ export class DshAdapter implements RuntimeAdapter {
       const env = dshEnvironment({ ...input.env, ...input.scratch.env }, this.root, this.sandbox);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp' });
+      const key = await resolveRuntimeApiKey('dsh', this.options.resolveKey, input.signal);
+      env[DSH_PROVIDER_KEY_ENV] = key;
+      const redactor = sessionCredentialRedactor({ env });
+      redactor.addExplicit(key);
       const raw = await dshSession(
         (bin, args, options) => {
           const child = spawnAgent(bin, args, options);
           session.own(child);
-          void child.exited.then(() => session.exited(), (error) => session.fail(error));
+          void child.exited.then(() => session.exited(), (error) => session.fail(redactor.redactValue(error)));
           return session.gate(child);
         },
         { kind: 'available', via: 'executable', command },
@@ -321,7 +314,9 @@ export class DshAdapter implements RuntimeAdapter {
           ...(resume === undefined ? {} : { resume }),
         },
         {
+          credentialsForRedaction: [key],
           onReady: (id) => session.ready(id),
+          onRouteMismatch: () => session.refuseRoute(),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),
         },
@@ -345,8 +340,8 @@ export class DshAdapter implements RuntimeAdapter {
 class DshSession implements Session {
   sessionRef = '';
   private raw?: RawDshSession;
-  private child?: { dispose(): Promise<void>; kill(): void; observeDescendants(): void };
-  private exit?: { readonly exitedOnItsOwn: boolean };
+  private child?: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean };
+  private exitedNaturally = false;
   private projection?: DshProjection;
   private readonly queue = new AsyncQueue<AgentEvent>();
   private failure?: RuntimeExecutionFailure;
@@ -362,15 +357,13 @@ class DshSession implements Session {
   constructor(
     private readonly scratch: ExecutionScratch,
     private readonly interruptMs: number,
-    private readonly model: string,
   ) {}
 
   own(child: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
-    this.exit = child;
   }
   get exitedOnItsOwn(): boolean {
-    return this.exit?.exitedOnItsOwn === true;
+    return this.child?.exitedOnItsOwn ?? this.exitedNaturally;
   }
   /** The agent's lines stop at the transport once the record stream halted. */
   gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
@@ -383,7 +376,14 @@ class DshSession implements Session {
   }
   ready(id: string): void {
     this.sessionRef = id;
-    this.projection = new DshProjection(id, this.model);
+    this.projection = new DshProjection(id);
+  }
+  refuseRoute(): void {
+    if (this.turnClosed || this.halted !== undefined) return;
+    this.fail(new RuntimeExecutionFailure({
+      phase: 'run', retry: 'non-retryable', reason: 'dsh session does not run the configured provider route and model',
+    }));
+    this.halted = this.failure;
   }
   bind(raw: RawDshSession): void {
     this.raw = raw;
@@ -533,6 +533,7 @@ class DshSession implements Session {
         }
         this.raw = undefined;
         this.projection = undefined;
+        this.exitedNaturally = this.exitedOnItsOwn;
         this.child = undefined;
       });
       this.closeAttempt = promise.catch((error) => {

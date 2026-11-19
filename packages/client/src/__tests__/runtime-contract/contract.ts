@@ -19,8 +19,8 @@ import { startEgressRecorder, type EgressAttempt, type EgressRecorder } from './
  */
 export const CONTRACT_CASES = Object.freeze({
   'detect.version': 'detect() is available and names the expected version, with a warn verdict exactly when it is not the qualified one',
-  'detect.auth.absent': 'detect() reports authPresent false with no credential',
-  'detect.auth.apiKey': 'detect() reports authPresent true for an API key in the environment',
+  'detect.auth.absent': 'detect() reports the expected authentication evidence without an ambient key',
+  'detect.auth.apiKey': 'detect() reports the expected authentication evidence for the provider key source',
   'detect.auth.login': 'detect() reports authPresent true for the runtime\'s own stored login',
   'mcp.submitResult': 'a Host MCP server reaches the model and its submit_result call reaches the server',
   'instructions.project': 'the project instruction file in the workspace reaches the model (folder trust)',
@@ -344,6 +344,17 @@ export async function readReceipt(file: string): Promise<Array<Record<string, un
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
+}
+
+/** Finds synthetic credentials in the files a loopback run left behind. Does not follow links. */
+export async function credentialFiles(root: string, key: string): Promise<readonly string[]> {
+  const matches = [];
+  for (const entry of await fs.readdir(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    if ((await fs.readFile(file)).includes(key)) matches.push(path.relative(root, file));
+  }
+  return matches;
 }
 
 /** Whether a server written by {@link writeSubmitResultServer} was ever started. */

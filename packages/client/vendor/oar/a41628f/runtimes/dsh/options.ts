@@ -1,3 +1,4 @@
+// BYOK change: keep credential-bearing model values out of opening diagnostics (Apache-2.0).
 import { UnsupportedOptionError } from "../../contracts/errors.js";
 import type { RefusedSessionOptions } from "../../contracts/runtime.js";
 import type { SessionOptions } from "../../contracts/session.js";
@@ -27,7 +28,7 @@ export function dshAgentOptions(options: Pick<SessionOptions, "model" | "effort"
   if (model === undefined) { return effortOption; }
   const separator = model.indexOf("/");
   if (separator <= 0 || separator === model.length - 1) {
-    throw new UnsupportedOptionError("model", `DSH selects a model as provider/model, not ${JSON.stringify(model)}`);
+    throw new UnsupportedOptionError("model", "DSH requires a model in provider/model form");
   }
   return { provider: model.slice(0, separator), model: model.slice(separator + 1), ...effortOption };
 }

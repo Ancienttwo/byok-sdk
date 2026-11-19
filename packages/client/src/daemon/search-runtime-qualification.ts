@@ -58,13 +58,11 @@ export function searchMcpEnvironmentFor(config: DaemonConfig): NonNullable<Searc
   const dsh = config.runtimes?.dsh;
   const dshHome = dsh === undefined ? undefined : path.resolve(dsh.home);
   const dshSandbox = dsh?.sandbox ?? 'danger-full-access';
-  const dshKey = dsh?.model.keyEnv.toUpperCase();
   const agy = config.runtimes?.agy;
   const agyHome = agy === undefined ? undefined : path.resolve(agy.home);
   return (runtimeId, env) => {
     if (runtimeId === 'dsh' && dshHome !== undefined) {
-      return Object.fromEntries(Object.entries(dshEnvironment(env, dshHome, dshSandbox))
-        .filter(([name]) => name.toUpperCase() !== dshKey));
+      return dshEnvironment(env, dshHome, dshSandbox);
     }
     if (runtimeId === 'agy' && agyHome !== undefined) return agyEnvironment(env, agyHome);
     return env;

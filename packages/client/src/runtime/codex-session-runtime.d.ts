@@ -54,6 +54,7 @@ export declare function codexSession(
     onReady?: (threadId: string) => void;
     turnProcessReader?: { rootPid(): number | undefined; readProcessTable(): ProcessTable };
     onRecord?: (record: CodexRecord) => void;
+    onNativeIdentity?: (method: string, identity: Record<string, unknown>) => void;
     onServerRequest?: (id: string | number, method: string, params: Record<string, unknown>, reply: {
       respond(value: Record<string, unknown>): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
     }) => void;

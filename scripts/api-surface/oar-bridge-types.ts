@@ -260,7 +260,9 @@ export type CheckDshExports = Assert<Equal<keyof typeof DshBridge, 'dshSession' 
 export type CheckDshMcpRows = Assert<Equal<typeof DshBridge.dshMcpRows, typeof vendorDshMcpRows>>;
 export type CheckDshOptions = Assert<Equal<Mutable<DshBridgeArgs[2]>, DshBridgeOptions>>;
 export type CheckDshVendorOptions = Assert<Assignable<DshBridgeArgs[2], VendorDshArgs[2]>>;
-export type CheckDshHooks = Assert<Assignable<DshHooksFromBridge, Partial<Mutable<DshSessionHooks>> | undefined>>;
+type DshPrivateHookKeys = 'credentialsForRedaction' | 'onRouteMismatch';
+export type CheckDshHooks = Assert<Equal<Pick<NonNullable<DshHooksFromBridge>, DshPrivateHookKeys>, Pick<DshSessionHooks, DshPrivateHookKeys>>>;
+export type CheckDshVendorHooks = Assert<Assignable<DshHooksFromBridge, Partial<Mutable<DshSessionHooks>> | undefined>>;
 type DshHooksFromBridge = DshBridgeArgs[3];
 export type CheckDshControl = Assert<Equal<DshBridge.DshControl, BridgeControl>>;
 export type CheckDshRecord = Assert<Equal<DshBridge.DshRecord, Flatten<BridgeRecord>>>;
@@ -361,7 +363,8 @@ import type { antigravityAccountUsage as V_antigravityAccountUsage } from '../..
 export type Check_antigravityAccountUsage = Assert<Assignable<typeof V_antigravityAccountUsage, typeof Readers.antigravityAccountUsage>>;
 import type { antigravityVersionRefusal as V_antigravityVersionRefusal } from '../../packages/client/vendor/oar/a41628f/runtimes/antigravity/version.js';
 export type Check_antigravityVersionRefusal = Assert<Assignable<typeof V_antigravityVersionRefusal, typeof VersionFloors.antigravityVersionRefusal>>;
-import type { dshVersionUnsupported as V_dshVersionUnsupported } from '../../packages/client/vendor/oar/a41628f/runtimes/dsh/version.js';
+import type { compareSemver as V_compareSemver, dshVersionUnsupported as V_dshVersionUnsupported } from '../../packages/client/vendor/oar/a41628f/runtimes/dsh/version.js';
+export type Check_compareSemver = Assert<Assignable<typeof V_compareSemver, typeof VersionFloors.compareSemver>>;
 export type Check_dshVersionUnsupported = Assert<Assignable<typeof V_dshVersionUnsupported, typeof VersionFloors.dshVersionUnsupported>>;
 import type { grokListModels as V_grokListModels } from '../../packages/client/vendor/oar/a41628f/runtimes/grok/list-models.js';
 import type { grokAccountUsage as V_grokAccountUsage } from '../../packages/client/vendor/oar/a41628f/runtimes/grok/account-usage.js';

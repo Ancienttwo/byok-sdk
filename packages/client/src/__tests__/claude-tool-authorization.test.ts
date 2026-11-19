@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeToolAuthorizationBridge } from '../adapters/claude/tool-authorization';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
+import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 import { createAutoToolAuthorizationGate, type ToolAuthorizationGate, type ToolCall } from '../tool-authorization';
 import { bindMcpHubAuthorization } from '../mcp/hub-authorization';
 import { publishMcpHubCatalog } from '../mcp/hub/catalog';
@@ -318,9 +319,9 @@ describe('Claude runtime requests on the OAR stream-json session', () => {
 
   async function open() {
     const claude = memoryClaude();
-    const stream = new ClaudeStreamSession(claude.child as never);
+    const stream = new ClaudeStreamSession(claude.child as never, sessionCredentialRedactor({}));
     const gate = new ClaudeToolAuthorizationBridge(deny, () => {});
-    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: (message, respond) => { gate.receive(message, respond); } });
+    await stream.open({ maxRetainedBytes: 16 * 1024 * 1024, onFrame: () => {}, onExit: () => {}, onAppRequest: (message, respond) => { gate.receive(message, respond); } });
     const callbackId = (gate.hooks.PreToolUse as Array<{ hookCallbackIds: string[] }>)[0]!.hookCallbackIds[0];
     return { claude, stream, callbackId };
   }
@@ -342,12 +343,12 @@ describe('Claude runtime requests on the OAR stream-json session', () => {
 
   it('writes nothing after a fatal bridge failure, neither a late verdict nor a new one', async () => {
     const claude = memoryClaude();
-    const stream = new ClaudeStreamSession(claude.child as never);
+    const stream = new ClaudeStreamSession(claude.child as never, sessionCredentialRedactor({}));
     let allow!: () => void;
     const pending: ToolAuthorizationGate = { timeoutMs: 1_000, authorize: () => new Promise(resolve => { allow = () => resolve({ decision: 'allow' }); }) };
     // Only the stream latch, not a closed bridge, stands between a verdict and stdin here.
     const gate = new ClaudeToolAuthorizationBridge(pending, error => stream.fail(error));
-    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: (message, respond) => { gate.receive(message, respond); } });
+    await stream.open({ maxRetainedBytes: 16 * 1024 * 1024, onFrame: () => {}, onExit: () => {}, onAppRequest: (message, respond) => { gate.receive(message, respond); } });
     const callbackId = (gate.hooks.PreToolUse as Array<{ hookCallbackIds: string[] }>)[0]!.hookCallbackIds[0];
     const hook = (id: string, callback = callbackId) => claude.send({ type: 'control_request', request_id: id, request: { subtype: 'hook_callback', callback_id: callback, input: {
       hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_use_id: id, tool_input: { command: 'ls' }, cwd: '/tmp',

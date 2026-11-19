@@ -1,4 +1,5 @@
 import type { RuntimeEventBody, TokenTotals } from "../../contracts/session.js";
+import type { CredentialRedactor } from "../credential-redactor.js";
 import { asNumber, asRecord, type JsonRecord } from "../json.js";
 import { acpPromptUsage } from "./projection.js";
 import type { AcpSessionProfile } from "./profile.js";
@@ -9,12 +10,14 @@ export interface AcpTokenUsage {
   extension(method: string, params: JsonRecord, opened: boolean): RuntimeEventBody | null;
 }
 
-export function createAcpTokenUsage(profile: AcpSessionProfile, sentByOar: (promptId: string) => boolean = () => false): AcpTokenUsage {
+export function createAcpTokenUsage(profile: AcpSessionProfile, sentByOar: (promptId: string) => boolean = () => false, redact?: CredentialRedactor["redactValue"]): AcpTokenUsage {
   let billed: TokenTotals = { input: 0, output: 0 };
   const seen = new Set<string>();
   return {
     prompt(response) {
-      const reading = acpPromptUsage(profile.promptContextUsage?.(response) ?? null, profile.promptTokenUsage?.(response) ?? null, billed);
+      const safe = redact === undefined ? response : asRecord(redact(response));
+      if (safe === null) return null;
+      const reading = acpPromptUsage(profile.promptContextUsage?.(safe) ?? null, profile.promptTokenUsage?.(safe) ?? null, billed);
       ({ billed } = reading);
       return reading.event;
     },
@@ -25,7 +28,10 @@ export function createAcpTokenUsage(profile: AcpSessionProfile, sentByOar: (prom
       // Opening can replay old terminal reports. Remember their identity so
       // a later repeated delivery cannot turn history into a fresh charge.
       if (!opened || report.replayed === true) { return null; }
-      const reading = acpPromptUsage(null, report.tokens, billed);
+      const safe = redact === undefined ? params : asRecord(redact(params));
+      const retained = safe === null ? null : safe === params ? report : profile.spontaneousTokenUsage?.(method, safe, () => false);
+      if (retained == null) return null;
+      const reading = acpPromptUsage(null, retained.tokens, billed);
       ({ billed } = reading);
       return reading.event;
     },

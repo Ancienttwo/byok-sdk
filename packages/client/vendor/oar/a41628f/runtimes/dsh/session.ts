@@ -24,7 +24,7 @@ import { DshCommandError, dshControl, type DshControl } from "./control.js";
 import { launchDsh, type DshLaunch, type DshLineProcess, type SpawnDshLineProcess } from "./launch.js";
 import { dshMcpRows } from "./mcp.js";
 import { dshAgentOptions, dshRefusedSessionOptions, type DshAgentOptions } from "./options.js";
-import { dshOpenedFrame, foldDsh, initialDshProjection } from "./projection.js";
+import { dshOpenedFrame, foldDsh, initialDshProjection, redactDshRecord } from "./projection.js";
 
 const OPEN_TIMEOUT_MS = 60_000;
 const DISPOSE_TIMEOUT_MS = 8000;
@@ -42,6 +42,8 @@ export interface DshSessionHooks {
   readonly credentialsForRedaction?: readonly string[];
   /** The session id, before any record is delivered; a throw fails the open. */
   readonly onReady?: (sessionId: string) => void;
+  /** BYOK change: Check the root request route before sanitizing it for observers. */
+  readonly onRouteMismatch?: () => void;
   /** A kernel observer from seq 0. The kernel swallows its errors, so it fails the session itself. */
   readonly onRecord?: (record: RawEvent) => void;
 }
@@ -72,17 +74,18 @@ function openFailure(error: unknown, sessionId: string, resuming: boolean): unkn
 }
 
 /** Where the runtime already reports its selection, a request it did not take is refused rather than run on another route. */
-function refuseUnappliedRoute(opened: JsonRecord, requested: DshAgentOptions, requestedModel: string | undefined): void {
+function refuseUnappliedRoute(opened: JsonRecord, requested: DshAgentOptions, requestedModel: string | undefined, credentials: CredentialRedactor): void {
   const reported = asRecord(opened.model);
   if (reported === null) { return; }
+  const visible = asRecord(asRecord(credentials.redactValue(opened))?.model) === null ? null : reported;
   if (requestedModel !== undefined && requested.provider !== undefined && (reported.provider !== requested.provider || reported.model !== requested.model)) {
-    throw new ModelConfirmationError(`DSH did not apply model ${requested.provider}/${String(requested.model)}: it reports ${String(reported.provider)}/${String(reported.model)}`, {
-      requested: requestedModel,
-      reported: typeof reported.provider === "string" && typeof reported.model === "string" ? `${reported.provider}/${reported.model}` : null,
-    });
+    const label = typeof visible?.provider === "string" && typeof visible.model === "string" ? `${visible.provider}/${visible.model}` : null;
+    const detail = visible === null ? "" : `: it reports ${String(visible.provider)}/${String(visible.model)}`;
+    throw new ModelConfirmationError(`DSH did not apply model ${requestedModel}${detail}`, { requested: requestedModel, reported: label });
   }
   if (requested.reasoningEffort !== undefined && reported.reasoningEffort !== requested.reasoningEffort) {
-    throw new UnsupportedOptionError("effort", `DSH did not apply effort ${requested.reasoningEffort}: it reports ${String(reported.reasoningEffort)}`);
+    const detail = visible === null ? "" : `: it reports ${String(visible.reasoningEffort)}`;
+    throw new UnsupportedOptionError("effort", `DSH did not apply effort ${requested.reasoningEffort}${detail}`);
   }
 }
 
@@ -113,15 +116,25 @@ async function open(spawnLineProcess: SpawnDshLineProcess, command: string, opti
   const sessionId = options.resume ?? randomUUID();
   const agentOptions = dshAgentOptions(options);
   // BYOK change: the record consumer observes from seq 0: it registers before any frame.
-  const kernel = createSessionKernel(sessionId, credentials.redactValue, options.retainedBytes);
+  const kernel = createSessionKernel(sessionId, record => {
+    const safe = redactDshRecord(record, credentials);
+    if (safe.kind !== "frame") return safe;
+    const body = { ...safe.body, byokRoot: record.sessionId === sessionId && record.agentPath.length === 0 };
+    return { ...safe, body };
+  }, options.retainedBytes);
   if (hooks.onRecord !== undefined) { kernel.rawEvents(hooks.onRecord); }
   hooks.onReady?.(sessionId);
   let projection = initialDshProjection(sessionId);
   const child: DshLineProcess = await launchDsh(spawnLineProcess, command, options.launch, mcpRows);
   const fallback = createAbortFallback(() => { child.kill(); });
   const control = dshControl(child, (message) => {
-    const { state, frame } = foldDsh(projection, message);
+    const { state, frame } = foldDsh(projection, message, credentials);
     projection = state;
+    if (frame.sessionId === undefined && options.model !== undefined && hooks.onRouteMismatch !== undefined
+      && frame.body.events.some(event => event.kind === "model" && event.model !== options.model)) {
+      hooks.onRouteMismatch();
+      return;
+    }
     kernel.frame(frame.body, frame.sessionId === undefined ? undefined : { sessionId: frame.sessionId });
     if (frame.sessionId === undefined && frame.body.events.some((event) => event.kind === "turn_ended")) { fallback.clear(); }
   });
@@ -142,7 +155,7 @@ async function open(spawnLineProcess: SpawnDshLineProcess, command: string, opti
       const route = await savedRoute(control, sessionId, options.cwd);
       opened = await control.request("resume", { ...fields, ...(route === undefined ? {} : { route }) }, OPEN_TIMEOUT_MS);
     }
-    refuseUnappliedRoute(opened, agentOptions, options.model);
+    refuseUnappliedRoute(opened, agentOptions, options.model, credentials);
     if (opened.sessionId !== sessionId) { throw new Error(`DSH opened ${String(opened.sessionId)}, not ${sessionId}`); }
     if (options.name !== undefined) { await control.request("name", { sessionId, name: options.name, resuming: options.resume !== undefined }, OPEN_TIMEOUT_MS); }
   } catch (error) {

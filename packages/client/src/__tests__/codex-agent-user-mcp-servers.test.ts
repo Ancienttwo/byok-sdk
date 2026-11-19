@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { withCodexUserMcpServersExcluded, verifyCodexUserMcpServersExcluded } from '../adapters/codex/agent-user-mcp-servers';
+import { codexUserMcpServerNames, withCodexUserMcpServersExcluded, verifyCodexUserMcpServersExcluded } from '../adapters/codex/agent-user-mcp-servers';
 import type { CodexOpenStepRequest } from '../runtime/codex-session-runtime';
 import { isRuntimeExecutionFailure } from '../runtime-failure';
 
@@ -35,7 +35,7 @@ async function refusal(work: () => unknown): Promise<string> {
 
 describe('withCodexUserMcpServersExcluded', () => {
   it('disables every configured server outside the task and turns off apps and plugins', () => {
-    expect(withCodexUserMcpServersExcluded(OPEN, EFFECTIVE, ['byokagentmemory'])).toEqual({
+    expect(withCodexUserMcpServersExcluded(OPEN, codexUserMcpServerNames(EFFECTIVE, ['byokagentmemory']))).toEqual({
       cwd: '/home/agent',
       approvalPolicy: 'never',
       config: {
@@ -53,7 +53,7 @@ describe('withCodexUserMcpServersExcluded', () => {
 
   it('keeps the denied tools the open already sets on a user server, with the server disabled', () => {
     const denied = { ...OPEN, config: { ...OPEN.config, mcp_servers: { ...OPEN.config.mcp_servers, probe_user: { disabled_tools: ['send'] } } } };
-    expect((withCodexUserMcpServersExcluded(denied, EFFECTIVE, ['byokagentmemory']).config as Record<string, unknown>).mcp_servers).toEqual({
+    expect((withCodexUserMcpServersExcluded(denied, codexUserMcpServerNames(EFFECTIVE, ['byokagentmemory'])).config as Record<string, unknown>).mcp_servers).toEqual({
       probe_project: { enabled: false },
       probe_user: { disabled_tools: ['send'], enabled: false },
       'probe.dotted': { enabled: false },
@@ -62,7 +62,7 @@ describe('withCodexUserMcpServersExcluded', () => {
   });
 
   it('adds the features to an open with no config and no configured servers', () => {
-    expect(withCodexUserMcpServersExcluded({ threadId: 't' }, { config: {} }, [])).toEqual({
+    expect(withCodexUserMcpServersExcluded({ threadId: 't' }, codexUserMcpServerNames({ config: {} }, []))).toEqual({
       threadId: 't',
       config: { mcp_servers: {}, features: { apps: false, plugins: false } },
     });
@@ -70,14 +70,14 @@ describe('withCodexUserMcpServersExcluded', () => {
 
   it('refuses a user server that shares a task server name', async () => {
     const effective = { config: { mcp_servers: { byokagentmemory: { command: 'x', env: { NODE_OPTIONS: '--require /x' } }, zeta: {}, alpha: {} } } };
-    expect(await refusal(() => withCodexUserMcpServersExcluded(OPEN, effective, ['zeta', 'byokagentmemory', 'alpha'])))
-      .toBe('codex Agent user MCP server exclusion refused: user MCP servers share a name with task servers: alpha, byokagentmemory, zeta');
+    expect(await refusal(() => codexUserMcpServerNames(effective, ['zeta', 'byokagentmemory', 'alpha'])))
+      .toBe('codex_mcp_server_name_collision: user MCP servers share a name with task servers: alpha, byokagentmemory, zeta. Rename either server and try again.');
   });
 
   it('refuses a configuration it cannot read', async () => {
     for (const effective of [{}, { config: null }, { config: [] }, { config: { mcp_servers: [] } }, { config: { mcp_servers: 'x' } }]) {
-      expect(await refusal(() => withCodexUserMcpServersExcluded(OPEN, effective, [])))
-        .toBe('codex Agent user MCP server exclusion refused: config/read returned no readable configuration');
+      expect(await refusal(() => codexUserMcpServerNames(effective, [])))
+        .toBe('codex_mcp_config_unavailable: config/read returned no readable configuration');
     }
   });
 });

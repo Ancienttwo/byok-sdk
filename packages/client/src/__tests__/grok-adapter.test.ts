@@ -65,13 +65,13 @@ async function failureOf(s: Session): Promise<unknown> {
 const usage = { type: 'usage', inputTokens: 100, cachedInputTokens: 64, outputTokens: 7, contextTokens: 1001, contextSource: 'provider' } as const;
 
 const GEMINI_URL = 'http://127.0.0.1:9';
-const agyCtx = (env: NodeJS.ProcessEnv = {}) => ctx({ GEMINI_API_KEY: 'task-key', ...env });
+const agyCtx = (env: NodeJS.ProcessEnv = {}) => ctx({ GEMINI_API_KEY: 'ambient-task-key', ...env });
 const mcpServer = (serverName: string, ...names: string[]): McpToolsetToolObservation[string] => ({
   serverName, toolsetId: `set.${serverName}`, serverInfo: { name: serverName, version: '1' }, protocolVersion: '2025-06-18',
   tools: names.map(name => ({ name, description: name, inputSchema: { type: 'object' } })),
 });
 function agy(home: string, options: Partial<AgyAdapterOptions> = {}): AgyAdapter {
-  return agyAdapterWithEndpoint(new AgyAdapter({ home, resolveBin: () => ({ command: fixture, source: 'path' }), runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*', 'GEMINI_*', 'GOOGLE_*', 'AGY_*'] }, ...options }), GEMINI_URL);
+  return agyAdapterWithEndpoint(new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home, resolveBin: () => ({ command: fixture, source: 'path' }), runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*', 'GEMINI_*', 'GOOGLE_*', 'AGY_*'] }, ...options }), GEMINI_URL);
 }
 async function agyVersion(version: string) {
   vi.stubEnv('FAKE_ACP_VERSION', version);
@@ -722,12 +722,13 @@ describe('GrokAdapter agentUserContext (#2239)', () => {
 
 describe('AgyAdapter', () => {
   it('owns a home that is not the user\'s and refuses an upstream carrying credentials', () => {
-    expect(() => new AgyAdapter({ home: 'relative' })).toThrow(/absolute/);
-    expect(() => new AgyAdapter({ home: os.homedir() })).toThrow(/user's home/);
-    expect(() => new AgyAdapter({ home: path.join(os.homedir(), '.gemini', 'x') })).toThrow(/user's home/);
-    expect(() => agyAdapterWithEndpoint(new AgyAdapter({ home: '/owned' }), 'http://user:pw@127.0.0.1:9')).toThrow(/credentials/);
-    expect(() => agyAdapterWithEndpoint(new AgyAdapter({ home: '/owned' }), 'http://127.0.0.1:9?key=x')).toThrow(/query/);
-    expect(new AgyAdapter({ home: '/owned' }).descriptor).toMatchObject({ id: 'agy', platforms: ['darwin', 'linux', 'win32'] });
+    expect(() => new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home: 'relative' })).toThrow(/absolute/);
+    expect(() => new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home: os.homedir() })).toThrow(/user's home/);
+    expect(() => new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home: path.join(os.homedir(), '.gemini', 'x') })).toThrow(/user's home/);
+    expect(() => agyAdapterWithEndpoint(new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home: '/owned' }), 'http://user:pw@127.0.0.1:9')).toThrow(/credentials/);
+    expect(() => agyAdapterWithEndpoint(new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home: '/owned' }), 'http://127.0.0.1:9?key=x')).toThrow(/query/);
+    expect(() => new AgyAdapter({ home: '/owned' } as AgyAdapterOptions)).toThrow(/resolveKey must be a function/);
+    expect(new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home: '/owned' }).descriptor).toMatchObject({ id: 'agy', platforms: ['darwin', 'linux', 'win32'] });
   });
 
   it('detect refuses a CLI without native ACP, a prerelease and an extra notice, and writes the native settings', async () => {
@@ -738,7 +739,11 @@ describe('AgyAdapter', () => {
     vi.stubEnv('FAKE_ACP_VERSION', '1.5.0\nupdate available');
     expect(await agy(home).detect()).toEqual({ kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { requiredVersion: '1.5.0' } });
     vi.stubEnv('FAKE_ACP_VERSION', '1.5.0');
-    expect(await agy(home).detect()).toMatchObject({ kind: 'available', version: '1.5.0' });
+    const resolveKey = vi.fn(async () => 'agy-task-resolver-key-fixture');
+    const result = await agy(home, { resolveKey }).detect();
+    expect(result).toMatchObject({ kind: 'available', version: '1.5.0' });
+    expect(result).not.toHaveProperty('authPresent');
+    expect(resolveKey).not.toHaveBeenCalled();
     expect(JSON.parse(readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8')))
       .toEqual({ modelProvider: 'gemini', setupComplete: true, onboardingComplete: true });
   });
@@ -772,7 +777,9 @@ describe('AgyAdapter', () => {
     });
     expect(start.env.GOOGLE_GEMINI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(start.env.GEMINI_API_KEY).toMatch(/^[\w-]{43}$/);
-    expect(JSON.stringify(start.env)).not.toContain('task-key');
+    expect(start.env.GEMINI_API_KEY).not.toBe('ambient-task-key');
+    expect(JSON.stringify(start.env)).not.toContain('agy-task-resolver-key-fixture');
+    expect(process.env.GEMINI_API_KEY).toBe('host-key');
     expect(start.env.GOOGLE_API_KEY).toBeUndefined();
     expect(start.env.AGY_ADC_AUTH).toBeUndefined();
     expect(start.env).toMatchObject({
@@ -849,8 +856,10 @@ describe('AgyAdapter', () => {
 
   it('fails a task without a key as authority, and one whose proxy cannot start as retryable, before agy runs', async () => {
     const home = await agyVersion('1.5.11');
-    const resources = await ctx();
-    expect(await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, resources).catch(error => error)).toMatchObject({ phase: 'start', retry: 'non-retryable' });
+    const resources = await agyCtx();
+    expect(await open(agy(home, { resolveKey: async () => '' }), { target: GROK_TARGET, instruction: 'hello' }, resources).catch(error => error)).toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: expect.stringContaining('at least 20 characters'),
+    });
     const refused = await agyCtx();
     const listen = vi.spyOn(Server.prototype, 'listen').mockImplementationOnce(function (this: Server) {
       process.nextTick(() => this.emit('error', new Error('no port')));
@@ -859,6 +868,41 @@ describe('AgyAdapter', () => {
     expect(await open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, refused).catch(error => error)).toMatchObject({ phase: 'start', retry: 'retryable' });
     listen.mockRestore();
     expect(existsSync(resources.log) || existsSync(refused.log)).toBe(false);
+  });
+
+  it('rejects a key Node cannot send as an HTTP header before allocating the proxy', async () => {
+    const home = await agyVersion('1.5.11');
+    const resources = await agyCtx();
+    const listen = vi.spyOn(Server.prototype, 'listen');
+    try {
+      await expect(open(agy(home, { resolveKey: async () => 'invalid-💥-http-header-key-fixture' }), { target: GROK_TARGET, instruction: 'hello' }, resources)).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: 'agy provider API key resolution failed',
+      });
+      expect(listen).not.toHaveBeenCalled();
+      expect(existsSync(resources.log)).toBe(false);
+    } finally {
+      listen.mockRestore();
+    }
+  });
+
+  it('closes a proxy whose listener opens after startup is cancelled', async () => {
+    const home = await agyVersion('1.5.11');
+    const resources = await agyCtx();
+    const controller = new AbortController();
+    const closing = vi.spyOn(Server.prototype, 'close');
+    const listen = Server.prototype.listen;
+    const listening = vi.spyOn(Server.prototype, 'listen').mockImplementationOnce(function (this: Server, ...args: unknown[]) {
+      controller.abort();
+      return Reflect.apply(listen, this, args) as Server;
+    });
+    try {
+      await expect(open(agy(home), { target: GROK_TARGET, instruction: 'hello' }, { ...resources, signal: controller.signal })).rejects.toThrow('agy start was aborted');
+      expect(closing).toHaveBeenCalledOnce();
+      expect(existsSync(resources.log)).toBe(false);
+    } finally {
+      listening.mockRestore();
+      closing.mockRestore();
+    }
   });
 
   it('closes the proxy when agy exits', async () => {

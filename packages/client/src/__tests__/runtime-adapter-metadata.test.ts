@@ -41,8 +41,8 @@ function builtIns(home: string): Record<FakeRuntimeAdapterId, RuntimeAdapter> {
     codex: new CodexAdapter(),
     pi: new PiAdapter(),
     grok: new GrokAdapter(),
-    dsh: new DshAdapter({ home, model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } }),
-    agy: new AgyAdapter({ home }),
+    dsh: new DshAdapter({ resolveKey: async () => 'fixture-key', home, model: { provider: 'deepseek', model: 'deepseek-v4-flash' } }),
+    agy: new AgyAdapter({ resolveKey: async () => 'fixture-key', home }),
   };
 }
 
@@ -61,8 +61,8 @@ describe('session limits', () => {
     ['Claude', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new ClaudeAdapter(limits)],
     ['Codex', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new CodexAdapter(limits)],
     ['Grok', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new GrokAdapter(limits)],
-    ['agy', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new AgyAdapter({ home: path.join(os.tmpdir(), 'agy-limits'), ...limits })],
-    ['dsh', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new DshAdapter({ home: path.join(os.tmpdir(), 'dsh-limits'), model: { provider: 'deepseek', model: 'test', keyEnv: 'TEST_KEY' }, ...limits })],
+    ['agy', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new AgyAdapter({ resolveKey: async () => 'fixture-key', home: path.join(os.tmpdir(), 'agy-limits'), ...limits })],
+    ['dsh', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new DshAdapter({ resolveKey: async () => 'fixture-key', home: path.join(os.tmpdir(), 'dsh-limits'), model: { provider: 'deepseek', model: 'test' }, ...limits })],
   ] as const)('%s validates limits', (label, create) => {
     expect(() => create({ interruptTimeoutMs: 0.5 })).not.toThrow();
     for (const interruptTimeoutMs of [0, Number.NaN, 2_147_483_648]) {
@@ -133,7 +133,7 @@ describe('supported platforms', () => {
 
   it('Windows refuses dsh with platform_unsupported before any probe', async () => {
     const resolveBin = vi.fn(() => { throw new Error('the probe must not run'); });
-    const adapter = new DshAdapter({ home: await tempDir(), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' }, resolveBin });
+    const adapter = new DshAdapter({ resolveKey: async () => 'fixture-key', home: await tempDir(), model: { provider: 'deepseek', model: 'deepseek-v4-flash' }, resolveBin });
     expect(await onPlatform('win32', () => observeRuntimeDetection(adapter))).toEqual({ kind: 'refused', reason: 'platform_unsupported' });
     expect(resolveBin).not.toHaveBeenCalled();
   });

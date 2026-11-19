@@ -338,6 +338,23 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
     expect(status.detail).toBe('inactive');
   });
 
+  it('confirms systemd exit 4 for an absent unit', async () => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(4, 'inactive\n'));
+    const lifecycle = createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' });
+    expect(await lifecycle.status()).toMatchObject({ installed: false, running: false, determinate: true });
+  });
+
+  it.each([
+    [37, '', 'Unexpected failure'],
+    [3, 'deactivating', ''],
+    [4, 'active', ''],
+    [4, 'inactive', 'Failed to connect to bus: No such file or directory'],
+  ])('leaves unknown or conflicting systemd exit %d indeterminate', async (code, stdout, stderr) => {
+    const run = vi.fn<Runner>().mockResolvedValue(fail(code, stdout, stderr));
+    const lifecycle = createSystemdLifecycle(def(), { run, fs: installedFs(), homedir: () => '/h' });
+    expect(await lifecycle.status()).toMatchObject({ running: false, determinate: false, detail: `systemctl --user is-active failed (exit ${code}): ${stderr || stdout}` });
+  });
+
   it('status() reports installed=false when no unit file exists on disk', async () => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(3, 'inactive\n'));
     const lifecycle = createSystemdLifecycle(def(), { run, fs: fakeFs(), homedir: () => '/h' });

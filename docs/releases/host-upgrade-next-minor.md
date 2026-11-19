@@ -50,3 +50,41 @@ Prepared input preparation and execution require `direct`. Use `direct` also for
 If a selected server already uses `byoktools`, keep that task direct-only or rename the server before selecting any search toolset. Update the Host's exact selectors and any native rules or hooks that mention the old name. Check whether a saved runtime session can resume with the changed tool names before reusing it.
 
 Claude stays closed to search in this release. When qualifying a future Claude combination, its native deny rules and `PreToolUse` hooks see the hub call, such as `mcp__byoktools__call_tool`, with the inner identity in `server` and `tool` and its parameters in `arguments`. Review any native filters that rely on a direct tool name before opting in. SDK authorization selectors continue to match the inner tool name, server, and arguments.
+
+## dsh and agy provider keys
+
+Supply an async `resolveKey` on `DshAdapterOptions`, `AgyAdapterOptions`,
+`runtimes.dsh` or `runtimes.agy`. Read the key in that callback from the
+Host's credential store for the daemon's account. Remove `model.keyEnv`
+from dsh configuration and remove the old provider-key entries from
+`runtimeEnvironment.pass` or `allow`. The Host can stop copying keys into
+its process environment. Both adapters now omit `authPresent` during
+installation detection. Use the Host's credential store to decide whether
+the account has a saved key.
+
+Provider keys supplied through `resolveKey` or Claude's `ANTHROPIC_API_KEY`
+and `ANTHROPIC_AUTH_TOKEN` environment variables must contain at least 20
+characters and cannot contain leading or trailing whitespace, NUL, or line
+breaks. Give local OpenAI-compatible endpoints a placeholder of at least 20
+characters even when they do not require authentication.
+
+**Known limitation.** Plain JSON configuration cannot start dsh or agy.
+Use an embedded Host to provide the per-spawn callback. See [#2408](https://github.com/Ancienttwo/byok-sdk/issues/2408).
+
+## Agent memory preflight and helper path
+
+Use `checkAgentMemoryHome(home, { scope: 'resident' })` from
+`@byok-sdk/client/agent-memory` to validate `MEMORY.md` during device sync
+without starting a helper. The same entry exports
+`resolveAgentMemoryFilesystemHelper(assetRoot?)` to resolve a verified helper
+path before opening a filesystem. See [#2410](https://github.com/Ancienttwo/byok-sdk/issues/2410).
+
+## Codex task MCP allowlists
+
+List every tool a task should use in the local server's `approveTools`. Codex now
+exposes only those exact names. Omitted and empty grants both expose zero
+tools. A tool previously available through `readOnlyHint` or an ad hoc approval
+now needs an explicit grant. Upgrade to Codex CLI 0.48.0 or later for tasks with
+required toolsets. If `codex_mcp_server_name_collision` names a server, rename the
+injected or user-configured server before retrying, including under
+`agentUserMcpServers: 'inherit'`. See [#2414](https://github.com/Ancienttwo/byok-sdk/issues/2414).

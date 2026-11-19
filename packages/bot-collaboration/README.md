@@ -736,6 +736,10 @@ After retention, a late message for an archived Turn gets `binding_mismatch`,
 and an echo can no longer match an archived delivery. Back up the whole SQLite
 database: a JSON-only restore loses the archived rows and tombstones.
 
+During store recovery, the WAL-aware SQLite snapshot check (#2420) opens a
+private copy under `os.tmpdir()`. SQLite can create sidecars for that copy.
+The check makes no writes to the original database or files beside it.
+
 The Host drains application commands until all new turns have a K4 intent.
 An immediate terminal cannot leave a continuation without a wake.
 K4 also settles intents in drains that the Host did not start: a terminal
