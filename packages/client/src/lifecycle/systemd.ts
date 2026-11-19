@@ -14,7 +14,6 @@ export interface SystemdDeps {
   run?: Runner;
   fs?: ManagedLifecycleFs;
   homedir?: () => string;
-  getuid?: () => number;
 }
 
 /**
@@ -204,7 +203,7 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
   return createManagedLifecycle(def, {
     serviceName: name,
     registration: () => {
-      const uid = systemdLocalUserUid(deps.getuid);
+      const uid = systemdLocalUserUid();
       return uid === undefined ? null : { manager: 'systemd', uid };
     },
     unitPath,
