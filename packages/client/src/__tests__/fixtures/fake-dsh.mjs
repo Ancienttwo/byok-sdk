@@ -57,6 +57,9 @@ function prompt(sessionId, text) {
   event(sessionId, 'turn/start');
   const end = (reason) => event(sessionId, 'turn/end', { reason });
   if (text === 'fail') return end({ kind: 'error', error: { code: 'AUTH', status: 401, message: 'invalid api key' } });
+  if (text === 'fail-echo-provider-key') {
+    return end({ kind: 'error', error: { code: 'AUTH', status: 401, message: `invalid api key: ${process.env.BYOK_DSH_PROVIDER_API_KEY}` } });
+  }
   if (text === 'rate-limit') return end({ kind: 'error', error: { code: 'RATE_LIMIT', status: 429, message: 'rate limit exceeded' } });
   if (text === 'exit') process.exit(3);
   if (text === 'echo-provider-key') {

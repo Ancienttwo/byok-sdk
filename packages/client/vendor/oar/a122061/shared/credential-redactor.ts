@@ -8,6 +8,23 @@ const AUTH_HEADERS = new Set(["AUTHORIZATION", "PROXY-AUTHORIZATION"]);
 const CREDENTIAL_NAMES = new Set(["PGPASSWORD"]);
 const CREDENTIAL_MIN_LENGTH = 8;
 const PATH_VALUE = /^(?:\/|~\/|[a-z]:\\)/iu;
+// Record and native-protocol routing, correlation and enum fields carry structure.
+// Their string values may coincide with a Host key, especially a short key.
+const STRUCTURAL_FIELDS = new Set([
+  "kind", "type", "direction", "method", "jsonrpc", "sessionUpdate", "stopReason",
+  "status", "failure", "phase", "action", "code", "placement", "admission", "queued",
+  "settledBy", "evidence", "via", "result", "outcome", "role", "mediaType", "mimeType",
+  "id", "sessionId", "spanId", "requestId", "responseTo", "inputId", "turnId",
+  "nativeMessageId", "messageId", "callId", "toolCallId", "compactionId", "taskId", "parent", "child",
+]);
+const ID_LIST_FIELDS = new Set(["agentPath", "inputIds", "carries"]);
+
+function preservesStructure(key: string, value: unknown): boolean {
+  if (Array.isArray(value)) return ID_LIST_FIELDS.has(key) && value.every(item => typeof item === "string");
+  if (typeof value !== "string") return false;
+  return STRUCTURAL_FIELDS.has(key)
+    || (key === "credential" && (value === "missing" || value === "rejected"));
+}
 
 function credentialValue(value: string | null | undefined): value is string {
   return typeof value === "string" && value.length >= CREDENTIAL_MIN_LENGTH && !PATH_VALUE.test(value);
@@ -38,6 +55,7 @@ export interface CredentialRedactor {
 /** Explicit session credentials only; runtime-native keys can be added after SDK resolution. */
 export function sessionCredentialRedactor(options: Partial<SessionOptions>): CredentialRedactor {
   const known = new Set<string>();
+  const explicit = new Set<string>();
   const add = (value: string | null | undefined): void => { if (credentialValue(value)) { known.add(value); } };
   const env = (entries: SessionOptions["env"]): void => {
     for (const [name, value] of Object.entries(entries ?? {})) {
@@ -62,18 +80,27 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     for (const data of images) text = text.replaceAll(data, "[redacted]");
     return values.reduce((result, value) => result.replaceAll(value, "[redacted]"), text);
   };
-  const addExplicit = (value: string): void => {
+  const addKnown = (value: string): void => {
     if (value.length !== 0 && !known.has(value)) {
       known.add(value);
       values = [...known].toSorted((left, right) => right.length - left.length);
     }
   };
+  const shape = {
+    preserve: preservesStructure,
+    // Preserve the protocol's field names. Credential-bearing map keys from
+    // ambient credentials retain the original diagnostic redaction behavior.
+    key: (key: string) => known.has(key) && !explicit.has(key) && !STRUCTURAL_FIELDS.has(key) ? "[redacted]" : key,
+  };
   return {
     values: () => values,
     add(value) {
-      if (credentialValue(value)) { addExplicit(value); }
+      if (credentialValue(value)) { addKnown(value); }
     },
-    addExplicit,
+    addExplicit(value) {
+      explicit.add(value);
+      addKnown(value);
+    },
     addImage(data) {
       if (data.length !== 0) images.add(data);
     },
@@ -81,6 +108,6 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     // Most records contain no credentials. Avoid traversing at all without known
     // values, and preserve the original object when the scan finds no match.
     redactValue: (value) => values.length === 0 && images.size === 0 ? value : redactText(value, redact, (text) =>
-      values.some((knownValue) => text.includes(knownValue)) || [...images].some((data) => text.includes(data))),
+      values.some((knownValue) => text.includes(knownValue)) || [...images].some((data) => text.includes(data)), shape),
   };
 }

@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.120.0",
-    "commit": "b63f52acf0fc7da491923978c6628fdacd837b4a"
+    "commit": "40d28b4aee673e3f7c3b6db28dbafbcd5e7c08c7"
   },
   "release": {
     "ecosystem": "npm",
@@ -952,8 +952,8 @@
       "path": "shared/credential-redactor.ts",
       "sourcePath": "packages/oar/src/shared/credential-redactor.ts",
       "upstreamSha256": "e7358de620f170bcd2b4ec1e46d98a6fe58a1e6d52dfe5dc535c090a713af6be",
-      "vendoredSha256": "858fb634ed52b8711467ec6c883e379478a98665eba641ed3bc0b09f74503b0d",
-      "delta": "Redact echoed image data before recording native output. Register exact caller-resolved credentials, including short or path-like values, without changing the ambient heuristic (#2408)."
+      "vendoredSha256": "f8d304aedba3e9ebf52663be401c8b253442cc7e4c1e735e1aae74813a45dd28",
+      "delta": "Redact echoed image data before recording native output. Register exact caller-resolved credentials, including short or path-like values, without changing the ambient heuristic. Keep protocol structure intact when a credential matches it (#2408)."
     },
     {
       "path": "shared/deadline.ts",
@@ -1070,7 +1070,8 @@
       "path": "shared/redact-text.ts",
       "sourcePath": "packages/oar/src/shared/redact-text.ts",
       "upstreamSha256": "30fe17becb13c6439e251752b8fad2b74f71d66c284a66751e9e49d3d70de966",
-      "vendoredSha256": "30fe17becb13c6439e251752b8fad2b74f71d66c284a66751e9e49d3d70de966"
+      "vendoredSha256": "0d702b52a653b25fb60d28ff53b19063e02461e39fd945a1e2f9e3cd81a74d29",
+      "delta": "Credential redaction can preserve protocol discriminators and field names while redacting content (#2408)."
     },
     {
       "path": "shared/same-directory.ts",

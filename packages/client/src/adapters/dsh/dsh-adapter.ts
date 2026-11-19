@@ -340,8 +340,8 @@ export class DshAdapter implements RuntimeAdapter {
 class DshSession implements Session {
   sessionRef = '';
   private raw?: RawDshSession;
-  private child?: { dispose(): Promise<void>; kill(): void; observeDescendants(): void };
-  private exit?: { readonly exitedOnItsOwn: boolean };
+  private child?: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean };
+  private exitedNaturally = false;
   private projection?: DshProjection;
   private readonly queue = new AsyncQueue<AgentEvent>();
   private failure?: RuntimeExecutionFailure;
@@ -362,10 +362,9 @@ class DshSession implements Session {
 
   own(child: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
-    this.exit = child;
   }
   get exitedOnItsOwn(): boolean {
-    return this.exit?.exitedOnItsOwn === true;
+    return this.child?.exitedOnItsOwn ?? this.exitedNaturally;
   }
   /** The agent's lines stop at the transport once the record stream halted. */
   gate<T extends { onLine(handler: (line: string) => void): void }>(child: T): T {
@@ -528,6 +527,7 @@ class DshSession implements Session {
         }
         this.raw = undefined;
         this.projection = undefined;
+        this.exitedNaturally = this.exitedOnItsOwn;
         this.child = undefined;
       });
       this.closeAttempt = promise.catch((error) => {

@@ -1,6 +1,13 @@
 /* oxlint-disable import/prefer-default-export -- Shared named helper. */
+interface RedactionShape {
+  readonly key: (key: string) => string;
+  readonly preserve: (key: string, value: unknown) => boolean;
+}
+
 /** Copy diagnostic data, including Error fields and cause chains, replacing known strings without mutating native inputs. */
-export function redactText<T>(value: T, redact: (text: string) => string, contains: (text: string) => boolean): T {
+export function redactText<T>(value: T, redact: (text: string) => string, contains: (text: string) => boolean, shape?: RedactionShape): T {
+  const redactKey = shape?.key ?? redact;
+  const preserve = shape?.preserve;
   const scanned = new Set<object>();
   const matches = (entry: unknown): boolean => {
     if (typeof entry === "string") { return contains(entry); }
@@ -8,9 +15,11 @@ export function redactText<T>(value: T, redact: (text: string) => string, contai
     scanned.add(entry);
     if (Array.isArray(entry)) { return entry.some((item) => matches(item)); }
     return Object.getOwnPropertyNames(entry).some((key) => {
-      if (contains(key)) { return true; }
+      if (shape === undefined ? contains(key) : redactKey(key) !== key) { return true; }
       const descriptor = Object.getOwnPropertyDescriptor(entry, key);
-      if (descriptor !== undefined && "value" in descriptor) { return matches(descriptor.value); }
+      if (descriptor !== undefined && "value" in descriptor) {
+        return preserve?.(key, descriptor.value) !== true && matches(descriptor.value);
+      }
       return entry instanceof Error && key === "stack" && matches(entry.stack);
     });
   };
@@ -35,7 +44,8 @@ export function redactText<T>(value: T, redact: (text: string) => string, contai
     for (const key of Object.getOwnPropertyNames(entry)) {
       const descriptor = Object.getOwnPropertyDescriptor(entry, key);
       if (descriptor !== undefined && "value" in descriptor) {
-        Object.defineProperty(result, redact(key), { ...descriptor, value: copy(descriptor.value) });
+        const value = preserve?.(key, descriptor.value) === true ? descriptor.value : copy(descriptor.value);
+        Object.defineProperty(result, redactKey(key), { ...descriptor, value });
       } else if (entry instanceof Error && key === "stack" && typeof entry.stack === "string") {
         // Node 24 exposes the lazily computed stack as an accessor. Copy its
         // redacted text, never a getter closing over the original Error.

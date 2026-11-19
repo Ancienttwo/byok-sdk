@@ -299,9 +299,9 @@ function readerScope(manifest: RuntimeOperationManifest): AgyReaderScope | undef
 class AgySession implements Session {
   sessionRef = '';
   private raw?: RawAcpSession;
-  private child?: { dispose(): Promise<void>; kill(): void; observeDescendants(): void };
+  private child?: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean };
   private proxy?: AgyGeminiProxy;
-  private exit?: { readonly exitedOnItsOwn: boolean };
+  private exitedNaturally = false;
   private stopAttempt?: Promise<void>;
   /** The refused permission no model output has followed yet: agy ends the turn on it, and that is no success. */
   private refused?: { readonly toolCallId: string; readonly reason: string };
@@ -328,10 +328,9 @@ class AgySession implements Session {
   }
   own(child: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
-    this.exit = child;
   }
   get exitedOnItsOwn(): boolean {
-    return this.exit?.exitedOnItsOwn === true;
+    return this.child?.exitedOnItsOwn ?? this.exitedNaturally;
   }
   ready(id: string): void {
     if (this.expectedSessionRef !== undefined && id !== this.expectedSessionRef) throw authority('agy resume returned a different session id');
@@ -492,6 +491,7 @@ class AgySession implements Session {
       }
       this.raw = undefined;
       this.projection = undefined;
+      this.exitedNaturally = this.exitedOnItsOwn;
       this.child = undefined;
     });
   }

@@ -12,6 +12,7 @@ import { CodexNativeInteractions } from './native-interactions.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { promises as fs } from 'node:fs';
+import path from 'node:path';
 import * as codexRuntime from '../../runtime/codex-session-runtime.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type {
@@ -44,7 +45,7 @@ import { CodexProjection, type CodexRecord } from './projection.js';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session-kit.js';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin.js';
-import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
+import { findRuntimeCommandOnPath, resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities.js';
 import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version.js';
@@ -220,7 +221,12 @@ export class CodexAdapter implements RuntimeAdapter {
     try {
       const { env } = await this.runtimeEnvironment();
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin);
-      const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
+      const host = runtimeInvocationHost(env);
+      const named = resolved.bin.command;
+      const executableCommand = host.platform === 'win32' ? named
+        : named.includes('/') ? path.resolve(named) : findRuntimeCommandOnPath(named, host);
+      if (executableCommand === undefined) return { detected: { kind: 'not-found' } };
+      const invocation = resolveRuntimeInvocation(executableCommand, host);
       const { command, args, executable } = invocation;
       const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env, args);
       if (version.kind !== 'available') return { detected: version };
@@ -261,7 +267,7 @@ export class CodexAdapter implements RuntimeAdapter {
         sessionCapabilities: codexRuntime.codexSessionCapabilities(),
         version: text,
         authPresent,
-        ...runtimeExecutableFields(resolved, executable),
+        ...runtimeExecutableFields(resolved, host.platform === 'win32' ? executable : named),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
       } };
     } catch (error) {

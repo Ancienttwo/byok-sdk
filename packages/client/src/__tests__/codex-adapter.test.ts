@@ -192,6 +192,25 @@ describe('Codex persistent app-server adapter', () => {
     }
     expect(await runtime.prepare({ ...prepare, requiredToolsetIds: [] })).toMatchObject({ kind: 'prepared' });
   });
+  it.skipIf(process.platform === 'win32')('opens the executable probed during prepare even when the start PATH differs', async () => {
+    const resources = await ctx();
+    const probedDir = path.join(resources.workspaceDir, 'probed');
+    const startDir = path.join(resources.workspaceDir, 'start');
+    const probed = path.join(probedDir, 'codex');
+    await fs.mkdir(probedDir);
+    await fs.mkdir(startDir);
+    await fs.symlink(fixture, probed);
+    await fs.writeFile(path.join(startDir, 'codex'), '#!/bin/sh\nexit 86\n', { mode: 0o755 });
+    const runtimePath = process.env.PATH ?? '';
+    vi.stubEnv('BYOK_CODEX_BIN', 'codex');
+    vi.stubEnv('PATH', `${probedDir}:${runtimePath}`);
+    const spawnFn = vi.fn<typeof spawn>((command, args, options) => spawn(command, args, options));
+    const runtime = new CodexAdapter({ runtimeEnvironment: { base: 'allowlist' }, spawnFn });
+    resources.env.PATH = `${startDir}:${runtimePath}`;
+    resources.mcpServers = { host: { command: '/fixture/server' } };
+    expect((await turn(await open(runtime, task, resources))).at(-1)).toEqual({ type: 'turn_end' });
+    expect(spawnFn.mock.calls[0]?.[0]).toBe(probed);
+  });
   it('detect refuses a missing app-server subcommand', async () => {
     vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');
     expect(await adapter().detect()).toEqual({

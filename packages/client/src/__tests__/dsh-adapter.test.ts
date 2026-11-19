@@ -402,6 +402,12 @@ describe('DshAdapter sessions', () => {
     expect((error as Error).message).toMatch(/invalid api key/);
   });
 
+  it('preserves the failed outcome when the resolved key matches its discriminator', async () => {
+    const { open } = await setup({ resolveKey: async () => 'failed' });
+    const session = await open({ target: DSH_TARGET, instruction: 'fail-echo-provider-key' });
+    await expect(turn(session)).rejects.toMatchObject({ phase: 'run', failure: { class: 'auth' }, message: expect.stringContaining('invalid api key: [redacted]') });
+  });
+
   it('retries a native rate limit', async () => {
     const { open } = await setup();
     const error = await turn(await open({ target: DSH_TARGET, instruction: 'rate-limit' })).catch((caught: unknown) => caught);
