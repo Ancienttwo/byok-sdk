@@ -406,7 +406,10 @@ export class CodexAdapter implements RuntimeAdapter {
           ...(excludeUserMcp ? {
             afterOpen: (request, threadId) => verifyCodexUserMcpServersExcluded(request, threadId, taskServers),
           } : {}),
-          ...(this.options.nativeInteractions === undefined ? {} : { onServerRequest: session.serverRequest.bind(session) }),
+          ...(this.options.nativeInteractions === undefined ? {} : {
+            onServerRequest: session.serverRequest.bind(session),
+            onNativeIdentity: (method: string, identity: Record<string, unknown>) => session.nativeIdentity(method, identity),
+          }),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),
         },
@@ -489,6 +492,9 @@ class CodexSession implements Session {
   serverRequest(id: string | number, method: string, params: Record<string, unknown>, reply: import('./native-interactions.js').CodexNativeReply): void {
     this.native!.receive(id, method, params, reply);
   }
+  nativeIdentity(method: string, identity: Record<string, unknown>): void {
+    this.native?.notification(method, identity);
+  }
   own(child: { dispose(): Promise<void>; kill(): void; readonly exitedOnItsOwn: boolean }): void {
     this.child = child;
     this.exit = child;
@@ -529,8 +535,6 @@ class CodexSession implements Session {
   record(record: CodexRecord): void {
     if (this.halted !== undefined) return;
     try {
-      const nativeFrame = record.body as { origin?: string; type?: string; native?: Record<string, unknown> };
-      if (record.kind === 'frame' && nativeFrame.origin === 'byok-native' && nativeFrame.type && nativeFrame.native) this.native?.notification(nativeFrame.type, nativeFrame.native);
       const body = recordOf(record.body);
       const rootRecord = typeof body?.byokRoot === 'boolean' ? body.byokRoot : record.sessionId === this.sessionRef;
       if (record.kind === 'frame' && rootRecord && body?.type === 'turn/completed' && body.origin !== 'byok-native' && Array.isArray(body.events)) {

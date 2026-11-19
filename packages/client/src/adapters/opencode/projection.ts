@@ -21,9 +21,7 @@ export class OpenCodeProjection {
     const body = object(record.body);
     if (!Array.isArray(body?.events)) return;
     const events = body.events;
-    this.children.link(events);
-    // OAR also routes a verified child extension update by session id on its own channel.
-    const path = this.children.path(record.sessionId, record.agentPath) ?? [record.sessionId];
+    const path = this.children.route(record.sessionId, record.agentPath, events, body?.byokRoot) ?? [record.sessionId];
     const root = path.length === 0;
     const attribution = root ? {} : { agentPath: [...path] };
     const update = object(object(body.native)?.update);

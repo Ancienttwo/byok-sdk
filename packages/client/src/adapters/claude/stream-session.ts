@@ -125,6 +125,7 @@ export class ClaudeStreamSession {
       disposing: () => this.#end(),
     }, {
       onRecord: record => this.#record(record, options.onFrame),
+      onSessionInit: id => this.#resolveRef(id),
       // After a halt no reply reaches Claude, whatever a bridge still decides.
       onAppRequest: (request, respond) => options.onAppRequest(request.native as ClaudeStreamMessage,
         reply => this.#fatal === undefined ? respond(reply) : Promise.reject(this.#fatal)),
@@ -247,7 +248,6 @@ export class ClaudeStreamSession {
     const root = agentPath.length === 0;
     if (frame.type === 'system' && frame.subtype === 'init' && root) {
       if (typeof frame.model === 'string') this.#initModel = frame.model;
-      if (typeof frame.session_id === 'string' && frame.session_id.length > 0) this.#resolveRef(frame.session_id);
     }
     if (frame.type === 'result' && root) {
       this.#results += 1;

@@ -634,6 +634,21 @@ it('emits dsh tool use when complete native arguments arrive', async () => {
   expect(events).toEqual([{ type: 'tool_use', tool: 'shell', toolCallId: 'c', input: { command: 'sleep 600' } }]);
 });
 
+it('settles dsh and agy turns using private root membership when the recorded IDs collide', async () => {
+  const { DshProjection } = await import('../adapters/dsh/projection');
+  const { AgyProjection } = await import('../adapters/antigravity/projection');
+  for (const projection of [new DshProjection('root-with-key'), new AgyProjection('root-with-key', new Map())]) {
+    const outcome = vi.fn();
+    const record = { kind: 'frame', seq: 1, sessionId: 'root-[redacted]', agentPath: [], body: {
+      byokRoot: true, events: [{ kind: 'turn_ended', outcome: { kind: 'completed' } }],
+    } };
+    projection.consume({ ...record, body: { ...record.body, byokRoot: false } }, () => {}, outcome);
+    expect(outcome).not.toHaveBeenCalled();
+    projection.consume(record, () => {}, outcome);
+    expect(outcome).toHaveBeenCalledExactlyOnceWith({ kind: 'completed' });
+  }
+});
+
 it.each(['aborted', 'failed', 'completed'])('drains pending ACP calls once with their latest input when a turn is %s', async kind => {
   const { OpenCodeProjection } = await import('../adapters/opencode/projection');
   const { GrokProjection } = await import('../adapters/grok/projection');

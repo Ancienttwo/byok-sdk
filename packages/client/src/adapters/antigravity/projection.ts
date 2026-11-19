@@ -51,8 +51,7 @@ export class AgyProjection {
     const body = record(input.body);
     if (!Array.isArray(body?.events)) return;
     const events = body.events;
-    this.children.link(events);
-    const path = this.children.path(input.sessionId, input.agentPath);
+    const path = this.children.route(input.sessionId, input.agentPath, events, body?.byokRoot);
     if (path === undefined) return;
     const root = path.length === 0;
     const buffer = root ? this.root : this.children.buffer(input.sessionId, path);

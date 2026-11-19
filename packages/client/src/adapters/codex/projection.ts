@@ -115,13 +115,8 @@ export class CodexProjection {
       if (typeof turnId === 'string') state.activeTurnId = turnId;
       return [];
     }
-    if (
-      isRoot &&
-      typeof params.turnId === 'string' &&
-      state.activeTurnId !== undefined &&
-      params.turnId !== state.activeTurnId
-    )
-      return [];
+    if (isRoot && (typeof body.byokStaleTurn === 'boolean' ? body.byokStaleTurn
+      : typeof params.turnId === 'string' && state.activeTurnId !== undefined && params.turnId !== state.activeTurnId)) return [];
     const attribution = input.agentPath.length > 0 ? { agentPath: [...input.agentPath] } : !isRoot ? { agentPath: [sessionId] } : {};
     if (method === 'item/agentMessage/delta') {
       if (!isRoot || typeof params.delta !== 'string') return [];

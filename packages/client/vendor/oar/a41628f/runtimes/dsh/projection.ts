@@ -81,7 +81,7 @@ export function dshTurnOutcome(reason: JsonRecord | null): TurnOutcome {
     case "blocked": return { kind: "failed", failure: "unknown", reason: "DSH reported the turn blocked" };
     // Closes a log whose process died mid-turn; the loop never says it live.
     case "interrupted": return { kind: "failed", failure: "runtime_exited", reason: "DSH closed a turn its earlier process never finished" };
-    default: return { kind: "failed", failure: "unknown", reason: `DSH ended the turn with ${JSON.stringify(reason?.kind ?? null)}` };
+    default: return { kind: "failed", failure: "unknown", reason: typeof reason?.kind === "string" ? `DSH ended the turn with ${reason.kind}` : "DSH ended the turn with an unknown reason" };
   }
 }
 
@@ -301,12 +301,12 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
   const redact = <R extends RawEvent>(value: R, jsonField?: (path: RedactionPath) => boolean): R =>
     redactRuntimeRecord(value, credentials.redactValue, jsonField, protocolString);
   if (record.kind !== "frame") return redact(record);
-  if (credentials.values().length !== 0 && record.body.type === "agent/assistant-stream") {
+  if (credentials.hasProtectedValues() && record.body.type === "agent/assistant-stream") {
     const native = withholdArgumentDelta(record.body.native);
     return redact({ ...record, body: { ...record.body, native,
       events: record.body.events.filter(event => event.kind !== "tool_call_input_delta") } });
   }
-  if (credentials.values().length !== 0 && record.body.type === "session/event:assistant/attempt") {
+  if (credentials.hasProtectedValues() && record.body.type === "session/event:assistant/attempt") {
     const native = asRecord(record.body.native);
     const data = asRecord(native?.data);
     if (Array.isArray(data?.stream)) {

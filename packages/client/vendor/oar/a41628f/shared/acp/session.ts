@@ -214,7 +214,12 @@ async function openAcpRuntimeSession(
       } finally { releaseStartup?.(); }
     })();
     // BYOK change: the record consumer observes from seq 0: it registers before the recorder binds.
-    const kernel = createSessionKernel(opened.sessionId, record => redactAcpRecord(record, credentials, profile.childNotification), options.retainedBytes);
+    const kernel = createSessionKernel(opened.sessionId, record => {
+      const safe = redactAcpRecord(record, credentials, profile.childNotification);
+      if (safe.kind !== "frame") return safe;
+      const body = { ...safe.body, byokRoot: record.sessionId === opened.sessionId && record.agentPath.length === 0 };
+      return { ...safe, body };
+    }, options.retainedBytes);
     if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);
     try {
       hooks.onReady?.(opened.sessionId);

@@ -53,6 +53,24 @@ describe('unconnected OAR Codex adapter', () => {
     await session.dispose(); expect(fake.child.kill).toHaveBeenCalledTimes(1);
   });
 
+  it('keeps wire identities for native interaction while withholding quoted credentials from record IDs', async () => {
+    const key = 'fixture-"quoted"';
+    const fake = fakeServer();
+    const native = vi.fn();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' },
+      { cwd: '/workspace', env: { OPENAI_API_KEY: key } }, 1000, { onNativeIdentity: native });
+    fake.frame({ method: 'turn/started', params: { threadId: 'thread-root', turn: { id: key } } });
+    fake.frame({ method: 'item/agentMessage/delta', params: { threadId: 'thread-root', turnId: '[redacted]', itemId: 'm', delta: 'stale' } });
+    fake.frame({ id: key, method: 'item/tool/requestUserInput', params: { turnId: key } });
+    expect(native).toHaveBeenCalledWith('turn/started', { threadId: 'thread-root', turn: { id: key } });
+    expect(session.records()).toContainEqual(expect.objectContaining({ kind: 'frame', body: expect.objectContaining({
+      origin: 'byok-native', type: 'item/agentMessage/delta', byokStaleTurn: true,
+    }) }));
+    expect(session.records()).toContainEqual(expect.objectContaining({ kind: 'request', direction: 'toApp', id: expect.stringMatching(/^native:redacted:/u) }));
+    expect(JSON.stringify(session.records())).not.toContain('quoted');
+    await session.dispose();
+  });
+
   it('passes launch arguments to the owned spawn without adding them to records', async () => {
     const fake = fakeServer();
     const launchArgs = ['-c', 'service_tier="fast"'];

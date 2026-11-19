@@ -115,7 +115,12 @@ async function open(spawnLineProcess: SpawnDshLineProcess, command: string, opti
   const sessionId = options.resume ?? randomUUID();
   const agentOptions = dshAgentOptions(options);
   // BYOK change: the record consumer observes from seq 0: it registers before any frame.
-  const kernel = createSessionKernel(sessionId, record => redactDshRecord(record, credentials), options.retainedBytes);
+  const kernel = createSessionKernel(sessionId, record => {
+    const safe = redactDshRecord(record, credentials);
+    if (safe.kind !== "frame") return safe;
+    const body = { ...safe.body, byokRoot: record.sessionId === sessionId && record.agentPath.length === 0 };
+    return { ...safe, body };
+  }, options.retainedBytes);
   if (hooks.onRecord !== undefined) { kernel.rawEvents(hooks.onRecord); }
   hooks.onReady?.(sessionId);
   let projection = initialDshProjection(sessionId);

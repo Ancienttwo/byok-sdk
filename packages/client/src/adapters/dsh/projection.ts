@@ -61,7 +61,7 @@ export class DshProjection {
 
   private readonly children: AcpChildTurns;
 
-  constructor(private readonly rootSessionId: string) {
+  constructor(rootSessionId: string) {
     this.children = new AcpChildTurns(rootSessionId);
   }
 
@@ -71,9 +71,8 @@ export class DshProjection {
     const body = record(input.body);
     const events = body?.events;
     if (!Array.isArray(events)) return;
-    this.children.link(events);
-    const path = this.children.path(input.sessionId, input.agentPath);
-    const root = input.sessionId === this.rootSessionId && input.agentPath.length === 0;
+    const path = this.children.route(input.sessionId, input.agentPath, events, body?.byokRoot);
+    const root = path?.length === 0;
     const attribution = path === undefined || root ? {} : { agentPath: [...path] };
     const identify = (id: string) => root ? id : JSON.stringify([input.sessionId, path, id]);
     if (path !== undefined && body?.type === 'session/event:assistant/message') {

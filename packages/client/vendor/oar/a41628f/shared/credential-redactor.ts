@@ -25,6 +25,7 @@ function urlCredentials(value: string | null | undefined): readonly string[] {
 export interface CredentialRedactor {
   /** Private connection redaction input. Never put these values in records or diagnostics. */
   values(this: void): readonly string[];
+  hasProtectedValues(this: void): boolean;
   add(this: void, value: string | undefined): void;
   /** BYOK change: A credential the caller resolved, including short or path-like values. */
   addExplicit(this: void, value: string): void;
@@ -69,6 +70,7 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
   };
   return {
     values: () => values,
+    hasProtectedValues: () => values.length !== 0 || images.size !== 0,
     add(value) {
       if (credentialValue(value)) { addKnown(value); }
     },

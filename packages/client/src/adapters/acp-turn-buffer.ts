@@ -124,9 +124,16 @@ export class AcpChildTurns {
   private readonly turns = new Map<string, AcpTurnBuffer>();
   private readonly tasks = new Map<string, readonly string[]>();
 
-  constructor(private readonly rootId: string) {}
+  constructor(private rootId: string) {}
 
-  path(sessionId: string, agentPath: readonly string[]): readonly string[] | undefined {
+  route(sessionId: string, agentPath: readonly string[], events: readonly unknown[], root: unknown): readonly string[] | undefined {
+    if (root === true) this.rootId = sessionId;
+    this.link(events);
+    if (root === false && agentPath.length === 0) return this.paths.get(sessionId);
+    return this.path(sessionId, agentPath);
+  }
+
+  private path(sessionId: string, agentPath: readonly string[]): readonly string[] | undefined {
     if (agentPath.length > 0) return agentPath;
     return sessionId === this.rootId ? [] : this.paths.get(sessionId);
   }
@@ -141,7 +148,7 @@ export class AcpChildTurns {
     return turn;
   }
 
-  link(events: readonly unknown[]): void {
+  private link(events: readonly unknown[]): void {
     for (const value of events) {
       const event = record(value);
       if (event?.kind !== 'session_linked' || typeof event.parent !== 'string' || typeof event.child !== 'string' || event.child === this.rootId) continue;

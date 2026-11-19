@@ -75,6 +75,8 @@ export async function codexSession(
     readonly onReady?: (threadId: string) => void;
     readonly turnProcessReader?: CodexProcessReader;
     readonly onRecord?: (record: RawEvent) => void;
+    /** Native interaction correlation uses opaque wire IDs. */
+    readonly onNativeIdentity?: (method: string, identity: JsonRecord) => void;
     // BYOK change: caller-owned, bounded native request lifecycle; no permissive fallback.
     readonly onServerRequest?: (id: string | number, method: string, params: JsonRecord, reply: {
       respond(value: JsonRecord): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
@@ -87,7 +89,7 @@ export async function codexSession(
   // BYOK change: Upstream withSessionCredentials without sealSession. One redactor per open keeps
   // opening failures, retained records and later control errors under the same credential rules.
   const credentials = sessionCredentialRedactor(options);
-  try { return await openCodexSession(spawnLineProcess, installation, options, serverRequestTimeoutMs, hooks, credentials.redactValue); }
+  try { return await openCodexSession(spawnLineProcess, installation, options, serverRequestTimeoutMs, hooks, credentials); }
   catch (error) { throw credentials.redactValue(error); }
 }
 
@@ -119,8 +121,9 @@ async function openCodexSession(
   options: CodexSessionArgs[2],
   serverRequestTimeoutMs: number,
   hooks: NonNullable<CodexSessionArgs[4]>,
-  redactValue: CredentialRedactor["redactValue"],
+  credentials: CredentialRedactor,
 ): Promise<CodexAdapterSession> {
+  const { redactValue } = credentials;
   if (installation.via !== "executable") {
     throw new Error("The codex session adapter needs an executable installation");
   }
@@ -226,18 +229,27 @@ async function openCodexSession(
   // Drive the pure projection fold, applying its commands to the kernel; the
   // fold owns event translation, attribution and graph links; this owns the
   // transport-only turn id and the control decisions (busy, spontaneous).
+  let lastNotifiedRootTurnId: string | undefined;
   const onNotification = (method: string, params: JsonRecord): void => {
     // BYOK change: Retain the exact native notification before any potentially throwing fold.
     // The record envelope's sessionId puts a foreign thread in the graph (observe/graph.ts); no out-of-band node.
     const notificationSession = typeof params.threadId === "string" ? params.threadId : threadId;
     const isRoot = notificationSession === threadId;
-    // BYOK change: label native frames and anchor root membership before redaction can change ids.
-    const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot } as const;
+    const wireTurn = asRecord(params.turn)?.id;
+    if (isRoot && method === "turn/started" && typeof wireTurn === "string") lastNotifiedRootTurnId = wireTurn;
+    const byokStaleTurn = isRoot && typeof params.turnId === "string" && lastNotifiedRootTurnId !== undefined && params.turnId !== lastNotifiedRootTurnId;
+    // BYOK change: label native frames and anchor root and turn membership before redaction can change ids.
+    const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot, byokStaleTurn } as const;
     kernel.frame(nativeBody, {
       sessionId: notificationSession,
       ...(typeof params.turnId === "string" ? { spanId: params.turnId } : {}),
     });
     try {
+    // Keep native interaction correlation private to the SDK's transport owner.
+    if (isRoot && (method === "turn/started" || method === "turn/completed" || method === "serverRequest/resolved")) {
+      hooks.onNativeIdentity?.(method, { threadId, ...(typeof wireTurn === "string" ? { turn: { id: wireTurn } } : {}),
+        ...(typeof params.requestId === "string" || typeof params.requestId === "number" ? { requestId: params.requestId } : {}) });
+    }
     tasks.observe(method, params);
     if (isRoot && method === "turn/started") {
       state.queuePausedAfterInterrupt = false;
@@ -285,7 +297,9 @@ async function openCodexSession(
   // BYOK change: Opted-in native requests use the caller-owned lifecycle; absent opt-in keeps bounded refusal.
   const onServerRequest = (id: number | string, method: string, params: JsonRecord): void => {
     // BYOK change: Record ids follow the kernel string contract; the wire reply echoes the original id.
-    const request = kernel.request("toApp", { kind: "native", type: method, native: params }, { id: `native:${typeof id}:${JSON.stringify(id)}` });
+    const publicId = typeof id === "string" && credentials.redact(id) !== id
+      ? `native:redacted:${randomUUID()}` : `native:${typeof id}:${JSON.stringify(id)}`;
+    const request = kernel.request("toApp", { kind: "native", type: method, native: params }, { id: publicId });
     // BYOK change: This injected owner uses NativeInteractionController for deadlines and at-most-once answers.
     if (hooks.onServerRequest !== undefined) {
       let claimed = false;

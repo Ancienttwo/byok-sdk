@@ -90,6 +90,20 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
+  it('uses the original startup identity when it contains a BYOK credential', async () => {
+    const key = 'fixture-claude-resume-key';
+    const sessionRef = `fixture-${key}`;
+    const resources = await makeCtx({ ...process.env, ANTHROPIC_API_KEY: key, FAKE_CLAUDE_SESSION_ID: sessionRef });
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), { ...baseTask, sessionRef }, resources);
+      openSessions.push(session);
+      expect(session.sessionRef).toBe(sessionRef);
+      expect(await takeEvents(session, 5)).toContainEqual({ type: 'turn_end' });
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it('detect() reports present + version + authPresent from the fake binary', async () => {
     const adapter = fakeClaudeAdapter();
     const result = await adapter.detect();

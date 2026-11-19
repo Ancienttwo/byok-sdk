@@ -36,6 +36,7 @@ export declare const resumedClaudeProjection: ClaudeProjectionState;
 /** One per open: the session's explicit credentials, redacted from records and errors. */
 export interface ClaudeCredentialRedactor {
   values(this: void): readonly string[];
+  hasProtectedValues(this: void): boolean;
   add(this: void, value: string | undefined): void;
   addExplicit(this: void, value: string): void;
   addImage(this: void, data: string): void;
@@ -63,6 +64,7 @@ export interface ClaudeSessionProfile {
 export interface ClaudeSessionHooks {
   /** Registered before any record is appended. */
   onRecord?: (record: ClaudeRecord) => void;
+  onSessionInit?: (sessionId: string) => void;
   /** Every runtime request, whatever its type; one the hook never answers stays unanswered. */
   onAppRequest?: (request: { readonly id: string; readonly type: string; readonly native: Record<string, unknown> }, respond: (reply: Record<string, unknown>) => Promise<void>) => void;
   /** Runs before the native interrupt is written; a throw rejects the abort and writes nothing. */

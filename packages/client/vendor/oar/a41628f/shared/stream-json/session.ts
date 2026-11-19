@@ -31,6 +31,8 @@ const INTERRUPT_WRITE_TIMEOUT_MS = 10_000;
 /** BYOK change: caller hooks. The record consumer sees every record; the caller alone answers a runtime request. */
 export interface StreamJsonSessionHooks {
   readonly onRecord?: (record: RawEvent) => void;
+  /** The SDK resumes with the runtime's original root session identity. */
+  readonly onSessionInit?: (sessionId: string) => void;
   /** Every `toApp` request, whatever its type. `respond` writes the native reply and records it; a request never answered stays unanswered. */
   readonly onAppRequest?: (request: { readonly id: string; readonly type: string; readonly native: JsonRecord }, respond: (reply: JsonRecord) => Promise<void>) => void;
   /** Runs before the native interrupt is written; a throw rejects the abort with code `error` and writes no interrupt. */
@@ -47,7 +49,7 @@ const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
 /** Encoded fragments can span frames. The complete assistant tool block carries the usable input. */
 export function redactStreamJsonRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
   let safe = record;
-  if (credentials.values().length !== 0 && record.kind === "frame" && record.body.type === "stream_event") {
+  if (credentials.hasProtectedValues() && record.kind === "frame" && record.body.type === "stream_event") {
     const native = asRecord(record.body.native);
     const event = asRecord(native?.event);
     const delta = asRecord(event?.delta);
@@ -199,6 +201,10 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
           if (command.agentPath.length === 0 && cancelled?.kind === "input_dropped" && cancelled.inputId !== undefined) {
             writtenQueues.delete(cancelled.inputId);
             if (state.active !== null && cancelled.inputId === (state.active.body.kind === "compact" ? state.active.id : ("inputId" in state.active.body ? state.active.body.inputId : undefined))) { state.active = null; }
+          }
+          if (command.agentPath.length === 0 && message.type === "system" && message.subtype === "init"
+            && typeof message.session_id === "string" && message.session_id.length > 0) {
+            hooks.onSessionInit?.(message.session_id);
           }
           const record = kernel.frame(correlated ? { ...command.body, responseTo: nativeResponse } : command.body, { agentPath: command.agentPath, receivedAt });
           if (record.agentPath.length > 0) { break; }
