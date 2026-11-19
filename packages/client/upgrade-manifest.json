@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "6e36133a3271768e039ee307cc0c23f68757e4a6affd9380c4569fa06df7d39e"
+    "snapshotSha256": "14740161157fe1075f44f6297cd60ca808859c1a8df300853adad8ea8558feeb"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,18 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "dream-instruction-input-types",
+      "impact": "additive",
+      "summary": "Import DreamBudget, DreamInstructionInput and DreamWindow from @byok-sdk/protocol when typing inputs to buildDreamInstruction.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/protocol#DreamBudget",
+        "export:@byok-sdk/protocol#DreamInstructionInput",
+        "export:@byok-sdk/protocol#DreamWindow",
+        "export:@byok-sdk/protocol#buildDreamInstruction"
+      ]
+    },
     {
       "id": "k4-memory-reader-dispatch",
       "impact": "breaking",
@@ -281,6 +293,26 @@
       "item": "export:@byok-sdk/keys#removeRetiredProviderCredentials",
       "change": "added",
       "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamBudget",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamInstructionInput",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamWindow",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#buildDreamInstruction",
+      "change": "changed",
+      "entry": "dream-instruction-input-types"
     },
     {
       "item": "store:keys-profile-store",
