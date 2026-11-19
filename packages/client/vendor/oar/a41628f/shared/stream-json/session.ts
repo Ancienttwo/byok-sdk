@@ -45,6 +45,7 @@ const streamJsonEventTypes = new Set(["message_start", "message_stop", "content_
 const streamJsonDeltaTypes = new Set(["text_delta", "thinking_delta", "input_json_delta"]);
 const streamJsonResultTypes = new Set(["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]);
 const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
+const streamJsonContextFields = new Set(["tokens", "contextWindow", "percent"]);
 const streamJsonAssistantEnvelope = new Set(["type", "message", "session_id", "parent_tool_use_id", "uuid", "error", "isReplay", "tool_use_result"]);
 const streamJsonToolResultFields = new Set(["type", "tool_use_id", "is_error", "content"]);
 const streamJsonUsageFields = new Set(["input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens", "server_tool_use", "cache_creation"]);
@@ -154,6 +155,8 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
       && group === "content" && typeof block === "number" && member === "type" && streamJsonContentTypes.has(value);
   }, (path, key) => {
     const [body, nativeKey, section, entry, index] = path;
+    if (body === "body" && nativeKey === "events" && typeof section === "number" && entry === "usage" && index === "context"
+      && path.length === 5 && record.kind === "frame" && record.body.events[section]?.kind === "usage") return streamJsonContextFields.has(key);
     if (body !== "body" || nativeKey !== "native") return false;
     if (native?.type === "assistant" || native?.type === "user") {
       if (path.length === 2 && streamJsonAssistantEnvelope.has(key)) return true;

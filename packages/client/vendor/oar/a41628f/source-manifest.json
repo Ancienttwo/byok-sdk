@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.121.0",
-    "commit": "668ce9805cb6e24d043464a7cafdb4a23fd203d2"
+    "commit": "9733288a45348ffe01402e1b504c74ac728c3919"
   },
   "release": {
     "ecosystem": "npm",
@@ -974,7 +974,7 @@
       "path": "shared/credential-redactor.ts",
       "sourcePath": "packages/oar/src/shared/credential-redactor.ts",
       "upstreamSha256": "e7358de620f170bcd2b4ec1e46d98a6fe58a1e6d52dfe5dc535c090a713af6be",
-      "vendoredSha256": "8aef67ff8c09afb640856c8c9b0d459829afab3950cff2179256b0f38efbbe9a",
+      "vendoredSha256": "e69706617e017a5e3962b3e522aca73b86ae28d4377f056b47275350a00c3a71",
       "delta": "Register caller-resolved provider credentials and apply one content redactor to retained records, errors and protocol-declared encoded fields (#2380, #2408)."
     },
     {
@@ -1223,7 +1223,7 @@
       "path": "shared/stream-json/session.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/session.ts",
       "upstreamSha256": "4e2ec5c6d575ffaa1c976a1580b9cfbdf9058e2c0f51da29abd689ea148fbc7b",
-      "vendoredSha256": "9eb4da0839b86502e8aa2aa5019276e3a3f81ed6c7f97f931a3bff8cf9da2ad8",
+      "vendoredSha256": "745873bc9a3823e11d6a21a26bae080fba1de82fa84a5ca26083e86b9bc1f03e",
       "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it; profile.permissionResponse is not read, and a request no hook answers stays unanswered. An optional retainedBytes goes to the upstream kernel's record retention, which elides the oldest native payloads past it after every observer has the complete record. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing. A refused or unwritten interrupt withdraws its abort mark and kill fallback: the interrupt goes through the acknowledged write, a write that throws or rejects rejects the abort with code error, a write not acknowledged within 10 s counts as written, the fallback is armed once the write is acknowledged or that bound passes unless Claude refused the interrupt, once the fallback fires the queue does not drain and the held result waits for the exit, and a root result arriving while an interrupt is pending is held, with later lines except control responses, until every pending interrupt settles. Redact echoed image data before recording native output."
     },
     {

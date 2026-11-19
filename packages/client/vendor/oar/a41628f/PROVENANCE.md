@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `668ce9805cb6e24d043464a7cafdb4a23fd203d2` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. Each commit holds one entry of "Maintained deltas": its first line states the invariant and its last line is the entry's `Upstream:` route. Current pin: branch `byok/0.121.0`, commit `9733288a45348ffe01402e1b504c74ac728c3919` (the manifest's `fork`).
 
 For #2380, `cff0aa94` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
@@ -179,6 +179,8 @@ All 44 branch deltas from `byok/0.120.0` through `7eb600dc99581a4633c4a0a22a5167
 `ff77a94e` narrows Codex structural keys to the owning notifications and preserves the Claude context-window and tool-result identification fields at their typed paths.
 
 `668ce980` protects typed Claude message envelopes and projected context counts. Codex applies item fields by native item variant.
+
+`9733288a` keeps the Claude projected context exception on the stream-JSON runtime boundary.
 
 The decoded-value credential boundary supersedes `82ccb2f2`, `73743394`, `bd8fa0c7`, `7c194335` and `e9e50220`. It preserves JSON literals and unchanged encoded arguments, withholds credential-bearing maps and derives dsh tool input from sanitized native arguments.
 
