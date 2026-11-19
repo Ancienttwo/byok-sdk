@@ -127,7 +127,7 @@ async function open(spawnLineProcess: SpawnDshLineProcess, command: string, opti
   const child: DshLineProcess = await launchDsh(spawnLineProcess, command, options.launch, mcpRows);
   const fallback = createAbortFallback(() => { child.kill(); });
   const control = dshControl(child, (message) => {
-    const { state, frame } = foldDsh(projection, message);
+    const { state, frame } = foldDsh(projection, message, credentials);
     projection = state;
     if (frame.sessionId === undefined && options.model !== undefined && hooks.onRouteMismatch !== undefined
       && frame.body.events.some(event => event.kind === "model" && event.model !== options.model)) {

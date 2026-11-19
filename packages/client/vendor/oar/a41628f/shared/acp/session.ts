@@ -63,9 +63,12 @@ export function redactAcpRecord<T extends RawEvent>(
   if (record.kind !== "frame" || safe.kind !== "frame") return safe;
   const fragment = update?.sessionUpdate;
   const retainedNative = asRecord(safe.body.native);
-  if (method.startsWith("session/") && update === null && safe.body.native !== record.body.native) {
-    const model = acpReportedModel(retainedNative);
-    const effort = acpReportedEffort(retainedNative);
+  if ((fragment === "config_option_update" || (method.startsWith("session/") && update === null))
+    && safe.body.native !== record.body.native) {
+    const config = fragment !== "config_option_update" ? retainedNative : directUpdate ? asRecord(retainedNative?.update)
+      : retainedNative === null ? null : childNotification?.(method.replace(/\/after_answer$/u, ""), retainedNative)?.update ?? null;
+    const model = acpReportedModel(config);
+    const effort = acpReportedEffort(config);
     const events = safe.body.events.flatMap<RuntimeEventBody>(event => {
       if (event.kind === "model") return model === null ? [] : [{ ...event, model }];
       if (event.kind === "effort") return effort === null ? [] : [{ ...event, effort }];

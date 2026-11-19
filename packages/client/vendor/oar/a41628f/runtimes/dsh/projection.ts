@@ -155,7 +155,7 @@ function toolEnd(message: JsonRecord): readonly RuntimeEventBody[] {
     ...(typeof message.isError === "boolean" ? { result: message.isError ? "failed" : "ok" } : {}) }];
 }
 
-function sessionEvent(state: DshProjection, sessionId: string, session: DshSessionFold, event: JsonRecord, cause: unknown): { readonly session: DshSessionFold; readonly links: readonly string[]; readonly events: readonly RuntimeEventBody[] } {
+function sessionEvent(state: DshProjection, sessionId: string, session: DshSessionFold, event: JsonRecord, cause: unknown, retainedData: JsonRecord | null): { readonly session: DshSessionFold; readonly links: readonly string[]; readonly events: readonly RuntimeEventBody[] } {
   const data = asRecord(event.data) ?? {};
   const unchanged = { session, links: state.links };
   switch (event.type) {
@@ -182,11 +182,11 @@ function sessionEvent(state: DshProjection, sessionId: string, session: DshSessi
     case "tool/result":
       return { ...unchanged, events: toolEnd(asRecord(data.message) ?? {}) };
     case "assistant/message":
-      return { ...spent(session, asRecord(data.usage), true), links: state.links };
+      return { ...spent(session, asRecord(retainedData?.usage), true), links: state.links };
     case "assistant/attempt":
-      return { ...spent(session, attemptUsage(data.stream), false), links: state.links };
+      return { ...spent(session, attemptUsage(retainedData?.stream), false), links: state.links };
     case "request/context":
-      return { session: { ...session, contextWindow: asNumber(data.contextWindow) ?? session.contextWindow }, links: state.links, events: [] };
+      return { session: { ...session, contextWindow: asNumber(retainedData?.contextWindow) ?? session.contextWindow }, links: state.links, events: [] };
     case "request/header": {
       const config = asRecord(asRecord(data.header)?.config);
       return { ...unchanged, events: [
@@ -249,7 +249,7 @@ function payloadOf(message: JsonRecord): unknown {
 }
 
 /** Fold one line of the bridge into its frame. Pure: replay of the same lines gives the same records. */
-export function foldDsh(state: DshProjection, message: JsonRecord): DshFolded {
+export function foldDsh(state: DshProjection, message: JsonRecord, credentials?: CredentialRedactor): DshFolded {
   if (message.type !== "native") {
     return { state, frame: { body: { type: `dsh/${String(message.type)}`, native: message, events: [] } } };
   }
@@ -260,7 +260,9 @@ export function foldDsh(state: DshProjection, message: JsonRecord): DshFolded {
   const native = payloadOf(message);
   if (message.channel === "session/event") {
     const event = asRecord(native) ?? {};
-    const next = sessionEvent(state, sessionId, session, event, message.cause);
+    const needsReading = event.type === "assistant/message" || event.type === "assistant/attempt" || event.type === "request/context";
+    const source = needsReading ? asRecord(credentials?.redactValue(event) ?? event) : event;
+    const next = sessionEvent(state, sessionId, session, event, message.cause, asRecord(source?.data));
     return {
       state: { ...state, links: next.links, sessions: { ...state.sessions, [sessionId]: next.session } },
       frame: { ...at, body: { type: `session/event:${String(event.type)}`, native, events: next.events } },
@@ -361,10 +363,21 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
         native: { ...native, data: { ...data, stream: data.stream.map(withholdStreamFragment) } } } });
     }
   }
+  if (record.body.type === "session/event:goal/change" || record.body.type === "goal/read") {
+    const safe = redact(record);
+    if (safe.kind !== "frame") return safe;
+    const native = asRecord(safe.body.native);
+    const fields = record.body.type === "goal/read" ? native : asRecord(native?.data);
+    if (fields !== null && (fields.goal === null || asRecord(fields.goal) !== null || asRecord(fields.cleared) !== null)) return safe;
+    return { ...safe, body: { ...safe.body, events: safe.body.events.filter(event => event.kind !== "goal_changed") } };
+  }
   if (record.body.type === "session/event:assistant/message") {
-    const safe = redactAssistantText(record, credentials);
-    assembledText = safe !== record;
-    return redact(safe, path => isAssistantToolArguments(path, record.body.native));
+    const assembled = redactAssistantText(record, credentials);
+    assembledText = assembled !== record;
+    const safe = redact(assembled, path => isAssistantToolArguments(path, record.body.native));
+    const sourceUsage = asRecord(asRecord(record.body.native)?.data)?.usage;
+    if (safe.kind !== "frame" || asRecord(sourceUsage) === null || asRecord(asRecord(asRecord(safe.body.native)?.data)?.usage) !== null) return safe;
+    return { ...safe, body: { ...safe.body, events: safe.body.events.filter(event => event.kind !== "usage") } };
   }
   if (record.body.type === "session/event:turn/end") {
     const safe = redact(record);

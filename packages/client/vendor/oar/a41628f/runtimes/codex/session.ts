@@ -204,7 +204,9 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
         const { forkAnchor: _withheld, ...ended } = event;
         return ended;
       });
-      return { ...safe, body: { ...safe.body, events } };
+      const retained = { ...safe, body: { ...safe.body, events } };
+      Reflect.deleteProperty(retained, "spanId");
+      return retained;
     }
     const snapshot = redactCodexSnapshot(originalNative, native, redact);
     if (snapshot !== native) return { ...safe, body: { ...safe.body, native: snapshot } };

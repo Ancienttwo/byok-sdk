@@ -28,7 +28,10 @@ export function createAcpTokenUsage(profile: AcpSessionProfile, sentByOar: (prom
       // Opening can replay old terminal reports. Remember their identity so
       // a later repeated delivery cannot turn history into a fresh charge.
       if (!opened || report.replayed === true) { return null; }
-      const reading = acpPromptUsage(null, report.tokens, billed);
+      const safe = redact === undefined ? params : asRecord(redact(params));
+      const retained = safe === null ? null : safe === params ? report : profile.spontaneousTokenUsage?.(method, safe, () => false);
+      if (retained == null) return null;
+      const reading = acpPromptUsage(null, retained.tokens, billed);
       ({ billed } = reading);
       return reading.event;
     },
