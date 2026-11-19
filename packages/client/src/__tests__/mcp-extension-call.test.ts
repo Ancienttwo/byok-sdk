@@ -161,14 +161,17 @@ describe('Pi MCP extension — the call path', () => {
     const { tools, recordTo, shutdown } = await loadExtension(observation);
     const echo = tools.find((tool) => tool.name === 'mcp__salesko__echo')!;
     const leads = tools.find((tool) => tool.name === 'mcp__salesko__find_leads')!;
-    await echo.execute('call-1', { text: 'one' }, undefined);
-    await leads.execute('call-2', { query: 'two' }, undefined);
+    await Promise.all([
+      echo.execute('call-1', { text: 'one' }, undefined),
+      leads.execute('call-2', { query: 'two' }, undefined),
+    ]);
+    await echo.execute('call-3', { text: 'three' }, undefined);
 
     const seen = await records(recordTo);
-    // One child, one handshake: two tools on one server share a connection.
+    // Concurrent first calls and a warm call share one child and handshake.
     expect(seen.filter((entry) => entry.event === 'start')).toHaveLength(1);
     expect(seen.filter((entry) => entry.method === 'initialize')).toHaveLength(1);
-    expect(seen.filter((entry) => entry.method === 'tools/call')).toHaveLength(2);
+    expect(seen.filter((entry) => entry.method === 'tools/call')).toHaveLength(3);
     shutdown();
     await expect.poll(() => alive(seen[0]!.pid as number), { timeout: 10_000 }).toBe(false);
   }, 30_000);

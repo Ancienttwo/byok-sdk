@@ -94,6 +94,7 @@ import {
   MCP_SERVER_MAX_PENDING_BYTES,
   MCP_SERVER_MAX_PENDING_FRAMES,
 } from './framing.js';
+import { encodeToolResultFrame } from './call-frame.js';
 import { MCP_MAX_FRAME_BYTES } from '../mcp/frame-limit.js';
 import { classifyJsonRpcMessage, isUsableRequestId, SeenRequestIds, type McpServerRequestId } from './dispatch.js';
 
@@ -287,11 +288,15 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
 
   const writer = createBoundedFrameWriter({ output, maxFrameBytes: maxOutboundFrameBytes });
 
-  function send(message: Record<string, unknown>, requestId?: McpServerRequestId): void {
+  function sendFrame(frame: string, requestId?: McpServerRequestId): void {
     if (closed) return;
-    const oversize = writer.write(`${JSON.stringify(message)}\n`);
+    const oversize = writer.write(frame);
     if (oversize === 'pending-limit') closeOutboundBufferLimit();
     else if (oversize !== undefined) closeOutboundLimit(oversize, requestId);
+  }
+
+  function send(message: Record<string, unknown>, requestId?: McpServerRequestId): void {
+    if (!closed) sendFrame(`${JSON.stringify(message)}\n`, requestId);
   }
 
   /**
@@ -458,7 +463,7 @@ export function serveMcpOverStdio(options: McpServerOptions): McpServerHandle {
         const result = await options.callTool({ name, arguments: callArguments, signal: controller.signal, progress });
         if (!stillOurs()) return;
         activeCalls.delete(key);
-        send({ jsonrpc: '2.0', id, result }, id);
+        sendFrame(encodeToolResultFrame(id, result, maxOutboundFrameBytes), id);
       } catch (error) {
         if (!stillOurs()) return;
         activeCalls.delete(key);

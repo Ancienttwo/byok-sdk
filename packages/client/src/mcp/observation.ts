@@ -145,6 +145,36 @@ function validateTool(label: string, entry: unknown): McpToolDescriptor {
   });
 }
 
+export function describeMcpServer(
+  serverName: string,
+  client: McpStdioClient,
+  tools: readonly unknown[],
+  label: string,
+): McpServerObservation {
+  const descriptors = parseMcpToolDescriptors(label, tools);
+  return Object.freeze({
+    serverName,
+    serverInfo: client.serverInfo(),
+    protocolVersion: client.protocolVersion(),
+    tools: descriptors,
+  });
+}
+
+/** Validate and order an entire tools/list response or a persisted snapshot. */
+export function parseMcpToolDescriptors(label: string, tools: readonly unknown[]): readonly McpToolDescriptor[] {
+  const descriptors = tools.map((tool) => validateTool(label, tool));
+  const names = new Set<string>();
+  for (const tool of descriptors) {
+    if (names.has(tool.name)) {
+      throw new McpAuthorityError(
+        `${label} tools/list reported tool name ${JSON.stringify(tool.name)} more than once`,
+      );
+    }
+    names.add(tool.name);
+  }
+  return Object.freeze(descriptors.sort((left, right) => compareCodeUnits(left.name, right.name)));
+}
+
 /**
  * Start the exact configured stdio server, complete `initialize` +
  * `tools/list`, and return everything it said about itself.
@@ -158,6 +188,7 @@ export async function observeMcpServer(
   serverName: string,
   server: McpStdioServerSpec,
   options: ObserveMcpServerOptions,
+  absoluteDeadline?: number,
 ): Promise<McpServerObservation> {
   const label = options.label ?? `MCP server "${serverName}"`;
   const timeoutMs = options.timeoutMs ?? MCP_DEFAULT_REQUEST_TIMEOUT_MS;
@@ -169,7 +200,7 @@ export async function observeMcpServer(
     label,
     maxStdoutBytes: MCP_OBSERVATION_MAX_STDOUT_BYTES,
   });
-  const deadline = performance.now() + timeoutMs;
+  const deadline = absoluteDeadline ?? performance.now() + timeoutMs;
   const controller = new AbortController();
   const signal = options.signal === undefined
     ? controller.signal
@@ -181,29 +212,14 @@ export async function observeMcpServer(
     if (performance.now() >= deadline) expire();
     signal.throwIfAborted();
   };
-  const timer = setTimeout(expire, timeoutMs);
+  const timer = setTimeout(expire, absoluteDeadline === undefined ? timeoutMs : Math.max(0, deadline - performance.now()));
   try {
     checkDeadline();
     await client.connect(signal, deadline);
     checkDeadline();
     const tools = await client.listTools(signal);
     checkDeadline();
-    const descriptors = tools.map((tool) => validateTool(label, tool));
-    const names = new Set<string>();
-    for (const tool of descriptors) {
-      if (names.has(tool.name)) {
-        throw new McpAuthorityError(
-          `${label} tools/list reported tool name ${JSON.stringify(tool.name)} more than once`,
-        );
-      }
-      names.add(tool.name);
-    }
-    const observation = Object.freeze({
-      serverName,
-      serverInfo: client.serverInfo(),
-      protocolVersion: client.protocolVersion(),
-      tools: Object.freeze([...descriptors].sort((left, right) => compareCodeUnits(left.name, right.name))),
-    });
+    const observation = describeMcpServer(serverName, client, tools, label);
     checkDeadline();
     return observation;
   } finally {
