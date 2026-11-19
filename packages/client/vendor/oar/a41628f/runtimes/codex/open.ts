@@ -261,12 +261,15 @@ export const CODEX_SETTINGS_REPORT_MS = 10_000;
 export function codexResumeEffortRefusal(
   requested: string,
   settings: JsonRecord | null,
+  settingsVisible = true,
 ): Error | null {
   if (settings === null) {
     return new Error(`codex reported no thread/settings/updated within ${String(CODEX_SETTINGS_REPORT_MS)} ms, so effort ${requested} cannot be confirmed`);
   }
   const effort = effortIn(asRecord(settings.threadSettings));
-  return effort === requested ? null : new UnsupportedOptionError("effort", `codex thread/settings/update left effort ${effort ?? "none (the model's default)"} although ${requested} was requested`);
+  if (effort === requested) return null;
+  const detail = settingsVisible ? `left effort ${effort ?? "none (the model's default)"} although ${requested} was requested` : `did not confirm requested effort ${requested}`;
+  return new UnsupportedOptionError("effort", `codex thread/settings/update ${detail}`);
 }
 
 /** Null explicitly means no tier; an absent field is no evidence. */

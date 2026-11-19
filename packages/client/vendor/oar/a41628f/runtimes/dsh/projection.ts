@@ -333,9 +333,10 @@ function redactAssistantText<T extends RawEvent>(record: T, credentials: Credent
   return { ...record, body: { ...record.body, native: { ...native, data: { ...data, message: { ...message, content } } } } };
 }
 
-function withholdStreamFragment(frame: unknown): unknown {
+function withholdStreamFragment(frame: unknown, credentials: CredentialRedactor): unknown {
   const native = asRecord(frame);
   const chunk = asRecord(native?.chunk);
+  if (chunk !== null && Object.getOwnPropertyNames(chunk).some(credentials.matches)) return frame;
   if (chunk?.type === "tool-call-delta") {
     const { argumentsDelta: _omitted, ...safeChunk } = chunk;
     return { ...native, chunk: safeChunk };
@@ -381,7 +382,7 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     return redact({ ...record, body: { ...record.body, events: [] } });
   }
   if (credentials.hasProtectedValues() && record.body.type === "agent/assistant-stream") {
-    const native = withholdStreamFragment(record.body.native);
+    const native = withholdStreamFragment(record.body.native, credentials);
     return redact({ ...record, body: { ...record.body, native,
       events: record.body.events.filter(event => event.kind !== "tool_call_input_delta" && event.kind !== "text_delta" && event.kind !== "reasoning") } });
   }
@@ -390,7 +391,7 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     const data = asRecord(native?.data);
     if (Array.isArray(data?.stream)) {
       return redact({ ...record, body: { ...record.body,
-        native: { ...native, data: { ...data, stream: data.stream.map(withholdStreamFragment) } } } });
+        native: { ...native, data: { ...data, stream: data.stream.map(frame => withholdStreamFragment(frame, credentials)) } } } });
     }
   }
   if (record.body.type === "session/event:goal/change" || record.body.type === "goal/read") {

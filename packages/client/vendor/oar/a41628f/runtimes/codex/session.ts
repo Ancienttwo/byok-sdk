@@ -116,8 +116,8 @@ const codexNotificationFields: Readonly<Record<string, readonly string[]>> = {
   "turn/started": ["turn"], "turn/completed": ["turn"], "item/started": ["item"], "item/completed": ["item"],
   "item/agentMessage/delta": ["itemId", "delta"], "thread/tokenUsage/updated": ["tokenUsage"], "rawResponseItem/completed": ["item"], error: ["error", "willRetry"],
 };
-const isCodexNotificationKey = (method: string, key: string): boolean => key === "threadId" || key === "turnId"
-  || codexNotificationFields[method]?.includes(key) === true;
+const isCodexNotificationKey = (method: string, key: string): boolean => codexObservedMethods.has(method)
+  && (key === "threadId" || key === "turnId" || codexNotificationFields[method]?.includes(key) === true);
 const isCodexItemKey = (fields: readonly string[] | undefined, key: string): boolean => fields !== undefined
   && (key === "id" || key === "type" || fields.includes(key));
 
@@ -161,7 +161,7 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   const itemFields = rawFunction ? ["arguments", "call_id", "name"] : rawReasoning ? ["summary", "content", "encrypted_content"]
     : rawMessage ? ["role", "content", "status", "phase"] : typeof itemType === "string" ? codexItemFields.get(itemType) : undefined;
   const encoded = itemType === "mcpToolCall" || itemType === "fileChange" || itemType === "collabAgentToolCall" || itemType === "sleep";
-  const projected = redactRuntimeRecord(record, redact, path => (encoded && isProjectedToolInput(record, path))
+  const safe = redactRuntimeRecord(record, redact, path => (encoded && isProjectedToolInput(record, path))
     || (rawFunction && path.length === 4 && path[0] === "body" && path[1] === "native" && path[2] === "item" && path[3] === "arguments"), (path, value) => {
     const [body, group, member, field] = path;
     if (body !== "body" || record.kind !== "frame") return false;
@@ -185,18 +185,19 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
         && ((path.length === 3 && codexUsageFields.has(key))
           || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));
   });
-  if (record.kind === "response" && projected.kind === "response" && (record.body.kind === "accepted" || record.body.kind === "rejected")
-    && (projected.body.kind === "accepted" || projected.body.kind === "rejected")) {
-    const native = asRecord(projected.body.native);
+  if (record.kind === "response" && safe.kind === "response" && (record.body.kind === "accepted" || record.body.kind === "rejected")
+    && (safe.body.kind === "accepted" || safe.body.kind === "rejected")) {
+    const native = asRecord(safe.body.native);
     const snapshot = redactCodexSnapshot(asRecord(record.body.native), native, redact);
-    return snapshot === native ? projected : { ...projected, body: { ...projected.body, native: snapshot } };
+    return snapshot === native ? safe : { ...safe, body: { ...safe.body, native: snapshot } };
   }
-  if (projected.kind !== "frame") return projected;
-  const native = asRecord(projected.body.native);
-  const hideSpan = originalNative !== null && native === null && projected.spanId !== undefined;
-  const safe = hideSpan ? { ...projected } : projected;
-  if (hideSpan) Reflect.deleteProperty(safe, "spanId");
   if (safe.kind !== "frame") return safe;
+  const native = asRecord(safe.body.native);
+  if (originalNative !== null && native === null) {
+    const retained = { ...safe, body: { ...safe.body, events: [] } };
+    Reflect.deleteProperty(retained, "spanId");
+    return retained;
+  }
   const safeItem = asRecord(native?.item);
   const isOpenReply = method === "thread/start" || method === "thread/resume" || method === "thread/fork";
   if (isOpenReply || method === "turn/completed" || method === "turn/started" || method === "thread/started") {
@@ -392,7 +393,8 @@ async function openCodexSession(
   const abortFallback = createAbortFallback(() => { client.kill(); });
   const turnProcesses = codexTurnProcesses(kernel, options.endTurnProcessesOnAbort === true ? hooks.turnProcessReader : undefined);
   // A resume's effort update in flight: codex's thread/settings/updated answers it.
-  let settingsWaiter: ((params: JsonRecord) => void) | null = null;
+  type SettingsReadback = { readonly params: JsonRecord; readonly visible: boolean };
+  let settingsWaiter: ((readback: SettingsReadback) => void) | null = null;
 
   recordOpen = (): void => {
     kernel.frame({ type: openMethod, native: started, events: readback.events });
@@ -430,8 +432,7 @@ async function openCodexSession(
       if (threadTails?.size === 0) draftTails.delete(notificationSession);
     }
     const itemMethod = method === "item/started" || method === "item/completed";
-    const withheld = (draftMethod || itemMethod)
-      && Object.getOwnPropertyNames(params).some(key => !isCodexNotificationKey(method, key) && credentials.matches(key));
+    const withheld = Object.getOwnPropertyNames(params).some(key => !isCodexNotificationKey(method, key) && credentials.matches(key));
     const item = itemMethod ? asRecord(params.item) : null;
     const itemFields = typeof item?.type === "string" ? codexItemFields.get(item.type) : undefined;
     const withheldItem = item !== null && (withheld || Object.getOwnPropertyNames(item)
@@ -445,11 +446,11 @@ async function openCodexSession(
       }
       pruneTail(item.id);
     }
-    if (credentials.hasProtectedValues() && typeof params.delta === "string" && (streamedOutput || (draftMethod && (byokStaleTurn || withheld)))) {
-      if (withheld) pruneTail(itemId);
+    if (withheld && draftMethod) pruneTail(itemId);
+    if (!withheld && credentials.hasProtectedValues() && typeof params.delta === "string" && (streamedOutput || (draftMethod && byokStaleTurn))) {
       const { delta: _omitted, ...rest } = params;
       params = rest;
-    } else if (draftMethod && typeof params.delta === "string" && credentials.hasProtectedValues()) {
+    } else if (!withheld && draftMethod && typeof params.delta === "string" && credentials.hasProtectedValues()) {
       const { ready, pending } = credentials.redactChunk((turnTails?.get(itemId) ?? "") + params.delta);
       if (pending === "") pruneTail(itemId);
       else {
@@ -463,7 +464,7 @@ async function openCodexSession(
     const terminalStatus = byokTurnStatus === "completed" || byokTurnStatus === "interrupted" || byokTurnStatus === "failed"
       ? { byokTurnStatus } : {};
     const nativeBody = { type: method, native: params, events: [], origin: "byok-native", byokRoot: isRoot, byokStaleTurn, ...terminalStatus } as const;
-    const nativeRecord = kernel.frame(nativeBody, {
+    const nativeRecord = kernel.frame(nativeBody, withheld ? undefined : {
       sessionId: notificationSession,
       ...(typeof params.turnId === "string" ? { spanId: params.turnId } : {}),
     });
@@ -474,7 +475,7 @@ async function openCodexSession(
       hooks.onNativeIdentity?.(method, { threadId, ...(typeof wireTurn === "string" ? { turn: { id: wireTurn } } : {}),
         ...(typeof params.requestId === "string" || typeof params.requestId === "number" ? { requestId: params.requestId } : {}) });
     }
-    tasks.observe(method, params);
+    if (!withheld) tasks.observe(method, params);
     if (isRoot && method === "turn/started") {
       state.queuePausedAfterInterrupt = false;
       const startedTurn = asRecord(params.turn)?.id;
@@ -493,11 +494,19 @@ async function openCodexSession(
       state.spontaneous = false;
       state.codexTurnId = null;
     }
-    const error = method === "error" ? asRecord(params.error) : null;
-    const withheldError = error !== null && (Object.getOwnPropertyNames(error).some(credentials.matches)
-      || Object.getOwnPropertyNames(params).some(key => !isCodexNotificationKey(method, key) && credentials.matches(key)));
-    let projectionParams = withheldItem ? { ...params, item: undefined } : withheldError ? { ...params, error: undefined } : params;
     const safeNative = asRecord(nativeRecord.body.native);
+    if (isRoot && method === "thread/settings/updated") {
+      settingsWaiter?.({ params, visible: safeNative !== null && (asRecord(params.threadSettings) === null || asRecord(safeNative.threadSettings) !== null) });
+    }
+    // Withheld notifications still drive transport correlation. Only root turn status drives a public fold.
+    const rootTurn = isRoot && (method === "turn/started" || method === "turn/completed");
+    if (withheld && !rootTurn) return;
+    const error = method === "error" ? asRecord(params.error) : null;
+    const withheldError = error !== null && Object.getOwnPropertyNames(error).some(credentials.matches);
+    let projectionParams = params;
+    if (withheld) projectionParams = { turn: { status: terminalStatus.byokTurnStatus } };
+    else if (withheldItem) projectionParams = { ...params, item: undefined };
+    else if (withheldError) projectionParams = { ...params, error: undefined };
     if (method === "thread/tokenUsage/updated") projectionParams = { ...params, tokenUsage: safeNative?.tokenUsage };
     if (method === "account/rateLimits/updated") projectionParams = { ...params, rateLimits: safeNative?.rateLimits };
     const { state: nextProjection, commands } = foldCodexNotification(state.projection, method, projectionParams);
@@ -520,8 +529,7 @@ async function openCodexSession(
           break;
       }
     }
-    if (isRoot && method === "turn/completed") { turnProcesses.turnCompleted(params); }
-    if (isRoot && method === "thread/settings/updated") { settingsWaiter?.(params); }
+    if (isRoot && method === "turn/completed") turnProcesses.turnCompleted(params);
     } catch (error) {
       client.kill(); // BYOK change: A required fold failure is visible and terminates the session.
       throw error;
@@ -609,14 +617,15 @@ async function openCodexSession(
     // The resumed thread runs another level: set it on the loaded thread and
     // take codex's pushed settings (a recorded frame) as the word on it.
     const requested = readback.resumeEffort;
-    const { promise: reported, resolve } = Promise.withResolvers<JsonRecord | null>();
+    const { promise: reported, resolve } = Promise.withResolvers<SettingsReadback | null>();
     settingsWaiter = resolve;
     const timer = setTimeout(() => {
       resolve(null);
     }, CODEX_SETTINGS_REPORT_MS);
     try {
       await updateThreadEffort(client, threadId, requested, version);
-      const refusal = codexResumeEffortRefusal(requested, await reported);
+      const readback = await reported;
+      const refusal = codexResumeEffortRefusal(requested, readback?.params ?? null, readback?.visible);
       if (refusal !== null) { throw refusal; }
     } finally { clearTimeout(timer); settingsWaiter = null; }
   }
