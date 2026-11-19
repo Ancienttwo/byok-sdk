@@ -16,7 +16,7 @@ Each symbol has one entry (#1845). K4 needs Node 24.22.1 or later, because its l
 | `.` | `BotCollaboration` and its option types, `botLedgerOptions`, `botCompactVeto`, `createBotPersonaProjection`, `teamSnapshot` and its errors | Node only. It loads the L Host and `@byok-sdk/client`. |
 | `./host-kit` | The L modules a Host adapter composes: model, channel, delivery, routines, team, migration, retention, dreaming, adapter steps | Node or a Worker. It loads the K4 root entry, but not the L Host or `@byok-sdk/client`. The hosted Worker example bundles it. |
 | `./rules` | The pure rules that the two entries above do not export | Anywhere. It loads only `@byok-sdk/protocol` and `@byok-sdk/server/execution-core/canonical`, so no `node:sqlite`. |
-| `./testing` | The shared vectors, the L test Host, and the K4 test data `policy` and `template` | Tests on Node. It needs the optional peers `vitest` and `@hono/node-server`. |
+| `./testing` | The shared vectors, the L test Host, and the K4 test data `policy` and `template` | Tests on Node. It needs the optional peer `@hono/node-server`. Pass the test runner API to the vectors. |
 
 `openLTestHost` requires a `deviceCredentials` backend from the caller. In tests,
 import `InMemoryDeviceCredentialBackend` from `@byok-sdk/client/testing` and pass
@@ -1313,6 +1313,22 @@ true.
   adds them: a Host that refuses an unknown projection prefix fails its flush
   on the first one.
 
+## Shared vector migration
+
+Each `./testing` vector now takes the test runner as its first argument. Hosts
+must pass `describe`, `it`, and `expect`, including `it.each` and the
+`expect.any` and `expect.objectContaining` asymmetric matchers. For Vitest:
+
+```ts
+import { describe, it, expect } from 'vitest';
+import { commitVectors } from '@byok-sdk/bot-collaboration/testing';
+
+commitVectors({ describe, it, expect }, 'my store', openMyStore);
+```
+
+Apply the same change to every shared vector call. The package no longer
+imports Vitest or declares it as a peer; the Host chooses its test runner.
+
 ## Persona delivery failures
 
 A stale or conflicting persona completion stays in the owner ledger. It emits
@@ -1337,6 +1353,18 @@ again, so the old file stays until the next persona update writes it. A process
 crash can leave an `AGENTS.md.<pid>-<n>.tmp` file in the home. The next
 `writeHomeFile` call for `AGENTS.md` removes it when that process has ended.
 The Host failure and retry API does not change these limits.
+
+A Host can pass `renderAdditionalFiles` to return more root files, and
+`afterWrite` for side effects outside the home after all writes complete.
+Both callbacks receive the validated `bot-profile.v1` persona, agent reference,
+canonical home, request id and projection hash while the SDK writer lease is
+held. `AGENTS.md` is reserved for the persona. All home files must be returned
+by `renderAdditionalFiles` and written with the SDK `writeHomeFile`; `afterWrite`
+must not write to `canonicalHome`. If a later rendering omits a file, the SDK
+leaves the previous file in the home; it does not delete it. Each file is
+replaced atomically, but the files and the hook are not a transaction. Exact
+revision/hash replays invoke both callbacks again, so `afterWrite` must be
+idempotent. Hook errors fail the projection before its state is recorded.
 
 
 ## Deferred Main Bot routine target

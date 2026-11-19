@@ -186,7 +186,7 @@ async function hostedSubject(port: ChannelPort) {
 }
 
 describe.skipIf(POSTGRES_URL === undefined)('H delivery sender (#793 D2b-out-2)', () => {
-  deliveryVectors('H HostedCollaborationStore and outbox sender on Postgres', hostedSubject);
+  deliveryVectors({ describe, it, expect }, 'H HostedCollaborationStore and outbox sender on Postgres', hostedSubject);
 
   it.each(['task.complete', 'task.fail'] as const)('gives a staged reply an outbox row only when a succeeded outcome promotes it: %s (#1762)', async type => {
     const sent: string[] = [];

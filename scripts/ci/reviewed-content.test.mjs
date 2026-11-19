@@ -309,7 +309,7 @@ function k8Fixture(t) {
   const dir = 'packages/bot-collaboration', path = `${dir}/package.json`, name = '@byok-sdk/bot-collaboration';
   f.write(path, { name, version: '0.0.0', private: true }); f.write('bun.lock', f.lock); rebase(f, 'private K8');
 
-  const peers = { '@hono/node-server': '^2.1.3', vitest: '^5.1.0' };
+  const peers = { '@hono/node-server': '^2.1.3' };
   const manifest = { name, version: '0.28.0', type: 'module', description: 'K8', license: 'MIT',
     repository: { type: 'git', url: 'git+https://github.com/Ancienttwo/byok-sdk.git', directory: dir },
     bugs: { url: 'https://github.com/Ancienttwo/byok-sdk/issues' }, homepage: 'https://github.com/Ancienttwo/byok-sdk#readme',
@@ -320,8 +320,9 @@ function k8Fixture(t) {
     files: ['dist', 'README.md', 'LICENSE'], publishConfig: { access: 'public' },
     scripts: { build: 'tsup && tsc -p tsconfig.build.json', typecheck: 'tsc --noEmit', test: 'vitest run', clean: 'rm -rf dist' },
     dependencies: { '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' },
-    peerDependencies: peers, peerDependenciesMeta: { '@hono/node-server': { optional: true }, vitest: { optional: true } },
-    devDependencies: { '@byok-sdk/cloud': 'workspace:*', '@byok-sdk/core': 'workspace:*', '@byok-sdk/example-host-execution-core': 'workspace:*', ...peers } };
+    peerDependencies: peers, peerDependenciesMeta: { '@hono/node-server': { optional: true } },
+    devDependencies: { '@byok-sdk/cloud': 'workspace:*', '@byok-sdk/core': 'workspace:*', '@byok-sdk/example-host-execution-core': 'workspace:*',
+      ...peers, vitest: '^5.1.0' } };
   return { f, dir, path, manifest };
 }
 
@@ -344,6 +345,23 @@ test('#1845: the published K8 manifest has one reviewed shape; the K4 example st
   ]) {
     f.write(path, candidate);
     assert.throws(() => selectImpact([path], f), reason);
+  }
+});
+
+test('#2411: the published K8 may remove only its Vitest peer', t => {
+  const { f, dir, path, manifest } = k8Fixture(t);
+  const legacy = { ...manifest, peerDependencies: { ...manifest.peerDependencies, vitest: '^5.1.0' },
+    peerDependenciesMeta: { ...manifest.peerDependenciesMeta, vitest: { optional: true } } };
+  f.write(path, legacy); rebase(f, 'published K8 with Vitest peer');
+  f.write(path, manifest);
+  assert.ok(selectImpact([path], f).dirs.includes(dir));
+  for (const candidate of [
+    { ...manifest, peerDependencies: {}, peerDependenciesMeta: {} },
+    { ...manifest, peerDependencies: { ...manifest.peerDependencies, extra: '^1.0.0' },
+      peerDependenciesMeta: { ...manifest.peerDependenciesMeta, extra: { optional: true } } },
+  ]) {
+    f.write(path, candidate);
+    assert.throws(() => selectImpact([path], f), /optional testing peers|dependency names/);
   }
 });
 

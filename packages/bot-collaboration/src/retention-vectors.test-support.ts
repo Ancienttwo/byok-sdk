@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import type { VectorTestApi } from './vector-test-api.js';
 import { hash, MIN_TOMBSTONE_RETENTION_MS, type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model.js';
 import type { CommitRequest } from './rules/commit.js';
@@ -53,7 +53,7 @@ function delivery(state: CollaborationState, row: 'pending' | 'unknown'): void {
     channel: 'fake', route: { kind: 'push', pushRouteId: 'p' }, state: row, attempts: 0 } } };
 }
 
-export function retentionVectors(name: string, open: () => RetentionSubject | Promise<RetentionSubject>): void {
+export function retentionVectors({ describe, it, expect }: VectorTestApi, name: string, open: () => RetentionSubject | Promise<RetentionSubject>): void {
   describe(`retention contract: ${name}`, () => {
     const request = (subject: CommitSubject, commandId: string, command: Command): CommitRequest<Command> => ({ scope: subject.scope, commandId, command });
     const retain = (subject: RetentionSubject, roots: string[], fields: Partial<RetentionInput> = {}, limits = LIMITS) =>

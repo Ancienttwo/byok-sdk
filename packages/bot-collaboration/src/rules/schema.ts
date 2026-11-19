@@ -3,6 +3,7 @@ import { botTurnOutcomeFragments as f, checkRoutineSchedule, composeBotTurnOutco
 import type { Turn } from './turn.js';
 import type { RoomsState } from './rooms.js';
 import { inactive } from './team.js';
+import type { Autonomy } from './autonomy.js';
 import { openDelegations, type DelegationView } from './delegation.js';
 
 /**
@@ -14,7 +15,7 @@ export const NEW_ROOMS = ['new_room_1'] as const;
 /** The Bot fields that the schema and the ContextPack read. */
 export interface ContextBot {
   readonly id: string; readonly name: string; readonly role: string; readonly mainBot: boolean; readonly archived: boolean;
-  readonly participation?: 'suspended'; readonly readyRevision: string | null;
+  readonly participation?: 'suspended'; readonly readyRevision: string | null; readonly autonomy?: Autonomy;
 }
 /** Team, delegation and reply rows. No Turn rows: the ContextPack takes its history as an argument. */
 export interface ContextState extends DelegationView {
