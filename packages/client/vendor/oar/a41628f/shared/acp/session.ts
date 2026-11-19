@@ -130,7 +130,7 @@ export function redactAcpRecord<T extends RawEvent>(
     if (pending === "") pendingToolText?.delete(toolLane);
     else pendingToolText?.set(toolLane, pending);
     return ready;
-  }) : undefined;
+  }, update.rawOutput) : undefined;
   if (terminal) pendingToolText?.delete(toolLane);
   const events = safe.body.events.flatMap<RuntimeEventBody>(event => {
     if (event.kind === "tool_call_progress") {

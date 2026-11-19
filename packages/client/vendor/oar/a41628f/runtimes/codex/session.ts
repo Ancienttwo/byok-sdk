@@ -199,6 +199,10 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     const snapshot = redactCodexSnapshot(originalNative, native, redact);
     return snapshot === native ? safe : { ...safe, body: { ...safe.body, native: snapshot } };
   }
+  if (method === "thread/settings/updated" && asRecord(native?.threadSettings) === null) {
+    const events = safe.body.events.filter(event => event.kind !== "model" && event.kind !== "effort" && event.kind !== "service_tier");
+    return { ...safe, body: { ...safe.body, events } };
+  }
   if (method === "error" && asRecord(originalNative?.error) !== null && asRecord(native?.error) === null) {
     const events = safe.body.events.map(event => {
       if (event.kind !== "retry") return event;

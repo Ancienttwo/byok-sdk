@@ -34,20 +34,19 @@ export function createAcpProjectionState(): AcpProjectionState {
   return { tools: new Map() };
 }
 
-function textContent(value: unknown): string | null {
+function textContent(value: unknown, source: unknown = value): string | null {
   const content = asRecord(value);
-  if (content !== null && typeof content.text === "string") {
-    return content.text;
-  }
+  const original = asRecord(source);
+  if (typeof content?.text === "string" && typeof original?.text === "string") return original.text;
   // An ACP ToolCallContent of type "content" wraps a ContentBlock (grok's
   // completed `run_terminal_command`: `[{type: "content", content: {type:
   // "text", text}}]`); its text is the call's readable output.
-  if (content !== null && content.type === "content") {
-    return textContent(content.content);
+  if (original?.type === "content" && content !== null) {
+    return textContent(content.content, original.content);
   }
-  if (Array.isArray(value)) {
+  if (Array.isArray(value) && Array.isArray(source)) {
     const parts = value
-      .map((item) => textContent(item))
+      .map((item, index) => textContent(item, source[index]))
       .filter((item): item is string => item !== null);
     return parts.length === 0 ? null : parts.join("\n");
   }
@@ -73,8 +72,8 @@ function inputDetail(value: unknown): string | undefined {
   }
 }
 
-export function acpToolProgressOutput(value: unknown, mapText: (text: string) => string = text => text): string | undefined {
-  const text = typeof value === "string" ? value : textContent(value);
+export function acpToolProgressOutput(value: unknown, mapText: (text: string) => string = text => text, source: unknown = value): string | undefined {
+  const text = typeof value === "string" && typeof source === "string" ? source : textContent(value, source);
   const output = text === null ? inputDetail(value) : mapText(text);
   return output === undefined ? undefined : truncate(output);
 }
