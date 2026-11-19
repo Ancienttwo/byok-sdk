@@ -146,11 +146,12 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
     : ['alpha', 'beta', 'blocked'];
   const qualifiedLaunch = scenario === 'qualified-launch';
   const paired = scenario === 'mixed' || qualifiedLaunch || scenario === 'all' || scenario === 'name-boundary' || collision !== undefined;
+  const longDirectServer = options.runtime === 'dsh' ? longServer.slice(0, 32) : longServer;
   const first = call(names[0]!, 'first');
   const actions = paired ? [search, first, call('beta', 'second'), call('alpha', 'long-name', longName), call('blocked', 'denied'),
     call('outside', 'not-in-attempt'), { server: 'native', tool: exact, args: { summary: 'direct' } },
     ...(collision === undefined ? [] : [{ server: collision, tool: HUB_CALL_TOOL, args: { summary: 'collision-control' } }]),
-    ...(scenario === 'name-boundary' ? [{ server: longServer, tool: longName, args: { summary: 'long-native' } }] : [])]
+    ...(scenario === 'name-boundary' ? [{ server: longDirectServer, tool: longName, args: { summary: 'long-native' } }] : [])]
     : scenario === 'parallel' ? [search, first, call('beta', 'parallel-second')]
       : ['cancel', 'slow-above', 'outer-slow'].includes(scenario) ? [search]
         : [search, first, ...(scenario.includes('idle') || scenario.includes('flight') || scenario === 'drift' ? [call('alpha', 'explicit-next')] : [])];
@@ -271,10 +272,10 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
       const collisionFile = path.join(box.root, 'collision.jsonl');
       if (collision !== undefined) receiptPaths.set(collision, collisionFile);
       const boundaryReceipt = path.join(box.root, 'long-native.jsonl');
-      if (scenario === 'name-boundary') receiptPaths.set(longServer, boundaryReceipt);
+      if (scenario === 'name-boundary') receiptPaths.set(longDirectServer, boundaryReceipt);
       const directServers = { native,
         ...(collision === undefined ? {} : { [collision]: await writeSubmitResultServer(box.root, collisionFile, HUB_CALL_TOOL) }),
-        ...(scenario === 'name-boundary' ? { [longServer]: await writeSubmitResultServer(box.root, boundaryReceipt, longName) } : {}),
+        ...(scenario === 'name-boundary' ? { [longDirectServer]: await writeSubmitResultServer(box.root, boundaryReceipt, longName) } : {}),
       };
       const registry = new McpToolsetRegistry({ ...Object.fromEntries(searchSets), ...(paired ? {
         direct: { mcpServers: directServers },

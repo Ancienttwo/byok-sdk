@@ -367,7 +367,8 @@ defineMcpSearchProbes({
   async configure(box, provider, spawnFn) {
     const model = loopbackModel(provider.baseUrl);
     const home = path.join(box.root, 'dsh');
-    return { adapter: new DshAdapter({ home, model, resolveBin, spawnFn }), env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder' } };
+    return { adapter: new DshAdapter({ home, model, spawnFn }),
+      env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', BYOK_DSH_BIN: target.bin } };
   },
   projectEnvironment: (env, box) => searchMcpEnvironmentFor({ runtimes: {
     dsh: { home: path.join(box.root, 'dsh'), model: loopbackModel('http://127.0.0.1:9/v1') },
