@@ -24,6 +24,7 @@ import { asRecord, type JsonRecord } from "../../shared/json.js";
 // BYOK change: Return the raw adapter contract without best-effort observer projections.
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
 import { isProjectedToolInput, redactRuntimeRecord, sessionCredentialRedactor, type CredentialRedactor } from "../../shared/credential-redactor.js";
+import { redactJoinedText } from "../../shared/redact-text.js";
 import { createSessionKernel } from "../../shared/session-kernel.js";
 import { newSessionLinks } from "../../shared/session-links.js";
 import { startAppServerClient, type RpcOutcome, type SpawnLineProcess } from "./app-server-client.js";
@@ -150,16 +151,13 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
           || (path.length === 4 && (path[3] === "last" || path[3] === "total") && codexTokenFields.has(key))));
   });
   if (safe.kind !== "frame") return safe;
-  const safeItem = asRecord(asRecord(safe.body.native)?.item);
+  const native = asRecord(safe.body.native);
+  const safeItem = asRecord(native?.item);
   if (itemType === "userMessage" && method === "item/started" && Array.isArray(originalItem?.content)) {
-    const surviving = safeItem?.content;
-    const text = originalItem.content.flatMap((block: unknown, index: number) => {
-      const source = asRecord(block);
-      return Array.isArray(surviving) && asRecord(surviving[index]) !== null && source?.type === "text" && typeof source.text === "string" ? [source.text] : [];
-    }).join("");
-    const input = redact(text);
+    const { content, input } = redactJoinedText(originalItem.content, safeItem?.content, redact);
     const events = safe.body.events.map(event => event.kind === "user_message" ? { ...event, input } : event);
-    return { ...safe, body: { ...safe.body, events } };
+    const updated = safeItem !== null && content !== safeItem.content ? { ...native, item: { ...safeItem, content } } : safe.body.native;
+    return { ...safe, body: { ...safe.body, native: updated, events } };
   }
   if (itemType !== "mcpToolCall" || method !== "item/completed") return safe;
   if (safeItem?.result === originalItem?.result && safeItem?.error === originalItem?.error) return safe;

@@ -1,7 +1,7 @@
 // BYOK change: derive tool inputs from protocol-aware redaction (Apache-2.0).
 import type { FailureClass, FrameBody, RawEvent, RuntimeEventBody, TokenTotals, TurnOutcome } from "../../contracts/session.js";
 import { redactRuntimeRecord, type CredentialRedactor } from "../../shared/credential-redactor.js";
-import type { RedactionPath } from "../../shared/redact-text.js";
+import { redactJoinedText, type RedactionPath } from "../../shared/redact-text.js";
 import { asNumber, asRecord, asRecordList, type JsonRecord } from "../../shared/json.js";
 import { failureFromStatus } from "../../shared/failure-class.js";
 import { addTokens, noTokens } from "../../shared/token-totals.js";
@@ -370,11 +370,13 @@ export function redactDshRecord<T extends RawEvent>(record: T, credentials: Cred
     const safe = redact(record);
     if (safe.kind !== "frame") return safe;
     const original = asRecord(asRecord(record.body.native)?.data)?.content;
-    const content = asRecord(asRecord(safe.body.native)?.data)?.content;
+    const native = asRecord(safe.body.native);
+    const data = asRecord(native?.data);
     if (!Array.isArray(original)) return safe;
-    const blocks = Array.isArray(content) ? original.filter((_block, index) => asRecord(content[index]) !== null) : [];
-    const input = credentials.redact(textOf(blocks));
-    return { ...safe, body: { ...safe.body, events: safe.body.events.map(event => event.kind === "user_message" ? { ...event, input } : event) } };
+    const { content, input } = redactJoinedText(original, data?.content, credentials.redact);
+    const events = safe.body.events.map(event => event.kind === "user_message" ? { ...event, input } : event);
+    const updated = data !== null && content !== data.content ? { ...native, data: { ...data, content } } : safe.body.native;
+    return { ...safe, body: { ...safe.body, native: updated, events } };
   }
   if (record.body.type === "session/event:tool/result") {
     const safe = redact(record);

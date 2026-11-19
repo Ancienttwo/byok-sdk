@@ -1,5 +1,6 @@
 // BYOK change: redact decoded JSON values and withhold maps with credential-bearing keys (Apache-2.0).
 /* oxlint-disable import/prefer-default-export -- Shared named helpers. */
+import { asRecord } from "./json.js";
 export type RedactionPath = readonly (string | number)[];
 type Redact = (text: string) => string;
 type Matches = (text: string) => boolean;
@@ -54,6 +55,27 @@ function sanitize(value: unknown, redact: Redact, matches: Matches, jsonField: J
 /** Opaque application data, never an outbound runtime message. */
 export function redactText<T>(value: T, redact: Redact, jsonField?: JsonField, structure?: RedactionStructure, matches: Matches = text => redact(text) !== text): T {
   return sanitize(value, redact, matches, jsonField, structure, [], new WeakMap()) as T;
+}
+
+/** Join user-message blocks after excluding every block the native traversal withheld. */
+export function redactJoinedText(original: readonly unknown[], sanitized: unknown, redact: Redact): { content: unknown; input: string } {
+  if (!Array.isArray(sanitized)) return { content: sanitized, input: "" };
+  const indexes: number[] = [];
+  const parts: string[] = [];
+  const retained: string[] = [];
+  original.forEach((block, index) => {
+    const source = asRecord(block);
+    const safe = asRecord(sanitized[index]);
+    if (source?.type !== "text" || typeof source.text !== "string" || typeof safe?.text !== "string") return;
+    indexes.push(index);
+    parts.push(source.text);
+    retained.push(safe.text);
+  });
+  const input = redact(parts.join(""));
+  if (input === retained.join("")) return { content: sanitized, input };
+  const content = [...sanitized];
+  for (const [offset, index] of indexes.entries()) content[index] = { ...asRecord(content[index]), text: offset === 0 ? input : "" };
+  return { content, input };
 }
 
 /** The protocol declares this field as encoded JSON. Keep its original token spans,

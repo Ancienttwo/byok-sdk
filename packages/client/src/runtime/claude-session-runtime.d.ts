@@ -1,5 +1,5 @@
-import type { RuntimeInputOptions } from '../types';
-import type { spawnOwnedLineProcess } from './owned-line-process';
+import type { RuntimeInputOptions } from '../types.js';
+import type { spawnOwnedLineProcess } from './owned-line-process.js';
 /** Structural SPI: one complete kernel record of a Claude stream-json session. */
 export interface ClaudeRecord {
   readonly seq: number;

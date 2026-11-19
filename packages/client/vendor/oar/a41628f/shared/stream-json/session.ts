@@ -15,6 +15,7 @@ import { asRecord, parseJson, type JsonRecord } from "../json.js";
 import type { LineProcess } from "../../runtimes/codex/app-server-client.js";
 import { isProjectedToolInput, redactRuntimeRecord, type CredentialRedactor } from "../credential-redactor.js";
 import { createSessionKernel } from "../session-kernel.js";
+import { redactJoinedText } from "../redact-text.js";
 import { toolContent } from "../tool-output.js";
 import { streamJsonUserMessage, streamJsonPrompted } from "./input-lifecycle.js";
 import { foldStreamJsonStdout } from "./projection.js";
@@ -223,21 +224,27 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   });
   if (redacted.kind === "frame" && safe.kind === "frame" && native?.type === "user") {
     const original = asRecord(native.message)?.content;
-    const sanitized = asRecord(asRecord(redacted.body.native)?.message)?.content;
-    if (Array.isArray(original) && Array.isArray(sanitized) && original !== sanitized) {
+    const packet = asRecord(redacted.body.native);
+    const message = asRecord(packet?.message);
+    const sanitized = message?.content;
+    if (Array.isArray(original)) {
+      const { content, input } = redactJoinedText(original, sanitized, credentials.redact);
       const events = redacted.body.events.map((event, index) => {
+        if (event.kind === "user_message") return { ...event, input };
         const source = safe.kind === "frame" ? safe.body.events[index] : undefined;
-        if (event.kind !== "tool_call_ended" || source?.kind !== "tool_call_ended") return event;
+        if (event.kind !== "tool_call_ended" || source?.kind !== "tool_call_ended" || original === sanitized) return event;
         const slot = original.findIndex(block => {
           const part = asRecord(block);
           return part?.type === "tool_result" && part.tool_use_id === source.callId;
         });
-        if (slot < 0 || original[slot] === sanitized[slot]) return event;
+        const block = Array.isArray(sanitized) ? sanitized[slot] : undefined;
+        if (slot < 0 || original[slot] === block) return event;
         const { content: _original, ...rest } = event;
-        const content = toolContent(asRecord(sanitized[slot])?.content);
-        return content === undefined ? rest : { ...rest, content };
+        const output = toolContent(asRecord(block)?.content);
+        return output === undefined ? rest : { ...rest, content: output };
       });
-      redacted = { ...redacted, body: { ...redacted.body, events } };
+      const updated = message !== null && content !== sanitized ? { ...packet, message: { ...message, content } } : redacted.body.native;
+      redacted = { ...redacted, body: { ...redacted.body, native: updated, events } };
     }
   }
   if (redacted.kind === "frame" && native?.type === "result" && asRecord(redacted.body.native) === null && record.kind === "frame") {

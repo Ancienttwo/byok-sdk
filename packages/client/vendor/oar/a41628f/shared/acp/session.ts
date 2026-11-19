@@ -114,35 +114,39 @@ export function redactAcpRecord<T extends RawEvent>(
   const rawOutput = credentials.redactValue(update.rawOutput);
   const content = credentials.redactValue(update.content);
   const toolLane = JSON.stringify([child?.sessionId ?? record.sessionId, update.toolCallId]);
+  const previous = pendingToolText?.get(toolLane);
+  const terminal = update.status === "completed" || update.status === "failed" || update.status === "cancelled"
+    || safe.body.events.some(event => event.kind === "tool_call_ended");
   let withholdProgress = false;
-  const events = safe.body.events.map(event => {
+  const progressOutput = !terminal && update.sessionUpdate === "tool_call_update" ? acpToolProgressOutput(rawOutput, text => {
+    const { ready, pending } = credentials.redactChunk((previous ?? "") + text);
+    withholdProgress = ready !== text || pending !== "" || previous !== undefined;
+    if (pending === "") pendingToolText?.delete(toolLane);
+    else pendingToolText?.set(toolLane, pending);
+    return ready;
+  }) : undefined;
+  if (terminal) pendingToolText?.delete(toolLane);
+  const events = safe.body.events.flatMap<RuntimeEventBody>(event => {
     if (event.kind === "tool_call_progress") {
       const { output: _original, ...progress } = event;
-      const output = acpToolProgressOutput(rawOutput, text => {
-        const previous = pendingToolText?.get(toolLane);
-        const { ready, pending } = pendingToolText === undefined
-          ? { ready: credentials.redact(text), pending: "" }
-          : credentials.redactChunk((previous ?? "") + text);
-        withholdProgress = ready !== text || pending !== "" || previous !== undefined;
-        if (pending === "") pendingToolText?.delete(toolLane);
-        else pendingToolText?.set(toolLane, pending);
-        return ready;
-      });
-      return output === undefined || output === "" ? progress : { ...progress, output };
+      return [progressOutput === undefined || progressOutput === "" ? progress : { ...progress, output: progressOutput }];
     }
     if (event.kind === "tool_call_ended") {
-      pendingToolText?.delete(toolLane);
-      if (rawOutput === update.rawOutput && content === update.content) return event;
-      const { content: _original, exitCode, ...ended } = event;
-      const output = acpToolTerminalContent(content, rawOutput);
-      const safeExitCode = exitCode !== undefined && asRecord(rawOutput) !== null ? { exitCode } : {};
-      return { ...ended, ...safeExitCode, ...(output === undefined ? {} : { content: output }) };
+      let ended = event;
+      if (rawOutput !== update.rawOutput || content !== update.content) {
+        const { content: _original, exitCode, ...result } = event;
+        const output = acpToolTerminalContent(content, rawOutput);
+        const safeExitCode = exitCode !== undefined && asRecord(rawOutput) !== null ? { exitCode } : {};
+        ended = { ...result, ...safeExitCode, ...(output === undefined ? {} : { content: output }) };
+      }
+      return previous === undefined || ended.content !== undefined ? [ended]
+        : [{ kind: "tool_call_progress", callId: event.callId, output: credentials.redact(previous) }, ended];
     }
-    return event;
+    return [event];
   });
   if (!withholdProgress) return { ...safe, body: { ...safe.body, events } };
   const packet = asRecord(safe.body.native);
-  const sanitizedUpdate = asRecord(packet?.update);
+  const sanitizedUpdate = packet !== null && (directUpdate || child !== null) ? asRecord(packet.update) : null;
   if (sanitizedUpdate === null) return { ...safe, body: { ...safe.body, native: "[redacted]", events } };
   const { rawOutput: _withheld, ...safeUpdate } = sanitizedUpdate;
   return { ...safe, body: { ...safe.body, native: { ...packet, update: safeUpdate }, events } };
@@ -242,7 +246,9 @@ async function openAcpRuntimeSession(
     const configUpdates = createAcpConfigUpdates();
     // BYOK change: a child's own update projects events only when it was read while a prompt awaited its answer (records.ts).
     const promptAnswers = createAcpPromptAnswers();
-    const recorder = createAcpRecorder(usageGate, profile.attributeUpdate, tokenUsage, undefined, profile.projectUpdate, profile.projectExtension, nativeTurns, { ...profile, whilePromptAwaited: promptAnswers.whilePromptAwaited, childTokenUsage });
+    const recorder = createAcpRecorder(usageGate, profile.attributeUpdate, tokenUsage, undefined, profile.projectUpdate, profile.projectExtension, nativeTurns, {
+      ...profile, whilePromptAwaited: promptAnswers.whilePromptAwaited, ...(childTokenUsage === undefined ? {} : { childTokenUsage }),
+    });
     const client = createAcpClientApp(terminalHost, {
       update: (notification, receivedAt) => {
         recorder.update(notification, receivedAt);
