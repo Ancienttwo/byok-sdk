@@ -3,7 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { AgentMessageEgressRequirement, TerminalProjectionSelection } from '@byok-sdk/protocol';
-import type { McpStdioServerConfig } from '../../types.js';
+import type { McpStdioServerConfig, McpToolsetConfig } from '../../types.js';
 import type { AgentRef } from '../../agent-home.js';
 import { AGENT_MEMORY_MCP_SERVER_NAME, AGENT_MESSAGE_MCP_SERVER_NAME, AGENT_RESULT_MCP_SERVER_NAME } from '../../sdk-reserved-mcp.js';
 import type { AgentMemoryMcpContext, SdkReservedMcpContext } from '../../sdk-reserved-helper-context.js';
@@ -177,8 +177,8 @@ export async function withHostToolsetContext(
 }
 
 export function resolveMcpServers(
-  this: TaskRunner,
   requiredToolsets: readonly string[],
+  registry: ReadonlyMap<string, McpToolsetConfig> | undefined,
 ):
   | {
       ok: true;
@@ -187,7 +187,6 @@ export function resolveMcpServers(
       mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
     }
   | { ok: false; reason: string } {
-  const registry = this['deps'].getMcpToolsets?.();
   if (!registry || registry.size === 0) {
     return { ok: false, reason: 'offer requires MCP toolsets, but this device has no local mcpToolsets registry' };
   }

@@ -85,6 +85,10 @@ describe('generated DaemonConfig schema (#1094)', () => {
     expect(schema.properties.agentHome.properties.projection).toMatchObject({ 'x-byok-surface': 'embedded-only' });
     expect(schema.properties.localAgentRelease).toMatchObject({ 'x-byok-surface': 'distribution-owned', not: {} });
     expect(schema.properties.codexSandbox).toMatchObject({ enum: ['danger-full-access', 'inherit', 'read-only', 'workspace-write'] });
+    expect(schema.properties.mcpToolsets.additionalProperties).toMatchObject({
+      required: ['mcpServers'],
+      properties: { exposure: { enum: ['direct', 'search'] } },
+    });
     // Closed like the validator: every object without an index signature refuses other keys.
     expect(schema.additionalProperties).toBe(false);
     expect(schema.properties.agentHome.additionalProperties).toBe(false);
@@ -119,6 +123,16 @@ describe('validateDaemonConfig', () => {
     expect(functionIssues.map((issue) => issue.code)).toEqual(['invalid_type', 'distribution_owned']);
     const embedded = validateDaemonConfig({ ...base, toolAuthorization: { default: 'auto' }, localAgentRelease: { version: '1' } }, { source: 'embedded' });
     expect(embedded).toEqual({ ok: true, issues: [] });
+  });
+
+  it('loads search exposure from a config file and rejects unknown exposure values', async () => {
+    const config = (exposure: string) => ({
+      ...base, mcpToolsets: { docs: { exposure, mcpServers: { srv: { command: process.execPath } } } },
+    });
+    const accepted = loadConfig(await writeConfig(config('search')));
+    expect(accepted.mcpToolsets?.docs?.exposure).toBe('search');
+    const invalid = await writeConfig(config('auto'));
+    expect(() => loadConfig(invalid)).toThrow(/mcpToolsets\.docs\.exposure/);
   });
 
   it('accepts a declared property named like a schema annotation', () => {

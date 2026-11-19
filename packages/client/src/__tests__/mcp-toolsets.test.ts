@@ -775,7 +775,7 @@ describe('DaemonConfig.mcpToolsets field set', () => {
   it.each(['mutationTools', 'readOnlyTools'])('rejects the unknown toolset field %s', (field) => {
     expect(() => new McpToolsetRegistry({
       salesko: { ...servers, [field]: { salesko: ['find_leads'] } } as never,
-    })).toThrow(/accepts only the mcpServers field/);
+    })).toThrow(/accepts only mcpServers and exposure/);
   });
 
   it.each([

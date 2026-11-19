@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "c016de7b5b7466ffd3f837d30ff7c7a7c83ff9fc6a4b717a810f4f794daa2a36"
+    "snapshotSha256": "d2a79c695dd511c158bbb3a9e7ac8a48e5cb8b530f5b048a6a6ccc45961e41aa"
   },
   "configFields": {
     "status": "tracked",
@@ -23,9 +23,31 @@
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
       ]
+    },
+    {
+      "id": "mcp-toolset-exposure-config",
+      "impact": "additive",
+      "summary": "Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2396",
+      "items": [
+        "config:mcpToolsets",
+        "export:@byok-sdk/client#McpToolsetConfig"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "config:mcpToolsets",
+      "change": "changed",
+      "before": "optional schema-sha256=fba615fff84b94e3",
+      "after": "optional schema-sha256=7d4f72ebf918d478",
+      "entry": "mcp-toolset-exposure-config"
+    },
+    {
+      "item": "export:@byok-sdk/client#McpToolsetConfig",
+      "change": "changed",
+      "entry": "mcp-toolset-exposure-config"
+    },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",

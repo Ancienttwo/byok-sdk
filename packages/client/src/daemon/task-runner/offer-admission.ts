@@ -5,7 +5,7 @@ import { AgentHomeBusyError, AgentHomeResolutionError, type AgentRef } from '../
 import { isReaderRunName, type AgentHomeAccessMode } from '../../agent-home-readers.js';
 import type { OfferPhaseContext } from './support.js';
 import { outboundErrorMessage } from '../outbound-error.js';
-import { hostDeclineSender, settledOrWithdrawn } from './support.js';
+import { hostDeclineSender, offeredPreparation, settledOrWithdrawn } from './support.js';
 import { INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
 import type { TaskRunner } from '../task-runner.js';
 import type { AcceptedOfferPayload } from './support.js';
@@ -165,9 +165,26 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
   this['deviceTaskReservations'].add(taskId);
 
   const requiredToolsets = payload.requiredToolsets;
-  const resolvedMcp = requiredToolsets ? this['resolveMcpServers'](requiredToolsets) : undefined;
+  const registry = requiredToolsets === undefined ? undefined : this['deps'].getMcpToolsets?.();
+  const resolvedMcp = requiredToolsets ? this['resolveMcpServers'](requiredToolsets, registry) : undefined;
   if (resolvedMcp && !resolvedMcp.ok) {
     decline({ reason: resolvedMcp.reason, retryable: true });
+    return undefined;
+  }
+  const searchToolset = requiredToolsets?.find((id) => registry?.get(id)?.exposure === 'search');
+  if (searchToolset !== undefined) {
+    if (offeredPreparation(payload) !== undefined) {
+      decline({
+        reason: `prepared inputs require direct exposure for MCP toolset ${JSON.stringify(searchToolset)}`,
+        retryable: false,
+        code: 'unsupported_input',
+      });
+    } else {
+      decline({
+        reason: `MCP toolset ${JSON.stringify(searchToolset)} requires search exposure, which is unavailable on this device`,
+        retryable: true,
+      });
+    }
     return undefined;
   }
   return { requiredToolsets, resolvedMcp };
