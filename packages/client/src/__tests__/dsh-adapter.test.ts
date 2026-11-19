@@ -251,6 +251,15 @@ describe('DshAdapter sessions', () => {
     await expect(fs.stat(scratch.sdkDir)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it.each([' leading-space-dsh-credential', 'trailing-space-dsh-credential '])('refuses a resolved key with edge whitespace before spawn', async key => {
+    const { open, facts } = await setup({ resolveKey: async () => key });
+    await expect(open()).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'auth' },
+      message: 'dsh provider API key cannot contain leading or trailing whitespace',
+    });
+    expect((await facts()).some(row => row.kind === 'start')).toBe(false);
+  });
+
   it('cancels a pending resolver, reclaims scratch, and ignores a late key', async () => {
     const pending = Promise.withResolvers<string>();
     const resolveKey = vi.fn(() => pending.promise);

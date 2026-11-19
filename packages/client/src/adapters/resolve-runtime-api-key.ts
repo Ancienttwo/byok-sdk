@@ -11,6 +11,12 @@ export function requireRuntimeApiKey(key: unknown, source: RuntimeKeySource): st
       reason: `${source} provider API key must contain at least ${MIN_RUNTIME_KEY_LENGTH} characters and cannot be all whitespace or contain NUL or line breaks`,
     });
   }
+  if (key.trim() !== key) {
+    throw new RuntimeExecutionFailure({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'auth' },
+      reason: `${source} provider API key cannot contain leading or trailing whitespace`,
+    });
+  }
   return key;
 }
 

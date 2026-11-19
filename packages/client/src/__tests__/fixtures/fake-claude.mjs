@@ -360,6 +360,12 @@ if (
   runProbeOrTurnFlow();
 }
 
+function exitWithStderr(message) {
+  const file = process.env.FAKE_CLAUDE_STDERR_FILE;
+  const text = file ? readFileSync(file, 'utf8') : message;
+  process.stderr.write(typeof text === 'string' ? text + '\n' : '', () => process.exit(1));
+}
+
 function runProbeOrTurnFlow() {
   if (argv.length === 2 && argv[0] === 'auth' && argv[1] === 'status') {
     // real invocation is `auth status --json` (3 args) — guard against a
@@ -396,8 +402,8 @@ function runProbeOrTurnFlow() {
   }
 
   if (process.env.FAKE_CLAUDE_CRASH_WITH_STDERR) {
-    process.stderr.write(`${process.env.FAKE_CLAUDE_CRASH_WITH_STDERR}\n`);
-    process.exit(1);
+    exitWithStderr(process.env.FAKE_CLAUDE_CRASH_WITH_STDERR);
+    return;
   }
 
   // Exactly the flags packages/client/src/adapters/claude/claude-adapter.ts
@@ -668,8 +674,8 @@ function runProbeOrTurnFlow() {
     const failure = JSON.parse(process.env.FAKE_CLAUDE_FAILURES ?? '[]')[turn - 1];
     if (failure) {
       if (failure.exit === true) {
-        if (typeof failure.stderr === 'string') process.stderr.write(`${failure.stderr}\n`);
-        process.exit(1);
+        exitWithStderr(failure.stderr);
+        return;
       }
       if (failure.rateLimit !== undefined) send({ type: 'rate_limit_event', rate_limit_info: failure.rateLimit, session_id: reportedSessionId });
       const text = failure.text ?? 'API Error: fixture failure';

@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams, type ChildProcess, type SpawnOptions } from 'node:child_process';
+import { StringDecoder } from 'node:string_decoder';
+import type { ClaudeCredentialRedactor } from './claude-session-runtime.js';
 import {
   adoptOwnedProcessTree, disposeOwnedProcessTree, rememberOwnedDescendants, withOwnedProcessTree,
 } from '../adapters/process-tree.js';
@@ -7,6 +9,9 @@ import { createJsonlLineDecoder } from '../util/jsonl-lines.js';
 
 const MAX_LINE_BYTES = 1024 * 1024;
 const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
+const MAX_STDERR_BYTES = 64 * 1024;
+
+type StderrRedactor = Pick<ClaudeCredentialRedactor, 'redactChunk' | 'finishRedaction'>;
 
 interface SpawnDependencies {
   nativeAssetRoot?: string;
@@ -15,6 +20,8 @@ interface SpawnDependencies {
   jobObject?: { assign(pid: number): Promise<{ release(): void }> };
   /** Names the runtime in disposal and adoption failures. */
   label?: string;
+  /** Sanitize captured stderr before applying the diagnostic byte limit. */
+  stderrRedactor?: StderrRedactor;
 }
 
 /**
@@ -49,6 +56,12 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     let failure: Error | undefined;
     const pendingWrites = new Set<(error: Error) => void>();
     let stderrTail = Buffer.alloc(0);
+    const stderrRedactor = options.onOutput === undefined ? deps.stderrRedactor : undefined;
+    const stderrDecoder = stderrRedactor === undefined ? undefined : new StringDecoder('utf8');
+    let pendingStderr: ReturnType<StderrRedactor['redactChunk']>['pending'];
+    const retainStderr = (chunk: Buffer): void => {
+      if (chunk.length > 0) stderrTail = Buffer.concat([stderrTail, chunk.subarray(-MAX_STDERR_BYTES)]).subarray(-MAX_STDERR_BYTES);
+    };
     let disposal: Promise<void> | undefined;
     let resolveClosed!: () => void;
     const closeReceipt = new Promise<void>(resolve => { resolveClosed = resolve; });
@@ -111,7 +124,11 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     // Drain stderr without retaining unbounded output or inheriting daemon stdio.
     child.stderr.on('data', (chunk: Buffer) => {
       if (options.onOutput !== undefined) options.onOutput('stderr', chunk);
-      else stderrTail = Buffer.concat([stderrTail,chunk]).subarray(-64*1024);
+      else if (stderrRedactor !== undefined && stderrDecoder !== undefined) {
+        const { ready, pending } = stderrRedactor.redactChunk(stderrDecoder.write(chunk), pendingStderr);
+        pendingStderr = pending;
+        retainStderr(Buffer.from(ready));
+      } else retainStderr(chunk);
     });
     child.stdin.on('error', fail);
     child.stdout.on('error', fail);
@@ -126,7 +143,13 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     });
     child.once('close', (code: number | null) => {
       if (closed) return;
-      closed = true; exitCode = code; resolveClosed();
+      closed = true; exitCode = code;
+      if (stderrRedactor !== undefined && stderrDecoder !== undefined) {
+        const { ready, pending } = stderrRedactor.redactChunk(stderrDecoder.end(), pendingStderr);
+        retainStderr(Buffer.from(ready + stderrRedactor.finishRedaction(pending)));
+        pendingStderr = undefined;
+      }
+      resolveClosed();
       exitedOnItsOwn = !terminationRequested && failure === undefined;
       for (const reject of [...pendingWrites]) reject(failure ?? new Error('owned line process closed during write'));
       // exited is a tree-quiescence receipt, not merely a root exit event.

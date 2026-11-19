@@ -49,9 +49,9 @@ the account has a saved key.
 
 Provider keys supplied through `resolveKey` or Claude's `ANTHROPIC_API_KEY`
 and `ANTHROPIC_AUTH_TOKEN` environment variables must contain at least 20
-characters and cannot be all whitespace. Give local OpenAI-compatible
-endpoints a placeholder of at least 20 characters even when they do not
-require authentication.
+characters and cannot contain leading or trailing whitespace, NUL, or line
+breaks. Give local OpenAI-compatible endpoints a placeholder of at least 20
+characters even when they do not require authentication.
 
 **Known limitation.** Plain JSON configuration cannot start dsh or agy.
 Use an embedded Host to provide the per-spawn callback. See [#2408](https://github.com/Ancienttwo/byok-sdk/issues/2408).

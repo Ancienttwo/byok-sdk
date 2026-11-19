@@ -496,7 +496,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // The adapter, never the host callback, owns fatal process termination.
         onFatal: error => { closeBridges(); stream?.fail(error); },
       }, resumeSessionId);
-      const spawnLineProcess = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude' });
+      const spawnLineProcess = createOwnedLineProcessSpawn({
+        nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude', stderrRedactor: credentials,
+      });
       try {
         stream = new ClaudeStreamSession(spawnLineProcess(invocation.command, [...invocation.args, ...args], { cwd: manifestCwd, env }), credentials);
       } catch (cause) {

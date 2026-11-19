@@ -77,6 +77,25 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
+  it.each([
+    ['ANTHROPIC_API_KEY', ' '],
+    ['ANTHROPIC_AUTH_TOKEN', '\t'],
+  ])('refuses %s with edge whitespace before spawn', async (name, whitespace) => {
+    const key = 'synthetic-claude-edge-whitespace-key';
+    const spawnFn = vi.fn(() => { throw new Error('unexpected spawn'); });
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), runtimeEnvironment: { base: 'allowlist' }, spawnFn });
+    const value = name === 'ANTHROPIC_API_KEY' ? whitespace + key : key + whitespace;
+    const resources = await makeCtx({ PATH: process.env.PATH, [name]: value });
+    try {
+      await expect(startAdapter(adapter, baseTask, resources)).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: expect.stringContaining('leading or trailing whitespace'),
+      });
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
   it.each(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])('redacts a path-like %s echoed by Claude', async name => {
     const key = '/synthetic/provider/credential';
     const resources = await makeCtx({ PATH: process.env.PATH, [name]: key });
@@ -403,6 +422,41 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(wire).not.toContain('opaqueBearerValue0123');
     expect((decodeEnvelope(wire).payload as { reason: string }).reason)
       .toMatch(/stderr: proxy: Authorization: \[redacted\] rejected; stderr echoes \[redacted\]/);
+  });
+
+  it.each(['start', 'run'])('redacts the credential before applying the stderr tail limit during %s', async phase => {
+    const prefix = 'unique-claude-key-prefix';
+    const suffix = 'unique-claude-key-suffix';
+    const key = prefix + suffix;
+    const ending = 'stderr-tail-end';
+    // With one newline from the fixture, the old 64 KiB tail starts at the key's second half.
+    const stderr = key + '.'.repeat(64 * 1024 - suffix.length - ending.length - 1) + ending;
+    const ctx = await makeCtx({ PATH: process.env.PATH, ANTHROPIC_API_KEY: key,
+      ...(phase === 'start' ? { FAKE_CLAUDE_CRASH_WITH_STDERR: 'fixture crash' }
+        : { FAKE_CLAUDE_FAILURES: JSON.stringify([{ exit: true }]) }),
+    });
+    try {
+      const stderrFile = path.join(ctx.workspaceDir, 'fixture-stderr');
+      await fs.writeFile(stderrFile, stderr);
+      ctx.env = { ...ctx.env, FAKE_CLAUDE_STDERR_FILE: stderrFile };
+      const run = async () => {
+        const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+        openSessions.push(session);
+        return takeTurn(session);
+      };
+      const failure = await run().then(() => undefined, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(failure).toMatchObject({ phase, failure: { class: 'runtime_exited' } });
+      const cause = (failure as Error).cause as Error;
+      expect(cause.message.includes(ending)).toBe(true);
+      for (const message of [String(failure), cause.message, cause.stack ?? '']) {
+        expect(message.includes(prefix)).toBe(false);
+        expect(message.includes(suffix)).toBe(false);
+      }
+      expect(cause.message.includes('[redacted]')).toBe(true);
+    } finally {
+      await fs.rm(ctx.workspaceDir, { recursive: true, force: true });
+    }
   });
 
   it('redacts registered credentials from runtime stderr exposed on the error cause', async () => {

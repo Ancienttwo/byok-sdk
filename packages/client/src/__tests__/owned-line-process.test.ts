@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { spawn, type SpawnOptions } from 'node:child_process';
 import { createOwnedLineProcessSpawn, spawnOwnedLineProcess } from '../runtime/owned-line-process';
+import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
 import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
@@ -58,6 +59,27 @@ describe('BYOK owned line process', () => {
     const child = checkedSpawn(process.execPath, ['-e', 'const b=Buffer.from("你好\\n");process.stdout.write(b.subarray(0,2));setTimeout(()=>{process.stdout.write(b.subarray(2));process.exitCode=7},10)'], { env: {} }); live.push(child);
     const line = firstLine(child); const exited = vi.fn(); child.onExit(exited);
     await child.spawned; expect(await line).toBe('你好'); expect(await child.exited).toBe(7); expect(exited).toHaveBeenCalledWith(7);
+  });
+
+  it('decodes split stderr bytes and redacts the full credential before limiting and trimming the tail', async () => {
+    const key = 'fixture-🗝-stderr-key ';
+    const credentials = sessionCredentialRedactor({});
+    credentials.addExplicit(key);
+    let native!: ReturnType<typeof spawn>;
+    const child = createOwnedLineProcessSpawn({
+      stderrRedactor: credentials,
+      spawnFn: (command, args, options) => { native = spawn(command, args, options); return native; },
+    })(process.execPath, ['-e', 'process.stdin.resume()'], { env: {} });
+    live.push(child);
+    await child.spawned;
+    const bytes = Buffer.from(key);
+    const split = Buffer.byteLength('fixture-') + 1;
+    native.stderr!.emit('data', Buffer.concat([Buffer.alloc(64 * 1024 + 20, 'x'), bytes.subarray(0, split)]));
+    native.stderr!.emit('data', bytes.subarray(split));
+    native.stdin!.end();
+    expect(await child.exited).toBe(0);
+    const diagnostic = child.exitError().message.split('; stderr: ')[1];
+    expect(diagnostic === 'x'.repeat(64 * 1024 - '[redacted]'.length) + '[redacted]').toBe(true);
   });
 
   it('rejects NUL-bearing spawn input on every client spawn before starting it, naming only the slot', async () => {
