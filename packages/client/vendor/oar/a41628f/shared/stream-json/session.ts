@@ -54,7 +54,7 @@ const streamJsonUsageFields = new Set(["input_tokens", "cache_creation_input_tok
 const streamJsonResultFields = new Set(["type", "subtype", "session_id", "parent_tool_use_id", "is_error", "terminal_reason", "result", "usage", "modelUsage", "stop_reason", "api_error_status", "permission_denials", "num_turns", "duration_ms", "duration_api_ms", "total_cost_usd", "fast_mode_state", "structured_output", "errors"]);
 
 interface StreamTextTails {
-  readonly drafts: Map<string, Map<number, string>>;
+  readonly drafts: Map<string, string>;
   readonly assistant: Map<string, string>;
   readonly projected: Map<string, string>;
   readonly messages: Map<string, { id: unknown; published: boolean }>;
@@ -75,6 +75,7 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   const draftTails = textTails?.drafts;
   const assistantTails = textTails?.assistant;
   let terminalText: { text: string; continues: boolean } | undefined;
+  let sanitizedText = false;
   if (textTails !== undefined && record.kind === "frame" && record.body.type === "assistant" && native?.type === "assistant"
     && credentials.hasProtectedValues()) {
     const message = asRecord(native.message);
@@ -89,6 +90,10 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
       }
       const content = message.content.map((block: unknown) => {
         const part = asRecord(block);
+        if (part?.type === "thinking") {
+          const { thinking: _omitted, ...rest } = part;
+          return rest;
+        }
         if (part?.type !== "text" || typeof part.text !== "string") return block;
         const ready = redactTextPart(textTails.assistant, lane, part.text, credentials);
         published ||= ready.trim() !== "";
@@ -96,10 +101,12 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
       });
       textTails.messages.set(lane, { id: message.id, published });
       const events = record.body.events.flatMap<RuntimeEventBody>(event => {
+        if (event.kind === "reasoning") return [];
         if (event.kind !== "text_delta") return [event];
         const ready = redactTextPart(textTails.projected, lane, event.text, credentials);
         return ready === "" ? [] : [{ ...event, text: ready }];
       });
+      sanitizedText = true;
       safe = { ...record, body: { ...record.body, native: { ...native, message: { ...message, content } }, events } };
     }
   }
@@ -112,17 +119,13 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
     if (event?.type === "message_start" || event?.type === "message_stop") draftTails?.delete(lane);
     if (draftTails !== undefined && (isStart || event?.type === "content_block_delta") && typeof event.index === "number"
       && textField !== undefined && typeof delta?.text === "string") {
-      const tails = draftTails.get(lane) ?? new Map<number, string>();
-      const { ready, pending } = credentials.redactChunk((tails.get(event.index) ?? "") + delta.text);
-      if (pending === "") tails.delete(event.index);
-      else tails.set(event.index, pending);
-      if (tails.size === 0) draftTails.delete(lane);
-      else draftTails.set(lane, tails);
+      const ready = redactTextPart(draftTails, lane, delta.text, credentials);
       const events = record.body.events.flatMap<RuntimeEventBody>(projected => {
         if (projected.kind !== "text_delta") return [projected];
         const text = textTails === undefined ? ready : redactTextPart(textTails.projected, lane, projected.text, credentials);
         return text === "" ? [] : [{ ...projected, text }];
       });
+      sanitizedText = true;
       safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, [fragmentField]: { ...delta, text: ready } } }, events } };
     }
     if ((isStart && delta?.type === "thinking") || (event?.type === "content_block_delta" && delta?.type === "thinking_delta")) {
@@ -138,7 +141,17 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   }
   let redacted = redactRuntimeRecord(safe, credentials.redactValue, path => isProjectedToolInput(safe, path), (path, value) => {
     const [body, native, field, group, block, member] = path;
-    if (body !== "body" || native !== "native" || record.kind !== "frame") return false;
+    if (body !== "body" || safe.kind !== "frame") return false;
+    if (sanitizedText && native === "events" && typeof field === "number" && path.length === 4
+      && group === "text" && safe.body.events[field]?.kind === "text_delta") return true;
+    if (native !== "native" || record.kind !== "frame") return false;
+    if (sanitizedText && record.body.type === "stream_event" && field === "event" && path.length === 5
+      && (group === "delta" || group === "content_block") && block === "text") return true;
+    if (sanitizedText && record.body.type === "assistant" && field === "message" && group === "content"
+      && typeof block === "number" && member === "text" && path.length === 6) {
+      const content = asRecord(asRecord(record.body.native)?.message)?.content;
+      if (Array.isArray(content) && asRecord(content[block])?.type === "text") return true;
+    }
     if (path.length === 3) {
       if (field === "type") return streamJsonMessageTypes.has(value);
       if (asRecord(record.body.native)?.type === "result") {
