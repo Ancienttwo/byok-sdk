@@ -227,7 +227,11 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
   }
   if (itemType !== "mcpToolCall" || method !== "item/completed") return safe;
   if (safeItem?.result === originalItem?.result && safeItem?.error === originalItem?.error) return safe;
-  const content = safeItem === null ? undefined : codexToolContent({ ...safeItem, type: "mcpToolCall" });
+  const originalError = asRecord(originalItem?.error);
+  const visibleError = asRecord(safeItem?.error);
+  const content = typeof visibleError?.message === "string" && typeof originalError?.message === "string"
+    ? [{ type: "text" as const, text: redact(`error: ${originalError.message}`) }]
+    : safeItem === null ? undefined : codexToolContent({ ...safeItem, type: "mcpToolCall" });
   const events = safe.body.events.map(event => {
     if (event.kind !== "tool_call_ended") return event;
     const { content: _original, ...rest } = event;

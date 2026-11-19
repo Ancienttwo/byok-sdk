@@ -97,6 +97,7 @@ export interface MapClaudeMessageOptions {
   context?: Record<string, unknown>;
   initModel?: string;
   agentPath?: readonly string[];
+  redactDiagnostic?: (text: string) => string;
 }
 
 export interface MapClaudeMessageResult {
@@ -427,7 +428,9 @@ function mapResult(msg: ClaudeStreamMessage, options: MapClaudeMessageOptions): 
   // used. `undefined` means the frame carried neither.
   const diagnostic =
     errors.length > 0 ? errors.join('; ') : typeof msg.result === 'string' && msg.result.length > 0 ? msg.result : undefined;
-  const message =
+  const redactDiagnostic = options.redactDiagnostic ?? ((text: string) => text);
+  const malformedDetail = diagnostic === undefined || msg.is_error === true ? diagnostic : redactDiagnostic(diagnostic);
+  const message = redactDiagnostic(
     msg.is_error === true
       ? (diagnostic ?? 'claude reported an error result')
       : // M4 hardening: a missing/invalid `is_error` is already fail-closed
@@ -442,9 +445,10 @@ function mapResult(msg: ClaudeStreamMessage, options: MapClaudeMessageOptions): 
         // frame actually said. Truncated defensively: this is an
         // unexpected/malformed frame shape, not the normal error path, so
         // the content could in principle be arbitrarily large.
-        diagnostic
-          ? `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed; diagnostic content on the frame: ${truncateResultDiagnostic(diagnostic)}`
-          : `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed`;
+        malformedDetail
+          ? `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed; diagnostic content on the frame: ${truncateResultDiagnostic(malformedDetail)}`
+          : `claude result frame had a missing/invalid is_error flag (got ${JSON.stringify(msg.is_error)}) — treating as failure, fail-closed`,
+  );
   const events: AgentEvent[] = usageEvent ? [usageEvent, { type: 'error', message }] : [{ type: 'error', message }];
   return {
     events,

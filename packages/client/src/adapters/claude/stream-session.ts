@@ -52,6 +52,8 @@ export class ClaudeStreamSession {
   readonly sessionRef: Promise<string>;
   hooksApplied: boolean | undefined;
   #raw: RawClaudeSession | undefined;
+  #redact = (text: string): string => text;
+  redactDiagnostic = (text: string): string => this.#redact(text);
   #effort: string | undefined;
   get effort(): string | undefined { return this.#effort; }
   #inputWrites: Promise<void>[] | undefined;
@@ -106,6 +108,7 @@ export class ClaudeStreamSession {
     };
     const redactor = sessionCredentialRedactor({ env: options.env, mcpServers });
     for (const key of options.credentials ?? []) redactor.addExplicit(key);
+    this.#redact = redactor.redact;
     this.#raw = await streamJsonSession(child, options.resume ?? randomUUID(), redactor, {
       projection: claudeProjectionProfile,
       initial: options.resume === undefined ? initialClaudeProjection : resumedClaudeProjection,

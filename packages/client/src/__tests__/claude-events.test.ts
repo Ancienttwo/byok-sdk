@@ -220,6 +220,17 @@ describe('mapClaudeMessageToAgentEvents', () => {
     expect(result.terminalFailure).toBeInstanceOf(RuntimeExecutionFailure);
   });
 
+  it('redacts a credential reconstructed by joining Claude result diagnostics', () => {
+    const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
+    const key = 'fixture-left; fixture-right';
+    const message: ClaudeStreamMessage = { type: 'result', subtype: 'error_during_execution', is_error: true,
+      errors: ['fixture-left', 'fixture-right'] };
+    const result = mapClaudeMessageToAgentEvents(message, correlation, {
+      workspaceDir: '/tmp/ws', redactDiagnostic: text => text.replaceAll(key, '[redacted]'),
+    });
+    expect(result.events).toEqual([{ type: 'error', message: '[redacted]' }]);
+  });
+
   it('maps a failed result that still carries partial usage to a usage AgentEvent followed by error', () => {
     const correlation: ToolUseCorrelation = { toolNameByUseId: new Map() };
     const msg: ClaudeStreamMessage = {

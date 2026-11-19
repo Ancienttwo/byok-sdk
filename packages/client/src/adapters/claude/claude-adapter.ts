@@ -768,7 +768,9 @@ class ClaudeSession implements Session {
                 // tools. One lookup per process; a failure leaves `mcp` absent.
                 await mcpIdentity.observe();
               }
-              const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir, agentPath, context, initModel: root ? stream.initModel : undefined });
+              const mapped = mapClaudeMessageToAgentEvents(value, correlation, {
+                workspaceDir, agentPath, context, initModel: root ? stream.initModel : undefined, redactDiagnostic: stream.redactDiagnostic,
+              });
               if (root) {
                 servedModel.observe(value);
                 if (value.type === 'result') {
