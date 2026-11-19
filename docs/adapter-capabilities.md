@@ -66,6 +66,19 @@ checks the running model's image support before delivery.
 | Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
 
+### MCP toolset search
+
+Search qualification additionally binds the installed version, host platform,
+SDK launch mode and lane. The `mcpToolsets` capability above describes the
+adapter's support for task-scoped toolsets.
+
+| Runtime | Ordinary search qualification |
+| --- | --- |
+| Pi, Claude, Codex, Grok, dsh, agy, OpenCode 1.x and 2.x | Closed in the initial qualification runs |
+
+The [runtime evidence](researches/2026-11-19-mcp-search-runtime-qualification.md)
+records the exact launch conditions and the unavailable combinations.
+
 ## Pi background subagents in packaged products (#1589)
 
 Bun-compiled executables with shipped install-root assets support native

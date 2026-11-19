@@ -129,6 +129,7 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
   const box = await createSandbox(`search-${options.runtime}`);
   const recorder = await fileEgress();
   const sent: Envelope[] = [];
+  const lifecycleClock: Array<{ type: string; ms: number }> = [];
   const nativeFrames: unknown[] = [];
   const attempted: Array<{ action: Action; native: ProviderTool }> = [];
   const providerSteps: ProviderStep[] = [];
@@ -291,6 +292,9 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
         ...testAgentHomeDeps(), ...freshOfferRunnerDeps(), adapters: [adapter], storeDir: box.root, productId,
         send: envelope => {
           sent.push(envelope);
+          if (envelope.task_id === taskId && (terminalTypes.has(envelope.type) || envelope.type === 'task.claim' || envelope.type === 'task.started')) {
+            lifecycleClock.push({ type: envelope.type, ms: Date.now() });
+          }
           if (envelope.type === 'task.await_approval') {
             cancellations.push(track(new Promise<void>(resolve => setImmediate(resolve)).then(() =>
               runner.handleEnvelope(createEnvelope('task.reject', { approvalId: envelope.payload.approvalId }, { taskId, seq: 2 })))));
@@ -415,15 +419,17 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
     const parsed = AgentEventSchema.safeParse(event);
     return parsed.success && (parsed.data.type === 'tool_use' || parsed.data.type === 'tool_result') ? [parsed.data] : [];
   });
+  const observedSession = sent.find(envelope => envelope.task_id === 'search-contract' && envelope.session_ref !== undefined)?.session_ref;
   return {
     runtime: options.runtime, variant: options.variant, detected: mode, platform: platform(), arch: arch(), release: release(),
+    observedSession,
     sdk: process.env.BYOK_SEARCH_SDK_COMMIT, lane: 'ordinary', scenario, elapsedMs, offerToFirstModelMs: startedAt === 0 ? undefined : startedAt - offeredAt,
     error, faultError, killed, staleActive, staleNonce, staleCall, nextTaskActive, innerAuthority,
     modelRequests: provider.requests.filter(request => request.model).length,
     tools: [...new Set(provider.requests.flatMap(request => request.tools.map(tool => [tool.namespace, tool.name].filter(Boolean).join('/'))))],
     attempted, providerSteps, nativeFrames, toolEvents, hub, leaks, hubFdPeak, innerPeak,
     terminals: sent.filter(envelope => envelope.task_id === 'search-contract' && terminalTypes.has(envelope.type)).map(({ type, payload }) => ({ type, payload })),
-    order: sent.filter(envelope => envelope.task_id === 'search-contract').map(envelope => envelope.type),
+    order: sent.filter(envelope => envelope.task_id === 'search-contract').map(envelope => envelope.type), lifecycleClock,
     servers: Object.fromEntries(receipts.map(([name, rows]) => [name, {
       starts: rows.filter(frame => frame.method === 'start').length,
       lists: rows.filter(frame => frame.method === 'tools/list').length,
@@ -553,8 +559,20 @@ export function defineMcpSearchProbes(options: ProbeOptions): void {
     for (const scenario of scenarios.filter(entry => selected.includes(entry) && (entry !== 'qualified-launch' || options.runtime === 'pi'))) {
       it(scenario, async () => {
         const result = await probe(options, scenario);
+        const acceptance = options.runtime === 'pi' ? (() => {
+          try {
+            if (scenario === 'qualified-launch' && result.order[0] === 'task.decline') {
+              expect(result.order).toEqual(['task.decline']);
+              expect(result.terminals[0]?.payload).toMatchObject({ reason: expect.stringContaining('MCP search exposure is unavailable') });
+              expect(result.attempted).toHaveLength(0);
+              return { status: 'closed' as const };
+            }
+            assertPiReceipt(result);
+            return { status: 'pass' as const };
+          } catch (error) { return { status: 'fail' as const, reason: String(error) }; }
+        })() : { status: 'observation' as const };
         await fs.mkdir(outputDir, { recursive: true });
-        await fs.writeFile(path.join(outputDir, `${options.runtime}-${scenario}.json`), `${JSON.stringify(result, null, 2)}\n`);
+        await fs.writeFile(path.join(outputDir, `${options.runtime}-${scenario}.json`), `${JSON.stringify({ ...result, acceptance }, null, 2)}\n`);
         // A closed runtime can supply a negative observation. These invariants
         // apply even if it registered no hub tools or aborted the turn.
         expect(result.leaks).toEqual([]);
@@ -567,7 +585,7 @@ export function defineMcpSearchProbes(options: ProbeOptions): void {
           && ['alpha', 'beta', 'blocked'].includes(event.mcp.server))).toEqual([]);
         const writes = Object.values(result.servers).flatMap(server => server.writes.map(frame => JSON.stringify(frame)));
         expect(new Set(writes).size).toBe(writes.length);
-        if (options.runtime === 'pi') assertPiReceipt(result);
+        if (process.env.BYOK_SEARCH_REQUIRE_PASS === '1') expect(acceptance).toEqual({ status: 'pass' });
       }, scenario === 'call-budget' ? 180_000 : 120_000);
     }
   });

@@ -2634,6 +2634,32 @@ snapshot before claim, and rejects missing ids or colliding server names.
 Runtime selection also requires an adapter that advertises `mcpToolsets`; no
 semantic fallback to a tool-less runtime exists.
 
+### Search exposure
+
+`McpToolsetConfig.exposure` defaults to `direct`. A qualified ordinary Attempt
+can select one or more `search` toolsets and receive one SDK-owned `byoktools`
+stdio server. Selected direct toolsets keep their native names and mounting.
+If a selected server occupies the hub name, admission declines the search
+Attempt before claim. The name remains available in direct-only tasks.
+
+- `tool_search({ query })` freezes the selected search catalog on first use.
+  It searches names and descriptions lexically and returns up to five
+  `{ server, tool, description, inputSchema }` entries within a 256 KiB budget.
+- `call_tool({ server, tool, arguments })` requires the exact server and tool
+  from that frozen catalog. It validates the inner arguments and routes the
+  call over stdio using the task's workspace and the target server's private
+  launch context. The hub checks task liveness before dispatch.
+- SDK tool authorization uses the inner identity and arguments. The existing
+  `mcp` field on a qualified hub `tool_use` identifies the inner attempt when
+  the outer identity, call ID, raw arguments and frozen catalog agree.
+  `tool_search` and hub `tool_result` events keep the outer identity. A target
+  server receipt establishes execution.
+
+Search is qualified only for the combinations in the
+[adapter capabilities](adapter-capabilities.md#mcp-toolset-search) table.
+Prepared inputs, native-sessions, durable lanes, and injected adapters require
+`direct`.
+
 `command` must be an absolute path. A definition carrying a bare name, a
 relative path (`mcp_toolset_command_not_absolute`) or a command starting with
 `-` (`mcp_toolset_command_option_like`) is rejected when it enters the registry
