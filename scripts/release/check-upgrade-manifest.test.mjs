@@ -34,6 +34,20 @@ test('keys store digest changes when the provider catalog gains a kind', (t) => 
   assert.notEqual(store.format(root, store.source), before);
 });
 
+test('keys store digest changes when the credential metadata DDL changes', (t) => {
+  const root = mkdtempSync(path.join(tmpdir(), 'byok-keys-metadata-digest-'));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  cpSync(path.join(repo, 'packages/keys/src'), path.join(root, 'packages/keys/src'), { recursive: true });
+  const store = STORES.find((entry) => entry.id === 'keys-profile-store');
+  const before = store.format(root, store.source);
+  const source = path.join(root, store.source);
+  const ddl = readFileSync(source, 'utf8');
+  const modified = ddl.replace('credential_namespace_id TEXT NOT NULL', 'credential_namespace_id TEXT NOT NULL UNIQUE');
+  assert.notEqual(modified, ddl);
+  writeFileSync(source, modified);
+  assert.notEqual(store.format(root, store.source), before);
+});
+
 function fixture(t) {
   const root = mkdtempSync(path.join(tmpdir(), 'byok-upgrade-manifest-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));

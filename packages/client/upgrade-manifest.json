@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "c016de7b5b7466ffd3f837d30ff7c7a7c83ff9fc6a4b717a810f4f794daa2a36"
+    "snapshotSha256": "449f0f21e381ef087f328fac56478e7748fe2a374002c2c8534555944d2d8cf0"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,29 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "provider-store-credential-namespace",
+      "impact": "breaking",
+      "acceptance": "new-path-repair",
+      "summary": "@byok-sdk/keys requires a credential namespace in each provider store. Existing stores return PROVIDER_STORE_SCHEMA_STALE. Preserve the old database, create a fresh store on a new path and re-enter provider keys. Automatic credential cleanup requires a recognized namespaced retired store.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#provider-store-credential-namespace",
+      "items": [
+        "export:@byok-sdk/keys#InMemoryProviderProfileStore",
+        "export:@byok-sdk/keys#ProviderProfileStore",
+        "export:@byok-sdk/keys#SqliteProviderProfileStore",
+        "export:@byok-sdk/keys#removeRetiredProviderCredentials",
+        "store:keys-profile-store"
+      ]
+    },
+    {
+      "id": "provider-credential-scope-binding",
+      "impact": "breaking",
+      "summary": "ProviderRegistry, applySealedProviderProvisioning, runPiProviderLauncher and the bundled Pi launcher scope the Host's base credential store to the selected database's namespace. Pass the base scope and upgrade the Host and launcher together.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#provider-store-credential-namespace",
+      "items": [
+        "behavior:provider-credential-scope-binding"
+      ]
+    },
     {
       "id": "model-list-unreachable",
       "impact": "additive",
@@ -30,6 +53,33 @@
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "model-list-unreachable"
+    },
+    {
+      "item": "export:@byok-sdk/keys#InMemoryProviderProfileStore",
+      "change": "changed",
+      "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/keys#ProviderProfileStore",
+      "change": "changed",
+      "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/keys#SqliteProviderProfileStore",
+      "change": "changed",
+      "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/keys#removeRetiredProviderCredentials",
+      "change": "added",
+      "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "store:keys-profile-store",
+      "change": "changed",
+      "before": "ddl-sha256=7c5c4e5f67ea8b36",
+      "after": "ddl-sha256=56993ed09c60b513",
+      "entry": "provider-store-credential-namespace"
     }
   ]
 }

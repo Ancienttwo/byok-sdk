@@ -435,6 +435,7 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
   }
 
   async list(): Promise<ModelProviderProfile[]> {
+    // SAFETY: the query selects the verified profile table, and parseRow validates its profile values.
     const rows = this.#database
       .prepare('SELECT * FROM provider_profile ORDER BY profile_ref ASC')
       .all() as unknown as ProfileRow[];
@@ -739,19 +740,21 @@ export class SqliteProviderProfileStore implements ProviderProfileStore {
  */
 function parseRow(row: ProfileRow): ModelProviderProfile {
   let capabilities: unknown;
+  let piModel: unknown;
   try {
     capabilities = JSON.parse(row.capabilities);
+    piModel = row.pi_model === null ? undefined : JSON.parse(row.pi_model);
   } catch (cause) {
     throw new ByokKeysError(
       'PROVIDER_PROFILE_INVALID',
-      'Provider profile capabilities column is not valid JSON',
+      'Provider profile contains malformed capabilities or pi_model JSON',
       { cause },
     );
   }
   return parseModelProviderProfile({
     ...row,
-    pi_model: row.pi_model === null ? undefined : JSON.parse(row.pi_model),
     capabilities,
+    pi_model: piModel,
     enabled: row.enabled === 1,
   });
 }
