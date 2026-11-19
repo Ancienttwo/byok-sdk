@@ -37,6 +37,7 @@ export declare const resumedClaudeProjection: ClaudeProjectionState;
 export interface ClaudeCredentialRedactor {
   values(this: void): readonly string[];
   hasProtectedValues(this: void): boolean;
+  matches(this: void, text: string): boolean;
   redactChunk(this: void, text: string): { readonly ready: string; readonly pending: string };
   add(this: void, value: string | undefined): void;
   addExplicit(this: void, value: string): void;
