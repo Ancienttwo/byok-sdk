@@ -9,6 +9,7 @@ import type { Runner } from '../util/exec-runner';
 import type { ServiceDefinition, ServiceLifecycle } from '../lifecycle/service-types';
 import {
   claimServiceLifecycleOwner,
+  claimHeldServiceLifecycleOwner,
   generateServiceLauncher,
   readServiceLifecycleOwner,
   releaseServiceLifecycleOwner,
@@ -16,6 +17,7 @@ import {
   ServiceUnitError,
   withServiceOwnerGate,
   type ServiceOwnerFs,
+  type ServiceRegistration,
 } from '../lifecycle/service-unit';
 import { acquireDaemonOwner, DAEMON_OWNER_FILENAME, type DaemonOwnerLease } from '../util/daemon-owner';
 import * as mutationGate from '../util/path-mutation-gate';
@@ -78,6 +80,10 @@ async function codeOf(promise: Promise<unknown>): Promise<string | undefined> {
 
 describe('inspectStoreServiceState (#2421)', () => {
   const owner = { owner: 'cli', service: 'production' };
+  const registrations = { darwin: { manager: 'launchd', uid: 501 }, linux: { manager: 'systemd' }, win32: { manager: 'winsw' } } as const;
+  function claim(storeDir: string, registration: ServiceRegistration) {
+    return withServiceOwnerGate(() => claimHeldServiceLifecycleOwner({ storeDir, ...owner }, nodeFs, registration));
+  }
   const cases = [
     { platform: 'darwin', command: 'launchctl', args: ['print', 'gui/501/production'], stopped: { code: 0, stdout: 'state = waiting', stderr: '' }, running: 'state = running' },
     { platform: 'linux', command: 'systemctl', args: ['--user', 'is-active', 'production.service'], stopped: { code: 3, stdout: 'inactive', stderr: '' }, running: 'active' },
@@ -97,15 +103,14 @@ describe('inspectStoreServiceState (#2421)', () => {
   describe.each(cases)('$platform', ({ platform, command, args, stopped, running }) => {
     function manager(result = stopped as { code: number; stdout: string; stderr: string }) {
       const run = vi.fn<Runner>().mockImplementation(async (binary, argv) => {
-        if (platform === 'win32' && binary === 'powershell') return { code: 0, stdout: '', stderr: '' };
         expect([binary, argv]).toEqual([command, args]);
         return result;
       });
-      return { run, getuid: () => 501 };
+      return { run, getuid: () => 999 };
     }
 
     it('returns stopped only with a recorded owner, a stopped service and a free store', () => withStore(async storeDir => {
-      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      await claim(storeDir, registrations[platform]);
       const deps = manager();
       expect(await inspectStoreServiceStateWith(storeDir, platform, deps)).toEqual({ state: 'stopped', owner });
       expect(deps.run).toHaveBeenCalledWith(command, args);
@@ -113,14 +118,14 @@ describe('inspectStoreServiceState (#2421)', () => {
     }));
 
     it('queries the service recorded for the store, even when a different installation is stopped', () => withStore(async storeDir => {
-      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      await claim(storeDir, registrations[platform]);
       const deps = manager({ code: 0, stdout: running, stderr: '' });
       expect(await inspectStoreServiceStateWith(storeDir, platform, deps)).toEqual({ state: 'running', owner });
       expect(deps.run).toHaveBeenCalledWith(command, args);
     }));
 
     it('returns running for a held store mutex even before its owner marker is published', () => withStore(async storeDir => {
-      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      await claim(storeDir, registrations[platform]);
       const lease = await acquireDaemonOwner(storeDir, 'daemon');
       const marker = path.join(storeDir, DAEMON_OWNER_FILENAME);
       const saved = `${marker}.saved`;
@@ -133,13 +138,13 @@ describe('inspectStoreServiceState (#2421)', () => {
     }));
 
     it('returns unknown when the service query fails', () => withStore(async storeDir => {
-      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      await claim(storeDir, registrations[platform]);
       expect(await inspectStoreServiceStateWith(storeDir, platform, manager({ code: 37, stdout: '', stderr: 'unknown failure' })))
         .toEqual({ state: 'unknown', owner });
     }));
 
     it('returns unknown for an unreadable lock marker and leaves it in place', () => withStore(async storeDir => {
-      await claimServiceLifecycleOwner({ storeDir, ...owner });
+      await claim(storeDir, registrations[platform]);
       const marker = path.join(storeDir, DAEMON_OWNER_FILENAME);
       await nodeFs.writeFile(marker, 'corrupt');
       expect(await inspectStoreServiceStateWith(storeDir, platform, manager())).toEqual({ state: 'unknown', owner });
@@ -147,12 +152,28 @@ describe('inspectStoreServiceState (#2421)', () => {
     }));
   });
 
-  it('recognizes a live Windows Startup launcher when SCM reports the service absent', () => withStore(async storeDir => {
-    await claimServiceLifecycleOwner({ storeDir, ...owner });
-    const run = vi.fn<Runner>().mockImplementation(async command => command === 'sc.exe'
-      ? { code: 1060, stdout: '', stderr: '' } : { code: 0, stdout: '123', stderr: '' });
+  it('uses the recorded Windows Startup launcher spelling even if the caller uses a different store path', () => withStore(async storeDir => {
+    const launcher = 'C:\\install-alias\\store\\service\\production.launcher.cmd';
+    await claim(storeDir, { manager: 'windows-user', launcher });
+    const run = vi.fn<Runner>().mockResolvedValue({ code: 0, stdout: '123', stderr: '' });
     expect(await inspectStoreServiceStateWith(storeDir, 'win32', { run })).toEqual({ state: 'running', owner });
-    expect(run).toHaveBeenCalledWith('powershell', expect.arrayContaining([expect.stringContaining('production.launcher.cmd')]));
+    expect(run).toHaveBeenCalledExactlyOnceWith('powershell', expect.arrayContaining([expect.stringContaining(launcher)]));
+  }));
+
+  it('does not infer a launchd GUI domain for a legacy owner record', () => withStore(async storeDir => {
+    await claimServiceLifecycleOwner({ storeDir, ...owner });
+    const run = vi.fn<Runner>().mockResolvedValue({ code: 113, stdout: '', stderr: 'Could not find service' });
+    expect(await inspectStoreServiceStateWith(storeDir, 'darwin', { run, getuid: () => 999 })).toEqual({ state: 'unknown', owner });
+  }));
+
+  it.skipIf(process.platform === 'win32')('does not follow a service owner record symlink', () => withStore(async storeDir => {
+    await claim(storeDir, registrations.darwin);
+    const marker = path.join(storeDir, 'service', 'lifecycle-owner.json');
+    await nodeFs.rename(marker, `${marker}.other`);
+    await nodeFs.symlink(`${marker}.other`, marker);
+    const run = vi.fn<Runner>();
+    expect(await inspectStoreServiceStateWith(storeDir, 'darwin', { run })).toEqual({ state: 'unknown' });
+    expect(run).not.toHaveBeenCalled();
   }));
 });
 

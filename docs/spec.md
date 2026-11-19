@@ -1192,8 +1192,9 @@ retry; the gate frees itself when its holder process exits.
 `inspectStoreServiceState(storeDir)` reads the lifecycle owner for an absolute
 store directory and queries that recorded service. It reports `running` if
 the manager or the store lock shows a live process. It reports `stopped` only
-when the owner is known, the platform confirms a stop or absence, and the lock
-is clear. Otherwise it reports `unknown`. This observation holds no reservation
+when the manager confirms a stop or absence in the recorded registration and
+the lock is clear. Legacy records without enough manager identity yield
+`unknown` when there is no live evidence. This observation holds no reservation
 against a later start. A Host performing recovery must hold exclusive store
 ownership for its writes.
 

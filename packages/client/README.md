@@ -39,7 +39,10 @@ if (status.state !== 'stopped') {
 The result includes the recorded `owner` and `service` when available.
 A live service or lock gives `running`. A missing owner, unreadable lock
 or unresolved service status gives `unknown` in the absence of live evidence.
-This query observes current state. Keep the service stopped and hold exclusive
+Older macOS and Windows installs may lack the registration details needed to
+confirm a stop. Rerun the SDK-managed install for the same store and service
+to record those details. This query observes current state. Keep the service
+stopped and hold exclusive
 store ownership through the recovery write.
 
 ## Exact provider-profile admission

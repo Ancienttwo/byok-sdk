@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { promises as fsp } from 'node:fs';
+import { constants as fsConstants, promises as fsp } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import path from 'node:path';
 import { acquirePathMutationGate, PathMutationGateBusyError, withGateReleaseFailures } from '../util/path-mutation-gate.js';
 import { PlatformCommandTimeoutError } from '../util/command-timeouts.js';
@@ -210,10 +211,16 @@ export async function classifyServiceUnit(fs: ServiceUnitFs, expected: readonly 
 
 const OWNER_RECORD_FILENAME = 'lifecycle-owner.json';
 
+export type ServiceRegistration =
+  | { readonly manager: 'launchd'; readonly uid: number }
+  | { readonly manager: 'systemd' | 'winsw' }
+  | { readonly manager: 'windows-user'; readonly launcher: string };
+
 interface OwnerRecord {
   version: 1;
   owner: string;
   service: string;
+  registration?: ServiceRegistration;
 }
 
 export interface ServiceLifecycleOwnerInput {
@@ -236,23 +243,70 @@ function ownerRecordPath(storeDir: string): string {
  * no owner holds it.
  */
 export async function readServiceLifecycleOwner(storeDir: string, fs: ServiceOwnerFs = fsp): Promise<{ owner: string; service: string } | undefined> {
-  let text: string | undefined;
+  const record = await readOwnerRecord(storeDir, fs);
+  return record === undefined ? undefined : { owner: record.owner, service: record.service };
+}
+
+async function readOwnerRecord(storeDir: string, fs: ServiceUnitFs): Promise<OwnerRecord | undefined> {
   try {
-    text = await readOptional(fs, ownerRecordPath(storeDir));
+    const text = await readOptional(fs, ownerRecordPath(storeDir));
+    return text === undefined ? undefined : parseOwnerRecord(text);
   } catch {
     throw new ServiceUnitError('lifecycle_owner_unreadable');
   }
-  if (text === undefined) return undefined;
-  let record: Partial<OwnerRecord>;
+}
+
+function parseOwnerRecord(text: string): OwnerRecord {
+  const record = JSON.parse(text) as OwnerRecord | null;
+  if (record?.version !== 1 || typeof record.owner !== 'string' || !OWNER_PATTERN.test(record.owner) || typeof record.service !== 'string') {
+    throw new ServiceUnitError('lifecycle_owner_unreadable');
+  }
+  const registration = record.registration;
+  if (registration !== undefined && !validRegistration(registration)) throw new ServiceUnitError('lifecycle_owner_unreadable');
+  return record;
+}
+
+function validRegistration(value: ServiceRegistration): boolean {
+  switch (value?.manager) {
+    case 'launchd': return Number.isSafeInteger(value.uid) && value.uid >= 0;
+    case 'systemd':
+    case 'winsw': return true;
+    case 'windows-user': return typeof value.launcher === 'string' && path.win32.isAbsolute(value.launcher) && !hasControlChar(value.launcher);
+    default: return false;
+  }
+}
+
+/** Inspect an owner record without following symlinks or blocking on a special file. @internal */
+export async function inspectServiceOwnerRecord(storeDir: string): Promise<OwnerRecord | undefined> {
+  const file = ownerRecordPath(storeDir);
+  const dir = await fsp.lstat(path.dirname(file)).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (dir === undefined) return undefined;
+  if (!dir.isDirectory()) throw new ServiceUnitError('lifecycle_owner_unreadable');
+  const named = await fsp.lstat(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+    return undefined;
+  });
+  if (named === undefined) return undefined;
+  if (!named.isFile()) throw new ServiceUnitError('lifecycle_owner_unreadable');
+  const handle = await fsp.open(file, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0) | (fsConstants.O_NOFOLLOW ?? 0));
   try {
-    record = JSON.parse(text) as Partial<OwnerRecord>;
-  } catch {
-    throw new ServiceUnitError('lifecycle_owner_unreadable');
+    const opened = await handle.stat();
+    if (!opened.isFile() || named.dev !== opened.dev || named.ino !== opened.ino || opened.size > 8192) {
+      throw new ServiceUnitError('lifecycle_owner_unreadable');
+    }
+    const buffer = Buffer.alloc(opened.size);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    const after = await fsp.lstat(file);
+    if (!after.isFile() || after.dev !== opened.dev || after.ino !== opened.ino || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs || bytesRead !== buffer.length) {
+      throw new ServiceUnitError('lifecycle_owner_unreadable');
+    }
+    return parseOwnerRecord(buffer.toString('utf8'));
+  } finally {
+    await handle.close();
   }
-  if (record.version !== 1 || typeof record.owner !== 'string' || !OWNER_PATTERN.test(record.owner) || typeof record.service !== 'string') {
-    throw new ServiceUnitError('lifecycle_owner_unreadable');
-  }
-  return { owner: record.owner, service: record.service };
 }
 
 /**
@@ -313,14 +367,15 @@ export async function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInp
  *
  * @internal
  */
-export async function claimHeldServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs): Promise<void> {
-  const current = await readServiceLifecycleOwner(input.storeDir, fs);
+export async function claimHeldServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs: ServiceOwnerFs, registration?: ServiceRegistration): Promise<void> {
+  const current = await readOwnerRecord(input.storeDir, fs);
   if (current !== undefined && current.owner !== input.owner) throw new ServiceUnitError('lifecycle_owner_conflict');
-  if (current?.service === input.service) return;
+  if (current?.service === input.service && (registration === undefined || isDeepStrictEqual(registration, current.registration))) return;
+  if (registration !== undefined && !validRegistration(registration)) throw new ServiceUnitError('lifecycle_owner_unreadable');
   const file = ownerRecordPath(input.storeDir);
   await fs.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
   const tmp = `${file}.${randomUUID()}.tmp`;
-  const record: OwnerRecord = { version: 1, owner: input.owner, service: input.service };
+  const record: OwnerRecord = { version: 1, owner: input.owner, service: input.service, ...(registration === undefined ? {} : { registration }) };
   await fs.writeFile(tmp, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600 });
   try {
     await fs.rename(tmp, file);

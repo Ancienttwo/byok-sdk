@@ -77,8 +77,8 @@ async function queryLauncher(launcherPath: string, run: Runner) {
 }
 
 /** Check the launcher path a user-scope install registers for this store. @internal */
-export async function queryWindowsUserService(storeDir: string, name: string, { run = defaultRunner }: WindowsUserDeps = {}): Promise<ServiceManagerQuery> {
-  const { running, determinate, detail } = await queryLauncher(serviceLauncherPath(storeDir, name, 'win32'), run);
+export async function queryWindowsUserService(launcherPath: string, { run = defaultRunner }: WindowsUserDeps = {}): Promise<ServiceManagerQuery> {
+  const { running, determinate, detail } = await queryLauncher(launcherPath, run);
   return { running, determinate, detail };
 }
 
@@ -152,6 +152,7 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
 
   return createManagedLifecycle(def, {
     serviceName: name,
+    registration: () => ({ manager: 'windows-user', launcher: launcherPath }),
     unitPath,
     launcherPath,
     files: () => [
@@ -171,6 +172,6 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
     },
     start,
     stop,
-    query: () => queryWindowsUserService(def.storeDir, name, { run }),
+    query: () => queryWindowsUserService(launcherPath, { run }),
   }, fs, gateRoot);
 }

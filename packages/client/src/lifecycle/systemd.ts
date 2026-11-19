@@ -202,6 +202,7 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
 
   return createManagedLifecycle(def, {
     serviceName: name,
+    registration: () => ({ manager: 'systemd' }),
     unitPath,
     launcherPath,
     files: () => [
@@ -251,7 +252,8 @@ export async function querySystemdService(name: string, { run = defaultRunner }:
     if (result.code === 0 && (state === 'active' || state === 'reloading' || state === 'refreshing')) {
       return { running: true, determinate: true, detail: state };
     }
-    if (result.code === SYSTEMCTL_UNIT_NOT_FOUND || (result.code === SYSTEMCTL_NOT_RUNNING && (state === 'inactive' || state === 'failed'))) {
+    if ((result.code === SYSTEMCTL_UNIT_NOT_FOUND && (state === 'inactive' || state === 'unknown'))
+      || (result.code === SYSTEMCTL_NOT_RUNNING && (state === 'inactive' || state === 'failed'))) {
       return { running: false, determinate: true, detail: state || result.stderr.trim() };
     }
   }

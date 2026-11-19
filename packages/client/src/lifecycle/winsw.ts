@@ -266,6 +266,7 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
 
   return createManagedLifecycle(def, {
     serviceName: id,
+    registration: () => ({ manager: 'winsw' }),
     unitPath: xmlPath,
     launcherPath: exePath,
     files: () => [{ path: xmlPath, content: generateWinswXml({ id, displayName: def.displayName ?? def.name, program: def.program, logDir: def.logDir }) }],

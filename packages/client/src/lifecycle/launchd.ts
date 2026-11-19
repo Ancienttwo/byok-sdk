@@ -243,6 +243,7 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
 
   return createManagedLifecycle(def, {
     serviceName: label,
+    registration: () => ({ manager: 'launchd', uid: getuid() }),
     unitPath: plistPath,
     launcherPath,
     files: () => [

@@ -10,6 +10,7 @@ import {
   ServiceUnitError,
   throwPublicCommandTimeout,
   withServiceOwnerGate,
+  type ServiceRegistration,
   type ServiceUnitFile,
   type ServiceUnitInspection,
 } from './service-unit.js';
@@ -20,6 +21,7 @@ export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readF
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {
   serviceName: string;
+  registration?(): ServiceRegistration;
   unitPath: string;
   launcherPath: string;
   /** The unit first, then the launcher, with their exact expected content. */
@@ -133,7 +135,7 @@ export function createManagedLifecycle(def: ServiceDefinition, platform: Platfor
     const { state } = await inspect();
     if (state === 'foreign' && opts.replaceUnmarked !== true) throw new ServiceUnitError('service_unit_unmarked');
     await requireOwner();
-    await claimHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner, service: unit.serviceName }, fs);
+    await claimHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner, service: unit.serviceName }, fs, unit.registration?.());
     await writeFiles();
     await unit.activate();
   }

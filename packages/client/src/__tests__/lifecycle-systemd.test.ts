@@ -347,6 +347,7 @@ describe('lifecycle/systemd: createSystemdLifecycle', () => {
   it.each([
     [37, '', 'Unexpected failure'],
     [3, 'deactivating', ''],
+    [4, 'active', ''],
     [4, 'inactive', 'Failed to connect to bus: No such file or directory'],
   ])('leaves unknown or conflicting systemd exit %d indeterminate', async (code, stdout, stderr) => {
     const run = vi.fn<Runner>().mockResolvedValue(fail(code, stdout, stderr));
