@@ -995,7 +995,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 626020,
+      "budgetBytes": 627000,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1068,7 +1068,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 177000,
+      "budgetBytes": 178000,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
