@@ -94,7 +94,7 @@ test('a published file that names the install store fails the release pack', () 
   assertNoStorePaths('@byok-sdk/client', tarball('__esm({"node_modules/typebox/build/guard/string.mjs"(){}})'));
 });
 
-test('release graph requires keys to carry the release train version', (t) => {
+test('release graph rejects dev-only declaration dependencies and off-train keys versions', (t) => {
   // Run the real graph check on a copy of its inputs, so keys can move off the
   // train version without touching the checkout.
   const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
@@ -105,7 +105,7 @@ test('release graph requires keys to carry the release train version', (t) => {
   const releaseVersion = manifestOf('packages/core').version;
   const keysRecord = /("packages\/keys": \{\r?\n\s+"name": "@byok-sdk\/keys",\r?\n\s+"version": ")[^"]+(")/;
   assert.match(lockText, keysRecord);
-  const runGraph = (keysVersion, mutatePiRecord, omitCore = false) => {
+  const runGraph = (keysVersion, mutatePiRecord, referenceDevOnlyCloud = false) => {
     const root = mkdtempSync(path.join(os.tmpdir(), 'byok-release-graph-'));
     t.after(() => rmSync(root, { recursive: true, force: true }));
     const copy = (relative) => {
@@ -131,11 +131,11 @@ test('release graph requires keys to carry the release train version', (t) => {
       mkdirSync(path.join(root, directory, 'dist'));
     }
     copy('packages/bot-collaboration/dist/store-compatibility.d.ts');
-    if (omitCore) {
+    if (referenceDevOnlyCloud) {
       const declaration = path.join(root, 'packages/bot-collaboration/dist/store-compatibility.d.ts');
       const contents = readFileSync(declaration, 'utf8');
       assert.match(contents, /@byok-sdk\/client/);
-      writeFileSync(declaration, contents.replace('@byok-sdk/client', '@byok-sdk/core'));
+      writeFileSync(declaration, contents.replace('@byok-sdk/client', '@byok-sdk/cloud'));
     }
     // The purity audit resolves the installed client dependencies.
     for (const directory of ['', 'packages/client']) {
@@ -157,9 +157,9 @@ test('release graph requires keys to carry the release train version', (t) => {
   assert.equal(aligned.status, 0, aligned.stderr);
   assert.match(aligned.stdout, /\[release-graph\] OK: published set is exactly 9 packages at /);
 
-  const missingCore = runGraph(releaseVersion, undefined, true);
-  assert.equal(missingCore.status, 1);
-  assert.match(missingCore.stderr, /store-compatibility\.d\.ts: @byok-sdk\/core is referenced by a published declaration but missing from dependencies or peerDependencies/);
+  const missingCloud = runGraph(releaseVersion, undefined, true);
+  assert.equal(missingCloud.status, 1);
+  assert.match(missingCloud.stderr, /store-compatibility\.d\.ts: @byok-sdk\/cloud is referenced by a published declaration but missing from dependencies or peerDependencies/);
 
   const split = runGraph('0.13.1');
   assert.equal(split.status, 1);
