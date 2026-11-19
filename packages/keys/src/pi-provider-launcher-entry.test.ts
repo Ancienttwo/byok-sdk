@@ -120,7 +120,7 @@ async function fixture(overrides: Partial<ModelProviderProfileInput> = {}) {
     envKey: string | null;
     receipt: { type: string; configDigest: string; secret: string | null };
     model: string;
-    models: { providers: Record<string, { apiKey?: string; authHeader?: boolean; models: Array<{ id: string }> }> };
+    models: { providers: Record<string, { apiKey?: string; authHeader?: boolean; models: Array<{ id: string; input: string[] }> }> };
   };
   return { root, profile, profileDb, projection, launch, launchArgs, validate, childOutput, namespaceId: writer.credentialNamespaceId };
 }
@@ -224,6 +224,20 @@ describe.skipIf(!(isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1'
       expect(output.models.providers['byok-sdk-local']?.models[0]?.id).toBe(output.model);
       expect(output.receipt.secret).toBe(CANARY);
     }
+  });
+
+  it('projects the selected catalog model input instead of the saved model input', async () => {
+    const f = await fixture({ provider_kind: 'openrouter', base_url: 'https://openrouter.ai/api/v1',
+      model: 'amazon/nova-lite-v1', capabilities: ['image-input'] });
+    const host = { createSecretStore: () => hostKeychain(HOST_PREFIX).store };
+    const options = f.launch();
+    const readInput = async () => (await f.childOutput()).models.providers['byok-sdk-local']?.models[0]?.input;
+    await expect(runPiProviderLauncher({ ...options, modelId: 'amazon/nova-micro-v1',
+      expectedBinding: exactProviderProfileBinding(f.profile, []) }, host)).resolves.toBe(CHILD_EXIT_CODE);
+    expect(await readInput()).toEqual(['text']);
+    await expect(runPiProviderLauncher({ ...options, modelId: 'amazon/nova-pro-v1',
+      expectedBinding: exactProviderProfileBinding(f.profile) }, host)).resolves.toBe(CHILD_EXIT_CODE);
+    expect(await readInput()).toEqual(['text', 'image']);
   });
 
   it('refuses an invalid database identity at admission before the host store is built', async () => {

@@ -475,7 +475,6 @@
 //   isKnownAgentEvent -> dist/agent-event.d.ts
 //   isPairingText -> dist/http-api.d.ts
 //   isPreparedAgentMemoryMode -> dist/capability-constants.d.ts
-//   isProviderProfileModelId -> dist/constants.d.ts
 //   isSealableMessageType -> dist/sealed-split-table.d.ts
 //   isSealedPayload -> dist/sealed-split-table.d.ts
 //   isSealedTaskPlainOutput -> dist/sealed-payload.d.ts
@@ -560,7 +559,6 @@
 //   TruncateOptions -> dist/failure-reason.d.ts
 //   boundFailureReason -> dist/failure-reason.d.ts
 //   isPreparedAgentMemoryMode -> dist/capability-constants.d.ts
-//   isProviderProfileModelId -> dist/constants.d.ts
 //   redactSecrets -> dist/failure-reason.d.ts
 //   truncateUtf8 -> dist/failure-reason.d.ts
 // ==== @byok-sdk/protocol dist/agent-egress.d.ts ====
@@ -2204,7 +2202,6 @@ export declare const AGENT_MEMORY_MAX_SNAPSHOT_FILES = 128;
 export declare const AGENT_MEMORY_MAX_FILE_BYTES: number;
 export declare const AGENT_MEMORY_MAX_SNAPSHOT_ENTRIES = 512;
 export declare const RESIDENT_MEMORY_MAX_BYTES: number;
-export declare function isProviderProfileModelId(value: unknown): value is string;
 export declare const RUNTIME_IDS: readonly ["pi", "claude", "codex"];
 export declare const RUNTIME_UNAVAILABLE_CAUSES: readonly ["not_installed", "not_executable", "probe_timeout", "probe_failed", "app_server_unavailable", "acp_unavailable", "platform_unsupported", "environment_unavailable", "version_blocked", "runtime_not_configured", "runtime_not_allowed", "none_available", "agent_user_context_unavailable"];
 export type RuntimeUnavailableCause = (typeof RUNTIME_UNAVAILABLE_CAUSES)[number];

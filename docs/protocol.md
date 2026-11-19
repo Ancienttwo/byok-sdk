@@ -844,7 +844,10 @@ mode on the durable lane. The binding carries the opaque local `profileRef`,
 canonical decimal `profileRevision`, lowercase SHA-256 `profileHash`, and
 `requiredCapabilities`. The hash covers the normalized non-secret profile,
 including its default model. `selection.modelId` overrides that default for
-this task while keeping the profile's endpoint, API, settings, and capabilities.
+this task while keeping the profile's endpoint, API, and settings. For an
+override, the pinned Pi catalog must verify any required image input capability.
+A missing or insufficient catalog entry with that requirement is declined as
+non-retryable `model_unavailable`.
 The credential launcher checks the exact binding before resolving the key for
 the launch. A Host may derive the binding from the persisted profile using
 `exactProviderProfileBinding` from `@byok-sdk/keys`.

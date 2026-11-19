@@ -31,6 +31,7 @@
       "bareImports": [
         "@byok-sdk/client",
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sealed-payload",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
@@ -348,6 +349,7 @@
         "@byok-sdk/client",
         "@byok-sdk/cloud",
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sealed-payload",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
@@ -508,6 +510,7 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sealed-payload",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
@@ -634,6 +637,7 @@
         "packages/client/dist/adapters/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
         "fs",
@@ -1019,6 +1023,7 @@
         "packages/client/dist/testing/index.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
         "fs",
@@ -1357,6 +1362,7 @@
         "packages/client/dist/bin/pi-runtime-host.d.ts"
       ],
       "bareImports": [
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol",
@@ -1578,22 +1584,22 @@
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 38,
+          "line": 39,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 38,
+          "line": 39,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 38,
+          "line": 39,
           "rule": "opaque import()"
         },
         {
           "file": "packages/client/dist/bin/pi-runtime-host.js",
-          "line": 38,
+          "line": 39,
           "rule": "opaque import()"
         },
         {
@@ -1704,6 +1710,7 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
         "hono",
@@ -1789,6 +1796,7 @@
       "bareImports": [
         "@byok-sdk/cloud",
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
         "aws4fetch",
@@ -1947,6 +1955,7 @@
       "bareImports": [
         "@byok-sdk/cloud",
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
         "aws4fetch",
@@ -2131,6 +2140,39 @@
       "codegen": []
     }
   },
+  "@byok-sdk/core/provider-model": {
+    "kind": "exports",
+    "policy": {
+      "purpose": "Shared provider model validation and failure classification",
+      "budgetBytes": 2048,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": false,
+        "thirdParty": false
+      },
+      "thirdParty": []
+    },
+    "facts": {
+      "target": "packages/core/dist/provider-model.js",
+      "conditions": [
+        "import"
+      ],
+      "types": [
+        "packages/core/dist/provider-model.d.ts"
+      ],
+      "bareImports": [],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
   "@byok-sdk/core/sealed-payload": {
     "kind": "exports",
     "policy": {
@@ -2264,7 +2306,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 263342,
+      "budgetBytes": 285000,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2285,6 +2327,7 @@
       ],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "child_process",
@@ -2653,6 +2696,7 @@
         "#byok-embedded-blob-storage",
         "@byok-sdk/cloud",
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
@@ -2931,6 +2975,7 @@
       "bareImports": [
         "@byok-sdk/cloud",
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/protocol",
         "@cfworker/json-schema",
         "hono",
@@ -3023,6 +3068,7 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sealed-payload",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
@@ -3458,7 +3504,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 203883,
+      "budgetBytes": 225000,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -3475,6 +3521,7 @@
       "types": [],
       "bareImports": [
         "@byok-sdk/core",
+        "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sqlite-node",
         "@byok-sdk/core/system-tool",
         "child_process",

@@ -171,6 +171,13 @@ describe('public API surface', () => {
     expect(Object.keys(publicApi)).not.toContain('runCoreConformance');
   });
 
+  it('keeps provider model checks on a portable schema-free subpath', async () => {
+    const subpath = await import('../provider-model');
+    expect(Object.keys(subpath).sort()).toEqual([
+      'PI_PROVIDER_MODEL_UNAVAILABLE_EXIT', 'classifyModelProviderHttpError', 'isProviderProfileModelId',
+    ]);
+  });
+
   it('keeps sealed payload v1 on its own subpath, with a frozen runtime export list', async () => {
     const subpath = await import('../sealed-payload/index');
     expect(Object.keys(subpath).sort()).toEqual([

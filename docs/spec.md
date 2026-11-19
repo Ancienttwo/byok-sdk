@@ -376,7 +376,9 @@ The launcher accepts the adapter's bounded absolute extension paths and an
 absolute `--config` path. The profile supplies provider, thinking level, and
 default model. An explicit `byok-profile` task selection can override the
 model ID through the launcher's own `--model` argument. The override reuses
-the profile's endpoint, API, Pi settings, and capabilities. The exact binding
+the profile's endpoint, API, and Pi settings. The pinned Pi catalog supplies
+image input support for an override. The launcher refuses an override that
+lacks verified support for required image input. The exact binding
 still hashes the saved default model. The Pi child gets a
 narrow inherited environment; arbitrary environment names, `BYOK_*` names and
 ambient provider credentials are excluded. The profile SQLite schema includes

@@ -59,6 +59,14 @@ export function assertExactProviderProfileBinding(
   profile: ModelProviderProfile,
   expected: ExactProviderProfileBinding,
 ): void {
+  assertProviderProfileIdentity(profile, expected);
+  const supported = new Set(profile.capabilities);
+  const unsupported = expected.requiredCapabilities.find((capability) => !supported.has(capability));
+  if (unsupported !== undefined) throw new Error(`provider profile does not support required capability ${unsupported}`);
+}
+
+/** The binding pins the stored profile. Pi checks capabilities on the selected model. */
+export function assertProviderProfileIdentity(profile: ModelProviderProfile, expected: ExactProviderProfileBinding): void {
   if (new Set(expected.requiredCapabilities).size !== expected.requiredCapabilities.length) {
     throw new Error('provider profile required capabilities must be unique');
   }
@@ -66,7 +74,4 @@ export function assertExactProviderProfileBinding(
   if (actual.profileRef !== expected.profileRef) throw new Error('provider profile ref mismatch');
   if (actual.profileRevision !== expected.profileRevision) throw new Error('provider profile revision mismatch');
   if (actual.profileHash !== expected.profileHash) throw new Error('provider profile hash mismatch');
-  const supported = new Set(profile.capabilities);
-  const unsupported = expected.requiredCapabilities.find((capability) => !supported.has(capability));
-  if (unsupported !== undefined) throw new Error(`provider profile does not support required capability ${unsupported}`);
 }

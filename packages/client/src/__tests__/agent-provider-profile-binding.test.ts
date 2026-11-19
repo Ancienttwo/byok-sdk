@@ -11,6 +11,10 @@ import { PiAdapter } from '../adapters/pi/pi-adapter';
 import { createDaemonWithAdapters } from '../daemon/create-daemon';
 import type { RuntimeAdapterPrepareInput } from '../types';
 import { TestServer } from './fixtures/test-server';
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
+import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
+import { SqliteProviderProfileStore } from '../../../keys/src/sqlite-profile-store';
+import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 
 // A sessionless v3 Agent offer is a fresh one in v4, and a fresh offer carries the egress policy.
@@ -58,6 +62,40 @@ describe('Agent provider profile binding admission', () => {
       expect.objectContaining(binding),
       expect.objectContaining({ profileDbPath: '/tmp/providers.sqlite' }),
     );
+  });
+
+  it('uses the real launcher to reject an override without verified required capabilities', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-profile-capabilities-'));
+    const profileDbPath = path.join(root, 'profiles.sqlite');
+    const store = new SqliteProviderProfileStore({ path: profileDbPath });
+    try {
+      const profile = parseModelProviderProfile({
+        kind: 'model', profile_ref: 'openrouter-primary', provider_kind: 'openrouter',
+        display_name: 'Nova Lite', adapter: 'openai_compatible', auth_mode: 'bearer',
+        base_url: 'https://openrouter.ai/api/v1', model: 'amazon/nova-lite-v1', capabilities: ['image-input'],
+        enabled: true, created_at: '2026-08-26T00:00:00Z', updated_at: '2026-08-26T00:00:00Z', pi_model: PI_MODEL_FIXTURE,
+      });
+      await store.save(profile);
+      const launchBin = fileURLToPath(new URL('../../../keys/dist/bin/pi-provider-launcher.js', import.meta.url));
+      const adapter = new PiAdapter({ byokLauncher: {
+        command: process.execPath, args: [launchBin], profileDbPath, sessionDir: path.join(root, 'sessions'),
+      } });
+      const actual = exactProviderProfileBinding(profile);
+      const prepare = (modelId: string, requiredCapabilities = [...actual.requiredCapabilities]) => adapter.prepare({
+        ...prepareInput(),
+        offer: { instruction: 'inspect image', target: { lane: 'harness', harnessId: 'pi', selection: {
+          mode: 'byok-profile', modelId, providerProfile: { ...actual, requiredCapabilities },
+        } } },
+      });
+      const refusal = { kind: 'reject', code: 'model_unavailable', retryable: false };
+      await expect(prepare('amazon/nova-micro-v1')).resolves.toMatchObject(refusal);
+      await expect(prepare('unlisted/model')).resolves.toMatchObject(refusal);
+      await expect(prepare('amazon/nova-pro-v1')).resolves.toMatchObject({ kind: 'prepared' });
+      await expect(prepare('unlisted/model', [])).resolves.toMatchObject({ kind: 'prepared' });
+    } finally {
+      await store.close();
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 
   it('declines stale local profile authority before preparation completes', async () => {

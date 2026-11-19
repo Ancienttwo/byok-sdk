@@ -105,7 +105,7 @@ describe('Pi provider launcher core', () => {
       macosKeychainPath,
     });
 
-    expect(parsePiProviderLauncherOptions([
+    const exactOptions = parsePiProviderLauncherOptions([
       '--pi-bin', '/opt/pi', '--runtime-entry', 'pi-rpc',
       '--profile-db', profileDbPath,
       '--session-dir', sessionDir,
@@ -115,15 +115,17 @@ describe('Pi provider launcher core', () => {
       '--profile-hash', `sha256:${'a'.repeat(64)}`,
       '--required-capabilities', '["image-input"]',
       '--validate-only', 'true',
-    ])).toMatchObject({
+    ]);
+    expect(exactOptions).toMatchObject({
       profileRef: 'openrouter-primary',
+      modelId: 'anthropic/claude-sonnet-4',
       validateOnly: true,
-      expectedBinding: {
-        profileRef: 'openrouter-primary',
-        profileRevision: '1787702400000',
-        modelId: 'anthropic/claude-sonnet-4',
-        requiredCapabilities: ['image-input'],
-      },
+    });
+    expect(exactOptions.expectedBinding).toEqual({
+      profileRef: 'openrouter-primary',
+      profileRevision: '1787702400000',
+      profileHash: `sha256:${'a'.repeat(64)}`,
+      requiredCapabilities: ['image-input'],
     });
 
     expect(() => parsePiProviderLauncherOptions([

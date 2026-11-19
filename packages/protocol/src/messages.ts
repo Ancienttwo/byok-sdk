@@ -1,6 +1,6 @@
 import { PreparedAgentMemoryModeSchema } from './input-preparation.js';
 import { z } from 'zod';
-import { AGENT_MEMORY_START_REFUSALS, RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, isProviderProfileModelId, type AgentMemoryStartRefusal } from './constants.js';
+import { AGENT_MEMORY_START_REFUSALS, RUNTIME_FAILURE_CLASSES, RUNTIME_IDS, RUNTIME_QUOTA_SCOPES, RUNTIME_UNAVAILABLE_CAUSES, TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH, boundFailureReason, type AgentMemoryStartRefusal } from './constants.js';
 import { BlobRefSchema } from './blob.js';
 import {
   SEALED_DECLINE_CODES,
@@ -348,7 +348,7 @@ export const HarnessSelectionSchema = z.discriminatedUnion('mode', [
   z.strictObject({
     mode: z.literal('byok-profile'),
     providerProfile: ProviderProfileBindingSchema,
-    modelId: DispatchTargetIdSchema.refine(value => isProviderProfileModelId(value), 'invalid provider profile model ID').optional(),
+    modelId: DispatchTargetIdSchema.optional(),
   }),
 ]);
 export type HarnessSelection = z.infer<typeof HarnessSelectionSchema>;

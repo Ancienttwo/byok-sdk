@@ -367,13 +367,20 @@
       "summary": "Harnesses advertise configured model defaults by selection mode. Native Pi exposes a catalog, and DSH and OpenCode accept task models without requiring a configured fallback. Missing and unavailable models carry typed admission errors.",
       "migration": "docs/releases/host-upgrade-next-minor.md#harness-model-selection",
       "items": [
+        "entry:@byok-sdk/core/provider-model",
         "export:@byok-sdk/client#OpenCodeAdapter",
         "export:@byok-sdk/client#PiAdapter",
+        "export:@byok-sdk/client#PiAdapterOptions",
         "export:@byok-sdk/client#RuntimeAdapterRejectedOperation",
         "export:@byok-sdk/client/adapters#OpenCodeAdapter",
         "export:@byok-sdk/client/adapters#PiAdapter",
+        "export:@byok-sdk/client/adapters#PiAdapterOptions",
         "export:@byok-sdk/client/adapters#RuntimeAdapterRejectedOperation",
         "export:@byok-sdk/cloud#CLOUD_ERROR_CODES",
+        "export:@byok-sdk/core/provider-model#PI_PROVIDER_MODEL_UNAVAILABLE_EXIT",
+        "export:@byok-sdk/core/provider-model#classifyModelProviderHttpError",
+        "export:@byok-sdk/core/provider-model#isProviderProfileModelId",
+        "export:@byok-sdk/keys#classifyModelProviderHttpError",
         "export:@byok-sdk/protocol#DECLINE_CODES",
         "export:@byok-sdk/protocol#DefaultModelSelectionMode",
         "export:@byok-sdk/protocol#TaskDeclinePayload",
@@ -419,6 +426,11 @@
       "before": "optional schema-sha256=0274d0856fb11b28",
       "after": "optional schema-sha256=db0784c472ee1e10",
       "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "entry:@byok-sdk/core/provider-model",
+      "change": "added",
+      "entry": "harness-model-defaults"
     },
     {
       "item": "example:host-execution-core",
@@ -613,6 +625,11 @@
       "entry": "harness-model-defaults"
     },
     {
+      "item": "export:@byok-sdk/client#PiAdapterOptions",
+      "change": "changed",
+      "entry": "harness-model-defaults"
+    },
+    {
       "item": "export:@byok-sdk/client#PreparedRuntimeOperation",
       "change": "changed",
       "entry": "native-subscription-admission"
@@ -733,6 +750,11 @@
       "entry": "harness-model-defaults"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#PiAdapterOptions",
+      "change": "changed",
+      "entry": "harness-model-defaults"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#PreparedRuntimeOperation",
       "change": "changed",
       "entry": "native-subscription-admission"
@@ -833,6 +855,21 @@
       "entry": "wire-v8-harness-selection"
     },
     {
+      "item": "export:@byok-sdk/core/provider-model#PI_PROVIDER_MODEL_UNAVAILABLE_EXIT",
+      "change": "added",
+      "entry": "harness-model-defaults"
+    },
+    {
+      "item": "export:@byok-sdk/core/provider-model#classifyModelProviderHttpError",
+      "change": "added",
+      "entry": "harness-model-defaults"
+    },
+    {
+      "item": "export:@byok-sdk/core/provider-model#isProviderProfileModelId",
+      "change": "added",
+      "entry": "harness-model-defaults"
+    },
+    {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
       "change": "changed",
       "entry": "model-list-unreachable"
@@ -876,6 +913,11 @@
       "item": "export:@byok-sdk/keys#buildPiProviderProjection",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/keys#classifyModelProviderHttpError",
+      "change": "changed",
+      "entry": "harness-model-defaults"
     },
     {
       "item": "export:@byok-sdk/keys#removeRetiredProviderCredentials",
@@ -1043,11 +1085,6 @@
       "entry": "wire-v8-harness-selection"
     },
     {
-      "item": "export:@byok-sdk/protocol#isProviderProfileModelId",
-      "change": "added",
-      "entry": "harness-model-defaults"
-    },
-    {
       "item": "export:@byok-sdk/protocol#targetsPi",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
@@ -1061,11 +1098,6 @@
       "item": "export:@byok-sdk/protocol/constants#PROTOCOL_VERSION",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
-    },
-    {
-      "item": "export:@byok-sdk/protocol/constants#isProviderProfileModelId",
-      "change": "added",
-      "entry": "harness-model-defaults"
     },
     {
       "item": "export:@byok-sdk/server#MachineInfo",
@@ -1092,6 +1124,16 @@
       "before": "schema_version=10",
       "after": "schema_version=11",
       "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#isProviderProfileModelId",
+      "change": "added",
+      "entry": "harness-model-defaults"
+    },
+    {
+      "item": "export:@byok-sdk/protocol/constants#isProviderProfileModelId",
+      "change": "added",
+      "entry": "harness-model-defaults"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",

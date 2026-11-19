@@ -172,6 +172,7 @@ describe('OpenAiCompatibleChatClient', () => {
     [400, { error: { message: 'insufficient_quota' } }, 'MODEL_PROVIDER_BALANCE_INSUFFICIENT'],
     [400, { error: { message: 'invalid_api_key' } }, 'MODEL_PROVIDER_AUTH_FAILED'],
     [400, { error: { message: 'model_not_found' } }, 'MODEL_PROVIDER_MODEL_NOT_FOUND'],
+    [400, { error: { message: '模型不存在' } }, 'MODEL_PROVIDER_MODEL_NOT_FOUND'],
   ])('maps HTTP %i to %s', async (status, body, code) => {
     const { fetchImpl } = recorder(() => jsonResponse(body, status));
     await expect(

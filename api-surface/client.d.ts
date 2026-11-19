@@ -1152,7 +1152,7 @@ export interface PiAdapterOptions {
     spawnFn?: SpawnFn;
     byokLauncher?: PiByokLauncherConfig;
     sdkHelperHost?: SdkHelperHostConfig;
-    validateProviderProfileBinding?: (binding: ProviderProfileBinding, launcher: PiByokLauncherConfig) => Promise<void>;
+    validateProviderProfileBinding?: (binding: ProviderProfileBinding, launcher: PiByokLauncherConfig, modelId?: string) => Promise<void>;
     versionPolicy?: RuntimeVersionPolicy;
 }
 export interface PiByokLauncherConfig {

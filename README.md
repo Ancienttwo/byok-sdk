@@ -515,10 +515,11 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/cloud/package.json` | Package metadata | — | forbidden | 1400 B |
 | `@byok-sdk/core` | Shared contracts and validation | `zod` | allowed | 105937 B |
 | `@byok-sdk/core/package.json` | Package metadata | — | forbidden | 1821 B |
+| `@byok-sdk/core/provider-model` | Shared provider model validation and failure classification | — | forbidden | 2048 B |
 | `@byok-sdk/core/sealed-payload` | Sealed payload v1 byte rules | `zod` | allowed | 171173 B |
 | `@byok-sdk/core/sqlite-node` | Read-only SQLite format admission and private snapshots for Node stores | — | forbidden | 4729 B |
 | `@byok-sdk/core/system-tool` | Trusted system tools for Node hosts | — | forbidden | 2981 B |
-| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 263342 B |
+| `@byok-sdk/keys` | Local provider credential custody | `zod` | allowed | 285000 B |
 | `@byok-sdk/keys/model-route` | Headless Pi model route: choices, linkage, field errors and submission | `zod` | allowed | 355727 B |
 | `@byok-sdk/keys/package.json` | Package metadata | — | forbidden | 1768 B |
 | `@byok-sdk/keys/pi-catalog` | Pinned pi-ai catalog lookup for pi_model | `zod` | allowed | 325263 B |
@@ -541,7 +542,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `bin:byok-mcp-hub` | Task-bound MCP discovery and dispatch helper | `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `eventsource`, `eventsource-parser`, `pkce-challenge`, `zod` | allowed | 71770 B |
 | `bin:byok-pi-durable` | Pi durable launcher; host loads lazily | — | forbidden | 446 B |
 | `bin:byok-pi-prepared` | Pi prepared launcher; host loads lazily | — | forbidden | 517 B |
-| `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 203883 B |
+| `bin:byok-pi-provider-launcher` | Provider credential custody launcher | `zod` | allowed | 225000 B |
 | `bin:byok-pi-rpc` | Pi RPC launcher; host loads lazily | — | forbidden | 495 B |
 
 <!-- END generated: api-surface/entries.json -->

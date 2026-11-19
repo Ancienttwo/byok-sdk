@@ -2,6 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promises as fs, type Dirent } from 'node:fs';
 import { spawn, type ChildProcess } from 'node:child_process';
+import { isProviderProfileModelId, PI_PROVIDER_MODEL_UNAVAILABLE_EXIT } from '@byok-sdk/core/provider-model';
 import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
 import { runCommand, type CommandRunner } from './command-runner.js';
 import { configurationPendingError, withConfigurationLock } from './custody.js';
@@ -21,7 +22,7 @@ import {
   type ProviderProfileRef,
 } from './provider-profile.js';
 import {
-  assertExactProviderProfileBinding,
+  assertProviderProfileIdentity,
   exactProviderProfileBinding,
   type ExactProviderProfileBinding,
 } from './provider-profile-binding.js';
@@ -72,8 +73,7 @@ function parsePiFixedArgs(raw: string | undefined, runtimeEntry: PiLauncherRunti
 }
 
 function assertModelOverride(modelId: string | undefined): void {
-  if (modelId !== undefined && (modelId.length > 160 || modelId.trim().length === 0
-    || modelId.startsWith('--') || /\p{Cc}/u.test(modelId))) {
+  if (modelId !== undefined && !isProviderProfileModelId(modelId)) {
     throw new Error('--model requires a valid provider profile model ID');
   }
 }
@@ -645,7 +645,8 @@ export async function startPiProvider(
   const configDigest = options.piConfigDigest!;
   assertModelOverride(options.modelId);
   const modelId = options.modelId ?? profile.model;
-  const projection = buildPiProviderProjection(profile, runtimeEntry, modelId);
+  if (options.expectedBinding !== undefined) assertProviderProfileIdentity(profile, options.expectedBinding);
+  const projection = buildPiProviderProjection(profile, runtimeEntry, modelId, options.expectedBinding?.requiredCapabilities);
   // The ONE place the child grammars diverge. Everything after it —
   // projection write, layout assertion, secret resolution and the spawn
   // itself — is shared; only the key's delivery channel (`ipcLane`) depends
@@ -751,7 +752,8 @@ export interface PiProviderLauncherHost {
  * It opens the profile database read-only, requires the exact configured
  * profile, checks the exact binding when the options carry one,
  * refuses a profile the runtime entry cannot serve, and builds the projection.
- * A validation-only call then checks custody without reading a key. A launch
+ * A validation-only call then checks custody without reading a key. A model
+ * without required catalog capabilities returns the reserved refusal status. A launch
  * reads the key through the custody snapshot, spawns Pi, forwards SIGINT and
  * SIGTERM to the child while it runs, and resolves with the child's exit code.
  * The projection file is removed on every exit path.
@@ -772,13 +774,11 @@ export async function runPiProviderLauncher(
     }
     assertModelOverride(options.modelId);
     const modelId = options.modelId ?? profile.model;
-    if (options.expectedBinding !== undefined) {
-      assertExactProviderProfileBinding(profile, options.expectedBinding);
-    }
     if (options.runtimeEntry === 'pi-prepared') assertPiPreparedProviderProfile(profile);
-    if (options.runtimeEntry === 'pi-rpc') assertPiLaunchArgs(profile, modelId);
-    buildPiProviderProjection(profile, options.runtimeEntry, modelId);
     if (options.validateOnly) {
+      if (options.expectedBinding !== undefined) assertProviderProfileIdentity(profile, options.expectedBinding);
+      if (options.runtimeEntry === 'pi-rpc') assertPiLaunchArgs(profile, modelId);
+      buildPiProviderProjection(profile, options.runtimeEntry, modelId, options.expectedBinding?.requiredCapabilities);
       await assertProviderCustodyIdle({ profiles, profile });
       return 0;
     }
@@ -808,6 +808,11 @@ export async function runPiProviderLauncher(
       process.off('SIGINT', onSigint);
       process.off('SIGTERM', onSigterm);
     }
+  } catch (error) {
+    if (error instanceof ByokKeysError && error.code === 'MODEL_PROVIDER_MODEL_NOT_FOUND') {
+      return PI_PROVIDER_MODEL_UNAVAILABLE_EXIT;
+    }
+    throw error;
   } finally {
     await profiles.close();
     await cleanup?.();

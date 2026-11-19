@@ -64,8 +64,11 @@ const target = {
 ```
 
 Omit `selection.modelId` to use `profile.model`. An override reuses the same
-credential, provider endpoint, `api`, `pi_model` settings, and declared
-capabilities. Choose a model that works with those settings. A prepared task
+credential, provider endpoint, `api`, and `pi_model` settings. Pi projects
+image input for an override only when the pinned catalog confirms support
+for that provider and API. An override without verified image support is
+declined before claim if `requiredCapabilities` includes `image-input`.
+A prepared task
 must count and execute the same model. A runtime refusal for an unavailable
 model after claim reports `task.fail.failure.class = 'model_unavailable'`.
 

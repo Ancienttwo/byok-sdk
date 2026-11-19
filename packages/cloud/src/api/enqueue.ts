@@ -1,6 +1,7 @@
 import type { HostOfferPlainPayload, HostOfferSealedPayload } from '@byok-sdk/protocol';
 import type { ByokCloud, ByokCloudOptions, EnqueuedAgentControl, EnqueuedOffer } from '../cloud.js';
 import { contentHash, type ControlPlanePrincipal, type TenantId } from '@byok-sdk/core';
+import { isProviderProfileModelId } from '@byok-sdk/core/provider-model';
 import {
   AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY,
   NATIVE_SESSIONS_CAPABILITY,
@@ -12,7 +13,6 @@ import {
   encodeEnvelope,
   harnessSelectionNeedsModel,
   harnessSupportsTarget,
-  isProviderProfileModelId,
   isSealedPayload,
   requiredReceiverCapabilities,
   uuidFromSha256,

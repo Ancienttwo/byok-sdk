@@ -35,8 +35,9 @@ const errorsFromRoot: EsbuildPlugin = {
 
 export default defineConfig([
   // The configs build in parallel, so the root clean keeps the subpath output.
-  { ...shared, entry: ['src/index.ts'], clean: ['!sealed-payload/**', '!sqlite-node.*', '!system-tool.*'] },
+  { ...shared, entry: ['src/index.ts'], clean: ['!sealed-payload/**', '!provider-model.*', '!sqlite-node.*', '!system-tool.*'] },
   { ...shared, entry: { 'sealed-payload/index': 'src/sealed-payload/index.ts' }, clean: false, esbuildPlugins: [errorsFromRoot] },
+  { ...shared, entry: ['src/provider-model.ts'], clean: false },
   { ...shared, entry: ['src/sqlite-node.ts'], platform: 'node', clean: false },
   { ...shared, entry: ['src/system-tool.ts'], platform: 'node', clean: false },
 ]);

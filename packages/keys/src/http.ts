@@ -1,5 +1,8 @@
+import { classifyModelProviderHttpError } from '@byok-sdk/core/provider-model';
 import { ByokKeysError } from './errors.js';
 import { normalizeProviderUrl } from './url.js';
+
+export { classifyModelProviderHttpError } from '@byok-sdk/core/provider-model';
 
 /** Injectable `fetch`. Defaults to `globalThis.fetch` at every call site. */
 export type ProviderFetch = (
@@ -278,57 +281,6 @@ function modelProviderHttpError(
     `Model provider request failed with HTTP ${status}`,
     { httpStatus: status },
   );
-}
-
-/**
- * Map an HTTP status plus error body onto a stable code
- * (`providers.ts:1783-1815`). Providers disagree on status codes for billing
- * and key problems, so the body text is inspected as well — the pattern lists
- * are verbatim from the source, including the Chinese-language variants the
- * source's providers actually return.
- */
-export function classifyModelProviderHttpError(
-  status: number,
-  payload: unknown,
-): string {
-  const detail = safeProviderErrorText(payload);
-  if (
-    status === 402 ||
-    /(?:insufficient[_ -]?(?:quota|balance|credit)|quota[_ -]?exceeded|billing|payment required|余额不足|额度不足|欠费|充值)/iu.test(
-      detail,
-    )
-  ) {
-    return 'MODEL_PROVIDER_BALANCE_INSUFFICIENT';
-  }
-  if (
-    status === 401 ||
-    status === 403 ||
-    /(?:invalid[_ -]?api[_ -]?key|authentication|unauthori[sz]ed|forbidden|鉴权失败|密钥无效|令牌无效)/iu.test(
-      detail,
-    )
-  ) {
-    return 'MODEL_PROVIDER_AUTH_FAILED';
-  }
-  if (
-    status === 404 ||
-    /(?:model[_ -]?not[_ -]?found|model does not exist|unknown model|模型不存在|无权访问模型)/iu.test(
-      detail,
-    )
-  ) {
-    return 'MODEL_PROVIDER_MODEL_NOT_FOUND';
-  }
-  if (status === 429) return 'MODEL_PROVIDER_RATE_LIMITED';
-  return 'MODEL_PROVIDER_HTTP_ERROR';
-}
-
-function safeProviderErrorText(payload: unknown): string {
-  try {
-    return JSON.stringify(payload ?? '')
-      .slice(0, 8_000)
-      .toLowerCase();
-  } catch {
-    return '';
-  }
 }
 
 /** Join a normalized base URL with an API path, idempotently (`providers.ts:1949-1953`). */

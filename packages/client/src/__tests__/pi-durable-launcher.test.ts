@@ -125,10 +125,10 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(f.bodies.map(body => JSON.parse(body).model)).toEqual(['org/alternate']);
   });
 
-  it('reports a provider model refusal as model_unavailable', async () => {
+  it.each(['model_not_found', '模型不存在'])('reports a provider model refusal (%s) as model_unavailable', async message => {
     const f = await fixture(res => {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'model_not_found', message: 'No such model' } }));
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message } }));
     }, undefined, undefined, undefined, undefined, {}, 'absent');
     await expect((async () => { for await (const _ of f.session.events) { /* drain */ } })())
       .rejects.toMatchObject({ phase: 'run', failure: { class: 'model_unavailable' } });

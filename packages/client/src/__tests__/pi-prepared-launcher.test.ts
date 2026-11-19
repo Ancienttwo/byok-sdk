@@ -1048,11 +1048,11 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
     expect(endpoint.bodies.map(body => JSON.parse(body).model)).toEqual([modelId]);
   }, 60_000);
 
-  it('reports an unavailable prepared model without an unmetered call event', async () => {
+  it.each(['model_not_found', '模型不存在'])('reports an unavailable prepared model (%s) without an unmetered call event', async message => {
     const endpoint = await providerEndpoint();
     endpoint.respond = (_req, res) => {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'model_not_found', message: 'No such model' } }));
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message } }));
     };
     const f = await byokFixture(endpoint, 'absent');
     const session = await startPrepared(f.prepared, {

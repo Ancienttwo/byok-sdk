@@ -30,6 +30,10 @@
       "import": "./dist/sealed-payload/index.js"
     },
     "./package.json": "./package.json",
+    "./provider-model": {
+      "types": "./dist/provider-model.d.ts",
+      "import": "./dist/provider-model.js"
+    },
     "./sqlite-node": {
       "types": "./dist/sqlite-node.d.ts",
       "default": "./dist/sqlite-node.js"

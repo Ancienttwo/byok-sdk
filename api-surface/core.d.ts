@@ -224,6 +224,10 @@
 //   tenantObjectKey -> dist/blob.d.ts
 //   verifyDeviceAssertion -> dist/device-assertion.d.ts
 //   verifyTaskAssertion -> dist/device-assertion.d.ts
+// entry @byok-sdk/core/provider-model
+//   PI_PROVIDER_MODEL_UNAVAILABLE_EXIT -> dist/provider-model.d.ts
+//   classifyModelProviderHttpError -> dist/provider-model.d.ts
+//   isProviderProfileModelId -> dist/provider-model.d.ts
 // entry @byok-sdk/core/sealed-payload
 //   MEMBER_CHAIN_OPS -> dist/sealed-payload/member-chain.d.ts
 //   MemberChainEntryV1 -> dist/sealed-payload/member-chain.d.ts
@@ -1232,6 +1236,10 @@ export interface ControlPlanePrincipal {
 }
 export type Principal = DevicePrincipal | ControlPlanePrincipal;
 export declare function principalTenant(principal: Principal): TenantId;
+// ==== @byok-sdk/core dist/provider-model.d.ts ====
+export declare function isProviderProfileModelId(value: unknown): value is string;
+export declare const PI_PROVIDER_MODEL_UNAVAILABLE_EXIT = 79;
+export declare function classifyModelProviderHttpError(status: number, payload: unknown): string;
 // ==== @byok-sdk/core dist/quota.d.ts ====
 import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 import type { ContentHash } from './blob.js';

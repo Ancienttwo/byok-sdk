@@ -118,7 +118,7 @@
 //   buildPiProviderProjection -> dist/pi-provider-projection.d.ts
 //   chatCompletionText -> dist/openai-client.d.ts
 //   checkProviderKey -> dist/provider-key-check.d.ts
-//   classifyModelProviderHttpError -> dist/http.d.ts
+//   classifyModelProviderHttpError -> @byok-sdk/core/provider-model#classifyModelProviderHttpError
 //   decodeStrictBase64Utf8 -> dist/secret-store.d.ts
 //   discoverProviderModels -> dist/model-discovery.d.ts
 //   exactProviderProfileBinding -> dist/provider-profile-binding.d.ts
@@ -395,13 +395,13 @@ export interface ProviderAuthProfile {
 export declare function requiredProviderSecret(profile: ProviderAuthProfile, secret: string | undefined): string | undefined;
 export declare function providerHeaders(profile: ProviderAuthProfile, secret: string | undefined): Record<string, string>;
 // ==== @byok-sdk/keys dist/http.d.ts ====
+export { classifyModelProviderHttpError } from '@byok-sdk/core/provider-model';
 export type ProviderFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 export declare const PROVIDER_RESPONSE_MAX_BYTES: number;
 export declare const PROVIDER_TIMEOUT_MS = 15000;
 export declare function fetchWithProviderGuards(fetchImpl: ProviderFetch, url: string, init: RequestInit, signal: AbortSignal, timeoutMs?: number): Promise<Response>;
 export declare function parseBoundedJsonResponse(response: Response): Promise<unknown>;
 export declare function readModelProviderResponse(response: Response): Promise<unknown>;
-export declare function classifyModelProviderHttpError(status: number, payload: unknown): string;
 export declare function modelApiUrl(baseUrl: string, suffix: string): string;
 export declare function modelMessageText(value: unknown): string;
 export declare function objectValue(value: unknown): Record<string, unknown> | undefined;
@@ -899,14 +899,14 @@ export interface PiProviderLauncherHost {
 }
 export declare function runPiProviderLauncher(options: PiProviderLauncherOptions, host: PiProviderLauncherHost): Promise<number>;
 // ==== @byok-sdk/keys dist/pi-provider-projection.d.ts ====
-import type { ModelProviderProfile } from './provider-profile.js';
+import type { ModelProviderProfile, ProviderModelCapability } from './provider-profile.js';
 export declare const PI_PROJECTED_KEY_ENV = "PI_PROVIDER_API_KEY";
 export declare const PI_AUTH_NONE_API_KEY = "byok-sdk-auth-none";
 // support
 export declare const PI_LAUNCHER_RUNTIME_ENTRIES: readonly ['pi-rpc', 'pi-prepared', 'pi-durable'];
 // support
 export type PiLauncherRuntimeEntry = (typeof PI_LAUNCHER_RUNTIME_ENTRIES)[number];
-export declare function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry, modelId?: string): object;
+export declare function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry, modelId?: string, requiredCapabilities?: readonly ProviderModelCapability[]): object;
 export declare function assertPiLaunchArgs(profile: ModelProviderProfile, modelId?: string): void;
 // ==== @byok-sdk/keys dist/pi-runtime-defaults.generated.d.ts ====
 export declare const PI_DEFAULT_THINKING_LEVEL = "medium";

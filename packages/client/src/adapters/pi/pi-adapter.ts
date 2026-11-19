@@ -56,7 +56,8 @@ import { BYOK_SDK_HELPER_SUBCOMMAND, resolveSdkReservedHelperBin, type SdkHelper
 import { resolvePiBin, type ResolvedBin } from './resolve-bin.js';
 import { runtimeExecutableFields } from '../runtime-executable.js';
 import { isPiModelUnavailable, mapPiContextUsage, mapPiMessageToAgentEvent, piAssistantError, PI_MODEL_UNAVAILABLE_REASON, ROUTINE_PI_EVENT_TYPES } from './events.js';
-import { boundFailureReason, isProviderProfileModelId } from '@byok-sdk/protocol/constants';
+import { boundFailureReason } from '@byok-sdk/protocol/constants';
+import { isProviderProfileModelId, PI_PROVIDER_MODEL_UNAVAILABLE_EXIT } from '@byok-sdk/core/provider-model';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client.js';
 import { abortPiRpcAndSettle } from './interrupt-settlement.js';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame.js';
@@ -132,10 +133,11 @@ export interface PiAdapterOptions {
    * The product bundles Pi, so no installed Pi package is resolved.
    */
   sdkHelperHost?: SdkHelperHostConfig;
-  /** Admission-time exact local profile check. Tests may replace the process boundary. */
+  /** Admission-time exact local profile and selected model check. Tests may replace the launcher boundary. */
   validateProviderProfileBinding?: (
     binding: ProviderProfileBinding,
     launcher: PiByokLauncherConfig,
+    modelId?: string,
   ) => Promise<void>;
   /** A complete Host version policy that replaces the descriptor default wholesale (#1103). */
   versionPolicy?: RuntimeVersionPolicy;
@@ -487,11 +489,14 @@ export class PiAdapter implements RuntimeAdapter {
       try {
         const binding = { ...providerProfile, requiredCapabilities: [...providerProfile.requiredCapabilities] };
         if (this.options.validateProviderProfileBinding !== undefined) {
-          await this.options.validateProviderProfileBinding(binding, launcher);
+          await this.options.validateProviderProfileBinding(binding, launcher, ...(profileModelId === undefined ? [] : [profileModelId]));
         } else {
           await validateProviderProfileBindingWithLauncher(binding, launcher, profileModelId);
         }
       } catch (error) {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === PI_PROVIDER_MODEL_UNAVAILABLE_EXIT) {
+          return { kind: 'reject', code: 'model_unavailable', reason: PI_MODEL_UNAVAILABLE_REASON, retryable: false };
+        }
         return { kind: 'reject', reason: `provider profile admission failed: ${errorMessage(error)}`, retryable: false };
       }
       launcherArgs = [

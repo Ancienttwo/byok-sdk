@@ -140,10 +140,10 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     expect(lane.launches.map(({ args }) => args[args.indexOf('--model') + 1])).toEqual(expected);
   }, 60_000);
 
-  it.skipIf(BUN_BIN === undefined)('reports a model refusal from the actual provider stream', async () => {
+  it.skipIf(BUN_BIN === undefined).each(['model_not_found', '模型不存在'])('reports a model refusal (%s) from the actual provider stream', async message => {
     await expect(runLane('Reply once.', res => {
-      res.writeHead(404, { 'content-type': 'application/json' });
-      res.end(JSON.stringify({ error: { code: 'model_not_found', message: 'No such model' } }));
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message } }));
     }, undefined, undefined, ['absent']))
       .rejects.toMatchObject({ phase: 'run', failure: { class: 'model_unavailable' } });
   }, 60_000);
