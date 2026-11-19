@@ -375,7 +375,8 @@ root `package.json`, reinstall and check the resolved tree:
 | pnpm | `"pnpm": { "overrides": { "undici": "8.12.4" } }` | `pnpm why -r undici` |
 | Yarn | `"resolutions": { "undici": "8.12.4" }` | `yarn why undici` |
 
-For npm 11.16.0, include both the global override and the dependency chain to
+For npm 11.16.0 (the only npm version verified; other npm versions have not
+been verified), include both the global override and the dependency chain to
 pi-coding-agent. If `@byok-sdk/client` is a direct root dependency, merge this
 into the root `package.json`:
 
@@ -407,10 +408,15 @@ one scoped only to pi-coding-agent does not reliably cover its exact 8.12.3
 dependency through a workspace. Existing lock entries can also retain the old
 version after adding the chain.
 
-When upgrading an npm Host, check `package-lock.json` for
-`node_modules/@earendil-works/pi-coding-agent/node_modules/undici`. If that entry
-is 8.12.3, remove it and its installed copy before regenerating the lock. From
-the Host root, this removes that one entry and directory:
+When upgrading an npm Host, inspect `package-lock.json` for entries ending in
+`node_modules/undici` at every depth. They can live under a workspace, for
+example `packages/<ws>/node_modules/`, or under
+`node_modules/@byok-sdk/client/node_modules/`. `npm ls undici --all --parseable`
+helps locate installed copies; it may report errors while stale versions remain.
+For each nested 8.12.3 entry, remove the lock entry and its corresponding
+installed directory before regenerating the lock. For example, from the Host
+root, the following removes the hoisted Pi entry and directory. Substitute the
+actual lock path for each stale nested copy:
 
 ```sh
 node <<'NODE'

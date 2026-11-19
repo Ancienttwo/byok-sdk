@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { defineConfig } from 'tsup';
 
 const coreSource = resolve('../core/src');
@@ -6,6 +6,9 @@ const publicCoreModules = new Set([
   'blob', 'errors', 'retention', 'tenant', 'time',
   'in-memory/board', 'in-memory/clock', 'in-memory/mailbox', 'in-memory/presence',
   'in-memory/quota', 'in-memory/skill-pack', 'in-memory/storage-ledger', 'in-memory/truth',
+].map(module => resolve(coreSource, module + '.js')));
+const bundledCoreModules = new Set([
+  'in-memory/index', 'in-memory/blob', 'in-memory/archive-access', 'in-memory/device-assertion-replay',
 ].map(module => resolve(coreSource, module + '.js')));
 
 export default defineConfig({
@@ -31,9 +34,16 @@ export default defineConfig({
     setup(build) {
       // Bundle only the private composition and object store. Reuse the public
       // stores, helpers and error classes, including their runtime identities.
-      build.onResolve({ filter: /^\.{1,2}\/.*\.js$/ }, args => {
-        if (publicCoreModules.has(resolve(args.resolveDir, args.path))) {
+      build.onResolve({ filter: /.*/ }, args => {
+        if (!args.path.startsWith('./') && !args.path.startsWith('../') && !isAbsolute(args.path)) return;
+        const target = resolve(args.resolveDir, args.path);
+        const corePath = relative(coreSource, target);
+        if (corePath.startsWith('..' + sep) || corePath === '..' || !corePath) return;
+        if (publicCoreModules.has(target)) {
           return { path: '@byok-sdk/core', external: true };
+        }
+        if (!bundledCoreModules.has(target)) {
+          return { errors: [{ text: `Unclassified core module in embedded blob storage: ${corePath}` }] };
         }
       });
     },

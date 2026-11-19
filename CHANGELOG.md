@@ -17,7 +17,7 @@
 
 ### OAR 0.120.0
 
-- **Changed (client)** — OpenCode ACP startups queue by canonical data directory within one SDK process. Queueing, spawn, and `initialize` share 60 seconds. A queue timeout is a `RuntimeExecutionFailure` with `phase: start` and `retry: retryable`. The startup lock lives in memory.
+- **Changed (client)** — OpenCode ACP startups queue by canonical data directory within one SDK process. Queueing, spawn, and `initialize` share 60 seconds. A queue timeout is a `RuntimeExecutionFailure` with `phase: start` and `retry: retryable`. An OpenCode `startup_directory` failure is also a `RuntimeExecutionFailure` with `phase: 'start'`, `retry: 'retryable'`, and `failure: { class: 'unknown' }`. The startup lock lives in memory.
 - **Added (client/adapters)** — `RuntimeModelEntry.serviceTierDetails` optionally carries native Codex tier labels and descriptions.
 - **SDK projection** — The SDK still probes versions independently of OAR’s `installation()` cache. Claude retains its existing exit order and record redaction. Upstream Cursor peer, Claude `skills()` view, and OpenCode skills provenance changes are outside the SDK projection. [Host upgrade notes](docs/releases/v0.44.1.md#oar-01200)
 
