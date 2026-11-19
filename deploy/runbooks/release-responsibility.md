@@ -77,17 +77,20 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
+0.44.1 is the published owner-approved PATCH for all nine public packages. See the
+[release notes](../../docs/releases/v0.44.1.md).
+
 0.44.0 is the published owner-approved MINOR for all nine public packages and
 the first wire v7 cut. Plan the cloud and device upgrade together using the
 [release notes](../../docs/releases/v0.44.0.md) and
 [Host upgrade checklist](../../docs/releases/host-upgrade-0.44.0.md).
 
-The previous published release is 0.43.0 for all nine public packages, keys included,
+The earlier published release is 0.43.0 for all nine public packages, keys included,
 published on 2026-11-14 (UTC). cloud-do left the release train at 0.43.0 (#1959);
 its existing npm versions are deprecated and receive no further releases or fixes.
 See the [release notes](../../docs/releases/v0.43.0.md)
 and [Host upgrade order](../../docs/releases/v0.43.0.md#host-upgrade-order).
-The registry read of 2026-11-18 (UTC) reports `latest` 0.44.0 for all nine packages.
+The registry read of 2026-11-19 (UTC) reports `latest` 0.44.1 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -102,10 +105,10 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.44.0 for all nine packages on 2026-11-18 (UTC).
+the dist-tag `latest`, observed at 0.44.1 for all nine packages on 2026-11-19 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the historical 0.44.0 pre-publication baseline: prior `latest` 0.43.0 and
+records the historical 0.44.1 pre-publication baseline: prior `latest` 0.44.0 and
 `priorPublication: existing` for all nine packages, including
 `@byok-sdk/bot-collaboration`. Recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies

@@ -275,7 +275,7 @@ token and reads it as `unknown`.
   type, every `WIRE_ADDITIONS` entry, a result-document `task.offer` with
   `schema` for each offer lane (resume, resume with `egressPolicy`, fresh,
   prepared), and an `approvalId` on every approval request and decision.
-  `golden/v7.releases.json` registers 0.44.0 and the 0.44.1 candidate with
+  `golden/v7.releases.json` registers the published 0.44.0 and 0.44.1 releases with
   the same corpus prefixes. The covered lines are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.43.0 registry tarball, the last v6 release. It rejects every v7
