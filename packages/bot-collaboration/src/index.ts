@@ -5,4 +5,4 @@ export { BotCollaboration } from './host.js';
 export { botCompactVeto, botLedgerOptions } from './compaction.js';
 export type { AgentMessageInput, BotOptions, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer } from './host.js';
 export { TEAM_ROOM_LIMIT, TeamModeError, teamSnapshot, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team.js';
-export { createBotPersonaProjection } from './persona.js';
+export { createBotPersonaProjection, type BotPersonaProjectionContext, type BotPersonaProjectionOptions } from './persona.js';

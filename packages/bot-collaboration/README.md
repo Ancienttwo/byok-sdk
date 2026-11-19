@@ -1338,6 +1338,18 @@ crash can leave an `AGENTS.md.<pid>-<n>.tmp` file in the home. The next
 `writeHomeFile` call for `AGENTS.md` removes it when that process has ended.
 The Host failure and retry API does not change these limits.
 
+A Host can pass `renderAdditionalFiles` to return more root files, and
+`afterWrite` for side effects outside the home after all writes complete.
+Both callbacks receive the validated `bot-profile.v1` persona, agent reference,
+canonical home, request id and projection hash while the SDK writer lease is
+held. `AGENTS.md` is reserved for the persona. All home files must be returned
+by `renderAdditionalFiles` and written with the SDK `writeHomeFile`; `afterWrite`
+must not write to `canonicalHome`. If a later rendering omits a file, the SDK
+leaves the previous file in the home; it does not delete it. Each file is
+replaced atomically, but the files and the hook are not a transaction. Exact
+revision/hash replays invoke both callbacks again, so `afterWrite` must be
+idempotent. Hook errors fail the projection before its state is recorded.
+
 
 ## Deferred Main Bot routine target
 

@@ -7,6 +7,8 @@
 //   AgentMessageInput -> dist/host.d.ts
 //   BotCollaboration -> dist/host.d.ts
 //   BotOptions -> dist/host.d.ts
+//   BotPersonaProjectionContext -> dist/persona.d.ts
+//   BotPersonaProjectionOptions -> dist/persona.d.ts
 //   HostIntentCancelResult -> dist/host.d.ts
 //   HostIntentHandler -> dist/host.d.ts
 //   HostIntentMessageHandler -> dist/host.d.ts
@@ -958,7 +960,7 @@ export { BotCollaboration } from './host.js';
 export { botCompactVeto, botLedgerOptions } from './compaction.js';
 export type { AgentMessageInput, BotOptions, HostIntentCancelResult, HostIntentHandler, HostIntentMessageHandler, MessageServer } from './host.js';
 export { TEAM_ROOM_LIMIT, TeamModeError, teamSnapshot, type TeamModeCode, type TeamSnapshot, type TeamSnapshotBot, type TeamSnapshotRoom } from './rules/team.js';
-export { createBotPersonaProjection } from './persona.js';
+export { createBotPersonaProjection, type BotPersonaProjectionContext, type BotPersonaProjectionOptions } from './persona.js';
 // ==== @byok-sdk/bot-collaboration dist/k4-fixtures.test-support.d.ts ====
 import type { AgentEgressPolicy } from '@byok-sdk/client';
 import type { ExecutionTemplate } from '@byok-sdk/server/execution-core';
@@ -1217,7 +1219,28 @@ export interface CollaborationState extends AutonomyState {
 }
 export declare function stateOf(application: Record<string, Json>): CollaborationState;
 // ==== @byok-sdk/bot-collaboration dist/persona.d.ts ====
-export declare function createBotPersonaProjection(): import("@byok-sdk/client").AgentHomeProjection;
+import { type AgentHomeProjectionApplyInput } from '@byok-sdk/client';
+export interface BotPersonaProjectionContext {
+    readonly agentRef: AgentHomeProjectionApplyInput['agentRef'];
+    readonly canonicalHome: string;
+    readonly requestId: string;
+    readonly projectionHash: string;
+    readonly projection: {
+        readonly schemaVersion: 'bot-profile.v1';
+        readonly persona: string;
+    };
+}
+export interface BotPersonaProjectionOptions {
+    readonly renderAdditionalFiles?: (input: BotPersonaProjectionContext) => readonly {
+        name: string;
+        body: string | Uint8Array;
+    }[] | Promise<readonly {
+        name: string;
+        body: string | Uint8Array;
+    }[]>;
+    readonly afterWrite?: (input: BotPersonaProjectionContext) => void | Promise<void>;
+}
+export declare function createBotPersonaProjection(options?: BotPersonaProjectionOptions): import("@byok-sdk/client").AgentHomeProjection;
 // ==== @byok-sdk/bot-collaboration dist/retention-vectors.test-support.d.ts ====
 import { type Json } from '@byok-sdk/server/execution-core';
 import type { CollaborationState } from './model.js';
