@@ -7,6 +7,11 @@ export type ProviderFetch = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+/** Whether a fetch failure represents an unreachable provider. */
+export function isProviderTransportError(error: unknown): error is TypeError {
+  return error instanceof TypeError;
+}
+
 /** Response body ceiling, ported from `providers.ts:106`. */
 export const PROVIDER_RESPONSE_MAX_BYTES = 2 * 1024 * 1024;
 
