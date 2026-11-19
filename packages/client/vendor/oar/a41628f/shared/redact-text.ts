@@ -3,24 +3,31 @@
 export type RedactionPath = readonly (string | number)[];
 type Redact = (text: string) => string;
 type JsonField = (path: RedactionPath) => boolean;
+export interface RedactionStructure {
+  readonly string: (path: RedactionPath, value: string) => boolean;
+  readonly keys: (path: RedactionPath) => boolean;
+}
 const withheld = '"[redacted]"';
 
 
 /** Copy only changed values. A credential-bearing property name hides its containing object. */
-function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefined, path: RedactionPath, seen: WeakMap<object, unknown>): unknown {
-  if (typeof value === "string") return jsonField?.(path) === true ? redactJsonText(value, redact) : redact(value);
+function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefined, structure: RedactionStructure | undefined, path: RedactionPath, seen: WeakMap<object, unknown>): unknown {
+  if (typeof value === "string") {
+    if (structure?.string(path, value) === true) return value;
+    return jsonField?.(path) === true ? redactJsonText(value, redact) : redact(value);
+  }
   if (value === null || typeof value !== "object") return value;
   if (seen.has(value)) return seen.get(value);
   if (Array.isArray(value)) {
     const result: unknown[] = [];
     seen.set(value, result);
-    value.forEach((item: unknown, index) => { result.push(sanitize(item, redact, jsonField, [...path, index], seen)); });
+    value.forEach((item: unknown, index) => { result.push(sanitize(item, redact, jsonField, structure, [...path, index], seen)); });
     const sanitized = result.every((item, index) => item === value[index]) ? value : result;
     seen.set(value, sanitized);
     return sanitized;
   }
   const keys = Object.getOwnPropertyNames(value);
-  if (keys.some(key => redact(key) !== key)) return "[redacted]";
+  if (structure?.keys(path) !== true && keys.some(key => redact(key) !== key)) return "[redacted]";
   const target = Object.create(Object.getPrototypeOf(value)) as object;
   seen.set(value, target);
   let changed = false;
@@ -29,7 +36,7 @@ function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefin
     if (descriptor === undefined) continue;
     if ("value" in descriptor) {
       const original: unknown = descriptor.value;
-      const sanitized = sanitize(original, redact, jsonField, [...path, key], seen);
+      const sanitized = sanitize(original, redact, jsonField, structure, [...path, key], seen);
       changed ||= sanitized !== original;
       Object.defineProperty(target, key, { ...descriptor, value: sanitized });
     } else if (value instanceof Error && key === "stack" && typeof value.stack === "string") {
@@ -44,8 +51,8 @@ function sanitize(value: unknown, redact: Redact, jsonField: JsonField | undefin
 }
 
 /** Opaque application data, never an outbound runtime message. */
-export function redactText<T>(value: T, redact: Redact, jsonField?: JsonField): T {
-  return sanitize(value, redact, jsonField, [], new WeakMap()) as T;
+export function redactText<T>(value: T, redact: Redact, jsonField?: JsonField, structure?: RedactionStructure): T {
+  return sanitize(value, redact, jsonField, structure, [], new WeakMap()) as T;
 }
 
 /** The protocol declares this field as encoded JSON. Keep its original token spans,

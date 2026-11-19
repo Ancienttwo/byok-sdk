@@ -1,6 +1,6 @@
 // BYOK change: derive tool inputs from protocol-aware redaction (Apache-2.0).
 import type { FailureClass, FrameBody, RawEvent, RuntimeEventBody, TokenTotals, TurnOutcome } from "../../contracts/session.js";
-import type { CredentialRedactor } from "../../shared/credential-redactor.js";
+import { redactRuntimeRecord, type CredentialRedactor } from "../../shared/credential-redactor.js";
 import type { RedactionPath } from "../../shared/redact-text.js";
 import { asNumber, asRecord, asRecordList, type JsonRecord } from "../../shared/json.js";
 import { failureFromStatus } from "../../shared/failure-class.js";
@@ -296,25 +296,29 @@ function withholdArgumentDelta(frame: unknown): unknown {
 
 /** BYOK change: only complete tool arguments can be decoded safely. Use the same sanitized JSON for both views. */
 export function redactDshRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
-  if (record.kind !== "frame") return credentials.redactValue(record);
+  const protocolString = (path: RedactionPath) => record.kind === "frame"
+    && record.body.type === "session/event:assistant/message" && path.length === 2 && path[0] === "body" && path[1] === "type";
+  const redact = <R extends RawEvent>(value: R, jsonField?: (path: RedactionPath) => boolean): R =>
+    redactRuntimeRecord(value, credentials.redactValue, jsonField, protocolString);
+  if (record.kind !== "frame") return redact(record);
   if (credentials.values().length !== 0 && record.body.type === "agent/assistant-stream") {
     const native = withholdArgumentDelta(record.body.native);
-    return credentials.redactValue({ ...record, body: { ...record.body, native,
+    return redact({ ...record, body: { ...record.body, native,
       events: record.body.events.filter(event => event.kind !== "tool_call_input_delta") } });
   }
   if (credentials.values().length !== 0 && record.body.type === "session/event:assistant/attempt") {
     const native = asRecord(record.body.native);
     const data = asRecord(native?.data);
     if (Array.isArray(data?.stream)) {
-      return credentials.redactValue({ ...record, body: { ...record.body,
+      return redact({ ...record, body: { ...record.body,
         native: { ...native, data: { ...data, stream: data.stream.map(withholdArgumentDelta) } } } });
     }
   }
   if (record.body.type === "session/event:assistant/message") {
-    return credentials.redactValue(record, path => isAssistantToolArguments(path, record.body.native));
+    return redact(record, path => isAssistantToolArguments(path, record.body.native));
   }
-  if (record.body.type !== "session/event:tool/call") return credentials.redactValue(record);
-  const safe = credentials.redactValue(record, isToolArguments);
+  if (record.body.type !== "session/event:tool/call") return redact(record);
+  const safe = redact(record, isToolArguments);
   const body = asRecord(safe.body);
   const args = asRecord(asRecord(body?.native)?.data)?.arguments;
   if (safe.kind !== "frame" || typeof args !== "string" || !Array.isArray(body?.events)) return safe;

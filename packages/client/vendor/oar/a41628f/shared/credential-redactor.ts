@@ -1,7 +1,7 @@
 // BYOK change: Modified from OAR a122061 to accept explicitly resolved credentials (Apache-2.0).
 /* oxlint-disable import/prefer-default-export -- Shared named helper. */
-import type { SessionOptions } from "../contracts/session.js";
-import { redactText, type RedactionPath } from "./redact-text.js";
+import type { RawEvent, SessionOptions } from "../contracts/session.js";
+import { redactText, type RedactionPath, type RedactionStructure } from "./redact-text.js";
 
 const CREDENTIAL_WORDS = new Set(["KEY", "APIKEY", "TOKEN", "SECRET", "PASSWORD", "PASSWD", "PASSPHRASE", "CREDENTIAL", "CREDENTIALS", "COOKIE", "PWD"]);
 const AUTH_HEADERS = new Set(["AUTHORIZATION", "PROXY-AUTHORIZATION"]);
@@ -31,7 +31,7 @@ export interface CredentialRedactor {
   /** BYOK change: suppress an echoed image payload from records and control errors. */
   addImage(this: void, data: string): void;
   redact(this: void, text: string): string;
-  redactValue<T>(this: void, value: T, jsonField?: (path: RedactionPath) => boolean): T;
+  redactValue<T>(this: void, value: T, jsonField?: (path: RedactionPath) => boolean, structure?: RedactionStructure): T;
 }
 
 /** Explicit session credentials only; runtime-native keys can be added after SDK resolution. */
@@ -77,6 +77,40 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
       if (data.length !== 0) images.add(data);
     },
     redact,
-    redactValue: (value, jsonField) => values.length === 0 && images.size === 0 ? value : redactText(value, redact, jsonField),
+    redactValue: (value, jsonField, structure) => values.length === 0 && images.size === 0 ? value : redactText(value, redact, jsonField, structure),
   };
+}
+
+function eventPath(path: RedactionPath): boolean {
+  return path[0] === "body" && path[1] === "events" && typeof path[2] === "number";
+}
+
+export function isProjectedToolInput(record: RawEvent, path: RedactionPath): boolean {
+  const [,, index, field] = path;
+  if (record.kind !== "frame" || path.length !== 4 || !eventPath(path) || typeof index !== "number" || field !== "input") return false;
+  const kind = record.body.events[index]?.kind;
+  return kind === "tool_call_started" || kind === "tool_call_input";
+}
+
+/** Keep the typed record and event discriminators out of the content traversal. */
+export function redactRuntimeRecord<T extends RawEvent>(
+  record: T, redact: CredentialRedactor["redactValue"], jsonField?: (path: RedactionPath) => boolean,
+  isProtocolString?: (path: RedactionPath, value: string) => boolean,
+): T {
+  return redact(record, jsonField, {
+    string(path, value) {
+      const [body, field, , eventField, nestedField] = path;
+      return (path.length === 1 && (body === "kind" || body === "direction"))
+        || (path.length === 2 && body === "body" && (field === "kind" || (field === "code" && record.kind === "response")))
+        || (eventPath(path) && ((path.length === 4 && (eventField === "kind"
+          || (eventField === "result" && (value === "ok" || value === "failed"))))
+          || (path.length === 5 && eventField === "outcome" && (nestedField === "kind" || nestedField === "failure"))))
+        || isProtocolString?.(path, value) === true;
+    },
+    keys(path) {
+      return path.length === 0 || (path.length === 1 && path[0] === "body")
+        || (path.length === 3 && eventPath(path))
+        || (path.length === 4 && eventPath(path) && path[3] === "outcome");
+    },
+  });
 }

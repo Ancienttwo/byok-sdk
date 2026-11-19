@@ -12,6 +12,7 @@ import { randomUUID } from "node:crypto";
 import type {
   ControlResult,
   InputOptions,
+  RawEvent,
   RequestRecord,
   AdapterSession,
   SessionOptions,
@@ -22,7 +23,7 @@ import { inputImagesRefusal } from "../../shared/input-images.js";
 import { asRecord, type JsonRecord } from "../../shared/json.js";
 // BYOK change: Return the raw adapter contract without best-effort observer projections.
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
-import { sessionCredentialRedactor, type CredentialRedactor } from "../../shared/credential-redactor.js";
+import { isProjectedToolInput, redactRuntimeRecord, sessionCredentialRedactor, type CredentialRedactor } from "../../shared/credential-redactor.js";
 import { createSessionKernel } from "../../shared/session-kernel.js";
 import { newSessionLinks } from "../../shared/session-links.js";
 import { startAppServerClient, type RpcOutcome, type SpawnLineProcess } from "./app-server-client.js";
@@ -73,7 +74,7 @@ export async function codexSession(
   hooks: { // BYOK change: the record consumer is registered before any record is appended.
     readonly onReady?: (threadId: string) => void;
     readonly turnProcessReader?: CodexProcessReader;
-    readonly onRecord?: (record: import("../../contracts/session.js").RawEvent) => void;
+    readonly onRecord?: (record: RawEvent) => void;
     // BYOK change: caller-owned, bounded native request lifecycle; no permissive fallback.
     readonly onServerRequest?: (id: string | number, method: string, params: JsonRecord, reply: {
       respond(value: JsonRecord): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
@@ -93,6 +94,21 @@ export async function codexSession(
 type CodexSessionArgs = Parameters<typeof codexSession>;
 // BYOK change: one request on the session's own client, for the caller-owned open steps.
 export type CodexOpenStepRequest = (method: string, params: JsonRecord) => Promise<JsonRecord>;
+
+const codexObservedMethods = new Set(["turn/started", "turn/completed", "thread/tokenUsage/updated", "error", "item/agentMessage/delta", "item/started", "item/completed"]);
+const codexToolItemTypes = new Set(["commandExecution", "fileChange", "mcpToolCall", "collabAgentToolCall", "webSearch", "sleep"]);
+
+export function redactCodexRecord<T extends RawEvent>(record: T, redact: CredentialRedactor["redactValue"]): T {
+  const itemType = record.kind === "frame" && record.body.type === "item/started"
+    ? asRecord(asRecord(record.body.native)?.item)?.type : undefined;
+  const encoded = itemType === "mcpToolCall" || itemType === "fileChange" || itemType === "collabAgentToolCall" || itemType === "sleep";
+  return redactRuntimeRecord(record, redact, path => encoded && isProjectedToolInput(record, path), (path, value) => {
+    const [body, group, member, field] = path;
+    if (body !== "body" || record.kind !== "frame") return false;
+    if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native");
+    return path.length === 4 && group === "native" && member === "item" && field === "type" && codexToolItemTypes.has(value);
+  });
+}
 
 async function openCodexSession(
   spawnLineProcess: SpawnLineProcess,
@@ -179,7 +195,7 @@ async function openCodexSession(
 
   // BYOK change: The record consumer observes from seq 0: it registers before any record is appended.
   // Observer errors are swallowed by the kernel, so the consumer fails the session itself.
-  const kernel = createSessionKernel(threadId, redactValue, options.retainedBytes);
+  const kernel = createSessionKernel(threadId, record => redactCodexRecord(record, redactValue), options.retainedBytes);
   if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);
   hooks.onReady?.(threadId);
   const state: CodexSessionState = {

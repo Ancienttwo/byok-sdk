@@ -13,7 +13,8 @@ import type {
   SessionOptions,
 } from "../../contracts/session.js";
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
-import { sessionCredentialRedactor, type CredentialRedactor } from "../credential-redactor.js";
+import { isProjectedToolInput, redactRuntimeRecord, sessionCredentialRedactor, type CredentialRedactor } from "../credential-redactor.js";
+import { asRecord, type JsonRecord } from "../json.js";
 import { manualCompaction, type CompactionOperation } from "../manual-compaction.js";
 import { createSessionKernel } from "../session-kernel.js";
 import { createAcpClientApp, type AcpClientHooks } from "./client-app.js";
@@ -34,9 +35,20 @@ import { acpTakesImages } from "./prompt.js";
 import { createAcpTokenUsage } from "./token-usage.js";
 import { createAcpOpening, createAcpPromptAnswers, withAcpPromptAnswers } from "./opening.js";
 import { createAcpConfigUpdates } from "./config-updates.js";
-import type { JsonRecord } from "../json.js";
 import { createAcpNativeTurnTracker } from "./native-turns.js";
 import { sendAcpSteerRequest } from "./steer-request.js";
+
+export function redactAcpRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
+  const update = record.kind === "frame" ? asRecord(asRecord(record.body.native)?.update) : null;
+  const rawInput = update?.rawInput;
+  // ACP projects string rawInput verbatim and serializes the other JSON values.
+  const encoded = rawInput !== null && rawInput !== undefined && typeof rawInput !== "string";
+  return redactRuntimeRecord(record, credentials.redactValue, path => encoded && isProjectedToolInput(record, path), (path, value) => {
+    const [body, native, update, field] = path;
+    return path.length === 4 && body === "body" && native === "native" && update === "update" && field === "status"
+      && (value === "pending" || value === "in_progress" || value === "completed" || value === "failed" || value === "cancelled");
+  });
+}
 
 export type { AcpSessionProfile } from "./profile.js";
 
@@ -177,7 +189,7 @@ async function openAcpRuntimeSession(
       } finally { releaseStartup?.(); }
     })();
     // BYOK change: the record consumer observes from seq 0: it registers before the recorder binds.
-    const kernel = createSessionKernel(opened.sessionId, credentials.redactValue, options.retainedBytes);
+    const kernel = createSessionKernel(opened.sessionId, record => redactAcpRecord(record, credentials), options.retainedBytes);
     if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);
     try {
       hooks.onReady?.(opened.sessionId);

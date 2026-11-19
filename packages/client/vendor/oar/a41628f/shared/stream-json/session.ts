@@ -13,7 +13,7 @@ import { withdrawControl } from "../held-input.js";
 import { asRecord, parseJson, type JsonRecord } from "../json.js";
 // BYOK change: the injected line process, one credential redactor per open and the upstream kernel; no SessionCredentials or executable manager.
 import type { LineProcess } from "../../runtimes/codex/app-server-client.js";
-import type { CredentialRedactor } from "../credential-redactor.js";
+import { isProjectedToolInput, redactRuntimeRecord, type CredentialRedactor } from "../credential-redactor.js";
 import { createSessionKernel } from "../session-kernel.js";
 import { streamJsonUserMessage, streamJsonPrompted } from "./input-lifecycle.js";
 import { foldStreamJsonStdout } from "./projection.js";
@@ -37,6 +37,35 @@ export interface StreamJsonSessionHooks {
   readonly beforeInterrupt?: () => void;
 }
 
+const streamJsonMessageTypes = new Set(["command_lifecycle", "assistant", "stream_event", "user", "result", "system", "control_response", "control_request", "control_cancel_request", "rate_limit_event"]);
+const streamJsonContentTypes = new Set(["text", "thinking", "redacted_thinking", "tool_use", "tool_result"]);
+const streamJsonEventTypes = new Set(["message_start", "message_stop", "content_block_start", "content_block_stop", "content_block_delta"]);
+const streamJsonDeltaTypes = new Set(["text_delta", "thinking_delta", "input_json_delta"]);
+
+/** Encoded fragments can span frames. The complete assistant tool block carries the usable input. */
+export function redactStreamJsonRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
+  let safe = record;
+  if (credentials.values().length !== 0 && record.kind === "frame" && record.body.type === "stream_event") {
+    const native = asRecord(record.body.native);
+    const event = asRecord(native?.event);
+    const delta = asRecord(event?.delta);
+    if (event?.type === "content_block_delta" && delta?.type === "input_json_delta") {
+      const { partial_json: _omitted, ...rest } = delta;
+      safe = { ...record, body: { ...record.body, native: { ...native, event: { ...event, delta: rest } },
+        events: record.body.events.filter(projected => projected.kind !== "tool_call_input_delta") } };
+    }
+  }
+  return redactRuntimeRecord(safe, credentials.redactValue, path => isProjectedToolInput(safe, path), (path, value) => {
+    const [body, native, field, group, block, member] = path;
+    if (body !== "body" || native !== "native" || record.kind !== "frame") return false;
+    if (path.length === 3 && field === "type") return streamJsonMessageTypes.has(value);
+    if (path.length === 4 && field === "event" && group === "type") return streamJsonEventTypes.has(value);
+    if (path.length === 5 && field === "event" && group === "delta" && block === "type") return streamJsonDeltaTypes.has(value);
+    return path.length === 6 && field === "message" && group === "content" && typeof block === "number"
+      && member === "type" && streamJsonContentTypes.has(value);
+  });
+}
+
 /** Shared line protocol driver. A runtime launches its own process and supplies its own readbacks. */
 export async function streamJsonSession<S extends StreamJsonProjectionState>(
   child: LineProcess,
@@ -47,7 +76,7 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
   retainedBytes?: number, // BYOK change: the caller's retained-record budget; old frame payloads are elided past it.
 ): Promise<AdapterSession> {
   // BYOK change: the upstream kernel with the redactor as its redact hook; the record consumer is registered before any record is appended.
-  const kernel = createSessionKernel(sessionId, credentials.redactValue, retainedBytes);
+  const kernel = createSessionKernel(sessionId, record => redactStreamJsonRecord(record, credentials), retainedBytes);
   if (hooks.onRecord !== undefined) { kernel.rawEvents(hooks.onRecord); }
   const tasks = profile.stopTask === undefined ? undefined : streamJsonTaskControl(kernel, child, profile.stopTask);
   const nativeUserMessage = profile.userMessage ?? streamJsonUserMessage;
