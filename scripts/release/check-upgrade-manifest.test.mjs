@@ -352,7 +352,8 @@ test('rebaseline snapshots a release checkout and refuses a version that is not 
   const f = fixture(t);
   assert.throws(() => run(['--root', f.root, '--rebaseline', f.root], { log() {}, error() {} }), /not newer than the baseline/);
   const release = fixture(t);
-  const [major, minor] = buildSnapshot(release.root).version.split('.').map(Number);
+  const previous = buildSnapshot(release.root).version;
+  const [major, minor] = previous.split('.').map(Number);
   release.setVersion(`${major}.${minor + 1}.0`);
   f.setVersion(`${major}.${minor + 1}.0`);
   const next = `${major}.${minor + 1}.0`;
@@ -367,7 +368,7 @@ test('rebaseline snapshots a release checkout and refuses a version that is not 
   assert.deepEqual(manifest.entries, []);
   // The released manifest is archived byte for byte beside the earlier ones; the gate then needs its tag.
   const released = readFileSync(path.join(release.root, MANIFEST_PATH));
-  const archive = path.join(f.root, HISTORY_DIR, `${major}.${minor}.0-${next}.json`);
+  const archive = path.join(f.root, HISTORY_DIR, `${previous}-${next}.json`);
   assert.deepEqual(readFileSync(archive), released);
   assert.deepEqual(readdirSync(path.join(f.root, HISTORY_DIR)).sort(), [...archives, path.basename(archive)].sort());
   assert.match(f.gate().output, new RegExp(`tag v${next} has no`));

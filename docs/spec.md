@@ -408,10 +408,10 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-The current aligned release is `0.44.1` (candidate). The stable npm release is `0.44.0`,
-published on 2026-11-18 (UTC) with registry readback for all nine packages.
+The current aligned release is `0.44.1`, also the stable npm release,
+published on 2026-11-19 (UTC) with registry readback for all nine packages.
 The packed and published keys `@byok-sdk/core` edge must pin the corresponding
-release version. Verify the candidate edge at `0.44.1` in an isolated standard
+release version. Verify the release edge at `0.44.1` in an isolated standard
 npm install.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
@@ -422,10 +422,10 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.44.1 is the owner-approved PATCH candidate after 0.44.0. It keeps the nine
+0.44.1 is the published owner-approved PATCH after 0.44.0. It keeps the nine
 public packages aligned on wire v7 and carries six additive upgrade-manifest
 entries. Hosts upgrading from 0.44.0 can reuse their stores and enrollment.
-[0.44.1 candidate notes](releases/v0.44.1.md)
+[0.44.1 release notes](releases/v0.44.1.md)
 
 0.44.0 is the published owner-approved MINOR after 0.43.0. It keeps the nine
 public packages aligned and is the first wire v7 release. A v6 peer cannot
@@ -571,7 +571,7 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry read of 2026-11-18 (UTC) reports `latest` 0.44.0 for all nine
+The registry read of 2026-11-19 (UTC) reports `latest` 0.44.1 for all nine
 packages in the release train; cloud-do remains archived at 0.42.0. The earlier
 published versions include 0.42.0 (2026-11-13, UTC), 0.41.0, 0.40.0, 0.39.0, 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for

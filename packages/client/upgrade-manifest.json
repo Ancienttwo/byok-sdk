@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "package": "@byok-sdk/client",
   "from": {
-    "version": "0.44.0",
-    "snapshotSha256": "74c716ac94443d12518252898dfa368791a7090bdf1dec4cd84440b5ca6bd77c"
+    "version": "0.44.1",
+    "snapshotSha256": "9fd69dfc3fe57c07d629b6b90a91008776de0972fe10739df9de49e6705edd26"
   },
   "to": {
     "version": "0.44.1",
@@ -14,122 +14,6 @@
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [
-    {
-      "id": "codex-service-tier-details",
-      "impact": "additive",
-      "summary": "Hosts can read optional RuntimeModelEntry.serviceTierDetails for Codex’s native tier names and descriptions. Tier IDs and ordering match serviceTiers.",
-      "migration": "docs/adapter-capabilities.md#codex-model-catalog-service-tiers",
-      "items": [
-        "export:@byok-sdk/client/adapters#RuntimeModelEntry"
-      ]
-    },
-    {
-      "id": "inspect-device-enrollment-clear",
-      "impact": "additive",
-      "summary": "Hosts can call inspectDeviceEnrollmentClear with the same options as clearDeviceEnrollment to check published store ownership and another store's enrollment or staged pairing attempt. The result is a point-in-time hint and the clear checks again under its own lease.",
-      "migration": "docs/releases/v0.44.1.md#enrollment-clear-precheck",
-      "items": [
-        "export:@byok-sdk/client#inspectDeviceEnrollmentClear"
-      ]
-    },
-    {
-      "id": "embedded-input-image-upload",
-      "impact": "additive",
-      "summary": "A trusted Host can upload a committed input image through ByokServer.blobs.uploadInputImage and pass the returned ref to dispatch or steer. Use images up to 20 MiB and respect any lower server blob limit.",
-      "migration": "docs/releases/v0.44.1.md#embedded-input-image-upload",
-      "items": [
-        "export:@byok-sdk/client#BlobClient",
-        "export:@byok-sdk/protocol#INPUT_IMAGE_MAX_BYTES",
-        "export:@byok-sdk/server#ByokServer",
-        "export:@byok-sdk/server#InputImageUploadError",
-        "export:@byok-sdk/server#UploadInputImage"
-      ]
-    },
-    {
-      "id": "offline-provider-secret-recovery",
-      "impact": "additive",
-      "summary": "List provider credential entry names from a recognized offline store. Before deleting obsolete credentials, exclude names used by active stores in the same credential scope.",
-      "migration": "docs/releases/v0.44.1.md#offline-provider-credential-recovery",
-      "items": [
-        "export:@byok-sdk/keys#listProviderProfileSecretNames"
-      ]
-    },
-    {
-      "id": "result-mcp-identifiers",
-      "impact": "additive",
-      "summary": "Hosts can import AGENT_RESULT_MCP_SERVER_NAME and AGENT_RESULT_TOOL_NAME from @byok-sdk/client to identify result submissions in event.mcp.",
-      "migration": "docs/releases/v0.44.1.md#result-mcp-identifiers",
-      "items": [
-        "export:@byok-sdk/client#AGENT_RESULT_MCP_SERVER_NAME",
-        "export:@byok-sdk/client#AGENT_RESULT_TOOL_NAME"
-      ]
-    },
-    {
-      "id": "task-result-memory-change",
-      "impact": "additive",
-      "summary": "Hosts can read TaskResult.agentHomeMemoryChange from @byok-sdk/server for memory-reader evidence reported in the terminal frame; it is absent for writer passes.",
-      "migration": "docs/releases/v0.44.1.md#memory-change-evidence-on-taskresult",
-      "items": [
-        "export:@byok-sdk/server#TaskResult"
-      ]
-    }
-  ],
-  "changes": [
-    {
-      "item": "export:@byok-sdk/client#AGENT_RESULT_MCP_SERVER_NAME",
-      "change": "added",
-      "entry": "result-mcp-identifiers"
-    },
-    {
-      "item": "export:@byok-sdk/client#AGENT_RESULT_TOOL_NAME",
-      "change": "added",
-      "entry": "result-mcp-identifiers"
-    },
-    {
-      "item": "export:@byok-sdk/client#BlobClient",
-      "change": "changed",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/client#inspectDeviceEnrollmentClear",
-      "change": "added",
-      "entry": "inspect-device-enrollment-clear"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#RuntimeModelEntry",
-      "change": "changed",
-      "entry": "codex-service-tier-details"
-    },
-    {
-      "item": "export:@byok-sdk/keys#listProviderProfileSecretNames",
-      "change": "added",
-      "entry": "offline-provider-secret-recovery"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#INPUT_IMAGE_MAX_BYTES",
-      "change": "added",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/server#ByokServer",
-      "change": "changed",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/server#InputImageUploadError",
-      "change": "added",
-      "entry": "embedded-input-image-upload"
-    },
-    {
-      "item": "export:@byok-sdk/server#TaskResult",
-      "change": "changed",
-      "entry": "task-result-memory-change"
-    },
-    {
-      "item": "export:@byok-sdk/server#UploadInputImage",
-      "change": "added",
-      "entry": "embedded-input-image-upload"
-    }
-  ]
+  "entries": [],
+  "changes": []
 }

@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.44.1 — 2026-11-18 (candidate)
+## 0.44.1 — 2026-11-19 (published)
 
-[Candidate notes](docs/releases/v0.44.1.md)
+[Release notes](docs/releases/v0.44.1.md)
 
 - **Added (server, protocol, client; #2395)** — A trusted embedded Host can commit an input image with `server.blobs.uploadInputImage` and pass its ref to dispatch, fresh execution, or steer. The upload checks the image signature and honors both the 20 MiB image limit and the server blob limit.
 - **Added (client; #2393)** — Import `AGENT_RESULT_MCP_SERVER_NAME` and `AGENT_RESULT_TOOL_NAME` to match structured `event.mcp` identifiers for result submissions.
