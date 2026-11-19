@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "6e36133a3271768e039ee307cc0c23f68757e4a6affd9380c4569fa06df7d39e"
+    "snapshotSha256": "5ca9e992111c3ede88f1fe0bc58c659e6f4b591ad8bbbec20120facda5d90f39"
   },
   "configFields": {
     "status": "tracked",
@@ -94,6 +94,24 @@
       ]
     },
     {
+      "id": "bot-input-images",
+      "impact": "additive",
+      "summary": "BotCollaboration.input accepts { request, images } and forwards ordered image refs to K4. Coalescing starts a new batch before exceeding 16 images. Hosts can read coordination_input_invalid on a Turn whose image submission was refused.",
+      "migration": "packages/bot-collaboration/README.md#input-images",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#BotCollaboration",
+        "export:@byok-sdk/bot-collaboration/host-kit#Command",
+        "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+        "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+        "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+        "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+        "export:@byok-sdk/bot-collaboration/rules#InputFields",
+        "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+        "export:@byok-sdk/bot-collaboration/rules#addTurn",
+        "export:@byok-sdk/bot-collaboration/rules#seatTurn"
+      ]
+    },
+    {
       "id": "mcp-toolset-exposure-config",
       "impact": "additive",
       "summary": "Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default.",
@@ -129,6 +147,11 @@
       "entry": "mcp-toolset-exposure-config"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
       "change": "added",
       "entry": "bot-persona-and-autonomy-context"
@@ -149,9 +172,54 @@
       "entry": "bot-persona-and-autonomy-context"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Command",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
       "change": "changed",
       "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#InputFields",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#addTurn",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#seatTurn",
+      "change": "changed",
+      "entry": "bot-input-images"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration/rules#syncTurn",

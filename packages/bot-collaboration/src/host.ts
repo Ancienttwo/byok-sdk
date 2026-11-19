@@ -41,7 +41,7 @@ import { admitBot, admitDevice, botDeviceRefusal, checkTopology, DeviceModeError
   type SwitchWork } from './topology.js';
 import { checkSwitchRecords, refuseExported, sealLedger, switchContent } from './switch.js';
 import { sealSwitchExport, SwitchExportError, type SwitchExport, type SwitchHeader } from './migration.js';
-import { admitUserInput, coalescePolicy, type CoalescePolicy } from './coalesce.js';
+import { admitUserInput, coalescePolicy, type CoalescePolicy, type InputFields } from './coalesce.js';
 import { classifyInbound, inboundKey, isOwner, verified, type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type Principal, type PrincipalArg } from './channel.js';
 import { acceptDeliveryEcho, readbackDelivery, recoverDelivery, settleDelivery, startDelivery, unknownDelivery } from './delivery.js';
 import { supersededDeliveryIds } from './delivery-superseded.js';
@@ -418,10 +418,12 @@ export class BotCollaboration {
    * (the first batched input's id); that Turn appears when the batch seals.
    * Only the owner starts a 1:1 execution (R2).
    */
-  input(key: string, request: string, botId = this.options.botId, ...by: PrincipalArg): Promise<string> {
+  input(key: string, input: string | Pick<InputFields, 'request' | 'images'>, botId = this.options.botId, ...by: PrincipalArg): Promise<string> {
     return this.exclusive(async () => {
       const principal = this.ownerOnly(by, 'input', botId);
-      const result = this.commitOwner(hash(['input', botId, key]), { kind: 'input', botId, key, request, sender: principal.id });
+      const { request, images } = typeof input === 'string' ? { request: input } : input;
+      const result = this.commitOwner(hash(['input', botId, key]), { kind: 'input', botId, key, request, sender: principal.id,
+        ...(images === undefined ? {} : { images }) });
       await this.process();
       return turnOf(result);
     });

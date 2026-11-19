@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { ByokServer } from '../index.js';
+import { isInputImageRefError } from '../input-image-ref-error.js';
 import type { ByokServerEvent, CreateByokServerOptions } from '../types.js';
 import type { DueWake } from '../wakes/types.js';
 import { MemoryBlockedError, type HostMemoryPage, type MemoryBinding } from './memory.js';
@@ -691,21 +692,29 @@ export class HostExecutionCore {
     if (typeof admitted !== 'boolean') throw new Error('Submit admission must return a boolean synchronously');
     return admitted;
   }
-  private async submit(intent: Intent): Promise<void> {
+  private async submit(intent: Intent): Promise<boolean> {
     const input = this.ledger.snapshot().executions[intent.taskId]!.input;
-    const outcome = await submitFrozen(this.frozenPort(), input, () => {
-      const snapshot = this.ledger.snapshot(), latest = snapshot.intents[intent.id]!;
-      if (latest.conclusion || latest.cancelReason) return false;
-      if (this.now() >= latest.waitUntil) {
-        this.ledger.transaction(state => { state.intents[intent.id]!.cancelReason = 'expired'; });
-        return false;
-      }
-      // The admission can change between the begin and the SDK call, so it is read again here.
-      if (!this.admits(latest, snapshot)) return false;
-      this.options.memory?.refreshExecution({ deviceId: input.deviceId, agentRef: input.payload.agentRef }, input.taskId);
+    try {
+      const outcome = await submitFrozen(this.frozenPort(), input, () => {
+        const snapshot = this.ledger.snapshot(), latest = snapshot.intents[intent.id]!;
+        if (latest.conclusion || latest.cancelReason) return false;
+        if (this.now() >= latest.waitUntil) {
+          this.ledger.transaction(state => { state.intents[intent.id]!.cancelReason = 'expired'; });
+          return false;
+        }
+        // The admission can change between the begin and the SDK call, so it is read again here.
+        if (!this.admits(latest, snapshot)) return false;
+        this.options.memory?.refreshExecution({ deviceId: input.deviceId, agentRef: input.payload.agentRef }, input.taskId);
+        return true;
+      });
+      if (outcome === 'delivered') this.ledger.transaction(state => { state.executions[intent.taskId]!.submission = 'delivered'; });
+      return false;
+    } catch (error) {
+      if (!isInputImageRefError(error)) throw error;
+      // Persist the refusal before reconciling any attempt left by an earlier submit. Recovery must never resubmit it.
+      this.ledger.transaction(state => { state.intents[intent.id]!.preparationError = error.code; });
       return true;
-    });
-    if (outcome === 'delivered') this.ledger.transaction(state => { state.executions[intent.taskId]!.submission = 'delivered'; });
+    }
   }
   private assertMemoryDispatchable(intent: Intent): void {
     this.options.memory?.assertDispatchable({ deviceId: intent.execution.deviceId, agentRef: intent.execution.payload.agentRef });
@@ -790,28 +799,31 @@ export class HostExecutionCore {
     const execution = this.ledger.snapshot().executions[intent.taskId]!;
     await this.delivered(intent); // Verify the immutable input before accepting any later evidence.
     let terminal = await this.server.tasks.deviceTerminal(intent.taskId);
+    const imageRefused = intent.preparationError === 'coordination_input_invalid';
     // Only an earlier observed claim removes the waiting deadline. A claim racing
     // this cancellation can be interrupted. This boundary was accepted by the owner.
-    if (!terminal && !intent.cancelReason && !execution.started && this.now() >= intent.waitUntil) {
+    if (!terminal && !imageRefused && !intent.cancelReason && !execution.started && this.now() >= intent.waitUntil) {
       this.ledger.transaction(state => { state.intents[intent.id]!.cancelReason = 'expired'; });
       intent.cancelReason = 'expired';
     }
-    if (!terminal && !intent.cancelReason && !execution.started && execution.submission === 'delivered') {
+    if (!terminal && !imageRefused && !intent.cancelReason && !execution.started && execution.submission === 'delivered') {
       const reason = this.options.yieldUnclaimed?.(this.ledger.snapshot(), intent);
       if (reason !== undefined) await this.server.tasks.cancel(intent.taskId, reason, { ifUnclaimed: true });
     }
     let attempt = await this.server.tasks.attempt(intent.taskId);
     this.verifyAttempt(intent, attempt);
-    if (intent.cancelReason && !terminal) {
+    const cancellation = imageRefused ? intent.preparationError : intent.cancelReason;
+    const stopped = imageRefused ? 'failed' : intent.cancelReason === 'expired' ? 'expired' : 'cancelled';
+    if (cancellation && !terminal) {
       if (attempt) {
-        await this.server.tasks.cancel(intent.taskId, intent.cancelReason);
+        await this.server.tasks.cancel(intent.taskId, cancellation);
         attempt = await this.server.tasks.attempt(intent.taskId);
         this.verifyAttempt(intent, attempt);
         if (!attempt) throw new Error('Attempt disappeared after cancellation');
       } else {
         // No SDK attempt exists. The uncertain submit has finished, and this scan
         // is serialized with every Host submit. Never submit after this decision.
-        this.ledger.transaction(state => settle(state, state.intents[intent.id]!, intent.cancelReason === 'expired' ? 'expired' : 'cancelled'));
+        this.ledger.transaction(state => settle(state, state.intents[intent.id]!, stopped));
         return true;
       }
       terminal = await this.server.tasks.deviceTerminal(intent.taskId);
@@ -827,7 +839,7 @@ export class HostExecutionCore {
     // terminal again once the attempt reads cancelled: one that landed between the two reads is finished, not settled past.
     if (attempt?.status === 'cancelled' && !terminal) terminal = await this.server.tasks.deviceTerminal(intent.taskId);
     if (attempt?.status === 'cancelled' && !terminal && (attempt.terminalCause !== undefined || (!attempt.claimedExecutor && !attempt.ownerDeviceId))) {
-      this.ledger.transaction(state => settle(state, state.intents[intent.id]!, intent.cancelReason === 'expired' ? 'expired' : 'cancelled'));
+      this.ledger.transaction(state => settle(state, state.intents[intent.id]!, stopped));
       return true;
     }
     if (terminal) {
@@ -839,7 +851,7 @@ export class HostExecutionCore {
       this.finish(intent, terminal, attempt);
       return true;
     }
-    if (!attempt?.cancellation && !intent.cancelReason && execution.submission !== 'delivered') await this.submit(intent);
+    if (!attempt?.cancellation && !cancellation && execution.submission !== 'delivered') return this.submit(intent);
     return false;
   }
   private finish(intent: Intent, terminal: Terminal, attempt: Attempt): void {
@@ -849,8 +861,11 @@ export class HostExecutionCore {
       const execution = state.executions[row.taskId]!;
       execution.terminal = terminal; execution.attempt = attempt;
       const envelope = terminal.envelope;
-      if (attempt.cancellation || envelope.type === 'task.cancelled') { settle(state, row, 'cancelled'); return; }
+      const imageRefused = row.preparationError === 'coordination_input_invalid';
+      if (attempt.cancellation || envelope.type === 'task.cancelled') { settle(state, row, imageRefused ? 'failed' : 'cancelled'); return; }
+      // A device terminal from an earlier submit is authoritative. A definitive submit refusal still prevents retries.
       if (envelope.type === 'task.complete' && envelope.payload.sealed === undefined) {
+        if (imageRefused) delete row.preparationError;
         if (!state.applied[row.taskId]) {
           const result = this.options.applyOutcome?.(envelope.payload.document, {
             intent: structuredClone(row), terminal: structuredClone(terminal), application: state.application, rows,
@@ -861,6 +876,7 @@ export class HostExecutionCore {
         }
         settle(state, row, 'succeeded'); return;
       }
+      if (imageRefused) { settle(state, row, 'failed'); return; }
       const busy = envelope.type === 'task.decline'
         && (envelope.payload.code === 'agent_home_writer_busy' || envelope.payload.code === 'agent_home_reader_busy');
       const retryable = busy || envelope.type === 'task.fail' && envelope.payload.retryable !== false && row.retry.retryFailures;

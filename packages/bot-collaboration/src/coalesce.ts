@@ -44,7 +44,8 @@ export function admitUserInput(state: CollaborationState, input: rules.InputFiel
   addBatchTurns(state, admission.sealed);
   if (admission.turn) {
     state.budgets[input.id] ??= { continuation: 0, delegation: 0 };
-    addTurn(state, { id: input.id, root: input.id, source: 'user', request: input.request, botId: input.botId, hop: 0, authority: input.authority });
+    addTurn(state, { id: input.id, root: input.id, source: 'user', request: input.request, botId: input.botId, hop: 0, authority: input.authority,
+      ...(input.images === undefined ? {} : { images: input.images }) });
   }
   return admission.id;
 }

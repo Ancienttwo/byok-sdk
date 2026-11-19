@@ -445,7 +445,7 @@ export declare function inboundKey(message: InboundMessage): string;
 // ==== @byok-sdk/bot-collaboration dist/coalesce.d.ts ====
 import { type CollaborationState } from './model.js';
 import * as rules from './rules/coalesce.js';
-export { type CoalescePolicy } from './rules/coalesce.js';
+export { type CoalescePolicy, type InputFields } from './rules/coalesce.js';
 export declare function admitUserInput(state: CollaborationState, input: rules.InputFields, policy: rules.CoalescePolicy | undefined, now: number): string;
 // ==== @byok-sdk/bot-collaboration dist/commit-vectors.test-support.d.ts ====
 import type { VectorTestApi } from './vector-test-api.js';
@@ -780,7 +780,7 @@ import type { RoomFields } from '@byok-sdk/protocol';
 import { type HomeServer } from './home-projections.js';
 import { type DeviceTopology, type SwitchWork } from './topology.js';
 import { type SwitchExport } from './migration.js';
-import { type CoalescePolicy } from './coalesce.js';
+import { type CoalescePolicy, type InputFields } from './coalesce.js';
 import { type ChannelOptions, type Conversation, type InboundClass, type InboundMessage, type PrincipalArg } from './channel.js';
 import type { InboundDisposition } from './rules/inbound.js';
 export interface BotOptions {
@@ -866,7 +866,7 @@ export declare class BotCollaboration {
     snapshot(): CollaborationState;
     private write;
     private exclusive;
-    input(key: string, request: string, botId?: string, ...by: PrincipalArg): Promise<string>;
+    input(key: string, input: string | Pick<InputFields, 'request' | 'images'>, botId?: string, ...by: PrincipalArg): Promise<string>;
     inputRoot(key: string, botId?: string): string | undefined;
     receive(message: InboundMessage): Promise<{
         kind: InboundClass;
@@ -1458,20 +1458,15 @@ export declare function reportCardDecisions(state: TurnsState & {
     readonly cards: Readonly<Record<string, Card>>;
 }, publish: Publish): void;
 // ==== @byok-sdk/bot-collaboration dist/rules/coalesce.d.ts ====
+import { type InputImageBlobRef } from '@byok-sdk/protocol';
 // support
 export type Authority = 'owner' | 'bot';
-export interface UserInput {
-    id: string;
-    key: string;
-    botId: string;
-    request: string;
+export interface UserInput extends InputFields {
     bytes: number;
-    sender: string;
-    authority: Authority;
     receivedAt: number;
     batchId: string;
 }
-export type SealReason = 'idle' | 'window' | 'items' | 'bytes' | 'boundary' | 'key_changed' | 'cancel' | 'policy_off' | 'archived';
+export type SealReason = 'idle' | 'window' | 'items' | 'bytes' | 'images' | 'boundary' | 'key_changed' | 'cancel' | 'policy_off' | 'archived';
 export interface InputBatch {
     id: string;
     botId: string;
@@ -1483,6 +1478,7 @@ export interface InputBatch {
     state: 'open' | 'sealed';
     sealReason?: SealReason;
     request?: string;
+    images?: readonly InputImageBlobRef[];
     revision?: 1 | 2;
 }
 export declare const COALESCE_DEFAULTS: {
@@ -1500,6 +1496,7 @@ export interface InputFields {
     key: string;
     botId: string;
     request: string;
+    images?: readonly InputImageBlobRef[];
     sender: string;
     authority: Authority;
 }
@@ -1510,7 +1507,7 @@ export interface CoalesceState {
 }
 export declare function coalescePolicy(options: Partial<CoalescePolicy>, contextMaxBytes: number): CoalescePolicy;
 // ==== @byok-sdk/bot-collaboration dist/rules/commands.d.ts ====
-import type { RoomFields } from '@byok-sdk/protocol';
+import { type RoomFields } from '@byok-sdk/protocol';
 import { type Json, type Turn } from './turn.js';
 import { type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team.js';
 import { type MemberMentions, type Mentions } from './rooms.js';
@@ -1522,13 +1519,9 @@ import type { Autonomy } from './autonomy.js';
 import { type CommandRecord, type CommitRequest, type CommitResult, type CommitState } from './commit.js';
 // support
 export type KeyedCommand =
-{
+({
     kind: 'input';
-    botId: string;
-    key: string;
-    request: string;
-    sender: string;
-}
+} & Pick<InputFields, 'botId' | 'key' | 'request' | 'images' | 'sender'>)
  | {
     kind: 'receive';
     inbound: 'owner_input';
@@ -2366,6 +2359,7 @@ export type DeviceRefusal = 'unbound' | 'revoked' | 'mode';
 export type SyncRefusal = DeviceRefusal | 'switching';
 export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
     executionStarted(turnId: string): boolean;
+    preparationError?(turnId: string): string | undefined;
     retired(turnId: string): 'result_retired' | 'turn_retired' | undefined;
     deviceRefusal?(botId: string): SyncRefusal | undefined;
     dreamHold?(botId: string): number | undefined;
@@ -2459,7 +2453,7 @@ export declare function inactive(bot: {
 export declare function profileRevision(value: unknown): string;
 export declare function teamSnapshot(value: unknown): TeamSnapshot;
 // ==== @byok-sdk/bot-collaboration dist/rules/turn.d.ts ====
-import type { AskUserAction, ConfirmableAction } from '@byok-sdk/protocol';
+import type { AskUserAction, ConfirmableAction, InputImageBlobRef } from '@byok-sdk/protocol';
 import { type Authority, type CoalesceState } from './coalesce.js';
 // support
 export type Json = null | boolean | number | string | Json[] | {
@@ -2471,6 +2465,7 @@ export interface Turn {
     botId: string;
     source: 'user' | 'continuation' | 'answer' | 'action_result' | 'routine' | 'room_slot' | 'bot_request' | 'bot_reply';
     request: string;
+    images?: readonly InputImageBlobRef[];
     hop: number;
     status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'blocked' | 'delivered';
     authority?: Authority;
@@ -2482,7 +2477,7 @@ export interface Turn {
     historyDigest?: string;
     sealedRoutine?: SealedRoutineRef;
     held?: 'device_not_bound' | 'device_switching';
-    settleCode?: 'outcome_failed';
+    settleCode?: 'outcome_failed' | 'coordination_input_invalid';
     blockedReason?: string;
     profileFailure?: {
         sequence: number;
@@ -2553,6 +2548,7 @@ export interface TurnFields {
     root: string;
     source: Turn['source'];
     request: string;
+    images?: readonly InputImageBlobRef[];
     botId: string;
     hop: number;
     authority: Authority;

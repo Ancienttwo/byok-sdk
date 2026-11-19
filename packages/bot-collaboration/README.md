@@ -200,6 +200,29 @@ or `uncertain` delegation; end those with `abandonDelegation`. Both error
 classes extend `Error`, so an `instanceof Error` check still holds, and the
 messages are the same as before.
 
+### Input images
+
+Pass a string for text-only input, or pass `{ request, images }` with refs
+returned by the same Server's `blobs.uploadInputImage`.
+
+```ts
+const image = await server.blobs.uploadInputImage({ bytes, contentType: 'image/png' });
+const turnId = await bot.input(messageId, { request: 'Describe this image.', images: [image] });
+```
+
+When present, `images` must contain 1–16 refs. Replaying the same input key
+must preserve the request and the ordered images. Coalescing appends refs in
+input arrival order and starts a new batch before the merged list would
+exceed 16 images. The target device and runtime must support `input-images`.
+
+Submit the images to K4 within the blob's orphan grace period (24 hours by
+default). Uploading the same bytes again refreshes the grace period. If K8
+is down or the Turn waits past grace and maintenance collects an image before
+submission, the Turn ends as `failed` with `settleCode: 'coordination_input_invalid'`.
+Read it in `snapshot().turns[turnId]` or the `bot-turn:<id>` projection.
+The Host needs to ask the user to resend the message so it can upload the
+images and admit a new input with a new key.
+
 ### Input root (#1407)
 
 `input` commits first and then runs a pass, so it can reject with a drain error
@@ -209,8 +232,8 @@ input's command record, or `undefined` when no input with that key committed.
 It runs no pass, writes nothing and does not change the K8 revision, so it
 gives the same answer after a restart. A record that retention moved still
 answers until its row expires; the key then reads as not committed. The call
-checks no principal and does not compare the request text: a replay of `input`
-does both.
+checks no principal or input identity. A replay of `input` checks the principal,
+request text and images.
 
 ## Reply visibility
 
@@ -1864,6 +1887,7 @@ budget blocks with a visible reason, as before.
 | `window` | `windowMs` passed after the first input. Later inputs do not extend it. |
 | `items` | The batch has `maxItems` inputs. |
 | `bytes` | The next input makes the merged Request larger than `maxBytes`. |
+| `images` | The next input would bring the batch above 16 images. |
 | `boundary` | Another new Turn of this Bot arrives. |
 | `key_changed` | The sender, authority, or Bot configuration changed. |
 | `cancel` | `cancelTurn` names the batch or a member input. |
@@ -1877,22 +1901,21 @@ seal. The seal check runs at the start of each Host sync and before each new
 input. `recover()` runs a sync first, so a due batch seals after a restart.
 
 `cancelTurn` takes a batch id or a member input id. It cancels the whole batch.
-A replay of `input` with the same key and text returns the batch Turn id and
-does not join again. A replay with a changed text throws
+A replay of `input` with the same key, text and images returns the batch Turn
+id without joining again. Changing the text or the ordered images throws
 `Input identity conflict`. Each input has a durable record in
 `snapshot().inputs` with its `batchId`. `snapshot().inputBatches` holds the
 batches. The `bot-turn:<id>` projection carries `inputIds` in arrival order.
 Show the one reply once, and mark each member message from `inputIds`.
 
-From the second input, a reply can wait up to `windowMs` plus the running
-execution. A batch Turn freezes its ContextPack at enqueue, as every waiting
-Turn does. The Host does not read message text for meaning, so a later input
-such as "never mind" does not withdraw an earlier input. The model reads all
-inputs in order and answers them together.
+A batch Turn freezes its ContextPack at enqueue. A reply can also wait for
+work already in the execution queue or for the Host to recover after downtime.
+The Host does not read message text for meaning, so a later input such as
+"never mind" does not withdraw an earlier input. The model reads all inputs
+in order and answers them together.
 
-This example does not yet arm a timer at the window end, or publish
-`input-batch` projections (slice I2). Until then, a batch of a busy Bot seals
-at the next Host call or when the Bot becomes idle.
+The embedded Host arms a timer at the window end for open batches and
+publishes `input-batch` projections when a batch opens or seals.
 
 ## User input priority (#1229)
 

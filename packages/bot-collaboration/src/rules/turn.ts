@@ -1,4 +1,4 @@
-import type { AskUserAction, ConfirmableAction } from '@byok-sdk/protocol';
+import type { AskUserAction, ConfirmableAction, InputImageBlobRef } from '@byok-sdk/protocol';
 import { sealAtBoundary, type Authority, type BatchTurn, type CoalesceState } from './coalesce.js';
 
 /**
@@ -12,7 +12,7 @@ export function json(value: unknown): Json { return JSON.parse(JSON.stringify(va
 export interface Turn {
   id: string; root: string; botId: string;
   source: 'user' | 'continuation' | 'answer' | 'action_result' | 'routine' | 'room_slot' | 'bot_request' | 'bot_reply';
-  request: string; hop: number; status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'blocked' | 'delivered';
+  request: string; images?: readonly InputImageBlobRef[]; hop: number; status: 'queued' | 'processing' | 'succeeded' | 'failed' | 'blocked' | 'delivered';
   /** Set at insert and never changed. Absent counts as `bot`: only `owner` turns can manage the team. */
   authority?: Authority;
   /** B side of a delegation: the bot_request Turn and its continuations. */
@@ -35,10 +35,9 @@ export interface Turn {
   /** Set while the sync holds this Turn because its Bot's device has no active binding (#956) or is frozen for an owner switch (#957). */
   held?: 'device_not_bound' | 'device_switching';
   /**
-   * The refusal code of the K4 terminal when the owner's `failStuckIntent` settled this Turn's intent (#1405). Set in the
-   * settle transaction, so a reader need not match the audit row, which keeps the message.
+   * The code of a refused image submission or a terminal that the owner settled with `failStuckIntent` (#1405).
    */
-  settleCode?: 'outcome_failed';
+  settleCode?: 'outcome_failed' | 'coordination_input_invalid';
   blockedReason?: string; profileFailure?: { sequence: number; revision: string; reason: string }; outcome?: Json; conclusion?: string; reported?: boolean;
 }
 export interface SealedRoutineRef { routineId: string; definitionVersion: number }
@@ -62,7 +61,7 @@ export interface Budget { continuation: number; delegation: number; reserved?: n
 /** The rows that adding a Turn changes. */
 export interface TurnsState extends CoalesceState { turns: Record<string, Turn>; budgets: Record<string, Budget> }
 export interface TurnFields {
-  id: string; root: string; source: Turn['source']; request: string; botId: string; hop: number; authority: Authority;
+  id: string; root: string; source: Turn['source']; request: string; images?: readonly InputImageBlobRef[]; botId: string; hop: number; authority: Authority;
   delegationId?: string; replies?: ReplyEntry[]; refusalReport?: boolean; unit?: string; inputIds?: string[]; sealedRoutine?: SealedRoutineRef;
 }
 /**
@@ -77,7 +76,7 @@ export function addTurn(state: TurnsState, fields: TurnFields): Turn {
 /** One user Turn per sealed input batch, in order. A batch Turn id is new and its batch is sealed, so no boundary seal applies. */
 export function addBatchTurns(state: TurnsState, sealed: readonly BatchTurn[]): void {
   for (const batch of sealed) insertTurn(state, { id: batch.id, root: batch.id, source: 'user', request: batch.request, botId: batch.botId, hop: 0,
-    authority: batch.authority, inputIds: batch.inputIds });
+    authority: batch.authority, inputIds: batch.inputIds, ...(batch.images === undefined ? {} : { images: batch.images }) });
 }
 function insertTurn(state: TurnsState, fields: TurnFields): Turn {
   state.turns[fields.id] ??= { ...fields, status: 'queued' };
