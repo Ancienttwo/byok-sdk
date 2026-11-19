@@ -19,7 +19,8 @@ This checklist starts after the published 0.44.1 release. Hosts on an earlier re
    supports device defaults. For explicit routing, pass `lane: 'harness'`, the
    advertised `harnessId`, and a supported `selection`. Use `device-default`
    to keep the executor's defaults or `subscription` with a `modelId` to pin
-   the model under Claude or Codex's own CLI login. For a Host credential, use
+   the model under Claude or Codex's own CLI login. Codex subscription
+   requires a ChatGPT account. For a Host credential, use
    `byok` with the advertised pi-ai catalog `providerId`. For `byok` and
    `adapter-model`, omit `modelId` only if the device advertises that selection
    mode in `capabilities.defaultModelModes`. DSH can use a configured default
@@ -38,6 +39,8 @@ model refusal after claim is reported through `task.fail.failure.class`.
 
 Ordinary Pi supports `device-default` with the device's Pi auth store. For
 `adapter-model`, pass an exact `provider/id` from `PiAdapter.listModels()`.
+A prepared task must use the same provider and model as its frozen record.
+Ordinary Pi uses credentials from its own store and configuration.
 The pinned Pi 1.5.2 exposes session token and cost totals through
 `get_session_stats`. Pi does not report account usage or quotas through the SDK.
 
@@ -70,7 +73,8 @@ the staged CLI passes its version and liveness probes.
 
 AGY and Grok return vendor commands and reasons. Pi ships with the SDK. Read
 local status or doctor for the installed source and upgrade guidance. Stop
-sessions using a managed copy before calling `uninstallManagedRuntime`.
+sessions using a managed copy before calling `uninstallManagedRuntime` with
+an install root whose path has no symbolic links.
 
 ## Provider store credential namespace
 

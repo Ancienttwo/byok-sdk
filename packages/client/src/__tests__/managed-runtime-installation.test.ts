@@ -1,8 +1,8 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { managedBinaryPath, npmInstallInvocation, upgradeRuntime } from '../lifecycle/runtime-installation';
+import { managedBinaryPath, npmInstallInvocation, uninstallManagedRuntime, upgradeRuntime } from '../lifecycle/runtime-installation';
 import { runtimeUpgradeAdvice } from '../runtime/runtime-releases';
 import { managedRuntimeDirectory, resolveManagedRuntime } from '../adapters/managed-runtime-path';
 import { resolveRuntimeCommand } from '../adapters/runtime-executable';
@@ -15,7 +15,7 @@ afterEach(async () => {
 });
 
 async function tempRoot(): Promise<string> {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'byok-managed-runtime-'));
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-managed-runtime-')));
   roots.push(root);
   return root;
 }
@@ -89,6 +89,38 @@ chmod +x '${native}'
       resolveManagedRuntime(options.installRoot, 'claude'))).toMatchObject({ source: 'managed', bin: { command: first.executable } });
     await rm(first.executable);
     expect(() => resolveManagedRuntime(options.installRoot, 'claude')).toThrow('managed runtime installation is unusable');
+  });
+});
+
+describe('managed runtime uninstall', () => {
+  it.each(['install root', 'runtimes parent', 'runtime target'])('refuses a linked %s and preserves the external files', async linkAt => {
+    const root = await tempRoot();
+    const installRoot = path.join(root, 'sdk');
+    const managedDirectory = managedRuntimeDirectory(installRoot, 'claude');
+    const link = linkAt === 'install root' ? installRoot : linkAt === 'runtimes parent' ? path.dirname(managedDirectory) : managedDirectory;
+    const external = path.join(root, 'external');
+    const externalRuntime = path.join(external, path.relative(link, managedDirectory));
+    await mkdir(path.dirname(link), { recursive: true });
+    await mkdir(externalRuntime, { recursive: true });
+    await writeFile(path.join(externalRuntime, 'keep.txt'), 'external content');
+    await symlink(external, link, 'junction');
+    await expect(uninstallManagedRuntime(installRoot, 'claude')).rejects.toThrow('without symbolic links');
+    expect((await lstat(link)).isSymbolicLink()).toBe(true);
+    await expect(readFile(path.join(externalRuntime, 'keep.txt'), 'utf8')).resolves.toBe('external content');
+  });
+
+  it('removes only the selected runtime and permits a repeated uninstall', async () => {
+    const root = await tempRoot();
+    const claude = managedRuntimeDirectory(root, 'claude');
+    const codex = managedRuntimeDirectory(root, 'codex');
+    await mkdir(claude, { recursive: true });
+    await mkdir(codex);
+    await writeFile(path.join(claude, 'current.json'), '{}');
+    await writeFile(path.join(codex, 'current.json'), '{}');
+    await uninstallManagedRuntime(root, 'claude');
+    await uninstallManagedRuntime(root, 'claude');
+    await expect(lstat(claude)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(readFile(path.join(codex, 'current.json'), 'utf8')).resolves.toBe('{}');
   });
 });
 

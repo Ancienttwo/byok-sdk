@@ -1424,10 +1424,9 @@ adapter are outside the check. The BYOK loopback runtime contracts qualify SDK
 behavior and isolation against the vendored OAR native adapters.
 
 Pi `authPresent` is pi's own login state, on the installed and `sdkHelperHost`
-paths alike. It is `true` when any provider credential env-var name the pinned pi reads
-(generated from pi-ai `findEnvKeys`, `packages/client/scripts/generate-pi-provider-env.mjs`) is
-set, or when pi's agent directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`)
-holds a credential for the global `settings.json` `defaultProvider`, or for any
+paths alike. It is `true` when Pi's agent directory (`PI_CODING_AGENT_DIR`,
+else `~/.pi/agent`) holds a credential for the global `settings.json`
+`defaultProvider`, or for any
 provider when `settings.json` is absent or configures no default. A credential
 is an `auth.json` login record of pi's `api_key` or `oauth` shape, or a
 `models.json` provider entry with a non-empty `apiKey` string. That `apiKey`

@@ -153,9 +153,7 @@ if (mode === 'latest') {
     'detect.auth.absent': check(async () => {
       expectAuth(await detectWith(new PiAdapter(), await detectEnv('pi-auth-absent')), false);
     }),
-    'detect.auth.apiKey': check(async () => {
-      expectAuth(await detectWith(new PiAdapter(), { ...await detectEnv('pi-auth-key'), ANTHROPIC_API_KEY: 'sk-ant-runtime-contract-placeholder' }), true);
-    }),
+    'detect.auth.apiKey': skip('Native Pi uses stored auth and the SDK drops provider keys from the environment'),
     'detect.auth.login': check(async () => {
       // The record `pi /login` stores for an API-key provider.
       const env = await detectEnv('pi-auth-login', { 'auth.json': JSON.stringify({ anthropic: { type: 'api_key', key: 'sk-ant-runtime-contract-placeholder' } }) });

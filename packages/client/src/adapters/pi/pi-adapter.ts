@@ -60,9 +60,7 @@ import { boundFailureReason } from '@byok-sdk/protocol/constants';
 import { PiRpcClient, type PiRpcMessage, type SpawnFn } from './rpc-client.js';
 import { abortPiRpcAndSettle } from './interrupt-settlement.js';
 import { buildPreparedPromptCommand, PREPARED_PROMPT_COMMAND_ID } from './prepared-prompt-frame.js';
-import {
-  withoutProviderCredentials,
-} from '../provider-credential-environment.js';
+import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { probePiAuthPresent } from './auth-presence.js';
 import { startToolAuthorizationIpc } from '../../tool-authorization-ipc.js';
 import type { ToolAuthorizationGate } from '../../tool-authorization.js';
@@ -339,7 +337,7 @@ export class PiAdapter implements RuntimeAdapter {
       : resolveSdkReservedHelperBin('pi-rpc', this.options.sdkHelperHost);
     try {
       const { stdout } = await execFileAsync(helper.command, [...helper.args, '--list-models-json'], {
-        env: { ...env, PI_OFFLINE: '1' }, signal, timeout: 15_000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
+        env: { ...withoutProviderCredentials(env), PI_OFFLINE: '1' }, signal, timeout: 15_000, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024,
       });
       const items: unknown = JSON.parse(stdout);
       if (!Array.isArray(items)) throw new Error('Invalid Pi model catalog');
@@ -361,7 +359,7 @@ export class PiAdapter implements RuntimeAdapter {
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const { env } = await this.runtimeEnvironment();
+      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const host = this.options.sdkHelperHost;
       if (host !== undefined) {
         // The product bundles Pi at the SDK pin; there is no package to probe.
@@ -528,7 +526,7 @@ export class PiAdapter implements RuntimeAdapter {
           boundRuntime = await resolvePiRuntimeLaunch({
             ...resources, sessionCwd: resources.cwd, kind,
             // The launch env may not come from runtimeEnvironment(); packageDir stays the one asset root.
-            env: withPiPackageDirEnv(providerProfile === undefined ? resources.env : withoutProviderCredentials(resources.env), this.options.packageDir),
+            env: withPiPackageDirEnv(resources.env, this.options.packageDir),
             resolveInvocation: () => {
               const host = this.options.sdkHelperHost;
               if (host !== undefined) {
@@ -621,6 +619,11 @@ export class PiAdapter implements RuntimeAdapter {
               launcher: this.options.byokLauncher, launcherArgs, nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn });
           }
           if (startInput.kind === 'prepared') {
+            const preparedModel = startInput.preparation.expected.model;
+            if (nativeModel !== undefined && (preparedModel.provider !== nativeModel.provider || preparedModel.id !== nativeModel.id)) {
+              throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+                reason: 'the prepared Pi model differs from the admitted adapter-model selection' });
+            }
             return await startPreparedPiOperation({
               runtimeLaunch,
               scratch: startInput.scratch,

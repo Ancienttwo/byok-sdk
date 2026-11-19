@@ -7,6 +7,15 @@ export interface CodexControl {
   // ControlResult also permits an exit response with a numeric or null code.
   response: { body: { kind: string; code?: string | number | null; reason?: string } };
 }
+export declare function startAppServerClient(
+  spawn: typeof spawnOwnedLineProcess, command: string, env: Readonly<Record<string, string>>,
+): {
+  readonly spawned: Promise<void>;
+  handle(handlers: { onNotification(): void; onServerRequest(): void }): void;
+  request(method: string, params: Record<string, unknown>): Promise<Record<string, unknown>>;
+  notify(method: string, params: Record<string, unknown>): void;
+  kill(): void;
+};
 /** OAR 0.25.0 Codex always implements steer. The bridge retains this required member. */
 export declare function codexSessionCapabilities(): { readonly steer: true; readonly images: true };
 

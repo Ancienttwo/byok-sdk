@@ -64,6 +64,7 @@ const DEFAULT_OPERATION_MS = 30_000;
 type CodexInstallation =
   | { readonly detected: Exclude<RuntimeDetectResult, { kind: 'available' }> }
   | { readonly detected: Extract<RuntimeDetectResult, { kind: 'available' }>; readonly invocation: RuntimeInvocation };
+const SUBSCRIPTION_REQUIRED = 'Codex subscription selection requires a ChatGPT login';
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
 const CODEX_SANDBOX_SETTINGS: readonly string[] = ['read-only', 'workspace-write', 'danger-full-access', 'inherit'];
@@ -309,6 +310,16 @@ export class CodexAdapter implements RuntimeAdapter {
     if (!mcpAllowlistSupported && (input.requiredToolsetIds.length > 0 || Object.keys(input.mcpServers ?? {}).length > 0)) {
       return { kind: 'reject', reason: CODEX_MCP_TOOL_ALLOWLIST_REFUSAL, retryable: false };
     }
+    if (model !== undefined) {
+      try {
+        if (!await this.#readSubscription(installation.invocation, withoutProviderCredentials((await this.runtimeEnvironment()).env), input.signal)) {
+          return { kind: 'reject', code: 'invalid_request', reason: SUBSCRIPTION_REQUIRED, retryable: false };
+        }
+      } catch {
+        input.signal?.throwIfAborted();
+        return { kind: 'reject', reason: 'Codex could not confirm the CLI account type', retryable: true };
+      }
+    }
     return {
       kind: 'prepared',
       operation: {
@@ -316,6 +327,36 @@ export class CodexAdapter implements RuntimeAdapter {
       },
     };
   }
+  async #readSubscription(invocation: RuntimeInvocation, env: Record<string, string>, signal?: AbortSignal): Promise<boolean> {
+    const timeout = AbortSignal.timeout(DETECT_TIMEOUT_MS);
+    const deadline = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+    deadline.throwIfAborted();
+    const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'codex account read' });
+    let child: ReturnType<typeof spawn> | undefined;
+    try {
+      const client = codexRuntime.startAppServerClient((bin, args, options) => {
+        child = spawn(bin, [...invocation.args, ...args], options);
+        return child;
+      }, invocation.command, env);
+      client.handle({ onNotification() {}, onServerRequest() {} });
+      const stop = () => client.kill();
+      deadline.addEventListener('abort', stop, { once: true });
+      try {
+        deadline.throwIfAborted();
+        await client.spawned;
+        deadline.throwIfAborted();
+        await client.request('initialize', { clientInfo: { name: 'byok-sdk', version: '0.0.0' } });
+        deadline.throwIfAborted();
+        client.notify('initialized', {});
+        return codexHasSubscription(await client.request('account/read', {}));
+      } finally {
+        deadline.removeEventListener('abort', stop);
+      }
+    } finally {
+      await child?.dispose();
+    }
+  }
+
   private async start(
     input: RuntimeOperationStartInput,
     invocation: RuntimeInvocation,
@@ -402,6 +443,10 @@ export class CodexAdapter implements RuntimeAdapter {
           beforeOpen: async (request, params) => {
             const inspectUserMcp = excludeUserMcp || taskServers.length > 0;
             const effective = inspectUserMcp || excludeUserContext ? await request('config/read', { cwd, includeLayers: false }) : undefined;
+            if (model !== undefined && !codexHasSubscription(await request('account/read', {}))) {
+              throw new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason: SUBSCRIPTION_REQUIRED,
+                failure: { class: 'invalid_request' } });
+            }
             if (excludeUserContext) assertCodexFileCredentials(effective!);
             const userServerNames = inspectUserMcp ? codexUserMcpServerNames(effective!, taskServers) : [];
             return withCodexMcpToolGrants(
@@ -443,6 +488,12 @@ export class CodexAdapter implements RuntimeAdapter {
     }
   }
 }
+function codexHasSubscription(result: Readonly<Record<string, unknown>>): boolean {
+  const account = result.account;
+  return account !== null && typeof account === 'object' && 'type' in account
+    && account.type === 'chatgpt' && result.requiresOpenaiAuth !== false;
+}
+
 const authority = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'start',

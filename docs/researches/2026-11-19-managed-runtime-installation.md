@@ -12,6 +12,9 @@ The November 19, 2026 candidate was tested on macOS arm64 against the OAR pins i
 For DSH, the installer restored mode `0755` on the `node-pty` `spawn-helper`. The qualified `dsh.close` contract used the managed binary through `BYOK_CONTRACT_DSH_BIN`. A real ACP shell tool started, and closing the session reaped its processes. That case passed. The other 23 contract cases were filtered out.
 
 A preflight on the same macOS arm64 host used the Claude and Codex adapter pins from `038d66c9d` in a temporary copy of the client source. Claude `2.1.326` selected `@anthropic-ai/claude-code-darwin-arm64/claude`. Codex `0.169.0` selected `node_modules/.bin/codex`. Both passed the public operation’s version and help probes and published their installations.
+The `@openai/codex@0.169.0` package maps its bin to `bin/codex.js`, which
+launches the installed platform package. Its manifest declares no postinstall
+script.
 
 A Windows x64 run on `win-ci` used Node 26.13.0 and npm 11.20.0. The
 installer resolved `node.exe` and its adjacent `node_modules/npm/bin/npm-cli.js`

@@ -27,6 +27,7 @@ import { CodexProjection } from '../adapters/codex/projection';
 import * as vendoredProjection from '../../vendor/oar/a41628f/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
+const SUBSCRIPTION_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'wanted' } } as const;
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codex.mjs', import.meta.url),
 );
@@ -463,11 +464,7 @@ describe('Codex persistent app-server adapter', () => {
       adapter(),
       {
         ...task,
-        target: {
-          lane: 'harness',
-          harnessId: 'codex',
-          selection: { mode: 'subscription', modelId: 'wanted' },
-        },
+        target: SUBSCRIPTION_TARGET,
       },
       resources,
     );
@@ -476,9 +473,38 @@ describe('Codex persistent app-server adapter', () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    expect(frames.find((f) => f.method === 'thread/start').params.model).toBe(
-      'wanted',
-    );
+    const methods = frames.map(frame => frame.method);
+    expect(methods.indexOf('account/read')).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf('account/read')).toBeLessThan(methods.indexOf('thread/start'));
+    expect(frames.find((f) => f.method === 'thread/start').params.model).toBe('wanted');
+  });
+
+  it.each(['apiKey', 'amazonBedrock', 'absent'])('declines Codex subscription at admission for a %s account', async accountType => {
+    vi.stubEnv('FAKE_CODEX_ACCOUNT_TYPE', accountType);
+    vi.stubEnv('OPENAI_API_KEY', 'host-provider-key');
+    const resources = await ctx();
+    const receipt = path.join(resources.workspaceDir, 'admission.jsonl');
+    vi.stubEnv('FAKE_CODEX_RPC_RECEIPT', receipt);
+    const owned = tracked();
+    const a = adapter({ spawnFn: owned.spawnFn, runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_CODEX_*', 'OPENAI_API_KEY'] } });
+    await expect(a.prepare({ offer: { ...task, target: SUBSCRIPTION_TARGET }, descriptor: a.descriptor, requiredToolsetIds: [] }))
+      .resolves.toMatchObject({ kind: 'reject', code: 'invalid_request', retryable: false });
+    const methods = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line).method);
+    expect(methods).toEqual(['initialize', 'initialized', 'account/read']);
+    expect(owned.pids).toHaveLength(1);
+    expect(gone(owned.pids[0]!)).toBe(true);
+  });
+
+  it('refuses a changed Codex account before opening a subscription thread', async () => {
+    const resources = await ctx({ FAKE_CODEX_ACCOUNT_TYPE: 'apiKey' });
+    const receipt = path.join(resources.workspaceDir, 'execution.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    await expect(open(adapter(), { ...task, target: SUBSCRIPTION_TARGET }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+    });
+    const methods = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line).method);
+    expect(methods).toContain('account/read');
+    expect(methods).not.toContain('thread/start');
   });
   it('followUp uses one persistent process and the same event stream', async () => {
     let starts = 0;

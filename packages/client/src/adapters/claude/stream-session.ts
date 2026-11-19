@@ -74,7 +74,6 @@ export class ClaudeStreamSession {
   /** Spawn and adoption settle before the first protocol write; the open writes `initialize` when asked. */
   async open(options: ClaudeStreamSessionOptions): Promise<void> {
     this.#effort = options.effort;
-    this.#providerKey = options.providerKey;
     await this.child.spawned;
     // A start halted during adoption writes nothing to the adopted process.
     if (this.#fatal !== undefined) throw this.#fatal;
@@ -91,7 +90,9 @@ export class ClaudeStreamSession {
       write: (text: string): void => {
         // OAR's drain writes a held follow-up as a user line named by its input id; written, it can no longer be withdrawn (#1940).
         if (this.#held.size > 0) {
-          const line = JSON.parse(text) as { type?: unknown; uuid?: unknown };
+          let line: { type?: unknown; uuid?: unknown };
+          try { line = JSON.parse(text); }
+          catch { throw new Error('Claude stream writer emitted malformed JSON'); }
           if (line.type === 'user' && typeof line.uuid === 'string') this.#held.delete(line.uuid);
         }
         // Keep the owned transport's synchronous writability refusal visible to OAR.
@@ -181,9 +182,7 @@ export class ClaudeStreamSession {
 
   #exitError(): Error {
     const error = this.child.exitError();
-    const key = this.#providerKey;
-    if (key === undefined || !error.message.includes(key)) return error;
-    return new Error(error.message.replaceAll(key, '[redacted]'));
+    return this.credentials.redactValue(error);
   }
 
   /** A start step Claude's own exit ended is `runtime_exited`. */

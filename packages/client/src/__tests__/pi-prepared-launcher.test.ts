@@ -12,12 +12,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import {
-  getDocsPath,
-  getExamplesPath,
-  getReadmePath,
-} from '@earendil-works/pi-coding-agent';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -352,6 +347,7 @@ async function prepareOnThisDevice(
 
 interface StartOverrides {
   preparation?: RuntimePreparedLaunchV1;
+  nativeModelId?: string;
   sessionRef?: string;
   spawnFn?: PiAdapterOptions['spawnFn'];
   /** Receives the resolved launch so a case can assert its projection lifecycle. */
@@ -376,10 +372,19 @@ const __executionScratch = await testExecutionScratch();
     ...(byok?.launcher === undefined ? {} : { byokLauncher: byok.launcher, validateProviderProfileBinding: async () => {} }),
     ...(overrides.spawnFn === undefined ? {} : { spawnFn: overrides.spawnFn }),
   });
+  const nativeModelId = overrides.nativeModelId;
+  const target: ExecutionTarget = nativeModelId === undefined
+    ? byok?.selection ?? { lane: 'auto' }
+    : { lane: 'harness', harnessId: 'pi', selection: { mode: 'adapter-model', modelId: nativeModelId } };
+  if (nativeModelId !== undefined) {
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [
+      { id: nativeModelId, provider: { id: nativeModelId.split('/')[0]! } },
+    ] });
+  }
   const offer: RuntimeTaskInput = {
     taskId: 'prepared-launch-test',
     instruction: 'unused on the prepared lane',
-    target: byok === undefined ? { lane: 'auto' } : byok.selection,
+    target,
   } as unknown as RuntimeTaskInput;
   const result = await adapter.prepare({
     offer,
@@ -395,7 +400,7 @@ const __executionScratch = await testExecutionScratch();
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
     requiredToolsetIds: [...prepared.requiredToolsets],
-    ...(byok === undefined ? {} : { selection: byok.selection.selection }),
+    ...(target.lane === 'auto' ? {} : { selection: target.selection }),
     ...(overrides.sessionRef === undefined ? {} : { sessionRef: overrides.sessionRef }),
     workspace: { workspaceDir: prepared.workspaceDir },
     forwardedEnvironmentNames: Object.keys(prepared.childEnv).sort(),
@@ -568,6 +573,21 @@ describe('the prepared pi launch entry', () => {
     const prepared = await prepareOnThisDevice(endpoint);
     await expect(startPrepared(prepared, { sessionRef: 'pi-session-from-an-earlier-turn' }))
       .rejects.toThrow(/never resumes/u);
+    expect(endpoint.bodies).toHaveLength(0);
+  }, 60_000);
+
+  it('refuses a frozen model that differs from the admitted adapter model before spawning', async () => {
+    const endpoint = await providerEndpoint();
+    const prepared = await prepareOnThisDevice(endpoint);
+    const { provider, id } = prepared.preparation.expected.model;
+    const spawnFn = vi.fn(() => { throw new Error('unexpected Pi spawn'); });
+    for (const nativeModelId of [`${provider}/${id}-other`, `different-provider/${id}`]) {
+      await expect(startPrepared(prepared, { nativeModelId, spawnFn })).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+        message: 'the prepared Pi model differs from the admitted adapter-model selection',
+      });
+    }
+    expect(spawnFn).not.toHaveBeenCalled();
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 

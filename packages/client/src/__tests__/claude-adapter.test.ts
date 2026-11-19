@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
+import { inspect } from 'node:util';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -310,11 +311,15 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
           selection: { mode: 'subscription', modelId: 'opus' },
         },
       },
-      await makeCtx({ ...process.env, ANTHROPIC_API_KEY: 'ambient-key', CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token' }),
+      await makeCtx({ ...process.env, ANTHROPIC_API_KEY: 'ambient-key', CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token',
+        CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1', Claude_Code_Use_Foundry: '1' }),
     );
     openSessions.push(session);
     expect(calls[0]?.env.ANTHROPIC_API_KEY).toBeUndefined();
     expect(calls[0]?.env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    expect(calls[0]?.env.CLAUDE_CODE_USE_BEDROCK).toBeUndefined();
+    expect(calls[0]?.env.CLAUDE_CODE_USE_VERTEX).toBeUndefined();
+    expect(calls[0]?.env.Claude_Code_Use_Foundry).toBeUndefined();
     expect(calls[0]?.args).toContain('--model');
     expect(calls[0]?.args[calls[0].args.indexOf('--model') + 1]).toBe('opus');
     await expect(session.followUp({
@@ -358,8 +363,28 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(spawnEnvs[0]?.ANTHROPIC_API_KEY).toBe('host-fixture-key');
     expect(spawnEnvs[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(spawnEnvs[0]?.CLAUDE_CODE_USE_BEDROCK).toBeUndefined();
-    const crash = await makeCtx({ ...process.env, FAKE_CLAUDE_CRASH_WITH_STDERR: 'fixture refused host-fixture-key' });
-    await expect(startAdapter(adapter, { ...baseTask, target }, crash)).rejects.toThrow('fixture refused [redacted]');
+  });
+
+  it.each(['spawn', 'open', 'startup'] as const)('redacts the exact BYOK key from the %s failure and its cause chain', async phase => {
+    const key = 'short';
+    const echoed = `fixture refused ${key}`;
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      byok: { providerId: 'anthropic', resolveKey: async () => key },
+      spawnFn: ((command: string, args: string[], options: Parameters<SpawnFn>[2]) => {
+        if (phase === 'spawn') throw Object.assign(new Error(echoed), { code: echoed });
+        const child = realSpawn(command, args, options);
+        if (phase === 'open') child.prependOnceListener('spawn', () => child.emit('error', Object.assign(new Error(echoed), { code: echoed })));
+        return child;
+      }) as SpawnFn,
+    });
+    const target = { lane: 'harness', harnessId: 'claude', selection: { mode: 'byok', providerId: 'anthropic', modelId: 'opus' } } as const;
+    const resources = await makeCtx({ ...process.env, ...(phase === 'startup' ? { FAKE_CLAUDE_CRASH_WITH_STDERR: echoed } : {}) });
+    const failure = await startAdapter(adapter, { ...baseTask, target }, resources).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    const diagnostic = inspect(failure, { depth: null, showHidden: true });
+    expect(diagnostic).toContain('fixture refused [redacted]');
+    expect(diagnostic).not.toContain(key);
   });
 
   it.each([undefined, 'resume-me-123'])('passes the effort from the selected Claude model menu (resume=%s)', async sessionRef => {

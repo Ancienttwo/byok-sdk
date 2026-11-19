@@ -60,6 +60,14 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+function claudeCredentialEnvironment(base: Readonly<Record<string, string>>): Record<string, string> {
+  const env = withoutProviderCredentials(base);
+  for (const name of Object.keys(env)) {
+    if (/^CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)$/i.test(name)) delete env[name];
+  }
+  return env;
+}
+
 export type SpawnFn = typeof spawn;
 
 function redactClaudeFailure(error: unknown, credentials: ClaudeCredentialRedactor): Error {
@@ -210,7 +218,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude')).bin.command,
       version: claudeVersionToken,
-      environment: env => ({ env: withoutProviderCredentials(env) }),
+      environment: env => ({ env: claudeCredentialEnvironment(env) }),
     });
   }
 
@@ -286,7 +294,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
 
   async detect(): Promise<RuntimeDetectResult> {
     try {
-      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env) as Record<string, string>;
+      const env = claudeCredentialEnvironment((await this.runtimeEnvironment()).env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude'));
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
@@ -353,7 +361,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     effort: string | undefined,
   ): Promise<Session> {
     const signal = startInput.signal;
-    const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
+    const env = claudeCredentialEnvironment({ ...startInput.env, ...startInput.scratch.env });
     const taskMcpServers = startInput.mcpServers ?? {};
     const credentials = sessionCredentialRedactor({ env, mcpServers: Object.entries(taskMcpServers).map(([name, server]) => ({ name, ...server })) });
     const cancellationFailure = () => new RuntimeExecutionFailure({
@@ -537,9 +545,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
       if (selection.mode === 'byok') {
         const key = await resolveRuntimeApiKey('claude', this.byok!.resolveKey, signal);
         throwIfCancelled();
-        for (const name of Object.keys(env)) {
-          if (/^CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY)$/i.test(name)) delete env[name];
-        }
         env.ANTHROPIC_API_KEY = key;
         credentials.addExplicit(key);
       }

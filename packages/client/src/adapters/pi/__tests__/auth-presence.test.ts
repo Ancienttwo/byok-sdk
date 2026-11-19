@@ -42,24 +42,17 @@ describe('resolvePiAgentDir', () => {
 });
 
 describe('probePiAuthPresent', () => {
-  test('win32: a mixed-case passed provider key reaches the probe under its canonical name (#1615)', async () => {
+  test('win32: a mixed-case provider key is canonicalized and does not count as a stored login', async () => {
     const live = { Openai_Api_Key: SECRET, Gemini_Api_Key: SECRET, Acme_Token: 'custom', PI_CODING_AGENT_DIR: agentDir };
     const { env, report } = composeRuntimeEnvironment({ policy: { base: 'allowlist', pass: ['OPENAI_API_KEY', 'Acme_Token', 'PI_CODING_AGENT_DIR'] }, live, platform: 'win32' });
-    await expect(probePiAuthPresent(env)).resolves.toBe(true);
+    await expect(probePiAuthPresent(env)).resolves.toBe(false);
     expect(env).toEqual({ OPENAI_API_KEY: SECRET, Acme_Token: 'custom', PI_CODING_AGENT_DIR: agentDir, NO_PROXY: '127.0.0.1,localhost' });
     expect(report.names).toContainEqual({ name: 'OPENAI_API_KEY', source: 'pass' });
   });
 
-  test('a provider credential env-var name is enough, without any file', async () => {
-    await expect(probe({ ZAI_API_KEY: '' })).resolves.toBe(true);
+  test('reports no stored login when only provider environment variables are present', async () => {
+    await expect(probe({ ZAI_API_KEY: '', MOONSHOT_API_KEY: 'x', ANTHROPIC_AUTH_TOKEN: 'x' })).resolves.toBe(false);
     await expect(probe()).resolves.toBe(false);
-  });
-
-  test('every provider env name pi reads counts, including ones outside the original hand-written list (#384)', async () => {
-    await expect(probe({ MOONSHOT_API_KEY: 'x' })).resolves.toBe(true);
-    for (const name of ['KIMI_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'HF_TOKEN', 'TOGETHER_API_KEY', 'FIREWORKS_API_KEY']) {
-      await expect(probe({ [name]: 'x' }), name).resolves.toBe(true);
-    }
   });
 
   test('an auth.json login record of pi\'s oauth or api_key shape is login state', async () => {

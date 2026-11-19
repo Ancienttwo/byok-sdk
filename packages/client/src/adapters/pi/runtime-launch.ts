@@ -1,7 +1,7 @@
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import type { RuntimeLaunchResources } from '../../types.js';
 import { buildAllowlistedEnv } from '../../runtime/environment.js';
-import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated.js';
+import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { createPrivateTempDir, ensurePiProjectionDir, ensureSecureDir } from '../../util/secure-dir.js';
@@ -77,7 +77,7 @@ async function createProjectionDir(projectionRoot: string, sessionCwd: string): 
 }
 
 /** Beyond the platform baseline, the only names the prepared lane passes; its runtime environment report uses the same list. */
-export const PI_PREPARED_ENV_ALLOW: readonly string[] = Object.freeze([...CONTROLLED_PI_DIRECTORY_ENV_NAMES, ...PI_PROVIDER_ENV_KEY_NAMES]);
+export const PI_PREPARED_ENV_ALLOW: readonly string[] = CONTROLLED_PI_DIRECTORY_ENV_NAMES;
 
 export async function resolvePiRuntimeLaunch(options: {
   kind: PiRuntimeLaunchKind;
@@ -90,12 +90,11 @@ export async function resolvePiRuntimeLaunch(options: {
 }): Promise<PiRuntimeLaunchResources> {
   const source = options.keysSessionDir === undefined ? 'pi-auth-store' : 'keys-profile';
   const original = Object.fromEntries(Object.entries({ ...options.env, ...options.scratch.env }).filter((entry): entry is [string, string] => entry[1] !== undefined));
-  // The prepared host must send the counted request as is, so it gets only
-  // the platform baseline, the Pi directories and the provider names. In the
-  // keys lane the launcher also narrows the environment of its own Pi child.
+  const nativeEnv = withoutProviderCredentials(original);
+  // Prepared Pi receives the platform baseline and Pi directory selectors.
   const env = options.kind === 'pi-prepared'
-    ? buildAllowlistedEnv({ ambient: original, allow: PI_PREPARED_ENV_ALLOW })
-    : original;
+    ? buildAllowlistedEnv({ ambient: nativeEnv, allow: PI_PREPARED_ENV_ALLOW })
+    : nativeEnv;
   let projectionDir: string | undefined;
   let released = false;
   const release = async (): Promise<void> => {

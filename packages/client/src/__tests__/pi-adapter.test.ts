@@ -81,8 +81,12 @@ describe('Pi native model selection', () => {
       runtimeEnvironment: { base: 'allowlist' } });
     const environment = await catalog.runtimeEnvironment();
     vi.spyOn(catalog, 'runtimeEnvironment').mockResolvedValue({ ...environment, env: { ...environment.env,
-      PI_CODING_AGENT_DIR: root, ANTHROPIC_API_KEY: 'synthetic-anthropic-catalog-auth', OPENAI_API_KEY: 'synthetic-openai-catalog-auth' } });
+      PI_CODING_AGENT_DIR: root, XAI_API_KEY: 'synthetic-ambient-key' } });
     try {
+      await fs.writeFile(path.join(root, 'auth.json'), JSON.stringify({
+        anthropic: { type: 'api_key', key: 'synthetic-anthropic-catalog-auth' },
+        openai: { type: 'api_key', key: 'synthetic-openai-catalog-auth' },
+      }), { mode: 0o600 });
       const result = await catalog.listModels();
       expect(result.kind).toBe('ok');
       if (result.kind !== 'ok') throw new Error(result.kind);

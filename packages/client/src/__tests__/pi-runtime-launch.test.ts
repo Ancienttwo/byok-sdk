@@ -30,18 +30,23 @@ async function fixture() {
 }
 
 describe('client runtime launch resources', () => {
-  it.each(['instruction','prepared'] as const)('adapter %s admission resolves the Pi executable only at launch resolution', async (kind) => {
+  it.each([
+    ['instruction', PI_TARGET], ['prepared', PI_TARGET],
+    ['instruction', { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }],
+    ['prepared', { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }],
+  ] as const)('adapter %s launch resolves Pi and drops provider credentials for %j', async (kind, target) => {
     const f = await fixture();
     const resolveBin = vi.fn(() => ({ command: process.execPath, source: 'env' as const }));
     const adapter = new PiAdapter({resolveBin});
-    const prepared = await adapter.prepare({offer:{ target: PI_TARGET, instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
+    const prepared = await adapter.prepare({offer:{ target, instruction:'Never sent'},descriptor:adapter.descriptor,requiredToolsetIds:[]});
     expect(prepared.kind).toBe('prepared');
     expect(resolveBin).not.toHaveBeenCalled();
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
-    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:{},scratch:f.options.scratch}) as PiRuntimeLaunchResources;
+    const resources = await prepared.operation.resolveRuntimeLaunch!({kind,cwd:f.options.sessionCwd,env:f.options.env,scratch:f.options.scratch}) as PiRuntimeLaunchResources;
     try {
       expect(resolveBin).toHaveBeenCalledOnce();
       expect(resources.kind).toBe(kind === 'prepared' ? 'pi-prepared' : 'pi-rpc');
+      expect(resources.env).not.toHaveProperty('OPENAI_API_KEY');
     } finally { await resources.release(); }
   });
 
@@ -106,7 +111,8 @@ describe('client runtime launch resources', () => {
     try {
       expect(resources.credentialSource).toBe('pi-auth-store');
       expect(resources.projectionDir).toBeUndefined();
-      expect(resources.env).toEqual({ ...f.options.env, ...f.options.scratch.env });
+      const { OPENAI_API_KEY: _ambientKey, ...nativeEnv } = f.options.env;
+      expect(resources.env).toEqual({ ...nativeEnv, ...f.options.scratch.env });
     } finally { await resources.release(); }
   });
 
@@ -196,15 +202,15 @@ it('prepared launch retains only explicitly allowed env, excluding all six OpenA
   } finally { await resources.release(); }
 });
 
-it('prepared launch on the Pi auth store keeps every provider credential name pi reads, and nothing else (#384)', async () => {
+it('prepared launch on the Pi auth store omits provider credentials from the environment', async () => {
   const f = await fixture();
   const { keysSessionDir: _unused, ...options } = f.options;
   const env = { PATH: process.env.PATH!, HOME: options.sessionCwd, MOONSHOT_API_KEY: 'ambient-moonshot', ANTHROPIC_AUTH_TOKEN: 'ambient-bearer', UNRELATED_SECRET: 'x' };
   const resources = await resolvePiRuntimeLaunch({ ...options, kind: 'pi-prepared', env });
   try {
     expect(resources.credentialSource).toBe('pi-auth-store');
-    expect(resources.env.MOONSHOT_API_KEY).toBe('ambient-moonshot');
-    expect(resources.env.ANTHROPIC_AUTH_TOKEN).toBe('ambient-bearer');
+    expect(resources.env).not.toHaveProperty('MOONSHOT_API_KEY');
+    expect(resources.env).not.toHaveProperty('ANTHROPIC_AUTH_TOKEN');
     expect(resources.env).not.toHaveProperty('UNRELATED_SECRET');
   } finally { await resources.release(); }
 });

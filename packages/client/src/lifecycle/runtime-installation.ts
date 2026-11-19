@@ -180,6 +180,24 @@ export async function uninstallManagedRuntime(installRoot: string, runtimeId: Ma
   if (release?.kind !== 'managed') throw new TypeError('runtime has no managed installation');
   const directory = managedRuntimeDirectory(installRoot, runtimeId);
   const gate = await acquirePathMutationGate({ scope: 'install-root', targetPath: installRoot });
-  try { await fs.rm(directory, { recursive: true, force: true }); }
-  finally { await gate.release(); }
+  try {
+    const normalized = path.resolve(directory);
+    let current = path.parse(normalized).root;
+    for (const segment of path.relative(current, normalized).split(path.sep)) {
+      current = path.join(current, segment);
+      const stat = await fs.lstat(current).catch((error: NodeJS.ErrnoException) => {
+        if (error.code === 'ENOENT') return undefined;
+        throw error;
+      });
+      if (stat === undefined) return;
+      if (!stat.isDirectory() || stat.isSymbolicLink()) {
+        throw new Error('managed runtime uninstall requires a directory path without symbolic links');
+      }
+    }
+    const [root, target] = await Promise.all([fs.realpath(installRoot), fs.realpath(directory)]);
+    if (path.relative(root, target) !== path.join('runtimes', runtimeId)) {
+      throw new Error('managed runtime uninstall target must be inside its SDK install root');
+    }
+    await fs.rm(target, { recursive: true, force: true });
+  } finally { await gate.release(); }
 }
