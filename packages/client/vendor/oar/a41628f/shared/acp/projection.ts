@@ -72,7 +72,7 @@ function inputDetail(value: unknown): string | undefined {
   }
 }
 
-function outputDetail(value: unknown): string | undefined {
+export function acpToolProgressOutput(value: unknown): string | undefined {
   const text = textContent(value) ?? inputDetail(value);
   return text === undefined ? undefined : truncate(text);
 }
@@ -132,7 +132,7 @@ function projectTool(state: AcpProjectionState, update: JsonRecord): RuntimeEven
     // A later non-terminal update with rawOutput is streamed output. `content`
     // is NOT used here: kimi streams the call's ARGUMENTS as content while
     // in_progress (wire-shapes test), which is input, not output.
-    const output = outputDetail(update.rawOutput);
+    const output = acpToolProgressOutput(update.rawOutput);
     events.push({ kind: "tool_call_progress", callId, ...(output === undefined ? {} : { output }) });
   }
   if (!tool.ended && terminal) {

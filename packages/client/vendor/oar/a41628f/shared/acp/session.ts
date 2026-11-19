@@ -29,6 +29,7 @@ import { acpLaunchArgs } from "./launch-args.js";
 import { startAcpProcess, type SpawnAcpLineProcess } from "./process.js";
 import { acpRequestTimeoutError } from "./errors.js";
 import { createAcpRecorder } from "./records.js";
+import { acpToolProgressOutput } from "./projection.js";
 import { createAcpTerminalHost, type SpawnAcpTerminal } from "./terminal.js";
 import { createAcpTurns, type ActiveTurn } from "./turns.js";
 import { acpTakesImages } from "./prompt.js";
@@ -38,16 +39,35 @@ import { createAcpConfigUpdates } from "./config-updates.js";
 import { createAcpNativeTurnTracker } from "./native-turns.js";
 import { sendAcpSteerRequest } from "./steer-request.js";
 
-export function redactAcpRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
-  const update = record.kind === "frame" ? asRecord(asRecord(record.body.native)?.update) : null;
+export function redactAcpRecord<T extends RawEvent>(
+  record: T, credentials: CredentialRedactor, childNotification?: AcpSessionProfile["childNotification"],
+): T {
+  const native = record.kind === "frame" ? asRecord(record.body.native) : null;
+  const direct = asRecord(native?.update);
+  const update = record.kind !== "frame" || native === null ? null
+    : record.body.type === direct?.sessionUpdate ? direct : childNotification?.(record.body.type, native)?.update ?? null;
+  const toolUpdate = update?.sessionUpdate === "tool_call" || update?.sessionUpdate === "tool_call_update";
   const rawInput = update?.rawInput;
   // ACP projects string rawInput verbatim and serializes the other JSON values.
-  const encoded = rawInput !== null && rawInput !== undefined && typeof rawInput !== "string";
-  return redactRuntimeRecord(record, credentials.redactValue, path => encoded && isProjectedToolInput(record, path), (path, value) => {
+  const encoded = toolUpdate && rawInput !== null && rawInput !== undefined && typeof rawInput !== "string";
+  const safe = redactRuntimeRecord(record, credentials.redactValue, path => encoded && isProjectedToolInput(record, path), (path, value) => {
     const [body, native, update, field] = path;
-    return path.length === 4 && body === "body" && native === "native" && update === "update" && field === "status"
+    return toolUpdate && path.length === 4 && body === "body" && native === "native" && update === "update" && field === "status"
       && (value === "pending" || value === "in_progress" || value === "completed" || value === "failed" || value === "cancelled");
   });
+  if (!toolUpdate || safe.kind !== "frame" || update.rawOutput === undefined
+    || !safe.body.events.some(event => event.kind === "tool_call_progress")) return safe;
+  // The progress view formats structured output, sometimes truncating its JSON.
+  // Format the sanitized value so even a truncated view never contains the key.
+  const rawOutput: unknown = update.rawOutput;
+  const cleanOutput = credentials.redactValue(rawOutput);
+  if (rawOutput === cleanOutput) return safe;
+  const output = acpToolProgressOutput(cleanOutput);
+  return { ...safe, body: { ...safe.body, events: safe.body.events.map(event => {
+    if (event.kind !== "tool_call_progress") return event;
+    const { output: _original, ...progress } = event;
+    return output === undefined ? progress : { ...progress, output };
+  }) } };
 }
 
 export type { AcpSessionProfile } from "./profile.js";
@@ -189,7 +209,7 @@ async function openAcpRuntimeSession(
       } finally { releaseStartup?.(); }
     })();
     // BYOK change: the record consumer observes from seq 0: it registers before the recorder binds.
-    const kernel = createSessionKernel(opened.sessionId, record => redactAcpRecord(record, credentials), options.retainedBytes);
+    const kernel = createSessionKernel(opened.sessionId, record => redactAcpRecord(record, credentials, profile.childNotification), options.retainedBytes);
     if (hooks.onRecord !== undefined) kernel.rawEvents(hooks.onRecord);
     try {
       hooks.onReady?.(opened.sessionId);

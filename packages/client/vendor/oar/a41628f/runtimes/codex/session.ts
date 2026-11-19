@@ -106,7 +106,10 @@ export function redactCodexRecord<T extends RawEvent>(record: T, redact: Credent
     const [body, group, member, field] = path;
     if (body !== "body" || record.kind !== "frame") return false;
     if (path.length === 2) return (group === "type" && codexObservedMethods.has(value)) || (group === "origin" && value === "byok-native");
-    return path.length === 4 && group === "native" && member === "item" && field === "type" && codexToolItemTypes.has(value);
+    if (path.length !== 4 || group !== "native") return false;
+    if (member === "item" && field === "type") return codexToolItemTypes.has(value);
+    return record.body.type === "turn/completed" && member === "turn" && field === "status"
+      && (value === "completed" || value === "interrupted" || value === "failed");
   });
 }
 

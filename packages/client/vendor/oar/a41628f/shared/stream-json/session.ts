@@ -41,6 +41,8 @@ const streamJsonMessageTypes = new Set(["command_lifecycle", "assistant", "strea
 const streamJsonContentTypes = new Set(["text", "thinking", "redacted_thinking", "tool_use", "tool_result"]);
 const streamJsonEventTypes = new Set(["message_start", "message_stop", "content_block_start", "content_block_stop", "content_block_delta"]);
 const streamJsonDeltaTypes = new Set(["text_delta", "thinking_delta", "input_json_delta"]);
+const streamJsonResultTypes = new Set(["success", "error_during_execution", "error_max_turns", "error_max_budget_usd", "error_max_structured_output_retries"]);
+const streamJsonAbortReasons = new Set(["aborted_streaming", "aborted_tools"]);
 
 /** Encoded fragments can span frames. The complete assistant tool block carries the usable input. */
 export function redactStreamJsonRecord<T extends RawEvent>(record: T, credentials: CredentialRedactor): T {
@@ -58,7 +60,13 @@ export function redactStreamJsonRecord<T extends RawEvent>(record: T, credential
   return redactRuntimeRecord(safe, credentials.redactValue, path => isProjectedToolInput(safe, path), (path, value) => {
     const [body, native, field, group, block, member] = path;
     if (body !== "body" || native !== "native" || record.kind !== "frame") return false;
-    if (path.length === 3 && field === "type") return streamJsonMessageTypes.has(value);
+    if (path.length === 3) {
+      if (field === "type") return streamJsonMessageTypes.has(value);
+      if (asRecord(record.body.native)?.type === "result") {
+        if (field === "subtype") return streamJsonResultTypes.has(value);
+        if (field === "terminal_reason") return streamJsonAbortReasons.has(value);
+      }
+    }
     if (path.length === 4 && field === "event" && group === "type") return streamJsonEventTypes.has(value);
     if (path.length === 5 && field === "event" && group === "delta" && block === "type") return streamJsonDeltaTypes.has(value);
     return path.length === 6 && field === "message" && group === "content" && typeof block === "number"
