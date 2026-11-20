@@ -259,6 +259,7 @@ describe('recoverable daemon memory proof (#2200)', () => {
       agentHomeManager: { layout: { hostRootInput: () => root }, supportsTaskFreeProjection: () => false, acquire },
       resolveAgentMemoryFilesystemHelperBin: () => path.resolve('helper'),
       daemonState: { blobLifecycleAbort: abort, helloCapabilities: [], connection: { refreshHello } },
+      effectiveConfig: { runtimes: [] },
       adapters: [], overrides: {}, observer: {},
     } as unknown as DaemonScope;
     Object.assign(selected, { setHelloCapability: (flag: Parameters<typeof setHelloCapability>[1], wanted: boolean) => setHelloCapability(selected, flag, wanted) });

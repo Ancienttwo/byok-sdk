@@ -17,6 +17,7 @@ const fixtures = {
 // What a Windows npm shim resolves to: node, with the shim's entry before the
 // adapter's own arguments. Every platform can run this form.
 vi.mock('../adapters/runtime-invocation', () => ({
+  findRuntimeCommandOnPath: vi.fn((command: string) => command),
   resolveRuntimeInvocation: vi.fn((command: string) => {
     // A raw Node read error: its message names the local shim path.
     if (command === 'unreadable-shim') throw Object.assign(new Error("EACCES: permission denied, open 'C:\\Users\\someone\\npm\\claude.cmd'"), { code: 'EACCES' });

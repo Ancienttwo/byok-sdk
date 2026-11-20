@@ -332,6 +332,14 @@ export class ClaudeAdapter implements RuntimeAdapter {
       phase: 'start', retry: 'retryable',
       reason: 'claude runtime startup was cancelled',
     }, { cause: signal?.reason });
+    if (signal?.aborted) {
+      for (const [name, key] of Object.entries(env)) {
+        if (key !== undefined && key.length > 0 && CLAUDE_PROVIDER_KEYS.some(candidate => process.platform === 'win32' ? candidate === name.toUpperCase() : candidate === name)) {
+          credentials.addExplicit(key);
+        }
+      }
+      throw redactClaudeFailure(cancellationFailure(), credentials);
+    }
     // This adapter has no prepared-input lane: a frozen provider request is
     // compiled against the pi runtime's own verified closure, and claude cannot
     // be told to send someone else's bytes. Refused by name rather than
