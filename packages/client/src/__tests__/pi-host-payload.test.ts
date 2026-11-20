@@ -796,7 +796,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       if (background) {
         expect(report.gateCalls).toContainEqual({ toolName: 'subagent_launch' });
         expect(results.join('\n')).not.toContain('pi_background_unavailable');
-        expect(results.join('\n')).toContain('No active async runs');
+        // The last wait can either find no work or collect the final run.
+        expect(results.at(-1)).toMatch(/No active async runs|No runs remain in flight/u);
       } else {
         const missing = form === 'compiled-executable (configured assets)';
         expect(results).toHaveLength(missing ? 6 : 5);
