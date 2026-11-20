@@ -1,10 +1,20 @@
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 let root: string;
+const fsRef = vi.hoisted(() => ({ actual: undefined as unknown as typeof import('node:fs/promises') }));
 
+vi.mock('node:fs/promises', async importOriginal => {
+  fsRef.actual = await importOriginal<typeof import('node:fs/promises')>();
+  return {
+    ...fsRef.actual,
+    cp: vi.fn(fsRef.actual.cp),
+    rename: vi.fn(fsRef.actual.rename),
+    writeFile: vi.fn(fsRef.actual.writeFile),
+  };
+});
 vi.mock('electron', () => ({ app: {}, dialog: {} }));
 vi.mock('electron-updater', () => ({ default: {} }));
 vi.mock('@byok-sdk/client/host-layout', () => ({
@@ -20,8 +30,8 @@ const { completeSnapshot, restoreSnapshot } = await import('../recovery/stores.t
 const layout = () => ({ storeDir: path.join(root, 'store'), scratchRoot: { path: path.join(root, 'store', 'tmp') }, hostStorageRoot: path.join(root, 'app') });
 
 const write = async (file: string, text: string) => {
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, text);
+  await fsRef.actual.mkdir(path.dirname(file), { recursive: true });
+  await fsRef.actual.writeFile(file, text);
 };
 
 describe('snapshotStores', () => {
@@ -30,7 +40,12 @@ describe('snapshotStores', () => {
     await write(path.join(root, 'store', 'device.json'), 'store');
     await write(path.join(root, 'app', 'host', 'settings.json'), 'host');
   });
-  afterEach(() => rm(root, { recursive: true, force: true }));
+  afterEach(async () => {
+    vi.mocked(cp).mockImplementation(fsRef.actual.cp);
+    vi.mocked(rename).mockImplementation(fsRef.actual.rename);
+    vi.mocked(writeFile).mockImplementation(fsRef.actual.writeFile);
+    await rm(root, { recursive: true, force: true });
+  });
 
   it('copies the host stores without the snapshots directory and keeps only the latest', async () => {
     const snapshots = path.join(root, 'app', 'host', 'snapshots');
@@ -45,14 +60,88 @@ describe('snapshotStores', () => {
 
   it('prunes nothing when the snapshot fails', async () => {
     const snapshots = path.join(root, 'app', 'host', 'snapshots');
-    await write(path.join(snapshots, '1.0.0', 'host', 'old.json'), 'old');
+    const prior = await snapshotStores('1.0.0');
     await rm(path.join(root, 'store'), { recursive: true });
     await expect(snapshotStores('2.0.0')).rejects.toThrow();
-    expect(await readdir(snapshots)).toContain('1.0.0');
-    // The partial 2.0.0 has no marker, so restore never offers it.
-    expect(await readdir(snapshots)).toContain('2.0.0');
+    expect(await completeSnapshot(layout(), '1.0.0')).toBe(prior);
+    expect(await readdir(snapshots)).toEqual(['1.0.0']);
     expect(await completeSnapshot(layout(), '2.0.0')).toBeUndefined();
     await expect(restoreSnapshot(layout(), '2.0.0', 's')).rejects.toThrow('No complete snapshot');
+  });
+
+  it.each(['store', 'host'] as const)('keeps the prior complete snapshot of the same version when retry fails copying %s', async failingCopy => {
+    const snapshots = path.join(root, 'app', 'host', 'snapshots');
+    const target = await snapshotStores('2.0.0');
+    await write(path.join(root, 'store', 'device.json'), 'newer-store');
+    await write(path.join(root, 'app', 'host', 'settings.json'), 'newer-host');
+
+    vi.mocked(cp).mockImplementation(async (source, destination, options) => {
+      if (String(destination).endsWith(failingCopy === 'store' ? `${path.sep}store` : path.join('host', 'settings.json'))) {
+        throw new Error(`${failingCopy} copy failed`);
+      }
+      return fsRef.actual.cp(source, destination, options);
+    });
+
+    await expect(snapshotStores('2.0.0')).rejects.toThrow(`${failingCopy} copy failed`);
+    expect(await completeSnapshot(layout(), '2.0.0')).toBe(target);
+    expect(await readFile(path.join(target, 'store', 'device.json'), 'utf8')).toBe('store');
+    expect(await readFile(path.join(target, 'host', 'settings.json'), 'utf8')).toBe('host');
+    expect(await readdir(snapshots)).toEqual(['2.0.0']);
+  });
+
+  it('keeps the prior complete snapshot of the same version when retry fails writing complete.json', async () => {
+    const snapshots = path.join(root, 'app', 'host', 'snapshots');
+    const target = await snapshotStores('2.0.0');
+    await write(path.join(root, 'store', 'device.json'), 'newer-store');
+    await write(path.join(root, 'app', 'host', 'settings.json'), 'newer-host');
+
+    vi.mocked(writeFile).mockImplementation(async (file, data, options) => {
+      if (String(file).endsWith(`${path.sep}complete.json`)) throw new Error('marker write failed');
+      return fsRef.actual.writeFile(file, data, options);
+    });
+
+    await expect(snapshotStores('2.0.0')).rejects.toThrow('marker write failed');
+    expect(await completeSnapshot(layout(), '2.0.0')).toBe(target);
+    expect(await readFile(path.join(target, 'store', 'device.json'), 'utf8')).toBe('store');
+    expect(await readFile(path.join(target, 'host', 'settings.json'), 'utf8')).toBe('host');
+    expect(await readdir(snapshots)).toEqual(['2.0.0']);
+  });
+
+  it.each(['aside', 'swap'] as const)('keeps the prior complete snapshot when retry fails during the %s handoff rename', async step => {
+    const snapshots = path.join(root, 'app', 'host', 'snapshots');
+    const target = await snapshotStores('2.0.0');
+    await write(path.join(root, 'store', 'device.json'), 'newer-store');
+    await write(path.join(root, 'app', 'host', 'settings.json'), 'newer-host');
+
+    let handoffFailed = false;
+    vi.mocked(rename).mockImplementation(async (from, to) => {
+      if (!handoffFailed && (step === 'aside' ? from === target : to === target)) {
+        handoffFailed = true;
+        throw new Error(`${step} rename failed`);
+      }
+      return fsRef.actual.rename(from, to);
+    });
+
+    await expect(snapshotStores('2.0.0')).rejects.toThrow(`${step} rename failed`);
+    expect(handoffFailed).toBe(true);
+    expect(await completeSnapshot(layout(), '2.0.0')).toBe(target);
+    expect(await readFile(path.join(target, 'store', 'device.json'), 'utf8')).toBe('store');
+    expect(await readFile(path.join(target, 'host', 'settings.json'), 'utf8')).toBe('host');
+    expect(await readdir(snapshots)).toEqual(['2.0.0']);
+  });
+
+  it('replaces the prior complete snapshot of the same version and prunes temporary entries when retry succeeds', async () => {
+    const snapshots = path.join(root, 'app', 'host', 'snapshots');
+    await snapshotStores('1.0.0');
+    const target = await snapshotStores('2.0.0');
+    await write(path.join(root, 'store', 'device.json'), 'newer-store');
+    await write(path.join(root, 'app', 'host', 'settings.json'), 'newer-host');
+
+    expect(await snapshotStores('2.0.0')).toBe(target);
+    expect(await completeSnapshot(layout(), '2.0.0')).toBe(target);
+    expect(await readFile(path.join(target, 'store', 'device.json'), 'utf8')).toBe('newer-store');
+    expect(await readFile(path.join(target, 'host', 'settings.json'), 'utf8')).toBe('newer-host');
+    expect(await readdir(snapshots)).toEqual(['2.0.0']);
   });
 
   it('restores a complete snapshot: the current stores move aside and the snapshots stay', async () => {
