@@ -375,6 +375,7 @@ async function toolInputTurn() {
 }
 
 defineMcpSearchProbes({
+  target: DSH_TARGET,
   runtime: 'dsh', variant: 'sandbox=danger-full-access', wire: 'openai-chat', model: MODEL,
   async configure(box, provider, spawnFn) {
     const model = loopbackModel(provider.baseUrl);

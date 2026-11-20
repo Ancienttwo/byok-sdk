@@ -18,7 +18,7 @@ import { hostFor } from '../daemon/task-runner/host';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { MCP_HUB_CONTEXT_ACTIVE_METHOD, type McpHubContext } from '../sdk-reserved-helper-context';
 import { freezeRuntimeAdapterDescriptor, type McpStdioServerConfig, type RuntimeAdapterPrepareInput, type RuntimeOperationStartInput } from '../types';
-import { acceptClaimSettlement, testIngressBudget } from './fixtures/activity-ingress';
+import { acceptClaimSettlement, testHarnesses, testIngressBudget } from './fixtures/activity-ingress';
 import { reservedMcpToken, testScratchOwner, testScratchRoot } from './fixtures/execution-scratch';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { observationOf } from './fixtures/mcp-observation';
@@ -91,7 +91,7 @@ function setup(adapters = [new FixtureAdapter()], extra: Partial<TaskRunnerDeps>
       async uploadArtifact() { throw new Error('not used'); },
     },
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
-    advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
+    advertisedCapabilities: advertiseEveryDeviceFlag, advertisedHarnesses: () => testHarnesses(adapters), scratchRoot: testScratchOwner(),
     getMcpToolsetSnapshot: () => registry.snapshot(), mcpToolsetToolsProbe: probe,
     hostTaskContextAvailable: () => true,
     mcpSearch: { bin: { command: process.execPath, args: [hubBin] }, candidates: () => [row] },
@@ -442,7 +442,7 @@ it('skips version mismatches and the durable lane in auto, and admits a direct-o
   const selected = new FixtureAdapter();
   const { offer, sent, cancel, probe } = setup([old, durable, selected], { runtimePreference: ['claude', 'codex', 'pi'] });
   const detectDurable = vi.spyOn(durable, 'detect');
-  await offer('unqualified', ['host'], { lane: 'runtime', runtimeId: 'claude' });
+  await offer('unqualified', ['host'], { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } });
   expect(sent.map(envelope => envelope.type)).toEqual(['task.decline']);
   await offer('collision', ['host', 'collision']);
   expect(sent.at(-1)?.payload).toMatchObject({ reason: expect.stringContaining('conflicts with the search hub name') });
@@ -452,7 +452,7 @@ it('skips version mismatches and the durable lane in auto, and admits a direct-o
   expect(old.startCalls).toHaveLength(0);
   expect(detectDurable).not.toHaveBeenCalled();
   await cancel();
-  await offer('direct', ['collision'], { lane: 'runtime', runtimeId: 'claude' });
+  await offer('direct', ['collision'], { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } });
   expect(old.input?.mcpServers?.byoktools?.args).toEqual([expect.stringContaining('host-toolset-')]);
 });
 

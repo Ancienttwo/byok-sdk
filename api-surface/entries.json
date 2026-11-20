@@ -619,7 +619,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 686500,
+      "budgetBytes": 715000,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1005,7 +1005,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 643000,
+      "budgetBytes": 667000,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {

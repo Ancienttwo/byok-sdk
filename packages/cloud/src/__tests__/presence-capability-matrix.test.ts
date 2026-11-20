@@ -45,7 +45,7 @@ describe('presence capability matrix', () => {
     expect(response.status).toBe(200);
     const hint = await harness.core.presence.read(TENANT_A, device.deviceId);
     expect(hint?.harnesses).toEqual([
-      { id: 'claude', version: '2.1.326', capabilities: { ...MATRIX, selectionModes: [], effort: false } },
+      { id: 'claude', version: '2.1.326', capabilities: MATRIX },
       { id: 'codex', version: '0.165.0', capabilities: { selectionModes: ['subscription'], effort: true } },
     ]);
     expect(Object.isFrozen(hint?.harnesses?.[0]?.capabilities?.isolation)).toBe(true);

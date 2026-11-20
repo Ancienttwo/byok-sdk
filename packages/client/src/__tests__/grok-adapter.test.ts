@@ -756,7 +756,7 @@ describe('AgyAdapter', () => {
   it('projects the native Antigravity quota reset into the runtime failure', async () => {
     const adapter = agy(await agyVersion('1.5.11'));
     const before = Date.now();
-    const error = await failureOf(await open(adapter, { target: { lane: 'harness', harnessId: 'agy' }, instruction: 'agy-quota' }, await agyCtx()));
+    const error = await failureOf(await open(adapter, { target: AGY_TARGET, instruction: 'agy-quota' }, await agyCtx()));
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
     const failure = (error as RuntimeExecutionFailure).failure;
     expect(failure).toMatchObject({ class: 'quota', resetsAt: expect.any(String) });

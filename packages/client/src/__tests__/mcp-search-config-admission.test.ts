@@ -85,7 +85,7 @@ it('declines native-sessions in search admission before runtime selection', () =
     admissionSignal: new AbortController().signal,
     releaseReservation() {}, reserveHome() {}, admission: new OfferAdmissionTiming(),
   }, {
-    ...payload, target: { lane: 'runtime', runtimeId: 'pi' },
+    ...payload, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
     agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 },
   });
   expect(result).toBeUndefined();

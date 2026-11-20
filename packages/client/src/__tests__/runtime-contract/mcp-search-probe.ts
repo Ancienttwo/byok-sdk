@@ -18,8 +18,9 @@ import { searchRuntimeCandidates } from '../../daemon/search-runtime-qualificati
 import { McpToolsetRegistry } from '../../daemon/toolset-registry';
 import { HUB_CALL_TOOL, HUB_SEARCH_TOOL, MCP_HUB_SERVER_NAME } from '../../mcp/hub/protocol';
 import { MCP_HUB_CONTEXT_ACTIVE_METHOD, type McpHubContext } from '../../sdk-reserved-helper-context';
+import type { ExecutionTarget } from '@byok-sdk/protocol';
 import type { McpStdioServerConfig, RuntimeAdapter, RuntimeDetectResult } from '../../types';
-import { acceptClaimSettlement, testIngressBudget } from '../fixtures/activity-ingress';
+import { acceptClaimSettlement, testHarnesses, testIngressBudget } from '../fixtures/activity-ingress';
 import { hostToolsetToken, testScratchOwner } from '../fixtures/execution-scratch';
 import { FRESH_OFFER, freshOfferRunnerDeps } from '../fixtures/fresh-offer';
 import { testRuntimeEnvironment } from '../fixtures/runtime-env';
@@ -48,6 +49,7 @@ const scenarios: readonly Scenario[] = ['mixed', 'qualified-launch', 'native-den
 interface ProbeOptions {
   runtime: ContractRuntime;
   variant: string;
+  target?: ExecutionTarget;
   wire: ProviderWire;
   model?: string;
   configure(box: Sandbox, provider: LoopbackProvider, capture: typeof spawn, scenario: Scenario): Promise<{ adapter: RuntimeAdapter; env: NodeJS.ProcessEnv }>;
@@ -306,7 +308,7 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
         id: adapter.descriptor.id, source: 'sdk-built', toolAuthorizationAuto: auto, isolation,
       }]);
       const runner = new TaskRunner({
-        ...testAgentHomeDeps(), ...freshOfferRunnerDeps(), adapters: [adapter], storeDir: box.root, productId,
+        ...testAgentHomeDeps(), ...freshOfferRunnerDeps(), advertisedHarnesses: () => testHarnesses([adapter]), adapters: [adapter], storeDir: box.root, productId,
         send: envelope => {
           sent.push(envelope);
           if (envelope.task_id === taskId && (terminalTypes.has(envelope.type) || envelope.type === 'task.claim' || envelope.type === 'task.started')) {
@@ -355,7 +357,7 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
         const requiredToolsets = nativeDenyControl ? ['nativecontrol'] : [...searchSets.map(([id]) => id), ...(paired ? ['direct'] : [])].slice(0, 16);
         const makeOffer = (id: string, sets = requiredToolsets) => createEnvelope('task.offer', {
           ...FRESH_OFFER, agentRef: freshTestAgentRef(), instruction: 'Run the synthetic MCP fixture.',
-          target: { lane: 'auto' }, requiredToolsets: sets,
+          target: options.target ?? { lane: 'auto' }, requiredToolsets: sets,
         }, { taskId: id, seq: 1 });
         offeredAt = Date.now();
         if (process.platform === 'darwin' && (scenario === 'mixed' || scenario === 'maximum')) {

@@ -1457,6 +1457,7 @@ Manifest transition: **0.44.1 → 0.44.1**. Versions and entries below come from
 |-------|--------|----------------------|
 | mcp-toolset-exposure-config | additive | Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default. [Migration](../docs/releases/host-upgrade-next-minor.md#mcp-toolset-search) |
 | runtime-provider-key-resolvers | breaking | dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters require a Host resolveKey callback for each authenticated spawn. Remove dsh model.keyEnv. Plain JSON configuration cannot start these runtimes. [Migration](../docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys) |
+| managed-runtime-upgrades | additive | Hosts can explicitly stage and activate the SDK-qualified Claude, Codex, DSH, or OpenCode release in the SDK install root. Local diagnostics report compatibility floor failures and upgrade guidance. [Migration](../docs/releases/host-upgrade-next-minor.md#managed-runtime-upgrades) |
 <!-- generated:migrations:end -->
 
 ## Maintaining this guide

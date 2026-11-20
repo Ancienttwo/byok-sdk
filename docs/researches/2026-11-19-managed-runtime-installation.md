@@ -24,3 +24,16 @@ Claude `2.1.312`, Codex `0.160.0`, and OpenCode `2.3.0` each returned
 for each runtime. DSH's runtime contract covers macOS and Linux.
 
 `agy help update` confirmed the standalone CLI's `agy update` command. Grok returns its vendor npm command. The installer regression suite exercises both vendor responses, native package path selection, version mismatch before publication, and preservation of the previous generation after a failed install.
+
+## Rebase onto OAR 0.121
+
+The rebased SDK used fresh temporary install roots on macOS arm64. Each Host install returned `installed` after its version and liveness probes. A second call returned `current` and kept the same generation.
+
+| Runtime | Qualified release | Selected executable |
+| --- | --- | --- |
+| Claude | `2.1.326` | `@anthropic-ai/claude-code-darwin-arm64/claude` |
+| Codex | `0.169.0` | `node_modules/.bin/codex` |
+| DSH | `0.2.2-rc.1` | `node_modules/.bin/dsh` |
+| OpenCode | `2.3.0` | `@opencode/cli-darwin-arm64/bin/opencode` |
+
+The runtime contract installer verified the pinned Antigravity archive against the qualified SHA-512. The extracted CLI reported `1.5.11` and printed usage for `agy update`.

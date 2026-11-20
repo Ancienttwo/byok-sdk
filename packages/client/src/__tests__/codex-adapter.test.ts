@@ -169,7 +169,7 @@ describe('Codex persistent app-server adapter', () => {
       requiredToolsetIds,
     });
     expect(result.kind).toBe(kind);
-    if (result.kind === 'reject') expect(result.reason).toContain('Codex 0.48.0 or later');
+    if (result.kind === 'reject') expect(result.reason).toContain('codex_mcp_tool_allowlist_unsupported: task MCP tools require Codex CLI 0.48.0 or later');
   });
   it('detect admits the qualified version with an allow verdict', async () => {
     expect(await adapter().detect()).toMatchObject({

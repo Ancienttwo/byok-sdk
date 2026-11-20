@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "9b70147ec2e9d500123fe281c7525cf5a330bcb5bb931584f4c663ea76174fe6"
+    "snapshotSha256": "9a5334ea7a88f1afb4ea79850c0346c8b5059b4b85d015912933f7cde36924c5"
   },
   "configFields": {
     "status": "tracked",
@@ -261,28 +261,18 @@
       "summary": "Wire v8 unifies explicit executor routing under the harness lane. Ordinary Pi supports native device defaults and exact catalog model selection. Pi profile execution requires an exact local binding and takes an optional per-task model ID on the selection. Drain v7 tasks and intents, then create fresh stores and ledgers when upgrading peers together.",
       "migration": "docs/releases/host-upgrade-next-minor.md#wire-v8-and-the-provider-store-cutover",
       "items": [
-        "config:runtimes",
         "example:host-execution-core",
-        "export:@byok-sdk/client#AgyAdapter",
-        "export:@byok-sdk/client#AgyAdapterOptions",
         "export:@byok-sdk/client#ClaudeAdapter",
         "export:@byok-sdk/client#ClaudeAdapterOptions",
         "export:@byok-sdk/client#DaemonConfig",
         "export:@byok-sdk/client#DshAdapter",
-        "export:@byok-sdk/client#DshAdapterOptions",
-        "export:@byok-sdk/client#DshModelSelection",
         "export:@byok-sdk/client#RuntimeAdapterDescriptor",
         "export:@byok-sdk/client#RuntimeOperationManifest",
-        "export:@byok-sdk/client/adapters#AgyAdapter",
-        "export:@byok-sdk/client/adapters#AgyAdapterOptions",
         "export:@byok-sdk/client/adapters#ClaudeAdapter",
         "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
         "export:@byok-sdk/client/adapters#DshAdapter",
-        "export:@byok-sdk/client/adapters#DshAdapterOptions",
-        "export:@byok-sdk/client/adapters#DshModelSelection",
         "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
         "export:@byok-sdk/client/adapters#RuntimeAdaptersConfig",
-        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
         "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
         "export:@byok-sdk/client/adapters#taskRuntimeTarget",
         "export:@byok-sdk/cloud#AgentExecutionInputSchema",
@@ -384,9 +374,7 @@
         "export:@byok-sdk/protocol#DECLINE_CODES",
         "export:@byok-sdk/protocol#DefaultModelSelectionMode",
         "export:@byok-sdk/protocol#TaskDeclinePayload",
-        "export:@byok-sdk/protocol#harnessSelectionNeedsModel",
-        "export:@byok-sdk/protocol#isProviderProfileModelId",
-        "export:@byok-sdk/protocol/constants#isProviderProfileModelId"
+        "export:@byok-sdk/protocol#harnessSelectionNeedsModel"
       ]
     },
     {
@@ -424,7 +412,7 @@
       "item": "config:runtimes",
       "change": "changed",
       "before": "optional schema-sha256=0274d0856fb11b28",
-      "after": "optional schema-sha256=db0784c472ee1e10",
+      "after": "optional schema-sha256=18d06e34b46dd3d1",
       "entry": "runtime-provider-key-resolvers"
     },
     {
@@ -438,6 +426,11 @@
       "before": "K4 0.0.1 src-sha256=de7bf7d4abde271f",
       "after": "K4 0.0.1 src-sha256=5c83fb84bf632045",
       "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
+      "change": "changed",
+      "entry": "bot-input-images"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
@@ -460,9 +453,54 @@
       "entry": "bot-persona-and-autonomy-context"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Command",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
       "change": "changed",
       "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#InputFields",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#addTurn",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#seatTurn",
+      "change": "changed",
+      "entry": "bot-input-images"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration/rules#syncTurn",
@@ -563,6 +601,11 @@
       "item": "export:@byok-sdk/client#ClaudeAdapterOptions",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "codex-task-mcp-version-floor"
     },
     {
       "item": "export:@byok-sdk/client#CodexAdapterOptions",
@@ -680,9 +723,19 @@
       "entry": "mcp-hub-sdk-helper"
     },
     {
+      "item": "export:@byok-sdk/client#StoreServiceState",
+      "change": "added",
+      "entry": "inspect-store-service-state"
+    },
+    {
       "item": "export:@byok-sdk/client#UpgradeableRuntimeId",
       "change": "added",
       "entry": "managed-runtime-upgrades"
+    },
+    {
+      "item": "export:@byok-sdk/client#inspectStoreServiceState",
+      "change": "added",
+      "entry": "inspect-store-service-state"
     },
     {
       "item": "export:@byok-sdk/client#uninstallManagedRuntime",
@@ -713,6 +766,11 @@
       "item": "export:@byok-sdk/client/adapters#ClaudeAdapterOptions",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
+      "change": "changed",
+      "entry": "codex-task-mcp-version-floor"
     },
     {
       "item": "export:@byok-sdk/client/adapters#CodexAdapterOptions",
@@ -800,6 +858,16 @@
       "entry": "wire-v8-harness-selection"
     },
     {
+      "item": "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome",
+      "change": "changed",
+      "entry": "agent-memory-home-resident-check"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#resolveAgentMemoryFilesystemHelper",
+      "change": "added",
+      "entry": "agent-memory-helper-path-resolver"
+    },
+    {
       "item": "export:@byok-sdk/cloud#AgentExecutionInputSchema",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
@@ -868,6 +936,16 @@
       "item": "export:@byok-sdk/core/provider-model#isProviderProfileModelId",
       "change": "added",
       "entry": "harness-model-defaults"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#SqliteSnapshotError",
+      "change": "added",
+      "entry": "sqlite-snapshot-read"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#readSqliteSnapshot",
+      "change": "added",
+      "entry": "sqlite-snapshot-read"
     },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
@@ -948,6 +1026,21 @@
       "item": "export:@byok-sdk/protocol#DefaultModelSelectionMode",
       "change": "added",
       "entry": "harness-model-defaults"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamBudget",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamInstructionInput",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamWindow",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
     },
     {
       "item": "export:@byok-sdk/protocol#ExecutionTargetSchema",
@@ -1075,6 +1168,11 @@
       "entry": "wire-v8-harness-selection"
     },
     {
+      "item": "export:@byok-sdk/protocol#buildDreamInstruction",
+      "change": "changed",
+      "entry": "dream-instruction-input-types"
+    },
+    {
       "item": "export:@byok-sdk/protocol#harnessSelectionNeedsModel",
       "change": "added",
       "entry": "harness-model-defaults"
@@ -1124,126 +1222,6 @@
       "before": "schema_version=10",
       "after": "schema_version=11",
       "entry": "wire-v8-harness-selection"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#isProviderProfileModelId",
-      "change": "added",
-      "entry": "harness-model-defaults"
-    },
-    {
-      "item": "export:@byok-sdk/protocol/constants#isProviderProfileModelId",
-      "change": "added",
-      "entry": "harness-model-defaults"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/host-kit#Command",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/host-kit#Turn",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/rules#InputFields",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/rules#addTurn",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/bot-collaboration/rules#seatTurn",
-      "change": "changed",
-      "entry": "bot-input-images"
-    },
-    {
-      "item": "export:@byok-sdk/client#CodexAdapter",
-      "change": "changed",
-      "entry": "codex-task-mcp-version-floor"
-    },
-    {
-      "item": "export:@byok-sdk/client#StoreServiceState",
-      "change": "added",
-      "entry": "inspect-store-service-state"
-    },
-    {
-      "item": "export:@byok-sdk/client#inspectStoreServiceState",
-      "change": "added",
-      "entry": "inspect-store-service-state"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
-      "change": "changed",
-      "entry": "codex-task-mcp-version-floor"
-    },
-    {
-      "item": "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome",
-      "change": "changed",
-      "entry": "agent-memory-home-resident-check"
-    },
-    {
-      "item": "export:@byok-sdk/client/agent-memory#resolveAgentMemoryFilesystemHelper",
-      "change": "added",
-      "entry": "agent-memory-helper-path-resolver"
-    },
-    {
-      "item": "export:@byok-sdk/core/sqlite-node#SqliteSnapshotError",
-      "change": "added",
-      "entry": "sqlite-snapshot-read"
-    },
-    {
-      "item": "export:@byok-sdk/core/sqlite-node#readSqliteSnapshot",
-      "change": "added",
-      "entry": "sqlite-snapshot-read"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#DreamBudget",
-      "change": "added",
-      "entry": "dream-instruction-input-types"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#DreamInstructionInput",
-      "change": "added",
-      "entry": "dream-instruction-input-types"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#DreamWindow",
-      "change": "added",
-      "entry": "dream-instruction-input-types"
-    },
-    {
-      "item": "export:@byok-sdk/protocol#buildDreamInstruction",
-      "change": "changed",
-      "entry": "dream-instruction-input-types"
     }
   ]
 }

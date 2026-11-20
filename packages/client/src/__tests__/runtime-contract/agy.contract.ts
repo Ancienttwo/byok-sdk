@@ -142,6 +142,7 @@ async function resumed() {
 }
 
 defineMcpSearchProbes({
+  target: AGY_TARGET,
   runtime: 'agy', variant: '', wire: 'gemini',
   async configure(box, provider, spawnFn) {
     return { adapter: agyAdapterWithEndpoint(new AgyAdapter({ home: path.join(box.root, 'agy'), resolveBin, spawnFn, resolveKey }), provider.origin),
