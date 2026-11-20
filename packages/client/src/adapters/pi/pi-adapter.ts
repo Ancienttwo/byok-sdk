@@ -1592,11 +1592,17 @@ class PiSession implements Session {
       throw new PolicyUnsupportedError('pi persistent session cannot change effort');
     }
     const requestedSelection = offerSelection(task.target);
-    const profileSelection = this.selection?.mode === 'byok-profile' ? this.selection : undefined;
-    if (requestedSelection !== undefined && !samePiProfile(requestedSelection, profileSelection?.providerProfile, profileSelection?.modelId)) {
-      throw new PolicyUnsupportedError(
-        'pi persistent session cannot change its authoritative BYOK provider/model selection',
-      );
+    const selection = this.selection;
+    if (requestedSelection !== undefined) {
+      const sameSelection = selection?.mode === 'byok-profile'
+        ? samePiProfile(requestedSelection, selection.providerProfile, selection.modelId)
+        : ((selection === undefined || selection.mode === 'device-default') && requestedSelection.mode === 'device-default')
+          || (selection?.mode === 'adapter-model' && requestedSelection.mode === 'adapter-model' && requestedSelection.modelId === selection.modelId);
+      if (!sameSelection) {
+        throw new PolicyUnsupportedError(selection?.mode === 'byok-profile'
+          ? 'pi persistent session cannot change its authoritative BYOK provider/model selection'
+          : 'pi persistent session cannot change its native model selection');
+      }
     }
     if (this.abortMemoryLane !== undefined) throw authorityFailure('memory lane cannot follow up');
     requireImageInput(task.images, this.capabilities.images);

@@ -549,6 +549,25 @@ test('#2286: core admits exactly its sqlite-node entry', t => {
   }
 });
 
+test('#2419: core admits only the exact new provider-model entry', t => {
+  const f = fixture(t), path = 'packages/core/package.json';
+  const manifest = { name: '@byok-sdk/core', version: '0.44.1', exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' } } };
+  f.write(path, manifest); rebase(f, 'core before provider-model');
+  const entry = { types: './dist/provider-model.d.ts', import: './dist/provider-model.js' };
+  const write = (value, extra = {}) => f.write(path, { ...manifest, exports: { ...manifest.exports, './provider-model': value, ...extra } });
+  write(entry);
+  assert.ok(selectImpact([path], f).dirs.includes('packages/core'));
+  for (const invalid of [{ ...entry, types: './dist/other.d.ts' }, { ...entry, import: './dist/other.js' }, { ...entry, default: entry.import }]) {
+    write(invalid);
+    assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  }
+  write(entry, { './other': './dist/other.js' });
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+  write({ ...entry, import: './dist/other.js' }); rebase(f, 'core with a different provider-model entry');
+  write(entry);
+  assert.throws(() => selectImpact([path], f), /changes more than the reviewed fields/);
+});
+
 test('the K4 example stays private', t => {
   const f = fixture(t), path = 'examples/host-execution-core/package.json';
   const manifest = { name: '@byok-sdk/example-host-execution-core', private: true, version: '0.0.1',

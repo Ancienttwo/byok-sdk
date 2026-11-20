@@ -306,12 +306,13 @@ export class ConnectionManager {
     return this.state === 'open' ? this.acceptedHarnesses : [];
   }
 
-  updateHarnessInventory(harnesses: HarnessInfo[], runtimeUnavailable: readonly RuntimeUnavailableEntry[]): void {
-    if (isDeepStrictEqual(harnesses, this.opts.harnesses) && isDeepStrictEqual(runtimeUnavailable, this.opts.runtimeUnavailable)) return;
+  updateHarnessInventory(harnesses: HarnessInfo[], runtimeUnavailable: readonly RuntimeUnavailableEntry[]): boolean {
+    if (isDeepStrictEqual(harnesses, this.opts.harnesses) && isDeepStrictEqual(runtimeUnavailable, this.opts.runtimeUnavailable)) return false;
     this.opts.harnesses = harnesses;
     this.opts.runtimeUnavailable = runtimeUnavailable;
     this.refreshInventory = true;
     this.breakSession();
+    return true;
   }
 
   private async run(): Promise<void> {

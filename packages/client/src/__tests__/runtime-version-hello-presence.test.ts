@@ -1,6 +1,7 @@
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { INPUT_IMAGES_CAPABILITY } from '@byok-sdk/protocol/constants';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { detectRuntimes } from '../daemon/create-daemon/support';
@@ -14,8 +15,6 @@ import * as timerDelay from '../util/timer-delay';
 const ALLOW = { state: 'allow' as const, qualifiedVersion: '1.4.0' };
 const WARN = { state: 'warn' as const, qualifiedVersion: '1.0.52' };
 const BLOCK = { state: 'block' as const, qualifiedVersion: '0.169.0', matched: '0.16.' };
-// The wire projection carries state + qualified token only.
-const WIRE_BLOCK = { state: 'block' as const, qualifiedVersion: '0.169.0' };
 
 it('bounds concurrent probes and reports every unavailable executor in scan order', async () => {
   const adapters = Array.from({ length: 64 }, (_, index) => new StubRuntimeAdapter(`test-${index}`));
@@ -135,7 +134,9 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
       await daemon.pair('pairing-code');
       await daemon.start();
       const first = await server.waitFor(event => event.type === 'conn.hello');
+      if (first.type !== 'conn.hello') throw new Error('expected conn.hello');
       expect(first.payload).toMatchObject({ harnesses: [{ id: 'fixture' }] });
+      expect(first.payload.capabilities).toContain(INPUT_IMAGES_CAPABILITY);
       if (holdOldHello) {
         await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual({ phase: 'running', connection: 'open' }));
         releaseOldHello = server.holdNextMessagesResponse(event => event.type === 'conn.hello');
@@ -151,12 +152,49 @@ describe('conn.hello / presence version-policy and runtime-unavailable projectio
       }
       releaseOldHello?.();
       const refreshed = await server.waitFor(event => event.type === 'conn.hello' && event.payload.harnesses.length === 0);
+      if (refreshed.type !== 'conn.hello') throw new Error('expected conn.hello');
       expect(refreshed.payload).toMatchObject({
         harnesses: [], runtimeUnavailable: [{ id: 'fixture', cause: 'not_installed', retryable: true }],
       });
+      expect(refreshed.payload.capabilities).not.toContain(INPUT_IMAGES_CAPABILITY);
       expect(daemon.status().runtimes).toMatchObject([{ id: 'fixture', outcome: 'not-found' }]);
     } finally {
       releaseOldHello?.();
+      scanTimer.mockRestore();
+      nextScan.resolve();
+    }
+  });
+
+  it('advertises image input in the hello that adds a newly available harness', async () => {
+    const sleep = timerDelay.abortableSleep;
+    const nextScan = Promise.withResolvers<void>();
+    const scanTimer = vi.spyOn(timerDelay, 'abortableSleep')
+      .mockImplementation((ms, signal) => ms === 60_000 ? nextScan.promise : sleep(ms, signal));
+    try {
+      const adapter = new StubRuntimeAdapter('fixture', { kind: 'not-found' });
+      const storeDir = await tmpDir('byok-rescan-images-');
+      dirs.push(storeDir);
+      daemon = createDaemonWithAdapters({
+        storage: { scratchRoot: testScratchRoot() },
+        localAgentRelease: { version: '0.0.0-test' },
+        productName: 'Rescan Images', productId: 'rescan-images', serverUrl: server.url, storeDir,
+      }, [adapter]);
+      await daemon.pair('pairing-code');
+      await daemon.start();
+      const first = await server.waitFor(event => event.type === 'conn.hello');
+      if (first.type !== 'conn.hello') throw new Error('expected conn.hello');
+      expect(first.payload.harnesses).toEqual([]);
+      expect(first.payload.capabilities).not.toContain(INPUT_IMAGES_CAPABILITY);
+      await vi.waitFor(() => expect(daemon?.status().lifecycle).toEqual({ phase: 'running', connection: 'open' }));
+
+      vi.spyOn(adapter, 'detect').mockResolvedValue({ kind: 'available', sessionCapabilities: { images: true } });
+      scanTimer.mockRestore();
+      nextScan.resolve();
+      const refreshed = await server.waitFor(event => event.type === 'conn.hello' && event.id !== first.id);
+      if (refreshed.type !== 'conn.hello') throw new Error('expected conn.hello');
+      expect(refreshed.payload.harnesses).toMatchObject([{ id: 'fixture', capabilities: { images: true } }]);
+      expect(refreshed.payload.capabilities).toContain(INPUT_IMAGES_CAPABILITY);
+    } finally {
       scanTimer.mockRestore();
       nextScan.resolve();
     }

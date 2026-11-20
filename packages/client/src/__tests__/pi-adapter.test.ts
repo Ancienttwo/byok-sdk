@@ -1,6 +1,6 @@
 import { acquirePiSessionRetention } from '../util/pi-session-retention';
 import { PathMutationGateBusyError } from '../util/path-mutation-gate';
-import type { RuntimeTaskInput } from '../types';
+import { PolicyUnsupportedError, type RuntimeTaskInput } from '../types';
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn } from 'node:child_process';
@@ -127,6 +127,26 @@ describe('Pi native model selection', () => {
       const session = await startPreparedOperation(adapter, { target: modelTarget('two/org/model:high'), instruction: 'hi' }, ctx);
       try { expect(spawnFn.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(['--provider', 'two', '--model', 'org/model:high', '--exact-model', 'true'])); }
       finally { await session.close(); }
+    } finally { await fs.rm(ctx.workspaceDir, { recursive: true, force: true }); }
+  });
+
+  const deviceDefault = { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } as const;
+  it.each([
+    [PI_TARGET, deviceDefault, [modelTarget('one/model'), PI_PROFILE_TARGET]],
+    [deviceDefault, deviceDefault, [modelTarget('one/model'), PI_PROFILE_TARGET]],
+    [modelTarget('one/model'), modelTarget('one/model'), [deviceDefault, modelTarget('one/other'), PI_PROFILE_TARGET]],
+  ] as const)('enforces native follow-up selection for %j', async (target, allowed, refused) => {
+    const adapter = fakePiAdapter();
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [{ id: 'one/model', provider: { id: 'one' } }] });
+    const ctx = await makeCtx();
+    try {
+      const session = await startAdapter(adapter, { ...baseTask, target }, ctx);
+      try {
+        for (const followUpTarget of refused) {
+          await expect(session.followUp({ instruction: 'switch selection', target: followUpTarget })).rejects.toBeInstanceOf(PolicyUnsupportedError);
+        }
+        await expect(session.followUp({ instruction: 'continue', target: allowed })).resolves.toBeUndefined();
+      } finally { await session.close(); }
     } finally { await fs.rm(ctx.workspaceDir, { recursive: true, force: true }); }
   });
 

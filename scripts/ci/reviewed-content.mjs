@@ -473,6 +473,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
       && isDeepStrictEqual(after.exports?.['./sqlite-node'], sqliteNode)) {
       if (prior === undefined) delete after.exports['./sqlite-node']; else after.exports['./sqlite-node'] = prior;
     }
+    // #2419: admit this core entry until the release containing it becomes the base.
+    const providerModel = { types: './dist/provider-model.d.ts', import: './dist/provider-model.js' };
+    if (path === 'packages/core/package.json' && !Object.hasOwn(before.exports ?? {}, './provider-model')
+      && isDeepStrictEqual(after.exports?.['./provider-model'], providerModel)) {
+      delete after.exports['./provider-model'];
+      qualify.push('packages/core');
+    }
   }
   // After every dedicated admission, so an edge a branch above already reviewed is not taken here.
   qualify.push(...admitRegisteredPrivateManifest(before, after, path, { base, cwd, workspaceGraph }));
