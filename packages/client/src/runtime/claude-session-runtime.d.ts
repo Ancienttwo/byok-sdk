@@ -57,7 +57,10 @@ export interface ClaudeCredentialRedactor {
 }
 export declare function sessionCredentialRedactor(options: {
   env?: Readonly<Record<string, string>>;
-  mcpServers?: readonly { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }[];
+  mcpServers?: readonly (
+    | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }
+    | { readonly name: string; readonly type: 'http'; readonly url: string; readonly headers?: Readonly<Record<string, string>> }
+  )[];
 }): ClaudeCredentialRedactor;
 export interface ClaudeSessionProfile {
   readonly projection: ClaudeProjectionProfile;

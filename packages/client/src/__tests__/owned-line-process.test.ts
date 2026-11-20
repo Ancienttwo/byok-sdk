@@ -7,7 +7,7 @@ import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { McpStdioClient } from '../mcp/client';
 import { spawnStartError } from '@byok-sdk/core/system-tool';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/a41628f/runtimes/codex/app-server-client';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/7961a59/runtimes/codex/app-server-client';
 
 // Pass-through spy: every spawn below, including MCP's direct one, is observable.
 vi.mock('node:child_process', async importOriginal => {

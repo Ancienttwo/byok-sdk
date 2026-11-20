@@ -319,6 +319,19 @@ describe('DshAdapter sessions', () => {
     expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(key);
   });
 
+  it('redacts a split startup credential before keeping the stderr tail', async () => {
+    const key = '/synthetic-dsh-credential-distinctive-suffix';
+    const { open } = await setup({ resolveKey: async () => key }, { FAKE_DSH_OPEN_EXIT: 'tail' });
+    const error = await open().catch(error => error);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', failure: { class: 'runtime_exited' } });
+    const diagnostics = JSON.stringify(error, Object.getOwnPropertyNames(error));
+    expect(diagnostics).toContain('DSH startup marker');
+    expect(diagnostics).toContain('[redacted]');
+    expect(diagnostics).not.toContain(key);
+    expect(diagnostics).not.toContain(key.slice(-16));
+  });
+
   it.each(['non-provider-prefix-fixture-key', '/looks/like/a/provider/key'])('redacts an echoed key from the native event before projection (%s)', async key => {
     const { open } = await setup({ resolveKey: async () => key });
     const events = await turn(await open({ target: DSH_TARGET, instruction: 'echo-provider-key' }));

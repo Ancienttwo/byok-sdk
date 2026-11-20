@@ -1,5 +1,5 @@
 import type { RuntimeTaskInput } from '../types';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -345,6 +345,29 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     }
   });
 
+  it('retains an unreadable cross-group descendant until a retry can confirm exit', async () => {
+    const rootPid = 900_001;
+    const descendantPid = 900_002;
+    let rootRunning = true;
+    const child = { pid: rootPid, exitCode: null, get signalCode() { return rootRunning ? null : 'SIGTERM'; } } as ChildProcess;
+    const descendant = { pid: descendantPid, ppid: rootPid, pgid: descendantPid, start: 'descendant start' };
+    const unreadable = new Set([descendantPid]);
+    const options = {
+      child, label: 'unreadable descendant', waitClosed: async () => {}, isClosed: () => !rootRunning, killGraceMs: 0,
+      observeProcessTableFn: () => rootRunning ? { table: new Map([[descendantPid, descendant]]) } : { table: new Map(), unreadable },
+      killFn(pid: number, signal: NodeJS.Signals | number) {
+        expect(pid).toBe(-rootPid);
+        if (!rootRunning) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+        if (signal === 'SIGTERM') rootRunning = false;
+      },
+    };
+    const unconfirmed = { name: 'RuntimeDisposalFailure', stage: 'quiescence', message: expect.stringContaining('not confirmed exited') };
+    await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject(unconfirmed);
+    await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject(unconfirmed);
+    unreadable.clear();
+    await expect(disposeOwnedProcessTree(options)).resolves.toBeUndefined();
+  });
+
   it('a disposal whose last table read timed out still ends the remembered setsid grandchild on retry (#2105)', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-process-tree-retry-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
@@ -366,7 +389,8 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
       await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', message: expect.stringContaining('exit unconfirmed') });
       expect(processExists(receipt.grandchildPid)).toBe(true);
       await disposeOwnedProcessTree(options);
-      expect(reads).toBe(3);
+      // The successful retry reads once to signal and again to confirm exit.
+      expect(reads).toBeGreaterThanOrEqual(4);
       expect(processExists(receipt.grandchildPid)).toBe(false);
     } finally {
       reapAll([receipt.descendantPid, receipt.grandchildPid]);

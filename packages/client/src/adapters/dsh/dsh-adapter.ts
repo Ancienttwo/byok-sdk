@@ -335,11 +335,11 @@ export class DshAdapter implements RuntimeAdapter {
       await fs.writeFile(patch, dshPatch(selection), { mode: 0o600 });
       const env = dshEnvironment({ ...input.env, ...input.scratch.env }, this.root, this.sandbox);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
-      const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp' });
       const key = await resolveRuntimeApiKey('dsh', this.options.resolveKey, input.signal);
       env[DSH_PROVIDER_KEY_ENV] = key;
-      const redactor = sessionCredentialRedactor({ env });
+      const redactor = sessionCredentialRedactor({ env, mcpServers });
       redactor.addExplicit(key);
+      const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp', stderrRedactor: redactor });
       const raw = await dshSession(
         (bin, args, options) => {
           const child = spawnAgent(bin, args, options);

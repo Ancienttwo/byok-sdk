@@ -5,6 +5,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeDisposalFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
 import { requireImageInput } from '../input-images.js';
@@ -238,7 +239,9 @@ class OpenCodeSession implements Session {
     this.model = undefined;
     this.stopAttempt = undefined;
     this.outcome = new Promise(resolve => { this.settle = resolve; });
-    const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'opencode acp' });
+    const env = withoutProviderCredentials({ ...this.input.env, ...this.input.scratch.env });
+    const redactor = sessionCredentialRedactor({ env, mcpServers: this.mcpServers });
+    const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'opencode acp', stderrRedactor: redactor });
     const expected = this.sessionRef || this.input.manifest.sessionRef;
     this.raw = await acp.opencodeSession((bin, args, opts) => {
       this.input.signal?.throwIfAborted();
@@ -263,7 +266,7 @@ class OpenCodeSession implements Session {
       return spawnTerminal(invocation.command, [...invocation.args, ...args], opts);
     },
     { kind: 'available', via: 'executable', command: this.command, version: this.version }, {
-      cwd: this.input.manifest.cwd!, env: withoutProviderCredentials({ ...this.input.env, ...this.input.scratch.env }),
+      cwd: this.input.manifest.cwd!, env,
       retainedBytes: this.maxRetainedBytes, model: this.models[index]!,
       ...(this.effort === undefined ? {} : { effort: this.effort }),
       ...(this.mcpServers.length === 0 ? {} : { mcpServers: this.mcpServers }),

@@ -1,5 +1,5 @@
 import type { RuntimeInputOptions } from '../types';
-import type { RuntimeFailureClass } from '@byok-sdk/protocol';
+import type { OarFailureClass } from './oar-failure-runtime';
 import type { CodexRecord } from '../adapters/codex/projection';
 import type { spawnOwnedLineProcess } from './owned-line-process';
 import type { ProcessTable } from './oar-process-tree';
@@ -9,7 +9,7 @@ export interface CodexControl {
 }
 export declare function startAppServerClient(
   spawn: typeof spawnOwnedLineProcess, command: string, env: Readonly<Record<string, string>>,
-  configOverrides?: Readonly<Record<string, string>>, cwd?: string, options?: { readonly launchArgs?: readonly string[] },
+  configOverrides?: Readonly<Record<string, string>>, cwd?: string, options?: { readonly launchArgs?: readonly string[]; readonly redact?: (text: string) => string },
 ): {
   readonly spawned: Promise<void>;
   handle(handlers: { onNotification(): void; onServerRequest(): void }): void;
@@ -86,7 +86,7 @@ export declare class SessionUnavailableError extends Error {
 }
 export declare class RuntimeFailureError extends Error {
   readonly name: 'RuntimeFailureError';
-  readonly failure: RuntimeFailureClass;
+  readonly failure: OarFailureClass;
   readonly code?: 'project_packages_blocked' | 'runtime_outdated' | 'runtime_config_invalid';
   readonly credential?: 'missing' | 'rejected';
   readonly status?: number;
@@ -94,7 +94,7 @@ export declare class RuntimeFailureError extends Error {
 }
 export declare class UnsupportedOptionError extends Error {
   readonly name: string;
-  readonly option: 'retainedBytes' | 'goals' | 'endTurnProcessesOnAbort' | 'cwd' | 'additionalDirectories' | 'model' | 'effort' | 'serviceTier' | 'outputSchema' | 'name' | 'resume' | 'fork' | 'env' | 'userConfiguration' | 'systemPrompt' | 'appendSystemPrompt' | 'mcpServers' | 'disallowedTools' | 'launchArgs' | 'placement';
+  readonly option: 'retainedBytes' | 'goals' | 'endTurnProcessesOnAbort' | 'cwd' | 'additionalDirectories' | 'model' | 'effort' | 'serviceTier' | 'outputSchema' | 'name' | 'resume' | 'fork' | 'env' | 'userConfiguration' | 'systemPrompt' | 'appendSystemPrompt' | 'mcpServers' | 'disallowedTools' | 'launchArgs' | 'nativeMemoryDefault' | 'placement';
 }
 /** The open could not confirm the requested model from the runtime's readback: the vendored typed error. */
 export declare class ModelConfirmationError extends Error {

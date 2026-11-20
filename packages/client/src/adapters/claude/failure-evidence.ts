@@ -1,5 +1,5 @@
 import type { RuntimeFailureClass, RuntimeQuotaScope, TaskFailure } from '@byok-sdk/protocol';
-import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import { RuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
 import { failureFromStatus } from '../../runtime/oar-failure-runtime.js';
 import type { ClaudeStreamMessage } from './projection.js';
 
@@ -80,6 +80,6 @@ export class ClaudeFailureEvidence {
       };
     }
     if (error !== undefined) return { class: Object.hasOwn(ASSISTANT_ERROR_CLASSES, error) ? ASSISTANT_ERROR_CLASSES[error]! : 'unknown' };
-    return { class: typeof status === 'number' && Number.isInteger(status) ? failureFromStatus(status) : 'unknown' };
+    return { class: typeof status === 'number' && Number.isInteger(status) ? runtimeFailureClassOf(failureFromStatus(status)) : 'unknown' };
   }
 }

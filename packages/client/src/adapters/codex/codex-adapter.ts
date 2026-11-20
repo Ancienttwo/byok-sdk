@@ -41,6 +41,7 @@ import {
 } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
+import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { readProcessTable } from '../../runtime/oar-process-tree.js';
@@ -362,7 +363,8 @@ export class CodexAdapter implements RuntimeAdapter {
     const timeout = AbortSignal.timeout(DETECT_TIMEOUT_MS);
     const deadline = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
     deadline.throwIfAborted();
-    const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'codex account read' });
+    const redactor = sessionCredentialRedactor({ env: launch.env });
+    const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'codex account read', stderrRedactor: redactor });
     let child: ReturnType<typeof spawn> | undefined;
     // account/read needs neither feature. Suppress their startup work even when the task inherits it.
     const launchArgs = [
@@ -374,7 +376,7 @@ export class CodexAdapter implements RuntimeAdapter {
       const client = codexRuntime.startAppServerClient((bin, args, options) => {
         child = spawn(bin, [...invocation.args, ...args], options);
         return child;
-      }, invocation.command, launch.env, {}, launch.cwd, { launchArgs });
+      }, invocation.command, launch.env, {}, launch.cwd, { launchArgs, redact: redactor.redact });
       client.handle({ onNotification() {}, onServerRequest() {} });
       const stop = () => client.kill();
       deadline.addEventListener('abort', stop, { once: true });
@@ -425,9 +427,6 @@ export class CodexAdapter implements RuntimeAdapter {
     const taskServers = mcpServers.map(server => server.name);
     if (taskServers.length > 0 && !mcpAllowlistSupported) throw authority(CODEX_MCP_TOOL_ALLOWLIST_REFUSAL);
     const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
-    const spawned = createOwnedLineProcessSpawn({
-      nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
-    });
     const session = new CodexSession(
       input.scratch,
       workspace,
@@ -444,6 +443,10 @@ export class CodexAdapter implements RuntimeAdapter {
     try {
       const launch = admittedLaunch ?? await this.#appServerLaunch({ kind: input.kind, cwd, env: input.env, scratch: input.scratch, agentHome });
       const { excludeUserMcp, excludeUserContext } = launch;
+      const redactor = sessionCredentialRedactor({ env: launch.env, mcpServers });
+      const spawned = createOwnedLineProcessSpawn({
+        nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, stderrRedactor: redactor,
+      });
       // The open deadline covers spawn, initialize, the thread open and its read-back.
       const raw = await session.within('open', retryable, codexRuntime.codexSession(
         (bin, args, options) => {
