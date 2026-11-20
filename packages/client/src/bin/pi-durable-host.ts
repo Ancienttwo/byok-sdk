@@ -84,6 +84,8 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
     : api === 'openai-responses'
       ? await import('@earendil-works/pi-ai/api/openai-responses')
       : await import('@earendil-works/pi-ai/api/anthropic-messages');
+  // SAFETY: The launcher builds this entry from the validated Pi model config.
+  // This host checks its identity and supplies the API, provider, endpoint, and cost.
   const model = { cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, ...entry, api, provider: expectedProvider, baseUrl: string(provider.baseUrl) } as unknown as Model<typeof api>;
   const models = createModels(); models.setProvider(createProvider({ id: expectedProvider, models: [model], api: streams, auth: { apiKey: { name: 'BYOK launcher', resolve: async () => ({ auth: key ? { apiKey: key } : {} }) } } }));
   const fail = (message: string): never => { throw new Error(message); };

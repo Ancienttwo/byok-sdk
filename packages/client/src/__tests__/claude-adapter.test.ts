@@ -311,7 +311,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
           selection: { mode: 'subscription', modelId: 'opus' },
         },
       },
-      await makeCtx({ ...process.env, ANTHROPIC_API_KEY: 'ambient-key', CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token',
+      await makeCtx({ ...process.env, ANTHROPIC_API_KEY: 'fixture-ambient-claude-key', CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token',
         CLAUDE_CODE_USE_BEDROCK: '1', CLAUDE_CODE_USE_VERTEX: '1', Claude_Code_Use_Foundry: '1' }),
     );
     openSessions.push(session);
@@ -352,7 +352,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   });
 
   it('resolves the declared Host key only when launching its configured BYOK selection', async () => {
-    const resolveKey = vi.fn(async () => 'host-fixture-key');
+    const key = 'fixture-host-claude-provider-key';
+    const resolveKey = vi.fn(async () => key);
     const spawnEnvs: NodeJS.ProcessEnv[] = [];
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
@@ -375,17 +376,17 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       .resolves.toMatchObject({ kind: 'reject', retryable: false });
     expect(resolveKey).not.toHaveBeenCalled();
     const session = await startAdapter(adapter, { ...baseTask, target }, await makeCtx({ ...process.env,
-      ANTHROPIC_API_KEY: 'ambient-key', CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token', CLAUDE_CODE_USE_BEDROCK: '1',
+      ANTHROPIC_API_KEY: 'fixture-ambient-claude-key', CLAUDE_CODE_OAUTH_TOKEN: 'ambient-token', CLAUDE_CODE_USE_BEDROCK: '1',
     }));
     openSessions.push(session);
     expect(resolveKey).toHaveBeenCalledExactlyOnceWith();
-    expect(spawnEnvs[0]?.ANTHROPIC_API_KEY).toBe('host-fixture-key');
+    expect(spawnEnvs[0]?.ANTHROPIC_API_KEY).toBe(key);
     expect(spawnEnvs[0]?.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     expect(spawnEnvs[0]?.CLAUDE_CODE_USE_BEDROCK).toBeUndefined();
   });
 
   it.each(['spawn', 'open', 'startup'] as const)('redacts the exact BYOK key from the %s failure and its cause chain', async phase => {
-    const key = 'short';
+    const key = 'fixture-claude-redaction-key';
     const echoed = `fixture refused ${key}`;
     const adapter = new ClaudeAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),

@@ -189,7 +189,7 @@ describe('DshAdapter sessions', () => {
     expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['dsh-first-test-key-value', 'dsh-rotated-test-key-value']);
     const expected = { provider: 'byok-custom', model: 'task-model', reasoningEffort: 'high' };
     expect(log.filter(fact => ['open', 'resume'].includes(fact.method)).map(row => row.request.agentOptions)).toEqual([expected, expected]);
-    expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch(MODEL)));
+    expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch({ ...MODEL, model: 'task-model' })));
   });
 
   it.each([
@@ -228,20 +228,6 @@ describe('DshAdapter sessions', () => {
     await expect(dynamic.adapter.prepare({ offer: { target, instruction: 'test' }, descriptor: dynamic.adapter.descriptor, requiredToolsetIds: [] }))
       .resolves.toMatchObject({ kind: 'reject', code: 'invalid_request', retryable: false });
     await turn(await dynamic.open());
-  });
-
-  it('keeps two concurrent launch keys scoped to their own processes', async () => {
-    const slow = Promise.withResolvers<string>();
-    const resolveKey = vi.fn().mockReturnValueOnce(slow.promise).mockResolvedValueOnce('parallel-second-key');
-    const { open, facts } = await setup({ resolveKey });
-    const first = open({ target: DSH_TARGET, instruction: 'first launch' });
-    await vi.waitFor(() => expect(resolveKey).toHaveBeenCalledOnce());
-    await turn(await open({ target: DSH_TARGET, instruction: 'second launch' }));
-    slow.resolve('parallel-first-key');
-    await turn(await first);
-    const log = await facts();
-    expect(log.filter(row => row.kind === 'start').map(row => row.env[DSH_PROVIDER_KEY_ENV])).toEqual(['parallel-second-key', 'parallel-first-key']);
-    expect(log.filter(row => row.method === 'prompt').map(row => row.request.text)).toEqual(['second launch', 'first launch']);
   });
 
   it('keeps two concurrent launch keys scoped to their own processes', async () => {

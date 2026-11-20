@@ -232,7 +232,8 @@ describe('GrokAdapter sessions', () => {
   it.each([undefined, 'fake-grok-session'])('selects the per-task Grok model and effort before prompt (resume=%s)', async sessionRef => {
     const resources = await ctx({ FAKE_ACP_EFFORT_MENU: '1' });
     const runtime = adapter({ model: 'boot-model' });
-    await turn(await open(runtime, { target: GROK_TARGET, instruction: 'hello', modelId: 'task-model', effort: 'high', sessionRef }, resources));
+    const target = { ...GROK_TARGET, selection: { mode: 'adapter-model', modelId: 'task-model' } } as const;
+    await turn(await open(runtime, { target, instruction: 'hello', effort: 'high', sessionRef }, resources));
     const log = facts(resources.log);
     expect(log.find(row => row.kind === 'model')?.params.modelId).toBe('task-model');
     expect(log.find(row => row.kind === 'config')?.params).toMatchObject({ configId: 'reasoning_effort', value: 'high' });

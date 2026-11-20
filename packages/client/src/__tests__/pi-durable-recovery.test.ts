@@ -14,7 +14,11 @@ describe('durable parent recovery authority', () => {
   it('Windows admission is refused before durable resources or custody can be opened', async () => {
     vi.spyOn(process,'platform','get').mockReturnValue('win32');
     const adapter=new PiAdapter({durableLane:true});
-    const result=await adapter.prepare({offer:{}} as never);
+    const result = await adapter.prepare({
+      offer: { target: { lane: 'auto' }, instruction: 'unused' },
+      descriptor: adapter.descriptor,
+      requiredToolsetIds: [],
+    });
     expect(result).toMatchObject({kind:'reject',retryable:false});if(result.kind==='reject')expect(result.reason).toContain('Windows');
   });
   it('feature defaults off and enabled adapter advertises only the capabilities it provides', async () => {

@@ -23,8 +23,17 @@ const clientRoot = path.dirname(require.resolve('@byok-sdk/client/package.json')
 // The installed coding-agent manifest must match the approved official pin.
 const piEntry = fileURLToPath(import.meta.resolve(PI_DEPENDENCY_SPECIFIER));
 const piRoot = path.dirname(path.dirname(piEntry));
-const piManifest = JSON.parse(await readFile(path.join(piRoot, 'package.json'), 'utf8'));
-const clientManifest = JSON.parse(await readFile(path.join(clientRoot, 'package.json'), 'utf8'));
+async function readInstalledManifest(root) {
+  const manifestPath = path.join(root, 'package.json');
+  try {
+    return JSON.parse(await readFile(manifestPath, 'utf8'));
+  } catch (cause) {
+    throw new Error(`could not read installed smoke manifest ${manifestPath}`, { cause });
+  }
+}
+
+const piManifest = await readInstalledManifest(piRoot);
+const clientManifest = await readInstalledManifest(clientRoot);
 assert.equal(clientManifest.dependencies['@juicesharp/rpiv-todo'], undefined);
 const clientRequire = createRequire(path.join(clientRoot, 'package.json'));
 assert.throws(() => clientRequire.resolve('@juicesharp/rpiv-todo/package.json'), {code:'MODULE_NOT_FOUND'});
