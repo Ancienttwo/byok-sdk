@@ -8,6 +8,7 @@ import { killProcessGroupsUntilGone, processSignalState } from '../util/process-
 
 const DEFAULT_TERM_GRACE_MS = 750;
 const DEFAULT_KILL_GRACE_MS = 2_000;
+const ZOMBIE_REAP_GRACE_MS = 250;
 const POLL_MS = 20;
 /**
  * Time limit of each synchronous `ps` and `sysctl` run here; past it the
@@ -737,8 +738,8 @@ function readDisposalTable(options: OwnedProcessTreeOptions, stage: 'signal' | '
   }
 }
 
-/** Retain unreadable and live identities. Signal only readable, matching identities. */
-function killDescendants(child: ChildProcess, read: () => OwnedProcessTableRead, more: readonly ProcessEntry[] = []): void {
+/** Retain unreadable and live identities. Collect zombies for the reap wait. */
+function killDescendants(child: ChildProcess, read: () => OwnedProcessTableRead, zombies: Map<number, ProcessEntry>, more: readonly ProcessEntry[] = []): void {
   const state = stateFor(child);
   const entries = [...state.descendants, ...more];
   if (entries.length === 0) return;
@@ -754,10 +755,13 @@ function killDescendants(child: ChildProcess, read: () => OwnedProcessTableRead,
       continue;
     }
     const current = table.get(entry.pid);
-    if (current?.start === entry.start && current.zombie !== true) {
-      pending.set(entry.pid, current);
-      running.push(current);
+    if (current?.start !== entry.start) continue;
+    if (current.zombie === true) {
+      zombies.set(entry.pid, current);
+      continue;
     }
+    pending.set(entry.pid, current);
+    running.push(current);
   }
   killEntries(running, table);
   state.descendants = [...pending.values()];
@@ -943,7 +947,8 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
  * POSIX measures the owned process GROUP, then SIGKILLs the descendants that
  * left the group (observed every {@link OWNED_TREE_OBSERVE_MS} while the root
  * ran, read before the SIGTERM and again before the SIGKILL, each pid checked
- * by start time) and waits until they are gone. That holds however the root
+ * by start time) and waits for them to exit. After quiescence, disposal gives
+ * the OS a short grace to reap any observed zombies. That holds however the root
  * ended, an outside SIGKILL included (#1269): the group signal never reaches a
  * tool in a group of its own, and once the root is gone only the remembered
  * entry leads to it.
@@ -965,9 +970,9 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
  * Grace budget: each phase carries its own full grace on both platforms. On
  * win32 the quiescence poll gets `killGraceMs` and the close wait that follows
  * gets a fresh `killGraceMs`; POSIX likewise gives the SIGTERM wait
- * `termGraceMs`, the SIGKILL wait `killGraceMs`, and the close wait another
- * `killGraceMs`. Worst-case disposal is therefore bounded by the sum, never by
- * one shared deadline that could starve the close wait after a slow drain.
+ * `termGraceMs`, the SIGKILL and live descendant waits `killGraceMs` each,
+ * and the close wait its own grace. The final best-effort zombie reap uses
+ * the smaller of `killGraceMs` and {@link ZOMBIE_REAP_GRACE_MS}.
  *
  * Residual boundary, stated honestly. Three cases this mechanism cannot cover:
  * a descendant whose intermediate parent died before any sweep observed it is
@@ -1053,6 +1058,7 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   }
 
   const readTable = (): OwnedProcessTableRead => readDisposalTable(options);
+  const zombies = new Map<number, ProcessEntry>();
   let groupReachable = groupExists(pid, options.label, kill);
   if (groupReachable && !terminationState.get(options.child)?.requested) {
     rememberDescendants(options.child, pid, readTable);
@@ -1064,7 +1070,7 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
     const observation = readTable();
     const more = isRunning(options.child) ? descendantsOf(observation.table, pid) : [];
     groupReachable = await signalGroup(options.child, pid, 'SIGKILL', options.label, kill);
-    killDescendants(options.child, () => observation, more);
+    killDescendants(options.child, () => observation, zombies, more);
     if (!(await killProcessGroupsUntilGone(
       async () => { groupReachable = await signalGroup(options.child, pid, 'SIGKILL', options.label, kill, true); },
       () => !groupReachable || !groupExists(pid, options.label, kill),
@@ -1076,7 +1082,7 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
       });
     }
   }
-  killDescendants(options.child, readTable);
+  killDescendants(options.child, readTable, zombies);
   // The group is gone or foreign. Stdio close includes any holders OAR
   // discovered, so revalidate their identities before settling disposal.
   const closeGrace = stateFor(options.child).boundOutputPipes ? PIPE_CLOSE_MS + killGraceMs : killGraceMs;
@@ -1088,13 +1094,26 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   }
   const state = stateFor(options.child);
   if (!(await waitUntil(() => {
-    killDescendants(options.child, () => readDisposalTable(options, 'quiescence'));
+    killDescendants(options.child, () => readDisposalTable(options, 'quiescence'), zombies);
     return state.descendants.length > 0;
   }, killGraceMs))) {
     throw new RuntimeDisposalFailure({
       stage: 'quiescence',
       reason: `${options.label} runtime descendants outside its process group were not confirmed exited after SIGKILL`,
     });
+  }
+  const reapGraceMs = Math.min(killGraceMs, ZOMBIE_REAP_GRACE_MS);
+  if (zombies.size > 0 && reapGraceMs > 0) {
+    // Exited descendants can still answer PID probes until the OS reaps them.
+    // Their already-confirmed exit stands if this optional observation fails.
+    await waitUntil(() => {
+      try {
+        const { table } = readDisposalTable(options, 'quiescence');
+        return [...zombies.values()].some(entry => table.get(entry.pid)?.start === entry.start);
+      } catch {
+        return false;
+      }
+    }, reapGraceMs);
   }
   await forgetOwnedGroup(options.child);
 }
