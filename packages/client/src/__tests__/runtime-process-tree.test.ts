@@ -43,10 +43,13 @@ interface ProcessTreeReceipt {
 function processExists(pid: number): boolean {
   try {
     process.kill(pid, 0);
-    return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== 'ESRCH';
   }
+  if (process.platform === 'win32') return true;
+  // OAR 0.124 and SDK quiescence count a POSIX zombie as exited while PID 1 reaps it.
+  const entry = readOwnedProcessTable().get(pid);
+  return entry !== undefined && entry.zombie !== true;
 }
 
 function allPids(receipt: ProcessTreeReceipt): number[] {
@@ -55,11 +58,10 @@ function allPids(receipt: ProcessTreeReceipt): number[] {
 
 function reapAll(pids: number[]): void {
   for (const pid of pids) {
-    if (!processExists(pid)) continue;
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
-      // A process that exited between the probe and cleanup is already safe.
+      // Best-effort cleanup after the test.
     }
   }
 }
