@@ -20,6 +20,30 @@ status and pairing never adopt an OS enrollment that this storeDir's
 `device.json` does not name. Pairing over another store's enrollment needs
 `byok-agent pair --replace-other-store` (`Daemon.pair(code, { replaceOtherStore: true })`).
 
+### Service state for a store directory
+
+Use `inspectStoreServiceState(storeDir)` from `@byok-sdk/client` before a
+recovery operation that requires a stopped service. Pass the absolute store
+directory. The SDK queries the service named by that store's lifecycle owner
+and checks the store's daemon lock.
+
+```ts
+import { inspectStoreServiceState } from '@byok-sdk/client';
+
+const status = await inspectStoreServiceState(storeDir);
+if (status.state !== 'stopped') {
+  throw new Error(`Store recovery needs a confirmed stop (${status.state})`);
+}
+```
+
+The result includes the recorded `owner` and `service` when available.
+A live service or lock gives `running`. A missing owner, unreadable lock
+or unresolved service status gives `unknown` in the absence of live evidence.
+Legacy installs may lack the registration details needed to confirm a stop. Rerun the SDK-managed install for the same store and service
+to record those details. This query observes current state. Keep the service
+stopped and hold exclusive
+store ownership through the recovery write.
+
 ## Exact provider-profile admission
 
 When `DaemonConfig.piByokLauncher` is configured, the daemon advertises the
@@ -390,7 +414,7 @@ task's `auto | all` mode and the runtime's own guardrails:
   the user's own MCP configuration. Claude starts with
   `--dangerously-skip-permissions`.
 - Codex: the selected servers go in the `thread/start` or `thread/resume`
-  config (`mcp_servers`, as OAR `mcpServers`), next to the user's `config.toml`. Codex is qualified against 0.160.0, needs
+  config (`mcp_servers`, as OAR `mcpServers`), next to the user's `config.toml`. Codex is qualified against 0.169.0, needs
   app-server support and uses `approval_policy=never` with sandbox
   `danger-full-access` by default (`DaemonConfig.codexSandbox`). Detection
   refuses an unavailable app-server. It never refuses a version: an
@@ -987,7 +1011,7 @@ Write an absolute-path JSON file with mode `0600` (its contexts are bearer secre
 byok-agent team relay dev --bindings /absolute/private-bindings.json --codex-bin /absolute/codex --max-notifications 2 --config /absolute/agent.json
 ```
 
-POSIX only. `codex-cli 0.160.0` is the qualified native queue version; another
+POSIX only. `codex-cli 0.169.0` is the qualified native queue version; another
 version prints a warning and continues. Endpoints must be explicit loopback `ws://127.0.0.1:<port>` /
 `ws://[::1]:<port>` or `unix:///absolute/socket`. No remote server discovery. Loopback app-server queue endpoints trust local
 processes; the relay does not add authentication to the native Codex endpoint.

@@ -360,6 +360,12 @@ if (
   runProbeOrTurnFlow();
 }
 
+function exitWithStderr(message) {
+  const file = process.env.FAKE_CLAUDE_STDERR_FILE;
+  const text = file ? readFileSync(file, 'utf8') : message;
+  process.stderr.write(typeof text === 'string' ? text + '\n' : '', () => process.exit(1));
+}
+
 function runProbeOrTurnFlow() {
   if (argv.length === 2 && argv[0] === 'auth' && argv[1] === 'status') {
     // real invocation is `auth status --json` (3 args) — guard against a
@@ -396,8 +402,8 @@ function runProbeOrTurnFlow() {
   }
 
   if (process.env.FAKE_CLAUDE_CRASH_WITH_STDERR) {
-    process.stderr.write(`${process.env.FAKE_CLAUDE_CRASH_WITH_STDERR}\n`);
-    process.exit(1);
+    exitWithStderr(process.env.FAKE_CLAUDE_CRASH_WITH_STDERR);
+    return;
   }
 
   // Exactly the flags packages/client/src/adapters/claude/claude-adapter.ts
@@ -667,7 +673,10 @@ function runProbeOrTurnFlow() {
 
     const failure = JSON.parse(process.env.FAKE_CLAUDE_FAILURES ?? '[]')[turn - 1];
     if (failure) {
-      if (failure.exit === true) process.exit(1);
+      if (failure.exit === true) {
+        exitWithStderr(failure.stderr);
+        return;
+      }
       if (failure.rateLimit !== undefined) send({ type: 'rate_limit_event', rate_limit_info: failure.rateLimit, session_id: reportedSessionId });
       const text = failure.text ?? 'API Error: fixture failure';
       send({
@@ -695,6 +704,11 @@ function runProbeOrTurnFlow() {
     if (process.env.FAKE_CLAUDE_UNKNOWN_ASSISTANT_BLOCK === '1' && turn === 1) {
       content.push({ type: 'totally_novel_block_type', payload: 'x' });
     }
+    if (process.env.FAKE_CLAUDE_MULTI_BLOCK_CLOSING_TEXT === '1') {
+      const text = content.pop().text;
+      const half = Math.ceil(text.length / 2);
+      content.push({ type: 'text', text: text.slice(0, half) }, { type: 'text', text: text.slice(half) });
+    }
     if (process.env.FAKE_CLAUDE_SPLIT_CLOSING_TEXT === '1') {
       const half = Math.ceil(finalText.length / 2);
       const blocks = [content[0], { type: 'text', text: finalText.slice(0, half) }, { type: 'text', text: finalText.slice(half) }];
@@ -709,6 +723,10 @@ function runProbeOrTurnFlow() {
       await sendAssistant({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}c`, role: 'assistant', content: [{ type: 'text', text: finalText }] }, session_id: reportedSessionId });
     }
 
+    if (process.env.FAKE_CLAUDE_FINAL_SHORT_MESSAGE) {
+      await sendAssistant({ type: 'assistant', message: { model: 'fake-model', id: `msg_${turn}short`, role: 'assistant',
+        content: [{ type: 'text', text: process.env.FAKE_CLAUDE_FINAL_SHORT_MESSAGE }] }, session_id: reportedSessionId });
+    }
     send({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed' }, session_id: reportedSessionId });
 
     if (process.env.FAKE_CLAUDE_RESULT_MALFORMED === '1') {

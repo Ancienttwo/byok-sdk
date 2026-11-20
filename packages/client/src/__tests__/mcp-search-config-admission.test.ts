@@ -1,8 +1,10 @@
-import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
+import { createEnvelope, type Envelope, type TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import { expect, it, vi } from 'vitest';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
+import { admitOfferLimits } from '../daemon/task-runner/offer-admission';
+import { OfferAdmissionTiming } from '../daemon/task-runner/offer-admission-timing';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { acceptClaimSettlement, testIngressBudget } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
@@ -12,10 +14,10 @@ import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 function snapshot(exposure: 'direct' | 'search', command: string) {
-  return new McpToolsetRegistry({ host: { exposure, mcpServers: { host: { command } } } }).snapshot().toolsets;
+  return new McpToolsetRegistry({ host: { exposure, mcpServers: { host: { command } } } }).snapshot();
 }
 
-function setup(getMcpToolsets: () => ReturnType<typeof snapshot>) {
+function setup(getMcpToolsetSnapshot: () => ReturnType<typeof snapshot>) {
   const adapter = new StubRuntimeAdapter('claude', { kind: 'available' }, {
     steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
   });
@@ -39,15 +41,16 @@ function setup(getMcpToolsets: () => ReturnType<typeof snapshot>) {
     awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe: probe,
-    getMcpToolsets,
+    getMcpToolsetSnapshot,
   });
   const taskId = 'search-admission';
-  const offer = createEnvelope('task.offer', {
+  const payload: TaskOfferPlainPayload = {
     agentRef: freshTestAgentRef(), session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     instruction: 'test instruction', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['host'],
-  }, { taskId, seq: 1 });
+  };
+  const offer = createEnvelope('task.offer', payload, { taskId, seq: 1 });
   return {
-    adapter, sent, probe,
+    adapter, sent, probe, runner, taskId, payload,
     run: () => runner.handleEnvelope(offer),
     cancel: () => runner.handleEnvelope(createEnvelope('task.cancel', {}, { taskId, seq: 2 })),
   };
@@ -61,7 +64,7 @@ it('declines ordinary search offers before runtime detection, probing or claim',
     await run();
     expect(sent.map((envelope) => envelope.type)).toEqual(['task.decline']);
     expect(sent[0]!.payload).toMatchObject({
-      reason: 'MCP toolset "host" requires search exposure, which is unavailable on this device', retryable: true,
+      reason: 'MCP search exposure is unavailable on this device for the requested runtime or version', retryable: true,
     });
     expect(detect).not.toHaveBeenCalled();
     expect(probe).not.toHaveBeenCalled();
@@ -71,14 +74,35 @@ it('declines ordinary search offers before runtime detection, probing or claim',
   }
 });
 
+it('declines native-sessions in search admission before runtime selection', () => {
+  const search = snapshot('search', process.execPath);
+  const { runner, taskId, payload } = setup(() => search);
+  const decline = vi.fn();
+  // The wire selection rule already rejects the combination. Exercise the
+  // separate limits boundary with the same payload shape.
+  const result = admitOfferLimits.call(runner, {
+    taskId, decline, admissionWithdrawn: () => false,
+    admissionSignal: new AbortController().signal,
+    releaseReservation() {}, reserveHome() {}, admission: new OfferAdmissionTiming(),
+  }, {
+    ...payload, target: { lane: 'runtime', runtimeId: 'pi' },
+    agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 },
+  });
+  expect(result).toBeUndefined();
+  expect(decline).toHaveBeenCalledExactlyOnceWith({
+    reason: 'native-sessions require direct exposure for MCP toolset "host"',
+    retryable: false, code: 'unsupported_input',
+  });
+});
+
 it('checks exposure and projects servers from the same registry snapshot', async () => {
   const direct = snapshot('direct', process.execPath);
   const search = snapshot('search', process.execPath + '-search');
-  const getMcpToolsets = vi.fn(() => search).mockReturnValueOnce(direct);
-  const { adapter, sent, probe, run, cancel } = setup(getMcpToolsets);
+  const getMcpToolsetSnapshot = vi.fn(() => search).mockReturnValueOnce(direct);
+  const { adapter, sent, probe, run, cancel } = setup(getMcpToolsetSnapshot);
   try {
     await run();
-    expect(getMcpToolsets).toHaveBeenCalledTimes(1);
+    expect(getMcpToolsetSnapshot).toHaveBeenCalledTimes(1);
     expect(probe).toHaveBeenCalledTimes(1);
     expect(sent.map((envelope) => envelope.type)).toEqual(['task.claim', 'task.started']);
     expect(adapter.startCalls[0]?.ctx.mcpServers?.host?.command).toBe(process.execPath);

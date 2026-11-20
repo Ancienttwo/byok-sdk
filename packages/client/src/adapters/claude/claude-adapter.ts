@@ -1,4 +1,5 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
+import { requireRuntimeApiKey } from '../resolve-runtime-api-key.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
@@ -26,7 +27,7 @@ import {
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types.js';
-import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
+import { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironmentConflictRule, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { resolveClaudeBin, type ResolvedBin } from './resolve-bin.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
@@ -37,7 +38,7 @@ import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions
 import { AssistantMessageTracker, mapClaudeMessageToAgentEvents, type ClaudeFrame, type ClaudeStreamMessage, type ToolUseCorrelation } from './projection.js';
 import { ClaudeFailureEvidence } from './failure-evidence.js';
 import { requireImageInput } from '../input-images.js';
-import { claudeSessionCapabilities } from '../../runtime/claude-session-runtime.js';
+import { claudeSessionCapabilities, sessionCredentialRedactor, type ClaudeCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { ClaudeStreamSession } from './stream-session.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import type { spawn } from 'node:child_process';
@@ -57,12 +58,29 @@ function errorMessage(err: unknown): string {
 
 export type SpawnFn = typeof spawn;
 
+function redactClaudeFailure(error: unknown, credentials: ClaudeCredentialRedactor): Error {
+  const safe = credentials.redactValue(error);
+  if (safe === error && safe instanceof Error) return safe;
+  // OAR copies Error diagnostics when redaction changes them. Rebuild the SDK
+  // failures with their original typed control facts and the sanitized cause.
+  const cause = safe instanceof Error ? safe.cause : undefined;
+  if (isRuntimeExecutionFailure(error)) {
+    return new RuntimeExecutionFailure({ phase: error.phase, retry: error.retry, failure: error.failure,
+      reason: credentials.redact(error.message) }, { cause });
+  }
+  if (isRuntimeDisposalFailure(error)) {
+    return new RuntimeDisposalFailure({ stage: error.stage, reason: credentials.redact(error.message) }, { cause });
+  }
+  return safe instanceof Error ? safe : new Error(typeof safe === 'string' ? safe : 'Claude operation failed', { cause: safe });
+}
+
 /** One owner covers process teardown and task config on every failed start. */
-async function rejectOwnedStartup(cause: unknown, stream: ClaudeStreamSession | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
-  const failure = isRuntimeExecutionFailure(cause) ? cause : new RuntimeExecutionFailure({
+async function rejectOwnedStartup(cause: unknown, credentials: ClaudeCredentialRedactor, stream: ClaudeStreamSession | undefined, scratch: ExecutionScratch, retainPendingDisposal = false): Promise<never> {
+  const safe = redactClaudeFailure(cause, credentials);
+  const failure = isRuntimeExecutionFailure(safe) ? safe : new RuntimeExecutionFailure({
     phase: 'start', retry: 'retryable',
     reason: 'claude runtime startup failed',
-  }, { cause });
+  }, { cause: safe });
   let disposalAttempt: Promise<void> | undefined;
   const retryDisposal = (): Promise<void> => {
     if (!disposalAttempt) {
@@ -74,7 +92,10 @@ async function rejectOwnedStartup(cause: unknown, stream: ClaudeStreamSession | 
         else await stream?.dispose();
         await scratch.release();
       })();
-      disposalAttempt = attempt.catch(error => { disposalAttempt = undefined; throw error; });
+      disposalAttempt = attempt.catch(error => {
+        disposalAttempt = undefined;
+        throw redactClaudeFailure(error, credentials);
+      });
     }
     return disposalAttempt;
   };
@@ -156,7 +177,17 @@ export interface ClaudeAdapterOptions {
  * shell selects: the inherited Bedrock/Vertex switches, OAuth token and other
  * `ANTHROPIC_*` settings would otherwise override or mix with it.
  */
-const CLAUDE_PROVIDER_NAMES = ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'];
+const CLAUDE_PROVIDER_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'] as const;
+const CLAUDE_PROVIDER_NAMES = ['ANTHROPIC_BASE_URL', ...CLAUDE_PROVIDER_KEYS];
+
+function claudeProviderCredentials(env: Readonly<Record<string, string | undefined>>): string[] {
+  const credentials: string[] = [];
+  for (const [name, key] of Object.entries(env)) {
+    const providerKey = CLAUDE_PROVIDER_KEYS.find(candidate => process.platform === 'win32' ? candidate === name.toUpperCase() : candidate === name);
+    if (providerKey !== undefined && key !== undefined) credentials.push(requireRuntimeApiKey(key, `Claude ${providerKey}`));
+  }
+  return credentials;
+}
 const claudeEnvironmentConflicts: RuntimeEnvironmentConflictRule = (passed) =>
   CLAUDE_PROVIDER_NAMES.some((name) => passed.has(name))
     ? ['ANTHROPIC_*', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_OAUTH_TOKEN', 'AWS_BEARER_TOKEN_BEDROCK']
@@ -171,6 +202,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       spawnFn: this.options.spawnFn,
       command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin).bin.command,
       version: claudeVersionToken,
+      environment: env => ({ env, credentials: claudeProviderCredentials(env) }),
     });
   }
 
@@ -239,6 +271,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> {
     try {
       const { env } = await this.runtimeEnvironment();
+      claudeProviderCredentials(env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin);
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
@@ -292,11 +325,21 @@ export class ClaudeAdapter implements RuntimeAdapter {
     effort: string | undefined,
   ): Promise<Session> {
     const signal = startInput.signal;
+    const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
+    const taskMcpServers = startInput.mcpServers ?? {};
+    const credentials = sessionCredentialRedactor({ env, mcpServers: Object.entries(taskMcpServers).map(([name, server]) => ({ name, ...server })) });
     const cancellationFailure = () => new RuntimeExecutionFailure({
       phase: 'start', retry: 'retryable',
       reason: 'claude runtime startup was cancelled',
     }, { cause: signal?.reason });
-    if (signal?.aborted) throw cancellationFailure();
+    if (signal?.aborted) {
+      for (const [name, key] of Object.entries(env)) {
+        if (key !== undefined && key.length > 0 && CLAUDE_PROVIDER_KEYS.some(candidate => process.platform === 'win32' ? candidate === name.toUpperCase() : candidate === name)) {
+          credentials.addExplicit(key);
+        }
+      }
+      throw redactClaudeFailure(cancellationFailure(), credentials);
+    }
     // This adapter has no prepared-input lane: a frozen provider request is
     // compiled against the pi runtime's own verified closure, and claude cannot
     // be told to send someone else's bytes. Refused by name rather than
@@ -346,6 +389,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
     };
     signal?.addEventListener('abort', onAbort, { once: true });
     try {
+      for (const credential of claudeProviderCredentials(env)) credentials.addExplicit(credential);
       throwIfCancelled();
       const persistSession = startInput.manifest.agentRef === undefined || this.options.agentSessionPersistence !== 'disabled';
       // Built before any write, so a refusal leaves no file behind.
@@ -355,7 +399,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
           try { return realpathSync.native(dir); } catch { return dir; }
         })
         : undefined;
-      const taskMcpServers = startInput.mcpServers ?? {};
       const needsMcpConfig = Object.keys(taskMcpServers).length > 0;
       const sdkDir = startInput.scratch.sdkDir;
       if (needsMcpConfig || userContextSettings) {
@@ -461,10 +504,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // The adapter, never the host callback, owns fatal process termination.
         onFatal: error => { closeBridges(); stream?.fail(error); },
       }, resumeSessionId);
-      const spawnLineProcess = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude' });
-      const env = { ...startInput.env, ...startInput.scratch.env } as Record<string, string>;
+      const spawnLineProcess = createOwnedLineProcessSpawn({
+        nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'claude', stderrRedactor: credentials,
+      });
       try {
-        stream = new ClaudeStreamSession(spawnLineProcess(invocation.command, [...invocation.args, ...args], { cwd: manifestCwd, env }));
+        stream = new ClaudeStreamSession(spawnLineProcess(invocation.command, [...invocation.args, ...args], { cwd: manifestCwd, env }), credentials);
       } catch (cause) {
         throw new RuntimeExecutionFailure({
           phase: 'start', retry: 'retryable',
@@ -478,9 +522,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         await Promise.race([opened.open({
           effort,
           ...(resumeSessionId === undefined ? {} : { resume: resumeSessionId }),
-          env,
           maxRetainedBytes: this.maxRetainedBytes,
-          mcpServers: taskMcpServers,
           ...(native === undefined && gate === undefined ? {} : { initialize: { hooks: gate?.hooks ?? null } }),
           onFrame: frame => native?.receive(frame),
           onExit: () => { native?.close(); gate?.close(); },
@@ -536,7 +578,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
         throw new RuntimeExecutionFailure({
           phase: 'start',
           retry: 'non-retryable',
-          reason: `claude --resume echoed a different session id than requested (requested ${resumeSessionId}, got ${sessionRef})`,
+          reason: 'claude --resume echoed a different session id than requested',
         });
       }
 
@@ -554,7 +596,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       );
     } catch (cause) {
       gate?.close();
-      return rejectOwnedStartup(cause, stream, startInput.scratch, cancellation !== undefined);
+      return rejectOwnedStartup(cause, credentials, stream, startInput.scratch, cancellation !== undefined);
     } finally {
       signal?.removeEventListener('abort', onAbort);
     }
@@ -673,6 +715,7 @@ class ClaudeSession implements Session {
     const failureEvidence = this.failureEvidence;
     const workspaceDir = this.workspaceDir;
     const mcpIdentity = this.mcpIdentity;
+    const redactFailure = (error: unknown): never => { throw redactClaudeFailure(error, stream.credentials); };
     return {
       [Symbol.asyncIterator](): AsyncIterator<AgentEvent | MessageDraftDelta> {
         const inner = stream.frames[Symbol.asyncIterator]();
@@ -710,7 +753,7 @@ class ClaudeSession implements Session {
         // exactly what lets `pump()`'s existing "iterable ended without
         // turn_end" branch report the task as Failed instead of hanging.
         let turnSettled = false;
-        return {
+        const iterator = {
           async next(): Promise<IteratorResult<AgentEvent | MessageDraftDelta>> {
             for (;;) {
               const buffered = pending.shift();
@@ -742,7 +785,7 @@ class ClaudeSession implements Session {
                 }, { cause: stream.terminalError });
               }
 
-              const { native: value, agentPath, context } = frame;
+              const { native: value, agentPath, context, textTail } = frame;
               const root = agentPath.length === 0;
               if (root && value.type === 'result') turnSettled = true;
               if (root) failureEvidence.observe(value);
@@ -753,7 +796,9 @@ class ClaudeSession implements Session {
                 // tools. One lookup per process; a failure leaves `mcp` absent.
                 await mcpIdentity.observe();
               }
-              const mapped = mapClaudeMessageToAgentEvents(value, correlation, { workspaceDir, agentPath, context, initModel: root ? stream.initModel : undefined });
+              const mapped = mapClaudeMessageToAgentEvents(value, correlation, {
+                workspaceDir, agentPath, context, initModel: root ? stream.initModel : undefined, redactDiagnostic: stream.redactDiagnostic,
+              });
               if (root) {
                 servedModel.observe(value);
                 if (value.type === 'result') {
@@ -770,14 +815,18 @@ class ClaudeSession implements Session {
               if (mapped.unmappedLabel) {
                 stream.recordUnmappedFrame(mapped.unmappedLabel);
               }
-              if (mapped.events.length > 0) {
-                pending = mapped.events;
+              pending = mapped.events;
+              if (textTail !== undefined) {
+                const continuation: AgentEvent = { type: 'progress', text: textTail.text, ...(root ? {} : { agentPath: [...agentPath] }) };
+                if (textTail.continues) assistantMessages.continueMessage(continuation);
+                pending.unshift(continuation);
               }
               // Nothing to yield yet (routine frame, or an unmapped one) —
               // loop around and pull the next raw line.
             }
           },
         };
+        return { next: () => iterator.next().catch(redactFailure) };
       },
     };
   }
@@ -801,7 +850,11 @@ class ClaudeSession implements Session {
     );
   }
 
-  async followUp(task: RuntimeTaskInput): Promise<void> {
+  followUp(task: RuntimeTaskInput): Promise<void> {
+    return this.#followUp(task).catch(error => { throw redactClaudeFailure(error, this.stream.credentials); });
+  }
+
+  async #followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') {
       throw new PolicyUnsupportedError('claude adapter only supports string instructions in M2 (no blob-ref fetch yet)');
     }
@@ -839,8 +892,12 @@ class ClaudeSession implements Session {
 
   /** Native interrupt ACK is bounded; TaskRunner still closes after cancellation acknowledgment. */
   async interrupt(): Promise<void> {
-    this.native?.endTurn('interrupted');
-    if (!await this.stream.interruptAndSettle(this.interruptTimeoutMs)) await this.stream.dispose();
+    try {
+      this.native?.endTurn('interrupted');
+      if (!await this.stream.interruptAndSettle(this.interruptTimeoutMs)) await this.stream.dispose();
+    } catch (error) {
+      throw redactClaudeFailure(error, this.stream.credentials);
+    }
   }
 
   async close(): Promise<void> {
@@ -856,7 +913,7 @@ class ClaudeSession implements Session {
       })();
       this.closeAttempt = attempt.catch((error: unknown) => {
         this.closeAttempt = undefined;
-        throw error;
+        throw redactClaudeFailure(error, this.stream.credentials);
       });
     }
     await this.closeAttempt;

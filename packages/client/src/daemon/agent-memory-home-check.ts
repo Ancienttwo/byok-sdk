@@ -23,8 +23,9 @@ export type AgentMemoryHomeCheck =
  *
  * It throws and decides nothing when it cannot read: a `MEMORY.md` that is
  * missing (every lease creates one), a changed home identity, an I/O error, or
- * no secure memory backend on this platform. On macOS and Windows pass the
- * helper's filesystem for this home as `commit.filesystem`; the caller closes it.
+ * no secure memory backend in the default `full` scope. For that scope on
+ * macOS and Windows, pass the helper's filesystem as `commit.filesystem`; the
+ * caller closes it. The `resident` scope checks only `MEMORY.md`.
  *
  * The verdict is about the home, and the device applies each half to one kind
  * of task: resident refusals to a task that carries `MEMORY.md` into its
@@ -37,10 +38,11 @@ export type AgentMemoryHomeCheck =
  */
 export async function checkAgentMemoryHome(
   home: string,
-  options: { readonly commit?: { readonly filesystem?: AgentMemoryFilesystem } } = {},
+  options: { readonly scope?: 'full' | 'resident'; readonly commit?: { readonly filesystem?: AgentMemoryFilesystem } } = {},
 ): Promise<AgentMemoryHomeCheck> {
-  const filesystem = options.commit?.filesystem;
-  if (!isAgentMemorySecureFilesystemAvailable(filesystem !== undefined)) throw new AgentMemoryError('Agent memory home check needs a secure memory filesystem on this platform');
+  const residentOnly = options.scope === 'resident';
+  const filesystem = residentOnly ? undefined : options.commit?.filesystem;
+  if (!residentOnly && !isAgentMemorySecureFilesystemAvailable(filesystem !== undefined)) throw new AgentMemoryError('Agent memory home check needs a secure memory filesystem on this platform');
   const canonicalHome = await fs.realpath(home);
   const { dev, ino } = await fs.stat(canonicalHome, { bigint: true });
   const resident = await readResidentMemory(canonicalHome, { dev, ino });
@@ -49,6 +51,7 @@ export async function checkAgentMemoryHome(
     if (refusal === undefined) throw new AgentMemoryError(`MEMORY.md cannot be judged: ${reason}`);
     return { ok: false, code: refusal, reason };
   }
+  if (residentOnly) return { ok: true };
   try {
     await readStartRecord(agentMemoryHomeBinding({ canonicalHome, homeIdentity: { dev, ino }, ...(filesystem === undefined ? {} : { filesystem }) }), PLACEHOLDER_TASK_ID);
     return { ok: true };

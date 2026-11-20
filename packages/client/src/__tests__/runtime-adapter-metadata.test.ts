@@ -41,8 +41,8 @@ function builtIns(home: string): Record<FakeRuntimeAdapterId, RuntimeAdapter> {
     codex: new CodexAdapter(),
     pi: new PiAdapter(),
     grok: new GrokAdapter(),
-    dsh: new DshAdapter({ home, model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' } }),
-    agy: new AgyAdapter({ home }),
+    dsh: new DshAdapter({ resolveKey: async () => 'fixture-key', home, model: { provider: 'deepseek', model: 'deepseek-v4-flash' } }),
+    agy: new AgyAdapter({ resolveKey: async () => 'fixture-key', home }),
   };
 }
 
@@ -61,8 +61,8 @@ describe('session limits', () => {
     ['Claude', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new ClaudeAdapter(limits)],
     ['Codex', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new CodexAdapter(limits)],
     ['Grok', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new GrokAdapter(limits)],
-    ['agy', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new AgyAdapter({ home: path.join(os.tmpdir(), 'agy-limits'), ...limits })],
-    ['dsh', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new DshAdapter({ home: path.join(os.tmpdir(), 'dsh-limits'), model: { provider: 'deepseek', model: 'test', keyEnv: 'TEST_KEY' }, ...limits })],
+    ['agy', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new AgyAdapter({ resolveKey: async () => 'fixture-key', home: path.join(os.tmpdir(), 'agy-limits'), ...limits })],
+    ['dsh', (limits: { interruptTimeoutMs?: number; maxRetainedBytes?: number }) => new DshAdapter({ resolveKey: async () => 'fixture-key', home: path.join(os.tmpdir(), 'dsh-limits'), model: { provider: 'deepseek', model: 'test' }, ...limits })],
   ] as const)('%s validates limits', (label, create) => {
     expect(() => create({ interruptTimeoutMs: 0.5 })).not.toThrow();
     for (const interruptTimeoutMs of [0, Number.NaN, 2_147_483_648]) {
@@ -133,7 +133,7 @@ describe('supported platforms', () => {
 
   it('Windows refuses dsh with platform_unsupported before any probe', async () => {
     const resolveBin = vi.fn(() => { throw new Error('the probe must not run'); });
-    const adapter = new DshAdapter({ home: await tempDir(), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'TEST_DSH_PROVIDER_KEY' }, resolveBin });
+    const adapter = new DshAdapter({ resolveKey: async () => 'fixture-key', home: await tempDir(), model: { provider: 'deepseek', model: 'deepseek-v4-flash' }, resolveBin });
     expect(await onPlatform('win32', () => observeRuntimeDetection(adapter))).toEqual({ kind: 'refused', reason: 'platform_unsupported' });
     expect(resolveBin).not.toHaveBeenCalled();
   });
@@ -205,7 +205,7 @@ describe('daemon detection authority', () => {
     const server = await TestServer.start(); servers.push(server);
     const refused = unsupportedHere();
     const available = fakeRuntimeAdapter('codex', {
-      detect: { kind: 'available', version: 'codex-cli 9.9.9', authPresent: true, versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' } },
+      detect: { kind: 'available', version: 'codex-cli 9.9.9', authPresent: true, versionVerdict: { state: 'warn', qualifiedVersion: '0.169.0' } },
     });
     const daemon = createDaemonWithAdapters({
       storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Metadata', productId: 'metadata',
@@ -227,7 +227,7 @@ describe('daemon detection authority', () => {
     expect(detected.runtimes).toEqual(await Promise.all([refused, available].map(async adapter =>
       projectRuntimeObservation(adapter.descriptor, await observeRuntimeDetection(adapter)))));
     expect(detected.runtimes[0]).toMatchObject({ id: 'claude', outcome: 'refused', reason: 'platform_unsupported' });
-    expect(detected.runtimes[1]).toMatchObject({ id: 'codex', version: 'codex-cli 9.9.9', qualifiedVersion: '0.160.0', authPresent: true });
+    expect(detected.runtimes[1]).toMatchObject({ id: 'codex', version: 'codex-cli 9.9.9', qualifiedVersion: '0.169.0', authPresent: true });
 
     server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'no start', target: { lane: 'runtime', runtimeId: 'claude' }, ...FRESH_OFFER }, { taskId: 'platform-refused', seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline');

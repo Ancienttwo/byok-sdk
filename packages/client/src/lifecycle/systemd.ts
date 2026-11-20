@@ -5,7 +5,7 @@ import { runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '
 import { defaultRunner } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
-import { sanitizeServiceName, type ServiceDefinition } from './service-types.js';
+import { sanitizeServiceName, type ServiceManagerQuery, type ServiceDefinition } from './service-types.js';
 import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath } from './service-unit.js';
 import { hasControlChar } from './control-chars.js';
 
@@ -39,6 +39,10 @@ const SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE: readonly RegExp[] = [
   /permission denied/i,
   /interactive authentication required/i,
 ];
+
+/** `systemctl is-active` LSB exit codes. */
+const SYSTEMCTL_NOT_RUNNING = 3;
+const SYSTEMCTL_UNIT_NOT_FOUND = 4;
 
 /**
  * What `systemctl --user disable --now`/`systemctl --user stop` prints/exits
@@ -198,6 +202,10 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
 
   return createManagedLifecycle(def, {
     serviceName: name,
+    registration: () => {
+      const uid = systemdLocalUserUid();
+      return uid === undefined ? null : { manager: 'systemd', uid };
+    },
     unitPath,
     launcherPath,
     files: () => [
@@ -234,15 +242,33 @@ export function createSystemdLifecycle(def: ServiceDefinition, deps: SystemdDeps
       // be surfaced rather than reported as "stopped" (P1 #7, round 2).
       await runIdempotent(run, 'systemctl', ['--user', 'stop', unitName], 'systemctl stop', SYSTEMD_NOT_LOADED);
     },
-    async query() {
-      const result = await run('systemctl', ['--user', 'is-active', unitName]);
-      const detail = (result.stdout || result.stderr).trim();
-      const running = result.code === 0 && detail === 'active';
-      // Finding P1 #2 (residual, round 3): a bus-connect/permission failure
-      // on THIS query is not evidence of "inactive"; see
-      // `service-types.ts`'s `ServiceStatusResult.determinate`.
-      const determinate = running || !SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
-      return { running, determinate, detail };
-    },
+    query: () => querySystemdService(name, { run }),
   }, fs, gateRoot);
+}
+
+export function systemdLocalUserUid(getuid: () => number | undefined = () => process.getuid?.()): number | undefined {
+  const uid = getuid();
+  if (uid === undefined) return undefined;
+  const runtime = `/run/user/${uid}`;
+  if (process.env.XDG_RUNTIME_DIR !== undefined && process.env.XDG_RUNTIME_DIR !== runtime) return undefined;
+  if (process.env.DBUS_SESSION_BUS_ADDRESS !== undefined && process.env.DBUS_SESSION_BUS_ADDRESS !== `unix:path=${runtime}/bus`) return undefined;
+  return uid;
+}
+
+/** Query a service by its recorded manager name. @internal */
+export async function querySystemdService(name: string, { run = defaultRunner }: SystemdDeps = {}): Promise<ServiceManagerQuery> {
+  const result = await run('systemctl', ['--user', 'is-active', `${name}.service`]);
+  const state = result.stdout.trim();
+  const denied = SYSTEMD_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
+  if (!denied) {
+    if (result.code === 0 && (state === 'active' || state === 'reloading' || state === 'refreshing')) {
+      return { running: true, determinate: true, detail: state };
+    }
+    if ((result.code === SYSTEMCTL_UNIT_NOT_FOUND && (state === 'inactive' || state === 'unknown'))
+      || (result.code === SYSTEMCTL_NOT_RUNNING && (state === 'inactive' || state === 'failed'))) {
+      return { running: false, determinate: true, detail: state || result.stderr.trim() };
+    }
+  }
+  const detail = (result.stderr || result.stdout).trim();
+  return { running: false, determinate: false, detail: `systemctl --user is-active failed (exit ${result.code})${detail ? `: ${detail}` : ''}` };
 }

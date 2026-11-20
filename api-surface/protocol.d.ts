@@ -195,6 +195,9 @@
 //   DEVICE_NOT_REGISTERED_CODE -> dist/http-api.d.ts
 //   DeviceNotRegisteredResponse -> dist/http-api.d.ts
 //   DeviceNotRegisteredResponseSchema -> dist/http-api.d.ts
+//   DreamBudget -> dist/dream.d.ts
+//   DreamInstructionInput -> dist/dream.d.ts
+//   DreamWindow -> dist/dream.d.ts
 //   E2EE_MEMBER_CHAIN_APPEND_MAX_ENTRIES -> dist/e2ee-member.d.ts
 //   E2EE_MEMBER_CHAIN_APPEND_OPERATION -> dist/e2ee-member.d.ts
 //   E2EE_MEMBER_CHAIN_ENTRY_MAX_BYTES -> dist/e2ee-member.d.ts
@@ -2199,16 +2202,13 @@ export type RuntimeUnavailableCause = (typeof RUNTIME_UNAVAILABLE_CAUSES)[number
 export declare const TERMINAL_INFERENCE_USAGE_MODEL_MAX_LENGTH = 160;
 // ==== @byok-sdk/protocol dist/dream.d.ts ====
 import type { HandoffPack } from './handoff-pack.js';
-// support
 export interface DreamWindow {
     readonly fromMs: number;
     readonly toMs: number;
 }
-// support
 export interface DreamBudget {
     readonly maxDurationMs: number;
 }
-// support
 export interface DreamInstructionInput {
     readonly history: HandoffPack;
     readonly window: DreamWindow;
@@ -3567,6 +3567,7 @@ export { ROUTINE_DAYS_OF_WEEK, ROUTINE_HORIZON_MS, checkRoutineSchedule, nextRou
 export type { RoutineDayOfWeek, RoutineSchedule, } from './routine-schedule.js';
 export { resultOutcomeMaxBytes } from './result-schema.js';
 export { buildDreamInstruction, } from './dream.js';
+export type { DreamBudget, DreamInstructionInput, DreamWindow } from './dream.js';
 export { buildHandoffPack, } from './handoff-pack.js';
 export type { HandoffTurn, HandoffPackBudgets, HandoffPack, } from './handoff-pack.js';
 // ==== @byok-sdk/protocol dist/input-preparation.d.ts ====

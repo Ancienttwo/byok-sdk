@@ -62,7 +62,7 @@ try {
       agentHome: { hostStorageRoot: path.join(storeDir, 'homes') }, agentEgress: { policy },
       runtimeAllowlist: ['codex'], serviceEnrollment: { enabled: true },
       mcpToolsets: { probe: { mcpServers: { echo: { command: process.execPath,
-        args: [fileURLToPath(new URL('../src/__tests__/fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit] } } } } };
+        args: [fileURLToPath(new URL('../src/__tests__/fixtures/toolset-echo-mcp.mjs', import.meta.url)), audit], approveTools: ['echo'] } } } } };
     const pairing = await cloud.createPairingCode(tenant, { productId: config.productId });
     let daemon, processChild, output = '';
     const env = { ...process.env };

@@ -10,7 +10,7 @@ import type { McpToolsetToolObservation } from '../../types.js';
 export type AgyTurnOutcome =
   | { readonly kind: 'completed' }
   | { readonly kind: 'aborted' }
-  | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string; readonly fromText?: true };
+  | { readonly kind: 'failed'; readonly failure: RuntimeFailureClass; readonly reason: string; readonly fromText?: true; readonly resetsAt?: string };
 
 
 /**
@@ -51,8 +51,7 @@ export class AgyProjection {
     const body = record(input.body);
     if (!Array.isArray(body?.events)) return;
     const events = body.events;
-    this.children.link(events);
-    const path = this.children.path(input.sessionId, input.agentPath);
+    const path = this.children.route(input.sessionId, input.agentPath, events, body?.byokRoot);
     if (path === undefined) return;
     const root = path.length === 0;
     const buffer = root ? this.root : this.children.buffer(input.sessionId, path);
@@ -71,6 +70,7 @@ export class AgyProjection {
       outcome({
         kind: 'failed', reason: typeof turn.reason === 'string' ? turn.reason : 'agy turn failed', failure: runtimeFailureClassOf(turn.failure),
         ...(turn.fromText === true ? { fromText: true as const } : {}),
+        ...(typeof turn.resetsAt === 'string' ? { resetsAt: turn.resetsAt } : {}),
       });
       return;
     }

@@ -177,7 +177,6 @@ export type EffectKind =
   | 'abort.blob'
   | 'abort.inflightBlob'
   | 'abort.inflightBlobs'
-  | 'revoke.contexts'
   | 'revoke.host_contexts'
   | 'revoke.allHostContexts'
   | 'revoke.message_context'
@@ -833,12 +832,12 @@ function claimedCleanupEffects(): readonly EffectSpec[] {
     bestEffort('release.scratch', {}, { requires: CLEANUP }),
     bestEffort('release.lease', {}, { requires: CLEANUP }),
     bestEffort('release.pin', {}, { requires: CLEANUP }),
-    atom('revoke.contexts', {}, { requires: CLEANUP }),
   ];
 }
 
 function declineCleanupEffects(): readonly EffectSpec[] {
   return [
+    atom('revoke.host_contexts', {}, { requires: CLEANUP }),
     ...claimedCleanupEffects(),
     atom('finish.declined', {}, { requires: CLEANUP }),
   ];
@@ -1308,7 +1307,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
           teardown: { ...task.teardown, batcher: 'stopped', hostContexts: 'revoked', blob: 'aborted' },
         }),
         effects: [
-          atom('revoke.contexts', { token: terminal.token }, { requires: CLEANUP }),
+          atom('revoke.host_contexts', { token: terminal.token }, { requires: CLEANUP }),
           atom('transfer.startup', { token: terminal.token }, { requires: CLAIMED }),
           atom('register.active', { token: terminal.token }, { requires: CLAIMED }),
           atom('stop.batcher', { token: terminal.token }),
@@ -1348,7 +1347,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
             teardown: { ...task.teardown, batcher: 'stopped', hostContexts: 'revoked', blob: 'aborted' },
           }),
           effects: [
-            atom('revoke.contexts', { token: terminal.token }, { requires: CLEANUP }),
+            atom('revoke.host_contexts', { token: terminal.token }, { requires: CLEANUP }),
             barrier('register.startup_owner', { token: terminal.token }, { requires: CLAIMED }),
             barrier('dispose.startup', { token: terminal.token }, { requires: CLEANUP }),
             atom('send.cancelled', {
@@ -1376,7 +1375,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
           teardown: { ...task.teardown, batcher: 'stopped', hostContexts: 'revoked', blob: 'aborted' },
         }),
         effects: [
-          atom('revoke.contexts', { token: terminal.token }, { requires: CLEANUP }),
+          atom('revoke.host_contexts', { token: terminal.token }, { requires: CLEANUP }),
           barrier('register.startup_owner', { token: terminal.token }, { requires: CLAIMED }),
           barrier('dispose.startup', { token: terminal.token }, { requires: CLEANUP }),
           barrier('failClaimedAgent', {
@@ -1414,7 +1413,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
           teardown: { ...task.teardown, hostContexts: 'revoked', blob: 'aborted' },
         }),
         effects: [
-          atom('revoke.contexts', { token: terminal.token }, { requires: CLEANUP }),
+          atom('revoke.host_contexts', { token: terminal.token }, { requires: CLEANUP }),
           barrier('failClaimedAgent', {
             token: terminal.token,
             ...(terminal.reason === undefined ? {} : { reason: terminal.reason }),
@@ -1450,7 +1449,7 @@ const OFFER_CLAIM_ROWS: readonly TransitionRow[] = [
           teardown: { ...task.teardown, batcher: 'stopped', hostContexts: 'revoked' },
         }),
         effects: [
-          atom('revoke.contexts', { token: terminal.token }, { requires: CLEANUP }),
+          atom('revoke.host_contexts', { token: terminal.token }, { requires: CLEANUP }),
           barrier('persist.evidence', { token: terminal.token }, { requires: CLAIMED }),
           barrier('failClaimedAgent', {
             token: terminal.token,

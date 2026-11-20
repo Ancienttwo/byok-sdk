@@ -14,6 +14,10 @@ import type { PickResult, OfferPhaseContext, OfferRuntimeInput, RuntimeRequireme
 import { outboundErrorMessage } from '../outbound-error.js';
 import { DEFAULT_RUNTIME_PREFERENCE, orderByPreference, unmetRequirements, requirementPhrases, runtimeTaskInput, errorMessage } from './support.js';
 import type { TaskRunner } from '../task-runner.js';
+import { mcpHubContextFile } from './mcp-contexts.js';
+import { MCP_HUB_SERVER_INFO, MCP_HUB_SERVER_NAME, MCP_HUB_TOOLS } from '../../mcp/hub/protocol.js';
+import { matchSearchRuntimeEvidence } from '../search-runtime-qualification.js';
+import { MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS } from '../../mcp-server/index.js';
 
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {
   const { taskId, decline, admissionWithdrawn } = phase;
@@ -28,6 +32,8 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   const requestedRuntime = target.lane === 'auto' ? undefined : target.lane === 'harness' ? target.harnessId : target.runtimeId;
   const requiresAgentMemoryMcp = preparation === undefined && ordinaryMemoryMcp;
   const mcpToolApprovals = resolvedMcp?.ok ? resolvedMcp.mcpToolApprovals : undefined;
+  const searchNames = Object.keys(resolvedMcp?.ok ? resolvedMcp.searchServers : {});
+  const searchExposure = searchNames.length > 0;
   let pick: PickResult;
   try {
     pick = await this['pickAdapter'](
@@ -42,6 +48,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
         taskExecutionOptions: offered.effort !== undefined || offered.modelId !== undefined,
       },
       blobAbort.signal,
+      searchExposure,
     );
   } catch (error) {
     if (!admissionWithdrawn()) decline({ reason: `runtime detection failed: ${outboundErrorMessage(error)}`, retryable: true });
@@ -125,6 +132,8 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     if (admissionWithdrawn()) return undefined;
   }
   let taskMcpServers: Readonly<Record<string, McpStdioServerConfig>> | undefined;
+  let searchServers: Readonly<Record<string, McpStdioServerConfig>> | undefined;
+  const innerNonces: string[] = [];
   try {
     // Contract §8.1: the host toolset servers this task will actually run
     // get their per-`(task, server)` nonce here, on the copy handed to the
@@ -132,7 +141,20 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     // which stays clean — a `tools/list` handshake is not this task's
     // execution and has no business holding its tool authority.
     if (resolvedMcp?.ok) {
-      taskMcpServers = await this['withHostToolsetContext'](resolvedMcp.servers, taskId, agentRef, resolvedMcp.toolsetIdByServer, scratch);
+      const projected = await this['withHostToolsetContext'](
+        { ...resolvedMcp.servers, ...resolvedMcp.searchServers }, taskId, agentRef, resolvedMcp.toolsetIdByServer, scratch,
+        searchExposure ? { names: new Set(searchNames), nonces: innerNonces } : undefined,
+      );
+      if (searchExposure) {
+        const bin = this['deps'].mcpSearch!.bin;
+        searchServers = Object.freeze(Object.fromEntries(searchNames.map(name => [name, projected[name]!])));
+        taskMcpServers = Object.freeze({
+          ...Object.fromEntries(Object.keys(resolvedMcp.servers).map(name => [name, projected[name]!])),
+          [MCP_HUB_SERVER_NAME]: Object.freeze({ command: bin.command, args: Object.freeze([...bin.args, mcpHubContextFile(scratch)]) }),
+        });
+      } else {
+        taskMcpServers = projected;
+      }
     }
     if (preparation === undefined) {
       taskMcpServers = await this['withAgentMessageMcp'](taskMcpServers, taskId, messageRequirement, scratch);
@@ -230,6 +252,14 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
       });
       return undefined;
     }
+    if (searchExposure) {
+      observed[MCP_HUB_SERVER_NAME] = bindMcpToolsetServerObservation({
+        serverName: MCP_HUB_SERVER_NAME,
+        serverInfo: MCP_HUB_SERVER_INFO,
+        protocolVersion: MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS[0]!,
+        tools: MCP_HUB_TOOLS.map(({ name, description, inputSchema }) => ({ name, description: description ?? '', inputSchema })),
+      }, '@byok-sdk/mcp-hub');
+    }
     mcpToolsetTools = Object.freeze(observed);
   }
   let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
@@ -254,7 +284,7 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   // `approveTools` is a grant, projected only to a runtime that declares
   // `mcpToolApprovals`; it never takes part in admission or runtime selection.
   return {
-    scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools,
+    scratch, offered, pick, env, mcpEnv, taskMcpServers, mcpToolsetTools, searchServers, innerNonces,
     mcpToolApprovals: pick.descriptor.mcpToolApprovals === true ? mcpToolApprovals : undefined,
     prepared,
   };
@@ -265,8 +295,14 @@ export async function pickAdapter(
   requestedRuntime: string | undefined,
   requirements: RuntimeRequirements,
   signal: AbortSignal,
+  searchExposure = false,
 ): Promise<PickResult> {
   const allowlist = this['deps'].runtimeAllowlist;
+  const searchCandidates = (descriptor: RuntimeAdapter['descriptor']) => descriptor.capabilities.durableLane === true
+    ? [] : this['deps'].mcpSearch?.candidates(descriptor) ?? [];
+  const searchUnavailable: PickResult = {
+    ok: false, retryable: true, reason: 'MCP search exposure is unavailable on this device for the requested runtime or version',
+  };
 
   if (requestedRuntime) {
     if (allowlist && !allowlist.includes(requestedRuntime)) {
@@ -287,6 +323,8 @@ export async function pickAdapter(
       };
     }
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
+    const rows = searchExposure ? searchCandidates(descriptor) : [];
+    if (searchExposure && rows.length === 0) return searchUnavailable;
     const unmet = unmetRequirements(descriptor, requirements);
     if (unmet.length > 0) {
       return {
@@ -323,7 +361,9 @@ export async function pickAdapter(
         runtimeUnavailable,
       };
     }
-    return { ok: true, adapter, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
+    const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
+    if (searchExposure && searchEvidence === undefined) return searchUnavailable;
+    return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
   }
 
   const eligible = allowlist ? this['deps'].adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this['deps'].adapters;
@@ -338,14 +378,18 @@ export async function pickAdapter(
   let capabilityEligible = 0;
   for (const adapter of candidates) {
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
-    if (unmetRequirements(descriptor, requirements).length > 0) continue;
+    const rows = searchExposure ? searchCandidates(descriptor) : [];
+    if ((searchExposure && rows.length === 0) || unmetRequirements(descriptor, requirements).length > 0) continue;
     capabilityEligible += 1;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
-    if (detected.kind === 'available' && detected.versionVerdict?.state !== 'block') {
-      return { ok: true, adapter, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
+    if (detected.kind !== 'available' || detected.versionVerdict?.state === 'block') continue;
+    const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
+    if (!searchExposure || searchEvidence !== undefined) {
+      return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
     }
   }
+  if (searchExposure) return searchUnavailable;
   const phrases = (Object.keys(requirementPhrases) as (keyof RuntimeRequirements)[]).filter((key) => requirements[key]).map((key) => requirementPhrases[key]);
   const capabilityMismatch = phrases.length > 0 && eligible.length > 0 && capabilityEligible === 0;
   return {

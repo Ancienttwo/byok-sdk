@@ -1,7 +1,19 @@
 import { isReservedMcpServerName, SDK_RESERVED_MCP_TOOL_NAMES } from '../../sdk-reserved-mcp.js';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
+import { compareSemver } from '../../runtime/oar-version-floors.js';
+import { codexVersionToken } from './codex-version.js';
 
 type JsonRecord = Record<string, unknown>;
+
+// OpenAI Codex #5367 first shipped enabled_tools in 0.48.0.
+export const CODEX_MCP_TOOL_ALLOWLIST_MINIMUM = '0.48.0';
+export const CODEX_MCP_TOOL_ALLOWLIST_REFUSAL = `codex_mcp_tool_allowlist_unsupported: task MCP tools require Codex CLI ${CODEX_MCP_TOOL_ALLOWLIST_MINIMUM} or later`;
+
+export function supportsCodexMcpToolAllowlist(version: string | undefined): boolean {
+  if (version === undefined) return false;
+  const order = compareSemver(codexVersionToken(version), CODEX_MCP_TOOL_ALLOWLIST_MINIMUM);
+  return order !== null && order >= 0;
+}
 
 /** Fixed helper authority and the attempt's local Host declaration are disjoint server namespaces. */
 export function withCodexMcpToolGrants(
@@ -19,13 +31,14 @@ export function withCodexMcpToolGrants(
       });
     }
   }
-  const grants = [...helpers, ...hosts.filter(([, tools]) => tools.length > 0)];
-  if (grants.length === 0) return params;
-  // These tables are produced by OAR's codexThreadOpen, rather than supplied by a remote task.
+  if (taskServers.length === 0) return params;
+  const grants = new Map([...helpers, ...hosts]);
+  // OAR produces these tables from the injected server definitions.
   const config = params.config as { mcp_servers?: Record<string, JsonRecord> } | undefined;
   const servers = { ...config?.mcp_servers };
-  for (const [name, tools] of grants) {
-    const server = servers[name];
+  for (const name of taskServers) {
+    const tools = grants.get(name) ?? [];
+    const server = Object.hasOwn(servers, name) ? servers[name] : undefined;
     if (server === undefined) {
       throw new RuntimeExecutionFailure({
         phase: 'start', retry: 'non-retryable',
@@ -35,10 +48,11 @@ export function withCodexMcpToolGrants(
     const configuredTools = server.tools as Record<string, JsonRecord> | undefined;
     servers[name] = {
       ...server,
-      tools: {
+      enabled_tools: [...tools],
+      ...(tools.length === 0 ? {} : { tools: {
         ...configuredTools,
         ...Object.fromEntries(tools.map(tool => [tool, { ...configuredTools?.[tool], approval_mode: 'approve' }])),
-      },
+      } }),
     };
   }
   return { ...params, config: { ...config, mcp_servers: servers } };

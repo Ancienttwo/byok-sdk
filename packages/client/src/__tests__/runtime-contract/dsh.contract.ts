@@ -12,18 +12,21 @@ import { setLoginShellSnapshotSource } from '../../login-shell-environment';
 import { TEST_LOGIN_SHELL_SNAPSHOT } from '../fixtures/runtime-env';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 import {
-  baseEnv, absent, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck, expectAuth,
-  expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
+  baseEnv, absent, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck,
+  credentialFiles, expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
 } from './contract';
-import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
+import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 
 const DSH_TARGET = { lane: 'harness', harnessId: 'dsh' } as const;
 
+import { defineMcpSearchProbes } from './mcp-search-probe';
+import { searchMcpEnvironmentFor } from '../../daemon/search-runtime-qualification';
+import type { DaemonConfig } from '../../daemon/create-daemon';
 const target = contractTarget('dsh', QUALIFIED_DSH_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
-// dsh keeps a name with KEY in it out of tool processes; BYOK_* names never reach the runtime.
-const KEY_ENV = 'RC_CONTRACT_MODEL_KEY';
+const PROVIDER_KEY = 'byok-contract-dsh-provider-86ae';
+const resolveKey = async () => PROVIDER_KEY;
 const PROJECT_MARKER = 'BYOK-CONTRACT-DSH-PROJECT-4e19';
 const USER_MARKER = 'BYOK-CONTRACT-DSH-USER-a7c2';
 const PERSONA_MARKER = 'BYOK-CONTRACT-DSH-PERSONA-5a3e';
@@ -36,12 +39,12 @@ const RESUME_MARKER = 'BYOK-CONTRACT-DSH-RESUME-e07c';
 const AGENT_PERSONA_MARKER = 'BYOK-CONTRACT-DSH-AGENT-PERSONA-71d4';
 const SKILL_FILE = `---\nname: ${SKILL}\ndescription: ${SKILL_MARKER}\n---\n\nRuntime contract user skill.\n`;
 
-const loopbackModel = (baseUrl: string): DshModelSelection => ({ provider: 'custom', model: MODEL, baseUrl, keyEnv: KEY_ENV });
+const loopbackModel = (baseUrl: string): DshModelSelection => ({ provider: 'custom', model: MODEL, baseUrl });
 
 /** One SDK-owned dsh root for the file; detect() writes the acp profile into it before any turn. */
 const rootBox = once(() => createSandbox('dsh-root'));
 async function adapter(model: DshModelSelection, options: Partial<DshAdapterOptions> = {}): Promise<DshAdapter> {
-  return new DshAdapter({ home: path.join((await rootBox()).root, 'dsh'), resolveBin, model, ...options });
+  return new DshAdapter({ home: path.join((await rootBox()).root, 'dsh'), resolveBin, model, resolveKey, ...options });
 }
 const detectModel = loopbackModel('http://127.0.0.1:9/v1');
 
@@ -72,7 +75,7 @@ beforeAll(async () => {
   if (result.kind !== 'available') throw new Error(`dsh root init: ${JSON.stringify(result)}; direct: ${await directVersion(runtime, box.home).catch((error: unknown) => String(error))}`);
 });
 
-const submitResult = callOnceThenReply(mcpTool('host', 'submit_result'), { summary: 'runtime contract' });
+
 
 const PERSONA_ROW = { id: 'system-prompt', name: '@deepseek-ai/dsh-system-prompt', config: { personaPrefix: PERSONA_MARKER } };
 
@@ -99,16 +102,29 @@ async function writeUserContext(home: string, userServer: { command: string; arg
 async function turn() {
   const box = await createSandbox('dsh-turn');
   const recorder = await fileEgress();
-  const provider = await startLoopbackProvider('openai-chat', submitResult, MODEL);
+  const shellEnv = path.join(box.workspace, 'shell.env');
+  const submitResult = mcpTool('host', 'submit_result');
+  const provider = await startLoopbackProvider('openai-chat', request => {
+    if (request.toolResults === 0) {
+      const bash = request.tools.find(tool => tool.name === 'bash');
+      if (bash !== undefined) return { kind: 'tool', tool: bash, args: { command: `env > ${JSON.stringify(shellEnv)}`, description: 'Record the tool environment' } };
+    }
+    const tool = request.toolResults === 1 ? submitResult(request.tools) : undefined;
+    return tool === undefined ? { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }
+      : { kind: 'tool', tool, args: { summary: 'runtime contract' } };
+  }, MODEL);
   try {
     const receipt = path.join(box.root, 'host.jsonl');
     const userReceipt = path.join(box.root, 'user-mcp.jsonl');
     const host = await writeSubmitResultServer(box.root, receipt);
     await writeUserContext(box.home, await writeSubmitResultServer(box.root, userReceipt, 'user_tool'));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
-    const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
+    const env = { ...baseEnv(box.home), ...recorder.env };
     const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } });
-    return { events, provider, calls: await readReceipt(receipt), userSpawned: spawned(userReceipt) };
+    return { events, provider, calls: await readReceipt(receipt), userSpawned: spawned(userReceipt),
+      mcpEnv: await fs.readFile(`${receipt}.env`, 'utf8'), shellEnv: await fs.readFile(shellEnv, 'utf8'),
+      credentialFiles: [...await credentialFiles(box.root, PROVIDER_KEY), ...await credentialFiles((await rootBox()).root, PROVIDER_KEY)],
+    };
   } finally {
     await provider.close();
   }
@@ -127,11 +143,11 @@ async function controlTurn(label: string, write: (root: string) => Promise<void>
   const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }), MODEL);
   try {
     const root = path.join(box.root, 'dsh');
-    const runtime = new DshAdapter({ home: root, resolveBin, model: loopbackModel(provider.baseUrl) });
+    const runtime = new DshAdapter({ home: root, resolveBin, model: loopbackModel(provider.baseUrl), resolveKey });
     const init = await detectWith(runtime, baseEnv(box.home));
     if (init.kind !== 'available') throw new Error(`dsh control root init: ${JSON.stringify(init)}`);
     await write(root);
-    const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
+    const env = { ...baseEnv(box.home), ...recorder.env };
     await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env });
     return provider;
   } finally {
@@ -182,7 +198,7 @@ async function toolTreeTurn(stop: 'close' | 'sigkill') {
   const spawnFn = ((command: string, args: readonly string[], options: SpawnOptions) => (child = spawn(command, [...args], options))) as typeof spawn;
   try {
     const runtime = await adapter(loopbackModel(provider.baseUrl), { spawnFn });
-    const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
+    const env = { ...baseEnv(box.home), ...recorder.env };
     const session = await startPreparedOperation(runtime, { target: DSH_TARGET, instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, env });
     const tools = await waitFor(async () => {
       const found = (await fs.readFile(pidFile, 'utf8').catch(() => '')).trim().split(/\s+/).map(Number).filter(pid => Number.isSafeInteger(pid) && pid > 0);
@@ -222,7 +238,7 @@ async function steerTurn() {
   const provider = await startLoopbackProvider('openai-chat', script, MODEL);
   try {
     const runtime = await adapter(loopbackModel(provider.baseUrl));
-    const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
+    const env = { ...baseEnv(box.home), ...recorder.env };
     const session = await startPreparedOperation(runtime, { target: DSH_TARGET, instruction: 'Run the shell command.' }, { workspaceDir: box.workspace, env });
     try {
       await waitFor(async () => fs.access(started).then(() => true, () => undefined), 120_000, 'the shell tool');
@@ -267,7 +283,7 @@ async function backgroundTurn() {
   const provider = await startLoopbackProvider('openai-chat', script, MODEL);
   try {
     const runtime = await adapter(loopbackModel(provider.baseUrl));
-    const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env } };
+    const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } };
     const opened = await startPreparedOperation(runtime, { target: DSH_TARGET, instruction: `Start the work. ${ROOT_MARKER}` }, resources);
     const usage = [];
     for await (const event of opened.events) {
@@ -313,7 +329,7 @@ async function agentPersonaTurn() {
   const provider = await startLoopbackProvider('openai-chat', () => ({ kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }), MODEL);
   try {
     const runtime = await adapter(loopbackModel(provider.baseUrl));
-    const resources = { workspaceDir: run, reader: { canonicalHome: home }, env: { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env } };
+    const resources = { workspaceDir: run, reader: { canonicalHome: home }, env: { ...baseEnv(box.home), ...recorder.env } };
     const turnOf = async (offer: Parameters<typeof startPreparedOperation>[1]) => {
       const before = provider.requests.length;
       const session = await startPreparedOperation(runtime, offer, resources);
@@ -350,7 +366,7 @@ async function toolInputTurn() {
   };
   const provider = await startLoopbackProvider('openai-chat', script, MODEL);
   try {
-    const env = { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder', ...recorder.env };
+    const env = { ...baseEnv(box.home), ...recorder.env };
     const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Run the tools.', { workspaceDir: box.workspace, env });
     const uses = events.filter(event => event.type === 'tool_use');
     return { calls, uses, risks: uses.map(use => classifyToolCall({ toolName: use.tool, input: use.input as Record<string, unknown>, cwd: box.workspace }, box.workspace, box.home).level) };
@@ -358,6 +374,19 @@ async function toolInputTurn() {
     await provider.close();
   }
 }
+
+defineMcpSearchProbes({
+  runtime: 'dsh', variant: 'sandbox=danger-full-access', wire: 'openai-chat', model: MODEL,
+  async configure(box, provider, spawnFn) {
+    const model = loopbackModel(provider.baseUrl);
+    const home = path.join(box.root, 'dsh');
+    return { adapter: new DshAdapter({ home, model, spawnFn, resolveKey }),
+      env: { ...baseEnv(box.home), BYOK_DSH_BIN: target.bin } };
+  },
+  projectEnvironment: (env, box) => searchMcpEnvironmentFor({ runtimes: {
+    dsh: { home: path.join(box.root, 'dsh'), model: detectModel, resolveKey },
+  } } as DaemonConfig)('dsh', env),
+});
 
 const contractTurn = once(turn);
 const steered = once(steerTurn);
@@ -373,7 +402,7 @@ const instructionsControl = once(() => controlTurn('instructions', root => fs.wr
 const personaControl = once(() => controlTurn('persona', root => fs.writeFile(path.join(root, 'cordis.patch.yml'), `${JSON.stringify([PERSONA_ROW], null, 2)}\n`)));
 const closed = once(() => toolTreeTurn('close'));
 const sigkilled = once(() => toolTreeTurn('sigkill'));
-const descriptor = new DshAdapter({ home: path.resolve('/dsh-descriptor-only'), model: detectModel }).descriptor;
+const descriptor = new DshAdapter({ home: path.resolve('/dsh-descriptor-only'), model: detectModel, resolveKey }).descriptor;
 
 defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, {
   'detect.version': check(async () => {
@@ -382,15 +411,25 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   }),
   'detect.auth.absent': check(async () => {
     const box = await createSandbox('dsh-auth-absent');
-    expectAuth(await detectWith(await adapter(detectModel), baseEnv(box.home)), false);
+    expect(await detectWith(await adapter(detectModel), baseEnv(box.home))).not.toHaveProperty('authPresent');
   }),
   'detect.auth.apiKey': check(async () => {
     const box = await createSandbox('dsh-auth-key');
-    expectAuth(await detectWith(await adapter(detectModel), { ...baseEnv(box.home), [KEY_ENV]: 'runtime-contract-placeholder' }), true);
+    const refusedResolver = async () => { throw new Error('detection must not resolve a key'); };
+    const result = await detectWith(await adapter(detectModel, { resolveKey: refusedResolver }), baseEnv(box.home));
+    expect(result.kind).toBe('available');
+    expect(result).not.toHaveProperty('authPresent');
   }),
-  'detect.auth.login': skip('dsh runs in an SDK-owned DSH_HOME and the adapter never reads a user dsh login; the key comes from the model selection keyEnv'),
+  'detect.auth.login': skip('dsh uses an SDK-owned DSH_HOME and gets the API key from the Host resolver'),
   'mcp.submitResult': check(async () => {
-    const { calls, events, provider } = await contractTurn();
+    const { calls, events, provider, mcpEnv, shellEnv, credentialFiles: persisted } = await contractTurn();
+    expect(new Set(provider.requests.filter(request => request.model).map(request => request.authorization))).toEqual(new Set([`Bearer ${PROVIDER_KEY}`]));
+    for (const env of [mcpEnv, shellEnv]) {
+      expect(env).not.toContain(PROVIDER_KEY);
+      expect(env).not.toContain('BYOK_DSH_PROVIDER_API_KEY');
+    }
+    expect(JSON.stringify(events)).not.toContain(PROVIDER_KEY);
+    expect(persisted).toEqual([]);
     expect(events.at(-1)?.type).toBe('turn_end');
     const offered = provider.requests.filter(request => request.model).map(request => request.tools.map(tool => tool.name));
     expect(calls, `tools offered per model request: ${JSON.stringify(offered)}; events: ${JSON.stringify(events.map(event => event.type))}`).toEqual([expect.objectContaining({ name: 'submit_result', arguments: { summary: 'runtime contract' } })]);

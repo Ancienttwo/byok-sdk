@@ -19,8 +19,8 @@ import { startEgressRecorder, type EgressAttempt, type EgressRecorder } from './
  */
 export const CONTRACT_CASES = Object.freeze({
   'detect.version': 'detect() is available and names the expected version, with a warn verdict exactly when it is not the qualified one',
-  'detect.auth.absent': 'detect() reports authPresent false with no credential',
-  'detect.auth.apiKey': 'detect() reports authPresent true for an API key in the environment',
+  'detect.auth.absent': 'detect() reports the expected authentication evidence without an ambient key',
+  'detect.auth.apiKey': 'detect() reports the expected authentication evidence for the provider key source',
   'detect.auth.login': 'detect() reports authPresent true for the runtime\'s own stored login',
   'mcp.submitResult': 'a Host MCP server reaches the model and its submit_result call reaches the server',
   'instructions.project': 'the project instruction file in the workspace reaches the model (folder trust)',
@@ -312,7 +312,9 @@ export function expectAuth(result: RuntimeDetectResult, authPresent: boolean): v
 }
 
 /** The Host MCP server of the contract turn: one `submit_result` tool, each call appended to `receipt`. */
-export async function writeSubmitResultServer(dir: string, receipt: string, tool = 'submit_result'): Promise<McpStdioServerConfig> {
+export async function writeSubmitResultServer(
+  dir: string, receipt: string, tool = 'submit_result', metadata: Readonly<Record<string, unknown>> = {},
+): Promise<McpStdioServerConfig> {
   const file = path.join(dir, `${tool}-server.mjs`);
   await fs.writeFile(file, `import readline from 'node:readline';
 import { appendFileSync } from 'node:fs';
@@ -324,7 +326,7 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   if (frame.id === undefined) return;
   let result;
   if (frame.method === 'initialize') result = { protocolVersion: frame.params?.protocolVersion ?? '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'runtime-contract', version: '1.0.0' } };
-  else if (frame.method === 'tools/list') result = { tools: [{ name: ${JSON.stringify(tool)}, description: 'Record the runtime contract result', inputSchema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'], additionalProperties: false } }] };
+  else if (frame.method === 'tools/list') result = { tools: [{ name: ${JSON.stringify(tool)}, description: 'Record the runtime contract result', inputSchema: { type: 'object', properties: { summary: { type: 'string' } }, required: ['summary'], additionalProperties: false }, ...${JSON.stringify(metadata)} }] };
   else if (frame.method === 'tools/call') { appendFileSync(${JSON.stringify(receipt)}, JSON.stringify(frame.params) + '\\n'); result = { content: [{ type: 'text', text: 'runtime contract result accepted' }] }; }
   else if (frame.method === 'ping') result = {};
   else { send({ jsonrpc: '2.0', id: frame.id, error: { code: -32601, message: 'method not found' } }); return; }
@@ -342,6 +344,17 @@ export async function readReceipt(file: string): Promise<Array<Record<string, un
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
     throw error;
   }
+}
+
+/** Finds synthetic credentials in the files a loopback run left behind. Does not follow links. */
+export async function credentialFiles(root: string, key: string): Promise<readonly string[]> {
+  const matches = [];
+  for (const entry of await fs.readdir(root, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const file = path.join(entry.parentPath, entry.name);
+    if ((await fs.readFile(file)).includes(key)) matches.push(path.relative(root, file));
+  }
+  return matches;
 }
 
 /** Whether a server written by {@link writeSubmitResultServer} was ever started. */

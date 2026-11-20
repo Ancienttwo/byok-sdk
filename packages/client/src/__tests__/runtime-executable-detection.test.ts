@@ -78,12 +78,12 @@ const CASES: readonly Case[] = [
     id: 'agy', envName: 'BYOK_AGY_BIN', fixture: fixture('fake-acp-agent.mjs'),
     create: async () => {
       vi.stubEnv('FAKE_ACP_VERSION', QUALIFIED_AGY_VERSION);
-      return new AgyAdapter({ home: await tempDir('ba-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_ACP_*'] } });
+      return new AgyAdapter({ resolveKey: async () => 'fixture-key', home: await tempDir('ba-'), runtimeEnvironment: { ...allowlist, pass: ['FAKE_ACP_*'] } });
     },
   },
   {
     id: 'dsh', envName: 'BYOK_DSH_BIN', fixture: fixture('fake-dsh.mjs'),
-    create: async () => new DshAdapter({ home: await tempDir('bd-'), model: { provider: 'deepseek', model: 'deepseek-v4-flash', keyEnv: 'RC_DSH_KEY' }, runtimeEnvironment: allowlist }),
+    create: async () => new DshAdapter({ resolveKey: async () => 'fixture-key', home: await tempDir('bd-'), model: { provider: 'deepseek', model: 'deepseek-v4-flash' }, runtimeEnvironment: allowlist }),
   },
 ];
 

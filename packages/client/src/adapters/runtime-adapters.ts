@@ -86,8 +86,10 @@ export interface RuntimeAdaptersRuntimes {
   dsh?: {
     /** `DshAdapterOptions.home`: the absolute `DSH_HOME` the SDK owns. It must persist across executions, because dsh keeps its sessions there, and must not be `~/.dsh`. */
     home: DshAdapterOptions['home'];
-    /** `DshAdapterOptions.model`: provider, model, `baseUrl` and the name of the variable that holds the key. */
+    /** `DshAdapterOptions.model`: provider, model and optional `baseUrl`. */
     model: DshAdapterOptions['model'];
+    /** Per-spawn provider API key resolver for an embedded Host. */
+    resolveKey: DshAdapterOptions['resolveKey'];
     /** `DshAdapterOptions.sandbox`: dsh's sandbox for every session. Default `danger-full-access`. */
     sandbox?: DshAdapterOptions['sandbox'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
@@ -108,6 +110,8 @@ export interface RuntimeAdaptersRuntimes {
   agy?: {
     /** `AgyAdapterOptions.home`: the absolute OS home the SDK owns for agy and its tools. It must persist across executions and must not be the user's home. */
     home: AgyAdapterOptions['home'];
+    /** Per-spawn Gemini API key resolver for an embedded Host. */
+    resolveKey: AgyAdapterOptions['resolveKey'];
     /** `AgyAdapterOptions.model`: the model id of every session. Default: the CLI's own. */
     model?: AgyAdapterOptions['model'];
     /** A complete version policy that replaces the adapter default wholesale; `block` is allowed here because it is Host configuration (#1103). */
@@ -222,7 +226,7 @@ export function createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAda
  * {@link createRuntimeAdapters} after its own validation.
  */
 export function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[] {
-  const issues = piRuntimeConfigIssues(config);
+  const issues = [...piRuntimeConfigIssues(config), ...providerKeyResolverIssues(config.runtimes)];
   if (issues.length > 0) throw new DaemonConfigInvalidError(issues);
   const ids = config.runtimeAllowlist
     ? SDK_BUILT_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
@@ -361,7 +365,7 @@ function buildDshAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
   }
   try {
     return new DshAdapter({
-      home: dsh.home, model: dsh.model, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+      home: dsh.home, model: dsh.model, resolveKey: dsh.resolveKey, nativeAssetRoot: config.nativeAssetRoot, ...environment,
       ...(dsh.sandbox === undefined ? {} : { sandbox: dsh.sandbox }),
       ...(dsh.versionPolicy === undefined ? {} : { versionPolicy: dsh.versionPolicy }),
     });
@@ -379,7 +383,7 @@ function buildAgyAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
   }
   try {
     return new AgyAdapter({
-      home: agy.home, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+      home: agy.home, resolveKey: agy.resolveKey, nativeAssetRoot: config.nativeAssetRoot, ...environment,
       ...(agy.model === undefined ? {} : { model: agy.model }),
       ...(agy.versionPolicy === undefined ? {} : { versionPolicy: agy.versionPolicy }),
     });
@@ -474,6 +478,21 @@ function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfi
     issues.push(...versionPolicyConfigIssues(config));
   }
   issues.push(...piRuntimeConfigIssues(config));
+  return issues;
+}
+
+/** JSON schema marks these runtime objects as opaque in an embedded Host. */
+function providerKeyResolverIssues(runtimes: RuntimeAdaptersRuntimes | undefined): DaemonConfigIssue[] {
+  const issues: DaemonConfigIssue[] = [];
+  for (const id of ['dsh', 'agy'] as const) {
+    const runtime = runtimes?.[id];
+    if (runtime === undefined) continue;
+    if (!isObject(runtime)) {
+      issues.push(invalid(`runtimes.${id}`, `DaemonConfig.runtimes.${id} must be an object`));
+    } else if (typeof runtime.resolveKey !== 'function') {
+      issues.push(invalid(`runtimes.${id}.resolveKey`, `DaemonConfig.runtimes.${id}.resolveKey must be a function`));
+    }
+  }
   return issues;
 }
 

@@ -5,8 +5,10 @@ import { runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '
 import { defaultRunner, runBounded } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_LIMITS } from './service-log.js';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
+import { sanitizeServiceName, type ServiceManagerQuery, type ServiceDefinition, type ServiceProgram } from './service-types.js';
 import { SERVICE_UNIT_MARKER } from './service-unit.js';
+
+const ERROR_SERVICE_DOES_NOT_EXIST = 1060;
 
 /**
  * Genuine-failure text that must NEVER be reclassified as "service already
@@ -37,7 +39,7 @@ const WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE: readonly RegExp[] = [
  * this same phrase/code already asserted in `status()`'s own test).
  */
 const WINSW_NOT_INSTALLED: IdempotentAbsence = {
-  codes: [1060],
+  codes: [ERROR_SERVICE_DOES_NOT_EXIST],
   patterns: [/does not exist/i, /non-existent service/i],
   neverAbsence: WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE,
 };
@@ -255,7 +257,7 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       await runIdempotent(runWinsw, exePath, ['stopwait'], 'winsw stopwait', WINSW_ALREADY_STOPPED);
       return;
     }
-    if (!denied && (state === '1 STOPPED' || result.code === 1060)) return;
+    if (!denied && (state === '1 STOPPED' || result.code === ERROR_SERVICE_DOES_NOT_EXIST)) return;
     const problem = wrapper === 'missing' ? 'is missing' : 'differs from winswBin';
     throw new Error(
       `winsw wrapper ${exePath} ${problem}; service "${id}" must be stopped in the Service Control Manager before repair (sc.exe query exit ${result.code}): ${detail}`,
@@ -264,6 +266,7 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
 
   return createManagedLifecycle(def, {
     serviceName: id,
+    registration: () => ({ manager: 'winsw' }),
     unitPath: xmlPath,
     launcherPath: exePath,
     files: () => [{ path: xmlPath, content: generateWinswXml({ id, displayName: def.displayName ?? def.name, program: def.program, logDir: def.logDir }) }],
@@ -310,15 +313,21 @@ export function createWinswLifecycle(def: ServiceDefinition, deps: WinswDeps = {
       // must be surfaced rather than reported as "stopped" (P1 #7, round 2).
       await runIdempotent(runWinsw, exePath, ['stop'], 'winsw stop', WINSW_ALREADY_STOPPED);
     },
-    async query() {
-      const result = await run('sc.exe', ['query', id]);
-      const detail = (result.stdout || result.stderr).trim();
-      const running = result.code === 0 && /\bSTATE\b.*\bRUNNING\b/i.test(detail);
-      // Finding P1 #2 (residual, round 3): a clean "does not exist" (1060)
-      // is determinate; a query the SCM could not answer is not — see
-      // `service-types.ts`'s `ServiceStatusResult.determinate`.
-      const determinate = running || !WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
-      return { running, determinate, detail };
-    },
+    query: () => queryWinswService(id, { run }),
   }, fs, gateRoot);
+}
+
+/** Query a service by its recorded manager name. @internal */
+export async function queryWinswService(id: string, { run = defaultRunner }: WinswDeps = {}): Promise<ServiceManagerQuery> {
+  const result = await run('sc.exe', ['query', id]);
+  const detail = (result.stdout || result.stderr).trim();
+  const denied = WINSW_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
+  if (!denied) {
+    if (result.code === 0 && /\bSTATE\s*:\s*4\s+RUNNING\b/i.test(result.stdout)) return { running: true, determinate: true, detail };
+    if (result.code === ERROR_SERVICE_DOES_NOT_EXIST || (result.code === 0 && /\bSTATE\s*:\s*1\s+STOPPED\b/i.test(result.stdout))) {
+      return { running: false, determinate: true, detail };
+    }
+  }
+  const error = (result.stderr || result.stdout).trim();
+  return { running: false, determinate: false, detail: `sc.exe query failed (exit ${result.code})${error ? `: ${error}` : ''}` };
 }

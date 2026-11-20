@@ -44,9 +44,6 @@ export function terminalEffectsHost(this: TaskRunner): TaskRunnerHost {
   host.registerHandler('revoke.allHostContexts', () => {
     this['revokeAllHostToolsetContexts']();
   });
-  host.registerHandler('revoke.host_contexts', (_envelope, context) => {
-    if (context.taskId !== undefined) this['revokeHostToolsetContexts'](context.taskId);
-  });
   host.registerHandler('startup.stopRetry', () => {
     this['startupOwnership'].stopRetry();
   });

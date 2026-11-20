@@ -41,7 +41,7 @@ describe('Salesko fake connector MCP end to end', () => {
       storeDir: 'unused-store-dir',
       productId: 'salesko',
       mcpToolsetToolsProbe,
-      getMcpToolsets: () => new Map([
+      getMcpToolsetSnapshot: () => ({ definitionRevisions: new Map(), toolsets: new Map([
         [
           'salesko',
           {
@@ -50,7 +50,7 @@ describe('Salesko fake connector MCP end to end', () => {
             },
           },
         ],
-      ]),
+      ]) }),
     };
     const runner = new TaskRunner(deps);
 

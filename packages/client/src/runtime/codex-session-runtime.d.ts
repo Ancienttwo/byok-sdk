@@ -54,6 +54,7 @@ export declare function codexSession(
     onReady?: (threadId: string) => void;
     turnProcessReader?: { rootPid(): number | undefined; readProcessTable(): ProcessTable };
     onRecord?: (record: CodexRecord) => void;
+    onNativeIdentity?: (method: string, identity: Record<string, unknown>) => void;
     onServerRequest?: (id: string | number, method: string, params: Record<string, unknown>, reply: {
       respond(value: Record<string, unknown>): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
     }) => void;
@@ -83,7 +84,7 @@ export declare class RuntimeFailureError extends Error {
 }
 export declare class UnsupportedOptionError extends Error {
   readonly name: string;
-  readonly option: 'retainedBytes' | 'goals' | 'endTurnProcessesOnAbort' | 'cwd' | 'additionalDirectories' | 'model' | 'effort' | 'serviceTier' | 'outputSchema' | 'name' | 'resume' | 'env' | 'userConfiguration' | 'systemPrompt' | 'appendSystemPrompt' | 'mcpServers' | 'disallowedTools' | 'launchArgs' | 'placement';
+  readonly option: 'retainedBytes' | 'goals' | 'endTurnProcessesOnAbort' | 'cwd' | 'additionalDirectories' | 'model' | 'effort' | 'serviceTier' | 'outputSchema' | 'name' | 'resume' | 'fork' | 'env' | 'userConfiguration' | 'systemPrompt' | 'appendSystemPrompt' | 'mcpServers' | 'disallowedTools' | 'launchArgs' | 'placement';
 }
 /** The open could not confirm the requested model from the runtime's readback: the vendored typed error. */
 export declare class ModelConfirmationError extends Error {

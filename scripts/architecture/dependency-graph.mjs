@@ -90,8 +90,8 @@ const allowed = {
   server: ['core', 'protocol', 'cloud'], 'cloud-dataplane': ['core', 'protocol', 'cloud'],
   'ui-runtime': ['core', 'protocol', 'cloud'], client: ['core', 'protocol'], keys: ['core'],
   conformance: ['core', 'protocol', 'cloud', 'testkit'], testkit: ['core', 'protocol'],
-  // #1845: K8 sits on top of the published packages; no package imports it (ADR-046 D4).
-  'bot-collaboration': ['client', 'protocol', 'server'],
+  // K8 may read private SQLite snapshots through core (#2420). No package imports K8 (ADR-046 D4).
+  'bot-collaboration': ['client', 'core', 'protocol', 'server'],
 };
 export function packageDirection(from, to) {
   return from === to || allowed[from]?.includes(to) === true;

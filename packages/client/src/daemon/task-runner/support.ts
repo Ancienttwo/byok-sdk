@@ -1,6 +1,4 @@
 // Types and helpers shared by `TaskRunner` (../task-runner.ts) and the member
-import type { ToolAuthorizationPolicy } from '../../tool-authorization.js';
-import type { RuntimeTaskInput } from '../../types.js';
 // modules in this directory.
 //
 // A member module holds the bodies of `TaskRunner` methods as functions that
@@ -10,6 +8,10 @@ import type { RuntimeTaskInput } from '../../types.js';
 // A body reads private state as `this['name']`, which TypeScript type-checks
 // like the dot form, and calls other members through the runner so that a
 // stub, a test spy or a fixture override still sees every call.
+import type { ToolAuthorizationPolicy } from '../../tool-authorization.js';
+import type { McpHubCatalogBinding } from '../../mcp/hub/catalog.js';
+import type { RuntimeTaskInput } from '../../types.js';
+import type { SearchRuntimeEvidence } from '../search-runtime-qualification.js';
 import { outboundErrorMessage } from '../outbound-error.js';
 import type { ResultReplyFailure } from '../result-reply-failure.js';
 import { AgentMessageDraftPublisher } from '../agent-message-draft.js';
@@ -19,7 +21,7 @@ import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { createEnvelope, RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclineCode, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, RuntimeAdapterDescriptor, Session } from '../../types.js';
+import type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeOperationStartInput, Session } from '../../types.js';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable.js';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home.js';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers.js';
@@ -127,7 +129,18 @@ export function observePreparedCall(
   return undefined;
 }
 
+/** Private Attempt authority shared by the helper, authorization and event projection. */
+export interface McpHubAttempt {
+  readonly binding: McpHubCatalogBinding;
+  readonly innerAttempts?: true;
+  readonly isActive: () => boolean;
+  beginStart(signal: AbortSignal): void;
+  configureAuthorization(gate: RuntimeOperationStartInput['toolAuthorization']): Promise<void>;
+  closeAuthorization(): void;
+}
+
 export interface ActiveTask {
+  readonly mcpHub?: McpHubAttempt;
   readonly memoryLane?: typeof import('../../adapters/pi/memory-lane-contract.js').PI_MEMORY_LANE;
   taskId: string;
   /** Cancels every blob transfer owned by this task before its terminal path runs. */
@@ -278,7 +291,7 @@ export interface ClaimedAgentFailureContext {
 }
 
 export type PickResult =
-  | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor }
+  | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor; searchEvidence?: SearchRuntimeEvidence }
   | { ok: false; reason: string; retryable: boolean; runtimeUnavailable?: RuntimeUnavailableAdmission };
 
 /**

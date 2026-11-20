@@ -19,17 +19,20 @@ const authority = (reason: string) =>
 /**
  * The structured tool input: dsh's complete native `arguments` string, never the
  * event's text. dsh replaces a model's malformed JSON with `{}` and refuses the
- * call, so anything but an object means the wire changed. Tool authorization
- * reads this object, so the session fails rather than run on an unseen input.
+ * call. The private record can withhold a credential-bearing object. The
+ * public event omits that input and retains the tool identity.
  */
-function toolInput(native: unknown): Record<string, unknown> {
-  const text = record(record(native)?.data)?.arguments;
+function toolInput(native: unknown): Record<string, unknown> | undefined {
+  const nativeData = record(native)?.data;
+  if (native === '[redacted]' || nativeData === '[redacted]') return undefined;
+  const text = record(nativeData)?.arguments;
   let parsed: unknown;
   try {
     parsed = typeof text === 'string' ? JSON.parse(text) : undefined;
   } catch {
     parsed = undefined;
   }
+  if (parsed === '[redacted]') return undefined;
   const input = record(parsed);
   if (input === undefined) throw authority('dsh tool call arguments are not a JSON object');
   return input;
@@ -60,7 +63,7 @@ export class DshProjection {
 
   private readonly children: AcpChildTurns;
 
-  constructor(private readonly rootSessionId: string, private readonly model: string) {
+  constructor(rootSessionId: string) {
     this.children = new AcpChildTurns(rootSessionId);
   }
 
@@ -70,9 +73,8 @@ export class DshProjection {
     const body = record(input.body);
     const events = body?.events;
     if (!Array.isArray(events)) return;
-    this.children.link(events);
-    const path = this.children.path(input.sessionId, input.agentPath);
-    const root = input.sessionId === this.rootSessionId && input.agentPath.length === 0;
+    const path = this.children.route(input.sessionId, input.agentPath, events, body?.byokRoot);
+    const root = path?.length === 0;
     const attribution = path === undefined || root ? {} : { agentPath: [...path] };
     const identify = (id: string) => root ? id : JSON.stringify([input.sessionId, path, id]);
     if (path !== undefined && body?.type === 'session/event:assistant/message') {
@@ -88,15 +90,12 @@ export class DshProjection {
       }
       if (path === undefined) continue;
       switch (event?.kind) {
-        case 'model':
-          // The SDK patch and the open name this route; a request on another one means they did not apply.
-          if (root && event.model !== this.model) throw authority('dsh session does not run the configured provider route and model');
-          break;
         case 'tool_call_started':
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           const callId = identify(event.callId);
           this.tools.set(callId, { tool: event.tool, ...attribution });
-          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: callId, input: toolInput(body?.native), ...attribution });
+          const args = toolInput(body?.native);
+          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: callId, ...(args === undefined ? {} : { input: args }), ...attribution });
           this.buffered.observe(callId, undefined, false, true, emit);
           break;
         case 'tool_call_ended': {

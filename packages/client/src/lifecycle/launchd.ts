@@ -1,11 +1,11 @@
 import { promises as fsp } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { runIdempotent, runOrThrow, type IdempotentAbsence, type Runner } from '../util/exec-runner.js';
+import { runIdempotent, runOrThrow, type IdempotentAbsence, type RunResult, type Runner } from '../util/exec-runner.js';
 import { defaultRunner } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
 import { SERVICE_REDIRECT_STDERR_FILENAME, SERVICE_REDIRECT_STDOUT_FILENAME } from './service-log.js';
-import { sanitizeServiceName, type ServiceDefinition } from './service-types.js';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceManagerQuery } from './service-types.js';
 import { generateServiceLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, ServiceUnitError } from './service-unit.js';
 
 /**
@@ -74,6 +74,38 @@ export interface LaunchdDeps {
 
 /** `launchctl print`'s exit for a service the domain does not have (`Could not find service ...`). */
 const LAUNCHCTL_PRINT_ABSENT = 113;
+
+function launchctlPrintAbsent(result: RunResult): boolean {
+  // A domain or permission failure in either stream outweighs the absence code.
+  return result.code === LAUNCHCTL_PRINT_ABSENT
+    && !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`));
+}
+
+function launchctlPrintFailure(result: RunResult): string {
+  return `launchctl print failed (exit ${result.code}): ${(result.stderr || result.stdout).trim()}`;
+}
+
+function launchdUserId(): number {
+  if (typeof process.getuid !== 'function') {
+    throw new Error('launchd lifecycle requires a POSIX uid (process.getuid unavailable) — this module only runs on macOS');
+  }
+  return process.getuid();
+}
+
+/** Query a registered label in the user's launchd domain. @internal */
+export async function queryLaunchdService(label: string, { run = defaultRunner, getuid = launchdUserId }: LaunchdDeps = {}): Promise<ServiceManagerQuery> {
+  const result = await run('launchctl', ['print', `gui/${getuid()}/${label}`]);
+  const detail = result.stdout || result.stderr;
+  if (result.code === 0 && !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some(pattern => pattern.test(`${result.stdout}\n${result.stderr}`))) {
+    const state = /^[\t ]*state[\t ]*=[\t ]*([^\r\n]+)$/im.exec(detail)?.[1]?.trim().toLowerCase();
+    if (state === 'running' || /^[\t ]*pid[\t ]*=[\t ]*[1-9]\d*[\t ]*$/m.test(detail)) {
+      return { running: true, determinate: true, detail };
+    }
+    if (state === 'not running' || state === 'waiting' || state === 'exited') return { running: false, determinate: true, detail };
+  }
+  if (launchctlPrintAbsent(result)) return { running: false, determinate: true, detail };
+  return { running: false, determinate: false, detail: launchctlPrintFailure(result) };
+}
 
 /** How long a booted-out job may stay in the domain before `stop()` gives up with `service_unload_timeout`. */
 export const LAUNCHD_UNLOAD_TIMEOUT_MS = 10_000;
@@ -173,14 +205,7 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   const run = deps.run ?? defaultRunner;
   const fs = deps.fs ?? fsp;
   const homedir = deps.homedir ?? (() => os.homedir());
-  const getuid =
-    deps.getuid ??
-    (() => {
-      if (typeof process.getuid !== 'function') {
-        throw new Error('launchd lifecycle requires a POSIX uid (process.getuid unavailable) — this module only runs on macOS');
-      }
-      return process.getuid();
-    });
+  const getuid = deps.getuid ?? launchdUserId;
 
   const now = deps.now ?? Date.now;
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
@@ -199,10 +224,8 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
   async function loaded(): Promise<boolean> {
     const result = await run('launchctl', ['print', serviceTarget()]);
     if (result.code === 0) return true;
-    // Both streams: a permission failure on either one is never an absent job.
-    const output = `${result.stdout}\n${result.stderr}`;
-    if (result.code === LAUNCHCTL_PRINT_ABSENT && !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(output))) return false;
-    throw new Error(`launchctl print failed (exit ${result.code}): ${(result.stderr || result.stdout).trim()}`);
+    if (launchctlPrintAbsent(result)) return false;
+    throw new Error(launchctlPrintFailure(result));
   }
 
   /**
@@ -220,6 +243,7 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
 
   return createManagedLifecycle(def, {
     serviceName: label,
+    registration: () => ({ manager: 'launchd', uid: getuid() }),
     unitPath: plistPath,
     launcherPath,
     files: () => [
@@ -265,15 +289,6 @@ export function createLaunchdLifecycle(def: ServiceDefinition, deps: LaunchdDeps
       await runIdempotent(run, 'launchctl', ['bootout', serviceTarget()], 'launchctl bootout', LAUNCHD_NOT_LOADED);
       await untilUnloaded();
     },
-    async query() {
-      const result = await run('launchctl', ['print', serviceTarget()]);
-      const detail = result.stdout || result.stderr;
-      const running = result.code === 0 && /\bstate\s*=\s*running\b/i.test(detail);
-      // Finding P1 #2 (residual, round 3): an unreachable GUI domain or a
-      // permission failure on THIS query is not evidence of "not running";
-      // see `service-types.ts`'s `ServiceStatusResult.determinate`.
-      const determinate = running || !LAUNCHD_CONNECTIVITY_OR_PERMISSION_FAILURE.some((pattern) => pattern.test(detail));
-      return { running, determinate, detail };
-    },
+    query: () => queryLaunchdService(label, { run, getuid }),
   }, fs, gateRoot);
 }

@@ -1,0 +1,142 @@
+// BYOK change: process-table diagnostics do not require the executable launcher (Apache-2.0).
+import { cleanupFailureReason, type ProcessCleanupDiagnostics } from "./process-cleanup.js";
+
+export interface ProcessExitObservation {
+  readonly at: string;
+  readonly elapsedMs: number;
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+}
+
+/** Facts captured when the deadline fires, before timeout cleanup begins. */
+export interface ProcessTimeoutObservation {
+  readonly at: string;
+  readonly elapsedMs: number;
+  /** Null means Node had not emitted exit at the deadline, not that no descendant exited. */
+  readonly exit: ProcessExitObservation | null;
+  readonly closeObserved: boolean;
+}
+
+/** A bounded observation of native process failure, not a retry policy. */
+export interface ProcessDiagnostics {
+  readonly exitCode: number | null;
+  readonly signal: NodeJS.Signals | null;
+  readonly stderr: string;
+  readonly timeoutMs?: number;
+  readonly timeoutObservation?: ProcessTimeoutObservation;
+  readonly error?: { readonly code?: string; readonly message: string };
+  readonly cleanup?: ProcessCleanupDiagnostics;
+}
+
+export const STDERR_TAIL_BYTES = 8192;
+
+/** Copy retained bytes so a small suffix cannot keep a large chunk alive. */
+export class StderrTail {
+  private bytes: Buffer = Buffer.alloc(0);
+
+  append(chunk: Buffer | string): void {
+    const incoming = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    this.bytes = incoming.length >= STDERR_TAIL_BYTES
+      ? Buffer.from(incoming.subarray(-STDERR_TAIL_BYTES))
+      : Buffer.concat([this.bytes.subarray(Math.max(0, this.bytes.length + incoming.length - STDERR_TAIL_BYTES)), incoming]);
+  }
+
+  text(): string {
+    // A byte limit can cut through the first UTF-8 character. Omit that
+    // incomplete prefix instead of introducing a replacement character.
+    let start = 0;
+    for (const byte of this.bytes) {
+      if ((byte & 0xC0) !== 0x80) {
+        break;
+      }
+      start += 1;
+    }
+    return this.bytes.subarray(start).toString("utf8");
+  }
+}
+
+export function stderrTail(text: string): string {
+  const tail = new StderrTail();
+  tail.append(text);
+  return tail.text();
+}
+
+export function nativeError(error: Error): { readonly code?: string; readonly message: string } {
+  return {
+    ...("code" in error && typeof error.code === "string" ? { code: error.code } : {}),
+    message: stderrTail(error.message),
+  };
+}
+
+/**
+ * A spawn failure as a host may see it: Node's own error carries the whole
+ * argv in `spawnargs` (prompts, SessionOptions.launchArgs). This keeps the
+ * message (which names only the command) and the identifying fields, no argv
+ * and no cause pointing back at the original.
+ */
+export function spawnFailure(error: Error, message = error.message): Error {
+  const failure = new Error(message);
+  for (const key of ["code", "errno", "syscall", "path"]) {
+    const field = Object.getOwnPropertyDescriptor(error, key);
+    if (field !== undefined) {
+      const value: unknown = field.value;
+      Object.assign(failure, { [key]: value });
+    }
+  }
+  return failure;
+}
+
+/**
+ * Node rejects an argument or environment value it cannot pass (a NUL byte)
+ * synchronously, quoting the value after "Received". Rethrown with the
+ * value cut, so an argv or env secret never reaches the host's error.
+ */
+export function spawnChecked<T>(start: () => T): T {
+  try {
+    return start();
+  } catch (error) {
+    if (!(error instanceof Error)) {
+      throw error;
+    }
+    // The cut message goes in at construction, so the stack never held the value.
+    throw spawnFailure(error, error.message.split(" Received")[0] ?? error.message);
+  }
+}
+
+export function processFailure(context: string, diagnostics: ProcessDiagnostics): Error {
+  const reasons = [
+    `exit code ${diagnostics.exitCode === null ? "unavailable" : String(diagnostics.exitCode)}`,
+    `signal ${diagnostics.signal ?? "none"}`,
+  ];
+  if (diagnostics.timeoutMs !== undefined) {
+    reasons.push(`timeout after ${String(diagnostics.timeoutMs)} ms`);
+  }
+  if (diagnostics.timeoutObservation !== undefined) {
+    const observation = diagnostics.timeoutObservation;
+    const exit = observation.exit;
+    reasons.push(exit === null ? "root exit not observed at timeout"
+      : `root exit observed at ${exit.at} (${String(exit.elapsedMs)} ms, code ${exit.exitCode === null ? "unavailable" : String(exit.exitCode)}, signal ${exit.signal ?? "none"})`,
+      `close observed at timeout: ${String(observation.closeObserved)}`);
+  }
+  if (diagnostics.error !== undefined) {
+    reasons.push(`${diagnostics.error.code ?? "native error"}: ${diagnostics.error.message}`);
+  }
+  const cleanup = cleanupFailureReason(diagnostics.cleanup);
+  if (cleanup !== undefined) { reasons.push(cleanup); }
+  const stderr = diagnostics.stderr === "" ? "" : `\nstderr (tail):\n${diagnostics.stderr}`;
+  return new Error(`${context}: ${reasons.join("; ")}${stderr}`, { cause: diagnostics });
+}
+
+/**
+ * Throws when a command timed out or never ran to an exit code of its own (a
+ * failed spawn, a signal): an operational failure, carrying the native reason
+ * and a bounded stderr tail. A command that exited with a code returns; that
+ * answer is the caller's to read.
+ */
+export function assertRan(result: { readonly ok: boolean; readonly exitCode: number | null; readonly stderr: string; readonly diagnostics?: ProcessDiagnostics }, context: string): void {
+  if (!result.ok && (result.exitCode === null || result.diagnostics?.timeoutMs !== undefined)) {
+    throw processFailure(context, result.diagnostics ?? {
+      exitCode: result.exitCode, signal: null, stderr: stderrTail(result.stderr),
+    });
+  }
+}

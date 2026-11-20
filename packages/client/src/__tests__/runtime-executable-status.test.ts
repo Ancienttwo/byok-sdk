@@ -30,7 +30,7 @@ const CLAUDE_PATH = path.resolve('/opt/Example User/bin/claude');
 function adapters() {
   return [
     new StubRuntimeAdapter('claude', { kind: 'available', version: '2.1.0', executablePath: CLAUDE_PATH, executableSource: 'env' }),
-    new StubRuntimeAdapter('codex', { kind: 'available', version: '0.160.0', executableSource: 'path' }),
+    new StubRuntimeAdapter('codex', { kind: 'available', version: '0.169.0', executableSource: 'path' }),
     new StubRuntimeAdapter('grok', { kind: 'not-found' }),
   ];
 }

@@ -34,11 +34,21 @@ export function agentKey(tenant: string, execution: Pick<IntentExecution, 'devic
   return hash([tenant, execution.deviceId, execution.payload.agentRef.agentId]);
 }
 
-/** The head of each agent queue: the open intent with the lowest `sequence`. Settled intents must not be passed. */
+/** The lowest-sequence open writer per agent, followed by every open memory reader. Settled intents must not be passed. */
 export function fifoHeads<T extends Pick<Intent, 'agent' | 'sequence'>>(open: Iterable<T>): T[] {
-  const heads = new Map<string, T>();
-  for (const intent of open) if (!heads.has(intent.agent) || heads.get(intent.agent)!.sequence > intent.sequence) heads.set(intent.agent, intent);
-  return [...heads.values()];
+  const writers = new Map<string, T>();
+  const readers: T[] = [];
+  for (const intent of open) {
+    // Bare queue entries carry no execution payload and take a writer slot.
+    const row: Pick<Intent, 'agent' | 'sequence'> & Partial<Pick<Intent, 'execution'>> = intent;
+    if (row.execution?.payload?.homeAccess === 'memory-reader') {
+      readers.push(intent);
+      continue;
+    }
+    const head = writers.get(intent.agent);
+    if (!head || head.sequence > intent.sequence) writers.set(intent.agent, intent);
+  }
+  return [...writers.values(), ...readers];
 }
 
 /** The conclusion of an intent that has no submit in flight (queued, memory-blocked or in backoff), or nothing while it can still start. */

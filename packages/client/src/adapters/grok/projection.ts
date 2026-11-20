@@ -61,8 +61,7 @@ export class GrokProjection {
     const body = record(input.body);
     const events = body?.events;
     if (!Array.isArray(events)) return;
-    this.children.link(events);
-    const path = this.children.path(input.sessionId, input.agentPath);
+    const path = this.children.route(input.sessionId, input.agentPath, events, body?.byokRoot);
     if (path === undefined) return;
     const update = record(record(body?.native)?.update);
     if (path.length > 0) {

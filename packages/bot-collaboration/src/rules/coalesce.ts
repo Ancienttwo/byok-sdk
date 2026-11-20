@@ -1,4 +1,5 @@
-import { hash } from '@byok-sdk/server/execution-core/canonical';
+import { InputImagesSchema, type InputImageBlobRef } from '@byok-sdk/protocol';
+import { canonical, hash } from '@byok-sdk/server/execution-core/canonical';
 import { frame } from './frame.js';
 
 /**
@@ -8,24 +9,29 @@ import { frame } from './frame.js';
  */
 export type Authority = 'owner' | 'bot';
 /** One durable record per user input while input coalescing is in use. `key` is the caller's input key. */
-export interface UserInput {
-  id: string; key: string; botId: string; request: string; bytes: number;
-  sender: string; authority: Authority; receivedAt: number; batchId: string;
-}
-export type SealReason = 'idle' | 'window' | 'items' | 'bytes' | 'boundary' | 'key_changed' | 'cancel' | 'policy_off' | 'archived';
+export interface UserInput extends InputFields { bytes: number; receivedAt: number; batchId: string }
+export type SealReason = 'idle' | 'window' | 'items' | 'bytes' | 'images' | 'boundary' | 'key_changed' | 'cancel' | 'policy_off' | 'archived';
 /**
  * `id` is the first input's id and the batch Turn id. `key` is the coalescing key.
- * `request` is the rendered Request while the batch is open; sealing moves it into the batch Turn.
+ * `request` and `images` hold the rendered input while the batch is open; sealing moves them into the batch Turn.
  * `bytes` is its UTF-8 size, framing included. `revision` is the last projected revision: 1 is open, 2 is sealed.
  */
 export interface InputBatch {
   id: string; botId: string; key: string; inputIds: string[]; bytes: number;
-  openedAt: number; sealAt: number; state: 'open' | 'sealed'; sealReason?: SealReason; request?: string; revision?: 1 | 2;
+  openedAt: number; sealAt: number; state: 'open' | 'sealed'; sealReason?: SealReason; request?: string;
+  images?: readonly InputImageBlobRef[]; revision?: 1 | 2;
 }
 /** Values that apply when `BotOptions.coalesce` is present (owner ruling on #551). */
 export const COALESCE_DEFAULTS = { windowMs: 10_000, maxItems: 8, maxBytes: 8192 } as const;
 export interface CoalescePolicy { windowMs: number; maxItems: number; maxBytes: number }
-export interface InputFields { id: string; key: string; botId: string; request: string; sender: string; authority: Authority }
+export interface InputFields {
+  id: string; key: string; botId: string; request: string; images?: readonly InputImageBlobRef[]; sender: string; authority: Authority;
+}
+/** Validate image refs at K8 ingress and pass the parsed value into the rules. */
+export function validateInputImages<T extends Pick<InputFields, 'images'>>(input: T): T {
+  const { images } = input;
+  return images === undefined ? input : { ...input, images: InputImagesSchema.parse(images) };
+}
 /** The input rows that the rules read and change. Both maps appear at the first coalesced input. */
 export interface CoalesceState { inputs?: Record<string, UserInput>; inputBatches?: Record<string, InputBatch> }
 /**
@@ -35,7 +41,9 @@ export interface CoalesceState { inputs?: Record<string, UserInput>; inputBatche
  */
 export interface BotFacts { busy: boolean; configKey: readonly string[]; archived: boolean }
 /** A sealed batch becomes one user Turn with these fields. Neither changes after this. */
-export interface BatchTurn { id: string; botId: string; request: string; authority: Authority; inputIds: string[] }
+export interface BatchTurn {
+  id: string; botId: string; request: string; images?: readonly InputImageBlobRef[]; authority: Authority; inputIds: string[];
+}
 /**
  * `id` is the Turn that answers the input. With `turn`, the Host adds the input's own Turn with this id,
  * after the Turns of `sealed`. Without it, `id` is a batch id.
@@ -77,10 +85,11 @@ function openInputBatch(state: CoalesceState, botId: string): InputBatch | undef
   return Object.values(state.inputBatches ?? {}).find(batch => batch.botId === botId && batch.state === 'open');
 }
 function sealInputBatch(state: CoalesceState, batch: InputBatch, reason: SealReason): BatchTurn {
-  const request = batch.request;
+  const { request, images } = batch;
   if (batch.state !== 'open' || request === undefined) throw new Error('Input batch is already sealed');
-  batch.state = 'sealed'; batch.sealReason = reason; delete batch.request;
-  return { id: batch.id, botId: batch.botId, request, authority: state.inputs![batch.id]!.authority, inputIds: [...batch.inputIds] };
+  batch.state = 'sealed'; batch.sealReason = reason; delete batch.request; delete batch.images;
+  return { id: batch.id, botId: batch.botId, request, authority: state.inputs![batch.id]!.authority, inputIds: [...batch.inputIds],
+    ...(images === undefined ? {} : { images }) };
 }
 /** Boundary rule: before any other new Turn of a Bot, seal its open batch, so the queue keeps arrival order. */
 export function sealAtBoundary(state: CoalesceState, botId: string): BatchTurn | undefined {
@@ -108,14 +117,13 @@ export function sealDueBatches(state: CoalesceState, bots: Readonly<Record<strin
  * Admit one user input before the Host queues it. `facts.turn` is a Turn that already has the input's id,
  * from a time without coalescing. Without a policy, or with such a Turn, the input keeps its own Turn.
  */
-export function admitUserInput(state: CoalesceState, input: InputFields, facts: { bot?: BotFacts; turn?: { request: string } },
+export function admitUserInput(state: CoalesceState, input: InputFields, facts: { bot?: BotFacts; turn?: Pick<InputFields, 'request' | 'images'> },
   policy: CoalescePolicy | undefined, now: number): Admission {
-  const prior = state.inputs?.[input.id];
-  if (prior) {
-    if (prior.request !== input.request) throw new Error('Input identity conflict');
-    return { id: prior.batchId, turn: false, sealed: [] };
+  const prior = state.inputs?.[input.id], original = prior ?? facts.turn;
+  if (original && (original.request !== input.request || canonical(original.images) !== canonical(input.images))) {
+    throw new Error('Input identity conflict');
   }
-  if (facts.turn && facts.turn.request !== input.request) throw new Error('Input identity conflict');
+  if (prior) return { id: prior.batchId, turn: false, sealed: [] };
   const sealed: BatchTurn[] = [];
   let bot = facts.bot, open = openInputBatch(state, input.botId);
   const due = open && sealIfDue(state, open, bot, policy, now);
@@ -129,18 +137,22 @@ export function admitUserInput(state: CoalesceState, input: InputFields, facts: 
       const member = { ...row, batchId: open.id };
       const request = batchRequest([...open.inputIds.map(id => state.inputs![id]!), member]);
       const bytes = Buffer.byteLength(request, 'utf8');
-      if (bytes <= policy.maxBytes) {
+      const images = open.images && row.images ? [...open.images, ...row.images] : open.images ?? row.images;
+      if (bytes > policy.maxBytes) reason = 'bytes';
+      else if (open.images && row.images && !InputImagesSchema.safeParse(images).success) reason = 'images';
+      else {
         state.inputs![member.id] = member;
         open.inputIds.push(member.id); open.request = request; open.bytes = bytes;
+        if (images !== undefined) open.images = images;
         return { id: open.id, turn: false, sealed };
       }
-      reason = 'bytes';
     }
     sealed.push(sealInputBatch(state, open, reason)); bot = busyAfterSeal(bot);
   }
   (state.inputs ??= {})[row.id] = row;
   const batch: InputBatch = { id: row.id, botId: row.botId, key, inputIds: [row.id], bytes: row.bytes,
-    openedAt: now, sealAt: now + policy.windowMs, state: 'open', request: batchRequest([row]) };
+    openedAt: now, sealAt: now + policy.windowMs, state: 'open', request: batchRequest([row]),
+    ...(row.images === undefined ? {} : { images: row.images }) };
   (state.inputBatches ??= {})[batch.id] = batch;
   // An idle Agent takes the first input at once, with the same Turn id and Request as without coalescing.
   if (!bot!.busy) sealed.push(sealInputBatch(state, batch, 'idle'));

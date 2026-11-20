@@ -1189,6 +1189,15 @@ it once, before its `store` gates, so the order is always `service-lifecycle`
 then `store`. A held gate fails at once with `lifecycle_owner_busy`, without
 retry; the gate frees itself when its holder process exits.
 
+`inspectStoreServiceState(storeDir)` reads the lifecycle owner for an absolute
+store directory and queries that recorded service. It reports `running` if
+the manager or the store lock shows a live process. It reports `stopped` only
+when the manager confirms a stop or absence in the recorded registration and
+the lock is clear. Legacy records without enough manager identity yield
+`unknown` when there is no live evidence. This observation holds no reservation
+against a later start. A Host performing recovery must hold exclusive store
+ownership for its writes.
+
 Under `--service` everything the daemon writes to stdout and stderr goes to its
 own log, `<logDir>/daemon.log`, rotated by size while it runs at
 `DAEMON_LOG_LIMITS` (10 MiB, 5 files). The service manager's
@@ -1265,14 +1274,18 @@ it, `DSH_PERMISSION_MODE` to the `sandbox` option and
 directory, `$DSH_HOME/.env`. The process starts in the execution scratch
 directory, so a workspace `.env` never applies. A Host must not leave stored
 credentials or a `.env` in the dsh root, or dsh uses them before the key in
-the environment.
+the environment. The embedded Host's `resolveKey` callback runs for each
+authenticated spawn, including resume and an uncached catalog read. The SDK
+sets `BYOK_DSH_PROVIDER_API_KEY` in that child only and records only the
+variable name in the patch. A missing or invalid key fails before spawn as a
+non-retryable `auth` failure. Installation detection leaves `authPresent`
+unset.
 
 Sessions persist under `<home>/sessions/<encoded cwd>/<session id>/`; resume
 needs them, and the SDK removes none. The DeepSeek route sends `GET
 https://api.deepseek.com/models` at boot when a key is present. A dsh `usage`
 event carries the turn's billed tokens and the provider's context usage, both
-read from OAR's session totals. The `keyEnv` rules are in
-[adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
+read from OAR's session totals. See [dsh adapter capabilities](adapter-capabilities.md#dsh-adapter-custom-harness).
 
 An Attempt is one prompt on one process. dsh's subagents and background jobs
 outlive the turn, and when one finishes dsh opens a root turn with no prompt. So
@@ -1299,8 +1312,12 @@ removes `antigravity/credential-user-scope` in the user config directory.
 `DBUS_SESSION_BUS_ADDRESS` names a socket in that home that does not exist, so
 agy's look for the session bus fails as on a host with no bus. agy passes its whole
 environment to `run_command` and stdio MCP children, so no real key may enter
-it. The key comes from `GEMINI_API_KEY` in the runtime environment and stays in
-the daemon process; a task without it fails as non-retryable authority.
+it. The embedded Host's `resolveKey` callback supplies the key fresh for each
+authenticated spawn, including resume, an uncached catalog read and each
+command in a quota read. The real key stays in the SDK process. An invalid
+key or a resolver failure stops the attempt before authentication with a
+non-retryable `auth` failure. Installation detection leaves `authPresent`
+unset.
 
 Each agy process gets one proxy, started before agy on an ephemeral `127.0.0.1`
 port and closed when agy exits. If it cannot start, the task fails before agy
@@ -1383,6 +1400,16 @@ default that carries one is rejected as `invalid_version_policy`
 version_blocked` and `retryable: false`. This is not a minimum-version check:
 the SDK does not install, repair or self-update a runtime, and an unqualified
 version is still admitted unless the Host configured a block.
+
+Claude Code, Codex and Antigravity are qualified at `2.1.326`, `0.169.0`
+and `1.5.11`, respectively. `check:version-authority` maps SDK adapter pins
+explicitly to entries in the vendored OAR `.github/runtime-versions.json`.
+For each mapped entry marked `accepted` or `minimum`, the SDK qualified
+version must be at least the OAR version. This lets SDK qualification follow
+OAR upgrades while keeping pins that are already ahead, such as Grok `1.0.77`.
+Every SDK qualified pin must have a mapping. OAR runtimes without a BYOK
+adapter are outside the check. The BYOK loopback runtime contracts qualify SDK
+behavior and isolation against the vendored OAR native adapters.
 
 Pi `authPresent` is pi's own login state, on the installed and `sdkHelperHost`
 paths alike. It is `true` when any provider credential env-var name the pinned pi reads
@@ -1976,10 +2003,9 @@ event variants do not change. Interruption/close evidence is a separate
 teardown lifecycle and cannot rewrite an already established semantic result.
 
 A `RuntimeExecutionFailure` also carries `failure`, a closed runtime failure
-class with an optional quota `resetsAt` (#869) and quota `scope` (#1271). An adapter sets it from
-structured runtime fields only, never from prose; without one the class is
-`unknown`. A class the vendored OAR derives from error text is marked, and the
-adapter sends it as `unknown`. TaskRunner copies it to `task.fail.failure`
+class with an optional quota `resetsAt` (#869) and quota `scope` (#1271). An adapter uses the runtime evidence listed below. Without that evidence
+the class is `unknown`. A class the vendored OAR derives from a generic error-text rule is marked, and
+the adapter sends it as `unknown`. TaskRunner copies it to `task.fail.failure`
 when the server advertises `runtime-failure-class`, and gives a failure it
 makes itself `unknown`, except an Agent-memory start refusal (below). It keeps `scope` only when the server also advertises
 `runtime-quota-scope`. The class never changes `retry`.
@@ -1987,9 +2013,9 @@ makes itself `unknown`, except an Agent-memory start refusal (below). It keeps `
 | Runtime | Evidence |
 |---|---|
 | Claude | the turn's last `assistant.error`; a `rate_limit` with a `rejected` `rate_limit_event` is `quota` with its `resetsAt`, otherwise `rate_limited`; else `result.api_error_status`. A `quota` takes `scope` from `rate_limit_info.rateLimitType`: `five_hour` and `seven_day` are `account`, `seven_day_opus` and `seven_day_sonnet` are `model`, any other value or none gives no `scope` |
-| Codex | `turn.error.codexErrorInfo`, through the vendored OAR table; `unauthorized` stays `unknown`, and an `other` class OAR takes from Anthropic's error wording is sent as `unknown` |
+| Codex | the vendored OAR turn outcome from `turn.error.codexErrorInfo`. Quota can carry OAR's reset time from a structured provider error or a native account-limit update bound to the failing turn. `unauthorized` and an `other` class OAR takes from Anthropic's generic error wording are sent as `unknown` |
 | Grok | the vendored OAR turn outcome, and the start `RuntimeFailureError`; -32003 covers every 429, so a usage limit shows as `rate_limited`; a class OAR derives from the error text (a failed prompt that is not a process exit, -32000 or -32003, and whose last ended `retry_state` is missing or has an `error_type` outside Grok's table) is sent as `unknown` |
-| agy | the vendored OAR turn outcome; a class OAR took from error text stays `unknown` |
+| agy | the vendored OAR turn outcome, including the reset time from a native quota notice recognized by OAR. A class OAR took from a generic error-text rule is sent as `unknown` |
 | dsh | the native `LlmFailure` code, then its HTTP status, through the vendored OAR dsh table; no class comes from error text |
 | Pi | no structured field: `unknown` |
 
@@ -2576,7 +2602,7 @@ names its member context, native thread UUID, explicit loopback WebSocket or
 Unix endpoint, and starting notification sequence. The operator must configure
 each native session with that same member's Team MCP grant; the relay does not
 infer or establish that mapping. The relay reads the Codex version and warns
-when it is not the qualified `codex-cli 0.160.0`; it does not refuse, and the
+when it is not the qualified `codex-cli 0.169.0`; it does not refuse, and the
 receipt parser still fails closed on a changed receipt shape. This remains
 warn-only and is not affected by a Host-configured version block, because the
 relay is not TaskRunner admission. This is a client CLI binding,
@@ -2625,6 +2651,37 @@ into one content-addressed snapshot, resolves every requested id from exactly on
 snapshot before claim, and rejects missing ids or colliding server names.
 Runtime selection also requires an adapter that advertises `mcpToolsets`; no
 semantic fallback to a tool-less runtime exists.
+The Host is responsible for credentials its connectors echo in tool replies
+in both direct and search exposure.
+
+In search mode, the outer runtime's MCP call timeout bounds the approval
+window for high-risk tool calls.
+
+### Search exposure
+
+`McpToolsetConfig.exposure` defaults to `direct`. A qualified ordinary Attempt
+can select one or more `search` toolsets and receive one SDK-owned `byoktools`
+stdio server. Selected direct toolsets keep their native names and mounting.
+If a selected server occupies the hub name, admission declines the search
+Attempt before claim. The name remains available in direct-only tasks.
+
+- `tool_search({ query })` freezes the selected search catalog on first use.
+  It searches names and descriptions lexically and returns up to five
+  `{ server, tool, description, inputSchema }` entries within a 256 KiB budget.
+- `call_tool({ server, tool, arguments })` requires the exact server and tool
+  from that frozen catalog. It validates the inner arguments and routes the
+  call over stdio using the task's workspace and the target server's private
+  launch context. The hub checks task liveness before dispatch.
+- SDK tool authorization uses the inner identity and arguments. The existing
+  `mcp` field on a qualified hub `tool_use` identifies the inner attempt when
+  the outer identity, call ID, raw arguments and frozen catalog agree.
+  `tool_search` and hub `tool_result` events keep the outer identity. A target
+  server receipt establishes execution.
+
+Search is qualified only for the combinations in the
+[adapter capabilities](adapter-capabilities.md#mcp-toolset-search) table.
+Prepared inputs, native-sessions, durable lanes, and injected adapters require
+`direct`.
 
 `command` must be an absolute path. A definition carrying a bare name, a
 relative path (`mcp_toolset_command_not_absolute`) or a command starting with
@@ -2669,21 +2726,22 @@ effect, and that runtime handles the server exactly as it handles a server
 without `approveTools`. Codex declares the capability; other bundled runtimes
 do not. No approval declaration or capability is added to wire.
 
-Codex projects only `tools.<exact-name>.approval_mode = "approve"` in the
-thread config for both start and resume, alongside the separate fixed SDK
-helper grants. It does not approve tools on any other server, add an
-`enabled_tools` filter or set `default_tools_approval_mode`. Unknown/misspelled
-tool names do not fail open or trigger extra SDK discovery: the thread may open,
-but the real unapproved tool remains subject to the runtime's existing refusal.
-There is no new status API or SDK `tools/list` probe for Codex.
+On Codex, `approveTools` is the visible allowlist for each injected Host
+server. For both thread start and resume, the SDK writes those exact names to
+`enabled_tools` and preapproves them via `tools.<exact-name>.approval_mode`.
+SDK helper servers use their own fixed tool lists. An omitted or empty grant
+exposes zero tools on that server. A misspelled name never exposes the intended
+tool. Tool annotations such as `readOnlyHint` do not expand the list. Unlisted
+tools cannot be invoked or opened through an ad hoc approval. The SDK keeps
+`approvalPolicy` at `never`, including when native interactions are enabled.
 
-This is an explicit local approval declaration, not a read-only/mutating
-classifier, a tool deny list or a sandbox. `approvalPolicy` stays `never`,
-with or without nativeInteractions. Existing user runtime policy
-and native interaction behavior still apply; absence of a Host declaration
-means no additional SDK approval, not a revocation of user configuration.
-Remote offers, prompts, tool descriptions and transcript contents cannot author
-these declarations.
+A Codex offer with required toolsets needs CLI 0.48.0 or later. The adapter
+declines it before claim if the installed version is older or unreadable.
+With direct injection, Codex merges settings for servers sharing a name.
+The SDK therefore refuses a collision between an effective user server and an
+injected server before thread open even under `inherit`. Unrelated inherited
+servers keep their user configuration. Only the local Host definition can
+author grants.
 
 ### The launch working directory
 
@@ -2903,13 +2961,10 @@ offers: `ownReadOnlyToolsets` validates the ids
 refuses an execution whose `requiredToolsets` names a toolset the list does not
 hold (`packages/bot-collaboration/src/rules/team.ts:14`).
 
-One declaration per product toolset is enough. A toolset carrying
-`approveTools` runs on every runtime since 0.35.0: the daemon projects the
-grant only to a runtime whose descriptor declares `mcpToolApprovals: true`
-(Codex, `packages/client/src/adapters/codex/codex-adapter.ts:139`,
-`task-runner/offer-runtime.ts:239`), and it takes no part in admission or
-runtime selection (#1324). A Host that split a toolset into one id per runtime
-can merge the copies.
+A Host can share one toolset declaration across runtimes. The daemon
+projects `approveTools` only to a runtime that declares `mcpToolApprovals`.
+On Codex the list controls which tools are exposed from each injected server.
+Codex checks the CLI version during admission for an offer carrying toolsets.
 
 **A CLI tool is an MCP stdio toolset.** The wire carries a logical id and
 nothing else, and the daemon starts a toolset server as one stdio child with
@@ -3388,6 +3443,16 @@ No arbitrary binary path, digest override or
 PATH search is admitted. The directory is a deployment integrity boundary, not
 a signer authentication mechanism. Omitting the option retains installed SDK
 package resolution.
+
+Embedded Hosts can call `resolveAgentMemoryFilesystemHelper(assetRoot?)` from
+`@byok-sdk/client/agent-memory` to get the verified helper path for the current
+process platform and architecture. Pass that path and any explicit asset root
+to `openAgentMemoryFilesystemHelper` to open a filesystem for one Agent home.
+For a device-sync check, `checkAgentMemoryHome(home, { scope: "resident" })`
+uses the device reader and refusal codes for `MEMORY.md` without opening the
+helper or walking `notes/`. The default `full` scope also checks the commit
+start record and uses the platform's secure filesystem. Both verdicts are
+advisory.
 
 Helper builds use Go
 1.26.5, `CGO_ENABLED=0`, `-buildvcs=false` and `-trimpath`. Product re-signing is
@@ -4193,7 +4258,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.2 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.120.0 source at `packages/client/vendor/oar/a122061/`, from upstream commit `a12206106fa12b7e11c09c4ff6d60c322712018e`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.2 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.121.0 source at `packages/client/vendor/oar/a41628f/`, from upstream commit `a41628f03dd7f7a60491df0d27798b9b24462a54`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -4600,15 +4665,15 @@ native identity drift dispose the process. Opt-in launches Claude with
 `--dangerously-skip-permissions`; the pass-through above keeps that mode from
 becoming a second permission system.
 
-Codex is qualified against CLI 0.160.0. As in OAR, the version is read and by
-default does not gate: Codex updates itself, so any other version is admitted
-with a `warn` version verdict. Native contracts are probed
-instead (app-server presence). The only exception is a Host-configured version
-policy whose block matches the installed version: that version is declined
-before claim with `runtime_unavailable` / `version_blocked`, non-retryably.
-This is not a minimum-version check, and the SDK never installs, repairs or
-self-updates the runtime. Every session, native opt-in included, opens/resumes
-with `approvalPolicy: never`, so Codex never asks for tool permission. The sandbox is `danger-full-access` by default, as in
+Codex is qualified against CLI 0.169.0. As in OAR, the version is read and by
+default other versions receive a `warn` verdict. Detection probes for the
+app-server subcommand. A Host-configured version block declines the offer
+before claim with
+`runtime_unavailable` / `version_blocked`, non-retryably. Offers that require
+MCP toolsets also need [CLI 0.48.0 or later](#task-scoped-host-mcp-toolsets).
+The SDK never installs, repairs or self-updates the runtime. Each session,
+including native opt-in, opens or resumes with `approvalPolicy: never`.
+The sandbox is `danger-full-access` by default, as in
 OAR. `DaemonConfig.codexSandbox` selects `read-only` or `workspace-write`, or
 `inherit` to pass no sandbox override so the user's own `config.toml` applies.
 Only `item/tool/requestUserInput` is mapped; a command/file approval request

@@ -12,6 +12,7 @@ import { CONTRACT_REPLY_CHUNKS, callOnceThenReply, mcpTool, startLoopbackProvide
 import { testExecutionScratch } from '../fixtures/execution-scratch';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 
+import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('codex', QUALIFIED_CODEX_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const adapter = (options: CodexAdapterOptions = {}) => new CodexAdapter({ resolveBin, sandbox: 'inherit', operationTimeoutMs: 60_000, ...options });
@@ -21,7 +22,7 @@ const MEMORY_MARKER = 'BYOK-CONTRACT-CODEX-MEMORY-0f47';
 const FIRST_MARKER = 'BYOK-CONTRACT-CODEX-FIRST-TURN-93b8';
 const placeholderKey = 'sk-runtime-contract-placeholder';
 
-/** Codex's own `--version` text: `codex-cli 0.160.0`. */
+/** Codex prints the version token after the `codex-cli` prefix. */
 const identifies = (version: string, expected: string) => /^codex-cli (\S+)$/.exec(version.trim())?.[1] === expected;
 
 async function detectEnv(label: string, files: Record<string, string> = {}) {
@@ -116,6 +117,15 @@ const resumeTurns = once(async () => {
   } finally {
     await provider.close();
   }
+});
+
+defineMcpSearchProbes({
+  runtime: 'codex', variant: 'agentUserContext=inherit,agentUserMcpServers=inherit,sandbox=inherit', wire: 'openai-responses',
+  async configure(box, provider, spawnFn) {
+    const home = path.join(box.home, '.codex');
+    await fs.mkdir(home);
+    return { adapter: adapter({ spawnFn }), env: await writeUserHome(box, home, provider.baseUrl, {}) };
+  },
 });
 
 const excluded = once(() => turn('excluded'));

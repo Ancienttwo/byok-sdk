@@ -79,6 +79,8 @@ export interface SyncFacts extends Pick<IntentFacts, 'intent'> {
    * The store writes the execution row with the intent, so an intent always has one.
    */
   executionStarted(turnId: string): boolean;
+  /** Preparation error from the K4 intent, when the store exposes it. */
+  preparationError?(turnId: string): string | undefined;
   /**
    * The Turn's identity can never run again. `result_retired`: the store compacted the intent before this sync saw its result,
    * or the occurrence of a routine Turn. `turn_retired`: retention retired the Turn id.
@@ -167,6 +169,8 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
     }
     turn.status = intent.conclusion === 'succeeded' ? 'succeeded' : 'failed';
     turn.conclusion = intent.conclusion;
+    const preparationError = facts.preparationError?.(turn.id);
+    if (intent.conclusion === 'failed' && preparationError === 'coordination_input_invalid') turn.settleCode = preparationError;
     if (!turn.reported) {
       publish(`bot-turn:${turn.id}`, json({ owner: turn.botId, ...turn }));
       turn.reported = true;
@@ -255,8 +259,9 @@ export function syncTurn<E extends FreezeExecution, R extends ContextRoutine>(st
   } : undefined;
   const execution = turn.source === 'room_slot' ? { ...base, agentMessageContext: undefined,
     payload: { ...roomPayload, agentMemory: ROOM_AGENT_MEMORY[roomPayload.agentMemory ?? 'read-if-admitted'] } } : { ...base, ...chain };
-  // The offer keeps every template field, and sets the frozen instruction and result contract.
+  // SAFETY: The offer preserves the full template E and adds only protocol payload fields for this Turn.
   const offer = { ...execution, payload: { ...execution.payload, instruction: frozen.instruction,
+    ...(turn.source === 'user' && turn.images !== undefined ? { images: turn.images } : {}),
     terminalProjection: { mode: 'result-document' as const, contract: BOT_TURN_OUTCOME_CONTRACT, schema } } } as unknown as E;
   for (const rejection of frozen.context.rejectedActions) rejection.consumedBy = turn.id;
   const read = history ?? room;

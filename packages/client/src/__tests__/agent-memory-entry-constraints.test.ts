@@ -210,6 +210,7 @@ describe('the embedded agent-memory public surface', () => {
       'isAgentMemorySecureFilesystemAvailable',
       'openAgentMemoryFilesystemHelper',
       'prependAgentMemoryGuidance',
+      'resolveAgentMemoryFilesystemHelper',
       'serveAgentMemoryMcpOverStdio',
     ]);
   });

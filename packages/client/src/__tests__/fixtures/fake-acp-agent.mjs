@@ -105,6 +105,10 @@ async function prompt(message) {
   // The daemon may put rules before the task; the last line selects the scenario.
   const input = full.trim().split('\n').at(-1) ?? '';
   // opencode's structured failures: data.errorName decides the class; a name outside the table leaves it to the words.
+  if (input === 'agy-quota') {
+    text('\n⚠ Individual quota reached. Please upgrade your subscription to increase your limits. Resets in 1h2m3s.\n');
+    result(message.id, { stopReason: 'end_turn' }); return;
+  }
   if (input.startsWith('opencode-error:')) {
     const [errorName, ...words] = input.slice('opencode-error:'.length).split('|');
     error(message.id, -32603, `Internal error: ${words.join('|')}`, { service: 'session', errorName }); return;

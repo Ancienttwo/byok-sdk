@@ -9,7 +9,7 @@ import { createInterface } from 'node:readline';
 import { spawnProcessTreeDescendant } from './process-tree-receipt.mjs';
 
 const argv = process.argv.slice(2);
-if (argv.includes('--version')) { console.log('codex-cli 0.160.0'); process.exit(0); }
+if (argv.includes('--version')) { console.log('codex-cli 0.169.0'); process.exit(0); }
 if (argv.includes('--help')) { console.log('app-server --listen stdio://'); process.exit(0); }
 if (argv[0] === 'auth') { console.log(JSON.stringify({ loggedIn: true })); process.exit(0); }
 if (argv[0] === 'login') { console.log('Logged in using ChatGPT'); process.exit(0); }
@@ -106,6 +106,7 @@ async function receive(msg) {
   if (msg.method === 'turn/interrupt' || msg.type === 'abort' || msg.request?.subtype === 'interrupt') timing('interrupt.receive', { id: msg.id });
   if (runtime === 'codex') {
     if (msg.method === 'initialize') send({ id: msg.id, result: { userAgent: 'task-runner-fixture' } });
+    if (msg.method === 'config/read') send({ id: msg.id, result: { config: {}, origins: {} } });
     if (msg.method === 'thread/start') { await gate(); send({ id: msg.id, result: { thread: { id: sessionId }, model: 'fixture-model' } }); }
     if (msg.method === 'turn/start') { send({ id: msg.id, result: { turn: { id: turnId } } }); setTimeout(run, 5); }
     if (msg.method === 'turn/interrupt') {

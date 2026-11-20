@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "6e36133a3271768e039ee307cc0c23f68757e4a6affd9380c4569fa06df7d39e"
+    "snapshotSha256": "9b70147ec2e9d500123fe281c7525cf5a330bcb5bb931584f4c663ea76174fe6"
   },
   "configFields": {
     "status": "tracked",
@@ -15,6 +15,25 @@
     "owner": "#1094"
   },
   "entries": [
+    {
+      "id": "sqlite-snapshot-read",
+      "impact": "additive",
+      "summary": "@byok-sdk/core/sqlite-node exposes readSqliteSnapshot and SqliteSnapshotError to read committed WAL data on a private copy without changing the original files.",
+      "migration": "packages/core/README.md#sqlite-snapshots",
+      "items": [
+        "export:@byok-sdk/core/sqlite-node#SqliteSnapshotError",
+        "export:@byok-sdk/core/sqlite-node#readSqliteSnapshot"
+      ]
+    },
+    {
+      "id": "bot-ledger-hot-journal",
+      "impact": "breaking",
+      "summary": "@byok-sdk/bot-collaboration inspectLedger rejects a ledger with a potentially hot rollback journal instead of recovering it on a private copy. Recover the ledger before inspecting it.",
+      "migration": "packages/bot-collaboration/README.md#ledger-compatibility",
+      "items": [
+        "behavior:bot-ledger-hot-journal"
+      ]
+    },
     {
       "id": "provider-store-credential-namespace",
       "impact": "breaking",
@@ -97,7 +116,7 @@
       "id": "mcp-toolset-exposure-config",
       "impact": "additive",
       "summary": "Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default.",
-      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2396",
+      "migration": "docs/releases/host-upgrade-next-minor.md#mcp-toolset-search",
       "items": [
         "config:mcpToolsets",
         "export:@byok-sdk/client#McpToolsetConfig"
@@ -111,6 +130,128 @@
       "items": [
         "bin:byok-mcp-hub",
         "export:@byok-sdk/client#SdkReservedHelperKind"
+      ]
+    },
+    {
+      "id": "dream-instruction-input-types",
+      "impact": "additive",
+      "summary": "Import DreamBudget, DreamInstructionInput and DreamWindow from @byok-sdk/protocol when typing inputs to buildDreamInstruction.",
+      "migration": "CHANGELOG.md#unreleased",
+      "items": [
+        "export:@byok-sdk/protocol#DreamBudget",
+        "export:@byok-sdk/protocol#DreamInstructionInput",
+        "export:@byok-sdk/protocol#DreamWindow",
+        "export:@byok-sdk/protocol#buildDreamInstruction"
+      ]
+    },
+    {
+      "id": "k4-memory-reader-dispatch",
+      "impact": "breaking",
+      "summary": "@byok-sdk/server/execution-core HostExecutionCore.enqueue can dispatch a payload.homeAccess memory-reader alongside other readers and the first open writer for the same Agent. Enqueue a dependent read after the write settles if it needs the completed write.",
+      "migration": "docs/host-execution-core.md#3-fifo-and-stable-task-identity",
+      "items": [
+        "behavior:k4-memory-reader-dispatch"
+      ]
+    },
+    {
+      "id": "bot-input-images",
+      "impact": "additive",
+      "summary": "BotCollaboration.input accepts { request, images } and forwards ordered image refs to K4. Coalescing starts a new batch before exceeding 16 images. Hosts can read coordination_input_invalid on a Turn whose image submission was refused.",
+      "migration": "packages/bot-collaboration/README.md#input-images",
+      "items": [
+        "export:@byok-sdk/bot-collaboration#BotCollaboration",
+        "export:@byok-sdk/bot-collaboration/host-kit#Command",
+        "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+        "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+        "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+        "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+        "export:@byok-sdk/bot-collaboration/rules#InputFields",
+        "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+        "export:@byok-sdk/bot-collaboration/rules#addTurn",
+        "export:@byok-sdk/bot-collaboration/rules#seatTurn"
+      ]
+    },
+    {
+      "id": "runtime-provider-key-resolvers",
+      "impact": "breaking",
+      "summary": "dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters require a Host resolveKey callback for each authenticated spawn. Remove dsh model.keyEnv. Plain JSON configuration cannot start these runtimes.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#AgyAdapter",
+        "export:@byok-sdk/client#AgyAdapterOptions",
+        "export:@byok-sdk/client#DshAdapterOptions",
+        "export:@byok-sdk/client#DshModelSelection",
+        "export:@byok-sdk/client/adapters#AgyAdapter",
+        "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+        "export:@byok-sdk/client/adapters#DshAdapterOptions",
+        "export:@byok-sdk/client/adapters#DshModelSelection",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
+    },
+    {
+      "id": "runtime-provider-key-environment",
+      "impact": "breaking",
+      "summary": "dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters authenticate through resolveKey and omit authPresent from installation detection. Remove provider key names from runtimeEnvironment.pass and allow, and use the Host store to determine whether an account has a saved key.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "items": [
+        "behavior:runtime-provider-key-environment"
+      ]
+    },
+    {
+      "id": "runtime-provider-key-minimum-length",
+      "impact": "breaking",
+      "summary": "dsh and agy resolveKey and Claude's BYOK environment reject credentials shorter than 20 characters or all whitespace. Set a placeholder of at least 20 characters for a local endpoint that does not authenticate.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "items": [
+        "behavior:runtime-provider-key-minimum-length"
+      ]
+    },
+    {
+      "id": "agent-memory-home-resident-check",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/agent-memory checkAgentMemoryHome supports resident scope so embedded Hosts can check MEMORY.md on device sync without opening the helper or walking notes.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-preflight-and-helper-path",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome"
+      ]
+    },
+    {
+      "id": "agent-memory-helper-path-resolver",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/agent-memory exports resolveAgentMemoryFilesystemHelper for embedded Hosts that need the verified installed or relocated SDK helper path.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-preflight-and-helper-path",
+      "items": [
+        "export:@byok-sdk/client/agent-memory#resolveAgentMemoryFilesystemHelper"
+      ]
+    },
+    {
+      "id": "codex-task-mcp-allowlist",
+      "impact": "breaking",
+      "summary": "Codex exposes only the exact local approveTools for each injected Host server. Add explicit grants for tools that previously ran through readOnlyHint or ad hoc approval. Rename colliding user or injected servers under inherit and upgrade Codex to at least 0.48.0 for toolset offers.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#codex-task-mcp-allowlists",
+      "items": [
+        "behavior:codex-task-mcp-allowlist"
+      ]
+    },
+    {
+      "id": "codex-task-mcp-version-floor",
+      "impact": "breaking",
+      "summary": "CodexAdapter declines offers requiring MCP toolsets before claim if the local CLI version predates 0.48.0 or cannot be determined.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#codex-task-mcp-allowlists",
+      "items": [
+        "export:@byok-sdk/client#CodexAdapter",
+        "export:@byok-sdk/client/adapters#CodexAdapter"
+      ]
+    },
+    {
+      "id": "inspect-store-service-state",
+      "impact": "additive",
+      "summary": "Embedded Hosts can inspect the lifecycle owner’s service and the daemon lock with inspectStoreServiceState before recovering a specific store. Proceed only on stopped and hold exclusive ownership through the write.",
+      "migration": "packages/client/README.md#service-state-for-a-store-directory",
+      "items": [
+        "export:@byok-sdk/client#inspectStoreServiceState",
+        "export:@byok-sdk/client#StoreServiceState"
       ]
     }
   ],
@@ -127,6 +268,18 @@
       "before": "optional schema-sha256=fba615fff84b94e3",
       "after": "optional schema-sha256=7d4f72ebf918d478",
       "entry": "mcp-toolset-exposure-config"
+    },
+    {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=0274d0856fb11b28",
+      "after": "optional schema-sha256=db0784c472ee1e10",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration#BotCollaboration",
+      "change": "changed",
+      "entry": "bot-input-images"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration#BotPersonaProjectionContext",
@@ -149,9 +302,54 @@
       "entry": "bot-persona-and-autonomy-context"
     },
     {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Command",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#InputBatch",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#SealReason",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#Turn",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/host-kit#UserInput",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
       "item": "export:@byok-sdk/bot-collaboration/host-kit#outcomeSchema",
       "change": "changed",
       "entry": "bot-persona-and-autonomy-context"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#InputFields",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#SyncFacts",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#addTurn",
+      "change": "changed",
+      "entry": "bot-input-images"
+    },
+    {
+      "item": "export:@byok-sdk/bot-collaboration/rules#seatTurn",
+      "change": "changed",
+      "entry": "bot-input-images"
     },
     {
       "item": "export:@byok-sdk/bot-collaboration/rules#syncTurn",
@@ -234,6 +432,31 @@
       "entry": "bot-testing-runner-injection"
     },
     {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client#AgyAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "codex-task-mcp-version-floor"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshModelSelection",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
       "item": "export:@byok-sdk/client#McpToolsetConfig",
       "change": "changed",
       "entry": "mcp-toolset-exposure-config"
@@ -242,6 +465,66 @@
       "item": "export:@byok-sdk/client#SdkReservedHelperKind",
       "change": "changed",
       "entry": "mcp-hub-sdk-helper"
+    },
+    {
+      "item": "export:@byok-sdk/client#StoreServiceState",
+      "change": "added",
+      "entry": "inspect-store-service-state"
+    },
+    {
+      "item": "export:@byok-sdk/client#inspectStoreServiceState",
+      "change": "added",
+      "entry": "inspect-store-service-state"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapter",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
+      "change": "changed",
+      "entry": "codex-task-mcp-version-floor"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshAdapterOptions",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshModelSelection",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "runtime-provider-key-resolvers"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome",
+      "change": "changed",
+      "entry": "agent-memory-home-resident-check"
+    },
+    {
+      "item": "export:@byok-sdk/client/agent-memory#resolveAgentMemoryFilesystemHelper",
+      "change": "added",
+      "entry": "agent-memory-helper-path-resolver"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#SqliteSnapshotError",
+      "change": "added",
+      "entry": "sqlite-snapshot-read"
+    },
+    {
+      "item": "export:@byok-sdk/core/sqlite-node#readSqliteSnapshot",
+      "change": "added",
+      "entry": "sqlite-snapshot-read"
     },
     {
       "item": "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES",
@@ -272,6 +555,26 @@
       "item": "export:@byok-sdk/keys#removeRetiredProviderCredentials",
       "change": "added",
       "entry": "provider-store-credential-namespace"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamBudget",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamInstructionInput",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#DreamWindow",
+      "change": "added",
+      "entry": "dream-instruction-input-types"
+    },
+    {
+      "item": "export:@byok-sdk/protocol#buildDreamInstruction",
+      "change": "changed",
+      "entry": "dream-instruction-input-types"
     },
     {
       "item": "store:keys-profile-store",

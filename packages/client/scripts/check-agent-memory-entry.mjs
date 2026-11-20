@@ -49,6 +49,7 @@ assert.deepEqual(Object.keys(agentMemory).sort(), [
   'isAgentMemorySecureFilesystemAvailable',
   'openAgentMemoryFilesystemHelper',
   'prependAgentMemoryGuidance',
+  'resolveAgentMemoryFilesystemHelper',
   'serveAgentMemoryMcpOverStdio',
 ]);
 

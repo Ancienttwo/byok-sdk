@@ -4,7 +4,7 @@ import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command
 import { type Runner } from '../util/exec-runner.js';
 import { defaultRunner, launchUnit, runBounded } from './platform-command.js';
 import { createManagedLifecycle, type ManagedLifecycleFs, type ManagedServiceLifecycle } from './managed-lifecycle.js';
-import { sanitizeServiceName, type ServiceDefinition, type ServiceProgram } from './service-types.js';
+import { sanitizeServiceName, type ServiceDefinition, type ServiceManagerQuery, type ServiceProgram } from './service-types.js';
 import { cmdQuote, generateWindowsUserLauncher, SERVICE_UNIT_MARKER, serviceLauncherPath, serviceStateDir, ServiceUnitError } from './service-unit.js';
 
 /** DI seams for tests; the real ones start Windows processes. */
@@ -64,7 +64,22 @@ async function runStopProgram(program: ServiceProgram): Promise<number | null> {
 /** PowerShell that prints the pid of every `cmd.exe` whose command line names `launcherPath`. */
 function launcherQuery(launcherPath: string): string {
   const literal = launcherPath.replaceAll("'", "''");
-  return `$p = '${literal}'; Get-CimInstance Win32_Process -Filter 'Name=''cmd.exe''' | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | ForEach-Object { $_.ProcessId }`;
+  return `$ErrorActionPreference = 'Stop'; $p = '${literal}'; $launcherPids = @(); $hidden = $false; Get-CimInstance Win32_Process -Filter 'Name=''cmd.exe''' | ForEach-Object { if (-not $_.CommandLine) { $hidden = $true } elseif ($_.CommandLine.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $launcherPids += $_.ProcessId } }; if ($launcherPids.Count -gt 0) { $launcherPids } elseif ($hidden) { throw 'Incomplete launcher process visibility' }`;
+}
+
+async function queryLauncher(launcherPath: string, run: Runner) {
+  const result = await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', launcherQuery(launcherPath)]);
+  const pids = result.stdout.split(/\s+/u).filter(Boolean);
+  const determinate = result.code === 0 && result.stderr.trim() === '' && pids.every(pid => /^[1-9]\d*$/u.test(pid));
+  return { running: determinate && pids.length > 0, determinate,
+    detail: !determinate ? (result.stderr || result.stdout).trim() : pids.length > 0 ? `launcher running (pid ${pids.join(', ')})` : 'launcher not running',
+    code: result.code };
+}
+
+/** Check the launcher path a user-scope install registers for this store. @internal */
+export async function queryWindowsUserService(launcherPath: string, { run = defaultRunner }: WindowsUserDeps = {}): Promise<ServiceManagerQuery> {
+  const { running, determinate, detail } = await queryLauncher(launcherPath, run);
+  return { running, determinate, detail };
 }
 
 /**
@@ -107,16 +122,10 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
   const unit = generateWindowsStartupUnit(launcherPath);
   const launcher = generateWindowsUserLauncher(def.program, stopMarker);
 
-  async function launcherQueryResult() {
-    const result = await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', launcherQuery(launcherPath)]);
-    const pids = result.code === 0 ? result.stdout.split(/\s+/u).filter(Boolean) : [];
-    return { ...result, pids };
-  }
-
   async function launcherRunning(): Promise<boolean> {
-    const result = await launcherQueryResult();
-    if (result.code !== 0) throw new Error(`launcher process query failed (exit ${result.code}): ${(result.stderr || result.stdout).trim()}`);
-    return result.pids.length > 0;
+    const result = await queryLauncher(launcherPath, run);
+    if (!result.determinate) throw new Error(`launcher process query failed (exit ${result.code}): ${result.detail}`);
+    return result.running;
   }
 
   async function start(): Promise<void> {
@@ -143,6 +152,7 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
 
   return createManagedLifecycle(def, {
     serviceName: name,
+    registration: () => ({ manager: 'windows-user', launcher: launcherPath }),
     unitPath,
     launcherPath,
     files: () => [
@@ -162,11 +172,6 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
     },
     start,
     stop,
-    async query() {
-      const result = await launcherQueryResult();
-      if (result.code !== 0) return { running: false, determinate: false, detail: (result.stderr || result.stdout).trim() };
-      const running = result.pids.length > 0;
-      return { running, determinate: true, detail: running ? `launcher running (pid ${result.pids.join(', ')})` : 'launcher not running' };
-    },
+    query: () => queryWindowsUserService(launcherPath, { run }),
   }, fs, gateRoot);
 }

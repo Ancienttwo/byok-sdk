@@ -2,10 +2,12 @@ import { appendFileSync, existsSync, readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { setTimeout } from 'node:timers/promises';
 
-const [configPath, receiptPath] = process.argv.slice(2);
+const [configPath, receiptPath, contextPath] = process.argv.slice(2);
 const config = () => JSON.parse(readFileSync(configPath, 'utf8'));
-const record = (event) => appendFileSync(receiptPath, `${JSON.stringify({ ...event, pid: process.pid })}\n`);
+const record = (event) => appendFileSync(receiptPath, `${JSON.stringify({ ...event, pid: process.pid, ms: Date.now() })}\n`);
 record({ method: 'start', cwd: process.cwd(), env: process.env });
+process.once('exit', () => record({ method: 'exit' }));
+process.once('SIGTERM', () => process.exit(0));
 const input = createInterface({ input: process.stdin });
 input.on('line', async (line) => {
   const { id, method, params } = JSON.parse(line);
@@ -32,8 +34,15 @@ input.on('line', async (line) => {
       break;
     }
     case 'tools/call': {
-      const { behavior } = config();
+      const { behavior, callDelayMs } = config();
       if (behavior === 'hang') break;
+      if (callDelayMs !== undefined) await setTimeout(callDelayMs);
+      if (behavior === 'echo-launch-secrets') {
+        const { contextToken } = JSON.parse(readFileSync(contextPath, 'utf8'));
+        process.stderr.write(contextToken + '\n');
+        send({ content: [{ type: 'text', text: process.env.HUB_CONNECTOR_TOKEN }], structuredContent: { [contextToken]: true } });
+        break;
+      }
       if (behavior === 'invalid-result') {
         send({ content: [], structuredContent: { text: 7 } });
         break;

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { expect } from 'vitest';
 import { ClaudeAdapter, type ClaudeAdapterOptions } from '../../adapters/claude/claude-adapter';
 import { ClaudeStreamSession } from '../../adapters/claude/stream-session';
+import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime';
 import { memoryClaude } from '../fixtures/memory-claude';
 import { QUALIFIED_CLAUDE_VERSION } from '../../adapters/claude/claude-version';
 import { CLAUDE_ABSENT_ISOLATION_SOURCES } from '../../adapters/claude/claude-capabilities';
@@ -18,6 +19,7 @@ import { startPreparedOperation } from '../fixtures/prepared-operation';
 
 const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
 
+import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('claude', QUALIFIED_CLAUDE_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const adapter = (options: ClaudeAdapterOptions = {}) => new ClaudeAdapter({ resolveBin, ...options });
@@ -30,7 +32,7 @@ const MEMORY_MARKER = 'BYOK-CONTRACT-CLAUDE-MEMORY-d3a6';
 /** The system-prompt section Claude adds for any output style other than the default, as JSON in the raw body. */
 const OUTPUT_STYLE_SECTION = JSON.stringify('according to your "Output Style"').slice(1, -1);
 
-/** Claude Code's own `--version` text: `2.1.312 (Claude Code)`. */
+/** Claude Code prints the version token before the `(Claude Code)` suffix. */
 const identifies = (version: string, expected: string) => /^(\S+) \(Claude Code\)$/.exec(version.trim())?.[1] === expected;
 
 async function detectEnv(label: string, files: Record<string, string> = {}) {
@@ -132,6 +134,15 @@ async function gateTurn() {
     await provider.close();
   }
 }
+
+defineMcpSearchProbes({
+  runtime: 'claude', variant: 'agentSessionPersistence=enabled,agentUserContext=inherit', wire: 'anthropic-messages', model: 'claude-sonnet-4-6',
+  async configure(box, provider, spawnFn) {
+    const config = path.join(box.home, '.claude');
+    await fs.mkdir(config);
+    return { adapter: new ClaudeAdapter({ spawnFn }), env: { ...runtimeEnv(box.home, config, provider.origin, {}), BYOK_CLAUDE_BIN: target.bin } };
+  },
+});
 
 const excluded = once(() => turn('excluded'));
 const inherited = once(() => turn('inherit'));
@@ -275,10 +286,10 @@ const ownTurn = once(async () => {
 defineRuntimeCases(`claude runtime contract: claude cases (${target.mode} ${target.expectedVersion})`, {
   streamSettlement: ['retains redacted replies, settles interrupts before the result and records exit before refusals', check(async () => {
     const cli = memoryClaude();
-    const stream = new ClaudeStreamSession(cli.child as never);
     const secret = 'claude-contract-fake-key';
+    const stream = new ClaudeStreamSession(cli.child as never, sessionCredentialRedactor({ env: { ANTHROPIC_API_KEY: secret } }));
     const replies: Promise<void>[] = [];
-    await stream.open({ env: { ANTHROPIC_API_KEY: secret }, maxRetainedBytes: 64 * 1024, mcpServers: {},
+    await stream.open({ maxRetainedBytes: 64 * 1024,
       onFrame: () => {}, onExit: () => {},
       onAppRequest: (_request, respond) => { replies.push(respond({ type: 'control_response', response: { request_id: 'permission', subtype: 'success', response: { secret } } })); },
     });

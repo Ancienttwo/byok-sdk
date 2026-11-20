@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Synthetic Codex 0.160.0 app-server frames only. No eval, shell, provider, credentials or MCP.
+// Synthetic Codex 0.169.0 app-server frames only. No eval, shell, provider, credentials or MCP.
 import readline from 'node:readline';
 import { appendFileSync } from 'node:fs';
 const args = process.argv.slice(2);
-if (args.length === 1 && args[0] === '--version') { console.log('codex-cli 0.160.0'); process.exit(0); }
+if (args.length === 1 && args[0] === '--version') { console.log('codex-cli 0.169.0'); process.exit(0); }
 if (args[0] === 'login' && args[1] === 'status') { console.log('Not logged in'); process.exit(1); }
 if (args[0] !== 'app-server') process.exit(2);
 if (args.includes('--help')) { console.log('app-server --listen stdio://'); process.exit(0); }

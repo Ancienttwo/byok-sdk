@@ -12,6 +12,7 @@ import type { AcceptedOfferPayload } from './support.js';
 import type { OfferAdmissionTiming } from './offer-admission-timing.js';
 import { hostFor } from './host.js';
 import { createOfferFacts, offerSettled } from './state.js';
+import { MCP_HUB_SERVER_NAME } from '../../mcp/hub/protocol.js';
 
 /**
  * Suppress redelivered offers for owned tasks and recently finished tasks.
@@ -165,27 +166,28 @@ export function admitOfferLimits(this: TaskRunner, phase: OfferPhaseContext, pay
   this['deviceTaskReservations'].add(taskId);
 
   const requiredToolsets = payload.requiredToolsets;
-  const registry = requiredToolsets === undefined ? undefined : this['deps'].getMcpToolsets?.();
-  const resolvedMcp = requiredToolsets ? this['resolveMcpServers'](requiredToolsets, registry) : undefined;
+  const snapshot = requiredToolsets === undefined ? undefined : this['deps'].getMcpToolsetSnapshot?.();
+  const resolvedMcp = requiredToolsets ? this['resolveMcpServers'](requiredToolsets, snapshot) : undefined;
   if (resolvedMcp && !resolvedMcp.ok) {
     decline({ reason: resolvedMcp.reason, retryable: true });
     return undefined;
   }
-  const searchToolset = requiredToolsets?.find((id) => registry?.get(id)?.exposure === 'search');
-  if (searchToolset !== undefined) {
-    if (offeredPreparation(payload) !== undefined) {
+  const searchToolset = requiredToolsets?.find((id) => snapshot?.toolsets.get(id)?.exposure === 'search');
+  if (searchToolset !== undefined && resolvedMcp?.ok) {
+    if (payload.nativeSessions !== undefined || offeredPreparation(payload) !== undefined) {
+      const lane = payload.nativeSessions === undefined ? 'prepared inputs' : 'native-sessions';
       decline({
-        reason: `prepared inputs require direct exposure for MCP toolset ${JSON.stringify(searchToolset)}`,
+        reason: `${lane} require direct exposure for MCP toolset ${JSON.stringify(searchToolset)}`,
         retryable: false,
         code: 'unsupported_input',
       });
-    } else {
-      decline({
-        reason: `MCP toolset ${JSON.stringify(searchToolset)} requires search exposure, which is unavailable on this device`,
-        retryable: true,
-      });
+      return undefined;
     }
-    return undefined;
+    const collision = [...resolvedMcp.toolsetIdByServer.keys()].find(name => name.toLowerCase() === MCP_HUB_SERVER_NAME);
+    if (collision !== undefined) {
+      decline({ reason: `MCP server ${JSON.stringify(collision)} conflicts with the search hub name ${MCP_HUB_SERVER_NAME}`, retryable: true });
+      return undefined;
+    }
   }
   return { requiredToolsets, resolvedMcp };
 }

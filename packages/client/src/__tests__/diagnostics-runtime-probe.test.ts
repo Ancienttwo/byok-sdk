@@ -28,7 +28,7 @@ describe('adapters/runtime-adapters: createRuntimeAdapters', () => {
   });
 
   it('builds the claude adapter with the configured runtimes.claude.versionPolicy, as createDaemon does', () => {
-    const versionPolicy = { qualifiedVersion: '2.1.312', unqualified: 'block', allow: [{ kind: 'exact', version: '2.1.313' }] } as const;
+    const versionPolicy = { qualifiedVersion: '2.1.326', unqualified: 'block', allow: [{ kind: 'exact', version: '2.1.313' }] } as const;
     const [claude] = createRuntimeAdapters({ ...BASE_CONFIG, runtimeAllowlist: ['claude'], runtimes: { claude: { versionPolicy } } });
     expect(claude?.descriptor.versionPolicy).toEqual(versionPolicy);
   });
@@ -70,9 +70,9 @@ describe('diagnostics/runtime-probe: probeRuntimes', () => {
 
   it('carries an unqualified-version warning into the probe', async () => {
     const [probed] = await probeRuntimes([
-      new StubRuntimeAdapter('codex', { kind: 'available', version: 'codex-cli 0.161.0', versionVerdict: { state: 'warn', qualifiedVersion: '0.160.0' } }),
+      new StubRuntimeAdapter('codex', { kind: 'available', version: 'codex-cli 0.161.0', versionVerdict: { state: 'warn', qualifiedVersion: '0.169.0' } }),
     ]);
-    expect(probed).toMatchObject({ present: true, version: 'codex-cli 0.161.0', qualifiedVersion: '0.160.0' });
+    expect(probed).toMatchObject({ present: true, version: 'codex-cli 0.161.0', qualifiedVersion: '0.169.0' });
   });
 
   it('probes multiple adapters in parallel, preserving input order', async () => {

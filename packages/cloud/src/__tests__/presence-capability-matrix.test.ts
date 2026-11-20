@@ -34,7 +34,7 @@ describe('presence capability matrix', () => {
       body: JSON.stringify({
         level: 'online',
         runtimes: [
-          { id: 'claude', version: '2.1.312', capabilities: { ...MATRIX, futureFlag: true, isolation: { ...MATRIX.isolation, futureSource: true } } },
+          { id: 'claude', version: '2.1.326', capabilities: { ...MATRIX, futureFlag: true, isolation: { ...MATRIX.isolation, futureSource: true } } },
           { id: 'codex', version: '0.165.0' },
         ],
       }),
@@ -42,7 +42,7 @@ describe('presence capability matrix', () => {
     expect(response.status).toBe(200);
     const hint = await harness.core.presence.read(TENANT_A, device.deviceId);
     expect(hint?.runtimes).toEqual([
-      { id: 'claude', version: '2.1.312', capabilities: MATRIX },
+      { id: 'claude', version: '2.1.326', capabilities: MATRIX },
       { id: 'codex', version: '0.165.0' },
     ]);
     expect(Object.isFrozen(hint?.runtimes?.[0]?.capabilities?.isolation)).toBe(true);

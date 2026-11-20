@@ -47,7 +47,7 @@ checks the running model's image support before delivery.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.1` | `2.1.312` | `0.160.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.5.2` | `1.5.2` |
+| Qualified version (PR CI) | — | `1.5.11` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.5.2` | `1.5.2` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Image input declared by descriptor | `images` | no | no | no | no | no | no | yes | no |
@@ -65,6 +65,21 @@ checks the running model's image support before delivery.
 | Keeps user MCP servers out | `isolation.userMcpServers` | yes | yes | yes | yes | yes | no | no | no |
 | Turns off the transcript store | `isolation.sessionPersistence` | no | yes | no | no | no | no | no | no |
 <!-- generated:capability-matrix:end -->
+
+### MCP toolset search
+
+Search qualification additionally binds the installed version, host platform,
+SDK launch mode and lane. The `mcpToolsets` capability above describes the
+adapter's support for task-scoped toolsets.
+
+| Runtime | Ordinary search qualification |
+| --- | --- |
+| dsh | `0.2.2-rc.1` on macOS arm64, SDK-built, `sandbox: 'danger-full-access'`, `BYOK_DSH_BIN` executable source, Node distribution helper and SDK authorization `all` |
+| Pi | `1.5.2` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
+| Claude, Codex, Grok, agy, OpenCode 1.x and 2.x | Closed |
+
+The [runtime evidence](researches/2026-11-19-mcp-search-runtime-qualification.md)
+records the exact launch conditions and the unavailable combinations.
 
 ## Pi background subagents in packaged products (#1589)
 
@@ -422,7 +437,7 @@ Under `excluded` these still load and can reach the model:
   Not probed.
 
 Claude declares `userInstructions`, `userOutputStyle` and `userMemory` for
-`excluded`. The runtime contract suite checks each at the qualified 2.1.312
+`excluded`. The runtime contract suite checks each at the qualified version
 with a marker that appears when inherited and is absent under `excluded`: a
 user `<config>/CLAUDE.md`, a user `outputStyle`, and auto memory in
 `<config>/projects/<cwd key>/memory/MEMORY.md`. A `CLAUDE.md` in a parent of
@@ -604,7 +619,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads unless `agentUserContext` is also `excluded`. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/a122061/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/a41628f/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -660,7 +675,7 @@ ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
 limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
-The [vendored launch profile](../packages/client/vendor/oar/a122061/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/a41628f/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -1005,7 +1020,7 @@ What the upstream runtimes offer that the SDK does not use:
 
 - Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
   thread that "should not be materialized on disk"), and `codex exec --help`
-  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/a122061/runtimes/codex/open.ts)
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/a41628f/runtimes/codex/open.ts)
   does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
   leaves the other `CODEX_HOME` files alone.
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
@@ -1112,7 +1127,7 @@ and adding persona text alone does not establish isolation.
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/a122061`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/a41628f`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 
@@ -1235,20 +1250,19 @@ developer preview) through the vendored OAR dsh runtime. Each session runs one
 bridge plugin on, and talks JSON lines over stdio. No ACP message is exchanged
 and `@agentclientprotocol/sdk` does not load. It runs on the custom-harness path (`harnessId: 'dsh'`). It takes no dispatch selection.
 `createDaemon` and `createRuntimeAdapters` build it when `runtimeAllowlist` lists
-`dsh`, from the required `runtimes.dsh` (`home`, `model`, and optional `sandbox`
-and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
+`dsh`. The embedded configuration requires `runtimes.dsh.home`, `model` and
+`resolveKey`, with optional `sandbox` and `versionPolicy`.
 
-- Model: the required `model` option names `provider`, `model`, `keyEnv` and,
-  for `custom`, `baseUrl`. The adapter writes the provider route, `keyEnv` and
-  `baseUrl` into a per-execution `--patch` overlay (mode 0600, in the execution
-  scratch directory), beside OAR's bridge overlay. The model travels as the
-  session's selection, not in the patch. `deepseek` uses the DeepSeek API route; `custom` is a hand-declared OpenAI-compatible
-  route; any other provider id is a dsh pi-ai catalog route. The key itself is
-  only in the environment, under `keyEnv`; `baseUrl` refuses credentials and a
-  query string. `keyEnv` must contain `KEY`,
-  `TOKEN`, `SECRET` or `PASSWORD`, which dsh strips from tool processes. It
-  must not start with `BYOK_` (the runtime environment drops those) or `DSH_`,
-  and it must not be `DEEPSEEK_API_KEY`, which dsh `web_search` also reads.
+- Model: `model` names `provider`, `model` and, for `custom`, `baseUrl`.
+  `deepseek` selects the DeepSeek API route. `custom` declares an
+  OpenAI-compatible route. Other ids select a dsh pi-ai catalog provider.
+  The 0600 `--patch` overlay in execution scratch contains the route, the
+  name `BYOK_DSH_PROVIDER_API_KEY` and the configured endpoint. `baseUrl`
+  rejects credentials and query strings.
+- Credentials: `resolveKey` supplies the API key just before every
+  authenticated spawn. Only the dsh child receives the value in its env.
+  The name matches dsh's tool-process environment scrub and is independent of
+  `DEEPSEEK_API_KEY`, which dsh's `web_search` reads.
 - Start: dsh validates the selected route when the session opens. The first
   request must then report that route and model; any other value fails closed
   as `authority`.
@@ -1310,8 +1324,8 @@ and `versionPolicy`). The other options stay on the `DshAdapter` constructor.
   within one second of that kill is not seen.
 - Detection: `dsh --version` (a `warn` verdict when it is not the qualified
   `0.2.2-rc.1`), then `dsh --profile acp --help`, which also writes the acp
-  profile into a new root (else `refused: acp_unavailable`). `authPresent`
-  means the `keyEnv` variable is set; the key is not checked.
+  profile into a new root (else `refused: acp_unavailable`). The probe leaves
+  the callback untouched and omits `authPresent`.
 - Egress: the DeepSeek route sends `GET https://api.deepseek.com/models` when
   dsh boots with a key. That call is free, but it is traffic. The contract
   suite's custom route has no declared host.
@@ -1332,15 +1346,14 @@ one `agy acp --dangerously-skip-permissions --process-per-session
 profile, which loads lazily through the private `#byok-acp-runtime` entry. It
 runs on the custom-harness path (`harnessId: 'agy'`). It takes no dispatch
 selection. `createDaemon` and `createRuntimeAdapters` build it when
-`runtimeAllowlist` lists `agy`, from the required `runtimes.agy` (`home`, and
+`runtimeAllowlist` lists `agy`, from the required `runtimes.agy` (`home`, `resolveKey`, and
 optional `model` and `versionPolicy`). The other options stay on the
 `AgyAdapter` constructor.
 
-- Credential: put a Gemini API key in the runtime environment as
-  `GEMINI_API_KEY`. `detect()` reports `authPresent` from it, without checking
-  it against the provider, and a task without it fails as non-retryable
-  authority. Only a Gemini API key is supported, never a Google account login.
-  agy passes its whole environment to `run_command` and stdio MCP children, so
+- Credentials: `resolveKey` supplies the Gemini API key just before each
+  authenticated spawn. A missing or invalid key fails with non-retryable
+  `auth`. Installation detection omits `authPresent`. agy passes its whole
+  environment to `run_command` and stdio MCP children, so
   the key stays in the daemon process. Each agy process gets its own proxy on an
   ephemeral `127.0.0.1` port, started before agy and closed when agy exits. agy
   holds that address and a random per-session token as its `GEMINI_API_KEY`. The
@@ -1401,7 +1414,7 @@ optional `model` and `versionPolicy`). The other options stay on the
   `auto` is declined before claim.
 - Detection: `agy --version` must be at least 1.5.0, the first with native ACP
   (an older CLI answers `acp` with its help, else `refused: acp_unavailable`),
-  and warns when it is not the qualified `1.5.1`. `authPresent` is not reported,
+  and warns when it is not the qualified `1.5.11`. `authPresent` is not reported,
   because the credential is not in agy.
 - Failures: a failed turn takes its class from the vendored OAR outcome, and a
   class taken from error text stays `unknown`. Resume needs `session/list` to

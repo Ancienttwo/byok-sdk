@@ -86,7 +86,7 @@ writeFileSync(entry, [
 const work = realpathSync(mkdtempSync(path.join(tmpdir(), 'byok-packed-plugin-')));
 try {
   const context = path.join(work, 'private hub context.json');
-  writeFileSync(context, JSON.stringify({ storeDir: work, productId: 'packaging-smoke', contextToken: 'synthetic-token',
+  writeFileSync(context, JSON.stringify({ storeDir: work, productId: 'packaging-smoke', contextToken: 'synthetic-token', authorization: 'all',
     binding: { catalogPath: path.join(work, 'catalog.json'), attemptId: 'fixture', launchCwd: work, mcpEnv: {}, mcpServers: {} },
   }), { mode: 0o600 });
   const installed = resolveSdkReservedHelperBin('mcp-hub');

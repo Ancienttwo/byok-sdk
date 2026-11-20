@@ -135,6 +135,9 @@ export interface ServiceInstallOptions {
   replaceUnmarked?: boolean;
 }
 
+/** Native service-manager observation, without unit or log inspection. @internal */
+export type ServiceManagerQuery = Pick<ServiceStatusResult, 'running' | 'determinate' | 'detail'>;
+
 export interface ServiceStatusResult {
   /** Whether the platform's own service manager has this service registered at all (a plist/unit/WinSW-config file present — checked directly, not inferred from `running`). */
   installed: boolean;
@@ -155,20 +158,16 @@ export interface ServiceStatusResult {
    * - `true`: either an authoritative "running"/"active" match, or a query
    *   that resolved with a KNOWN clean "not running"/"not loaded"/"not
    *   found" result.
-   * - `false`: the query itself could not be answered — a
-   *   connectivity/permission/manager-unreachable failure (each platform
-   *   classifies this with the SAME `neverAbsence`-style pattern list its
-   *   `uninstall()`/`stop()` already use for the identical reason — see
-   *   `systemd.ts`/`launchd.ts`/`winsw.ts`'s own
-   *   `*_CONNECTIVITY_OR_PERMISSION_FAILURE` constants). `running: false`
-   *   in this case is a FALLBACK, not a confirmed fact.
+   * - `false`: the query did not confirm the state. This includes failures
+   *   such as an unreachable service manager or a permission denial.
+   *   `running: false` then carries no conclusion about the service.
    *
    * Callers that must not fail open on an unreachable manager (see
    * `bin/commands/unpair.ts`'s `checkServiceState`) must treat
    * `determinate: false` exactly the same as a thrown `status()` call.
    */
   determinate: boolean;
-  /** Raw human-readable output from the underlying platform tool, for the `service-status` CLI subcommand and debugging. Never parsed further than the booleans above. */
+  /** Human-readable platform query output and, when available, the failed command's exit code. */
   detail: string;
   /** How the installed unit compares with this definition's (#1097). */
   unit: ServiceUnitInspection;

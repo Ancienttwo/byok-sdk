@@ -97,19 +97,19 @@ function isFallbackDirectory(dir: string): boolean {
   return path.dirname(dir) === PRIVATE_SOCKET_FALLBACK_ROOT && FALLBACK_LEAF.test(path.basename(dir));
 }
 
-/** Only a refused or vanished connection proves absence; every other result refuses the bind. */
-function socketIsInUse(endpoint: string): Promise<boolean> {
+/** Observe a Unix socket or Windows named pipe without binding or reclaiming it. */
+export function probeSocketListener(endpoint: string): Promise<'listening' | 'absent' | 'unknown'> {
   return new Promise((resolve) => {
     const socket = net.createConnection(endpoint);
-    const finish = (inUse: boolean): void => {
+    const finish = (state: 'listening' | 'absent' | 'unknown'): void => {
       clearTimeout(timer);
       socket.removeAllListeners();
       socket.destroy();
-      resolve(inUse);
+      resolve(state);
     };
-    const timer = setTimeout(() => finish(true), 1000);
-    socket.once('connect', () => finish(true));
-    socket.once('error', (error: NodeJS.ErrnoException) => finish(error.code !== 'ECONNREFUSED' && error.code !== 'ENOENT'));
+    const timer = setTimeout(() => finish('unknown'), 1000);
+    socket.once('connect', () => finish('listening'));
+    socket.once('error', (error: NodeJS.ErrnoException) => finish(error.code === 'ECONNREFUSED' || error.code === 'ENOENT' ? 'absent' : 'unknown'));
   });
 }
 
@@ -121,7 +121,7 @@ async function bindOnce(server: net.Server, endpoint: string, fallbackDir: strin
   });
   if (stat) {
     if (!stat.isSocket()) throw new PrivateSocketPathError(endpoint);
-    if (await socketIsInUse(endpoint)) throw new PrivateSocketInUseError(endpoint);
+    if (await probeSocketListener(endpoint) !== 'absent') throw new PrivateSocketInUseError(endpoint);
     await fs.unlink(endpoint);
   }
   await new Promise<void>((resolve, reject) => {

@@ -13,6 +13,7 @@ import {
   expectDetectedVersion,
   type ContractPlan,
 } from './runtime-contract/contract';
+import { startLoopbackProvider } from './runtime-contract/loopback';
 
 /**
  * #1103: the runtime contract suite's own admission rules, exercised without a
@@ -52,6 +53,21 @@ const descriptor = (capabilities: Partial<RuntimeCapabilities> = {}): RuntimeAda
     supportsDispatchSelection: false,
     capabilities: { steer: false, resume: false, approvalInteractive: false, ...capabilities },
   });
+
+it('emits two separately identified tool calls in one loopback model response', async () => {
+  const tool = { name: 'mcp__byoktools__call_tool' };
+  const args = (server: string) => ({ server, tool: 'write', arguments: { value: server } });
+  const provider = await startLoopbackProvider('openai-chat', () => ({
+    kind: 'tool', tool, args: args('first'), parallel: [{ tool, args: args('second') }],
+  }));
+  try {
+    const response = await fetch(`${provider.baseUrl}/chat/completions`, { method: 'POST', body: '{}' });
+    const body = await response.json() as { choices: Array<{ message: { tool_calls: Array<{ id: string; function: { arguments: string } }> } }> };
+    const calls = body.choices[0]!.message.tool_calls;
+    expect(calls.map(call => JSON.parse(call.function.arguments))).toEqual([args('first'), args('second')]);
+    expect(new Set(calls.map(call => call.id)).size).toBe(2);
+  } finally { await provider.close(); }
+});
 
 describe('runtime contract plan admission', () => {
   it('admits a complete plan whose every case is explicitly skipped with a reason', () => {
@@ -131,11 +147,11 @@ describe('runtime contract run selection', () => {
 
   it('fails a selected runtime with no executable instead of skipping it', async () => {
     process.env.BYOK_RUNTIME_CONTRACT = 'qualified';
-    expect(() => contractTarget('codex', '0.160.0')).toThrow(/BYOK_CONTRACT_CODEX_BIN must name the installed codex executable/);
+    expect(() => contractTarget('codex', '0.169.0')).toThrow(/BYOK_CONTRACT_CODEX_BIN must name the installed codex executable/);
     process.env.BYOK_CONTRACT_CODEX_BIN = 'codex';
-    expect(() => contractTarget('codex', '0.160.0')).toThrow(/BYOK_CONTRACT_CODEX_BIN must name the installed codex executable/);
+    expect(() => contractTarget('codex', '0.169.0')).toThrow(/BYOK_CONTRACT_CODEX_BIN must name the installed codex executable/);
     process.env.BYOK_CONTRACT_CODEX_BIN = path.join(os.tmpdir(), 'byok-contract-missing-codex');
-    expect(() => contractTarget('codex', '0.160.0')).toThrow(/BYOK_CONTRACT_CODEX_BIN must name the installed codex executable/);
+    expect(() => contractTarget('codex', '0.169.0')).toThrow(/BYOK_CONTRACT_CODEX_BIN must name the installed codex executable/);
 
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-contract-target-'));
     try {
@@ -145,14 +161,14 @@ describe('runtime contract run selection', () => {
       process.env.BYOK_RUNTIME_CONTRACT = 'latest';
       // A latest run must name the version it installed; the suite never
       // assumes the qualified token stands in for an untested latest one.
-      expect(() => contractTarget('codex', '0.160.0')).toThrow(/BYOK_CONTRACT_CODEX_VERSION/);
+      expect(() => contractTarget('codex', '0.169.0')).toThrow(/BYOK_CONTRACT_CODEX_VERSION/);
       process.env.BYOK_CONTRACT_CODEX_VERSION = '0.170.0';
-      expect(contractTarget('codex', '0.160.0')).toEqual({
-        runtime: 'codex', mode: 'latest', qualifiedVersion: '0.160.0', expectedVersion: '0.170.0', bin,
+      expect(contractTarget('codex', '0.169.0')).toEqual({
+        runtime: 'codex', mode: 'latest', qualifiedVersion: '0.169.0', expectedVersion: '0.170.0', bin,
       });
       process.env.BYOK_RUNTIME_CONTRACT = 'qualified';
       delete process.env.BYOK_CONTRACT_CODEX_VERSION;
-      expect(contractTarget('codex', '0.160.0').expectedVersion).toBe('0.160.0');
+      expect(contractTarget('codex', '0.169.0').expectedVersion).toBe('0.169.0');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
@@ -161,11 +177,11 @@ describe('runtime contract run selection', () => {
 
 describe('runtime contract detect.version catches a forced detector break', () => {
   const identifies = (version: string, expected: string) => version.trim() === expected;
-  const target = { expectedVersion: '0.160.0', qualifiedVersion: '0.160.0' };
+  const target = { expectedVersion: '0.169.0', qualifiedVersion: '0.169.0' };
   const detected = (overrides: { version?: string; state?: 'allow' | 'warn' } = {}): RuntimeDetectResult => ({
     kind: 'available',
-    version: overrides.version ?? '0.160.0',
-    versionVerdict: { state: overrides.state ?? 'allow', qualifiedVersion: '0.160.0' },
+    version: overrides.version ?? '0.169.0',
+    versionVerdict: { state: overrides.state ?? 'allow', qualifiedVersion: '0.169.0' },
   });
 
   it('passes the qualified token with an allow verdict', () => {
@@ -175,13 +191,13 @@ describe('runtime contract detect.version catches a forced detector break', () =
   it('fails when a broken adapter parser returns text its own detector cannot identify', () => {
     // The file's own reading rejects the adapter's parsed value: the exact
     // failure a broken version parser produces on a latest run.
-    expect(() => expectDetectedVersion(detected({ version: 'codex-cli 0.160.0' }), target, identifies, true))
-      .toThrow(/detected "codex-cli 0\.160\.0", expected 0\.160\.0/);
+    expect(() => expectDetectedVersion(detected({ version: 'codex-cli 0.169.0' }), target, identifies, true))
+      .toThrow(/detected "codex-cli 0\.169\.0", expected 0\.169\.0/);
   });
 
   it('fails when an unqualified version loses its warn verdict', () => {
     process.env.BYOK_RUNTIME_CONTRACT = 'latest';
-    const latestTarget = { expectedVersion: '0.161.0', qualifiedVersion: '0.160.0' };
+    const latestTarget = { expectedVersion: '0.161.0', qualifiedVersion: '0.169.0' };
     expect(() => expectDetectedVersion(detected({ version: '0.161.0', state: 'warn' }), latestTarget, identifies, true)).not.toThrow();
     expect(() => expectDetectedVersion(detected({ version: '0.161.0', state: 'allow' }), latestTarget, identifies, true))
       .toThrow();

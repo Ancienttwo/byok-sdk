@@ -42,12 +42,17 @@ import { fileScopeAdmission } from './file-scope-admission.js';
 import { FileScopeGuardError, fileScopePolicyDigest, resolveFileScopeGrant, type FileScopeAudit, type FileScopeGrant } from '../../file-scope-guard.js';
 import { bindFileScopeGate } from '../../file-scope-gate-binding.js';
 import { mcpEventIdentities } from '../../mcp/event-identity.js';
+import { bindMcpHubAuthorization } from '../../mcp/hub-authorization.js';
+import { MCP_HUB_SERVER_NAME } from '../../mcp/hub/protocol.js';
+import { bindCodexMcpHubInstallation } from '../../adapters/codex/hub-tool-grants.js';
+import { projectSearchMcpEnvironment } from '../search-runtime-qualification.js';
+import { sealMcpHub } from './mcp-contexts.js';
 import { DEFAULT_APPROVAL_TIMEOUT_MS } from './state.js';
 import { hostFor } from './host.js';
 
 export interface OfferManifestInput
   extends Pick<OfferRequest, 'agentRef' | 'agentMemory' | 'preparation' | 'preparedMemorySelected' | 'readerAttempt' | 'sessionRef'>,
-    Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'offered' | 'pick' | 'prepared' | 'scratch'>,
+    Pick<OfferRuntime, 'env' | 'mcpEnv' | 'mcpToolsetTools' | 'offered' | 'pick' | 'prepared' | 'scratch' | 'searchServers' | 'innerNonces'>,
     Pick<OfferLimits, 'requiredToolsets' | 'resolvedMcp'>,
     Pick<OfferWorkspace, 'workspaceDir'> {
   readonly agentBinding: OfferWorkspace['agentBinding'];
@@ -62,7 +67,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   const {
     agentBinding, agentRef, agentMemory, preparation, preparedMemorySelected, readerAttempt, sessionRef, env, mcpEnv,
     mcpToolsetTools, offered, pick, prepared, scratch, requiredToolsets, resolvedMcp, workspaceDir, blobAbort,
-    preparationLane, terminalProjection,
+    preparationLane, terminalProjection, searchServers, innerNonces,
   } = input;
   // The local Host owns the mode; it never comes from the offer. `auto` needs
   // a pre-execution gate, so a runtime or lane without one is declined here,
@@ -189,16 +194,6 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
         return;
       }
     }
-    // Only the toolsets this offer names: the preparation bound exactly the
-    // revisions of the toolsets its record named, so binding every toolset
-    // configured on the device would make an unrelated one a digest
-    // mismatch. An unconfigured name was already declined above.
-    const registryRevisions = lane.toolsetDefinitionRevisions();
-    const revisions: Record<string, string> = {};
-    for (const toolsetId of requiredToolsets ?? []) {
-      const revision = registryRevisions.get(toolsetId);
-      if (revision !== undefined) revisions[toolsetId] = revision;
-    }
     const servers: PreparedOfferServerProjection[] = [];
     for (const [serverName, server] of Object.entries(resolvedMcp?.ok ? resolvedMcp.servers : {})) {
       const toolsetId = resolvedMcp!.toolsetIdByServer.get(serverName);
@@ -225,7 +220,7 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       // present stays a fail-closed decline in admission.
       observation: mcpToolsetTools ?? (preparedMemorySelected || servers.length === 0 ? {} : undefined),
       servers,
-      toolsetDefinitionRevisions: Object.freeze(revisions),
+      toolsetDefinitionRevisions: resolvedMcp?.ok ? resolvedMcp.definitionRevisions : {},
       nowMs: Date.now(),
     });
     if (!admitted.ok) {
@@ -266,7 +261,19 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       calls: 0,
     };
   }
-  return { runtimeLaunch, manifest, preparedLaunch, preparedObservation, toolAuthorization };
+  let mcpHub: ActiveTask['mcpHub'];
+  if (searchServers !== undefined && !admissionWithdrawn()) {
+    try {
+      const nativeEnv = this['deps'].mcpSearch?.projectEnvironment?.(pick.descriptor.id, mcpEnv) ?? mcpEnv;
+      mcpHub = await sealMcpHub.call(this, taskId, scratch, workspaceDir, searchServers,
+        projectSearchMcpEnvironment(nativeEnv), innerNonces, pick.searchEvidence?.innerAttempts);
+    } catch {
+      if (!admissionWithdrawn()) decline({ reason: 'the private MCP hub context could not be sealed', retryable: true });
+      return;
+    }
+    if (admissionWithdrawn()) return;
+  }
+  return { runtimeLaunch, manifest, preparedLaunch, preparedObservation, toolAuthorization, mcpHub };
 }
 
 export interface OfferClaimInput
@@ -282,7 +289,7 @@ export interface OfferClaimInput
 
 /** Claims the task, resolves its instruction and binds prepared Agent memory. */
 export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, input: OfferClaimInput) {
-  const { taskId, decline, admissionWithdrawn, admission } = phase;
+  const { taskId, admissionWithdrawn, admission } = phase;
   const { agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload, startupDeadline } = input;
   let { taskMcpServers } = input;
   // All semantic admission is now in `prepare()` and the frozen manifest.
@@ -565,6 +572,8 @@ async function startAndActivateRuntime(
   launch: LaunchGate,
 ): Promise<void> {
   const { taskId } = phase;
+  const { mcpHub } = activation;
+  mcpHub?.beginStart(input.blobAbort.signal);
   const {
     agentBinding, ordinaryMemoryMode, ordinaryMemoryMcp, readerAttempt, sessionRef, env, mcpEnv, mcpToolsetTools, mcpToolApprovals, pick, prepared, scratch, manifest,
     preparedLaunch, runtimeLaunch, resolvedInstruction, taskMcpServers, blobAbort, startupDeadline, toolAuthorization,
@@ -682,6 +691,11 @@ async function startAndActivateRuntime(
     timeoutMs: (this['deps'].approvalTimeoutMs ?? DEFAULT_APPROVAL_TIMEOUT_MS) + 5_000,
     requestAuthorization: (summary, signal) => requestApproval(summary, signal, 'tool-authorization'),
   });
+  const dispatchGate = mcpHub === undefined || toolAuthorizationGate === undefined ? undefined
+    : bindMcpHubAuthorization(toolAuthorizationGate, {
+        catalog: mcpHub.binding, isActive: mcpHub.isActive,
+        canRequestDispatchApproval: () => this['tasks'].get(taskId)?.mcpHub === mcpHub,
+      });
   if (toolAuthorization.fileScope !== undefined && fileScopeGrant !== undefined && toolAuthorizationGate === undefined) {
     // A configured scope with no auto gate would reach the adapter as an
     // unscoped launch. Refuse the claimed task instead of dropping it.
@@ -714,6 +728,16 @@ async function startAndActivateRuntime(
   const memoryCommitGuidance = !readerAttempt && ordinaryMemoryMode === 'read-write' && activation.payload.agentMemoryCommit === 'on-success'
     ? 'Memory writes are kept only if this task completes successfully.\n'
     : '';
+  if (mcpHub !== undefined) {
+    try {
+      await mcpHub.configureAuthorization(dispatchGate);
+    } catch {
+      await failBeforeStart.call(this, taskId, 'the private MCP hub authorization could not be initialized', false, {
+        binding: agentBinding, runtimeId: pick.descriptor.id,
+      });
+      return;
+    }
+  }
   const startInput: RuntimeOperationStartInput = {
     scratch,
     ...(input.sessionLease === undefined ? {} : { sessionLease: input.sessionLease }),
@@ -757,6 +781,9 @@ async function startAndActivateRuntime(
     // `task.await_approval` and local `Daemon.approve`/`reject` resolve it.
     ...(toolAuthorizationGate === undefined ? {} : { toolAuthorization: toolAuthorizationGate }),
   };
+  if (mcpHub !== undefined && pick.descriptor.id === 'codex') {
+    bindCodexMcpHubInstallation(startInput, taskMcpServers![MCP_HUB_SERVER_NAME]!);
+  }
   // #1440: last before the runtime, so no earlier refusal has a copy to settle.
   // Set before the write: a failure after the manifest's rename can leave it.
   if (activation.payload.agentMemoryCommit !== undefined) {

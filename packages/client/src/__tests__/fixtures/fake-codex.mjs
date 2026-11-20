@@ -19,7 +19,7 @@ for (let i = 0; i < argv.length; i++)
     config[value.slice(0, eq)] = value.slice(eq + 1);
   }
 if (argv.includes('--version')) {
-  console.log(process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.160.0');
+  console.log(process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.169.0');
   process.exit(0);
 }
 if (argv[0] === 'login') {
@@ -312,6 +312,9 @@ async function runTurn(id, input) {
     },
   });
   if (process.env.FAKE_CODEX_TURN_FAILS === '1') {
+    if (process.env.FAKE_CODEX_QUOTA_RESET_AT) {
+      notify('account/rateLimits/updated', { rateLimits: { limitId: 'codex', primary: { usedPercent: 100, resetsAt: Number(process.env.FAKE_CODEX_QUOTA_RESET_AT) } } });
+    }
     notify('error', {
       threadId,
       error: {
@@ -444,7 +447,11 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
   if (method === 'turn/interrupt') {
     if (process.env.FAKE_CODEX_LATE_INTERRUPT === '1') return;
     send({ id, result: {} });
-    if (active) complete(active, 'interrupted');
+    if (active && process.env.FAKE_CODEX_CHILD_COMPLETES_FIRST) {
+      const interrupted = active;
+      notify('turn/completed', { threadId: process.env.FAKE_CODEX_CHILD_COMPLETES_FIRST, turn: { id: interrupted, status: 'completed' } });
+      setTimeout(() => complete(interrupted, 'interrupted'), 50);
+    } else if (active) complete(active, 'interrupted');
     return;
   }
   send({ id, error: { code: -32601, message: 'unsupported fake method' } });

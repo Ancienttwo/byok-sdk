@@ -79,7 +79,8 @@ const K8_EXPORTS = Object.freeze({
   './package.json': './package.json',
 });
 const K8_SCRIPTS = Object.freeze({ build: 'tsup && tsc -p tsconfig.build.json', typecheck: 'tsc --noEmit', test: 'vitest run', clean: 'rm -rf dist' });
-const K8_RUNTIME = Object.freeze({ '@byok-sdk/client': 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' });
+const K8_CORE = '@byok-sdk/core';
+const K8_RUNTIME = Object.freeze({ '@byok-sdk/client': 'workspace:*', [K8_CORE]: 'workspace:*', '@byok-sdk/protocol': 'workspace:*', '@byok-sdk/server': 'workspace:*' });
 // `./testing` imports these; a Host that installs only `.` or `./rules` does not need them.
 const K8_OPTIONAL_PEERS = Object.freeze(['@hono/node-server']);
 /** The other workspace manifests, each with its dir. */
@@ -220,6 +221,14 @@ function stableRegistryFloor(spec) {
  * first publication still uses the original base-declaration admission below.
  */
 function verifyK8DependencyUpdates(before, after) {
+  // #2420 promotes the existing workspace dependency for SQLite snapshot reads.
+  if (plain(before.dependencies) && !Object.hasOwn(before.dependencies, K8_CORE)
+    && before.devDependencies?.[K8_CORE] === K8_RUNTIME[K8_CORE]
+    && after.dependencies[K8_CORE] === K8_RUNTIME[K8_CORE]
+    && plain(after.devDependencies) && !Object.hasOwn(after.devDependencies, K8_CORE)) {
+    const { [K8_CORE]: core, ...devDependencies } = before.devDependencies;
+    before = { ...before, dependencies: { ...before.dependencies, [K8_CORE]: core }, devDependencies };
+  }
   for (const field of [...DEPENDENCY_FIELDS, 'peerDependencies']) {
     const previousNames = Object.keys(before[field] ?? {}).filter(name => !(field === 'peerDependencies' && name === 'vitest' && !Object.hasOwn(after[field] ?? {}, name))).sort();
     if (!plain(before[field]) || !plain(after[field])
@@ -249,7 +258,7 @@ function verifyK8Manifest(manifest, { base, cwd, workspaceGraph, before }) {
     || !isDeepStrictEqual(manifest.exports, K8_EXPORTS) || !isDeepStrictEqual(manifest.scripts, K8_SCRIPTS)) {
     refuse('has an unreviewed shape');
   }
-  if (!isDeepStrictEqual(manifest.dependencies, K8_RUNTIME)) refuse('runtime dependencies must be exactly client, protocol and server');
+  if (!isDeepStrictEqual(manifest.dependencies, K8_RUNTIME)) refuse('runtime dependencies must be exactly client, core, protocol and server');
   const peers = manifest.peerDependencies, meta = manifest.peerDependenciesMeta;
   if (!plain(peers) || !isDeepStrictEqual(Object.keys(peers).sort(), K8_OPTIONAL_PEERS)
     || !isDeepStrictEqual(meta, Object.fromEntries(K8_OPTIONAL_PEERS.map(name => [name, { optional: true }])))

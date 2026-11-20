@@ -222,6 +222,8 @@ async function openPinnedDirectory(target: string | Buffer, expectedIdentity?: A
   } catch (error) {
     await handle?.close().catch(() => {});
     if (error instanceof AgentMemoryError) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === 'ENOTDIR' || code === 'ELOOP') throw new AgentMemoryValidationError('memory directory is not a real directory');
     throw new AgentMemoryIoError('memory directory is unavailable or unsafe');
   }
 }
@@ -550,7 +552,9 @@ export async function observeAgentMemoryHomeFile(binding: AgentMemoryHomeBinding
       try {
         next = await fs.open(`${descriptorPath(directory)}/${part}`, noFollowFlags(fsConstants.O_RDONLY | fsConstants.O_DIRECTORY));
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Object.freeze({ exists: false, revision: digest('') });
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT') return Object.freeze({ exists: false, revision: digest('') });
+        if (code === 'ENOTDIR' || code === 'ELOOP') throw new AgentMemoryValidationError('memory directory is not a real directory');
         throw new AgentMemoryIoError('memory directory is unavailable or unsafe');
       }
       handles.push(next);

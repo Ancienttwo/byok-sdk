@@ -20,7 +20,7 @@ import { createRuntimeAdapters } from '../adapters/runtime-adapters';
 import { resolveRuntimeInvocation } from '../adapters/runtime-invocation';
 import { npmNodeShim } from './fixtures/npm-node-shim';
 import { check, defineRuntimeCases } from './runtime-contract/contract';
-import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/a122061/runtimes/opencode/session';
+import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/oar/a41628f/runtimes/opencode/session';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
@@ -625,13 +625,38 @@ it.each(['status', 'input', 'completion'] as const)('buffers ACP tool input unti
 
 it('emits dsh tool use when complete native arguments arrive', async () => {
   const { DshProjection } = await import('../adapters/dsh/projection');
-  const projection = new DshProjection('root', 'model');
+  const projection = new DshProjection('root');
   const events: AgentEvent[] = [];
   projection.consume({ kind: 'frame', sessionId: 'root', agentPath: [], body: {
     native: { data: { arguments: '{"command":"sleep 600"}' } },
     events: [{ kind: 'tool_call_started', callId: 'c', tool: 'shell' }],
   } } as never, event => events.push(event), () => {});
   expect(events).toEqual([{ type: 'tool_use', tool: 'shell', toolCallId: 'c', input: { command: 'sleep 600' } }]);
+});
+
+it('preserves a dsh tool identity when redaction withholds its entire data object', async () => {
+  const { DshProjection } = await import('../adapters/dsh/projection');
+  const projection = new DshProjection('root');
+  const emit = vi.fn();
+  projection.consume({ kind: 'frame', seq: 1, sessionId: 'root', agentPath: [], body: {
+    native: { data: '[redacted]' }, events: [{ kind: 'tool_call_started', callId: 'c', tool: 'shell' }],
+  } }, emit, () => {});
+  expect(emit).toHaveBeenCalledExactlyOnceWith({ type: 'tool_use', tool: 'shell', toolCallId: 'c' });
+});
+
+it('settles dsh and agy turns using private root membership when the recorded IDs collide', async () => {
+  const { DshProjection } = await import('../adapters/dsh/projection');
+  const { AgyProjection } = await import('../adapters/antigravity/projection');
+  for (const projection of [new DshProjection('root-with-key'), new AgyProjection('root-with-key', new Map())]) {
+    const outcome = vi.fn();
+    const record = { kind: 'frame', seq: 1, sessionId: 'root-[redacted]', agentPath: [], body: {
+      byokRoot: true, events: [{ kind: 'turn_ended', outcome: { kind: 'completed' } }],
+    } };
+    projection.consume({ ...record, body: { ...record.body, byokRoot: false } }, () => {}, outcome);
+    expect(outcome).not.toHaveBeenCalled();
+    projection.consume(record, () => {}, outcome);
+    expect(outcome).toHaveBeenCalledExactlyOnceWith({ kind: 'completed' });
+  }
 });
 
 it.each(['aborted', 'failed', 'completed'])('drains pending ACP calls once with their latest input when a turn is %s', async kind => {

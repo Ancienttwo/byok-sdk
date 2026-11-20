@@ -16,7 +16,8 @@ import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
-import type { RawEvent } from '../../vendor/oar/a122061/contracts/session';
+import type { RawEvent } from '../../vendor/oar/a41628f/contracts/session';
+import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 
 const CLAUDE_TARGET = { lane: 'runtime', runtimeId: 'claude' } as const;
 
@@ -60,6 +61,127 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
   afterEach(async () => {
     await Promise.all(openSessions.splice(0).map((s) => s.close()));
     vi.restoreAllMocks();
+  });
+
+  it.each(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])('refuses a short %s before spawning the BYOK process', async name => {
+    const spawnFn = vi.fn();
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), runtimeEnvironment: { base: 'allowlist' }, spawnFn });
+    const resources = await makeCtx({ PATH: process.env.PATH, [name]: 'short-placeholder' });
+    try {
+      await expect(startAdapter(adapter, baseTask, resources)).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: expect.stringContaining('at least 20 characters'),
+      });
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    ['ANTHROPIC_API_KEY', ' '],
+    ['ANTHROPIC_AUTH_TOKEN', '\t'],
+  ])('refuses %s with edge whitespace before spawn', async (name, whitespace) => {
+    const key = 'synthetic-claude-edge-whitespace-key';
+    const spawnFn = vi.fn(() => { throw new Error('unexpected spawn'); });
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), runtimeEnvironment: { base: 'allowlist' }, spawnFn });
+    const value = name === 'ANTHROPIC_API_KEY' ? whitespace + key : key + whitespace;
+    const resources = await makeCtx({ PATH: process.env.PATH, [name]: value });
+    try {
+      await expect(startAdapter(adapter, baseTask, resources)).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: expect.stringContaining('leading or trailing whitespace'),
+      });
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])('redacts a path-like %s echoed by Claude', async name => {
+    const key = '/synthetic/provider/credential';
+    const resources = await makeCtx({ PATH: process.env.PATH, [name]: key });
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), { ...baseTask, instruction: key }, resources);
+      openSessions.push(session);
+      const events = await takeEvents(session, 5);
+      expect(events).toContainEqual({ type: 'progress', text: 'reply-1:[redacted]' });
+      expect(JSON.stringify(events)).not.toContain(key);
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])('refuses to expose a startup session id containing a registered credential (resume=%s)', async resume => {
+    const key = 'fixture-claude-resume-key';
+    const sessionRef = `fixture-${key}`;
+    const resources = await makeCtx({ ...process.env, ANTHROPIC_API_KEY: key, FAKE_CLAUDE_SESSION_ID: sessionRef });
+    try {
+      const failure = await startAdapter(fakeClaudeAdapter(), { ...baseTask, ...(resume ? { sessionRef } : {}) }, resources).then(session => {
+        openSessions.push(session);
+        return undefined;
+      }, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+      expect(String(failure)).not.toContain(key);
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['FAKE_CLAUDE_MULTI_BLOCK_CLOSING_TEXT', 'FAKE_CLAUDE_SPLIT_CLOSING_TEXT'])('redacts a durable assistant credential split by %s', async shape => {
+    const key = 'fixture-claude-split-assistant-credential';
+    const resources = await makeCtx({ PATH: process.env.PATH, ANTHROPIC_API_KEY: key, [shape]: '1' });
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), { ...baseTask, instruction: key }, resources);
+      openSessions.push(session);
+      const events: AgentEvent[] = [];
+      for await (const event of session.events) {
+        if (event.type !== 'message_draft_delta') events.push(event);
+        if (event.type === 'turn_end') break;
+      }
+      expect(events.filter(event => event.type === 'progress').map(event => event.text).join('')).toBe('reply-1:[redacted]');
+      expect(events.filter(event => event.type === 'turn_end')).toHaveLength(1);
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('settles a Claude result whose status field matches an MCP credential', async () => {
+    const resources = await makeCtx();
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), baseTask, { ...resources,
+        mcpServers: { fixture: { command: process.execPath, env: { MCP_TOKEN: 'is_error' } } },
+      });
+      openSessions.push(session);
+      const events: AgentEvent[] = [];
+      for await (const event of session.events) {
+        if (event.type !== 'message_draft_delta') events.push(event);
+        if (event.type === 'turn_end') break;
+      }
+      expect(events.at(-1)).toEqual({ type: 'turn_end' });
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([false, true])('keeps a deferred Claude suffix in its message (separate message: %s)', async separateMessage => {
+    const resources = await makeCtx(separateMessage ? { PATH: process.env.PATH, FAKE_CLAUDE_FINAL_SHORT_MESSAGE: 'sk' } : undefined);
+    try {
+      const session = await startAdapter(fakeClaudeAdapter(), { ...baseTask, instruction: 'The task' }, { ...resources,
+        mcpServers: { fixture: { command: process.execPath, env: { MCP_TOKEN: 'sk-fixture' } } },
+      });
+      openSessions.push(session);
+      let finalText = '';
+      for await (const event of session.events) {
+        if (event.type === 'progress') {
+          if (session.progressStartsMessage?.(event)) finalText = '';
+          finalText += event.text;
+        }
+        if (event.type === 'turn_end') break;
+      }
+      expect(finalText).toBe(separateMessage ? 'sk' : 'reply-1:The task');
+    } finally {
+      await fs.rm(resources.workspaceDir, { recursive: true, force: true });
+    }
   });
 
   it('detect() reports present + version + authPresent from the fake binary', async () => {
@@ -246,7 +368,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     const ctx = await makeCtx({
       ...process.env,
       FAKE_CLAUDE_SESSION_ID: 'resume-me-123', // what the --resume-target validation checks against (so the resume itself "succeeds")
-      FAKE_CLAUDE_REPORTED_SESSION_ID: 'some-other-session', // but system/init reports a DIFFERENT id
+      FAKE_CLAUDE_REPORTED_SESSION_ID: 'other-session-id',
     });
     const task: RuntimeTaskInput = { ...baseTask, sessionRef: 'resume-me-123' };
     let failure: unknown;
@@ -257,7 +379,7 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
     expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
-    expect(failure).toHaveProperty('message', expect.stringMatching(/echoed a different session id than requested/));
+    expect(failure).toHaveProperty('message', 'claude --resume echoed a different session id than requested');
   });
 
   it('an unresolvable sessionRef surfaces claude\'s real resume rejection as a clean start() failure, not a hang (empirically confirmed against real claude: "No conversation found with session ID: ...", exit 1)', async () => {
@@ -282,21 +404,103 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     expect(failure).toHaveProperty('message', expect.stringMatching(/simulated crash for stderr-capture test/));
   });
 
-  it('keeps the stderr tail on the local failure but redacts a credential out of the wire reason (#1124)', async () => {
-    const key = ['sk', 'ant', 'api03', 'Zx9qW3eR5tY7uI1oP2aS4dF6gH8jK0lM'].join('-');
-    const stderr = `proxy: Authorization: Bearer opaqueBearerValue0123 rejected; ANTHROPIC_API_KEY=${key}`;
+  it('redacts registered credentials from startup stderr and its public cause before wire projection', async () => {
+    const key = '/synthetic/provider/startup-credential';
+    const stderr = `proxy: Authorization: Bearer opaqueBearerValue0123 rejected; stderr echoes ${key}`;
     const adapter = fakeClaudeAdapter();
-    const ctx = await makeCtx({ ...process.env, FAKE_CLAUDE_CRASH_WITH_STDERR: stderr });
+    const ctx = await makeCtx({ PATH: process.env.PATH, ANTHROPIC_API_KEY: key, FAKE_CLAUDE_CRASH_WITH_STDERR: stderr });
     const failure = await startAdapter(adapter, baseTask, ctx).then(() => undefined, (error: unknown) => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toHaveProperty('message', expect.stringContaining(key));
+    expect(failure).toMatchObject({ phase: 'start', failure: { class: 'runtime_exited' },
+      message: expect.stringContaining('stderr echoes [redacted]'), cause: { message: expect.stringContaining('stderr echoes [redacted]') } });
+    expect(String(failure)).not.toContain(key);
+    expect(String((failure as Error).cause)).not.toContain(key);
     const projection = projectRuntimeBoundaryFailure(failure, 'start');
     const wire = encodeEnvelope(createEnvelope('task.fail', { reason: projection.reason, retryable: projection.retryable },
       { taskId: '7c5b6b0e-7d0b-4d5f-9b0a-2b9f8b4f0c11' }));
     expect(wire).not.toContain(key);
     expect(wire).not.toContain('opaqueBearerValue0123');
     expect((decodeEnvelope(wire).payload as { reason: string }).reason)
-      .toMatch(/stderr: proxy: Authorization: \[redacted\] rejected; ANTHROPIC_API_KEY=\[redacted\]/);
+      .toMatch(/stderr: proxy: Authorization: \[redacted\] rejected; stderr echoes \[redacted\]/);
+  });
+
+  it.each(['start', 'run'])('redacts the credential before applying the stderr tail limit during %s', async phase => {
+    const prefix = 'unique-claude-key-prefix';
+    const suffix = 'unique-claude-key-suffix';
+    const key = prefix + suffix;
+    const ending = 'stderr-tail-end';
+    // With one newline from the fixture, the old 64 KiB tail starts at the key's second half.
+    const stderr = key + '.'.repeat(64 * 1024 - suffix.length - ending.length - 1) + ending;
+    const ctx = await makeCtx({ PATH: process.env.PATH, ANTHROPIC_API_KEY: key,
+      ...(phase === 'start' ? { FAKE_CLAUDE_CRASH_WITH_STDERR: 'fixture crash' }
+        : { FAKE_CLAUDE_FAILURES: JSON.stringify([{ exit: true }]) }),
+    });
+    try {
+      const stderrFile = path.join(ctx.workspaceDir, 'fixture-stderr');
+      await fs.writeFile(stderrFile, stderr);
+      ctx.env = { ...ctx.env, FAKE_CLAUDE_STDERR_FILE: stderrFile };
+      const run = async () => {
+        const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+        openSessions.push(session);
+        return takeTurn(session);
+      };
+      const failure = await run().then(() => undefined, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(failure).toMatchObject({ phase, failure: { class: 'runtime_exited' } });
+      const cause = (failure as Error).cause as Error;
+      expect(cause.message.includes(ending)).toBe(true);
+      for (const message of [String(failure), cause.message, cause.stack ?? '']) {
+        expect(message.includes(prefix)).toBe(false);
+        expect(message.includes(suffix)).toBe(false);
+      }
+      expect(cause.message.includes('[redacted]')).toBe(true);
+    } finally {
+      await fs.rm(ctx.workspaceDir, { recursive: true, force: true });
+    }
+  });
+
+  it('redacts registered credentials from runtime stderr exposed on the error cause', async () => {
+    const key = '/synthetic/provider/runtime-credential';
+    const ctx = await makeCtx({ PATH: process.env.PATH, ANTHROPIC_AUTH_TOKEN: key,
+      FAKE_CLAUDE_FAILURES: JSON.stringify([{ exit: true, stderr: `run stderr echoes ${key}` }]) });
+    const session = await startAdapter(fakeClaudeAdapter(), baseTask, ctx);
+    openSessions.push(session);
+    const failure = await takeTurn(session).then(() => undefined, (error: unknown) => error);
+    expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(failure).toMatchObject({ phase: 'run', failure: { class: 'runtime_exited' },
+      cause: { message: expect.stringContaining('run stderr echoes [redacted]') } });
+    expect(String(failure)).not.toContain(key);
+    expect(String((failure as Error).cause)).not.toContain(key);
+  });
+
+  it('redacts credentials through nested runtime causes', async () => {
+    const key = '/synthetic/provider/nested-credential';
+    const cause = new Error(`outer ${key}`, { cause: new Error(`inner ${key}`) });
+    let child!: ChildProcessWithoutNullStreams;
+    const adapter = new ClaudeAdapter({
+      resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }),
+      runtimeEnvironment: { base: 'allowlist', allow: ['FAKE_CLAUDE_*'] },
+      spawnFn: ((...args: Parameters<SpawnFn>) => {
+        child = realSpawn(...args) as ChildProcessWithoutNullStreams;
+        return child;
+      }) as SpawnFn,
+    });
+    const ctx = await makeCtx({ PATH: process.env.PATH, ANTHROPIC_API_KEY: key, FAKE_CLAUDE_HANG_AFTER_TOOL: '1' });
+    try {
+      const session = await startAdapter(adapter, baseTask, ctx);
+      openSessions.push(session);
+      child.stdin.emit('error', cause);
+      const failure = await takeTurn(session).then(() => undefined, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
+      expect(failure).toMatchObject({ phase: 'run', cause: { message: 'outer [redacted]', cause: { message: 'inner [redacted]' } } });
+      for (let current: unknown = failure; current instanceof Error; current = current.cause) {
+        expect(current.stack).not.toContain(key);
+      }
+      expect(cause.message).toContain(key);
+      await session.close();
+    } finally {
+      await fs.rm(ctx.workspaceDir, { recursive: true, force: true });
+    }
   });
 
   it('surfaces task-scoped MCP cleanup failure as typed disposal evidence and permits a clean retry', async () => {
@@ -424,8 +628,8 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     ['a process exit during the interrupt', undefined, (claude: ReturnType<typeof memoryClaude>) => { claude.exit(1); }],
   ] as const)('settles %s as not interrupted, so the owner terminates', async (_label, refuse, during) => {
     const claude = memoryClaude(refuse);
-    const stream = new ClaudeStreamSession(claude.child as never);
-    await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+    const stream = new ClaudeStreamSession(claude.child as never, sessionCredentialRedactor({}));
+    await stream.open({ maxRetainedBytes: 16 * 1024 * 1024, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
     expect((await stream.raw.prompt('go')).response.body.kind).toBe('accepted');
     const settled = stream.interruptAndSettle(1_000);
     during(claude);
@@ -570,9 +774,9 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       native = realSpawn(command, args, options) as ChildProcessWithoutNullStreams;
       return native;
     } })(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { env: {} });
-    const stream = new ClaudeStreamSession(child);
+    const stream = new ClaudeStreamSession(child, sessionCredentialRedactor({}));
     try {
-      await stream.open({ env: {}, maxRetainedBytes: 16 * 1024 * 1024, mcpServers: {}, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
+      await stream.open({ maxRetainedBytes: 16 * 1024 * 1024, onFrame: () => {}, onExit: () => {}, onAppRequest: () => {} });
       native.stdin.emit('error', new Error('stdin already failed'));
       const control = await stream.prompt('must not be accepted');
       expect(control.response.body).toMatchObject({ kind: 'rejected', code: 'error', reason: 'stdin already failed' });

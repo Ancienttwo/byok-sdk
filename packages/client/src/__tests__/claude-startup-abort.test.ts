@@ -42,7 +42,7 @@ function fixture(holdWrite = false, onSpawn?: () => void) {
   const spawnFn = vi.fn(() => { onSpawn?.(); queueMicrotask(() => child.emit('spawn')); return child; }) as unknown as SpawnFn;
   return { child, spawnFn, write, finishWrite: () => finishWrite(), init: () => child.stdout.write('{"type":"system","subtype":"init","session_id":"ready"}\n') };
 }
-async function operation(spawnFn: SpawnFn, signal?: AbortSignal, withMcp = false) {
+async function operation(spawnFn: SpawnFn, signal?: AbortSignal, withMcp = false, env: Record<string, string> = {}) {
 const __executionScratch = withMcp ? inertScratch('/inert-config') : inertScratch();
 
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn });
@@ -51,7 +51,7 @@ const __executionScratch = withMcp ? inertScratch('/inert-config') : inertScratc
   const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [], ...mcp });
   if (prepared.kind !== 'prepared') throw new Error('unexpected fixture admission rejection');
   const input: RuntimeOperationStartInput = { scratch: __executionScratch,
-    kind: 'instruction', instruction: 'hello', env: {}, ...(signal ? { signal } : {}), ...mcp,
+    kind: 'instruction', instruction: 'hello', env, ...(signal ? { signal } : {}), ...mcp,
     manifest: sealRuntimeOperationManifest({ taskId: 'abort-fixture', runtimeId: 'claude', descriptor: adapter.descriptor,
       requiredToolsetIds: [], workspace: { workspaceDir: '/inert-workspace' }, forwardedEnvironmentNames: [] }),
   };
@@ -100,6 +100,18 @@ describe('Claude startup cancellation ownership', () => {
     expect(fake.spawnFn).not.toHaveBeenCalled();
     expect(tree.dispose).not.toHaveBeenCalled();
     expect(getEventListeners(controller.signal, 'abort')).toHaveLength(0);
+  });
+
+  it('redacts provider credentials from an already-aborted startup reason without wrapping in disposal', async () => {
+    const key = '/synthetic/provider/abort-reason-key';
+    const controller = new AbortController(); controller.abort(new Error(`cancelled with ${key}`));
+    const fake = fixture();
+    const op = await operation(fake.spawnFn, controller.signal, false, { ANTHROPIC_API_KEY: key });
+    const result = observe(op.start()); await flush();
+    expect(result.error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(result.error).toMatchObject({ phase: 'start', cause: { message: 'cancelled with [redacted]' } });
+    expect(String((result.error as Error).cause)).not.toContain(key);
+    expect(fake.spawnFn).not.toHaveBeenCalled();
   });
 
   it('does not allocate MCP configuration for an already-aborted startup', async () => {

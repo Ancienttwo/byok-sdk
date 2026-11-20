@@ -5,10 +5,10 @@ import path from 'node:path';
 import {
   startAppServerClient,
   type LineProcess, type SpawnLineProcess,
-} from '../../vendor/oar/a122061/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/a122061/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/a122061/shared/session-kernel.js';
-import { sessionCredentialRedactor } from '../../vendor/oar/a122061/shared/credential-redactor.js';
+} from '../../vendor/oar/a41628f/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/a41628f/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/a41628f/shared/session-kernel.js';
+import { sessionCredentialRedactor } from '../../vendor/oar/a41628f/shared/credential-redactor.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -186,7 +186,7 @@ describe('OAR session kernel record redaction', () => {
 });
 
 it('accounts for every vendored file and the maintained source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/a122061');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/a41628f');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     packageVersion: string;
     commit: string;
@@ -204,9 +204,9 @@ it('accounts for every vendored file and the maintained source deltas', () => {
   }
   expect(manifest.release).toEqual({
     ecosystem: 'npm', name: '@botiverse/oar', version: manifest.packageVersion,
-    integrity: 'sha512-QcYXeNh6EJWJ48aR8hZLnrrANinodI5h1I6HNSbXaEfOiEzitsTC4XWQr6sRYGUWATtzhDKItferbYeeifGVOA==',
+    integrity: 'sha512-EYCtVCKmv9jjxA9JzAKA35CDWRAkxxsBuznWW9ej6C2i0FnFlLcU0i1wXV4lVApuoEDVqbBYuNDCJcj/w+SMdg==',
     gitCommit: manifest.commit,
-    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.120.0',
+    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.121.0',
   });
   expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: `byok/${manifest.packageVersion}`, commit: expect.stringMatching(/^[0-9a-f]{40}$/) });
   expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual([
@@ -232,12 +232,15 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'runtimes/codex/list-models.ts',
     'runtimes/codex/login.ts',
     'runtimes/codex/open.ts',
+    'runtimes/codex/refusal.ts',
     'runtimes/codex/rpc-control.ts',
     'runtimes/codex/session.ts',
     'runtimes/codex/turn-processes.ts',
     'runtimes/dsh/control.ts',
     'runtimes/dsh/launch.ts',
     'runtimes/dsh/list-models.ts',
+    'runtimes/dsh/options.ts',
+    'runtimes/dsh/projection.ts',
     'runtimes/dsh/session.ts',
     'runtimes/dsh/version.ts',
     'runtimes/grok/account-usage.ts',
@@ -257,15 +260,20 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'shared/acp/opening.ts',
     'shared/acp/process.ts',
     'shared/acp/profile.ts',
+    'shared/acp/projection.ts',
     'shared/acp/records.ts',
     'shared/acp/session.ts',
     'shared/acp/steer-request.ts',
     'shared/acp/terminal.ts',
+    'shared/acp/token-usage.ts',
     'shared/acp/turns.ts',
     'shared/credential-redactor.ts',
+    'shared/executable/diagnostics.ts',
+    'shared/executable/pipe-close.ts',
     'shared/executable/process-tree.ts',
     'shared/failure-class.ts',
     'shared/record-retention.ts',
+    'shared/redact-text.ts',
     'shared/stream-json/compaction.ts',
     'shared/stream-json/projection.ts',
     'shared/stream-json/session.ts',

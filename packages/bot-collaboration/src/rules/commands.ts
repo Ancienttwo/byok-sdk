@@ -1,11 +1,11 @@
-import type { RoomFields } from '@byok-sdk/protocol';
+import { type RoomFields } from '@byok-sdk/protocol';
 import { hash } from '@byok-sdk/server/execution-core/canonical';
 import { addBatchTurns, addTurn, json, type Json, type Turn } from './turn.js';
 import { activeBot, archiveBot, inactive, profileRevision, refuseExternalRooms, refuseExternalTeam, refuseSuspended, requireMain, roomId, teamSnapshot, TeamModeError,
   type ExternalTeam, type TeamSnapshot, type TeamSnapshotBot } from './team.js';
 import { applyRoomSnapshot, createRoom, publishSettled, roomInput, seatSettled, setMemberMentions, updateRoom, type MemberMentions,
   type Mentions } from './rooms.js';
-import { sealBatchForCancel, type InputFields } from './coalesce.js';
+import { sealBatchForCancel, validateInputImages, type InputFields } from './coalesce.js';
 import { abandonDelegation, arbitrateCancel, type IntentFacts, type Publish } from './delegation.js';
 import { applyTurnOutcome, type OutcomePorts, type OutcomeState } from './outcome.js';
 import { acceptMessage, type MessageDisposition, type MessageFields } from './message.js';
@@ -29,7 +29,7 @@ export { cardCallDue, CONNECTOR_OUTCOME_UNKNOWN, expireCards, reportCardDecision
 /** Commands with a caller key or a K4 key. The store records them, so a retry replays the first result. */
 export type KeyedCommand =
   /** Owner input to a Bot. The Turn id comes from the Bot and the caller key. */
-  | { kind: 'input'; botId: string; key: string; request: string; sender: string }
+  | ({ kind: 'input' } & Pick<InputFields, 'botId' | 'key' | 'request' | 'images' | 'sender'>)
   /** A received IM message that the Host classified (docs/host-im-adapter.md §3). `key` is its inbound key. */
   | { kind: 'receive'; inbound: 'owner_input'; key: string; botId: string; request: string; sender: string }
   | { kind: 'receive'; inbound: 'room_input'; key: string; roomId: string; text: string; mentions: Mentions; from: string }
@@ -218,7 +218,8 @@ export function isKeyless(command: Command): command is KeylessCommand { return 
 /** The fields that decide each command's effect: the fields that the existing identity checks compare. */
 export function commandEvidence(command: KeyedCommand): Json {
   switch (command.kind) {
-    case 'input': return { kind: command.kind, botId: command.botId, key: command.key, request: command.request };
+    case 'input': return { kind: command.kind, botId: command.botId, key: command.key, request: command.request,
+      ...(command.images === undefined ? {} : { images: json(command.images) }) };
     case 'receive': return command.inbound === 'owner_input'
       ? { kind: command.kind, inbound: command.inbound, botId: command.botId, key: command.key, request: command.request }
       : { kind: command.kind, inbound: command.inbound, roomId: command.roomId, key: command.key, text: command.text, mentions: mentionsJson(command.mentions), from: command.from };
@@ -278,7 +279,8 @@ export function decideCommand(state: CommandState, command: Command, ports: Comm
       activeBot(state.team, command.botId);
       refuseSuspended(state.team, command.botId);
       return accepted(need(ports.admitInput, command.kind)({ id: hash(['user', command.botId, command.key]), key: command.key,
-        botId: command.botId, request: command.request, sender: command.sender, authority: 'owner' }));
+        botId: command.botId, request: command.request, sender: command.sender, authority: 'owner',
+        ...(command.images === undefined ? {} : { images: command.images }) }));
     }
     case 'receive': {
       let root: string;
@@ -494,7 +496,8 @@ function commandRoot(state: CommandState, command: Command, disposition: Disposi
 }
 /** One command through the commit contract. The caller runs it inside one store transaction. A keyless command gets no record. */
 export function commitCommand(state: CommandState, request: CommitRequest<Command>, store: CommandStore, ports: CommandPorts): CommitResult {
-  const command = request.command;
+  const input = request.command;
+  const command = input.kind === 'input' ? validateInputImages(input) : input;
   let root: string | undefined;
   const decide = (out: (intent: OutboxIntent) => void): Disposition => {
     ports.admit?.(command);

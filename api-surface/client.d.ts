@@ -458,6 +458,7 @@
 //   StorageConfig -> dist/daemon/retention/config.d.ts
 //   StoragePressureState -> dist/daemon/retention/pressure.d.ts
 //   StoreCompatibility -> @byok-sdk/core#StoreCompatibility
+//   StoreServiceState -> dist/lifecycle/store-service-state.d.ts
 //   SweepReport -> dist/daemon/retention/registry.d.ts
 //   SystemToolUnavailableError -> @byok-sdk/core/system-tool#SystemToolUnavailableError
 //   TASK_ASSERTION_CONTEXT_TOKEN_MAX_BYTES -> dist/daemon/control-protocol.d.ts
@@ -544,6 +545,7 @@
 //   inspectDaemonStores -> dist/diagnostics/store-compatibility.d.ts
 //   inspectDeviceEnrollmentClear -> dist/daemon/enrollment-clear.d.ts
 //   inspectServiceLogs -> dist/lifecycle/service-log.d.ts
+//   inspectStoreServiceState -> dist/lifecycle/store-service-state.d.ts
 //   installSkillPacks -> dist/daemon/skill-pack-installer.d.ts
 //   isAgentMemorySecureFilesystemAvailable -> dist/daemon/agent-memory.d.ts
 //   isDaemonHaltReason -> dist/daemon/daemon-lifecycle.d.ts
@@ -709,6 +711,7 @@
 //   isAgentMemorySecureFilesystemAvailable -> dist/daemon/agent-memory.d.ts
 //   openAgentMemoryFilesystemHelper -> dist/daemon/agent-memory-fs-helper.d.ts
 //   prependAgentMemoryGuidance -> dist/daemon/memory-guidance.d.ts
+//   resolveAgentMemoryFilesystemHelper -> dist/util/agent-memory-helper-release.d.ts
 //   serveAgentMemoryMcpOverStdio -> dist/agent-memory/mcp-server.d.ts
 // entry @byok-sdk/client/assertion-client
 //   RequestDeviceAssertionErrorCode -> dist/daemon/assertion-client.d.ts
@@ -773,6 +776,7 @@ import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../ru
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface AgyAdapterOptions {
     home: string;
+    resolveKey: () => Promise<string>;
     model?: string;
     nativeAssetRoot?: string;
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -796,6 +800,7 @@ export declare class AgyAdapter implements RuntimeAdapter {
     get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     constructor(options: AgyAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    private authenticatedEnvironment;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
@@ -883,6 +888,7 @@ export declare class CodexAdapter implements RuntimeAdapter {
     constructor(options?: CodexAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
+    private detectInstallation;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -902,12 +908,12 @@ export interface DshModelSelection {
     readonly provider: string;
     readonly model: string;
     readonly baseUrl?: string;
-    readonly keyEnv: string;
 }
 export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only';
 export interface DshAdapterOptions {
     home: string;
     model: DshModelSelection;
+    resolveKey: () => Promise<string>;
     sandbox?: DshSandboxMode;
     nativeAssetRoot?: string;
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -1202,6 +1208,7 @@ export interface RuntimeAdaptersRuntimes {
     dsh?: {
         home: DshAdapterOptions['home'];
         model: DshAdapterOptions['model'];
+        resolveKey: DshAdapterOptions['resolveKey'];
         sandbox?: DshAdapterOptions['sandbox'];
         versionPolicy?: RuntimeVersionPolicy;
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -1214,6 +1221,7 @@ export interface RuntimeAdaptersRuntimes {
     };
     agy?: {
         home: AgyAdapterOptions['home'];
+        resolveKey: AgyAdapterOptions['resolveKey'];
         model?: AgyAdapterOptions['model'];
         versionPolicy?: RuntimeVersionPolicy;
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -1444,6 +1452,7 @@ export type { AgentMemoryRecallResult } from '../daemon/agent-memory.js';
 export type { AgentMemorySaveResult } from '../daemon/agent-memory.js';
 export type { AgentMemoryAuditWarning } from '../daemon/agent-memory.js';
 export { isAgentMemoryFilesystemHelperSupported } from '../daemon/agent-memory-fs-helper.js';
+export { resolveAgentMemoryFilesystemHelper } from '../util/agent-memory-helper-release.js';
 export { openAgentMemoryFilesystemHelper } from '../daemon/agent-memory-fs-helper.js';
 export type { AgentMemoryFilesystem } from '../daemon/agent-memory-filesystem.js';
 export type { AgentMemoryFilesystemFileState } from '../daemon/agent-memory-filesystem.js';
@@ -1746,6 +1755,7 @@ export type AgentMemoryHomeCheck = {
     readonly reason: string;
 };
 export declare function checkAgentMemoryHome(home: string, options?: {
+    readonly scope?: 'full' | 'resident';
     readonly commit?: {
         readonly filesystem?: AgentMemoryFilesystem;
     };
@@ -4321,6 +4331,8 @@ export type { DaemonRecord, DaemonRecordKind, DaemonRecordProjector, DaemonTurnR
 export type { ExecutionRecord, ExecutionRecordGap, ExecutionRecordStatus, ExecutionRecordUnknown } from './daemon/execution-record.js';
 export { createServiceLifecycle, UnsupportedServicePlatformError } from './lifecycle/create-service-lifecycle.js';
 export type { CreateServiceLifecycleOptions } from './lifecycle/create-service-lifecycle.js';
+export { inspectStoreServiceState } from './lifecycle/store-service-state.js';
+export type { StoreServiceState } from './lifecycle/store-service-state.js';
 export { nodeAgentProgram, sanitizeServiceName } from './lifecycle/service-types.js';
 export type { NodeAgentProgramOptions, ServiceDefinition, ServiceInstallOptions, ServiceLifecycle, ServiceProgram, ServiceStatusResult, ServiceWindowsOptions, } from './lifecycle/service-types.js';
 export { generateLaunchdPlist } from './lifecycle/launchd.js';
@@ -5005,6 +5017,15 @@ export declare function readServiceLifecycleOwner(storeDir: string, fs?: Service
 } | undefined>;
 export declare function claimServiceLifecycleOwner(input: ServiceLifecycleOwnerInput, fs?: ServiceOwnerFs): Promise<void>;
 export declare function releaseServiceLifecycleOwner(input: Omit<ServiceLifecycleOwnerInput, 'service'>, fs?: ServiceOwnerFs): Promise<void>;
+// ==== @byok-sdk/client dist/lifecycle/store-service-state.d.ts ====
+export interface StoreServiceState {
+    readonly state: 'stopped' | 'running' | 'unknown';
+    readonly owner?: {
+        readonly owner: string;
+        readonly service: string;
+    };
+}
+export declare function inspectStoreServiceState(storeDir: string): Promise<StoreServiceState>;
 // ==== @byok-sdk/client dist/lifecycle/systemd.d.ts ====
 import { type Runner } from '../util/exec-runner.js';
 import { type ManagedLifecycleFs } from './managed-lifecycle.js';
@@ -6254,6 +6275,7 @@ export declare class SteerUnsupportedError extends Error {
     constructor(runtimeId: string, message: string);
 }
 // ==== @byok-sdk/client dist/util/agent-memory-helper-release.d.ts ====
+export declare function resolveAgentMemoryFilesystemHelper(assetRoot?: string): string;
 export interface CopyAgentMemoryHelperAssetsOptions {
     readonly outDir: string;
     readonly platform?: 'darwin' | 'win32';

@@ -7,7 +7,7 @@ import { McpQualifiedToolNameCollisionError } from '../projection.js';
 import { McpCallOutcomeUnknownError, McpServerDriftError, McpServerPool } from '../server-pool.js';
 import { publishMcpHubCatalog, readMcpHubCatalog, snapshotHubBinding, type McpHubCatalog, type McpHubCatalogBinding } from './catalog.js';
 import { discoverMcpHubServers } from './discovery.js';
-import { HUB_CALL_TOOL, HUB_SEARCH_TOOL, MCP_HUB_SERVER_NAME, MCP_HUB_TOOLS, hubText, parseHubCall, parseHubQuery, type McpHubCall } from './protocol.js';
+import { HUB_CALL_TOOL, HUB_SEARCH_TOOL, MCP_HUB_SERVER_INFO, MCP_HUB_TOOLS, hubText, parseHubCall, parseHubQuery, type McpHubCall } from './protocol.js';
 import { searchMcpHubCatalog } from './search.js';
 
 export { readMcpHubCatalog, type McpHubCatalog, type McpHubCatalogBinding } from './catalog.js';
@@ -18,6 +18,7 @@ interface McpHubOptions extends Pick<McpServerOptions, 'input' | 'output'> {
   readonly isActive?: (signal: AbortSignal) => boolean | Promise<boolean>;
   readonly authorizeCall?: (call: McpHubCall, signal: AbortSignal) => boolean | Promise<boolean>;
   readonly toolCallTimeoutMs?: number;
+  readonly containsPrivateValue?: (value: unknown) => boolean;
 }
 
 class InactiveAttemptError extends Error {}
@@ -42,13 +43,14 @@ function matchesInputSchema(args: McpHubCall['arguments'], schema: unknown): boo
 }
 
 /** Internal stdio helper. Only a daemon-owned Attempt proof makes either tool callable. */
-export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } {
+export function serveMcpHub(options: McpHubOptions): { close(): Promise<void>; disconnect(): Promise<void> } {
   const binding = snapshotHubBinding(options.binding);
   const input = options.input ?? process.stdin;
   const output = options.output ?? process.stdout;
   let catalog: McpHubCatalog | undefined;
   let discovery: Discovery | undefined;
   let closing: Promise<void> | undefined;
+  let disconnecting: Promise<void> | undefined;
 
   const pool = new McpServerPool((name) => {
     const frozen = catalog?.get(name);
@@ -60,11 +62,11 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     signal.throwIfAborted();
     let active = false;
     try {
-      active = (await options.isActive?.(signal)) === true;
+      active = disconnecting === undefined && (await options.isActive?.(signal)) === true;
     } catch {
       // A missing or failed control proof denies this operation.
     }
-    if (!active) throw new InactiveAttemptError('MCP hub Attempt is inactive or could not be verified.');
+    if (!active || disconnecting !== undefined) throw new InactiveAttemptError('MCP hub Attempt is inactive or could not be verified.');
     signal.throwIfAborted();
   }
 
@@ -82,6 +84,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     const published = await readPublishedCatalog();
     if (published !== undefined) return published;
     const servers = await discoverMcpHubServers(binding, signal);
+    if (options.containsPrivateValue?.(servers)) throw new Error('MCP search metadata contains private launch data.');
     try {
       catalog = await publishMcpHubCatalog(binding, servers, signal);
       return catalog;
@@ -96,8 +99,12 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     if (catalog !== undefined) return catalog;
     // A cancelled waiter can leave a closing discovery. Wait for its children
     // to finish before granting the next run its own concurrency budget.
-    if (discovery?.abort.signal.aborted) await discovery.done.catch(() => undefined);
+    if (discovery?.abort.signal.aborted) {
+      await discovery.done.catch(() => undefined);
+      await checkActive(signal);
+    }
     signal.throwIfAborted();
+    if (disconnecting !== undefined) throw new InactiveAttemptError('MCP hub control connection is closed.');
     if (discovery === undefined) {
       const abort = new AbortController();
       discovery = { abort, waiters: 0, done: freezeCatalog(abort.signal).finally(() => { discovery = undefined; }) };
@@ -116,12 +123,14 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
 
   async function callTool(request: McpServerToolCall): Promise<Record<string, unknown>> {
     const { name, signal } = request;
+    if (disconnecting !== undefined) return hubText('MCP hub control connection is closed.', true);
     if (name === HUB_SEARCH_TOOL) {
       const query = parseHubQuery(request.arguments);
       if (query === undefined) return hubText('tool_search requires a query string of at most 256 characters.', true);
       try {
         await checkActive(signal);
         const matches = searchMcpHubCatalog(await searchCatalog(signal), query);
+        if (options.containsPrivateValue?.(matches)) return hubText('MCP search metadata contains private launch data.', true);
         return withOversizeToolResult(matches, hubText('Search results exceed the output frame limit.', true));
       } catch (error) {
         return hubText(error instanceof Error ? error.message : 'MCP hub search failed.', true);
@@ -153,6 +162,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
       const result = await pool.callVerified(
         call.server, call.tool, call.arguments, signal, () => checkActive(signal), options.toolCallTimeoutMs,
       );
+      if (options.containsPrivateValue?.(result)) return hubText('MCP tool call reply contained private launch data and was withheld.', true);
       return withOversizeToolResult(result, hubText('MCP tool call result unknown: its reply exceeds the output frame limit.', true));
     } catch (error) {
       if (error instanceof InactiveAttemptError) return hubText(error.message, true);
@@ -163,7 +173,7 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
   }
 
   const stdio = serveMcpOverStdio({
-    input, output, serverInfo: { name: MCP_HUB_SERVER_NAME, version: '1' }, tools: MCP_HUB_TOOLS, callTool,
+    input, output, serverInfo: MCP_HUB_SERVER_INFO, tools: MCP_HUB_TOOLS, callTool,
     onClose: closeStreams,
   });
   input.once('close', closeStreams);
@@ -175,6 +185,14 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     void close();
   }
 
+  // Keep stdio open so dispatched calls can report an unknown result.
+  function disconnect(): Promise<void> {
+    if (disconnecting !== undefined) return disconnecting;
+    discovery?.abort.abort();
+    disconnecting = Promise.allSettled([pool.close(), discovery?.done]).then(() => undefined);
+    return disconnecting;
+  }
+
   function close(): Promise<void> {
     if (closing !== undefined) return closing;
     stdio.close();
@@ -182,10 +200,9 @@ export function serveMcpHub(options: McpHubOptions): { close(): Promise<void> } 
     input.off('error', closeStreams);
     output.off('close', closeStreams);
     output.off('error', closeStreams);
-    discovery?.abort.abort();
-    closing = Promise.allSettled([pool.close(), discovery?.done]).then(() => undefined);
+    closing = disconnect();
     return closing;
   }
 
-  return { close };
+  return { close, disconnect };
 }

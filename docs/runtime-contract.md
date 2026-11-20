@@ -29,7 +29,7 @@ declared `true` with neither a check nor absent evidence fails the suite.
 | Case | Checks |
 | --- | --- |
 | `detect.version` | `detect()` is available. The suite reads the version text itself, so a broken adapter parser fails here. It also checks the effective version-policy verdict (allow for the qualified token; warn for an unqualified one where the adapter's default policy warns), and that the `conn.hello`/`presence` projection reduces that verdict to `state` plus `qualifiedVersion` without leaking a local `matched` spec. |
-| `detect.auth.*` | `authPresent` is false with no credential, and true for an API key in the environment and for the runtime's own stored login. |
+| `detect.auth.*` | Runtimes that inspect local auth report `authPresent` for the credential sources they support. dsh and agy omit `authPresent` and detect without calling the embedded Host's `resolveKey`. |
 | `mcp.submitResult` | A Host MCP server's `submit_result` call reaches the server, including through deferred-tool search (Claude `ToolSearch`, Grok `search_tool`/`use_tool`). |
 | `instructions.project` | The project instruction file (AGENTS.md, or CLAUDE.md for Claude) reaches the model. |
 | `isolation.userInstructions`, `.userOutputStyle`, `.userMemory`, `.userSkills`, `.userHookContext` | In an Agent task with user context excluded, a marker in that user source (instruction file, output style, memory store, skill name, description or body, hook output) does not reach the model. A positive control shows the marker does reach the model: the same adapter with the user context inherited (Claude, Pi), or the marker in the adapter's own home (agy, dsh). A bit declared absent runs no case; its evidence is the absent-sources record (see above). |
@@ -130,7 +130,10 @@ prerelease (`0.2.1-rc.5`) as an exact version.
   `QUALIFIED_DSH_VERSION`, or
   `QUALIFIED_CLAUDE_VERSION`. Pi has no
   separate constant: it is bundled, and its version is
-  `byok.piRuntimePin`.
+  `byok.piRuntimePin`. Claude and Codex follow the `accepted` pins in the
+  vendored OAR `.github/runtime-versions.json` on every OAR upgrade.
+  `check:version-authority` enforces the match. These loopback legs exercise
+  the SDK-owned behavior and isolation on top of the OAR native adapters.
 - **Nightly** (`runtime-contract-nightly.yml`, also `workflow_dispatch`): the
   same suite against each CLI's latest release. A failure comments on one open
   tracking issue, or creates it. Pi's leg reports every case as skipped,

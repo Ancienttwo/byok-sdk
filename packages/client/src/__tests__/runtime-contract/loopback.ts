@@ -95,7 +95,9 @@ export interface ProviderRequest {
 }
 
 export type ProviderStep =
-  | { readonly kind: 'tool'; readonly tool: ProviderTool; readonly args: Record<string, unknown> }
+  | { readonly kind: 'tool'; readonly tool: ProviderTool; readonly args: Record<string, unknown>;
+      /** Additional calls in the same OpenAI Chat assistant message. */
+      readonly parallel?: readonly { readonly tool: ProviderTool; readonly args: Record<string, unknown> }[] }
   | { readonly kind: 'text'; readonly chunks: readonly string[] };
 
 export type ProviderScript = (request: ProviderRequest) => ProviderStep | Promise<ProviderStep>;
@@ -226,9 +228,13 @@ function respondResponses(response: ServerResponse, step: ProviderStep): void {
 function respondChat(response: ServerResponse, step: ProviderStep, stream: boolean, model: string): void {
   const base = { id: `chatcmpl-contract-${++sequence}`, created: 0, model };
   const usage = { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 };
+  const tools = step.kind === 'tool' ? [step, ...(step.parallel ?? [])].map((call, index) => ({
+    id: `call_${sequence}${index === 0 ? '' : `_${index}`}`, type: 'function' as const,
+    function: { name: call.tool.name, arguments: JSON.stringify(call.args) },
+  })) : [];
   if (!stream) {
     const message = step.kind === 'tool'
-      ? { role: 'assistant', content: null, tool_calls: [{ id: `call_${sequence}`, type: 'function', function: { name: step.tool.name, arguments: JSON.stringify(step.args) } }] }
+      ? { role: 'assistant', content: null, tool_calls: tools }
       : { role: 'assistant', content: step.chunks.join('') };
     response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ ...base, object: 'chat.completion',
       choices: [{ index: 0, message, finish_reason: step.kind === 'tool' ? 'tool_calls' : 'stop' }], usage }));
@@ -236,7 +242,7 @@ function respondChat(response: ServerResponse, step: ProviderStep, stream: boole
   }
   const chunk = { ...base, object: 'chat.completion.chunk' };
   const deltas = step.kind === 'tool'
-    ? [{ role: 'assistant', tool_calls: [{ index: 0, id: `call_${sequence}`, type: 'function', function: { name: step.tool.name, arguments: JSON.stringify(step.args) } }] }]
+    ? [{ role: 'assistant', tool_calls: tools.map((call, index) => ({ ...call, index })) }]
     : step.chunks.map((content, index) => ({ ...(index === 0 ? { role: 'assistant' } : {}), content }));
   sse(response, [
     ...deltas.map(delta => [undefined, { ...chunk, choices: [{ index: 0, delta, finish_reason: null }] }] as const),

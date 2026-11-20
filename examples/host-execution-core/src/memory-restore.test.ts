@@ -16,7 +16,9 @@ import {
   type MemoryRestoreInput,
   type MemoryRestoreResult,
   type ExecutionServer,
+  type FrozenInput,
 } from '@byok-sdk/server/execution-core';
+import type { WakeScheduleInput } from '@byok-sdk/server';
 import { template } from './test-support';
 import type { AgentMemoryExport } from '@byok-sdk/protocol/agent-memory';
 const binding = { deviceId: 'device', agentRef: { agentId: 'main', profileRevision: '1' } };
@@ -68,6 +70,57 @@ it('holds the gate across all readbacks and preserves stable retry identity acro
   expect(Object.keys(ledger.snapshot().memory!.intents)).toEqual(ids);
   expect(Object.values(ledger.snapshot().memory!.intents).every(row => !('content' in row.intent))).toBe(true);
 });
+it('wakes a memory reader after restore while the earlier writer is held by Host admission', async () => {
+  let now = 1000;
+  const wakes = new Map<string, WakeScheduleInput>();
+  const offers = new Map<string, FrozenInput>();
+  const server = {
+    executions: { submit: async (offer: FrozenInput) => { offers.set(offer.taskId, offer); } },
+    tasks: {
+      offer: async (taskId: string) => {
+        const offer = offers.get(taskId);
+        return offer && { ...offer, type: 'task.offer', delivered: true };
+      },
+      deviceTerminal: async () => undefined,
+      attempt: async () => undefined,
+    },
+    wakes: {
+      schedule: async (wake: WakeScheduleInput) => { wakes.set(wake.dedupKey, wake); },
+      cancel: async (key: string) => wakes.delete(key),
+    },
+  } as unknown as ExecutionServer;
+  const core = new HostExecutionCore(server, ledger, { memory: page, now: () => now, reconcileMs: 100,
+    admitSubmit: intent => intent.key !== 'first-writer' });
+  try {
+    const restore = await page.restore(input());
+    const execution = template(binding.deviceId);
+    const writer = { source: 'user' as const, execution, waitUntil: 4000 };
+    await core.enqueue({ ...writer, key: 'first-writer' });
+    const reader = await core.enqueue({ ...writer, key: 'reader', waitUntil: 1600,
+      execution: { ...execution, payload: { ...execution.payload, homeAccess: 'memory-reader' } } });
+    await core.enqueue({ ...writer, key: 'later-writer' });
+    expect(core.intent(reader.key)).toMatchObject({ phase: 'memory_blocked', attempts: 0 });
+
+    for (const file of restore.files) await complete(file);
+    expect(page.restoreResult(binding, restore.restoreId)?.status).toBe('applied');
+    expect(core.intent(reader.key)).toMatchObject({ phase: 'queued', attempts: 0 });
+    expect(offers.size).toBe(0);
+
+    const wake = ledger.snapshot().scanWake!;
+    expect(wakes.get(wake.dedupKey)).toEqual(wake);
+    wakes.delete(wake.dedupKey);
+    now = wake.availableAt;
+    await core.consume({ ...wake, wakeId: wake.dedupKey, deliveredAt: now, delivery: 1 }, new AbortController().signal);
+
+    expect(core.intent(reader.key)).toMatchObject({ phase: 'inflight', attempts: 1 });
+    expect(offers.get(reader.taskId)?.payload.homeAccess).toBe('memory-reader');
+    expect(now).toBeLessThan(reader.waitUntil);
+    expect(core.intent('first-writer')).toMatchObject({ phase: 'queued', attempts: 0 });
+    expect(core.intent('later-writer')).toMatchObject({ phase: 'queued', attempts: 0 });
+    expect([...offers.keys()]).toEqual([reader.taskId]);
+  } finally { await core.close(); }
+});
+
 it('compacts restore intents only after the restore is terminal and keeps its result', async () => {
   const first = await page.restore(input());
   await complete(first.files[0]!);

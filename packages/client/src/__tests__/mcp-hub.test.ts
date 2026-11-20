@@ -4,10 +4,13 @@ import { build } from 'esbuild';
 import { mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
+import { setImmediate } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { afterAll, afterEach, beforeAll, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest';
 import { bindMcpHubAuthorization } from '../mcp/hub-authorization.js';
-import { readMcpHubCatalog, type McpHubCatalogBinding } from '../mcp/hub/index.js';
+import * as discovery from '../mcp/hub/discovery.js';
+import { readMcpHubCatalog, serveMcpHub, type McpHubCatalogBinding } from '../mcp/hub/index.js';
 import { createAutoToolAuthorizationGate } from '../tool-authorization.js';
 
 const fixture = (name: string): string => fileURLToPath(new URL(`./fixtures/${name}.mjs`, import.meta.url));
@@ -272,6 +275,48 @@ it('cancels unfinished discovery and lets the next search start fresh', async ()
   expect(await readMcpHubCatalog(f.binding)).toBeUndefined();
   await writeFile(release, '');
   expect(searchHits(await hub.search('echo'))).toHaveLength(1);
+});
+
+it('does not restart cancelled discovery after control disconnects during cleanup', async () => {
+  const { binding } = await fixtureContext();
+  const input = new PassThrough();
+  const output = new PassThrough();
+  const response = Promise.withResolvers<string>();
+  output.once('data', chunk => response.resolve(String(chunk)));
+  const started = Promise.withResolvers<AbortSignal>();
+  const cleanup = Promise.withResolvers<never>();
+  const discover = vi.spyOn(discovery, 'discoverMcpHubServers')
+    .mockImplementationOnce(async (_, signal) => {
+      started.resolve(signal);
+      return cleanup.promise;
+    })
+    .mockRejectedValue(new Error('Unexpected discovery restart'));
+  const isActive = vi.fn(() => true);
+  const hub = serveMcpHub({ binding, input, output, isActive });
+  const send = (message: object) => input.write(JSON.stringify({ jsonrpc: '2.0', ...message }) + '\n');
+  const search = (id: number) => send({ id, method: 'tools/call', params: { name: 'tool_search', arguments: { query: 'echo' } } });
+  try {
+    search(1);
+    const signal = await started.promise;
+    send({ method: 'notifications/cancelled', params: { requestId: 1 } });
+    await setImmediate();
+    expect(signal.aborted).toBe(true);
+    search(2);
+    await setImmediate();
+    expect(isActive).toHaveBeenCalledTimes(2);
+    expect(discover).toHaveBeenCalledTimes(1);
+
+    const disconnected = hub.disconnect();
+    cleanup.reject(signal.reason);
+    await disconnected;
+    const reply = JSON.parse(await response.promise);
+    expect(discover).toHaveBeenCalledTimes(1);
+    expect(reply).toMatchObject({ id: 2, result: { isError: true, content: [{ text: expect.stringMatching(/inactive|closed/u) }] } });
+  } finally {
+    cleanup.reject(new Error('Test cleanup'));
+    await hub.close();
+    discover.mockRestore();
+  }
 });
 
 it('reuses the published catalog after hub restart and rejects live schema drift before dispatch', async () => {
