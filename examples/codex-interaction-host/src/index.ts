@@ -49,7 +49,7 @@ export async function startFixtureHost(options: FixtureHostOptions): Promise<{
     // macOS tmpdir() resolves past the 61-byte scratch root limit; /tmp resolves to /private/tmp.
     scratchRoot = await mkdtemp(path.join(await realpath(process.platform === 'win32' ? tmpdir() : '/tmp'), 's-'));
     scratch = await createExecutionScratch({ root: scratchRoot });
-    const prepared = await adapter.prepare({ offer: { instruction, target: { lane: 'runtime', runtimeId: 'codex' } },
+    const prepared = await adapter.prepare({ offer: { instruction, target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } },
       descriptor: adapter.descriptor, requiredToolsetIds: [] });
     if (prepared.kind === 'reject') throw new Error('fixture adapter refused');
     host.assertOutputAvailable();

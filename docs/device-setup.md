@@ -17,12 +17,11 @@ runtime as the OS user who will run the daemon. For a source checkout, run
 On Linux, the daemon needs the user's unlocked Secret Service session for
 pairing. Device credentials belong in OS credential storage, never this JSON.
 
-OpenCode keyless onboarding remains gated on native OS/line qualification.
-Installing its CLI or supplying `runtimes.opencode.models` does not enable it
-while the adapter advertises no platforms. Follow the
-[OpenCode qualification contract](adapter-capabilities.md#opencode-implementation-and-qualification-1538)
-and its native evidence before selecting it for a device; the SDK does not
-install, upgrade or switch release lines.
+To enable OpenCode on a qualified macOS or Windows device, list `opencode` in
+`runtimeAllowlist`. Supply `runtimes.opencode.models` to let the device use
+configured defaults. With that list omitted, send each task with an explicit
+`adapter-model` selection. See the
+[OpenCode qualification contract](adapter-capabilities.md#opencode-implementation-and-qualification-1538).
 
 For a complete local Host, start the [basic example](../examples/basic/README.md)
 with `bun run --filter @byok-sdk/example-basic dev`, then open
@@ -1279,6 +1278,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `agentEgress.contentRead.artifact.sensitiveNames` | advanced | array |
 | `agentEgress.contentRead.runtimeAllowlistedRoots` | advanced | array |
 | `runtimeAllowlist` | common | array |
+| `runtimeInstallRoot` | advanced | string |
 | `runtimes` | advanced | object |
 | `runtimes.pi` | advanced | object |
 | `runtimes.pi.durableLane` | advanced | boolean |
@@ -1293,6 +1293,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.pi.runtimeEnvironment` | advanced | union |
 | `runtimes.pi.packageDir` | advanced | string |
 | `runtimes.claude` | advanced | object |
+| `runtimes.claude.byok` | embedded-only | embedded-only |
 | `runtimes.claude.agentUserContext` | advanced | "excluded" / "inherit" |
 | `runtimes.claude.agentSessionPersistence` | advanced | "disabled" / "enabled" |
 | `runtimes.claude.versionPolicy` | advanced | object |
@@ -1325,7 +1326,7 @@ linked JSON schema for full array/union shapes and descriptions.
 | `runtimes.grok.runtimeEnvironment` | advanced | union |
 | `runtimes.dsh` | embedded-only | embedded-only |
 | `runtimes.opencode` | advanced | object |
-| `runtimes.opencode.models` | required when parent is set | array |
+| `runtimes.opencode.models` | advanced | array |
 | `runtimes.opencode.executable` | advanced | string |
 | `runtimes.opencode.versionPolicy` | advanced | object |
 | `runtimes.opencode.versionPolicy.qualifiedVersion` | required when parent is set | string |
@@ -1456,6 +1457,7 @@ Manifest transition: **0.44.1 → 0.44.1**. Versions and entries below come from
 |-------|--------|----------------------|
 | mcp-toolset-exposure-config | additive | Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default. [Migration](../docs/releases/host-upgrade-next-minor.md#mcp-toolset-search) |
 | runtime-provider-key-resolvers | breaking | dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters require a Host resolveKey callback for each authenticated spawn. Remove dsh model.keyEnv. Plain JSON configuration cannot start these runtimes. [Migration](../docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys) |
+| managed-runtime-upgrades | additive | Hosts can explicitly stage and activate the SDK-qualified Claude, Codex, DSH, or OpenCode release in the SDK install root. Local diagnostics report compatibility floor failures and upgrade guidance. [Migration](../docs/releases/host-upgrade-next-minor.md#managed-runtime-upgrades) |
 <!-- generated:migrations:end -->
 
 ## Maintaining this guide

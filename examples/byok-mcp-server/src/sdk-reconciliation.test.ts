@@ -25,7 +25,7 @@ async function host() {
     expect(response).toMatchObject({ status: 200, body: { accepted: 1 } });
   };
   await send(createEnvelope('conn.hello', { protocolVersions: [PROTOCOL_VERSION], capabilities: AGENT_EXECUTION_CAPABILITIES,
-    productId: 'beta-b2-test', deviceId: session.deviceId, runtimes: [{ id: 'pi', capabilities: { steer: false, resume: false, approvalInteractive: false } }] }));
+    productId: 'beta-b2-test', deviceId: session.deviceId, harnesses: [{ id: 'pi', capabilities: { steer: false, resume: false, approvalInteractive: false, selectionModes: ['device-default'], effort: false } }] }));
   const ledger = new BetaLedger(join(root, 'beta.sqlite'), 'tenant-a', { tasks: server.tasks }); cleanup.push(() => ledger.close());
   const issued = ledger.issueKey({ label: 'SDK integration', scopes: ['tasks.dispatch', 'tasks.read'], deviceIds: [session.deviceId], runtimes: ['pi'], agentRef: AGENT });
   const caller = ledger.authenticate(`Bearer ${issued.token}`);
@@ -36,7 +36,7 @@ async function host() {
       target: runtimeTarget(reservation.binding.arguments.runtime), session: { mode: 'fresh' }, instruction: reservation.binding.arguments.instruction,
       agentRef: reservation.binding.agentRef!, egressPolicy: policy, terminalProjection: { mode: 'none' } } });
     const handle = { taskId: reservation.taskId };
-    await send(createEnvelope('task.claim', { deviceId: session.deviceId, agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: handle.taskId }));
+    await send(createEnvelope('task.claim', { deviceId: session.deviceId, agentRef: AGENT, executor: { id: 'pi' } }, { taskId: handle.taskId }));
     await send(createEnvelope('task.started', {}, { taskId: handle.taskId }));
     expect((await server.tasks.get(handle.taskId))?.state).toBe('Running');
     return handle;
@@ -54,7 +54,7 @@ it('keeps a pre-dispatch reservation occupied across missing SDK state and Host-
   expect((await f.server.tasks.get(handle.taskId))?.state).toBe('Cancelled');
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(false);
   expect(f.ledger.quota(f.caller).runningTasks).toBe(1);
-  await f.send(createEnvelope('task.cancelled', { agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' }, reason: 'Device acknowledged cancellation' }, { taskId: handle.taskId }));
+  await f.send(createEnvelope('task.cancelled', { agentRef: AGENT, executor: { id: 'pi' }, reason: 'Device acknowledged cancellation' }, { taskId: handle.taskId }));
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(true);
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(true);
   expect(f.ledger.quota(f.caller)).toMatchObject({ runningTasks: 0, remainingSubmits: 59 });
@@ -65,7 +65,7 @@ it('revokes authorization without killing the SDK task or releasing its slot', a
   f.ledger.revokeKey(f.issued.key.keyId);
   expect((await f.server.tasks.get(handle.taskId))?.state).toBe('Running');
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(false);
-  await f.send(createEnvelope('task.complete', { agentRef: AGENT, executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'Device fixture completed', sessionRef: 'b2-fixture-session' }, { taskId: handle.taskId }));
+  await f.send(createEnvelope('task.complete', { agentRef: AGENT, executor: { id: 'pi' }, summary: 'Device fixture completed', sessionRef: 'b2-fixture-session' }, { taskId: handle.taskId }));
   expect((await f.server.tasks.get(handle.taskId))?.state).toBe('Complete');
   expect(await f.ledger.reconcileTask(handle.taskId)).toBe(true);
 });

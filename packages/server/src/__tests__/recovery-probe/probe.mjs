@@ -26,7 +26,7 @@ const EGRESS_POLICY = {
 };
 // Each submission is its own Agent, so task B never meets task A's home writer.
 const submitExecution = async (byok, deviceId) => (await byok.executions.submit({ taskId: randomUUID(), deviceId,
-  payload: { instruction: 'attribution fixture', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: `probe-agent-${randomUUID()}`, profileRevision: 'rev-1' },
+  payload: { instruction: 'attribution fixture', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: { agentId: `probe-agent-${randomUUID()}`, profileRevision: 'rev-1' },
     session: { mode: 'fresh' }, egressPolicy: EGRESS_POLICY, terminalProjection: { mode: 'none' } } })).taskId;
 // Every daemon journals (#924), so a restart never runs task A again.
 const scenarios = [
@@ -137,7 +137,7 @@ async function child(stage, root) {
     return tail;
   };
   const adapter = {
-    descriptor: freezeRuntimeAdapterDescriptor({ id: 'pi', supportsDispatchSelection: true, requiresMcpToolsetToolObservation: false,
+    descriptor: freezeRuntimeAdapterDescriptor({ id: 'pi', selectionModes: ['device-default'], requiresMcpToolsetToolObservation: false,
       capabilities: { steer: false, resume: false, approvalInteractive: false, mcpToolsets: false } }),
     async detect() { return { kind: 'available', version: 'attribution-fixture-1' }; },
     async prepare() { return { kind: 'prepared', operation: { async start(input) {

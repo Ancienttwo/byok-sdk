@@ -14,7 +14,7 @@ import type { ContentHash } from '@byok-sdk/core';
 import { sealContent } from '@byok-sdk/core/sealed-payload';
 import { decodeEnvelope, requiredReceiverCapabilities } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, TENANT_B, TEST_AGENT_REF, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
 import {
   BY_REFERENCE_TEXT_LENGTH,
   CIPHERTEXT_CONTENT_TYPE,
@@ -30,7 +30,7 @@ const TASK_ID = 'sealed-host-task';
 const TYPE = 'task.offer';
 /** The plaintext fields of the sealed fresh Agent execution offer. */
 const FRESH = {
-  target: { lane: 'runtime', runtimeId: 'pi' },
+  target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
   agentRef: TEST_AGENT_REF,
   session: { mode: 'fresh' },
   egressPolicy: {
@@ -47,7 +47,7 @@ async function sealedDevice(): Promise<{ harness: CloudHarness; device: PairedDe
   const harness = createHarness();
   const device = await harness.pairDevice(TENANT_A);
   const capabilities = requiredReceiverCapabilities(TYPE, { ...FRESH, sealing: SEALING, sealed: {} });
-  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
+  await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities });
   return { harness, device };
 }
 
@@ -133,12 +133,12 @@ describe('a sealed offer retry keeps the first ciphertext (#654 §9.2)', () => {
   it('refuses a plaintext field change under the same task id and the same sealed member, and keeps the first offer', async () => {
     const { harness, device } = await sealedDevice();
     const sealed = inlineMember(await seal(device, 'review the patch'));
-    await failedFirstOffer(harness, device, sealed, { target: { lane: 'runtime', runtimeId: 'pi' } });
+    await failedFirstOffer(harness, device, sealed, { target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } });
 
-    await expect(offer(harness, device, sealed, { target: { lane: 'runtime', runtimeId: 'codex' } })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
+    await expect(offer(harness, device, sealed, { target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } })).rejects.toMatchObject({ code: 'coordination_input_invalid' });
     expect(await mailbox(harness, device)).toEqual([]);
-    const retried = await offer(harness, device, sealed, { target: { lane: 'runtime', runtimeId: 'pi' } });
-    expect(retried.envelope.payload).toMatchObject({ target: { lane: 'runtime', runtimeId: 'pi' }, sealed });
+    const retried = await offer(harness, device, sealed, { target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } });
+    expect(retried.envelope.payload).toMatchObject({ target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, sealed });
     expect(await mailbox(harness, device)).toEqual([retried.envelope]);
   });
 });

@@ -18,7 +18,7 @@ import {
 import type { ToolAuthorizationIpcConfig } from '../tool-authorization-ipc';
 import type { Session } from '../types';
 
-const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+const PI_TARGET = { lane: 'auto' } as const;
 
 const roots: string[] = [];
 const sessions: Session[] = [];

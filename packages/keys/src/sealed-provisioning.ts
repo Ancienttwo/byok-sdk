@@ -212,7 +212,7 @@ function bindingOf(profile: ModelProviderProfile): ProviderProvisioningBinding {
     profileRef: binding.profileRef,
     profileRevision: binding.profileRevision,
     profileHash: binding.profileHash,
-    modelId: binding.modelId,
+    modelId: profile.model,
   };
 }
 

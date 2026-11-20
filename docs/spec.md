@@ -373,8 +373,13 @@ and makes no network request.
   draft, change, new draft, view and submission for Hosts in other languages.
 
 The launcher accepts the adapter's bounded absolute extension paths and an
-absolute `--config` path. Provider/model/thinking selection remains local
-profile authority; delegated flags cannot override it. The Pi child gets a
+absolute `--config` path. The profile supplies provider, thinking level, and
+default model. An explicit `byok-profile` task selection can override the
+model ID through the launcher's own `--model` argument. The override reuses
+the profile's endpoint, API, and Pi settings. The pinned Pi catalog supplies
+image input support for an override. The launcher refuses an override that
+lacks verified support for required image input. The exact binding
+still hashes the saved default model. The Pi child gets a
 narrow inherited environment; arbitrary environment names, `BYOK_*` names and
 ambient provider credentials are excluded. The profile SQLite schema includes
 nullable `pi_model` and the singleton store metadata table. Launch requires the
@@ -1397,9 +1402,21 @@ no default policy blocks. Only a Host layer may configure a block; a descriptor
 default that carries one is rejected as `invalid_version_policy`
 (`block_requires_host`). A block is enforced locally before claim and produces
 `task.decline.code: runtime_unavailable`, `runtimeUnavailable.cause:
-version_blocked` and `retryable: false`. This is not a minimum-version check:
-the SDK does not install, repair or self-update a runtime, and an unqualified
-version is still admitted unless the Host configured a block.
+version_blocked` and `retryable: false`.
+
+Compatibility floors apply independently of the Host's version policy. AGY
+requires 1.5.0, DSH requires 0.2.1-rc.5, and OpenCode requires 1.18.35 on v1 or
+2.0.26 on v2. Below these floors, detection reports `acp_unavailable` with
+`unsupportedVersion`. Codex requires 0.48.0 for toolset selection. Local status
+and doctor show a required upgrade for a compatibility refusal, or an available
+upgrade when the installed version is usable and below the qualified release.
+At and above the qualified release, the Host version policy still applies.
+
+The Host can call `upgradeRuntime` explicitly against the SDK install root.
+The operation stages the exact qualified CLI release, probes its version and
+liveness, and publishes the result atomically. The daemon checks this managed
+copy before consulting PATH. AGY and Grok provide vendor upgrade instructions.
+Pi is distributed with the SDK.
 
 Claude Code, Codex and Antigravity are qualified at `2.1.326`, `0.169.0`
 and `1.5.11`, respectively. `check:version-authority` maps SDK adapter pins
@@ -1412,10 +1429,9 @@ adapter are outside the check. The BYOK loopback runtime contracts qualify SDK
 behavior and isolation against the vendored OAR native adapters.
 
 Pi `authPresent` is pi's own login state, on the installed and `sdkHelperHost`
-paths alike. It is `true` when any provider credential env-var name the pinned pi reads
-(generated from pi-ai `findEnvKeys`, `packages/client/scripts/generate-pi-provider-env.mjs`) is
-set, or when pi's agent directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent`)
-holds a credential for the global `settings.json` `defaultProvider`, or for any
+paths alike. It is `true` when Pi's agent directory (`PI_CODING_AGENT_DIR`,
+else `~/.pi/agent`) holds a credential for the global `settings.json`
+`defaultProvider`, or for any
 provider when `settings.json` is absent or configures no default. A credential
 is an `auth.json` login record of pi's `api_key` or `oauth` shape, or a
 `models.json` provider entry with a non-empty `apiKey` string. That `apiKey`
@@ -1426,9 +1442,8 @@ malformed `auth.json` or `settings.json` observes `false`. A missing
 credential. The probe inspects only presence and shape; it never returns, logs
 or retains a credential value.
 
-Explicit local `runtimes` shows fresh failure kinds. Online `status`, `doctor`
-and support bundles use the daemon's startup observations without local probes;
-offline `status` shows the last audited observations with a timestamp, or unknown.
+Online `status` and `doctor` use the daemon's most recent scan. Offline
+`status` shows the last audited observations with a timestamp when available.
 Offline `doctor` and support bundles label their explicit probes `local-shell`.
 `doctor` carries the same
 closed outcome and finite refusal reason in JSON and counts them in text. Its existing
@@ -1439,28 +1454,17 @@ probe wrapper's deadline is observed as `timeout`. This outer deadline does not
 claim to cancel arbitrary custom work because `detect()` has no cancellation
 contract.
 
-Daemon runtime registration and task selection validate the same shape and use
-only `available` where they previously consumed presence. By default no
-failure-kind field is added to wire presence or task envelopes, and no
-decline/retry/permission policy is derived from these diagnostic categories.
-The one exception is a **Host-configured version block**: before claim, the
-daemon declines the offer with `task.decline.code: runtime_unavailable`,
-`runtimeUnavailable.cause: version_blocked` and `retryable: false`. No other
-diagnostic category maps to a decline, retry or permission policy, and a
-device without a Host-configured policy behaves exactly as before.
+Wire v8 hello and presence carry the same `harnesses` and optional
+`runtimeUnavailable` fields. Built-in executors and custom harnesses share the
+same ID namespace. An advertised executor can carry a `versionPolicy` verdict.
+The typed causes explain unavailable executors, including `version_blocked`
+when the Host's policy refuses an installed release. The cloud checks explicit
+targets against the last accepted hello before enqueueing.
 
-Discovery carries strip-safe additions: `conn.hello.runtimes[].versionPolicy`,
-`conn.hello.harnesses[].versionPolicy`, `conn.hello.runtimeUnavailable[]`,
-and the same projections on `PUT /byok/presence`. Presence keeps the frozen
-`RuntimeId` identity domain; a custom harness's policy and cause travel only
-on `conn.hello.harnesses[]` / `conn.hello.runtimeUnavailable[]`. An older
-receiver drops every new field. Absence means unknown, never `allow` or
-`available`; a Host must not infer a verdict or availability from a missing
-field and must not infer a block from a missing `runtimes[]` entry.
-
-Startup detection is cached per daemon run; task admission still observes the
-adapter independently. No periodic probing, minimum versions, repair commands
-or self-update are added.
+The daemon scans its executors at startup and periodically while running. It
+publishes a fresh hello when the advertised inventory changes. Task admission
+checks the inventory acknowledged on the current connection and observes the
+selected adapter before preparing a launch.
 
 `DaemonStatus` and control `status` carry `runtimes: RuntimeObservation[]`,
 including unavailable outcomes, plus the closed `environment` projection.
@@ -1487,7 +1491,8 @@ The runtime executable is local-only evidence too (#1103 O10). An available
 `RuntimeDetectResult` and `RuntimeObservation` may carry `executablePath` (the
 absolute file detection ran) and `executableSource`: `config` when the
 adapter's Host `resolveBin` option chose it, `env` for a `BYOK_<RUNTIME>_BIN`
-override, `path` for a bare name. Both come from the adapter's one bin
+override, `managed` for the selected SDK installation, or `path` for a bare
+name. Both come from the adapter's one bin
 resolution and, for Claude and Codex, `resolveRuntimeInvocation`; no reader
 searches PATH to fill them. On win32 that invocation finds Claude's or Codex's
 file on PATH, so their `path` source has a path. Otherwise a bare name is
@@ -3983,20 +3988,18 @@ to 16 MiB per file and 64 MiB cumulatively per task. Reads use 64 KiB chunks and
 check both initial stat and actual growth; no upload/event is emitted after
 cancellation. Strict Agent egress remains its own authority.
 
-The additive `custom-harness` capability carries custom identities separately
-from the unchanged `RuntimeId` enum. Available adapters publish bounded
-`conn.hello.harnesses` (id, optional version, capabilities). The authenticated
-hello replaces the device's durable inventory. Hosts discover it through
-`MachineInfo.harnesses`, select one device and optionally require `harnessId` on
-an offer/dispatch. That field cannot coexist with `runtime` or
-`dispatchSelection`; capability/inventory rejection occurs before reservation.
-The actual custom adapter echoes `task.claim.harnessId`; the same claim CAS stores
-`claimedHarnessId`, and every complete/fail/cancelled terminal must echo it.
-An explicitly selected harness must match the immutable offer receipt. Old peers
-without the capability are refused; no identity is inferred from display names
-or provider/model fields. Business scheduling and device choice stay with the
-host. Deploy migration `0021_custom_harness_identity.sql` for PostgreSQL before
-this server code; embedded SQLite requires schema v6 under the new-database policy above.
+Wire v8 uses one executor inventory and one explicit `harness` lane. A device
+announces the executors its scan finds available. Each inventory entry names
+the supported selection modes and whether it accepts an explicit effort. The
+daemon sends a new hello when the scan changes. The cloud checks explicit
+selection against that inventory before reserving the attempt. For `auto`, the
+daemon picks an advertised executor that accepts device defaults.
+
+The first claim binds the actual executor to the original offer and the
+device's inventory. It records `claimedExecutor.id` once. After claim, a
+terminal echoes that identity. Hosts choose the device and the target. The
+[wire v8 Host checklist](releases/host-upgrade-next-minor.md#wire-v8-and-the-provider-store-cutover)
+covers draining and rebuilding the stores.
 
 ### Terminal boundary acceptance follow-up (#163 / #167)
 
@@ -4671,7 +4674,7 @@ app-server subcommand. A Host-configured version block declines the offer
 before claim with
 `runtime_unavailable` / `version_blocked`, non-retryably. Offers that require
 MCP toolsets also need [CLI 0.48.0 or later](#task-scoped-host-mcp-toolsets).
-The SDK never installs, repairs or self-updates the runtime. Each session,
+Managed installation requires an explicit Host operation. Each session,
 including native opt-in, opens or resumes with `approvalPolicy: never`.
 The sandbox is `danger-full-access` by default, as in
 OAR. `DaemonConfig.codexSandbox` selects `read-only` or `workspace-write`, or

@@ -12,7 +12,6 @@ import {
   type Envelope,
   type HarnessInfo,
   type RuntimeCapabilities,
-  type RuntimeInfo,
   type ToolsetId,
 } from '@byok-sdk/protocol';
 import { NONCE_SIGNING_DOMAIN, tenantId as brandTenantId, type TenantId } from '@byok-sdk/cloud';
@@ -36,7 +35,7 @@ export const TEST_SESSION_REF = 'sess-test';
 export const TEST_AGENT_DISPATCH = { agentRef: TEST_AGENT_REF, sessionRef: TEST_SESSION_REF, target: { lane: 'auto' } } as const;
 
 /** The executor a test claim reports when the test does not care which runtime ran. */
-export const TEST_CLAIMED_EXECUTOR: ClaimedExecutor = { kind: 'runtime', runtimeId: 'pi' };
+export const TEST_CLAIMED_EXECUTOR: ClaimedExecutor = { id: 'pi' };
 
 /**
  * Start `byok.hono` on an ephemeral port.
@@ -89,23 +88,25 @@ export async function stopServer(server: HttpServer): Promise<void> {
  * redelivery cursor forever. Any test needing a steerable task must claim
  * `pi`; anything else is expected to be refused server-side.
  */
-export const PI_RUNTIME_INFO: RuntimeInfo = {
+export const PI_RUNTIME_INFO: HarnessInfo = {
   id: 'pi',
-  capabilities: { steer: true, resume: true, approvalInteractive: false },
+  capabilities: { steer: true, resume: true, approvalInteractive: false, selectionModes: ['device-default', 'byok-profile'], effort: false },
 };
 
-export const CLAUDE_RUNTIME_INFO: RuntimeInfo = {
+export const CLAUDE_RUNTIME_INFO: HarnessInfo = {
   id: 'claude',
   capabilities: {
     steer: false,
     resume: true,
     approvalInteractive: true,
+    selectionModes: ['device-default', 'subscription'],
+    effort: true,
   },
 };
 
-export const CODEX_RUNTIME_INFO: RuntimeInfo = {
+export const CODEX_RUNTIME_INFO: HarnessInfo = {
   id: 'codex',
-  capabilities: { steer: false, resume: true, approvalInteractive: false },
+  capabilities: { steer: false, resume: true, approvalInteractive: false, selectionModes: ['device-default', 'subscription'], effort: true },
 };
 
 /**
@@ -275,7 +276,7 @@ export interface FakeLongPollDaemonOptions {
    */
   capabilities?: string[];
   /** Connection-level runtime discovery block — see {@link PI_RUNTIME_INFO} and friends. */
-  runtimes?: RuntimeInfo[];
+  runtimes?: HarnessInfo[];
   /** Custom harnesses the device declares; a harness claim names one of them. */
   harnesses?: HarnessInfo[];
   configuredToolsets?: ToolsetId[];
@@ -321,6 +322,9 @@ export async function connectFakeDaemonLongPoll(
   const { accessToken } = (await tokenRes.json()) as { accessToken: string };
 
   let cursor = 0;
+  const harnesses = opts.runtimes === undefined && opts.harnesses === undefined
+    ? [PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO, CODEX_RUNTIME_INFO]
+    : [...(opts.runtimes ?? []), ...(opts.harnesses ?? [])];
 
   const send = (envelope: Envelope): Promise<Response> =>
     fetch(`${baseUrl}/byok/messages`, {
@@ -342,8 +346,7 @@ export async function connectFakeDaemonLongPoll(
         deviceId,
         productId: opts.productId,
         clientVersion: opts.clientVersion,
-        runtimes: opts.runtimes,
-        harnesses: opts.harnesses,
+        harnesses,
         configuredToolsets: opts.configuredToolsets,
       }),
     );
@@ -364,7 +367,7 @@ export async function connectFakeDaemonLongPoll(
         level: 'online',
         clientVersion: opts.clientVersion,
         configuredToolsets: opts.configuredToolsets,
-        runtimes: opts.runtimes?.map(({ id, version, authPresent }) => ({ id, version, authPresent })),
+        ...(opts.runtimes === undefined && opts.harnesses === undefined ? {} : { harnesses }),
       }),
     });
     expect(published.status).toBe(200);
@@ -417,7 +420,7 @@ export async function announceHello(
   opts: {
     productId: string;
     capabilities?: string[];
-    runtimes?: RuntimeInfo[];
+    runtimes?: HarnessInfo[];
     clientVersion?: string;
     configuredToolsets?: ToolsetId[];
   },
@@ -429,7 +432,7 @@ export async function announceHello(
       deviceId: daemon.deviceId,
       productId: opts.productId,
       clientVersion: opts.clientVersion,
-      runtimes: opts.runtimes,
+      harnesses: opts.runtimes ?? [PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO, CODEX_RUNTIME_INFO],
       configuredToolsets: opts.configuredToolsets,
     }),
   );

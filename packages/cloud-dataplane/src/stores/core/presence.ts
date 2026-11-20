@@ -20,12 +20,12 @@ import { assertCollectExpiredInput, type CollectExpiredInput, type CollectExpire
  */
 import {
   ByokCoreError,
-  freezePresenceRuntimeFact,
+  freezePresenceHarnessFact,
   type Clock,
   type PresenceHint,
   type PresenceHintInput,
   type PresenceLevel,
-  type PresenceRuntimeFact,
+  type PresenceHarnessFact,
   type PresenceStore,
   type TenantId,
 } from '@byok-sdk/core';
@@ -33,7 +33,7 @@ import type { Pool } from 'pg';
 import type { ByokPool } from '../../pool.js';
 
 const PRESENCE_COLUMNS =
-  'tenant_id, device_id, level, detail, configured_toolsets, client_version, protocol_versions, runtimes, observed_at, expires_at';
+  'tenant_id, device_id, level, detail, configured_toolsets, client_version, protocol_versions, harnesses, observed_at, expires_at';
 
 interface PresenceRow {
   readonly tenant_id: string;
@@ -43,7 +43,7 @@ interface PresenceRow {
   readonly configured_toolsets: readonly string[] | null;
   readonly client_version: string | null;
   readonly protocol_versions: readonly number[] | null;
-  readonly runtimes: readonly PresenceRuntimeFact[] | null;
+  readonly harnesses: readonly PresenceHarnessFact[] | null;
   readonly observed_at: string;
   readonly expires_at: string;
 }
@@ -61,11 +61,7 @@ function toHint(row: PresenceRow): PresenceHint {
     ...(row.protocol_versions === null
       ? {}
       : { protocolVersions: Object.freeze([...row.protocol_versions]) }),
-    ...(row.runtimes === null
-      ? {}
-      : {
-          runtimes: Object.freeze(row.runtimes.map(freezePresenceRuntimeFact)),
-        }),
+    ...(row.harnesses === null ? {} : { harnesses: Object.freeze(row.harnesses.map(freezePresenceHarnessFact)) }),
     observedAt: row.observed_at,
     expiresAt: row.expires_at,
   };
@@ -135,7 +131,7 @@ export class PostgresPresenceStore implements PresenceStore {
               configured_toolsets = EXCLUDED.configured_toolsets,
               client_version = EXCLUDED.client_version,
               protocol_versions = EXCLUDED.protocol_versions,
-              runtimes    = EXCLUDED.runtimes,
+              harnesses   = EXCLUDED.harnesses,
               observed_at = EXCLUDED.observed_at,
               expires_at  = EXCLUDED.expires_at
         WHERE device_presence.expires_at <= EXCLUDED.observed_at
@@ -150,7 +146,7 @@ export class PostgresPresenceStore implements PresenceStore {
         input.configuredToolsets === undefined ? null : JSON.stringify(input.configuredToolsets),
         input.clientVersion ?? null,
         input.protocolVersions === undefined ? null : JSON.stringify(input.protocolVersions),
-        input.runtimes === undefined ? null : JSON.stringify(input.runtimes.map(freezePresenceRuntimeFact)),
+        input.harnesses === undefined ? null : JSON.stringify(input.harnesses.map(freezePresenceHarnessFact)),
         observedAt,
         new Date(now.getTime() + input.ttlMs).toISOString(),
         allowedBefore,

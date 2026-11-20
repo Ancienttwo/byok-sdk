@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createEnvelope, decodeEnvelope, MESSAGE_PAYLOAD_SCHEMAS } from '../index';
-import { ConnHelloPayloadSchema, RuntimeInfoSchema } from '../messages';
+import { ConnHelloPayloadSchema, HarnessInfoSchema } from '../messages';
 
 /**
  * M4 Phase 4: the version-negotiation compat-matrix drill. A self-contained
@@ -87,11 +87,11 @@ describe('M4 Phase 4 version-negotiation drill', () => {
       expect('futureArtifactMeta' in result.data).toBe(false);
     });
 
-    it('an unknown field on a per-runtime RuntimeInfo.capabilities entry (conn.hello.runtimes[], simulating a future daemon reporting to today\'s server) is silently stripped', () => {
-      const result = RuntimeInfoSchema.safeParse({
+    it('an unknown field on a per-runtime HarnessInfo.capabilities entry (conn.hello.harnesses[], simulating a future daemon reporting to today\'s server) is silently stripped', () => {
+      const result = HarnessInfoSchema.safeParse({
         id: 'claude',
         version: '2.2.0',
-        capabilities: { steer: true, resume: true, futureCapabilityField: true },
+        capabilities: { steer: true, resume: true, selectionModes: ['subscription'], effort: false, futureCapabilityField: true },
       });
       expect(result.success).toBe(true);
       if (!result.success) throw new Error('unreachable');
@@ -139,6 +139,7 @@ describe('M4 Phase 4 version-negotiation drill', () => {
     it('conn.hello.protocolVersions accepts a multi-entry array overlapping the server\'s version (e.g. a daemon simulating "I can also speak a hypothetical v2, but still list today\'s v1 too")', () => {
       const result = ConnHelloPayloadSchema.safeParse({
         protocolVersions: [1, 2],
+        harnesses: [],
         capabilities: [],
         deviceId: 'device-1',
         productId: 'acme-agent',
@@ -151,6 +152,7 @@ describe('M4 Phase 4 version-negotiation drill', () => {
     it("conn.hello.protocolVersions accepts a DISJOINT array too — the schema itself never referees negotiation, it only validates shape (the real accept/reject decision is ws-server.ts's own semantic check, not a schema constraint)", () => {
       const result = ConnHelloPayloadSchema.safeParse({
         protocolVersions: [2, 3],
+        harnesses: [],
         capabilities: [],
         deviceId: 'device-1',
         productId: 'acme-agent',

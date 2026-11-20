@@ -1,5 +1,6 @@
 // Match the existing pi-todo-runtime JS/declaration boundary: bundle the fixed fork without changing declaration rootDir.
 // codexSession accepts the isolated process reader through its caller-owned hooks.
+export { startAppServerClient } from '../../vendor/oar/a41628f/runtimes/codex/app-server-client.js';
 export { codexSession } from '../../vendor/oar/a41628f/runtimes/codex/session.js';
 export { SessionNotFoundError } from '../../vendor/oar/a41628f/contracts/session-not-found-error.js';
 export { SessionUnavailableError } from '../../vendor/oar/a41628f/contracts/session-unavailable-error.js';

@@ -1,4 +1,5 @@
-import { observeRuntimeDetection, projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection.js';
+import { observeRuntimeDetection, type RuntimeObservation } from '../runtime-detection.js';
+import { projectRuntimeObservationWithUpgrade } from '../runtime/runtime-releases.js';
 import type { RuntimeAdapter } from '../types.js';
 
 export const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
@@ -47,7 +48,7 @@ export async function probeRuntimes(
         steer = caps.steer === true;
         resume = caps.resume === true;
         const detected = await detectWithTimeout(adapter, timeoutMs);
-        return projectRuntimeObservation(adapter.descriptor, detected);
+        return projectRuntimeObservationWithUpgrade(adapter.descriptor, detected);
       } catch (error) {
         return { id, present: false, outcome: error instanceof RuntimeProbeTimeout ? 'timeout' : 'probe-failed', steer, resume };
       }

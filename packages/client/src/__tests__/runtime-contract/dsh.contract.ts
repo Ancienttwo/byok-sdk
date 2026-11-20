@@ -17,14 +17,13 @@ import {
 } from './contract';
 import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
 
-const DSH_TARGET = { lane: 'harness', harnessId: 'dsh' } as const;
-
 import { defineMcpSearchProbes } from './mcp-search-probe';
 import { searchMcpEnvironmentFor } from '../../daemon/search-runtime-qualification';
 import type { DaemonConfig } from '../../daemon/create-daemon';
 const target = contractTarget('dsh', QUALIFIED_DSH_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
 const MODEL = 'contract-model';
+const DSH_TARGET = { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'openai', modelId: `byok-custom/${MODEL}` } } as const;
 const PROVIDER_KEY = 'byok-contract-dsh-provider-86ae';
 const resolveKey = async () => PROVIDER_KEY;
 const PROJECT_MARKER = 'BYOK-CONTRACT-DSH-PROJECT-4e19';
@@ -39,7 +38,7 @@ const RESUME_MARKER = 'BYOK-CONTRACT-DSH-RESUME-e07c';
 const AGENT_PERSONA_MARKER = 'BYOK-CONTRACT-DSH-AGENT-PERSONA-71d4';
 const SKILL_FILE = `---\nname: ${SKILL}\ndescription: ${SKILL_MARKER}\n---\n\nRuntime contract user skill.\n`;
 
-const loopbackModel = (baseUrl: string): DshModelSelection => ({ provider: 'custom', model: MODEL, baseUrl });
+const loopbackModel = (baseUrl: string): DshModelSelection => ({ provider: 'custom', model: MODEL, baseUrl, providerId: 'openai' });
 
 /** One SDK-owned dsh root for the file; detect() writes the acp profile into it before any turn. */
 const rootBox = once(() => createSandbox('dsh-root'));
@@ -120,7 +119,7 @@ async function turn() {
     await writeUserContext(box.home, await writeSubmitResultServer(box.root, userReceipt, 'user_tool'));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     const env = { ...baseEnv(box.home), ...recorder.env };
-    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } });
+    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } }, DSH_TARGET);
     return { events, provider, calls: await readReceipt(receipt), userSpawned: spawned(userReceipt),
       mcpEnv: await fs.readFile(`${receipt}.env`, 'utf8'), shellEnv: await fs.readFile(shellEnv, 'utf8'),
       credentialFiles: [...await credentialFiles(box.root, PROVIDER_KEY), ...await credentialFiles((await rootBox()).root, PROVIDER_KEY)],
@@ -148,7 +147,7 @@ async function controlTurn(label: string, write: (root: string) => Promise<void>
     if (init.kind !== 'available') throw new Error(`dsh control root init: ${JSON.stringify(init)}`);
     await write(root);
     const env = { ...baseEnv(box.home), ...recorder.env };
-    await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env });
+    await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env }, DSH_TARGET);
     return provider;
   } finally {
     await provider.close();
@@ -367,7 +366,7 @@ async function toolInputTurn() {
   const provider = await startLoopbackProvider('openai-chat', script, MODEL);
   try {
     const env = { ...baseEnv(box.home), ...recorder.env };
-    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Run the tools.', { workspaceDir: box.workspace, env });
+    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Run the tools.', { workspaceDir: box.workspace, env }, DSH_TARGET);
     const uses = events.filter(event => event.type === 'tool_use');
     return { calls, uses, risks: uses.map(use => classifyToolCall({ toolName: use.tool, input: use.input as Record<string, unknown>, cwd: box.workspace }, box.workspace, box.home).level) };
   } finally {
@@ -376,6 +375,7 @@ async function toolInputTurn() {
 }
 
 defineMcpSearchProbes({
+  target: DSH_TARGET,
   runtime: 'dsh', variant: 'sandbox=danger-full-access', wire: 'openai-chat', model: MODEL,
   async configure(box, provider, spawnFn) {
     const model = loopbackModel(provider.baseUrl);

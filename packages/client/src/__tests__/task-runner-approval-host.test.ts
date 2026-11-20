@@ -18,7 +18,7 @@ import type { BlobResolver } from '../daemon/blob-client';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const unusedBlobClient: BlobResolver = {
@@ -32,7 +32,7 @@ function makeRunner(
   overrides: Partial<TaskRunnerDeps> = {},
 ): { runner: TaskRunner; approvalRegistry: ApprovalRegistry } {
   const approvalRegistry = new ApprovalRegistry();
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); },
     ...freshOfferRunnerDeps(),
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),

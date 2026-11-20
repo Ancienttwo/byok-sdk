@@ -8,6 +8,7 @@ import { DurableViewProjection, type DurableEvent } from './events.js';
 import { durableToolDenial } from './guard.js';
 import { acquireReplicaLock, resetReplica, type DurableReplicaBinding } from './replica.js';
 import { openLocalDurableStorage, type DurableStorageFactory } from './storage.js';
+import { isPiModelUnavailable, PI_MODEL_UNAVAILABLE_REASON } from '../pi/events.js';
 
 export interface DurableEngineInput {
   file: string; replicaRoot: string; binding: DurableReplicaBinding;
@@ -45,6 +46,9 @@ export const DURABLE_HARNESS_IDENTITY = { attribution: null } as const;
  */
 export class DurableRunInterrupted extends Error {
   constructor(readonly reason: 'interrupted' | 'restart_limit') { super(`durable run ${reason}`); this.name = 'DurableRunInterrupted'; }
+}
+export class DurableModelUnavailable extends Error {
+  constructor() { super(PI_MODEL_UNAVAILABLE_REASON); }
 }
 const INTERRUPTED = new Set(['interrupted', 'restart_limit']);
 /** Committed entries in ID order, from `minEntryId` up to `maxEntryId` when given. */
@@ -125,6 +129,7 @@ export async function openDurableEngine(input: DurableEngineInput) {
         await entriesFrom(root, projection.last + 1)));
       if (settlement.status !== 'done') {
         if (INTERRUPTED.has(settlement.reason)) throw new DurableRunInterrupted(settlement.reason as 'interrupted' | 'restart_limit');
+        if (settlement.reason === 'model_error' && isPiModelUnavailable(settlement.detail)) throw new DurableModelUnavailable();
         throw new Error('durable submission did not finish');
       }
       if (failed) throw new Error('durable run failed');

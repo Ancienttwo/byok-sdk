@@ -247,7 +247,7 @@ export class SqliteDeviceDirectory implements DeviceDirectory {
                     ...(hint.protocolVersions === undefined
                       ? {}
                       : { protocolVersions: hint.protocolVersions }),
-                    ...(hint.runtimes === undefined ? {} : { runtimes: hint.runtimes }),
+                    ...(hint.harnesses === undefined ? {} : { harnesses: hint.harnesses }),
                     observedAt: hint.observedAt,
                     expiresAt: hint.expiresAt,
                   },

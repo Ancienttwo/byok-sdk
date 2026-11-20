@@ -20,7 +20,7 @@ import type { Session } from '../../../types';
 import { startPreparedOperation, type PreparedOperationResources } from '../../../__tests__/fixtures/prepared-operation';
 import { resolveBunBin } from '../../../__tests__/support/test-bun-bin';
 
-const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
+const GROK_TARGET = { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } } as const;
 
 const FAKE_AGENT = fileURLToPath(new URL('../../../__tests__/fixtures/fake-acp-agent.mjs', import.meta.url));
 const usage = { type: 'usage', inputTokens: 100, cachedInputTokens: 64, outputTokens: 7, contextTokens: 1001, contextSource: 'provider' } as const;

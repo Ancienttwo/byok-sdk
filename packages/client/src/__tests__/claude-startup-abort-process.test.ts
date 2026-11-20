@@ -33,7 +33,7 @@ const __executionScratch = await testExecutionScratch();
     return child;
   }) as SpawnFn;
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-node-fixture', source: 'path' }), spawnFn });
-  const offer = { target: { lane: 'runtime', runtimeId: 'claude' } as const, instruction: 'hello' };
+  const offer = { target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const, instruction: 'hello' };
   const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [] });
   if (prepared.kind !== 'prepared') throw new Error('unexpected fixture rejection');
   const controller = new AbortController();

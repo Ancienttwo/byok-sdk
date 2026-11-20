@@ -5,7 +5,7 @@ type ErrorExports<M> = Extract<keyof M, `${string}Error`>;
 import type * as Bridge from '../../packages/client/src/runtime/codex-session-runtime.js';
 import type { codexSession as vendorSession, CodexAdapterSession } from '../../packages/client/vendor/oar/a41628f/runtimes/codex/session.js';
 import type { ControlResult, RawEvent } from '../../packages/client/vendor/oar/a41628f/contracts/session.js';
-import type { LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/a41628f/runtimes/codex/app-server-client.js';
+import type { AppServerClient, LineProcess, SpawnLineProcess } from '../../packages/client/vendor/oar/a41628f/runtimes/codex/app-server-client.js';
 import type { spawnOwnedLineProcess } from '../../packages/client/src/runtime/owned-line-process.js';
 import type { buildRuntimeEnvironment } from '../../packages/client/src/runtime/environment.js';
 import type { CodexProjection, CodexRecord } from '../../packages/client/src/adapters/codex/projection.js';
@@ -77,7 +77,8 @@ type BridgeSession = {
 
 // Exact checks catch removed members, extra members, and wider local types.
 // Named aliases identify the failed seam in compiler output.
-export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | 'codexSessionCapabilities' | keyof OarStartErrorClasses>>;
+export type CheckFunctionExports = Assert<Equal<keyof typeof Bridge, 'codexSession' | 'codexSessionCapabilities' | 'startAppServerClient' | keyof OarStartErrorClasses>>;
+export type CheckAppServerClient = Assert<Assignable<AppServerClient, ReturnType<typeof Bridge.startAppServerClient>>>;
 export type CheckNotFoundInstance = Assert<Equal<Bridge.SessionNotFoundError, VendorSessionNotFoundError>>;
 export type CheckNotFoundConstructor = Assert<Equal<
   ConstructorParameters<typeof Bridge.SessionNotFoundError>,

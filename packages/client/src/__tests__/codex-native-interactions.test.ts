@@ -9,7 +9,7 @@ import type { NativeInteractionChannel, NativeInteractionRequest, NativeInteract
 import type { Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 
-const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
+const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 const fixture = fileURLToPath(new URL('./fixtures/fake-codex-native-interactions.mjs', import.meta.url));
 const sessions: Session[] = []; const directories: string[] = [];
 afterEach(async () => { await Promise.all(sessions.splice(0).map(s => s.close())); await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); vi.useRealTimers(); });

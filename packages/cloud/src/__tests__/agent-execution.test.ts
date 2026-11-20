@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { ZodError } from 'zod';
 import { RESULT_SCHEMA_MAX_BYTES, checkResultSchema } from '@byok-sdk/protocol';
 import { AgentExecutionInputSchema } from '../agent-execution';
-import { TENANT_A, createHarness } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, createHarness } from './support/harness';
 
 /** A subset-valid frozen outcome schema (wire v3 `terminalProjection.schema`). */
 const RESULT_SCHEMA = {
@@ -14,7 +14,7 @@ const RESULT_CAPABILITIES = [
 
 const input = {
   taskId: 'turn-execution-1', deviceId: 'device',
-  payload: { instruction: 'context plus current input', target: { lane: 'runtime', runtimeId: 'codex' },
+  payload: { instruction: 'context plus current input', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
     agentRef: { agentId: 'agent', profileRevision: 'revision' },
     session: { mode: 'fresh' },
     egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
@@ -70,7 +70,7 @@ describe('fresh Agent execution submission', () => {
   it('accepts a result-document execution without messageEgress or a registered consumer', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: [
       'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection',
     ] });
     const { messageEgress: _messageEgress, ...payload } = input.payload;
@@ -88,7 +88,7 @@ describe('fresh Agent execution submission', () => {
   it('refuses a result-document terminalProjection without a frozen schema before any durable admission', async () => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: RESULT_CAPABILITIES });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: RESULT_CAPABILITIES });
     const { messageEgress: _messageEgress, ...payload } = input.payload;
     const candidate = { taskId: input.taskId, deviceId: device.deviceId,
       payload: { ...payload, terminalProjection: { mode: 'result-document', contract: 'test.result.v1' } } };
@@ -106,7 +106,7 @@ describe('fresh Agent execution submission', () => {
   ])('refuses a result-document schema with %s before any durable admission', async (_label, schema) => {
     const harness = createHarness();
     const device = await harness.pairDevice(TENANT_A);
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: RESULT_CAPABILITIES });
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: RESULT_CAPABILITIES });
     const record = vi.spyOn(harness.stores.receipts, 'record');
     expect(checkResultSchema(schema).ok).toBe(false);
     const { messageEgress: _messageEgress, ...payload } = input.payload;
@@ -123,7 +123,7 @@ describe('fresh Agent execution submission', () => {
   it('dispatches the persisted shape as fresh and retains original task identity', async () => {
     const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
     const device = await harness.pairDevice(TENANT_A);
-    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [
+    await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: [
       'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'agent-message-egress', 'terminal-projection-selection',
     ] });
     const prepared = AgentExecutionInputSchema.parse({ ...input, deviceId: device.deviceId });
@@ -149,17 +149,17 @@ describe('fresh Agent execution submission', () => {
         'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session',
         'terminal-projection-selection', 'toolset-selection', 'custom-harness',
       ],
-      harnesses: [{ id: 'acme-harness', version: '1.0.0', capabilities: { steer: true, resume: true, approvalInteractive: false } }],
+      harnesses: [{ id: 'acme-harness', version: '1.0.0', capabilities: { steer: true, resume: true, approvalInteractive: false, selectionModes: ['device-default'], effort: false } }],
     });
     const { messageEgress: _messageEgress, ...payload } = input.payload;
     const persisted = AgentExecutionInputSchema.parse({
       taskId: input.taskId,
       deviceId: device.deviceId,
-      payload: { ...payload, target: { lane: 'harness', harnessId: 'acme-harness' }, requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } },
+      payload: { ...payload, target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } }, requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } },
     });
-    expect(persisted.payload.target).toEqual({ lane: 'harness', harnessId: 'acme-harness' });
+    expect(persisted.payload.target).toEqual({ lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } });
     const offered = await harness.cloud.submitAgentExecution(TENANT_A, persisted);
-    expect(offered.envelope.payload).toMatchObject({ target: { lane: 'harness', harnessId: 'acme-harness' }, requiredToolsets: ['example.tools'] });
+    expect(offered.envelope.payload).toMatchObject({ target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } }, requiredToolsets: ['example.tools'] });
   });
 
   it('rejects a payload without a target or with an unknown lane', () => {
@@ -178,11 +178,12 @@ describe('fresh Agent execution submission', () => {
     const BASE_CAPABILITIES = [
       'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection',
     ];
-    const SELECTION = { lane: 'subscription', runtimeId: 'codex', modelId: 'gpt-5' } as const;
-    async function setup(capabilities: string[]) {
+    const SELECTION = { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'gpt-5' } } as const;
+    async function setup(capabilities: string[], advertiseSubscription = false) {
       const harness = createHarness();
       const device = await harness.pairDevice(TENANT_A);
-      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities });
+      await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities, harnesses: advertiseSubscription
+        ? [{ id: 'codex', capabilities: { selectionModes: ['subscription'], effort: false } }] : TEST_HARNESSES });
       const { messageEgress: _messageEgress, ...payload } = input.payload;
       return { harness, device, payload };
     }
@@ -224,12 +225,12 @@ describe('fresh Agent execution submission', () => {
       }
     });
 
-    it('refuses a model-lane target without the dispatch-selection capability', async () => {
+    it('refuses subscription selection when the executor advertises only device-default', async () => {
       const { harness, device, payload } = await setup(BASE_CAPABILITIES);
       const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
         payload: { ...payload, target: SELECTION, terminalProjection: { mode: 'none' } } });
       await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate))
-        .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining('dispatch-selection') });
+        .rejects.toMatchObject({ code: 'agent_capability_missing', message: expect.stringContaining('requested harness, selection mode and effort') });
       await expectNothingWritten(harness, device.deviceId);
     });
 
@@ -242,20 +243,16 @@ describe('fresh Agent execution submission', () => {
       await expectNothingWritten(harness, device.deviceId);
     });
 
-    it('refuses a model lane naming a runtime that cannot hold it', async () => {
-      const { harness, device, payload } = await setup([...BASE_CAPABILITIES, 'dispatch-selection', 'toolset-selection']);
-      const candidate = { taskId: input.taskId, deviceId: device.deviceId,
-        payload: { ...payload, target: { ...SELECTION, runtimeId: 'pi' }, terminalProjection: { mode: 'none' } } };
-      expect(() => AgentExecutionInputSchema.parse(candidate)).toThrow(ZodError);
-      expect(AgentExecutionInputSchema.safeParse(candidate).error?.issues)
-        .toMatchObject([{ path: ['payload', 'target', 'runtimeId'] }]);
-      await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate as never))
-        .rejects.toMatchObject({ issues: [{ path: ['payload', 'target', 'runtimeId'] }] });
+    it('refuses an explicit executor that is missing from the inventory', async () => {
+      const { harness, device, payload } = await setup(BASE_CAPABILITIES, true);
+      const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
+        payload: { ...payload, target: { ...SELECTION, harnessId: 'pi' }, terminalProjection: { mode: 'none' } } });
+      await expect(harness.cloud.submitAgentExecution(TENANT_A, candidate)).rejects.toMatchObject({ code: 'agent_capability_missing' });
       await expectNothingWritten(harness, device.deviceId);
     });
 
-    it('accepts a model-lane target when the device advertises both capabilities', async () => {
-      const { harness, device, payload } = await setup([...BASE_CAPABILITIES, 'dispatch-selection', 'toolset-selection']);
+    it('accepts an advertised subscription selection and toolset capability', async () => {
+      const { harness, device, payload } = await setup([...BASE_CAPABILITIES, 'toolset-selection'], true);
       const candidate = AgentExecutionInputSchema.parse({ taskId: input.taskId, deviceId: device.deviceId,
         payload: { ...payload, target: SELECTION, requiredToolsets: ['example.tools'], terminalProjection: { mode: 'none' } } });
       const offered = await harness.cloud.submitAgentExecution(TENANT_A, candidate);

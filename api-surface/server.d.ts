@@ -1081,7 +1081,6 @@ export declare class SteerRejectedError extends Error {
 import type { HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, InputImageBlobRef, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
-import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types.js';
 import type { RateLimiterOptions } from './rate-limiter.js';
 export interface UploadInputImage {
@@ -1238,7 +1237,6 @@ export interface MachineInfo {
     connected: boolean;
     lastSeen?: string;
     clientVersion?: string;
-    runtimes?: readonly PresenceRuntimeFact[];
     harnesses?: readonly HarnessInfo[];
     configuredToolsets?: readonly string[];
 }

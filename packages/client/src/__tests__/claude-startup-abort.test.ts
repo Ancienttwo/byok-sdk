@@ -46,7 +46,7 @@ async function operation(spawnFn: SpawnFn, signal?: AbortSignal, withMcp = false
 const __executionScratch = withMcp ? inertScratch('/inert-config') : inertScratch();
 
   const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: 'inert-fixture', source: 'path' }), spawnFn });
-  const offer = { target: { lane: 'runtime', runtimeId: 'claude' } as const, instruction: 'hello' };
+  const offer = { target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const, instruction: 'hello' };
   const mcp = withMcp ? { mcpServers: { byokagentmessage: { command: '/inert-mcp' } } } : {};
   const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [], ...mcp });
   if (prepared.kind !== 'prepared') throw new Error('unexpected fixture admission rejection');

@@ -9,7 +9,7 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 describe('TaskRunner shutdown admission/start ownership barrier', () => {
   it('cannot report successful shutdown before a claimed startup owner has been registered', async () => {
@@ -17,7 +17,7 @@ describe('TaskRunner shutdown admission/start ownership barrier', () => {
     const sent: Envelope[] = [];
     const adapter = new StubRuntimeAdapter();
     const release = adapter.blockStart();
-    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
       adapters: [adapter], deviceId: 'shutdown-device',
       send: event => { sent.push(event); },
       blobClient: {

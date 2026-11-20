@@ -101,8 +101,16 @@ function createProductConsumer(outcomesByTask) {
 // fixture itself, not only by post-hoc assertion. It survives process death
 // by construction, which is the whole point of the crash-window leg.
 // ---------------------------------------------------------------------------
+function parseFixtureJson(text, label) {
+  try {
+    return JSON.parse(text);
+  } catch (cause) {
+    throw new Error(`Invalid JSON in ${label}`, { cause });
+  }
+}
+
 function createPersistentProductLedger(filePath) {
-  const read = () => (existsSync(filePath) ? JSON.parse(readFileSync(filePath, 'utf8')) : {});
+  const read = () => (existsSync(filePath) ? parseFixtureJson(readFileSync(filePath, 'utf8'), 'the product ledger') : {});
   const scopeKey = ({ tenant, deviceId, taskId, agentRef, messageId }) =>
     [`${tenant}`, deviceId, taskId, `${agentRef.agentId}@${agentRef.profileRevision}`, messageId].join('|');
   return {
@@ -119,6 +127,8 @@ function createPersistentProductLedger(filePath) {
     },
   };
 }
+
+const CODEX_INVENTORY = [{ id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }];
 
 async function pairCapableDevice(composition, tenant, deviceName) {
   // The pairing route is the supported way to mint a device bearer token; the
@@ -145,14 +155,14 @@ async function pairCapableDevice(composition, tenant, deviceName) {
   const paired = await response.json();
   assert.equal(typeof paired.deviceId, 'string');
   assert.equal(typeof paired.accessToken, 'string');
-  await composition.stores.devices.recordCapabilities(tenant, { deviceId: paired.deviceId, capabilities: AGENT_MESSAGE_CAPABILITIES });
+  await composition.stores.devices.recordCapabilities(tenant, { deviceId: paired.deviceId, capabilities: AGENT_MESSAGE_CAPABILITIES, harnesses: CODEX_INVENTORY });
   return { deviceId: paired.deviceId, authorization: { authorization: `Bearer ${paired.accessToken}` } };
 }
 
 function recurringInput(taskId, deviceId, instruction, agentRef = { agentId: 'packed-agent', profileRevision: 'profile' }) {
   return AgentExecutionInputSchema.parse({
     taskId, deviceId,
-    payload: { instruction, target: { lane: 'runtime', runtimeId: 'codex' }, session: { mode: 'fresh' },
+    payload: { instruction, target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, session: { mode: 'fresh' },
       agentRef,
       egressPolicy: { policyRevision: 'policy', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -279,7 +289,7 @@ async function composeReopened(handoff, consume, finalizeProbePath) {
 // dispatched the task, so no TaskHandle exists here.
 const reopenHandoffPath = childArg('--recurring-reopen');
 if (reopenHandoffPath !== undefined) {
-  const handoff = JSON.parse(readFileSync(reopenHandoffPath, 'utf8'));
+  const handoff = parseFixtureJson(readFileSync(reopenHandoffPath, 'utf8'), 'the reopen handoff');
   const consumer = createProductConsumer({});
   const { cloud: reopened, pool } = await composeReopened(handoff, consumer.consume);
   try {
@@ -329,7 +339,7 @@ const ledgerIdentityOf = (input) => ({
 
 const crashCommitHandoffPath = childArg('--recurring-crash-commit');
 if (crashCommitHandoffPath !== undefined) {
-  const handoff = JSON.parse(readFileSync(crashCommitHandoffPath, 'utf8'));
+  const handoff = parseFixtureJson(readFileSync(crashCommitHandoffPath, 'utf8'), 'the crash-commit handoff');
   const ledger = createPersistentProductLedger(handoff.ledgerPath);
   const consume = async (input) => {
     // Host body transaction: the synchronous ledger write IS the commit.
@@ -352,7 +362,7 @@ if (crashCommitHandoffPath !== undefined) {
 // from the ledger's stored decision — no second commit, identical outcome.
 const crashReplayHandoffPath = childArg('--recurring-crash-replay');
 if (crashReplayHandoffPath !== undefined) {
-  const handoff = JSON.parse(readFileSync(crashReplayHandoffPath, 'utf8'));
+  const handoff = parseFixtureJson(readFileSync(crashReplayHandoffPath, 'utf8'), 'the crash-replay handoff');
   const ledger = createPersistentProductLedger(handoff.ledgerPath);
   const replays = [];
   const consume = async (input) => {
@@ -406,9 +416,9 @@ await core.quota.writeEntitlement(tenant, {
   retentionPolicyId: 'packed',
 });
 await stores.devices.register(tenant, { deviceId, productId: 'packed', deviceName: 'fixture', devicePublicKey: 'fixture-key', proofKeyId: 'fixture-proof', proofKeyEpoch: 1 });
-await stores.devices.recordCapabilities(tenant, { deviceId, capabilities: AGENT_MESSAGE_CAPABILITIES });
+await stores.devices.recordCapabilities(tenant, { deviceId, capabilities: AGENT_MESSAGE_CAPABILITIES, harnesses: CODEX_INVENTORY });
 const input = recurringInput('packed-execution', deviceId, 'persisted current input');
-const submitted = await cloud.submitAgentExecution(tenant, JSON.parse(JSON.stringify(input)));
+const submitted = await cloud.submitAgentExecution(tenant, parseFixtureJson(JSON.stringify(input), 'the serialized input'));
 assert.equal(submitted.taskId, input.taskId);
 assert.equal(submitted.envelope.type, 'task.offer');
 assert.equal('sessionRef' in submitted.envelope.payload, false);
@@ -578,6 +588,7 @@ console.log('[release-pack] recurring public imports, strict submission and inde
     const embeddedAuthorization = { authorization: `Bearer ${embeddedPaired.accessToken}` };
     const helloEnvelope = createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
+      harnesses: CODEX_INVENTORY,
       capabilities: AGENT_MESSAGE_CAPABILITIES,
       deviceId: embeddedPaired.deviceId,
       productId: 'packed-recurring',

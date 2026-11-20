@@ -145,11 +145,13 @@ resume and cwd refusal, permission refusal, cancellation and disposal evidence,
 including no surviving `serve --service` process. A pre-output rate-limit
 fallback that cannot be provoked honestly stays covered by replay only.
 
-The Host supplies `runtimes.opencode.models`, an ordered list of native model
-ids, and optionally `executable`. There is no SDK model default, price check,
-model listing, automatic installation, upgrade or cross-major migration.
-The adapter selects the first id, applies it explicitly through ACP and refuses
-an absent or differing native readback before prompting. On an OAR-classified
+The Host can supply `runtimes.opencode.models`, an ordered list of native model
+IDs, and an `executable` override. With a list, OpenCode advertises a default
+and uses the first ID when the offer omits the model. An explicit model must
+be on the configured list. Without a list, OpenCode advertises `adapter-model`
+only and the runtime validates the offer's explicit ID. The adapter applies
+the chosen model through ACP and checks the native readback before prompting.
+For the configured default path, on an OAR-classified
 rate limit before text, reasoning or tool output, it retries once with the next
 candidate after reaping the first process tree, resuming the same admitted native
 session and verifying its model readback. It never creates a replacement
@@ -1463,11 +1465,12 @@ An unreported menu leaves both arrays absent.
 
 ## Selection and platforms
 
-A Host reads the adapter list, not a table of its own. `taskRuntimeTarget(descriptor)`
-from `@byok-sdk/client/adapters` returns the offer `target`
-`{ lane: 'runtime', runtimeId }` for a frozen wire runtime id (`RUNTIME_IDS` in
-`@byok-sdk/protocol/constants`) and `{ lane: 'harness', harnessId }` for any
-other id. `descriptor.platforms` lists the supported `process.platform` values:
+A Host reads the device’s advertised harness inventory. For an adapter that
+advertises `device-default`, `taskRuntimeTarget(descriptor)` from
+`@byok-sdk/client/adapters` constructs
+`{ lane: 'harness', harnessId: descriptor.id, selection: { mode: 'device-default' } }`.
+For other advertised modes, the Host supplies the matching selection.
+`descriptor.platforms` lists the supported `process.platform` values:
 Claude, Codex, Pi and agy declare macOS, Linux and Windows; Grok, dsh
 and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with

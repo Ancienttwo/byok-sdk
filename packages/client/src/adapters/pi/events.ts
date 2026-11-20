@@ -1,3 +1,4 @@
+import { classifyModelProviderHttpError } from '@byok-sdk/core/provider-model';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { PREPARED_GATE_REFUSAL_CODES } from './prepared-prompt-frame.js';
 import type { AgentEvent } from '@byok-sdk/protocol';
@@ -77,6 +78,15 @@ function mapPiAssistantUsage(msg: PiRpcMessage): Extract<AgentEvent, { type: 'us
     ...(totalTokens === undefined ? {} : { totalTokens }),
     ...(model === undefined ? {} : { model }),
   };
+}
+
+export const PI_MODEL_UNAVAILABLE_REASON = 'requested Pi model is unavailable';
+
+/** Pi's provider streams expose the native error envelope as text. */
+export function isPiModelUnavailable(error: unknown): boolean {
+  if (typeof error !== 'string') return false;
+  const status = /^(?:[^\s]+ API error \()?([1-5]\d{2})\b/u.exec(error)?.[1];
+  return classifyModelProviderHttpError(Number(status), error) === 'MODEL_PROVIDER_MODEL_NOT_FOUND';
 }
 
 /** Provider failure evidence belongs to the same assistant message as usage. */

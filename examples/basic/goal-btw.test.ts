@@ -28,7 +28,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
   let extraStores: SqliteGoalBtwStore[];
   const accepted: (outcome: unknown) => boolean = () => true; // Fixture acceptance, not a production semantic proof.
   const target = (agentId = 'main-agent'): BotTarget => ({
-    deviceId, agentRef: { agentId, profileRevision: '1' }, target: { lane: 'runtime', runtimeId: 'pi' }, egressPolicy: policy,
+    deviceId, agentRef: { agentId, profileRevision: '1' }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, egressPolicy: policy,
   });
   function newGoal(id = 'goal', budget = 3, deadline = now + 10_000, agent = 'main-agent') {
     return host.startGoal({ id, objective: 'Complete the approved task', target: target(agent), maxSteps: budget, deadline });
@@ -79,7 +79,7 @@ describe('copy-and-own goal/btw Host, public SDK over real HTTP', () => {
     const sent = await startStep();
     const offer = await byok.tasks.offer('step-1');
     expect(offer).toMatchObject({ taskId: 'step-1', deviceId, type: 'task.offer', delivered: true,
-      payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, agentRef: target().agentRef, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } });
+      payload: { target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, agentRef: target().agentRef, terminalProjection: { mode: 'result-document', contract: GOAL_RESULT_CONTRACT, schema: GOAL_RESULT_SCHEMA } } });
     expect(offer?.payload).not.toHaveProperty('sessionRef'); expect(offer?.payload).not.toHaveProperty('messageEgress');
     adapter.sessions.get('step-1')!.finish(result('continue')); await terminal('step-1');
     const continued = await host.reconcileGoal('goal', sent.revision);

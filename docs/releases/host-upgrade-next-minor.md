@@ -3,6 +3,96 @@
 This checklist starts after the published 0.44.1 release. Hosts on an earlier release first follow the
 [0.44.0 checklist](host-upgrade-0.44.0.md) and its predecessors.
 
+## Wire v8 and the provider store cutover
+
+1. Pause new task offers and provisioning intents while the old Host and devices
+   are still running. Resolve or cancel open intents, finish in-flight tasks,
+   and let the devices flush their outboxes and terminal receipts.
+2. Stop the old server and daemons. Keep their stores for rollback and provision
+   fresh SQLite or PostgreSQL storage for the v8 server. Initialize fresh local
+   daemon journals, outboxes, and K4/K8 ledgers. Follow the provider store steps
+   below in the same window. The SDK does not import v7 state into v8.
+3. Upgrade the Host, server, and daemons together and pair the devices against
+   the new server. Wait for each device to publish its harness inventory before
+   submitting explicit offers. Wire v7 and v8 peers refuse each other.
+4. Use `{ lane: 'auto' }` to let a device choose an advertised executor that
+   supports device defaults. For explicit routing, pass `lane: 'harness'`, the
+   advertised `harnessId`, and a supported `selection`. Use `device-default`
+   to keep the executor's defaults or `subscription` with a `modelId` to pin
+   the model under the vendor's own CLI login. Subscription admission
+   requires Claude.ai for Claude or a ChatGPT account for Codex. For a Host credential, use
+   `byok` with the advertised pi-ai catalog `providerId`. For `byok` and
+   `adapter-model`, and `byok-profile`, omit `modelId` only if the device advertises that selection
+   mode in `capabilities.defaultModelModes`. DSH can use a configured default
+   or an explicit model within the configured route. OpenCode without a
+   configured model list requires `adapter-model` with an explicit ID.
+   Preserve the original target when replaying a task ID. Replaying the ID
+   with different offer bytes returns `binding_conflict`.
+
+### Harness model selection
+
+`task.decline.code` includes `invalid_request` for missing required model IDs
+and `model_unavailable` for a rejected model before claim. A native runtime
+model refusal after claim is reported through `task.fail.failure.class`.
+
+#### Pi provider selection
+
+Ordinary Pi supports `device-default` with the device's Pi auth store. For
+`adapter-model`, pass an exact `provider/id` from `PiAdapter.listModels()`.
+A prepared task must use the same provider and model as its frozen record.
+Ordinary Pi uses credentials from its own store and configuration.
+The pinned Pi 1.5.2 exposes session token and cost totals through
+`get_session_stats`. Pi does not report account usage or quotas through the SDK.
+
+Replace Pi offers that used `byok` with `byok-profile`. Durable Pi requires
+`byok-profile`. Read the persisted
+local profile and derive the exact binding with
+`exactProviderProfileBinding(profile)` from `@byok-sdk/keys`. Use the binding
+from the store assigned to the target device, and refresh it after changing
+the profile.
+
+```ts
+const target = {
+  lane: 'harness',
+  harnessId: 'pi',
+  selection: {
+    mode: 'byok-profile',
+    providerProfile: exactProviderProfileBinding(profile),
+    modelId: 'provider/model',
+  },
+} satisfies ExecutionTarget;
+```
+
+Omit `selection.modelId` to use `profile.model`. An override reuses the same
+credential, provider endpoint, `api`, and `pi_model` settings. Pi projects
+image input for an override only when the pinned catalog confirms support
+for that provider and API. An override without verified image support is
+declined before claim if `requiredCapabilities` includes `image-input`.
+A prepared task
+must count and execute the same model. A runtime refusal for an unavailable
+model after claim reports `task.fail.failure.class = 'model_unavailable'`.
+
+AiphaBee can use the same persisted binding for bots that select different
+models. Read the saved default from the profile or provisioning status. The
+exact binding's hash still includes the saved default.
+
+## Managed runtime upgrades
+
+Set `DaemonConfig.runtimeInstallRoot` to the absolute SDK install root and pass
+that same root to `upgradeRuntime({ installRoot, runtimeId })`. The Host calls
+this operation explicitly. It stages Claude, Codex, DSH, or OpenCode v2 at the
+SDK's exact qualified version with npm install scripts disabled. The daemon
+prefers the resulting managed executable. The active copy switches only after
+the staged CLI passes its version and liveness probes.
+
+AGY and Grok return vendor commands and reasons. Pi ships with the SDK. Read
+local status or doctor for the installed source and upgrade guidance. Stop
+sessions using a managed copy before calling `uninstallManagedRuntime` with
+the Host-configured install root. The SDK resolves that root and rejects
+symbolic links at the `runtimes` directory or the selected runtime directory.
+Keep the resolved install root stable during removal. A process with write access to the path can still
+replace a directory between the path check and the recursive delete.
+
 ## Provider store credential namespace
 
 1. Precheck the existing database with the candidate's

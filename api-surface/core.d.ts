@@ -107,11 +107,11 @@
 //   PRESENCE_LEVELS -> dist/presence.d.ts
 //   PROVIDER_PROVISIONING_MAX_TTL_MS -> dist/sealed-provider-secret.d.ts
 //   PROVIDER_PROVISIONING_OPERATIONS -> dist/sealed-provider-secret.d.ts
+//   PresenceHarnessFact -> dist/presence.d.ts
 //   PresenceHint -> dist/presence.d.ts
 //   PresenceHintInput -> dist/presence.d.ts
 //   PresenceLevel -> dist/presence.d.ts
 //   PresenceRuntimeCapabilities -> dist/presence.d.ts
-//   PresenceRuntimeFact -> dist/presence.d.ts
 //   PresenceStore -> dist/presence.d.ts
 //   Principal -> dist/principals.d.ts
 //   ProviderProvisioningExpectedProfile -> dist/sealed-provider-secret.d.ts
@@ -193,7 +193,7 @@
 //   deviceAssertionSigningInput -> dist/device-assertion.d.ts
 //   deviceProofCanonicalClaims -> dist/attestation.d.ts
 //   deviceProofSigningInput -> dist/attestation.d.ts
-//   freezePresenceRuntimeFact -> dist/presence.d.ts
+//   freezePresenceHarnessFact -> dist/presence.d.ts
 //   hasCapability -> dist/capabilities.d.ts
 //   isCanonicalTimestamp -> dist/time.d.ts
 //   isContentHash -> dist/blob.d.ts
@@ -224,6 +224,10 @@
 //   tenantObjectKey -> dist/blob.d.ts
 //   verifyDeviceAssertion -> dist/device-assertion.d.ts
 //   verifyTaskAssertion -> dist/device-assertion.d.ts
+// entry @byok-sdk/core/provider-model
+//   PI_PROVIDER_MODEL_UNAVAILABLE_EXIT -> dist/provider-model.d.ts
+//   classifyModelProviderHttpError -> dist/provider-model.d.ts
+//   isProviderProfileModelId -> dist/provider-model.d.ts
 // entry @byok-sdk/core/sealed-payload
 //   MEMBER_CHAIN_OPS -> dist/sealed-payload/member-chain.d.ts
 //   MemberChainEntryV1 -> dist/sealed-payload/member-chain.d.ts
@@ -982,8 +986,8 @@ export { BOARD_STATUSES, isLegalBoardTransition, } from './board.js';
 export type { BoardClaimInput, BoardItem, BoardItemInput, BoardListQuery, BoardPage, BoardStatus, BoardStatusUpdateInput, BoardStore, BoardUnclaimInput, } from './board.js';
 export { TRUTH_RECORD_KINDS } from './truth.js';
 export type { SnapshotWriteInput, TerminalWriteInput, TruthBodyRef, TruthManifestEntry, TruthManifestQuery, TruthRecord, TruthRecordKind, TruthRecordSelector, TruthStore, } from './truth.js';
-export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence.js';
-export type { PresenceHint, PresenceHintInput, PresenceLevel, PresenceRuntimeCapabilities, PresenceRuntimeFact, PresenceStore, TenantReadinessDevice, TenantReadinessPresence, TenantReadiness, } from './presence.js';
+export { freezePresenceHarnessFact, PRESENCE_LEVELS } from './presence.js';
+export type { PresenceHint, PresenceHintInput, PresenceLevel, PresenceRuntimeCapabilities, PresenceHarnessFact, PresenceStore, TenantReadinessDevice, TenantReadinessPresence, TenantReadiness, } from './presence.js';
 export { CONTENT_HASH_PATTERN, OBJECT_KEY_PREFIX_PATTERN, contentHash, isContentHash, isLegalObjectTransition, objectKeyPrefix, tenantObjectKey, } from './blob.js';
 export type { ContentHash, ObjectCommitInput, ObjectKeyPrefix, ObjectListQuery, ObjectManifestEntry, ObjectManifestInput, ObjectReference, ObjectReferenceInput, ObjectState, ObjectStore, } from './blob.js';
 export { STORAGE_ERROR_CODES, STORAGE_ERROR_HTTP_STATUS, } from './quota.js';
@@ -1137,6 +1141,10 @@ export interface PresenceRuntimeCapabilities {
     readonly toolAuthorizationAuto?: boolean;
     readonly durableLane?: boolean;
     readonly preparedLane?: boolean;
+    readonly selectionModes: readonly string[];
+    readonly defaultModelModes?: readonly ('byok' | 'adapter-model' | 'byok-profile')[];
+    readonly effort: boolean;
+    readonly byokProviderId?: string;
     readonly isolation?: {
         readonly userInstructions?: boolean;
         readonly userOutputStyle?: boolean;
@@ -1147,20 +1155,24 @@ export interface PresenceRuntimeCapabilities {
         readonly sessionPersistence?: boolean;
     };
 }
-export interface PresenceRuntimeFact {
+export interface PresenceHarnessFact {
     readonly id: string;
     readonly version?: string;
     readonly authPresent?: boolean;
-    readonly capabilities?: PresenceRuntimeCapabilities;
+    readonly capabilities: PresenceRuntimeCapabilities;
+    readonly versionPolicy?: {
+        readonly state: 'allow' | 'warn' | 'block';
+        readonly qualifiedVersion?: string;
+    };
 }
-export declare function freezePresenceRuntimeFact(runtime: PresenceRuntimeFact): PresenceRuntimeFact;
+export declare function freezePresenceHarnessFact(runtime: PresenceHarnessFact): PresenceHarnessFact;
 export interface TenantReadinessPresence {
     readonly level: PresenceLevel;
     readonly detail?: string;
     readonly configuredToolsets?: readonly string[];
     readonly clientVersion?: string;
     readonly protocolVersions?: readonly number[];
-    readonly runtimes?: readonly PresenceRuntimeFact[];
+    readonly harnesses?: readonly PresenceHarnessFact[];
     readonly observedAt: string;
     readonly expiresAt: string;
 }
@@ -1187,7 +1199,7 @@ export interface PresenceHint {
     readonly configuredToolsets?: readonly string[];
     readonly clientVersion?: string;
     readonly protocolVersions?: readonly number[];
-    readonly runtimes?: readonly PresenceRuntimeFact[];
+    readonly harnesses?: readonly PresenceHarnessFact[];
     readonly observedAt: string;
     readonly expiresAt: string;
 }
@@ -1198,7 +1210,7 @@ export interface PresenceHintInput {
     readonly configuredToolsets?: readonly string[];
     readonly clientVersion?: string;
     readonly protocolVersions?: readonly number[];
-    readonly runtimes?: readonly PresenceRuntimeFact[];
+    readonly harnesses?: readonly PresenceHarnessFact[];
     readonly ttlMs: number;
     readonly minimumIntervalMs: number;
 }
@@ -1224,6 +1236,10 @@ export interface ControlPlanePrincipal {
 }
 export type Principal = DevicePrincipal | ControlPlanePrincipal;
 export declare function principalTenant(principal: Principal): TenantId;
+// ==== @byok-sdk/core dist/provider-model.d.ts ====
+export declare function isProviderProfileModelId(value: unknown): value is string;
+export declare const PI_PROVIDER_MODEL_UNAVAILABLE_EXIT = 79;
+export declare function classifyModelProviderHttpError(status: number, payload: unknown): string;
 // ==== @byok-sdk/core dist/quota.d.ts ====
 import type { CollectExpiredInput, CollectExpiredResult } from './retention.js';
 import type { ContentHash } from './blob.js';

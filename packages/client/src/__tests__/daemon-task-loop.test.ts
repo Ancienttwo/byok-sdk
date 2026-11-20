@@ -81,7 +81,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === 'task-1');
     expect(claim.payload).toMatchObject({ deviceId: 'device-1' });
     expect('taskId' in claim.payload).toBe(false);
-    expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
+    expect(claim.payload).toMatchObject({ executor: { id: 'pi' } });
 
     // M1 gap #2: `task.claim` no longer implies `Running` — `task.started`
     // is the explicit, separate signal the adapter session actually started.
@@ -312,23 +312,22 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     ).toBe(false);
   });
 
-  it('declines (never claims) an offer naming an unavailable runtime (M1 gap #5)', async () => {
-    // `runtime` is constrained by the frozen protocol to 'pi'|'claude'|'codex'
-    // (RuntimeIdSchema), so the stub must claim one of those ids to exercise
-    // "runtime known but not detected as present" through a real RuntimeTaskInput.
+  it('declines an explicit offer for a runtime that the device did not advertise', async () => {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'not-found' });
     await setupDaemon(adapter);
+    const hello = await server.waitFor((e) => e.type === 'conn.hello');
+    expect(hello.payload).toMatchObject({ harnesses: [], runtimeUnavailable: [{ id: 'pi', cause: 'not_installed' }] });
 
     server.send(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } },
         { taskId: 'task-4', seq: server.nextSeq() },
       ),
     );
 
     const decline = await server.waitFor((e) => e.type === 'task.decline');
-    expect(decline.payload).toMatchObject({ retryable: true });
+    expect(decline.payload).toMatchObject({ retryable: false });
     expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === 'task-4')).toBe(false);
   });
 
@@ -420,7 +419,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
     );
     await server.waitFor((e) => e.type === 'task.claim');
     const fail = await server.waitFor((e) => e.type === 'task.fail');
-    expect(fail.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { kind: 'runtime', runtimeId: 'pi' },
+    expect(fail.payload).toEqual({ agentRef: echoedTestAgentRef, executor: { id: 'pi' },
       reason: RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON.start,
       retryable: false,
       failure: { class: 'unknown' },
@@ -541,18 +540,18 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } },
           { taskId: 'task-runtime-explicit', seq: server.nextSeq() },
         ),
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } });
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { id: 'pi' } });
       expect(claim.payload).not.toHaveProperty('agentId');
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const complete = await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-runtime-explicit');
-      expect(complete.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
+      expect(complete.payload).toMatchObject({ executor: { id: 'pi' } });
     });
 
     it('a harness offer: task.claim and task.complete carry the harness executor', async () => {
@@ -562,18 +561,18 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'acme-harness' } },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } } },
           { taskId: 'task-harness-explicit', seq: server.nextSeq() },
         ),
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'harness', harnessId: 'acme-harness' } });
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { id: 'acme-harness' } });
       expect(claim.payload).not.toHaveProperty('agentId');
       await vi.waitFor(() => expect(adapter.sessions).toHaveLength(1));
       adapter.sessions[0]!.emit({ type: 'turn_end' });
       const complete = await server.waitFor((e) => e.type === 'task.complete' && e.task_id === 'task-harness-explicit');
-      expect(complete.payload).toMatchObject({ executor: { kind: 'harness', harnessId: 'acme-harness' } });
+      expect(complete.payload).toMatchObject({ executor: { id: 'acme-harness' } });
     });
 
     it('an offer naming NO runtime: task.claim still carries the auto-selected adapter this device actually picked, not merely an absence (single-candidate case; see task-runner-runtime-selection.test.ts for multi-candidate order)', async () => {
@@ -591,7 +590,7 @@ describe('daemon task loop (stub adapter + in-process HTTP server)', () => {
       const claim = await server.waitFor((e) => e.type === 'task.claim');
       // This is the exact gap the feature closes: before, the server never
       // learned which runtime an auto-selected task actually ran on.
-      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'claude' } });
+      expect(claim.payload).toMatchObject({ deviceId: 'device-1', executor: { id: 'claude' } });
     });
   });
 

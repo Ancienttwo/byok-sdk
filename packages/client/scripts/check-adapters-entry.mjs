@@ -4,8 +4,16 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+function readJson(file) {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8'));
+  } catch (cause) {
+    throw new Error(`Unable to read adapter entry metadata from ${file}`, { cause });
+  }
+}
+
 const packageRoot = fileURLToPath(new URL('..', import.meta.url));
-const manifest = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+const manifest = readJson(new URL('../package.json', import.meta.url));
 if (process.argv.includes('--build-todo')) {
   const dist = path.join(packageRoot, 'dist');
   const before = new Map(readdirSync(dist, { recursive: true, withFileTypes: true })
@@ -19,7 +27,7 @@ if (process.argv.includes('--build-todo')) {
     cwd: packageRoot, stdio: 'inherit',
   });
   assert.equal(result.status, 0, 'private todo build failed');
-  const meta = JSON.parse(readFileSync(path.join(dist, 'bin/metafile-esm.json'), 'utf8'));
+  const meta = readJson(path.join(dist, 'bin/metafile-esm.json'));
   const inputs = Object.keys(meta.inputs).map(file => path.relative(packageRoot, path.resolve(packageRoot, file)).split(path.sep).join('/'));
   assert.deepEqual(inputs.filter(file => /vendor\/(pi-tui|get-east-asian-width)\//.test(file)).sort(), [
     'vendor/pi-tui/0.85.1/components/text.js', 'vendor/pi-tui/0.85.1/utils.js',
@@ -50,8 +58,7 @@ assert.equal(manifest.byok?.piRuntimePin, manifest.dependencies?.['@earendil-wor
 // identity gate's (`scripts/release/pi-runtime-identity.mjs`), not this
 // entry check's. Fail closed when the install is missing or differs.
 const EXACT_SEMVER = /^\d+\.\d+\.\d+$/u;
-const nativeManifest = JSON.parse(readFileSync(
-  new URL('../node_modules/@earendil-works/pi-coding-agent/package.json', import.meta.url), 'utf8'));
+const nativeManifest = readJson(new URL('../node_modules/@earendil-works/pi-coding-agent/package.json', import.meta.url));
 assert.equal(nativeManifest.name, '@earendil-works/pi-coding-agent',
   'installed @earendil-works/pi-coding-agent must be the official package, not an alias');
 assert.match(manifest.dependencies?.['@earendil-works/pi-coding-agent'] ?? '', EXACT_SEMVER,
@@ -81,7 +88,7 @@ assert.equal(manifest.devDependencies?.['@earendil-works/pi-tui'], undefined);
 for (const name of ['@earendil-works/pi-ai', '@earendil-works/pi-agent-core', '@earendil-works/pi-durable', '@earendil-works/chord']) {
   assert.equal(manifest.dependencies?.[name], nativeManifest.version,
     `client ${name} pin must equal the exact @earendil-works/pi-coding-agent version`);
-  const installed = JSON.parse(readFileSync(new URL(`../node_modules/${name}/package.json`, import.meta.url), 'utf8'));
+  const installed = readJson(new URL(`../node_modules/${name}/package.json`, import.meta.url));
   assert.equal(installed.name, name);
   assert.equal(installed.version, nativeManifest.version, `installed ${name} must be ${nativeManifest.version}`);
 }
@@ -126,8 +133,9 @@ assert.equal(new adapters.PiAdapter().descriptor.id, 'pi');
 assert.equal(new adapters.ClaudeAdapter().descriptor.id, 'claude');
 assert.equal(new adapters.CodexAdapter().descriptor.id, 'codex');
 assert.equal(new adapters.GrokAdapter().descriptor.id, 'grok');
-assert.equal(new adapters.AgyAdapter({ resolveKey: async () => 'fixture-key', home: '/tmp/byok-agy-entry-check' }).descriptor.id, 'agy');
-assert.equal(new adapters.DshAdapter({ resolveKey: async () => 'fixture-key', home: '/tmp/byok-dsh-entry-check', model: { provider: 'deepseek', model: 'deepseek-v4-flash' } }).descriptor.id, 'dsh');
+const resolveKey = async () => { throw new Error('entry check must not resolve credentials'); };
+assert.equal(new adapters.AgyAdapter({ home: '/tmp/byok-agy-entry-check', resolveKey }).descriptor.id, 'agy');
+assert.equal(new adapters.DshAdapter({ home: '/tmp/byok-dsh-entry-check', model: { provider: 'deepseek', model: 'deepseek-v4-flash' }, resolveKey }).descriptor.id, 'dsh');
 // The ACP stack and its protocol SDK are a private lazy entry, never part of this one.
 assert.doesNotMatch(bundledEntry, /@agentclientprotocol\/sdk/);
 
@@ -137,7 +145,7 @@ const readerSource = /\/vendor\/oar\/[^/]+\/runtimes\/[^/]+\/(?:list-models|acco
 for (const target of ['index.js', 'adapters/index.js', 'bin/byok-agent.js']) {
   const url = new URL(`../dist/${target}`, import.meta.url);
   assert.match(readFileSync(url, 'utf8'), /import\(["']#byok-oar-readers["']\)/, `${target} must load the native readers on demand`);
-  const { sources } = JSON.parse(readFileSync(new URL(`${url.href}.map`), 'utf8'));
+  const { sources } = readJson(`${fileURLToPath(url)}.map`);
   assert.deepEqual(sources.filter(source => readerSource.test(source)), [], `${target} bundles native reader sources`);
 }
 

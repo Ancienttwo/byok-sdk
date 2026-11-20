@@ -20,7 +20,7 @@ import { resolveFileScopeGrant, type FileScopeGrant } from '../file-scope-guard'
 import { observationOf } from './fixtures/mcp-observation';
 import type { Session } from '../types';
 
-const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+const PI_TARGET = { lane: 'auto' } as const;
 
 const roots: string[] = [];
 const sessions: Session[] = [];

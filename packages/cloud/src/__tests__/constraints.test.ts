@@ -83,7 +83,7 @@ describe('dependency boundaries', () => {
   });
 
   it('imports nothing outside those four packages', () => {
-    const allowed = new Set(['@byok-sdk/core', '@byok-sdk/protocol', 'hono', 'zod']);
+    const allowed = new Set(['@byok-sdk/core', '@byok-sdk/core/provider-model', '@byok-sdk/protocol', 'hono', 'zod']);
     for (const file of SHIPPED) {
       for (const [, specifier] of code(file.text).matchAll(/from\s+'([^']+)'/g)) {
         if (specifier === undefined) continue;

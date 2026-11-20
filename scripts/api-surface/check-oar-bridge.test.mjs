@@ -25,7 +25,7 @@ const require = createRequire(import.meta.url);
 test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotFoundError', () => {
   const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/codex-session-runtime.js'), 'utf8');
   const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
-  assert.equal(body.length, 7, 'OAR JS bridge must have exactly seven checked re-exports');
+  assert.equal(body.length, 8, 'OAR JS bridge must have exactly eight checked re-exports');
   const reexports = body.map((statement) => {
     assert.equal(statement.type, 'ExportNamedDeclaration');
     return [
@@ -34,6 +34,7 @@ test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotF
     ];
   });
   assert.deepEqual(reexports, [
+    ['../../vendor/oar/a41628f/runtimes/codex/app-server-client.js', [['startAppServerClient', 'startAppServerClient']]],
     ['../../vendor/oar/a41628f/runtimes/codex/session.js', [['codexSession', 'codexSession']]],
     ['../../vendor/oar/a41628f/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
     ['../../vendor/oar/a41628f/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],

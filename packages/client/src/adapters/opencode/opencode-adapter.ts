@@ -16,6 +16,8 @@ import { freezeRuntimeAdapterDescriptor, PolicyUnsupportedError, type RuntimeAda
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveManagedRuntime } from '../managed-runtime-path.js';
+import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation.js';
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { haltGate, oarCancelSettled, raceDeadline, RetryableOnce } from '../session-kit.js';
@@ -23,7 +25,7 @@ import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import { OPENCODE_RUNTIME_CAPABILITIES } from './opencode-capabilities.js';
-import { OPENCODE_VERSION_POLICY, opencodeVersionToken } from './opencode-version.js';
+import { OPENCODE_VERSION_POLICY, opencodeVersionToken, opencodeVersionUnsupported } from './opencode-version.js';
 import { resolveOpenCodeBin } from './resolve-bin.js';
 import { object, OpenCodeProjection, type OpenCodeTurnOutcome } from './projection.js';
 
@@ -31,8 +33,10 @@ import { object, OpenCodeProjection, type OpenCodeTurnOutcome } from './projecti
 const CHILD_UPDATE_AFTER_ANSWER = 'opencode/session/child_update/after_answer';
 
 export interface OpenCodeAdapterOptions {
-  /** Ordered Host model ids. The SDK has no default and does not consult prices or a model catalog. */
-  models: readonly string[];
+  /** SDK install root in which to find a managed runtime. */
+  runtimeInstallRoot?: string;
+  /** Ordered Host model IDs. Without a list, each offer selects a model explicitly. */
+  models?: readonly string[];
   runtimeEnvironment?: RuntimeEnvironmentPolicy;
   /** No default qualification policy exists until native OS/line canaries pass. */
   versionPolicy?: RuntimeVersionPolicy;
@@ -54,8 +58,9 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     return this.#runtimeReaders ??= createRuntimeReaders(this, {
       nativeAssetRoot: this.options.nativeAssetRoot,
       spawnFn: this.options.spawnFn,
-      command: (env) => resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env)).bin.command,
+      command: (env) => resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env), () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'opencode')).bin.command,
       version: opencodeVersionToken,
+      environment: env => ({ env: withoutProviderCredentials(env) }),
     });
   }
 
@@ -70,19 +75,22 @@ export class OpenCodeAdapter implements RuntimeAdapter {
   private readonly environment: RuntimeEnvironmentPolicy;
   private readonly policy?: RuntimeVersionPolicy;
 
-  constructor(options: OpenCodeAdapterOptions) {
-    if (!Array.isArray(options?.models) || options.models.length === 0 || options.models.some(id => typeof id !== 'string' || !id.trim()))
+  constructor(options: OpenCodeAdapterOptions = {}) {
+    const { models } = options;
+    if (models !== undefined && (!Array.isArray(models) || models.length === 0 || models.some(id => typeof id !== 'string' || !id.trim())))
       throw new TypeError('OpenCodeAdapterOptions.models must be a nonempty list of nonblank Host model ids');
     const maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'opencode');
     const interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'opencode');
     this.environment = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'OpenCodeAdapterOptions.runtimeEnvironment');
     this.policy = resolveRuntimeVersionPolicy(OPENCODE_VERSION_POLICY, options.versionPolicy);
-    this.options = { ...options, models: Object.freeze([...options.models]), maxRetainedBytes, interruptTimeoutMs };
+    this.options = { ...options, ...(models === undefined ? {} : { models: Object.freeze([...models]) }), maxRetainedBytes, interruptTimeoutMs };
   }
 
   get descriptor() {
-    return freezeRuntimeAdapterDescriptor({ id: 'opencode', supportsDispatchSelection: false,
-      supportsTaskExecutionOptions: true,
+    return freezeRuntimeAdapterDescriptor({ id: 'opencode',
+      selectionModes: this.options.models === undefined ? ['adapter-model'] : ['device-default', 'adapter-model'],
+      ...(this.options.models === undefined ? {} : { defaultModelModes: ['adapter-model'] }),
+      supportsEffort: true,
       // `platforms` is OS-grained: `darwin` covers x64 and arm64; `win32` is x64. Each has the lifecycle contract on both lines (#1593).
       platforms: ['darwin', 'win32'], capabilities: OPENCODE_RUNTIME_CAPABILITIES,
       ...(this.policy === undefined ? {} : { versionPolicy: this.policy }),
@@ -92,13 +100,15 @@ export class OpenCodeAdapter implements RuntimeAdapter {
 
   private async probe(): Promise<{ detected: RuntimeDetectResult; command?: string; version?: string }> {
     try {
-      const { env } = await this.runtimeEnvironment();
-      const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env));
+      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env), () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'opencode'));
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
       const version = await probeRuntimeVersion(invocation.command, 15_000, env, invocation.args);
       if (version.kind !== 'available') return { detected: version };
-      const token = opencodeVersionToken(version.stdout);
+      const token = opencodeVersionToken(version.stdout.trim() || version.stderr);
       if (token === undefined) return { detected: { kind: 'refused', reason: 'acp_unavailable' } };
+      const unsupportedVersion = opencodeVersionUnsupported(token);
+      if (unsupportedVersion !== undefined) return { detected: { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion } };
       return { command: resolved.bin.command, version: token, detected: {
         kind: 'available', version: token, rawVersion: version.stdout,
         sessionCapabilities: (await import('#byok-acp-runtime')).opencodeSessionCapabilities({ kind: 'available', via: 'executable', command: resolved.bin.command, version: token }),
@@ -109,6 +119,20 @@ export class OpenCodeAdapter implements RuntimeAdapter {
   async detect(): Promise<RuntimeDetectResult> { return (await this.probe()).detected; }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
+    const { target, effort } = input.offer;
+    const selection = target.lane === 'harness' ? target.selection : undefined;
+    if (target.lane === 'harness' && (target.harnessId !== 'opencode' || (selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model'))) {
+      return { kind: 'reject', reason: 'OpenCode does not support the requested selection', retryable: false };
+    }
+    const modelId = selection?.mode === 'adapter-model' ? selection.modelId : undefined;
+    const configured = this.options.models;
+    const models = modelId === undefined ? configured : [modelId];
+    if (models === undefined || modelId?.trim() === '') {
+      return { kind: 'reject', code: 'invalid_request', reason: 'OpenCode requires a model ID when no models are configured', retryable: false };
+    }
+    if (modelId !== undefined && configured !== undefined && !configured.includes(modelId)) {
+      return { kind: 'reject', code: 'model_unavailable', reason: 'The requested OpenCode model is outside the configured list', retryable: false };
+    }
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({
       name, command: server.command, ...(server.args === undefined ? {} : { args: [...server.args] }),
       ...(server.env === undefined ? {} : { env: { ...server.env } }),
@@ -119,10 +143,18 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     const probe = await this.probe();
     if (probe.detected.kind !== 'available' || probe.command === undefined || probe.version === undefined)
       return { kind: 'reject', reason: `opencode installation refused: ${probe.detected.kind}`, retryable: false };
-    const { command, version } = probe;
-    const { modelId, effort } = input.offer;
-    const models = modelId === undefined ? this.options.models : [modelId];
-    return { kind: 'prepared', operation: { start: input => this.start(input, command, version, models, effort) } };
+    const { command, version, detected: { executableSource, versionVerdict } } = probe;
+    return {
+      kind: 'prepared',
+      detected: { version, executableSource, versionVerdict },
+      operation: { start: start => {
+        const actual = start.manifest.selection;
+        if (actual?.mode !== selection?.mode || (actual?.mode === 'adapter-model' && actual.modelId !== modelId) || start.manifest.effort !== effort) {
+          throw authority('prepared OpenCode operation received a manifest with different runtime selection');
+        }
+        return this.start(start, command, version, models, effort);
+      } },
+    };
   }
 
   private async start(input: RuntimeOperationStartInput, command: string, version: string, models: readonly string[], effort: string | undefined): Promise<Session> {
@@ -231,7 +263,8 @@ class OpenCodeSession implements Session {
       return spawnTerminal(invocation.command, [...invocation.args, ...args], opts);
     },
     { kind: 'available', via: 'executable', command: this.command, version: this.version }, {
-      cwd: this.input.manifest.cwd!, env: { ...this.input.env, ...this.input.scratch.env }, retainedBytes: this.maxRetainedBytes, model: this.models[index]!,
+      cwd: this.input.manifest.cwd!, env: withoutProviderCredentials({ ...this.input.env, ...this.input.scratch.env }),
+      retainedBytes: this.maxRetainedBytes, model: this.models[index]!,
       ...(this.effort === undefined ? {} : { effort: this.effort }),
       ...(this.mcpServers.length === 0 ? {} : { mcpServers: this.mcpServers }),
       ...(expected === undefined ? {} : { resume: expected }),

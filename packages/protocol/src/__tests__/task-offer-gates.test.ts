@@ -1,20 +1,18 @@
 /**
  * The gates of the one `task.offer` (#925 stage 2): a daemon whose decoder
  * does not know a gated field or value stops on it instead of stripping it,
- * the v7 gates of every v6 offer the oracle release shipped equal the gates
- * it derived, and the table names each gate once.
+ * v8 preserves capability gates other than the two replaced by the executor descriptor, and the table names each gate once.
  */
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import * as v6Release from 'byok-protocol-previous';
+import * as v7Release from 'byok-protocol-previous';
 
 import {
   ExecutionTargetSchema,
   ReasoningEffortSchema,
-  TASK_EXECUTION_OPTIONS_CAPABILITY,
   readDeclineCode,
   HostOfferPlainPayloadSchema,
   HostOfferSealedPayloadSchema,
@@ -33,22 +31,22 @@ type Json = { [key: string]: unknown };
 type OfferRow = WireAddition & { readonly field: string };
 type OfferLine = { id: string; type: string; payload: Json };
 
-const corpusOfferLines = readFileSync(new URL('golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const corpusOfferLines = readFileSync(new URL('golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as OfferLine)
   .filter((line) => line.type === 'task.offer');
 const corpusOffers = corpusOfferLines.map((line) => line.payload);
 /**
- * The v6 offer lines the oracle's release shipped: the corpus prefix its
- * `golden/v6.releases.json` entry pins. The v7 corpus keeps each one's
- * envelope id (generate-v7-corpus.mjs), so each pairs with its v7 form.
+ * The v7 offer lines the oracle's release shipped: the corpus prefix its
+ * `golden/v7.releases.json` entry pins. The v8 corpus keeps each one's
+ * envelope id (generate-v8-corpus.mjs), so each pairs with its v8 form.
  */
 const oracleVersion = (JSON.parse(readFileSync(createRequire(import.meta.url).resolve('byok-protocol-previous/package.json'), 'utf8')) as { version: string }).version;
-const oracleLines = (JSON.parse(readFileSync(new URL('golden/v6.releases.json', import.meta.url), 'utf8')) as {
+const oracleLines = (JSON.parse(readFileSync(new URL('golden/v7.releases.json', import.meta.url), 'utf8')) as {
   releases: { version: string; envelopes: { lines: number } }[];
 }).releases.find((entry) => entry.version === oracleVersion)!.envelopes.lines;
-const v6OfferLines = readFileSync(new URL('golden/v6.envelopes.ndjson', import.meta.url), 'utf8')
+const v7OfferLines = readFileSync(new URL('golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .slice(0, oracleLines)
@@ -70,24 +68,11 @@ function decoderWithout(row: OfferRow, payload: Json): z.ZodType {
   const { shape } = payload.sealing === undefined ? TaskOfferPlainPayloadSchema : TaskOfferSealedPayloadSchema;
   const top = row.field.split('.')[0]!;
   const { [top]: known, ...rest } = shape as Record<string, z.ZodType>;
-  if (row.field === 'target.effort' || row.field === 'target.modelId') {
-    const field = row.field.split('.')[1]!;
-    const target = z.union(ExecutionTargetSchema.options.map((option) => {
-      if (row.when !== undefined && option.shape.lane.value !== row.when.value) return option;
-      const { [field]: _omitted, ...fields } = option.shape as Record<string, z.ZodType>;
-      return z.strictObject(fields);
-    }));
-    return z.strictObject({ ...rest, target });
-  }
   if (row.value === undefined) return z.strictObject(rest);
   if (row.field === 'agentMemory') {
     return z.strictObject({ ...rest, agentMemory: AgentMemorySelectionSchema.exclude([row.value as never]).optional() });
   }
   if (row.field === 'session.mode' && row.value === 'fresh') return z.strictObject({ ...rest, session: SessionSelectionSchema.options[0] });
-  if (row.field === 'target.lane') {
-    const lanes = ExecutionTargetSchema.options.filter((option) => option.shape.lane.value !== row.value);
-    return z.strictObject({ ...rest, target: z.union(lanes as unknown as [z.ZodType, z.ZodType, ...z.ZodType[]]) });
-  }
   if (row.field === 'sealing.categories') {
     const categories = z.array(z.enum(SEALED_PAYLOAD_CATEGORIES).exclude([row.value as never]));
     return z.strictObject({ ...rest, sealing: z.strictObject({ scopeId: z.string(), epoch: z.number(), categories }) });
@@ -114,14 +99,14 @@ describe('task.offer gates: an unknown gated field stops the daemon (Q4)', () =>
   );
 });
 
-describe('task.offer gates: the published v6 oracle, with dispatchSelection moved to the target lanes (Q2)', () => {
-  it('needs exactly the flags the oracle release derived for the v6 form of every offer line it shipped', () => {
-    expect(v6OfferLines.length).toBeGreaterThan(0);
-    for (const v6Line of v6OfferLines) {
-      const v7Line = corpusOfferLines.find((line) => line.id === v6Line.id)!;
-      expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(v7Line.payload).success).toBe(true);
-      const v6 = v6Release.requiredReceiverCapabilities('task.offer', v6Line.payload as never) as string[];
-      expect(new Set(requiredReceiverCapabilities('task.offer', v7Line.payload)), v6Line.id).toEqual(new Set(v6));
+describe('task.offer gates: the published v7 oracle, with dispatchSelection moved to the target lanes (Q2)', () => {
+  it('needs exactly the flags the oracle release derived for the v7 form of every offer line it shipped', () => {
+    expect(v7OfferLines.length).toBeGreaterThan(0);
+    for (const v7Line of v7OfferLines) {
+      const v8Line = corpusOfferLines.find((line) => line.id === v7Line.id)!;
+      expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(v8Line.payload).success).toBe(true);
+      const v7 = v7Release.requiredReceiverCapabilities('task.offer', v7Line.payload as never) as string[];
+      expect(new Set(requiredReceiverCapabilities('task.offer', v8Line.payload)), v7Line.id).toEqual(new Set(v7.filter(flag => flag !== 'task-execution-options' && flag !== 'dispatch-selection')));
     }
   });
 });
@@ -138,21 +123,16 @@ describe('per-task execution options (#2377)', () => {
   it.each([
     { lane: 'auto', effort: 'max' },
     { lane: 'auto', modelId: 'model' },
-    { lane: 'harness', harnessId: 'grok', modelId: '' },
-    { lane: 'harness', harnessId: 'grok', modelId: 'm'.repeat(161) },
-    { lane: 'harness', harnessId: 'grok', modelId: 'model\r\n' },
+    { lane: 'harness', harnessId: 'grok', selection: { mode: 'adapter-model', modelId: '' } },
+    { lane: 'harness', harnessId: 'grok', selection: { mode: 'adapter-model', modelId: 'm'.repeat(161) } },
+    { lane: 'harness', harnessId: 'grok', selection: { mode: 'adapter-model', modelId: 'model\r\n' } },
   ])('refuses invalid target %j', (target) => {
     expect(ExecutionTargetSchema.safeParse(target).success).toBe(false);
   });
 
-  it.each([
-    [{ lane: 'runtime', runtimeId: 'codex', effort: 'max' }, true],
-    [{ lane: 'harness', harnessId: 'grok', modelId: 'grok-code' }, true],
-    [{ lane: 'harness', harnessId: 'grok', modelId: 'grok-code', effort: 'max' }, true],
-    [{ lane: 'harness', harnessId: 'grok' }, false],
-    [{ lane: 'subscription', runtimeId: 'codex', modelId: 'gpt-5' }, false],
-    [{ lane: 'byok', runtimeId: 'pi', providerId: 'vendor', modelId: 'model' }, false],
-  ] as const)('derives the added gate only when needed by %j', (target, needsFlag) => {
+  it.each(['device-default', 'adapter-model'] as const)('uses the executor descriptor for %s effort admission', mode => {
+    const selection = mode === 'adapter-model' ? { mode, modelId: 'grok-code' } : { mode };
+    const target = { lane: 'harness', harnessId: 'grok', selection, effort: 'high' };
     const variants = [
       [HostOfferPlainPayloadSchema, corpusOffers.find(p => p.sealing === undefined && p.preparation === undefined)!],
       [HostOfferSealedPayloadSchema, corpusOffers.find(p => p.sealed !== undefined)!],
@@ -160,8 +140,7 @@ describe('per-task execution options (#2377)', () => {
     for (const [host, base] of variants) {
       const payload = host.parse({ ...base, target });
       expect(payload.target).toEqual(target);
-      expect(requiredReceiverCapabilities('task.offer', payload).filter(flag => flag === TASK_EXECUTION_OPTIONS_CAPABILITY))
-        .toEqual(needsFlag ? [TASK_EXECUTION_OPTIONS_CAPABILITY] : []);
+      expect(requiredReceiverCapabilities('task.offer', payload)).not.toContain('task-execution-options');
     }
   });
 });
@@ -180,10 +159,10 @@ describe('WIRE_ADDITIONS', () => {
 
 
 describe('Host offer selection admission (#1671)', () => {
-  const plain = { agentRef: { agentId: 'agent', profileRevision: 'revision' }, target: { lane: 'runtime', runtimeId: 'codex' },
+  const plain = { agentRef: { agentId: 'agent', profileRevision: 'revision' }, target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
     instruction: 'resume', session: { mode: 'resume', sessionRef: 'session' } };
   const fresh = corpusOffers.find(p => p.agentMemoryCommit !== undefined && p.sealing === undefined)!;
-  const piTarget = { lane: 'runtime', runtimeId: 'pi' };
+  const piTarget = { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } };
   const native = { session: fresh.session, egressPolicy: fresh.egressPolicy, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 }, target: piTarget };
   const nativeRule = 'native_sessions_selection_invalid';
   const rules = [
@@ -200,7 +179,7 @@ describe('Host offer selection admission (#1671)', () => {
     // Every rule fails at once: only the first, in the docs/protocol.md §3.2 order, is reported.
     ['agentMemory', { ...native, homeAccess: 'memory-reader', agentMemory: 'read-write', target: { lane: 'auto' } }, 'agentMemory read-write requires a writer; a memory-reader Attempt reads memory only', 'agent_memory_selection_invalid'],
     ['agentMemoryCommit', { ...native, homeAccess: 'memory-reader', agentMemoryCommit: 'on-success', target: { lane: 'auto' } }, 'agentMemoryCommit needs a writer; a memory-reader Attempt reads the live files', 'agent_memory_selection_invalid'],
-    ['target', { ...native, session: { mode: 'resume', sessionRef: 's' }, agentMemory: 'read', target: { lane: 'harness', harnessId: 'custom' } }, 'nativeSessions needs an explicit Pi target', nativeRule],
+    ['target', { ...native, session: { mode: 'resume', sessionRef: 's' }, agentMemory: 'read', target: { lane: 'harness', harnessId: 'custom', selection: { mode: 'device-default' } } }, 'nativeSessions needs an explicit Pi target', nativeRule],
     ['session', { ...native, session: { mode: 'resume', sessionRef: 's' }, agentMemory: 'read' }, 'nativeSessions needs a fresh session', nativeRule],
   ] as const;
   it.each([
@@ -224,7 +203,7 @@ describe('Host offer selection admission (#1671)', () => {
 describe('native session offer admission (#1526)', () => {
   const ordinary = corpusOffers.find(p => p.agentMemoryCommit !== undefined && p.sealing === undefined)!;
   const { agentMemoryCommit: _commit, ...base } = ordinary;
-  const native = { ...base, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 }, target: { lane: 'runtime', runtimeId: 'pi' } };
+  const native = { ...base, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } };
   it.each([undefined, { mode: 'none' }])('admits a fresh memory-only offer with projection %j', terminalProjection => {
     expect(TaskOfferPlainPayloadSchema.parse({ ...native, terminalProjection }).nativeSessions).toEqual({ fromMs: 1, toMs: 2 });
     expect(requiredReceiverCapabilities('task.offer', native)).toContain('native-sessions');

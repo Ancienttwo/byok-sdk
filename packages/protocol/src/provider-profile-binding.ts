@@ -28,7 +28,6 @@ export const ProviderProfileBindingSchema = z
     profileRef: ProviderProfileRefSchema,
     profileRevision: ProviderProfileRevisionSchema,
     profileHash: ProviderProfileHashSchema,
-    modelId: z.string().min(1).max(160).regex(/^[^\u0000\r\n]+$/u),
     requiredCapabilities: z.array(ProviderModelCapabilitySchema).max(8),
   })
   .strict()

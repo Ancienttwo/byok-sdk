@@ -870,6 +870,7 @@ export async function collectDoctorDiagnostics(
     ...(runtime.outcome === 'refused' ? { reason: runtime.reason } : {}),
     versionPresent: runtime.version !== undefined || runtime.unsupportedVersion?.installedVersion !== undefined,
     ...(runtime.unsupportedVersion === undefined ? {} : { unsupportedVersion: runtime.unsupportedVersion }),
+    ...(runtime.upgrade === undefined ? {} : { upgrade: { ...runtime.upgrade } }),
     ...(runtime.versionVerdict === undefined ? {} : { versionVerdict: { ...runtime.versionVerdict } }),
     ...(runtime.versionChange === undefined ? {} : { versionChange: { ...runtime.versionChange } }),
     ...(runtime.executablePath === undefined ? {} : { executablePath: runtime.executablePath }),

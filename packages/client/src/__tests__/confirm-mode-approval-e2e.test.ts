@@ -78,7 +78,7 @@ class ApprovalAwareSession implements Session {
 class ApprovalAwareAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
     id: 'confirm-stub',
-    supportsDispatchSelection: false,
+    selectionModes: ['device-default'],
     capabilities: { steer: false, resume: true, approvalInteractive: true },
   });
   readonly sessions: ApprovalAwareSession[] = [];

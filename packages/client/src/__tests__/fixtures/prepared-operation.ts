@@ -1,4 +1,4 @@
-import { modelLaneTarget, type RuntimeTaskInput } from '../../types';
+import { offerSelection, type RuntimeTaskInput } from '../../types';
 import { isRuntimeStartupDisposalFailure } from '../../runtime-failure';
 import { projectPiMcpEnvironment } from '../../adapters/pi/mcp-environment';
 import { testExecutionScratch } from './execution-scratch';
@@ -57,7 +57,8 @@ export async function startPreparedOperation(
     runtimeId: adapter.descriptor.id,
     descriptor: adapter.descriptor,
     requiredToolsetIds: [],
-    ...(modelLaneTarget(offer.target) === undefined ? {} : { modelTarget: modelLaneTarget(offer.target) }),
+    selection: offerSelection(offer.target),
+    effort: offer.effort,
     ...(offer.sessionRef === undefined ? {} : { sessionRef: offer.sessionRef }),
     ...(resources.agentHome === undefined ? {} : {
       agentRef: { agentId: 'adapter-unit-agent', profileRevision: 'r1' },
@@ -74,11 +75,12 @@ export async function startPreparedOperation(
     forwardedEnvironmentNames: Object.keys(resources.env).sort(),
   });
   const scratch = resources.scratch ?? await testExecutionScratch();
-  const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch?.({
-    kind: 'instruction', cwd: resources.workspaceDir, env: resources.env,
-    scratch,
-  });
   try {
+    const runtimeLaunch = await prepared.operation.resolveRuntimeLaunch?.({
+      kind: 'instruction', cwd: resources.workspaceDir, env: resources.env, scratch, signal: resources.signal,
+      ...(manifest.lease === undefined ? {} : { agentHome: { canonicalHome: manifest.lease.canonicalHome,
+        access: manifest.homeAccess ?? 'writer' } }),
+    });
     return await prepared.operation.start({ scratch,
       ...(runtimeLaunch === undefined ? {} : { runtimeLaunch }),
       kind: 'instruction',

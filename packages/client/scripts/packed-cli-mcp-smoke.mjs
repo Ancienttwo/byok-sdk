@@ -80,7 +80,7 @@ try {
       }
       const device = await wait(async () => (await cloud.listDevices(tenant)).find(device => device.productId === config.productId && device.capabilities?.includes('toolset-selection')), `${entry} discovery`);
       const offer = await cloud.submitAgentExecution(tenant, { taskId: `packed-${entry}-result`, deviceId: device.deviceId, payload: {
-        instruction: 'call echo', target: { lane: 'runtime', runtimeId: 'codex' }, session: { mode: 'fresh' }, requiredToolsets: ['probe'],
+        instruction: 'call echo', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, requiredToolsets: ['probe'],
         agentRef: { agentId: `packed-${entry}-agent`, profileRevision: '1' }, egressPolicy: policy,
         terminalProjection: entry === 'cli' ? resultSelection : { mode: 'none' },
       } });

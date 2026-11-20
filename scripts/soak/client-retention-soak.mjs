@@ -73,7 +73,7 @@ const K4_TOMBSTONE_RETENTION_MS = Math.max(30 * DAY_MS, MIN_TOMBSTONE_RETENTION_
 function k4SettleTask(ledger, agentRef, egressPolicy, key, failed, now) {
   ledger.transaction(state => {
     const intent = enqueue(state, ledger.tenant, { key, source: 'user', waitUntil: now + DAY_MS, execution: { deviceId: 'soak-device', payload: {
-      session: { mode: 'fresh' }, instruction: 'retention soak task', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef, egressPolicy,
+      session: { mode: 'fresh' }, instruction: 'retention soak task', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef, egressPolicy,
       terminalProjection: { mode: 'result-document', contract: RESULT_CONTRACT, schema: RESULT_SCHEMA },
     } } });
     if (!failed) {
@@ -173,7 +173,7 @@ class SoakRuntimeAdapter {
   startError;
   #counter = 0;
   descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'pi', supportsDispatchSelection: true, requiresMcpToolsetToolObservation: false,
+    id: 'pi', selectionModes: ['device-default'], requiresMcpToolsetToolObservation: false,
     capabilities: { steer: false, resume: true, approvalInteractive: false, mcpToolsets: true },
   });
   async runtimeEnvironment() { return buildRuntimeEnvironment({ base: 'allowlist' }); }
@@ -425,7 +425,7 @@ async function main() {
       const shouldFail = options.failEvery > 0 && taskNumber > 0 && taskNumber % options.failEvery === 0;
       adapter.startError = shouldFail ? new Error('soak deterministic runtime start failure') : undefined;
       const payload = {
-        agentRef, instruction: 'retention soak task', target: { lane: 'runtime', runtimeId: 'pi' },
+        agentRef, instruction: 'retention soak task', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
         ...(shouldFail ? {} : { terminalProjection: { mode: 'result-document', contract: RESULT_CONTRACT, schema: RESULT_SCHEMA } }),
       };
@@ -442,8 +442,15 @@ async function main() {
         // The start that just resolved names the result helper's context file; stage the
         // real staged-result record before the fake runtime ends its turn.
         const start = adapter.startCalls.at(-1);
-        const contextFile = start === undefined ? undefined : start.input?.mcpServers?.byokagentresult?.args?.at(-1);
-        const contextToken = contextFile === undefined ? undefined : JSON.parse(await fs.readFile(contextFile, 'utf8')).contextToken;
+        const contextFile = start?.input?.mcpServers?.byokagentresult?.args?.at(-1);
+        let contextToken;
+        if (contextFile !== undefined) {
+          try {
+            contextToken = JSON.parse(await fs.readFile(contextFile, 'utf8')).contextToken;
+          } catch (error) {
+            throw new Error('could not read result helper context for ' + taskId, { cause: error });
+          }
+        }
         if (typeof contextToken !== 'string') {
           const decline = terminalFor(taskId);
           throw new Error('result helper was not injected for ' + taskId + (decline === undefined ? '' : ': ' + JSON.stringify(decline.payload)));

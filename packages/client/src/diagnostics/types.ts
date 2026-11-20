@@ -1,6 +1,7 @@
 import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
 import type { RuntimeVersionChange } from '../runtime-detection.js';
 import type { RuntimeUnsupportedVersion } from '../runtime/runtime-reader-types.js';
+import type { RuntimeUpgradeAdvice } from '../runtime/runtime-releases.js';
 import type { ControlStatusResult } from '../daemon/control-protocol.js';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health.js';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
@@ -33,6 +34,7 @@ export interface DiagnosticsSnapshot {
     versionPresent: boolean;
     /** Native release floor refusal. Local status and doctor only. */
     unsupportedVersion?: RuntimeUnsupportedVersion;
+    upgrade?: RuntimeUpgradeAdvice;
     /** #1103: the effective version policy's verdict. Absent from an older daemon, or a custom adapter with no policy. */
     versionVerdict?: RuntimeVersionVerdict;
     /** #1103 §2.6: the local restart comparison. Absent on a first run, an unchanged version or an older daemon. */

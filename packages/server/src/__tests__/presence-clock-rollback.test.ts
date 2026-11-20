@@ -32,7 +32,7 @@ describe.each(['memory', 'sqlite'] as const)('%s transport presence after clock 
   }
   it('accepts a fresh inbound envelope before recording a genuine duplicate', async () => {
     const { daemon, byok } = await setup();
-    const envelope = createEnvelope('conn.hello', { deviceId: daemon.deviceId, productId, protocolVersions: [PROTOCOL_VERSION], capabilities: [] });
+    const envelope = createEnvelope('conn.hello', { deviceId: daemon.deviceId, productId, protocolVersions: [PROTOCOL_VERSION], harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }], capabilities: [] });
     const first = await daemon.send(envelope);
     // Inspect replay too: baseline records dedup before its renewal throws.
     const replay = await daemon.send(envelope);

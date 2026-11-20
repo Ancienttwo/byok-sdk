@@ -73,14 +73,14 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, target: { lane: 'harness', harnessId: 'acme-harness' }, instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } }, instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 
     // The claim really did carry the adapter's self-report across the long-poll
     // round trip — and it is the adapter's own value, not a server-side guess:
     // the claimed executor is the custom harness, never a built-in runtime.
     const snapshot = await real.byok.tasks.get(handle.taskId);
-    expect(snapshot?.claimedExecutor).toEqual({ kind: 'harness', harnessId: 'acme-harness' });
+    expect(snapshot?.claimedExecutor).toEqual({ id: 'acme-harness' });
     expect(snapshot?.claimedRuntimeCapabilities).toEqual({
       steer: true,
       resume: true,
@@ -138,7 +138,7 @@ describe('S0/H-010: task.steer over long-poll (real @byok-sdk/server)', () => {
 
     const machines = await real.byok.machines.list();
     expect(machines.find(m => m.deviceId === record.deviceId)?.harnesses).toEqual([expect.objectContaining({ id: 'acme-harness', version: '0.0.0' })]);
-    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, target: { lane: 'harness', harnessId: 'acme-harness' }, instruction: 'run over long-poll' });
+    const { handle, session } = await dispatchResumedAgentTask(real, adapter, { deviceId: record.deviceId, target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } }, instruction: 'run over long-poll' });
     await waitForTaskEvent(handle, (e) => e.kind === 'state' && e.state === 'Running');
 
     expect((await real.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities?.steer).toBe(false);

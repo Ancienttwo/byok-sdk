@@ -460,7 +460,7 @@ export async function runCell(options: RunCellOptions): Promise<RunCellResult> {
   } else {
     const host = await openHost(options);
     try {
-      manifest = { ...manifest, cell: { ...manifest.cell, observedRuntimes: (await host.server.machines.list()).flatMap(machine => machine.runtimes ?? []), activityMaxBytes: host.tap.activityMaxBytes } };
+      manifest = { ...manifest, cell: { ...manifest.cell, observedRuntimes: (await host.server.machines.list()).flatMap(machine => machine.harnesses ?? []), activityMaxBytes: host.tap.activityMaxBytes } };
       const plan = planTrials({ rounds: options.rounds, caseIds, calibrate: options.calibrate });
       let startedCounted = 0;
       for (const planned of plan) {

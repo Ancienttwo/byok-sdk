@@ -66,17 +66,18 @@ it('real daemon registration does not advertise a refused runtime', async () => 
   await daemon.pair('pairing-code'); await daemon.start();
   const hello = await server.waitFor(e => e.type === 'conn.hello');
   if (hello.type !== 'conn.hello') throw new Error('wrong envelope');
-  expect(hello.payload.runtimes).toEqual([]);
+  expect(hello.payload.harnesses).toEqual([]);
   expect(adapter.detect).toHaveBeenCalled();
 });
 
 it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection declines a refused runtime without starting it', async mode => {
   const cfg = await config(); const server = await TestServer.start(); servers.push(server); cfg.serverUrl = server.url;
-  const adapter = refusingAdapter();
+  const adapter = new StubRuntimeAdapter('codex');
   const daemon = createDaemonWithAdapters({agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },  storage: { scratchRoot: testScratchRoot() }, ...(cfg) }, [adapter]); daemons.push(daemon);
   await daemon.pair('pairing-code'); await daemon.start();
-  const before = vi.mocked(adapter.detect).mock.calls.length;
-  server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: mode === 'explicit' ? { lane: 'runtime', runtimeId: 'codex' } : { lane: 'auto' } },
+  await server.waitFor(e => e.type === 'conn.hello');
+  const detect = vi.spyOn(adapter, 'detect').mockResolvedValue({ kind: 'refused', reason: 'app_server_unavailable' });
+  server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: mode === 'explicit' ? { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } : { lane: 'auto' } },
     { taskId: `refuse-${mode}`, seq: server.nextSeq() }));
   const declined = await server.waitFor(e => e.type === 'task.decline');
   expect(declined.payload).toMatchObject({
@@ -84,7 +85,7 @@ it.each(['explicit', 'automatic'] as const)('real TaskRunner %s selection declin
     code: 'runtime_unavailable',
     runtimeUnavailable: { cause: mode === 'explicit' ? 'app_server_unavailable' : 'none_available' },
   });
-  expect(vi.mocked(adapter.detect).mock.calls.length).toBe(before + 1);
+  expect(detect).toHaveBeenCalledTimes(1);
   expect(adapter.startCalls).toHaveLength(0);
 });
 it('maps every explicit detection failure to its typed cause and retryable default', async () => {
@@ -106,7 +107,7 @@ it('maps every explicit detection failure to its typed cause and retryable defau
   for (const [detection, cause, retryable] of cases) {
     adapter.detect = async () => detection;
     const taskId = `cause-${cause}`;
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: { lane: 'runtime', runtimeId: 'codex' } }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } }, { taskId, seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
     expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable, runtimeUnavailable: { cause } });
     if (cause === 'environment_unavailable') {
@@ -131,7 +132,7 @@ it('types allowlist and unknown-runtime declines without changing their text or 
   ] as const;
   for (const [requested, cause, text] of cases) {
     const taskId = `policy-${cause}`;
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: { lane: 'runtime', runtimeId: requested } }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'no start', target: { lane: 'harness', harnessId: requested, selection: { mode: 'device-default' } } }, { taskId, seq: server.nextSeq() }));
     const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
     expect(declined.payload).toMatchObject({ code: 'runtime_unavailable', retryable: false, runtimeUnavailable: { cause } });
     expect((declined.payload as { reason?: string }).reason).toContain(text);

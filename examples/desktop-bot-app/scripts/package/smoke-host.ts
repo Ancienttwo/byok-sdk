@@ -4,9 +4,9 @@
 // asset root. Two Pi dispatches against an OpenAI-compatible endpoint inside this
 // process, no provider key and no OS credential store:
 //
-// 1. Keys launcher lane (byok target): the model calls memory_recall,
+// 1. Keys launcher lane (byok-profile selection): the model calls memory_recall,
 //    then replies. Under a BYOK keys profile Pi registers no subagent tool.
-// 2. Pi auth store lane (runtime target, PI_CODING_AGENT_DIR passed): the
+// 2. Pi auth store lane (device-default selection, PI_CODING_AGENT_DIR passed): the
 //    model asks for a background subagent, which the SEA refuses with
 //    pi_background_unavailable (#1499 R2); the task still completes.
 //
@@ -19,7 +19,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
 import { bundledSdkHelperHost, createDaemon, resolveSdkHosting, runSdkReservedHelperCommand } from '@byok-sdk/client';
-import { InMemorySecretStore, parseModelProviderProfile, parsePiProviderLauncherOptions, runPiProviderLauncher, SqliteProviderProfileStore } from '@byok-sdk/keys';
+import { InMemorySecretStore, exactProviderProfileBinding, parseModelProviderProfile, parsePiProviderLauncherOptions, runPiProviderLauncher, SqliteProviderProfileStore } from '@byok-sdk/keys';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 
 const MARKER = 'BYOK_DESKTOP_SMOKE';
@@ -53,7 +53,13 @@ function fakeModel(log: { requests: string[]; offeredTools: string[][]; toolResu
     request.on('data', chunk => { body += chunk; });
     request.on('end', () => {
       log.requests.push(`${request.method} ${request.url}`);
-      const chat = JSON.parse(body) as ChatRequest;
+      let chat: ChatRequest;
+      try {
+        chat = JSON.parse(body) as ChatRequest;
+      } catch {
+        response.writeHead(400).end('invalid model request');
+        return;
+      }
       const tools = (chat.tools ?? []).map(tool => tool.function?.name ?? '');
       log.offeredTools.push(tools);
       const results = (chat.messages ?? []).filter(message => message.role === 'tool').map(message => text(message.content));
@@ -113,7 +119,11 @@ async function smoke(): Promise<void> {
     pi_model: { contextWindow: 8192, maxTokens: 1024, reasoning: false, thinkingLevel: 'off',
       compat: { supportsStore: false, supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: 'max_tokens' } },
   }));
+  const profile = await profiles.get('smoke');
   await profiles.close();
+  if (profile === undefined) throw new Error('smoke provider profile could not be read back');
+  const binding = exactProviderProfileBinding(profile);
+  const providerProfile = { ...binding, requiredCapabilities: [...binding.requiredCapabilities] };
   const daemon = createDaemon({
     localAgentRelease: { version: '0.0.0-desktop-smoke' }, productName: 'BYOK Desktop Smoke', productId: PRODUCT_ID, deviceName: 'desktop-smoke', serverUrl: listener.serverUrl,
     storeDir: path.join(root, 'store'), storage: { scratchRoot: path.join(root, 'scratch') },
@@ -128,7 +138,7 @@ async function smoke(): Promise<void> {
     const { deviceId } = await daemon.pair(code);
     await daemon.start();
     await daemon.whenOpen({ signal: AbortSignal.timeout(120_000) });
-    const run = async (target: { lane: 'runtime'; runtimeId: 'pi' } | { lane: 'byok'; runtimeId: 'pi'; providerId: string; modelId: string }) => {
+    const run = async (target: Parameters<typeof byok.executions.submit>[0]['payload']['target']) => {
       const { taskId } = await byok.executions.submit({
         taskId: randomUUID(), deviceId,
         payload: { instruction: 'reply once', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
@@ -141,8 +151,8 @@ async function smoke(): Promise<void> {
       const reply = task.result && 'finalMessage' in task.result ? task.result.finalMessage : undefined;
       return task.state === 'Complete' ? { state: task.state, reply } : { state: task.state, result: task.result };
     };
-    const keys = await run({ lane: 'byok', runtimeId: 'pi', providerId: 'smoke', modelId: MODEL });
-    const piAuth = await run({ lane: 'runtime', runtimeId: 'pi' });
+    const keys = await run({ lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile } });
+    const piAuth = await run({ lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } });
     const memory = log.toolResults.some(result => result.includes('"revision"'));
     const refused = log.toolResults.some(result => result.includes('pi_background_unavailable'));
     const ok = [keys, piAuth].every(task => task.state === 'Complete' && task.reply === MODEL_REPLY) && memory && refused;

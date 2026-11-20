@@ -8,7 +8,7 @@ import {
   type SealedAgentExecutionInput,
 } from '../agent-execution.js';
 import { ByokCloudError } from '../errors.js';
-import { refuseSealedFields, type EnqueuePaths } from './enqueue.js';
+import { assertProviderProfileModelOverride, refuseSealedFields, type EnqueuePaths } from './enqueue.js';
 
 interface Dependencies {
   options: ByokCloudOptions;
@@ -30,12 +30,14 @@ export function createAgentExecutionsApi({
     tenant: TenantId, input: AgentExecutionInput,
   ): Promise<EnqueuedOffer> {
     refuseSealedFields((input as { payload?: unknown } | undefined)?.payload, ['sealing', 'sealed'], 'submitSealedAgentExecution');
+    assertProviderProfileModelOverride(input?.payload);
     return submitExecution(tenant, AgentExecutionInputSchema.parse(input));
   }
 
   async function submitSealedAgentExecution(
     tenant: TenantId, input: SealedAgentExecutionInput,
   ): Promise<EnqueuedOffer> {
+    assertProviderProfileModelOverride(input?.payload);
     return submitExecution(tenant, SealedAgentExecutionInputSchema.parse(input));
   }
 

@@ -1,4 +1,8 @@
-import type { ModelLaneTarget, RuntimeTaskInput } from '../types';
+import type { ExecutionTarget } from '@byok-sdk/protocol';
+import type { RuntimeTaskInput } from '../types';
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
+
+type PiProfileTarget = Extract<ExecutionTarget, { lane: 'harness' }>;
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { createHash } from 'node:crypto';
@@ -8,12 +12,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
-import {
-  getDocsPath,
-  getExamplesPath,
-  getReadmePath,
-} from '@earendil-works/pi-coding-agent';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   INPUT_PREPARATION_ARTIFACT_FORMAT,
   INPUT_PREPARATION_VERSION,
@@ -348,13 +347,14 @@ async function prepareOnThisDevice(
 
 interface StartOverrides {
   preparation?: RuntimePreparedLaunchV1;
+  nativeModelId?: string;
   sessionRef?: string;
   spawnFn?: PiAdapterOptions['spawnFn'];
   /** Receives the resolved launch so a case can assert its projection lifecycle. */
   captureLaunch?: (resources: { projectionDir?: string; release: () => Promise<void> }) => void;
   /** Everything a BYOK-profile prepared launch adds, and nothing else. */
   byok?: {
-    selection: ModelLaneTarget;
+    selection: PiProfileTarget;
     launcher?: PiAdapterOptions['byokLauncher'];
     projectionRoot: string;
   };
@@ -369,13 +369,22 @@ const __executionScratch = await testExecutionScratch();
 
   const byok = overrides.byok;
   const adapter = new PiAdapter({
-    ...(byok?.launcher === undefined ? {} : { byokLauncher: byok.launcher }),
+    ...(byok?.launcher === undefined ? {} : { byokLauncher: byok.launcher, validateProviderProfileBinding: async () => {} }),
     ...(overrides.spawnFn === undefined ? {} : { spawnFn: overrides.spawnFn }),
   });
+  const nativeModelId = overrides.nativeModelId;
+  const target: ExecutionTarget = nativeModelId === undefined
+    ? byok?.selection ?? { lane: 'auto' }
+    : { lane: 'harness', harnessId: 'pi', selection: { mode: 'adapter-model', modelId: nativeModelId } };
+  if (nativeModelId !== undefined) {
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [
+      { id: nativeModelId, provider: { id: nativeModelId.split('/')[0]! } },
+    ] });
+  }
   const offer: RuntimeTaskInput = {
     taskId: 'prepared-launch-test',
     instruction: 'unused on the prepared lane',
-    target: byok === undefined ? { lane: 'runtime', runtimeId: 'pi' } : byok.selection,
+    target,
   } as unknown as RuntimeTaskInput;
   const result = await adapter.prepare({
     offer,
@@ -391,7 +400,7 @@ const __executionScratch = await testExecutionScratch();
     runtimeId: 'pi',
     descriptor: adapter.descriptor,
     requiredToolsetIds: [...prepared.requiredToolsets],
-    ...(byok === undefined ? {} : { modelTarget: byok.selection }),
+    ...(target.lane === 'auto' ? {} : { selection: target.selection }),
     ...(overrides.sessionRef === undefined ? {} : { sessionRef: overrides.sessionRef }),
     workspace: { workspaceDir: prepared.workspaceDir },
     forwardedEnvironmentNames: Object.keys(prepared.childEnv).sort(),
@@ -564,6 +573,21 @@ describe('the prepared pi launch entry', () => {
     const prepared = await prepareOnThisDevice(endpoint);
     await expect(startPrepared(prepared, { sessionRef: 'pi-session-from-an-earlier-turn' }))
       .rejects.toThrow(/never resumes/u);
+    expect(endpoint.bodies).toHaveLength(0);
+  }, 60_000);
+
+  it('refuses a frozen model that differs from the admitted adapter model before spawning', async () => {
+    const endpoint = await providerEndpoint();
+    const prepared = await prepareOnThisDevice(endpoint);
+    const { provider, id } = prepared.preparation.expected.model;
+    const spawnFn = vi.fn(() => { throw new Error('unexpected Pi spawn'); });
+    for (const nativeModelId of [`${provider}/${id}-other`, `different-provider/${id}`]) {
+      await expect(startPrepared(prepared, { nativeModelId, spawnFn })).rejects.toMatchObject({
+        phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+        message: 'the prepared Pi model differs from the admitted adapter-model selection',
+      });
+    }
+    expect(spawnFn).not.toHaveBeenCalled();
     expect(endpoint.bodies).toHaveLength(0);
   }, 60_000);
 
@@ -777,8 +801,8 @@ type ProjectionShape = {
  * so a case that passes the consent gate passes it because the two really are
  * the same declaration — not because the fixture restated it consistently.
  */
-function byokModel(profile: ModelProviderProfile): InputPreparationModelV1 {
-  const projection = buildPiProviderProjection(profile, 'pi-prepared') as ProjectionShape;
+function byokModel(profile: ModelProviderProfile, modelId?: string): InputPreparationModelV1 {
+  const projection = buildPiProviderProjection(profile, 'pi-prepared', modelId) as ProjectionShape;
   const provider = projection.providers[BYOK_PROVIDER_ID]!;
   const entry = provider.models[0]!;
   return {
@@ -908,7 +932,7 @@ function launcherSpawn(options: {
       sessionDir: parsed.sessionDir,
     });
     if (options.secret !== undefined) env.PI_PROVIDER_API_KEY = options.secret;
-    const projection = buildPiProviderProjection(options.profile, 'pi-prepared') as ProjectionShape;
+    const projection = buildPiProviderProjection(options.profile, 'pi-prepared', parsed.modelId) as ProjectionShape;
     options.mutateProjection?.(projection);
     const projectionDir = env.PI_CODING_AGENT_DIR!;
     record.projectionDir = projectionDir;
@@ -932,16 +956,16 @@ function launcherSpawn(options: {
   }) as PiAdapterOptions['spawnFn'];
 }
 
-async function byokFixture(endpoint: ProviderEndpoint): Promise<{
+async function byokFixture(endpoint: ProviderEndpoint, modelId?: string): Promise<{
   prepared: Prepared;
   profile: ModelProviderProfile;
   launcher: NonNullable<PiAdapterOptions['byokLauncher']>;
   projectionRoot: string;
-  selection: ModelLaneTarget;
+  selection: PiProfileTarget;
 }> {
   const profile = byokProfile(endpoint.baseUrl);
   const prepared = await prepareOnThisDevice(endpoint, (snapshot) => {
-    snapshot.model = byokModel(profile);
+    snapshot.model = byokModel(profile, modelId);
   });
   const custody = await tempDir('byok-pi-prepared-custody-');
   return {
@@ -955,8 +979,11 @@ async function byokFixture(endpoint: ProviderEndpoint): Promise<{
     },
     projectionRoot: await tempDir('byok-pi-prepared-projections-'),
     selection: {
-      lane: 'byok', runtimeId: 'pi', providerId: BYOK_PROFILE_REF, modelId: 'glm-4.6',
-    } as unknown as ModelLaneTarget,
+      lane: 'harness',
+      harnessId: 'pi',
+      selection: { mode: 'byok-profile', providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [...profile.capabilities] },
+        ...(modelId === undefined ? {} : { modelId }) },
+    },
   };
 }
 
@@ -1004,6 +1031,39 @@ describe('the prepared pi launch entry under a BYOK profile', () => {
     expect(f.profile.base_url).toBe(endpoint.baseUrl);
     expect(endpoint.calls[0]?.url).toBe('/v1/chat/completions');
     expect(endpoint.calls[0]?.headers.authorization).toBe(`Bearer ${SYNTHETIC_SECRET}`);
+  }, 60_000);
+
+  it('sends a prepared override only when it matches the counted model', async () => {
+    const endpoint = await providerEndpoint();
+    const modelId = 'org/alternate';
+    const f = await byokFixture(endpoint, modelId);
+    const record: LauncherRecord = { logs: [] };
+    const spawnFn = launcherSpawn({ profile: f.profile, record, secret: SYNTHETIC_SECRET });
+    await expect(startPrepared(f.prepared, { spawnFn, byok: {
+      ...f, selection: { ...f.selection, selection: { ...f.selection.selection, modelId: 'other-model' } } as PiProfileTarget,
+    } })).rejects.toMatchObject({ phase: 'start', failure: { class: 'invalid_request' } });
+    expect(record.launcherCommand).toBeUndefined();
+    const session = await startPrepared(f.prepared, { spawnFn, byok: f });
+    for await (const event of session.events) { if (event.type === 'turn_end') break; }
+    expect(endpoint.bodies.map(body => JSON.parse(body).model)).toEqual([modelId]);
+  }, 60_000);
+
+  it.each(['model_not_found', '模型不存在'])('reports an unavailable prepared model (%s) without an unmetered call event', async message => {
+    const endpoint = await providerEndpoint();
+    endpoint.respond = (_req, res) => {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message } }));
+    };
+    const f = await byokFixture(endpoint, 'absent');
+    const session = await startPrepared(f.prepared, {
+      spawnFn: launcherSpawn({ profile: f.profile, record: { logs: [] }, secret: SYNTHETIC_SECRET }), byok: f,
+    });
+    const unmeteredCalls: unknown[] = [];
+    await expect((async () => { for await (const event of session.events) {
+      if (event.type === 'usage' && event.contextSource === undefined) unmeteredCalls.push(event);
+    } })()).rejects.toMatchObject({ phase: 'run', failure: { class: 'model_unavailable' } });
+    expect(unmeteredCalls).toEqual([]);
+    expect(endpoint.bodies.map(body => JSON.parse(body).model)).toEqual(['absent']);
   }, 60_000);
 
   it('keeps the synthetic secret out of the config, the argv, the logs and the artifact', async () => {

@@ -1,10 +1,11 @@
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
-import { readFile, realpath, stat, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, expect, it, vi } from 'vitest';
+import { DshAdapter } from '../adapters/dsh/dsh-adapter';
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { ToolReminder } from '../tool-authorization';
 import { createControlMethods } from '../daemon/create-daemon/control-methods';
@@ -12,13 +13,14 @@ import type { DaemonScope } from '../daemon/create-daemon/scope';
 import { connectControlClient } from '../daemon/control-client';
 import { exportPrivateKeyPem, generateDeviceKeyPair } from '../daemon/device-keys';
 import { startControlServer } from '../daemon/control-server';
+import { SEARCH_RUNTIME_EVIDENCE } from '../daemon/search-runtime-evidence';
 import type { SearchRuntimeEvidence } from '../daemon/search-runtime-qualification';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { hostFor } from '../daemon/task-runner/host';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { MCP_HUB_CONTEXT_ACTIVE_METHOD, type McpHubContext } from '../sdk-reserved-helper-context';
-import { freezeRuntimeAdapterDescriptor, type McpStdioServerConfig, type RuntimeAdapterPrepareInput, type RuntimeOperationStartInput } from '../types';
-import { acceptClaimSettlement, testIngressBudget } from './fixtures/activity-ingress';
+import { freezeRuntimeAdapterDescriptor, type McpStdioServerConfig, type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeOperationStartInput } from '../types';
+import { acceptClaimSettlement, testHarnesses, testIngressBudget } from './fixtures/activity-ingress';
 import { reservedMcpToken, testScratchOwner, testScratchRoot } from './fixtures/execution-scratch';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { observationOf } from './fixtures/mcp-observation';
@@ -66,7 +68,7 @@ class FixtureAdapter extends StubRuntimeAdapter {
   }
 }
 
-function setup(adapters = [new FixtureAdapter()], extra: Partial<TaskRunnerDeps> = {}) {
+function setup(adapters: RuntimeAdapter[] = [new FixtureAdapter()], extra: Partial<TaskRunnerDeps> = {}) {
   const storeDir = testScratchRoot();
   const configFile = path.join(storeDir, 'inner.json');
   const receiptFile = path.join(storeDir, 'inner.jsonl');
@@ -91,7 +93,7 @@ function setup(adapters = [new FixtureAdapter()], extra: Partial<TaskRunnerDeps>
       async uploadArtifact() { throw new Error('not used'); },
     },
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
-    advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
+    advertisedCapabilities: advertiseEveryDeviceFlag, advertisedHarnesses: () => testHarnesses(adapters), scratchRoot: testScratchOwner(),
     getMcpToolsetSnapshot: () => registry.snapshot(), mcpToolsetToolsProbe: probe,
     hostTaskContextAvailable: () => true,
     mcpSearch: { bin: { command: process.execPath, args: [hubBin] }, candidates: () => [row] },
@@ -436,13 +438,59 @@ it.each(['start', 'activation'] as const)('revokes direct and inner nonces while
   expect(sent.some(envelope => envelope.type === 'task.fail')).toBe(true);
 });
 
+it.skipIf(process.platform === 'win32')('declines search when DSH prepare captures a newly published unqualified installation', async () => {
+  const root = testScratchRoot();
+  const fixture = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url));
+  const version = '0.2.2-rc.1';
+  const generation = 'generation-00000000-0000-4000-8000-000000000001';
+  const executable = 'dsh';
+  const managedRoot = path.join(root, 'runtimes', 'dsh');
+  await mkdir(path.join(managedRoot, generation), { recursive: true });
+  await copyFile(fixture, path.join(managedRoot, generation, executable));
+  const spawnFn = vi.fn(() => { throw new Error('unexpected DSH session spawn'); });
+  const adapter = new DshAdapter({
+    home: path.join(root, 'home'), runtimeInstallRoot: root, spawnFn,
+    model: { provider: 'custom', providerId: 'openai', baseUrl: 'http://127.0.0.1:1', model: 'loop-model' },
+    resolveKey: async () => 'dsh-search-fixture-provider-key',
+    runtimeEnvironment: { base: 'allowlist' },
+  });
+  const detect = vi.spyOn(adapter, 'detect');
+  const prepare = vi.spyOn(adapter, 'prepare');
+  const { offer, sent } = setup([adapter], {
+    mcpSearch: {
+      bin: { command: process.execPath, args: [hubBin] },
+      candidates: descriptor => SEARCH_RUNTIME_EVIDENCE.filter(row => row.runtimeId === descriptor.id),
+    },
+    async prepareHostTaskContext() {
+      await writeFile(path.join(managedRoot, 'current.json'), JSON.stringify({ generation, executable, version }));
+    },
+  });
+  vi.stubEnv('BYOK_DSH_BIN', fixture);
+  try {
+    await offer('search-dsh', ['host'], {
+      lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'openai', modelId: 'byok-custom/loop-model' },
+    });
+    await expect(detect.mock.results[0]?.value).resolves.toMatchObject({ kind: 'available', version, executableSource: 'env' });
+    await expect(prepare.mock.results[0]?.value).resolves.toMatchObject({
+      kind: 'prepared', detected: { version, executableSource: 'managed' },
+    });
+    expect(sent.map(envelope => envelope.type)).toEqual(['task.decline']);
+    expect(sent[0]?.payload).toMatchObject({
+      retryable: true, reason: 'MCP search exposure is unavailable on this device for the requested runtime or version',
+    });
+    expect(spawnFn).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+  }
+});
+
 it('skips version mismatches and the durable lane in auto, and admits a direct-only byoktools', async () => {
   const old = new FixtureAdapter('claude', 'fixture-0');
   const durable = new FixtureAdapter('codex', 'fixture-1', true);
   const selected = new FixtureAdapter();
   const { offer, sent, cancel, probe } = setup([old, durable, selected], { runtimePreference: ['claude', 'codex', 'pi'] });
   const detectDurable = vi.spyOn(durable, 'detect');
-  await offer('unqualified', ['host'], { lane: 'runtime', runtimeId: 'claude' });
+  await offer('unqualified', ['host'], { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } });
   expect(sent.map(envelope => envelope.type)).toEqual(['task.decline']);
   await offer('collision', ['host', 'collision']);
   expect(sent.at(-1)?.payload).toMatchObject({ reason: expect.stringContaining('conflicts with the search hub name') });
@@ -452,7 +500,7 @@ it('skips version mismatches and the durable lane in auto, and admits a direct-o
   expect(old.startCalls).toHaveLength(0);
   expect(detectDurable).not.toHaveBeenCalled();
   await cancel();
-  await offer('direct', ['collision'], { lane: 'runtime', runtimeId: 'claude' });
+  await offer('direct', ['collision'], { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } });
   expect(old.input?.mcpServers?.byoktools?.args).toEqual([expect.stringContaining('host-toolset-')]);
 });
 

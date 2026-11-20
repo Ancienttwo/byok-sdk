@@ -11,7 +11,7 @@ import {
 import { searchThenCall, startLoopbackProvider, type ProviderRequest, type ProviderStep } from './loopback';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 
-const GROK_TARGET = { lane: 'harness', harnessId: 'grok' } as const;
+const GROK_TARGET = { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } } as const;
 
 import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('grok', QUALIFIED_GROK_VERSION);
@@ -116,9 +116,7 @@ defineRuntimeContract(`grok runtime contract (${target.mode} ${target.expectedVe
   'detect.auth.absent': check(async () => {
     expectAuth(await detectWith(adapter(), await detectEnv('grok-auth-absent')), false);
   }),
-  'detect.auth.apiKey': check(async () => {
-    expectAuth(await detectWith(adapter(), { ...await detectEnv('grok-auth-key'), XAI_API_KEY: 'xai-runtime-contract-placeholder' }), true);
-  }),
+  'detect.auth.apiKey': skip('Grok uses its own login and drops Host API keys from its environment'),
   'detect.auth.login': check(async () => {
     // The adapter checks that Grok's login file exists and never reads it.
     expectAuth(await detectWith(adapter(), await detectEnv('grok-auth-login', { 'auth.json': '{}' })), true);

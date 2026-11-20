@@ -10,7 +10,7 @@ import type { ExecutionRecord } from '../daemon/execution-record';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-failure';
 import { StubRuntimeAdapter, type StubSession } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
@@ -48,7 +48,7 @@ async function makeRunner(options: RunnerOptions = {}) {
   if (options.omitEvidence === true) adapter.decorateSession = stub => { Object.defineProperty(stub, 'evidence', { value: undefined }); };
   const sent: Envelope[] = [];
   const records: ExecutionRecord[] = [];
-  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     ...testAgentHomeDeps(),
     deviceId: 'execution-record-device',
@@ -131,7 +131,7 @@ describe('TaskRunner execution record', () => {
     session.emit(use('a'));
     session.fail(new RuntimeExecutionFailure({ phase: 'run', retry: 'retryable', reason: 'runtime exited' }));
     await finished();
-    expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { agentRef: RECORD_AGENT, executor: { kind: 'runtime', runtimeId: 'pi' }, reason: 'runtime exited', retryable: true, failure: { class: 'unknown' } }]]);
+    expect(terminals().map(envelope => [envelope.type, envelope.payload])).toEqual([['task.fail', { agentRef: RECORD_AGENT, executor: { id: 'pi' }, reason: 'runtime exited', retryable: true, failure: { class: 'unknown' } }]]);
     expect(records).toEqual([{
       taskId: TASK_ID, terminal: 'failed', status: 'partial', source: 'event-stream',
       gaps: [{ reason: 'unpaired_tool_call', count: 1 }, { reason: 'stream_ended_early', count: 1 }],
@@ -210,7 +210,7 @@ describe('TaskRunner execution record', () => {
     adapter.startError = new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: 'spawn failed' });
     const sent: Envelope[] = [];
     const onExecutionRecord = vi.fn();
-    const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter], deviceId: 'execution-record-device',
       send: envelope => { sent.push(envelope); },
       blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },

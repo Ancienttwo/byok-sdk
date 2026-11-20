@@ -1,6 +1,6 @@
 import { agySessionStoreOf } from '../util/agy-session-retention.js';
 import type { OutboundStatus } from './outbound-settlement.js';
-import { TaskSettlementRegistry, type DaemonTaskSettlement, type DaemonTaskUnknownError } from './task-settlement.js';
+import { TaskSettlementRegistry, type DaemonTaskSettlement } from './task-settlement.js';
 import { TerminalCommitQueue } from './terminal-commit-queue.js';
 import { type RuntimeObservation } from '../runtime-detection.js';
 import { serviceEnvironmentStatus, type ServiceEnvironmentStatus } from '../login-shell-environment.js';
@@ -11,7 +11,6 @@ import type {
 } from '@byok-sdk/protocol';
 import type {
   RuntimeAdapter,
-  McpStdioServerConfig,
   McpToolsetConfig,
   McpToolsetObservation,
   McpToolsetRegistryStatus,
@@ -31,8 +30,7 @@ import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
 import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals.js';
 import { AuthManager } from './auth-manager.js';
 import { resolveMachineId } from '../util/machine-id.js';
-import { DaemonHaltError, type DaemonLifecycle, type DaemonNotOpenError } from './daemon-lifecycle.js';
-import type { EmbeddedPairingError } from './daemon-errors.js';
+import type { DaemonLifecycle } from './daemon-lifecycle.js';
 import {
   type ControlStorageStatus,
 } from './control-protocol.js';
@@ -52,12 +50,6 @@ import { type StorageConfig } from './retention/config.js';
 import { RetentionSweeper, type RetentionTimers } from './retention/sweeper.js';
 import { createRetentionRegistry } from './retention/producers.js';
 
-import { DEFAULT_MAX_INLINE_EVENT_BYTES, MIN_MAX_INLINE_EVENT_BYTES } from './event-spill.js';
-import {
-  DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME,
-  DEFAULT_MAX_CONCURRENT_TASKS,
-  DEFAULT_MAX_TASK_OUTPUT_BYTES,
-} from './task-runner.js';
 import {
   type ProgressBatcherOptions,
 } from './progress-batcher.js';
@@ -210,7 +202,7 @@ export interface DaemonConfig {
   /**
    * How many `homeAccess: 'memory-reader'` Attempts this daemon lets run
    * CONCURRENTLY in one canonical Agent home, across every lane and every
-   * session. Default {@link DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME} (4).
+   * session. Default {@link import('./task-runner.js').DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME} (4).
    *
    * Readers are counted apart from the writer. A home has at most one writer
    * Attempt, fixed: the writer runs in the home itself, so a second writer
@@ -230,7 +222,7 @@ export interface DaemonConfig {
   maxConcurrentReaderAttemptsPerAgentHome?: number;
   /**
    * How many tasks this daemon runs at once, across every Agent home, lane and
-   * runtime. Default {@link DEFAULT_MAX_CONCURRENT_TASKS} (8).
+   * runtime. Default {@link import('./task-runner.js').DEFAULT_MAX_CONCURRENT_TASKS} (8).
    *
    * Active tasks and offers already admitted but still starting both count.
    * An offer over the cap is declined retryably (`task.decline` with
@@ -271,6 +263,8 @@ export interface DaemonConfig {
    * unchanged from M1/M2.
    */
   runtimeAllowlist?: string[];
+  /** SDK install root to read for explicitly installed, managed runtime CLIs. */
+  runtimeInstallRoot?: string;
   /**
    * Isolation options of the runtime adapters `createDaemon` builds (#1094),
    * passed to each adapter's constructor; an unset option keeps the
@@ -384,7 +378,7 @@ export interface DaemonConfig {
    * `resource limit exceeded: maxTaskOutputBytes` — see
    * `MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner/state.ts`) — see
    * `TaskRunner.pump`'s own doc comment for exactly what's counted and what
-   * isn't. Default {@link DEFAULT_MAX_TASK_OUTPUT_BYTES} (64 MiB) when
+   * isn't. Default {@link import('./task-runner.js').DEFAULT_MAX_TASK_OUTPUT_BYTES} (64 MiB) when
    * unset.
    *
    * `0` or a negative number is a config validation error, thrown
@@ -398,7 +392,7 @@ export interface DaemonConfig {
   /** Admission and startup deadline, including pure detect/prepare waits; unresolved process owners remain quarantined. Default 30 seconds. */
   startupTimeoutMs?: number;
   /**
-   * Per-EVENT inline ceiling (default {@link DEFAULT_MAX_INLINE_EVENT_BYTES},
+   * Per-EVENT inline ceiling (default {@link import('./event-spill.js').DEFAULT_MAX_INLINE_EVENT_BYTES},
    * 64 KiB) for the two `AgentEvent` fields a runtime authors freely:
    * `tool_use.input` and `tool_result.output`. An event whose serialization
    * exceeds this leaves `TaskRunner.pump` with that field replaced by a
@@ -418,7 +412,7 @@ export interface DaemonConfig {
    * without checking `spill` renders a truncation as the whole result.
    *
    * Must be a positive safe integer of at least
-   * {@link MIN_MAX_INLINE_EVENT_BYTES} (4096) — below that a legitimate
+   * {@link import('./event-spill.js').MIN_MAX_INLINE_EVENT_BYTES} (4096) — below that a legitimate
    * `spill` descriptor no longer fits inside the cap it exists to enforce.
    * Anything else (0, negative, non-integer, `NaN`,
    * `Number.POSITIVE_INFINITY`) is a config validation error thrown
@@ -727,7 +721,7 @@ export interface Daemon {
    * the owner lease and reconciles it with `server`. An unpaired store
    * against a server with no devices pairs; a paired store whose device the
    * server lists is returned unchanged. Every other state throws
-   * {@link EmbeddedPairingError} and writes nothing. Never starts the daemon.
+   * {@link import('./daemon-errors.js').EmbeddedPairingError} and writes nothing. Never starts the daemon.
    */
   pairEmbedded(server: EmbeddedPairingServer): Promise<DeviceEnrollment>;
   /**
@@ -735,14 +729,14 @@ export interface Daemon {
    * recovery, the control socket and the task runner — with the reconnect
    * loop running. It does not wait for the server: `status().lifecycle` and
    * `lifecycle` events report the connection, and a halt the server causes.
-   * Throws {@link DaemonHaltError} for a halt found locally; any other throw
+   * Throws {@link import('./daemon-lifecycle.js').DaemonHaltError} for a halt found locally; any other throw
    * is a crash.
    */
   start(): Promise<void>;
   /**
    * Valid after `start()` resolved. Resolves once `lifecycle` is
-   * `running/open`; rejects with {@link DaemonHaltError} on a halt,
-   * {@link DaemonNotOpenError} on `crashed` or `stopped`, and with
+   * `running/open`; rejects with {@link import('./daemon-lifecycle.js').DaemonHaltError} on a halt,
+   * {@link import('./daemon-lifecycle.js').DaemonNotOpenError} on `crashed` or `stopped`, and with
    * `signal.reason` on abort (`AbortSignal.timeout(ms)` bounds the wait).
    */
   whenOpen(options: { readonly signal: AbortSignal }): Promise<void>;
@@ -766,7 +760,7 @@ export interface Daemon {
    * relies on the server contract that mailbox replay suppresses a cancelled
    * task's offer (spec "Hosted task cancellation authority"). A custom Host
    * whose server does not honor that contract is outside this guarantee.
-   * Rejects with {@link DaemonTaskUnknownError} for an unknown task, before
+   * Rejects with {@link import('./task-settlement.js').DaemonTaskUnknownError} for an unknown task, before
    * `start()` the way `approve()` does, and with `signal.reason` on abort;
    * the task is untouched. Revocation and replay expiry carry no per-task
    * cancellation authority. `stop()` and halt reject no pending wait, so
@@ -1076,7 +1070,7 @@ function buildDaemon(
     daemonOwnerLease: undefined,
     ownedProcessesReconciledUnder: undefined,
     presencePublisher: undefined,
-    detectedRuntimeFacts: [],
+    detectedHarnessFacts: [],
     detectedRuntimeUnavailable: [],
     runtimeObservations: [],
     resolvedEnvironment: serviceEnvironmentStatus(),

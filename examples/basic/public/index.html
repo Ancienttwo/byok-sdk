@@ -124,16 +124,22 @@
   // This tag just marks "we asked the server to revoke this one."
   const revokedDevices = new Set();
 
-  function runtimeChips(runtimes) {
-    if (!runtimes || runtimes.length === 0) return '<span class="hint">no runtimes reported</span>';
-    return runtimes
-      .map((r) => {
-        const version = r.version ? ` v${r.version}` : '';
-        const auth = r.authPresent === undefined ? '' : r.authPresent ? ' ✓auth' : ' ✗auth';
-        const cls = r.authPresent === false ? 'runtime-chip no-auth' : 'runtime-chip';
-        return `<span class="${cls}">${r.id}${version}${auth}</span>`;
-      })
-      .join(' ');
+  function runtimeChips(harnesses = []) {
+    const chips = document.createElement('span');
+    if (harnesses.length === 0) {
+      chips.className = 'hint';
+      chips.textContent = 'no runtimes reported';
+      return chips;
+    }
+    for (const runtime of harnesses) {
+      const chip = document.createElement('span');
+      const version = runtime.version ? ` v${runtime.version}` : '';
+      const auth = runtime.authPresent === undefined ? '' : runtime.authPresent ? ' ✓auth' : ' ✗auth';
+      chip.className = runtime.authPresent === false ? 'runtime-chip no-auth' : 'runtime-chip';
+      chip.textContent = `${runtime.id}${version}${auth}`;
+      chips.append(chip, ' ');
+    }
+    return chips;
   }
 
   // The runtime <select> is the union of the runtime ids that connected
@@ -143,7 +149,8 @@
     const byId = new Map();
     for (const m of machines) {
       if (!m.connected) continue;
-      for (const r of m.runtimes ?? []) {
+      for (const r of m.harnesses ?? []) {
+        if (!r.capabilities.selectionModes.includes('device-default')) continue;
         const entry = byId.get(r.id) ?? { id: r.id, authPresent: false };
         if (r.authPresent !== false) entry.authPresent = true;
         byId.set(r.id, entry);
@@ -195,20 +202,32 @@
       deviceSelect.appendChild(option);
     }
     const list = $('machine-list');
-    list.innerHTML = '';
+    list.replaceChildren();
     if (machines.length === 0) {
-      list.innerHTML = '<li class="empty">none yet</li>';
+      const empty = document.createElement('li');
+      empty.className = 'empty';
+      empty.textContent = 'none yet';
+      list.appendChild(empty);
       return;
     }
-    for (const m of machines) {
-      const li = document.createElement('li');
-      const status = m.connected ? 'connected' : 'disconnected';
-      const revokedTag = revokedDevices.has(m.deviceId) ? ' <span class="revoked-tag">[revoked — re-pair required]</span>' : '';
-      li.innerHTML =
-        `<span>${m.deviceName} (${m.deviceId}) — ${status}${revokedTag}</span>` +
-        `<span>${runtimeChips(m.runtimes)}</span>` +
-        `<button type="button" class="revoke-btn" data-device-id="${m.deviceId}">Revoke device</button>`;
-      list.appendChild(li);
+    for (const machine of machines) {
+      const row = document.createElement('li');
+      const label = document.createElement('span');
+      const status = machine.connected ? 'connected' : 'disconnected';
+      label.textContent = `${machine.deviceName} (${machine.deviceId}) — ${status}`;
+      if (revokedDevices.has(machine.deviceId)) {
+        const revoked = document.createElement('span');
+        revoked.className = 'revoked-tag';
+        revoked.textContent = '[revoked — re-pair required]';
+        label.append(' ', revoked);
+      }
+      const revoke = document.createElement('button');
+      revoke.type = 'button';
+      revoke.className = 'revoke-btn';
+      revoke.dataset.deviceId = machine.deviceId;
+      revoke.textContent = 'Revoke device';
+      row.append(label, runtimeChips(machine.harnesses), revoke);
+      list.appendChild(row);
     }
   }
 
@@ -283,7 +302,9 @@
     const source = new EventSource(`/api/tasks/${taskId}/events`);
     currentSource = source;
     source.onmessage = (ev) => {
-      const event = JSON.parse(ev.data);
+      let event;
+      try { event = JSON.parse(ev.data); }
+      catch { logLine('[stream] invalid event'); return; }
       logLine(describeServerEvent(event));
       if (event.kind === 'artifact') void renderArtifact(event.artifact);
       if (event.kind === 'await_approval') showApprovalPanel(event.summary);

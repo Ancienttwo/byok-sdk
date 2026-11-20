@@ -84,13 +84,15 @@ export class ClaudeStreamSession {
       pid: owned.pid, spawned: owned.spawned, exited: owned.exited,
       kill: () => owned.kill(), dispose: () => owned.dispose(),
       get exitedOnItsOwn() { return owned.exitedOnItsOwn; },
-      observeDescendants: () => owned.observeDescendants(), exitError: () => owned.exitError(),
+      observeDescendants: () => owned.observeDescendants(), exitError: () => this.#exitError(),
       onLine: handler => owned.onLine(handler), onExit: handler => owned.onExit(handler),
       writeAcknowledged: text => owned.writeAcknowledged(text),
       write: (text: string): void => {
         // OAR's drain writes a held follow-up as a user line named by its input id; written, it can no longer be withdrawn (#1940).
         if (this.#held.size > 0) {
-          const line = JSON.parse(text) as { type?: unknown; uuid?: unknown };
+          let line: { type?: unknown; uuid?: unknown };
+          try { line = JSON.parse(text); }
+          catch { throw new Error('Claude stream writer emitted malformed JSON'); }
           if (line.type === 'user' && typeof line.uuid === 'string') this.#held.delete(line.uuid);
         }
         // Keep the owned transport's synchronous writability refusal visible to OAR.
@@ -176,7 +178,12 @@ export class ClaudeStreamSession {
   /** The process ended on its own, before any kill, disposal or transport failure. */
   get processExited(): boolean { return this.#fatal === undefined && this.child.exitedOnItsOwn; }
 
-  get terminalError(): Error { return this.#fatal ?? this.child.exitError(); }
+  get terminalError(): Error { return this.#fatal ?? this.#exitError(); }
+
+  #exitError(): Error {
+    const error = this.child.exitError();
+    return this.credentials.redactValue(error);
+  }
 
   /** A start step Claude's own exit ended is `runtime_exited`. */
   startupExit() { return this.processExited ? { class: 'runtime_exited' as const } : undefined; }

@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path';
 import { acquirePiSessionDiscovery, acquirePiSessionRebinding, acquirePiSessionWriter, type PiSessionRetentionLease } from '../util/pi-session-retention.js';
 import { resolvePathWithoutCreate, type PathMutationGate } from '../util/path-mutation-gate.js';
 import { createPiSubagentAbortBoundary } from '../adapters/pi/subagent-interruption.js';
+import { PI_MODEL_UNAVAILABLE_REASON } from '../adapters/pi/events.js';
 import {
   createAgentSession, createAgentSessionRuntime, createAgentSessionServices, createCodingTools,
   getAgentDir, ModelRuntime, resolveCliModel, runRpcMode, SessionManager, SettingsManager,
@@ -77,7 +78,7 @@ export interface PiToolLoadoutSession {
 export async function runPiSessionRuntime(options: {
   cwd: string; session?: string; sessionDir?: string;
   credentialSource: 'keys-profile' | 'pi-auth-store';
-  provider?: string; model?: string;
+  provider?: string; model?: string; exactModel?: boolean;
   thinking?: CreateAgentSessionOptions['thinkingLevel'];
   tools?: string[]; excludeTools?: string[]; noTools?: 'all' | 'builtin';
   customTools?: CreateAgentSessionOptions['customTools'];
@@ -233,16 +234,25 @@ export async function runPiSessionRuntime(options: {
         options.reject('launcher provider key could not be registered in memory');
       }
     }
-    const resolved = options.model === undefined ? undefined : resolveCliModel({
+    const profileModel = options.credentialSource === 'keys-profile';
+    let exact: ReturnType<ModelRuntime['getModel']>;
+    if (profileModel && options.provider !== undefined && options.model !== undefined) {
+      exact = services.modelRuntime.getModel(options.provider, options.model);
+    } else if (options.exactModel === true) {
+      exact = (await services.modelRuntime.getAvailable(options.provider, { signal: AbortSignal.timeout(12_000) }))
+        .find(model => model.provider === options.provider && model.id === options.model);
+    }
+    if ((profileModel || options.exactModel === true) && exact === undefined) options.reject(PI_MODEL_UNAVAILABLE_REASON);
+    const resolved = options.model === undefined || profileModel || options.exactModel === true ? undefined : resolveCliModel({
       cliProvider: options.provider, cliModel: options.model, cliThinking: options.thinking, modelRuntime: services.modelRuntime,
     });
     if (resolved?.error) options.reject(resolved.error);
-    if (options.model !== undefined && !resolved?.model) options.reject('requested model could not be resolved');
+    if (options.model !== undefined && exact === undefined && !resolved?.model) options.reject('requested model could not be resolved');
     if (resolved?.warning) process.stderr.write(`${options.label}: ${resolved.warning}\n`);
     const created = await createAgentSession({
       cwd: options.cwd, agentDir, sessionManager, sessionStartEvent,
       modelRuntime: services.modelRuntime, settingsManager: services.settingsManager, resourceLoader: services.resourceLoader,
-      model: resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
+      model: exact ?? resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
       tools: options.tools, excludeTools: options.excludeTools, noTools: options.noTools, customTools: options.customTools,
     });
     subagentAbort.bind(created.session);
@@ -279,6 +289,9 @@ export async function runPiSessionRuntime(options: {
       await bindExtensions(...args);
       if (ready) return;
       try {
+        if (exact !== undefined && (created.session.model?.provider !== exact.provider || created.session.model?.id !== exact.id)) {
+          options.reject('Pi session did not retain the requested model');
+        }
         options.assertToolLoadout?.(created.session);
         options.onSessionReady?.(created.session);
         ready = true;

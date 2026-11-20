@@ -18,7 +18,8 @@ export type {
   RuntimeAccountUsage, RuntimeAccountUsageUnsupportedReason, RuntimeAccountUsageWindow,
   RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeModelEntry, RuntimeReadOptions, RuntimeUnsupportedVersion,
 } from '../runtime/runtime-reader-types.js';
-export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
+export { isWireRuntimeId, observeRuntimeDetection, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
+export { projectRuntimeObservationWithUpgrade as projectRuntimeObservation } from '../runtime/runtime-releases.js';
 export type { RuntimeObservation } from '../runtime-detection.js';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure.js';
 export type {

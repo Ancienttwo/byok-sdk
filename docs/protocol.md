@@ -5,14 +5,17 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-Status: wire version `v:7`, **FROZEN**. The pi, claude, and codex runtime
-adapters have all exercised the wire (M2); every M1/M2 protocol gap identified
-along the way has been closed in place. From this point forward, this
-document and the schemas in `packages/protocol/src/` describe a closed
-contract — see "Freeze rule" immediately below for exactly what "frozen"
-does and doesn't allow.
+Only wire major `8` is supported by the current source tree. Wire v7 is the
+published 0.44.x contract. The [Freeze rule](#freeze-rule) governs changes
+within v8.
 
-Only wire major `7` is currently supported.
+**Wire major 8.** Every explicit offer names a harness ID and supplies exactly
+one selection. `auto` lets the device choose an advertised harness that accepts
+its defaults. Hello and presence share a bounded `harnesses` inventory. A first
+claim requires the original offer receipt and an eligible advertised executor.
+The claim records exactly one executor ID and terminals echo it. Wire v7 and
+v8 refuse each other. Hosts drain work and start v8 on fresh stores and ledgers.
+See the [Host upgrade checklist](releases/host-upgrade-next-minor.md#wire-v8-and-the-provider-store-cutover).
 
 **Wire major 7.** v7 changes how an offer names what to run, what a claim
 reports, and how a peer of another major is refused:
@@ -163,7 +166,7 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 ## Freeze rule
 
-`PROTOCOL_VERSION` is `7`. Every v7 change takes exactly one of three paths.
+`PROTOCOL_VERSION` is `8`. Every v8 change takes exactly one of three paths.
 Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
 not by author judgment. 0.44.0 is the first published v7 release; no published v7
 decoder is pinned as an oracle yet: until one is, the suite proves v7
@@ -288,21 +291,13 @@ v7 release is pinned as an oracle. From then on, the current schema must
 accept every released shape, and a new gated row must carry a flag unknown to
 that release.
 
-The v7 table is the v6 table with one change: the `dispatchSelection` row is
-three value rows, one for each model lane of `target` (`subscription`, `byok`,
-`byok-profile`), each gated on `dispatch-selection`. The `auto`, `runtime`
-and `harness` lanes need no flag. The device flags `steer` and
-`provider-profile-binding` are gone with no row: no gate read `steer`, and
-`provider-profile-binding` was checked only by the sender, so a device that
-cannot run a `byok-profile` target declines it. A `WireAddition` row is now
-only `{ surface, field?, value?, capability }`, always a device flag on a
-server-to-daemon surface; the `kind`, `rule` and `advertisedBy` members are
-gone with the server capability channel.
+Wire v8 checks target selection against the device’s `harnesses` inventory.
+The `WireAddition` table covers server-to-daemon capability flags and uses
+`{ surface, field?, value?, capability }` rows.
 
 | `task.offer` carries | Device flag |
 | --- | --- |
 | (every offer) | `agent-home-contract` |
-| `target.lane: 'subscription'`, `'byok'` or `'byok-profile'` | `dispatch-selection` |
 | `requiredToolsets` | `toolset-selection` |
 | `homeAccess` | `agent-home-readers` |
 | `agentMemory` | `agent-memory-selection` |
@@ -759,7 +754,7 @@ append/send; receipt and ack are delivery facts, not session authority.
 
 | Type | Dir | `task_id` | `seq` | Payload | Sent when |
 |---|---|---|---|---|---|
-| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]` (at most 64 device flags), `deviceId`, `productId`, `clientVersion?`, `runtimes?`, `harnesses?`, `runtimeUnavailable?` (additive — §11.4.1), `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
+| `conn.hello` | D→S | optional | optional | `protocolVersions[]`, `capabilities[]` (at most 64 device flags), `deviceId`, `productId`, `clientVersion?`, `harnesses`, `runtimeUnavailable?` (additive — §11.4.1), `configuredToolsets?`, `cursor?` | First message on an authenticated long-poll session (including after reconnect) |
 | `task.offer` | S→D | **required** | **required** | `agentRef`, `session` (§1.3), `instruction` (absent on a prepared offer; may move into `sealed`, §2.5), `preparation?` (§2.0), `agentMemory?` (§2.2), `agentMemoryCommit?` (§2.2), `nativeSessions?` (§2.2), `homeAccess?` (§2.2), `requiredToolsets?`, `target` (required; see below), `terminalProjection?`, `limits?` (`maxDurationMs?` only), `egressPolicy?` (§2.1), `messageEgress?`; sealed branch also `sealing`, `sealed?`, `routineRef?` (§2.5) | An Agent dispatch, execution or prepared Execution targets a device that advertises every flag its fields need (Freeze rule) |
 | `agent.egress.ack` | S→D | optional | **required** | exact `agentRef`, `sessionRef`, `policyRevision`, `eventId`, `cursor`, `receiptId` | Cloud durably recorded one reliable Agent event |
 | `agent.content.read` | S→D | optional | **required** | `requestId`, surface, actor, exact Agent/session/runtime/cwd, policy revision, relative target, MIME, decode mode, bounded policy | An independently authorized explicit content read is requested |
@@ -811,43 +806,53 @@ lists the rows and the daemon's own check of them.
 
 #### `task.offer` target
 
-`target` (required, wire v7) is what the offer asks the device to run. It is
-one strict discriminated union on `lane`, so no two selectors can disagree:
+Every offer requires one strict target.
 
-| `lane` | Members | Meaning |
+```ts
+type ExecutionTarget =
+  | { lane: 'auto' }
+  | { lane: 'harness'; harnessId: string; selection: HarnessSelection; effort?: string };
+```
+
+An explicit target must match an entry in the destination device's last
+accepted `conn.hello.harnesses`, including its selection mode and support for
+`effort` when requested. The cloud checks this before reserving an attempt.
+The daemon checks its acknowledged inventory and current availability before
+claiming. For `auto`, the daemon applies its device preference to advertised
+executors that support `device-default`.
+
+| Selection mode | Additional fields | Authority |
 | --- | --- | --- |
-| `auto` | none | The device picks by its own preference: a built-in runtime or a custom harness it advertised |
-| `runtime` | `runtimeId` | A built-in runtime (`pi`, `claude`, `codex`) with the device's own model |
-| `subscription` | `runtimeId: 'claude' \| 'codex'`, `modelId` | A vendor CLI with its subscription credentials and this model |
-| `byok` | `runtimeId: 'pi'`, `providerId`, `modelId` | A BYOK provider and model, run only through Pi |
-| `byok-profile` | `runtimeId: 'pi'`, `providerProfile: { profileRef, profileRevision, profileHash, modelId, requiredCapabilities }` | An exact local provider profile, run only through Pi |
-| `harness` | `harnessId` | A custom harness the device advertised in `conn.hello.harnesses` |
+| `device-default` | none | The executor's own device configuration |
+| `adapter-model` | `modelId` unless a default is advertised | The executor's configuration with a task-selected or configured model |
+| `subscription` | `modelId` | The vendor CLI's own login with an explicit model |
+| `byok` | `providerId`, `modelId` unless a default is advertised | A Host credential for the executor's advertised pi-ai catalog provider |
+| `byok-profile` | `providerProfile`, `modelId` unless a default is advertised | An exact device-local profile binding with a task-selected or saved model |
 
-Absence carries no meaning: an offer without `target` fails decoding. The
-subscription lane has no `providerId`; v6 carried it as an always-null
-member. Every model id and provider id is non-empty, at most 160 characters,
-and rejects NUL, CR and LF.
+The selection variants reject extra fields. Each harness advertises
+`capabilities.selectionModes`, `capabilities.effort`, and, if it accepts
+`byok`, `capabilities.byokProviderId`. Optional `capabilities.defaultModelModes`
+lists the supported `adapter-model`, `byok`, and `byok-profile` modes with a configured model
+default. Cloud returns `invalid_request` before enqueue when the requested
+mode requires a model and the offer omits it. The inventory holds at most 64
+unique IDs. The daemon sends another hello when its scan changes the inventory.
 
-The three model lanes (`subscription`, `byok`, `byok-profile`) are gated on
-the device flag `dispatch-selection` (Freeze rule): the server and hosted
-cloud refuse such an offer before task creation unless the target device
-advertises the flag, instead of sending an offer that could reach a different
-provider. The daemon selects the adapter from `runtimeId` or `harnessId`, and
-adapters pass the exact model (and, for Pi, provider) to the runtime. No
-layer infers a missing provider or model or falls back to another target.
+Ordinary Pi accepts `device-default` and `adapter-model` using its own auth
+store. `adapter-model` requires the exact `provider/id` from Pi's model catalog.
+With a credential launcher, Pi also accepts `byok-profile`, the sole selection
+mode on the durable lane. The binding carries the opaque local `profileRef`,
+canonical decimal `profileRevision`, lowercase SHA-256 `profileHash`, and
+`requiredCapabilities`. The hash covers the normalized non-secret profile,
+including its default model. `selection.modelId` overrides that default for
+this task while keeping the profile's endpoint, API, and settings. For an
+override, the pinned Pi catalog must verify any required image input capability.
+A missing or insufficient catalog entry with that requirement is declined as
+non-retryable `model_unavailable`.
+The credential launcher checks the exact binding before resolving the key for
+the launch. A Host may derive the binding from the persisted profile using
+`exactProviderProfileBinding` from `@byok-sdk/keys`.
 
-A `byok-profile` ref is an opaque device-local identity, its revision is
-canonical decimal, and its hash is lowercase SHA-256 over the normalized
-non-secret runtime profile. Base URL, auth mode and credential bytes never
-enter the offer. The daemon validates ref, revision, hash, model and required
-capabilities against the read-only local authority before claim, and the
-credential-custody launcher checks the same binding again before credential
-access and Pi spawn. Missing or stale state is a fail-closed decline, never a
-fallback to `providerId` or provider kind. No flag gates the lane beyond
-`dispatch-selection`: a device that cannot run it declines.
-
-`target` is a request. What the device actually ran is the claim's
-`executor` (§3.1).
+The claim's `executor` records the actual executor ID (§3.1).
 
 #### `task.steer_refused`
 
@@ -1235,7 +1240,7 @@ its memory admission.
 integers and `fromMs <= toMs`. The offer selection rule
 `native_sessions_selection_invalid` (§3.2,
 **Offer selection rules**) admits the field only with an explicit Pi
-`target` (lane `runtime`, `byok` or `byok-profile` with `runtimeId: 'pi'`), a
+`target` (lane `harness`, `harnessId: 'pi'`, selection `byok-profile`), a
 fresh session, `agentMemory: 'none'`, and `terminalProjection` absent or
 `{ mode: 'none' }`. It rejects any `agentMemoryCommit`, `homeAccess`, `preparation`,
 `requiredToolsets` or `messageEgress`. An `auto` or `harness` target does not
@@ -2522,29 +2527,16 @@ alone.
 `task.started` from the device that already owns a `Running` task is a
 no-op, not an illegal-transition error.
 
-**`task.claim.executor` (wire v7, required): what the device actually runs
-the task with**, distinct from the offer's `target` (the merely requested
-one). It is one strict union, a built-in runtime or a custom harness, and
-never a model:
+`task.claim.executor` is required and has the strict shape `{ id: string }`.
+The first claim must match the original offer receipt and the device's
+advertised inventory. For an explicit target the IDs must match. For `auto`
+the claimed executor must support `device-default`. An absent receipt or a
+target mismatch returns `claim_offer_mismatch`. An unavailable executor or
+unsupported selection returns `claim_harness_unavailable`.
 
-```ts
-type ClaimedExecutor =
-  | { kind: 'runtime'; runtimeId: 'pi' | 'claude' | 'codex' }
-  | { kind: 'harness'; harnessId: string };
-```
-
-For an `auto` target the device picks by its own preference
-(`DaemonConfig.runtimePreference`), and `executor` is the only way the server
-learns what ran. The winning claim records it once as the attempt's
-`claimedExecutor` (cloud `TaskAttempt`, reference server `TaskSnapshot`); a
-redelivered or losing claim leaves it as it is. v7 replaced the claim's
-`runtime` and `harnessId` with this field and removed `agentId`;
-`agentRef` names the Agent.
-
-The claimed executor must be one the offer's `target` allows: any under
-`auto`, otherwise exactly the named runtime (`runtime`, `subscription`,
-`byok`, `byok-profile`) or harness (`harness`). A claim naming another is
-rejected (`claim_offer_mismatch`).
+The winning claim records the ID once as `claimedExecutor`. Replays must
+match the recorded owner and executor. A later hello can change future offer
+admission without changing the identity of an existing claim.
 
 The terminals echo it. `task.complete` requires `executor`: a task completes
 only from `Running`, so every completion follows a claim. `task.fail` and
@@ -2652,7 +2644,7 @@ rule is appended at the end only.
 | --- | --- | --- | --- |
 | 1 | `agent_memory_selection_invalid` | `homeAccess: 'memory-reader'` with `agentMemory` `read-write` or `read-write-if-admitted` | `['agentMemory']` |
 | 2 | `agent_memory_selection_invalid` | `homeAccess: 'memory-reader'` with `agentMemoryCommit` | `['agentMemoryCommit']` |
-| 3 | `native_sessions_selection_invalid` | `nativeSessions` without an explicit Pi `target` (lane `runtime`, `byok` or `byok-profile` with `runtimeId: 'pi'`; `auto` and `harness` do not qualify), then with a session that is not fresh, `agentMemory` other than `none` (or absent), a `terminalProjection` other than `none`, or any of `agentMemoryCommit`, `homeAccess`, `preparation`, `requiredToolsets`, `messageEgress`, checked in that order | `['target']`, else the first such field |
+| 3 | `native_sessions_selection_invalid` | `nativeSessions` without an explicit Pi target (`lane: 'harness'`, `harnessId: 'pi'`, `selection.mode: 'byok-profile'`), then with a session that is not fresh, `agentMemory` other than `none` (or absent), a `terminalProjection` other than `none`, or any of `agentMemoryCommit`, `homeAccess`, `preparation`, `requiredToolsets`, `messageEgress`, checked in that order | `['target']`, else the first such field |
 
 v7 deleted the rules `runtime_selection_mismatch` and
 `harness_selection_conflict`: with one `target` union, the disagreements they
@@ -2731,6 +2723,8 @@ other known code.
 | `agent_memory_selection_invalid` | The offer's memory selection needs a writer, and it is a memory-reader Attempt |
 | `native_sessions_selection_invalid` | A native-sessions offer is not a fresh memory-only Pi offer |
 | **Offer admission** | |
+| `invalid_request` | The model-bearing selection requires an explicit model ID |
+| `model_unavailable` | The executor cannot admit the requested model |
 | `runtime_unavailable` | No runtime that can run the target is available (with `runtimeUnavailable`, §3.2) |
 | `offer_capability_missing` | The device does not advertise a flag the offer needs (Freeze rule) |
 | `preparation_store_unavailable` | The device's input-preparation store could not be opened |
@@ -3691,21 +3685,16 @@ publishes the same lossy first-hop presence snapshot:
 PUT /byok/presence
   Request (PresencePublishRequestSchema):
     { level, detail?, configuredToolsets?, clientVersion?,
-      protocolVersions?, runtimes?, runtimeUnavailable? }
+      protocolVersions?, harnesses?, runtimeUnavailable? }
 ```
 
 `clientVersion` is the U4a `localAgentRelease.version` value and is never
-derived from a package, runtime executable, or host. `runtimes[]` contains
-only the version/auth facts returned by the daemon's real local probe;
-unavailable fields are omitted. `runtimes[].versionPolicy` and the top-level
-`runtimeUnavailable[]` are the same discovery projection `conn.hello` carries
-(§11.4.1), and absence means unknown. `runtimeUnavailable[].id` accepts
-`RuntimeId | HarnessId`, the same domain as `conn.hello.runtimeUnavailable[]`
-(v6, #1573). A custom harness's `versionPolicy` is available only on
-`conn.hello.harnesses[]`. The
-`conn.hello` and this first HTTP presence publication use one frozen
-per-start snapshot, so identity has one authority. Presence remains a lossy
-TTL hint and is not an execution or admission signal.
+derived from a package, runtime executable, or host. `harnesses` carries the
+same snapshot of available executors as `conn.hello.harnesses`, including
+selection modes and any observed version and authentication facts. The
+optional `runtimeUnavailable` list carries typed failures for the same ID
+namespace (§11.4.1). Presence expires by TTL. Offer and claim admission use
+the inventory accepted in hello.
 
 ### 8.2 Send — `POST /byok/messages`
 
@@ -4347,39 +4336,24 @@ Two optional discovery projections accompany the capability matrix (#1103
 B2b):
 
 ```
-RuntimeInfo.versionPolicy?: { state: 'allow' | 'warn' | 'block', qualifiedVersion? }
-HarnessInfo.versionPolicy?: { ...the same... }
-ConnHelloPayload.runtimeUnavailable?: Array<{ id, cause, retryable }>   // max 16, unique id
-PresencePublishRequest.runtimes[].versionPolicy?: { ...the same... }
+HarnessInfo.versionPolicy?: { state: 'allow' | 'warn' | 'block', qualifiedVersion? }
+ConnHelloPayload.runtimeUnavailable?: Array<{ id, cause, retryable }>
+PresencePublishRequest.harnesses?: HarnessInfo[]
 PresencePublishRequest.runtimeUnavailable?: Array<{ id, cause, retryable }>
 ```
 
-`state` is the effective Host-configured policy's verdict for the installed
-token. `qualifiedVersion` is that policy's qualified token; `matched` and the
-policy's `allow`/`warn`/`block` spec lists stay local. A runtime whose
-installed version is blocked remains in `runtimes[]` with `state: 'block'`
-(it was detected); it is not a `runtimeUnavailable` entry.
+`state` is the effective Host version policy verdict for the installed
+version. `qualifiedVersion` comes from that policy. `matched` and the policy's
+spec lists stay local. A blocked runtime appears in `runtimeUnavailable`
+with `cause: 'version_blocked'` and `retryable: false`.
 
-`runtimeUnavailable[]` carries only non-available runtimes. `cause` comes
-from the append-only `RUNTIME_UNAVAILABLE_CAUSES` vocabulary (§3.2) and
-`retryable` is the same per-cause default a `task.decline` reports. A
-receiver that does not know a cause reads it as `unknown` with the raw token
-(`readRuntimeUnavailableCause`). The array is bounded to 16 and unique by
-id; an id is either a `RuntimeId` or a `HarnessId`, on presence and on
-`conn.hello` alike (v6, #1573; v5 presence accepted `RuntimeId` only).
-
-The `runtime-unavailable-cause` capability flag is retired in v6 (#1573): a
-device sends these fields unconditionally, exactly as it sends the capability
-matrix.
-
-**Old daemon / old Host boundary.** Every field above is optional. Absence
-means **unknown**, never `allow` and never
-`available`: a Host must not synthesize a verdict, infer a block from a
-missing `runtimes[]` entry, or treat a missing `runtimeUnavailable[]` as
-"everything works". A newer Host reading an older daemon's hello or presence
-sees no `versionPolicy` and no `runtimeUnavailable`, and keeps its previous
-dispatch behavior; a version block is still enforced locally by the daemon,
-so an old Host cannot bypass it.
+`runtimeUnavailable` carries failure types from `RUNTIME_UNAVAILABLE_CAUSES`
+(§3.2) and the corresponding retryability reported by `task.decline`.
+`readRuntimeUnavailableCause` gives an unrecognized cause the `unknown` kind
+and preserves its raw token. Both arrays use `HarnessId` and allow at most
+64 entries with unique IDs. Optional fields are unknown when omitted. The
+separate compatibility floors and upgrade guidance are available in local
+status and doctor.
 
 **Restart comparison stays local.** On start the daemon compares each present
 runtime's token with `<storeDir>/runtime-versions.json` and, on a change,
@@ -4647,30 +4621,22 @@ automatically repeats runtime side effects. The
 existing tenant/task_id remains an immutable execution identity; dispatch with
 an already delivered identity is refused even after mailbox retention.
 
-## Additive custom-harness contract (#167)
+## Harness inventory and claimed executor
 
-`PROTOCOL_VERSION` remains 1. The new optional fields and `custom-harness`
-capability preserve every existing builtin runtime meaning and golden envelope.
-Retired in v6 (#1573): the `custom-harness` flag is gone, and `harnesses` on
-`conn.hello` and a harness offer need no flag. In v7 a harness is one lane of
-the offer `target` and one kind of the claim `executor`.
-
-- `conn.hello.harnesses`: at most 64 unique custom descriptors with `id`, optional
-  `version` (1–128 characters), and `capabilities`. IDs are lower-case ASCII
-  segments separated by `.`, `_` or `-`, begin with a letter, are at most 128
-  characters, and exclude `pi`, `claude`, `codex`. This is an
-  authenticated, replace-all durable device snapshot, without secret/env/path data.
-- An offer names a harness with `target: { lane: 'harness', harnessId }`, so it
-  cannot also name a built-in runtime or a model. The host checks the target device's
-  advertised harness inventory before task reservation. A harness missing from
-  the inventory is rejected; unknown fields must not silently change execution identity.
-- `task.claim.executor: { kind: 'harness', harnessId }` identifies the actual
-  custom adapter. It must be advertised and match any explicit sealed selection.
-  The ownership CAS records it once as `claimedExecutor`; retries cannot rewrite
-  execution identity. Claim-carried capabilities remain the steer authority.
-- `task.complete`, `task.fail`, `task.cancelled` echo that exact `executor`
-  after a claim (§3.1). A missing, different, or unexpected executor is rejected. Builtin usage
-  metrics keep their existing schema; the SDK does not invent custom usage.
+- `conn.hello.harnesses` carries up to 64 distinct built-in and custom harness
+  descriptors. Each has an ID, optional version, and capabilities including
+  supported selection modes. The authenticated hello replaces the previous
+  device snapshot. It carries no credentials, environment values or paths.
+- `target: { lane: 'harness', harnessId, selection, effort? }` identifies the
+  requested harness and configuration. The Host checks the device’s advertised
+  inventory before reserving an attempt. `auto` lets the device choose among
+  advertised harnesses that support `device-default`.
+- `task.claim.executor: { id }` identifies the selected harness. On the first
+  claim the Host checks the original offer and the device’s inventory. The
+  ownership CAS records `claimedExecutor` once. Replays use that saved
+  identity. Claim capabilities govern steering for the task.
+- After a claim, `task.complete`, `task.fail` and `task.cancelled` echo that
+  exact executor (§3.1). The Host rejects a missing or different identity.
 
 Independent inbound handlers retain per-task control order, with one
 exception: `task.cancel` does not wait for an earlier control of its task to
@@ -4700,9 +4666,9 @@ be one the offer's `target` allows and is not recorded (§3.1). If cloud
 ownership exists, all terminals, including recovery, must carry `executor`
 equal to `claimedExecutor`. Ordinary failures gain no exception. The terminal
 read model copies `recovery` verbatim; `TaskAttempt` remains cloud claim authority.
-Deploy the supporting server before using these recovery reports. Migration
-0021 remains required for custom claims; the recovery object lives in existing
-immutable terminal receipts and requires no additional database migration.
+Deploy the supporting server before using these recovery reports. Wire v8
+starts on the store schema defined by migration `0041_wire_v8.sql`. Recovery
+objects live in the terminal receipts.
 
 For journal replay, a selected but uncommitted terminal blocks admission
 even when SQLite rolled the task row back to `received`. SDK-generated oversize

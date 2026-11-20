@@ -50,6 +50,8 @@ export interface PiRuntimeConfig {
 export interface RuntimeAdaptersRuntimes {
   pi?: PiRuntimeConfig;
   claude?: {
+    /** Catalog identity and per-spawn provider key resolver for an embedded Host. */
+    byok?: ClaudeAdapterOptions['byok'];
     /** `ClaudeAdapterOptions.agentUserContext`: `excluded` keeps user MCP servers, `CLAUDE.md` files, rules and auto memory out of an Agent task. Default `inherit`. */
     agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
     /** `ClaudeAdapterOptions.agentSessionPersistence`: `disabled` does not save an Agent task's session transcript, so it cannot be resumed. Default `enabled`. */
@@ -82,11 +84,11 @@ export interface RuntimeAdaptersRuntimes {
     /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
-  /** Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only. */
+  /** Required when `runtimeAllowlist` lists `dsh`. DSH runs on macOS and Linux. */
   dsh?: {
     /** `DshAdapterOptions.home`: the absolute `DSH_HOME` the SDK owns. It must persist across executions, because dsh keeps its sessions there, and must not be `~/.dsh`. */
     home: DshAdapterOptions['home'];
-    /** `DshAdapterOptions.model`: provider, model and optional `baseUrl`. */
+    /** `DshAdapterOptions.model`: provider route, optional default model and optional `baseUrl`. */
     model: DshAdapterOptions['model'];
     /** Per-spawn provider API key resolver for an embedded Host. */
     resolveKey: DshAdapterOptions['resolveKey'];
@@ -97,9 +99,9 @@ export interface RuntimeAdaptersRuntimes {
     /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
-  /** Required when runtimeAllowlist lists opencode. Native user configuration is inherited. */
+  /** Optional OpenCode settings. Native user configuration is inherited. */
   opencode?: {
-    models: OpenCodeAdapterOptions['models'];
+    models?: OpenCodeAdapterOptions['models'];
     /** Absolute executable override, resolved before PATH. Never installs or migrates OpenCode. */
     executable?: string;
     versionPolicy?: RuntimeVersionPolicy;
@@ -128,6 +130,8 @@ export interface RuntimeAdaptersRuntimes {
  * so only the daemon builds it.
  */
 export interface RuntimeAdaptersConfig {
+  /** SDK install root for the explicitly managed CLI copies. */
+  runtimeInstallRoot?: string;
   /** Absolute native asset root of every built adapter. */
   nativeAssetRoot?: string;
   /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
@@ -227,6 +231,9 @@ export function createRuntimeAdapters(config: RuntimeAdaptersConfig): RuntimeAda
  */
 export function buildRuntimeAdapters(config: DaemonRuntimeAdaptersConfig, piByokLauncher: PiByokLauncherConfig | undefined): RuntimeAdapter[] {
   const issues = [...piRuntimeConfigIssues(config), ...providerKeyResolverIssues(config.runtimes)];
+  if (config.runtimeInstallRoot !== undefined && !(typeof config.runtimeInstallRoot === 'string' && isAbsolute(config.runtimeInstallRoot))) {
+    issues.push(invalid('runtimeInstallRoot', 'DaemonConfig.runtimeInstallRoot must be an absolute path'));
+  }
   if (issues.length > 0) throw new DaemonConfigInvalidError(issues);
   const ids = config.runtimeAllowlist
     ? SDK_BUILT_RUNTIME_IDS.filter((id) => config.runtimeAllowlist?.includes(id))
@@ -313,14 +320,15 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
       });
     case 'claude':
       return new ClaudeAdapter({
-        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
         ...(claude?.agentUserContext === undefined ? {} : { agentUserContext: claude.agentUserContext }),
         ...(claude?.agentSessionPersistence === undefined ? {} : { agentSessionPersistence: claude.agentSessionPersistence }),
         ...(claude?.versionPolicy === undefined ? {} : { versionPolicy: claude.versionPolicy }),
+        ...(claude?.byok === undefined ? {} : { byok: claude.byok }),
       });
     case 'codex':
       return new CodexAdapter({
-        nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
         ...(config.codexSandbox === undefined ? {} : { sandbox: config.codexSandbox }),
         ...(codex?.agentUserMcpServers === undefined ? {} : { agentUserMcpServers: codex.agentUserMcpServers }),
         ...(codex?.agentUserContext === undefined ? {} : { agentUserContext: codex.agentUserContext }),
@@ -339,10 +347,9 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
     case 'agy':
       return buildAgyAdapter(config, environment);
     case 'opencode': {
-      const options = config.runtimes?.opencode;
-      if (!options) throw new DaemonConfigInvalidError([invalid('runtimes.opencode', 'OpenCode requires a Host model candidate list')]);
+      const options = config.runtimes?.opencode ?? {};
       try {
-        return new OpenCodeAdapter({ models: options.models, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+        return new OpenCodeAdapter({ models: options.models, nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
           ...(options.executable === undefined ? {} : { resolveBin: () => ({ command: options.executable!, source: 'env' as const }) }),
           ...(options.versionPolicy === undefined ? {} : { versionPolicy: options.versionPolicy }),
         });
@@ -365,7 +372,7 @@ function buildDshAdapter(config: DaemonRuntimeAdaptersConfig, environment: Pick<
   }
   try {
     return new DshAdapter({
-      home: dsh.home, model: dsh.model, resolveKey: dsh.resolveKey, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+      home: dsh.home, model: dsh.model, resolveKey: dsh.resolveKey, nativeAssetRoot: config.nativeAssetRoot, runtimeInstallRoot: config.runtimeInstallRoot, ...environment,
       ...(dsh.sandbox === undefined ? {} : { sandbox: dsh.sandbox }),
       ...(dsh.versionPolicy === undefined ? {} : { versionPolicy: dsh.versionPolicy }),
     });
@@ -463,7 +470,9 @@ function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfi
     }
     const opencode = record.opencode;
     if (isObject(opencode)) {
-      expect(isStringArray(opencode.models), 'runtimes.opencode.models', 'an array of strings');
+      if (opencode.models !== undefined && !isStringArray(opencode.models)) {
+        issues.push(invalid('runtimes.opencode.models', 'DaemonConfig.runtimes.opencode.models must be an array of strings'));
+      }
       expect(optional(opencode.executable, isString), 'runtimes.opencode.executable', 'a string');
     }
     const agy = record.agy;

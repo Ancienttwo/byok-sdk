@@ -28,7 +28,6 @@ const BINDING = {
   profileRef: 'host-agent-1',
   profileRevision: '1759000000000',
   profileHash: `sha256:${'a'.repeat(64)}`,
-  modelId: 'glm-5.3-flash',
   requiredCapabilities: [],
 } as const;
 const STATUS = {
@@ -162,7 +161,7 @@ describe('provider.provisioning.available notice', () => {
 
   it('forbids task_id and requires seq', () => {
     const base = {
-      v: 7,
+      v: 8,
       id: '20000000-0000-4000-8000-000000000099',
       ts: '2026-09-28T05:00:00.000Z',
       type: 'provider.provisioning.available',
@@ -185,7 +184,7 @@ describe('provider.provisioning.available notice', () => {
     const payload = { requestId: REQUEST_ID, [field]: value };
     expect(ProviderProvisioningAvailablePayloadSchema.safeParse(payload).success).toBe(false);
     const raw = JSON.stringify({
-      v: 7,
+      v: 8,
       id: '20000000-0000-4000-8000-000000000098',
       ts: '2026-09-28T05:00:00.000Z',
       type: 'provider.provisioning.available',
@@ -222,7 +221,7 @@ describe('provider provisioning completion', () => {
     expect(ProviderProvisioningCompletionSchema.safeParse(applied({ providerStatus: null, binding: null })).success).toBe(false);
   });
 
-  it('requires status and binding to agree on profile and model', () => {
+  it('requires a matching profile ref and reports the saved model in status', () => {
     expect(
       ProviderProvisioningCompletionSchema.safeParse(applied({ binding: { ...BINDING, profileRef: 'host-agent-2' } })).success,
     ).toBe(false);

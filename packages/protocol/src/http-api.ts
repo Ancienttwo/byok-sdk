@@ -4,10 +4,8 @@ import {
   AgentRefSchema,
   ConfiguredToolsetsSchema,
   ProtocolVersionNumberSchema,
-  RuntimeCapabilitiesSchema,
-  RuntimeIdSchema,
+  HarnessInventorySchema,
   RuntimeUnavailableListSchema,
-  RuntimeVersionPolicyProjectionSchema,
   AgentHomeProjectionAgentRefSchema,
 } from './messages.js';
 import {
@@ -231,21 +229,6 @@ export type DeviceNotRegisteredResponse = z.infer<typeof DeviceNotRegisteredResp
 export const PRESENCE_DETAIL_MAX_LENGTH = 512;
 export const PRESENCE_RUNTIME_VERSION_MAX_LENGTH = 128;
 
-/**
- * Presence is a readiness observation. It retains only the facts the cloud
- * persists and bounds every string/array/numeric input at this public request
- * boundary. `capabilities` is the same capability matrix `conn.hello` reports
- * for the runtime (#1103), so a Host can read it before dispatch.
- */
-const PresenceRuntimeFactSchema = z.object({
-  id: RuntimeIdSchema,
-  version: z.string().min(1).max(PRESENCE_RUNTIME_VERSION_MAX_LENGTH).optional(),
-  authPresent: z.boolean().optional(),
-  capabilities: RuntimeCapabilitiesSchema.optional(),
-  /** #1103 D8: discovery projection; absent means unknown. */
-  versionPolicy: RuntimeVersionPolicyProjectionSchema.optional(),
-});
-
 export const PresencePublishRequestSchema = z.object({
   level: z.enum(['online', 'thinking', 'working', 'error', 'offline']),
   detail: z.string().max(PRESENCE_DETAIL_MAX_LENGTH).optional(),
@@ -253,9 +236,9 @@ export const PresencePublishRequestSchema = z.object({
   /** U4a Local Agent release version; never inferred from a host package. */
   clientVersion: z.string().min(1).max(128).optional(),
   protocolVersions: z.array(ProtocolVersionNumberSchema).max(16).optional(),
-  /** Runtime version/auth facts from the same real probe as conn.hello. */
-  runtimes: z.array(PresenceRuntimeFactSchema).max(16).optional(),
-  /** The `conn.hello` list: built-in runtime and custom harness ids (#1103 D8); absent means unknown. */
+  /** Usable executors from the same scan as conn.hello. */
+  harnesses: HarnessInventorySchema.optional(),
+  /** Unavailable executors from the same scan as conn.hello. */
   runtimeUnavailable: RuntimeUnavailableListSchema.optional(),
 });
 

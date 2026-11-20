@@ -355,6 +355,11 @@ readline.createInterface({ input: process.stdin }).on('line', (line) => {
     send({ id, result: { userAgent: 'fake-codex' } });
     return;
   }
+  if (method === 'account/read') {
+    const type = process.env.FAKE_CODEX_ACCOUNT_TYPE ?? 'chatgpt';
+    send({ id, result: { account: type === 'absent' ? null : { type }, requiresOpenaiAuth: true } });
+    return;
+  }
   if (method === 'config/read') {
     send({ id, result: { config: userConfig, origins: {} } });
     return;

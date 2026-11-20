@@ -81,7 +81,7 @@ describe('Daemon.whenTaskSettled', () => {
   });
 
   // A custom harness may be named `scratch`, like the offer-owned scratch (#1944).
-  it.each([['pi', {}], ['scratch', { target: { lane: 'harness', harnessId: 'scratch' } }]] as const)('reports a failed close of a %s runtime as disposal failed', async (id, extra) => {
+  it.each([['pi', {}], ['scratch', { target: { lane: 'harness', harnessId: 'scratch', selection: { mode: 'device-default' } } }]] as const)('reports a failed close of a %s runtime as disposal failed', async (id, extra) => {
     const adapter = new StubRuntimeAdapter(id);
     const { d } = await started(adapter);
     offer('task-close-fails', extra);
@@ -95,7 +95,7 @@ describe('Daemon.whenTaskSettled', () => {
 
   it('settles a pre-claim decline without a runtime', async () => {
     const { d } = await started(new StubRuntimeAdapter());
-    offer('task-decline', { target: { lane: 'harness', harnessId: 'acme-harness' } });
+    offer('task-decline', { target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } } });
     await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-decline');
     await expect(d.whenTaskSettled('task-decline')).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
   });
@@ -143,7 +143,7 @@ describe('Daemon.whenTaskSettled', () => {
     d.subscribe((event) => {
       if (event.kind === 'offered' && event.taskId === 'task-from-offered') settlement = d.whenTaskSettled('task-from-offered');
     });
-    offer('task-from-offered', { target: { lane: 'harness', harnessId: 'acme-harness' } });
+    offer('task-from-offered', { target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } } });
     await vi.waitFor(() => expect(settlement).toBeDefined());
     await expect(settlement).resolves.toEqual({ terminal: 'declined', delivery: 'accepted', disposal: 'none' });
   });
@@ -430,7 +430,7 @@ describe('Daemon.whenTaskSettled', () => {
     await journal.close();
     await d.start();
     // A conforming mailbox never redelivers the cancelled offer; later traffic still flows.
-    offer('task-after-prune', { target: { lane: 'harness', harnessId: 'acme-harness' } });
+    offer('task-after-prune', { target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } } });
     await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-after-prune');
     await expect(d.whenTaskSettled(taskId)).rejects.toBeInstanceOf(DaemonTaskUnknownError);
     expect(adapter.startCalls).toHaveLength(0);
@@ -461,7 +461,7 @@ describe('Daemon.whenTaskSettled', () => {
     const tracked = track(settlement);
     // A conforming mailbox resumes after the cursor and suppresses the cancelled task's offer, so
     // only later traffic arrives. The earlier cancellation is not authority over this offer.
-    offer('task-after-pre-cancel', { target: { lane: 'harness', harnessId: 'acme-harness' } });
+    offer('task-after-pre-cancel', { target: { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } } });
     await server.waitFor((e) => e.type === 'task.decline' && e.task_id === 'task-after-pre-cancel');
     expect(tracked.settled()).toBe(false);
     expect(adapter.startCalls).toHaveLength(0);

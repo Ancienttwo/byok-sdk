@@ -1,6 +1,6 @@
 /**
  * The store wire-epoch fence on the Worker-loadable cloud composition (#1757
- * D-7). Wire v7 starts on a new database: `0040_wire_v7.sql` refuses a
+ * D-7). Wire v8 starts on a new database: `0041_wire_v8.sql` refuses a
  * database that holds rows and then writes `byok_wire_epoch`, and
  * `createPostgresCloudStores` refuses any epoch but `PROTOCOL_VERSION`.
  *
@@ -29,11 +29,11 @@ import { createDataplaneScope, POSTGRES_URL, SKIP_DATAPLANE, SKIP_REASON } from 
 
 const DEPLOY_SQL = fileURLToPath(new URL('../../../../deploy/sql', import.meta.url));
 
-/** A copy of every migration before 0040, for a database that 0040 has yet to see. */
-async function before0040(): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), 'byok-before-0040-'));
+/** Install the released wire v7 schema before exercising the v8 cut. */
+async function wireV7Migrations(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), 'byok-wire-v7-'));
   for (const name of await readdir(DEPLOY_SQL)) {
-    if (name.endsWith('.sql') && name < '0040') await copyFile(join(DEPLOY_SQL, name), join(directory, name));
+    if (name.endsWith('.sql') && name < '0041') await copyFile(join(DEPLOY_SQL, name), join(directory, name));
   }
   return directory;
 }
@@ -95,7 +95,7 @@ describe('store wire-epoch fence (substrate-free)', () => {
 });
 
 describe.skipIf(SKIP_DATAPLANE)(`store wire-epoch fence [postgres] — ${SKIP_REASON}`, () => {
-  it('opens epoch 7 on a new database', async () => {
+  it('opens epoch 8 on a new database', async () => {
     const scope = await createDataplaneScope();
     try {
       await migrate(scope.pool, DEPLOY_SQL);
@@ -108,20 +108,20 @@ describe.skipIf(SKIP_DATAPLANE)(`store wire-epoch fence [postgres] — ${SKIP_RE
 
   it('refuses to migrate a database that holds rows, changes nothing, and the composition refuses it', async () => {
     const scope = await createDataplaneScope();
-    const directory = await before0040();
+    const directory = await wireV7Migrations();
     try {
       await migrate(scope.pool, directory);
       // Host configuration counts: a new database has none before its migrations finish.
       await scope.pool.query(
         `INSERT INTO storage_entitlement (tenant_id, version, hard_limit_bytes, max_object_bytes, max_inline_bytes, mailbox_limit_bytes, retention_policy_id)
-         VALUES ('tenant-v6', 1, 1000, 100, 10, 1000, 'default')`,
+         VALUES ('tenant-v7', 1, 1000, 100, 10, 1000, 'default')`,
       );
       const ledger = async () => (await scope.pool.query('SELECT version FROM byok_schema_migration ORDER BY version')).rows;
       const before = await ledger();
 
-      await expect(migrate(scope.pool, DEPLOY_SQL)).rejects.toThrow('0040_wire_v7: table storage_entitlement holds rows');
+      await expect(migrate(scope.pool, DEPLOY_SQL)).rejects.toThrow('0041_wire_v8: table storage_entitlement holds rows');
       expect(await ledger()).toEqual(before);
-      expect((await scope.pool.query(`SELECT to_regclass('byok_wire_epoch') AS epoch_table`)).rows).toEqual([{ epoch_table: null }]);
+      expect((await scope.pool.query('SELECT epoch FROM byok_wire_epoch')).rows).toEqual([{ epoch: 7 }]);
       await expect(compose(scope.pool)).rejects.toMatchObject({ code: POSTGRES_STORE_EPOCH_UNSUPPORTED, requiredEpoch: PROTOCOL_VERSION });
     } finally {
       await rm(directory, { recursive: true, force: true });
@@ -133,7 +133,7 @@ describe.skipIf(SKIP_DATAPLANE)(`store wire-epoch fence [postgres] — ${SKIP_RE
     const scope = await createDataplaneScope();
     const other = `${scope.schema}_other`;
     const admin = createByokPool({ connectionString: POSTGRES_URL!, max: 1 });
-    const directory = await before0040();
+    const directory = await wireV7Migrations();
     try {
       await migrate(scope.pool, directory);
       await admin.query(`CREATE SCHEMA "${other}" AUTHORIZATION "${scope.role}"`);
@@ -143,9 +143,9 @@ describe.skipIf(SKIP_DATAPLANE)(`store wire-epoch fence [postgres] — ${SKIP_RE
       await scope.pool.query(`INSERT INTO "${other}".unrelated VALUES (1)`);
       await scope.pool.query(`INSERT INTO "${other}".leaf VALUES (1)`);
 
-      await expect(migrate(scope.pool, DEPLOY_SQL)).rejects.toThrow('0040_wire_v7: table host_partitioned holds rows');
+      await expect(migrate(scope.pool, DEPLOY_SQL)).rejects.toThrow('0041_wire_v8: table host_partitioned holds rows');
       await scope.pool.query(`DELETE FROM "${other}".leaf`);
-      await expect(migrate(scope.pool, DEPLOY_SQL)).resolves.toMatchObject({ applied: ['0040_wire_v7.sql'] });
+      await expect(migrate(scope.pool, DEPLOY_SQL)).resolves.toMatchObject({ applied: ['0041_wire_v8.sql'] });
     } finally {
       await rm(directory, { recursive: true, force: true });
       await admin.query(`DROP SCHEMA IF EXISTS "${other}" CASCADE`);

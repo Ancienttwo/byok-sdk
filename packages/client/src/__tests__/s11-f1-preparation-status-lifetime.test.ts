@@ -82,7 +82,7 @@ describe('S11-F1 status read owns headers, body and cancellation', () => {
     const h = harness({ auth, statusReadSignal: owner.signal });
     const cursorStore = new CursorStore(dir);
     let result!: ReturnType<typeof observe>;
-    const connection = new ConnectionManager({ serverUrl: 'http://cloud.test', deviceId: 'device', productId: 'fixture', capabilities: [], runtimes: [], auth, cursorStore,
+    const connection = new ConnectionManager({ serverUrl: 'http://cloud.test', deviceId: 'device', productId: 'fixture', capabilities: [], harnesses: [], auth, cursorStore,
       onEnvelope: async () => { const operation = h.handle(); result = observe(operation); await operation; },
     });
     cleanup.push(() => connection.stop());
@@ -213,7 +213,7 @@ describe('S11-F1 status read owns headers, body and cancellation', () => {
     });
     const h = harness({ statusReadSignal: lifecycle.signal });
     const cursorStore = new CursorStore(dir);
-    const connection = new ConnectionManager({ serverUrl: 'http://cloud.test', deviceId: 'device', productId: 'fixture', capabilities: [], runtimes: [], auth: h.auth, cursorStore,
+    const connection = new ConnectionManager({ serverUrl: 'http://cloud.test', deviceId: 'device', productId: 'fixture', capabilities: [], harnesses: [], auth: h.auth, cursorStore,
       onEnvelope: async e => { if (e.type === 'agent.input.preparation') await h.handle(); },
     });
     const delivery = connection as unknown as { deliver: (e: ReturnType<typeof createEnvelope>) => boolean };

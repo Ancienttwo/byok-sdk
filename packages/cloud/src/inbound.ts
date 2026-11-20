@@ -53,6 +53,7 @@ import {
   DAEMON_TO_SERVER_TYPES,
   decodeEnvelope,
   encodeEnvelope,
+  harnessSupportsTarget,
   PROTOCOL_VERSION,
   SEALED_SPLIT_TABLE,
   steerRefusalEnvelopeId,
@@ -612,7 +613,7 @@ async function applyInboundGate(
     const device = await stores.devices.get(deviceId);
     if (device === undefined || device.revoked) return refuse('device_not_eligible');
     if (device.productId !== envelope.payload.productId) return refuse('hello_product_mismatch');
-    if ((await stores.devices.recordCapabilities({ capabilities: envelope.payload.capabilities, ...(envelope.payload.harnesses === undefined ? {} : { harnesses: envelope.payload.harnesses }) })) === undefined) {
+    if ((await stores.devices.recordCapabilities({ capabilities: envelope.payload.capabilities, harnesses: envelope.payload.harnesses })) === undefined) {
       return refuse('hello_capabilities_not_recorded');
     }
     return completeInboundEnvelope(stores, deviceId, envelope.id, undefined);
@@ -738,10 +739,6 @@ async function applyInboundGate(
     const executor = envelope.payload.executor;
     // A replay by the owner names the executor it already claimed with.
     if (attempt.ownerDeviceId !== undefined && !sameExecutor(executor, attempt.claimedExecutor)) return refuse('claim_executor_mismatch');
-    if (executor.kind === 'harness') {
-      const device = await stores.devices.get(deviceId);
-      if (device?.harnesses?.some(harness => harness.id === executor.harnessId) !== true) return refuse('claim_harness_unavailable');
-    }
     const rejected = await checkOfferBinding(stores, deviceId, attempt, envelope, 'claim_offer_mismatch');
     if (rejected !== undefined) return rejected;
   }
@@ -1106,10 +1103,7 @@ async function taskRedacted(stores: TenantStores, taskId: string): Promise<boole
 
 /** Exact executor identity; two absent executors are equal. */
 function sameExecutor(left: ClaimedExecutor | undefined, right: ClaimedExecutor | undefined): boolean {
-  if (left === undefined || right === undefined) return left === right;
-  return left.kind === 'runtime'
-    ? right.kind === 'runtime' && left.runtimeId === right.runtimeId
-    : right.kind === 'harness' && left.harnessId === right.harnessId;
+  return left?.id === right?.id;
 }
 
 /**
@@ -1125,13 +1119,10 @@ async function checkOfferBinding(
   envelope: Extract<Envelope, { type: 'task.claim' | 'task.fail' }>,
   reason: 'claim_offer_mismatch' | 'recovery_offer_mismatch',
 ): Promise<Refused | undefined> {
-  const executor = envelope.type === 'task.claim' ? envelope.payload.executor : undefined;
   const messageId = await taskOfferMessageId(stores.tenant, attempt.taskId, deviceId, attempt.agentRef, hashOfferBytes);
   if (envelope.type === 'task.fail' && envelope.payload.recovery?.offerId !== messageId) return refuse(reason);
   const offer = await stores.receipts.get(`task-offer:${messageId}`);
-  if (offer === undefined) {
-    return envelope.type === 'task.fail' || executor?.kind === 'harness' ? refuse(reason) : undefined;
-  }
+  if (offer === undefined) return refuse(reason);
   if (isTaskRedactionTombstone(offer.body)) {
     // Only an archive without explicit redaction permits replay. A claim
     // needs its immutable ownership snapshot; unclaimed recovery needs the
@@ -1147,7 +1138,18 @@ async function checkOfferBinding(
     return;
   }
   const { target } = (JSON.parse(offer.body) as { payload: { target: ExecutionTarget } }).payload;
-  if (envelope.type === 'task.claim') return offerAllowsExecutor(target, envelope.payload.executor) ? undefined : refuse(reason);
+  if (envelope.type === 'task.claim') {
+    const executor = envelope.payload.executor;
+    if (!offerAllowsExecutor(target, executor)) return refuse(reason);
+    if (attempt.ownerDeviceId === undefined) {
+      const device = await stores.devices.get(deviceId);
+      const harness = device?.harnesses?.find(harness => harness.id === executor.id);
+      if (harness === undefined || !harnessSupportsTarget(harness, target)) {
+        return refuse('claim_harness_unavailable');
+      }
+    }
+    return;
+  }
   // An unclaimed interruption may name the executor its device admitted. It is
   // only compared here; after a claim the caller requires the claimed one.
   const reported = envelope.payload.executor;
@@ -1155,15 +1157,9 @@ async function checkOfferBinding(
     ? undefined : refuse('terminal_executor_mismatch');
 }
 
-/**
- * Whether an executor is one the offer's target lets the device run (wire v7
- * §3.1): any under `auto`, else exactly the named runtime or harness. A claim
- * and an unclaimed interruption are held to the same rule.
- */
+/** A claim or unclaimed interruption must match the original offer's target. */
 function offerAllowsExecutor(target: ExecutionTarget, executor: ClaimedExecutor): boolean {
-  if (target.lane === 'auto') return true;
-  if (target.lane === 'harness') return executor.kind === 'harness' && executor.harnessId === target.harnessId;
-  return executor.kind === 'runtime' && executor.runtimeId === target.runtimeId;
+  return target.lane === 'auto' || target.harnessId === executor.id;
 }
 
 /** The archive (#1120) removed the content, and no explicit redaction did: redaction's refusals take precedence. */

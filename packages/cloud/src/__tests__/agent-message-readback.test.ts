@@ -1,6 +1,6 @@
 import { createEnvelope, type AgentMessagePublishPlainPayload } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
-import { TENANT_A, TENANT_B, createHarness } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, TENANT_B, createHarness } from './support/harness';
 
 // Salesko needs the SDK decision after its own consumer transaction committed.
 // The Host must not decode TaskAttemptStore.terminalBody to recover that fact.
@@ -12,6 +12,7 @@ describe('Host exact Agent message disposition readback', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-message-egress', 'terminal-projection-selection', 'agent-egress-fresh-session'],
     });
     const agentRef = { agentId: 'readback-agent', profileRevision: 'profile-v1' };
@@ -19,7 +20,7 @@ describe('Host exact Agent message disposition readback', () => {
     const input = {
       taskId,
       payload: {
-        instruction: 'reply', agentRef, target: { lane: 'runtime' as const, runtimeId: 'codex' as const },
+        instruction: 'reply', agentRef, target: { lane: 'harness' as const, harnessId: 'codex' as const, selection: { mode: 'device-default' as const } },
         egressPolicy: {
           policyRevision: 'policy-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
           reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },

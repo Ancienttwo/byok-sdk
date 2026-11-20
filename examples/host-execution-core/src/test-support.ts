@@ -26,7 +26,7 @@ export const policy: AgentEgressPolicy = {
   transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' },
 };
 export function template(deviceId: string, agentId = 'main'): ExecutionTemplate {
-  return { deviceId, payload: { target: { lane: 'runtime', runtimeId: 'pi' }, session: { mode: 'fresh' }, instruction: 'Return the test result through submit_result.',
+  return { deviceId, payload: { target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, session: { mode: 'fresh' }, instruction: 'Return the test result through submit_result.',
     agentRef: { agentId, profileRevision: '1' }, egressPolicy: policy,
     terminalProjection: { mode: 'result-document', contract: 'host-core-test-v1', schema: {
       type: 'object', additionalProperties: false, required: ['text'], properties: { text: { type: 'string' } },

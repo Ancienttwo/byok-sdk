@@ -113,8 +113,8 @@ describe('examples/basic quickstart with default settings', () => {
 
     // ...and the machine is listed with the runtime the daemon reported.
     await vi.waitFor(async () => {
-      const machines = (await (await fetch(`${server!.url}/api/machines`)).json()) as Array<{ deviceId: string; runtimes?: Array<{ id: string }> }>;
-      expect(machines.find((machine) => machine.deviceId === deviceId)?.runtimes?.map((runtime) => runtime.id)).toEqual(['pi']);
+      const machines = (await (await fetch(`${server!.url}/api/machines`)).json()) as Array<{ deviceId: string; harnesses?: Array<{ id: string }> }>;
+      expect(machines.find((machine) => machine.deviceId === deviceId)?.harnesses?.map((runtime) => runtime.id)).toEqual(['pi']);
     }, { timeout: DEADLINE_MS, interval: 50 });
 
     // Step 3: dispatch. A poll that is open but never polled again would never see this.

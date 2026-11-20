@@ -111,6 +111,8 @@ describe('the deny set', () => {
       ...PI_PROVIDER_ENV_KEY_NAMES,
       ...PI_AMBIENT_CREDENTIAL_ENV_NAMES,
       ...CODEX_AUTH_ENV_NAMES,
+      'CLAUDE_CODE_OAUTH_TOKEN',
+      'ANTHROPIC_CUSTOM_HEADERS',
       PI_PROJECTED_KEY_ENV,
     ];
     expect([...PROVIDER_CREDENTIAL_ENV_DENY_NAMES]).toEqual(expected);

@@ -4,7 +4,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
-import * as v6Release from 'byok-protocol-previous';
+import * as v7Release from 'byok-protocol-previous';
 import * as currentModule from '../http-api';
 import { TerminalResidentMemoryOverLimitSchema, pairDeviceDigest } from '../index';
 import {
@@ -31,45 +31,7 @@ import {
 import { AgentMemorySelectionSchema } from '../messages';
 import { type WireAddition } from '../wire-additions';
 
-/**
- * Executable wire-major-7 compatibility evidence (docs/protocol.md "Freeze
- * rule", docs/releases/README.md).
- *
- * v7 has no v6 reader, and no v7 release has been published yet, so there is
- * no published v7 decoder to prove additions against. This file keeps:
- *
- * 1. Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
- *    and the v2 release registry `golden/releases.json` are byte-identical to
- *    what v2 shipped. They are a negative oracle: the current decoder rejects
- *    every v2 envelope on its protocol version and nothing else.
- * 2. Retired v3 evidence. `golden/v3.envelopes.ndjson`, `golden/v3.http.ndjson`
- *    and `golden/v3.releases.json` (0.27.0 through 0.30.2) are byte-identical
- *    to what v3 shipped. The current decoder rejects every v3 envelope on its
- *    protocol version.
- * 3. Retired v4 evidence. `golden/v4.envelopes.ndjson`, `golden/v4.http.ndjson`
- *    and `golden/v4.releases.json` (0.31.0 through 0.33.0) are byte-identical
- *    to what v4 shipped. The current decoder rejects every v4 envelope on its
- *    protocol version.
- * 4. Retired v5 evidence. `golden/v5.envelopes.ndjson`, `golden/v5.http.ndjson`
- *    and `golden/v5.releases.json` (0.34.0 through 0.40.0) are byte-identical
- *    to what v5 shipped. The current decoder rejects every v5 envelope on its
- *    protocol version.
- * 5. Retired v6 evidence. `golden/v6.envelopes.ndjson`, `golden/v6.http.ndjson`
- *    and `golden/v6.releases.json` (0.41.0 through 0.43.0) are byte-identical
- *    to what v6 shipped. The current decoder rejects every v6 envelope on its
- *    protocol version.
- * 6. v7 self-consistency. `golden/v7.envelopes.ndjson` and
- *    `golden/v7.http.ndjson` were generated from the frozen v6 corpora by
- *    `generate-v7-corpus.mjs`, are append-only from now on, and the
- *    current decoder reads them exactly. `golden/v7.releases.json` pins
- *    the published 0.44.0 release and the 0.44.1 candidate. There is no
- *    published v7 decoder floor yet.
- * 7. Published rejection oracle. `byok-protocol-previous` (0.43.0, the
- *    last v6 release) rejects every v7 corpus line and a v7 `conn.hello`: a
- *    v6 peer cannot read v7 bytes. None of its bytes is v7 evidence. It
- *    still reads the frozen cross-version refusal a v7 server answers its
- *    lone hello with, which is how a v6 daemon stops.
- */
+/** Frozen former majors, v8 corpus coverage, and a published v7 rejection oracle. */
 
 const require = createRequire(import.meta.url);
 const goldenDir = fileURLToPath(new URL('./golden/', import.meta.url));
@@ -491,7 +453,7 @@ describe('compat: the current decoder rejects every v6 envelope on its protocol 
 });
 
 // ---------------------------------------------------------------------------
-// 6. v7: self-consistency only — no published v7 decoder exists yet
+// 6. Frozen wire v7
 // ---------------------------------------------------------------------------
 
 const v7Lines = ndjsonLines(readGolden('v7.envelopes.ndjson'));
@@ -501,20 +463,51 @@ const v7HttpLines = ndjsonLines(v7HttpText);
 const v7HttpCorpus = httpCorpusOf(v7HttpLines);
 const v7Registry = JSON.parse(readGolden('v7.releases.json')) as { readonly releases: readonly ReleaseEntry[] };
 
-describe('compat v7 registry: no published v7 decoder exists yet, so cross-release gates are unproven', () => {
-  it('the v7 registry has releases only, and no floor until a v7 release is supported', () => {
-    expect(Object.keys(v7Registry)).toEqual(['releases']);
-    expect(Array.isArray(v7Registry.releases)).toBe(true);
-    expect(v7Registry.releases.map((entry) => entry.version).filter((version) =>
+describe('compat v7: frozen evidence rejected by v8', () => {
+  it('freezes both corpora and the release registry at the wire cut', () => {
+    expect(sha256(readGolden('v7.envelopes.ndjson'))).toBe('b06a3ec81a6b49b554d9ebaa48af4aeede1c4f4b6e642e608cc1162b458fa5cc');
+    expect(sha256(v7HttpText)).toBe('50767259e6a512375c87794c284bd6e1a1a434d3069ed77fd57804b6c3cd8bfd');
+    expect(sha256(readGolden('v7.releases.json'))).toBe('5e2db034fa8a3b027ae6daf2589fc15d46b817bb8120814d0cba67d411493490');
+  });
+
+  it.each(v7Corpus)('rejects v7 envelope $index ($type)', line => {
+    expect(() => decodeEnvelope(line.raw)).toThrow(EnvelopeValidationError);
+  });
+
+  it.each(v7HttpCorpus.filter(carriesEnvelopes))('refuses v7 payloads in $surface $index', line => {
+    const decoded = httpSchema(currentModule, line.surface).safeParse(JSON.parse(line.body));
+    if (!decoded.success) return;
+    for (const entry of undecodedEntries(line, decoded.data as Record<string, unknown>)!) {
+      expect(() => parseMessage(entry)).toThrow();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. v8: self-consistency only — no published v8 decoder exists yet
+// ---------------------------------------------------------------------------
+
+const v8Lines = ndjsonLines(readGolden('v8.envelopes.ndjson'));
+const v8Corpus = corpusOf(v8Lines);
+const v8HttpText = readGolden('v8.http.ndjson');
+const v8HttpLines = ndjsonLines(v8HttpText);
+const v8HttpCorpus = httpCorpusOf(v8HttpLines);
+const v8Registry = JSON.parse(readGolden('v8.releases.json')) as { readonly releases: readonly ReleaseEntry[] };
+
+describe('compat v8 registry: no published v8 decoder exists yet, so cross-release gates are unproven', () => {
+  it('the v8 registry has releases only, and no floor until a v8 release is supported', () => {
+    expect(Object.keys(v8Registry)).toEqual(['releases']);
+    expect(Array.isArray(v8Registry.releases)).toBe(true);
+    expect(v8Registry.releases.map((entry) => entry.version).filter((version) =>
       V2_RELEASES.some((v2) => v2.version === version) || v3Registry.releases.some((v3) => v3.version === version)
       || v4Registry.releases.some((v4) => v4.version === version) || v5Registry.releases.some((v5) => v5.version === version)
       || v6Registry.releases.some((v6) => v6.version === version)),
-    'a v2, v3, v4, v5 or v6 release is never v7 evidence').toEqual([]);
+    'a v2, v3, v4, v5 or v6 release is never v8 evidence').toEqual([]);
   });
 
-  it('registered v7 releases are stable, ascending, pin both corpora, and their prefixes are unchanged', () => {
+  it('registered v8 releases are stable, ascending, pin both corpora, and their prefixes are unchanged', () => {
     let previous: ReleaseEntry | undefined;
-    for (const entry of v7Registry.releases) {
+    for (const entry of v8Registry.releases) {
       expect(entry.version, 'prereleases are not registered').toMatch(/^\d+\.\d+\.\d+$/);
       if (previous !== undefined) {
         expect(compareVersions(previous.version, entry.version)).toBeLessThan(0);
@@ -522,33 +515,33 @@ describe('compat v7 registry: no published v7 decoder exists yet, so cross-relea
         expect(entry.http!.lines).toBeGreaterThanOrEqual(previous.http!.lines);
       }
       expect(entry.http, `HTTP prefix required for ${entry.version}`).toBeDefined();
-      expect(prefixHash(v7Lines, entry.envelopes.lines), `v7 envelope lines shipped with ${entry.version} are append-only`).toEqual(entry.envelopes);
-      expect(prefixHash(v7HttpLines, entry.http!.lines), `v7 HTTP lines shipped with ${entry.version} are append-only`).toEqual(entry.http);
+      expect(prefixHash(v8Lines, entry.envelopes.lines), `v8 envelope lines shipped with ${entry.version} are append-only`).toEqual(entry.envelopes);
+      expect(prefixHash(v8HttpLines, entry.http!.lines), `v8 HTTP lines shipped with ${entry.version} are append-only`).toEqual(entry.http);
       previous = entry;
     }
   });
 
-  it('the current stable package version is registered in v7, unless the manifest still names a v6 release', () => {
+  it('the current stable package version is registered in v8, unless the manifest still names a v7 release', () => {
     const version = (JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')) as { version: string }).version;
     if (!/^\d+\.\d+\.\d+$/.test(version)) return;
-    // Feature PRs leave the manifest at the current train; v7 bytes have not
-    // been released while it still names a v6 release.
-    if (v6Registry.releases.some((entry) => entry.version === version)) return;
+    // Feature PRs leave the manifest at the current train; v8 bytes have not
+    // been released while it still names a v7 release.
+    if (v7Registry.releases.some((entry) => entry.version === version)) return;
     expect(
-      v7Registry.releases.find((entry) => entry.version === version),
-      `@byok-sdk/protocol ${version} is not in golden/v7.releases.json. Append this entry: ${JSON.stringify({
-        version, envelopes: prefixHash(v7Lines, v7Lines.length), http: prefixHash(v7HttpLines, v7HttpLines.length),
+      v8Registry.releases.find((entry) => entry.version === version),
+      `@byok-sdk/protocol ${version} is not in golden/v8.releases.json. Append this entry: ${JSON.stringify({
+        version, envelopes: prefixHash(v8Lines, v8Lines.length), http: prefixHash(v8HttpLines, v8HttpLines.length),
       })}`,
     ).toBeDefined();
   });
 });
 
-describe('compat v7: the current decoder reads every v7 corpus line exactly (self-consistency; no published v7 decoder yet)', () => {
-  it.each(v7Corpus.map((line) => [line.index + 1, line.type, line] as const))(
-    'v7 line %i (%s) decodes, round-trips and deep-equals the committed JSON',
+describe('compat v8: the current decoder reads every v8 corpus line exactly (self-consistency; no published v8 decoder yet)', () => {
+  it.each(v8Corpus.map((line) => [line.index + 1, line.type, line] as const))(
+    'v8 line %i (%s) decodes, round-trips and deep-equals the committed JSON',
     (_n, _type, line) => {
       const decoded = decodeEnvelope(line.raw);
-      expect(decoded.v).toBe(7);
+      expect(decoded.v).toBe(8);
       expect(decodeEnvelope(encodeEnvelope(decoded))).toEqual(decoded);
       expect(decoded, 'the current decoder dropped or changed a committed field').toEqual(JSON.parse(line.raw));
     },
@@ -556,7 +549,7 @@ describe('compat v7: the current decoder reads every v7 corpus line exactly (sel
 
   it('reads each Agent-memory start refusal of the corpus as its own class (#1843)', () => {
     for (const refusal of AGENT_MEMORY_START_REFUSALS) {
-      const line = v7Corpus.find((candidate) => candidate.type === 'task.fail' && (candidate.payload.failure as { class?: string } | undefined)?.class === refusal);
+      const line = v8Corpus.find((candidate) => candidate.type === 'task.fail' && (candidate.payload.failure as { class?: string } | undefined)?.class === refusal);
       expect(line, refusal).toBeDefined();
       const decoded = decodeEnvelope(line!.raw) as Extract<ReturnType<typeof decodeEnvelope>, { type: 'task.fail' }>;
       expect(readTaskFailure(decoded.payload.failure!)).toEqual({ class: refusal });
@@ -565,7 +558,7 @@ describe('compat v7: the current decoder reads every v7 corpus line exactly (sel
 
   it('every approval request and decision names its approval', () => {
     for (const type of ['task.await_approval', 'task.approve', 'task.reject'] as const) {
-      const lines = v7Corpus.filter((line) => line.type === type);
+      const lines = v8Corpus.filter((line) => line.type === type);
       expect(lines.length, type).toBeGreaterThan(0);
       for (const line of lines) expect(typeof line.payload.approvalId, `${type} line ${line.index + 1}`).toBe('string');
       expect(MESSAGE_PAYLOAD_SCHEMAS[type].safeParse({ summary: 'x', reason: 'x' }).success, `${type} without approvalId`).toBe(false);
@@ -603,13 +596,13 @@ const OFFER_LANES = Object.keys(OFFER_LANE) as (keyof typeof OFFER_LANE)[];
 
 /** Whether a corpus prepared offer still parses with `agentMemory` replaced. */
 function preparedWithMemory(agentMemory: string): boolean {
-  const prepared = v7Corpus.find((line) => line.type === 'task.offer' && OFFER_LANE.prepared(line.payload))!;
+  const prepared = v8Corpus.find((line) => line.type === 'task.offer' && OFFER_LANE.prepared(line.payload))!;
   expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(prepared.payload).success).toBe(true);
   return MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse({ ...prepared.payload, agentMemory }).success;
 }
 
-describe('compat v7: corpus coverage and WIRE_ADDITIONS', () => {
-  it('gates no daemon-to-server surface: every v7 server reads them all', () => {
+describe('compat v8: corpus coverage and WIRE_ADDITIONS', () => {
+  it('gates no daemon-to-server surface: every v8 server reads them all', () => {
     expect(WIRE_ADDITIONS.filter(entry => !isServerToDaemonType(entry.surface))).toEqual([]);
     expect(requiredReceiverCapabilities('task.steer_refused', { steerMessageId: '00000000-0000-4000-8000-000000000007', reason: 'task_not_active' })).toEqual([]);
     expect(requiredReceiverCapabilities('agent.message.draft', {})).toEqual([]);
@@ -617,19 +610,19 @@ describe('compat v7: corpus coverage and WIRE_ADDITIONS', () => {
     expect(requiredReceiverCapabilities('task.decline', { code: 'native_sessions_unsupported' })).toEqual([]);
   });
 
-  it('every message type appears in the v7 corpus', () => {
-    const seen = new Set(v7Corpus.map((line) => line.type));
+  it('every message type appears in the v8 corpus', () => {
+    const seen = new Set(v8Corpus.map((line) => line.type));
     expect(MESSAGE_TYPES.filter((type) => !seen.has(type))).toEqual([]);
   });
 
   it('every Agent offer lane carrying terminalProjection has a result-document line with a schema, and a task.complete carries a document', () => {
     for (const lane of OFFER_LANES) {
-      expect(v7Corpus.some((line) => {
+      expect(v8Corpus.some((line) => {
         const projection = line.payload.terminalProjection as { mode?: string; schema?: unknown } | undefined;
         return line.type === 'task.offer' && OFFER_LANE[lane](line.payload) && projection?.mode === 'result-document' && projection.schema !== undefined;
       }), `${lane} result-document line`).toBe(true);
     }
-    expect(v7Corpus.some((line) => line.type === 'task.complete' && line.payload.document !== undefined)).toBe(true);
+    expect(v8Corpus.some((line) => line.type === 'task.complete' && line.payload.document !== undefined)).toBe(true);
   });
 
   it('every entry names a current message type and a device capability', () => {
@@ -640,7 +633,7 @@ describe('compat v7: corpus coverage and WIRE_ADDITIONS', () => {
   });
 
   it('every task.steer_refused line carries the envelope id its refused steer derives (#2009)', async () => {
-    const refusals = v7Corpus.filter((line) => line.type === 'task.steer_refused');
+    const refusals = v8Corpus.filter((line) => line.type === 'task.steer_refused');
     expect(refusals.length).toBeGreaterThan(0);
     for (const line of refusals) {
       expect((JSON.parse(line.raw) as { id: string }).id, `line ${line.index + 1}`).toBe(await steerRefusalEnvelopeId(line.payload.steerMessageId as string));
@@ -648,18 +641,18 @@ describe('compat v7: corpus coverage and WIRE_ADDITIONS', () => {
   });
 
   it('declines agentMemoryCommit on a memory-reader offer by the selection rule, not the decoder (#1440, #1757)', () => {
-    const line = v7Corpus.find((candidate) => candidate.type === 'task.offer' && candidate.payload.agentMemoryCommit !== undefined)!;
+    const line = v8Corpus.find((candidate) => candidate.type === 'task.offer' && candidate.payload.agentMemoryCommit !== undefined)!;
     expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(line.payload).success).toBe(true);
     const reader = { ...line.payload, homeAccess: 'memory-reader' };
     expect(MESSAGE_PAYLOAD_SCHEMAS['task.offer'].safeParse(reader).success).toBe(true);
     expect(offerSelectionViolation(reader as never)?.rule).toBe('agent_memory_selection_invalid');
   });
 
-  it('every entry is exercised by a v7 corpus line', () => {
-    const unused = WIRE_ADDITIONS.filter((entry) => !v7Corpus.some((line) => carries(line, entry))).map(
+  it('every entry is exercised by a v8 corpus line', () => {
+    const unused = WIRE_ADDITIONS.filter((entry) => !v8Corpus.some((line) => carries(line, entry))).map(
       (entry) => `${entry.surface}${entry.field === undefined ? '' : `.${entry.field}`}${entry.value === undefined ? '' : `=${entry.value}`}`,
     );
-    expect(unused, 'append a v7 corpus line that carries each of these (golden/v7.envelopes.ndjson is append-only)').toEqual([]);
+    expect(unused, 'append a v8 corpus line that carries each of these (golden/v8.envelopes.ndjson is append-only)').toEqual([]);
   });
 
   it('gates the per-task agentMemory selection on every offer that carries it (#614)', () => {
@@ -669,7 +662,7 @@ describe('compat v7: corpus coverage and WIRE_ADDITIONS', () => {
     expect(requiredReceiverCapabilities('task.offer', {})).not.toContain('agent-memory-selection');
     // Since v4 there is one offer type, so a prepared offer's required selection takes the same gate. A daemon
     // advertises agent-memory-selection with agent-home-contract, so admission does not change.
-    const prepared = v7Corpus.find((line) => line.type === 'task.offer' && OFFER_LANE.prepared(line.payload))!;
+    const prepared = v8Corpus.find((line) => line.type === 'task.offer' && OFFER_LANE.prepared(line.payload))!;
     expect(requiredReceiverCapabilities('task.offer', prepared.payload)).toContain('agent-memory-selection');
   });
 
@@ -685,7 +678,7 @@ describe('compat v7: corpus coverage and WIRE_ADDITIONS', () => {
   });
 
   it('gates agentMemory read-write-if-admitted on its own flag, on the plain and sealed ordinary Agent offers only (#833)', () => {
-    const sealing = v7Corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined)!.payload.sealing;
+    const sealing = v8Corpus.find((line) => line.type === 'task.offer' && line.payload.sealing !== undefined)!.payload.sealing;
     for (const extra of [{}, { sealing }]) {
       const required = requiredReceiverCapabilities('task.offer', { ...extra, agentMemory: 'read-write-if-admitted' });
       expect(required).toEqual(expect.arrayContaining(['agent-memory-selection', 'agent-memory-read-write-if-admitted']));
@@ -756,14 +749,14 @@ function assertCurrentHttp(line: HttpCorpusLine): void {
   assertBatchCounts(line, decoded);
 }
 
-describe('compat v7: HTTP corpus', () => {
+describe('compat v8: HTTP corpus', () => {
   it('covers all thirteen scoped HTTP route schemas with owned bodies and independent expected values', () => {
     const surfaces: readonly HttpSurface[] = ['ChallengeRequest', 'ChallengeResponse', 'TokenRequest', 'TokenResponse',
       'PairRequest', 'PairResponse', 'EventsPollQuery', 'EventsPollResponse', 'MessagesSendRequest', 'MessagesSendResponse',
       'PresencePublishRequest', 'PairSupersededResponse', 'PairingCodeInvalidResponse'];
-    expect([...new Set(v7HttpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
-    expect(v7HttpText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
-    for (const line of v7HttpCorpus) {
+    expect([...new Set(v8HttpCorpus.map((line) => line.surface))].sort()).toEqual([...surfaces].sort());
+    expect(v8HttpText.endsWith('\n'), 'literal corpus lines must be newline terminated').toBe(true);
+    for (const line of v8HttpCorpus) {
       expect(typeof line.body).toBe('string');
       expect(JSON.parse(line.body)).toEqual(line.value);
       if (line.surface === 'MessagesSendResponse') {
@@ -773,13 +766,13 @@ describe('compat v7: HTTP corpus', () => {
     }
   });
 
-  it.each(v7HttpCorpus.map((line) => [line.index + 1, line.surface, line] as const))(
-    'v7 HTTP line %i (%s) deep-equals its independent expected value and accounts for its batch',
+  it.each(v8HttpCorpus.map((line) => [line.index + 1, line.surface, line] as const))(
+    'v8 HTTP line %i (%s) deep-equals its independent expected value and accounts for its batch',
     (_index, _surface, line) => assertCurrentHttp(line),
   );
 
   it('pins the generator\'s pairing digest to pairDeviceDigest', async () => {
-    const request = v7HttpCorpus.find((entry) => entry.surface === 'PairRequest' && entry.value.expectedDeviceDigest !== null)!;
+    const request = v8HttpCorpus.find((entry) => entry.surface === 'PairRequest' && entry.value.expectedDeviceDigest !== null)!;
     expect(request.value.expectedDeviceDigest).toBe(await pairDeviceDigest({
       tenantId: 'tenant-golden',
       productId: 'acme-agent',
@@ -788,70 +781,69 @@ describe('compat v7: HTTP corpus', () => {
   });
 
   it('detects a changed literal body independently of the expected value', () => {
-    const line = v7HttpCorpus.find((entry) => entry.surface === 'ChallengeResponse')!;
+    const line = v8HttpCorpus.find((entry) => entry.surface === 'ChallengeResponse')!;
     expect(() => assertCurrentHttp({ ...line, body: JSON.stringify({ nonce: 'changed-nonce' }) })).toThrow('independently committed');
   });
 
   it('rejects unaccounted batch members', () => {
-    const line = v7HttpCorpus.find((entry) => entry.surface === 'MessagesSendResponse' && entry.batchLength === 2)!;
+    const line = v8HttpCorpus.find((entry) => entry.surface === 'MessagesSendResponse' && entry.batchLength === 2)!;
     expect(() => assertCurrentHttp({ ...line, batchLength: 3 })).toThrow('entire submitted batch');
   });
 });
 
 // ---------------------------------------------------------------------------
-// 7. Published rejection oracle: a published v6 decoder cannot read v7 bytes
+// 7. Published rejection oracle: a published v7 decoder cannot read v8 bytes
 // ---------------------------------------------------------------------------
 
-describe('compat: published 0.43.0 (byok-protocol-previous) is the v7 rejection oracle', () => {
-  it('the alias pins a registered v6 release and never enters the v7 registry', () => {
+describe('compat: published 0.44.1 (byok-protocol-previous) is the v8 rejection oracle', () => {
+  it('the alias pins a registered v7 release and never enters the v8 registry', () => {
     const version = packageVersion('byok-protocol-previous');
-    expect(version).toBe('0.43.0');
-    expect(v6Registry.releases.some((entry) => entry.version === version)).toBe(true);
-    expect(v7Registry.releases.some((entry) => entry.version === version)).toBe(false);
-    expect(v6Release.PROTOCOL_VERSION).toBe(6);
+    expect(version).toBe('0.44.1');
+    expect(v7Registry.releases.some((entry) => entry.version === version)).toBe(true);
+    expect(v8Registry.releases.some((entry) => entry.version === version)).toBe(false);
+    expect(v7Release.PROTOCOL_VERSION).toBe(7);
   });
 
-  it.each(v7Corpus.map((line) => [line.index + 1, line.type, line] as const))(
-    'rejects v7 line %i (%s)',
+  it.each(v8Corpus.map((line) => [line.index + 1, line.type, line] as const))(
+    'rejects v8 line %i (%s)',
     (_n, _type, line) => {
-      if ((v6Release.MESSAGE_TYPES as readonly string[]).includes(line.type)) {
-        expect(() => v6Release.decodeEnvelope(line.raw)).toThrow(v6Release.EnvelopeValidationError);
+      if ((v7Release.MESSAGE_TYPES as readonly string[]).includes(line.type)) {
+        expect(() => v7Release.decodeEnvelope(line.raw)).toThrow(v7Release.EnvelopeValidationError);
       } else {
-        // A type added after 0.43.0 is unknown to it before its version is read.
-        expect(() => v6Release.decodeEnvelope(line.raw)).toThrow(v6Release.UnknownMessageTypeError);
+        // A type added after 0.44.1 is unknown to it before its version is read.
+        expect(() => v7Release.decodeEnvelope(line.raw)).toThrow(v7Release.UnknownMessageTypeError);
       }
     },
   );
 
-  it('rejects a v7 conn.hello: a v6 server cannot admit a v7 daemon', () => {
+  it('rejects a v8 conn.hello: a v7 server cannot admit a v8 daemon', () => {
     const hello = createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
+      harnesses: [],
       capabilities: [],
-      deviceId: 'device-v7',
+      deviceId: 'device-v8',
       productId: 'acme-agent',
     });
-    expect(hello.v).toBe(7);
-    expect(() => v6Release.decodeEnvelope(encodeEnvelope(hello))).toThrow(v6Release.EnvelopeValidationError);
+    expect(hello.v).toBe(8);
+    expect(() => v7Release.decodeEnvelope(encodeEnvelope(hello))).toThrow(v7Release.EnvelopeValidationError);
   });
 
-  it.each(v7HttpCorpus.filter(carriesEnvelopes).map((line) => [line.index + 1, line.surface, line] as const))(
-    'rejects v7 HTTP line %i (%s), which carries v7 envelopes',
+  it.each(v8HttpCorpus.filter(carriesEnvelopes).map((line) => [line.index + 1, line.surface, line] as const))(
+    'rejects v8 HTTP line %i (%s), which carries v8 envelopes',
     (_n, surface, line) => {
-      const decoded = httpSchema(v6Release, surface).safeParse(JSON.parse(line.body));
+      const decoded = httpSchema(v7Release, surface).safeParse(JSON.parse(line.body));
       if (!decoded.success) return;
       const entries = undecodedEntries(line, decoded.data as Record<string, unknown>);
-      expect(entries, `${surface} decoded v7 envelopes in its body schema`).toBeDefined();
-      for (const entry of entries!) expect(() => v6Release.parseMessage(entry)).toThrow();
+      expect(entries, `${surface} decoded v8 envelopes in its body schema`).toBeDefined();
+      for (const entry of entries!) expect(() => v7Release.parseMessage(entry)).toThrow();
     },
   );
 
   it('reads the frozen cross-version refusal of a lone hello as a refused handshake', () => {
-    const line = v7HttpCorpus.find((entry) => entry.surface === 'MessagesSendResponse'
+    const line = v8HttpCorpus.find((entry) => entry.surface === 'MessagesSendResponse'
       && (entry.value.outcomes as readonly { reason?: string }[]).some((outcome) => outcome.reason === 'protocol_version_unsupported'))!;
     expect(line.value).toEqual({ accepted: 0, rejected: 1, outcomes: [{ id: expect.any(String), outcome: 'rejected', reason: 'protocol_version_unsupported' }] });
-    const decoded = v6Release.MessagesSendResponseSchema.parse(JSON.parse(line.body));
-    expect(decoded.rejected, 'a v6 daemon halts on rejected > 0 for its lone hello').toBeGreaterThan(0);
-    expect(decoded.outcomes).toEqual([{ id: (line.value.outcomes as { id: string }[])[0]!.id, outcome: 'rejected', reason: 'unknown' }]);
+    expect(v7Release.MessagesSendResponseSchema.parse(JSON.parse(line.body))).toEqual(line.value);
   });
 });
 // ---------------------------------------------------------------------------
@@ -1113,19 +1105,19 @@ function completeness(): { missingPaths: string[]; missingValues: string[]; unus
     const root = schemaNode(jsonSchema(MESSAGE_PAYLOAD_SCHEMAS[type]))!;
     const prefix = `envelope:${type}`;
     merge(required, requiredCoverage(root, prefix, exempt));
-    merge(seen, observedCoverage(root, prefix, v7Corpus.filter((line) => line.type === type).map((line) => line.payload)));
+    merge(seen, observedCoverage(root, prefix, v8Corpus.filter((line) => line.type === type).map((line) => line.payload)));
   }
   const header = envelopeHeaderRoot();
   merge(required, requiredCoverage(header, HEADER_PREFIX, () => false));
-  merge(seen, observedCoverage(header, HEADER_PREFIX, v7Corpus.map((line) => {
+  merge(seen, observedCoverage(header, HEADER_PREFIX, v8Corpus.map((line) => {
     const { payload: _payload, ...fields } = JSON.parse(line.raw) as Record<string, unknown>;
     return fields;
   })));
-  for (const surface of [...new Set(v7HttpCorpus.map((line) => line.surface))]) {
+  for (const surface of [...new Set(v8HttpCorpus.map((line) => line.surface))]) {
     const root = schemaNode(jsonSchema(httpSchema(currentModule, surface)))!;
     const prefix = `http:${surface}`;
     merge(required, requiredCoverage(root, prefix, exempt));
-    merge(seen, observedCoverage(root, prefix, v7HttpCorpus.filter((line) => line.surface === surface).map((line) => JSON.parse(line.body) as unknown)));
+    merge(seen, observedCoverage(root, prefix, v8HttpCorpus.filter((line) => line.surface === surface).map((line) => JSON.parse(line.body) as unknown)));
   }
   return {
     missingPaths: [...required.paths].filter((path) => !seen.paths.has(path)).sort(),

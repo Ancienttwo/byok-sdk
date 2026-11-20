@@ -39,7 +39,7 @@ describe('task.fail reason ingest (#1124)', () => {
   async function claimedTask(): Promise<string> {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     const claimed = await handleInboundEnvelope(stores, deviceId,
-      createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }));
+      createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId }));
     expect(claimed.outcome).toBe('accepted');
     return taskId;
   }
@@ -47,7 +47,7 @@ describe('task.fail reason ingest (#1124)', () => {
   /** Wire bytes whose reason was never bounded by `createEnvelope`. */
   function unboundedFail(taskId: string, reason: string): Envelope {
     return decodeEnvelope(encodeEnvelope({ v: PROTOCOL_VERSION, id: crypto.randomUUID(), ts: new Date().toISOString(), type: 'task.fail',
-      task_id: taskId, payload: { reason, retryable: false, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } } } as never));
+      task_id: taskId, payload: { reason, retryable: false, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } } } as never));
   }
 
   it('accepts an over-long, credential-bearing reason from the wire and records it bounded and redacted', async () => {
@@ -80,7 +80,7 @@ describe('task.fail reason ingest (#1124)', () => {
   it('leaves a short, clean reason byte-identical', async () => {
     const taskId = await claimedTask();
     const result = await handleInboundEnvelope(stores, deviceId,
-      createEnvelope('task.fail', { reason: 'claude exited before yielding an authoritative session id', retryable: true, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }));
+      createEnvelope('task.fail', { reason: 'claude exited before yielding an authoritative session id', retryable: true, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId }));
     expect(result.outcome).toBe('accepted');
     expect((await harness.cloud.readTaskAttempt(TENANT_A, taskId))?.terminalCause).toBe('claude exited before yielding an authoritative session id');
   });

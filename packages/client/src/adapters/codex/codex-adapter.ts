@@ -6,7 +6,7 @@ import { assertCodexMcpHubQualified } from './hub-tool-grants.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { requireImageInput } from '../input-images.js';
 import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
-import { modelLaneTarget, type ModelLaneTarget, type RuntimeTaskInput } from '../../types.js';
+import { offerSelection, type RuntimeTaskInput } from '../../types.js';
 import { snapshotNativeInteractionHostOptions, type NativeInteractionHostOptions, type NativeInteractionChannel } from '../../native-interactions.js';
 import { CodexNativeInteractions } from './native-interactions.js';
 import { execFile, type spawn as nodeSpawn } from 'node:child_process';
@@ -17,6 +17,7 @@ import * as codexRuntime from '../../runtime/codex-session-runtime.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type {
   AgentEvent,
+  HarnessSelection,
   TaskFailure,
 } from '@byok-sdk/protocol';
 import {
@@ -28,6 +29,7 @@ import {
   type RuntimeAdapterPrepareInput,
   type RuntimeAdapterPrepareResult,
   type MessageDraftDelta,
+  type PreparedRuntimeOperation,
   type RuntimeOperationStartInput,
   type Session,
 } from '../../types.js';
@@ -40,6 +42,7 @@ import {
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
+import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { readProcessTable } from '../../runtime/oar-process-tree.js';
 import { objectRecord as recordOf } from '../shared-rules.js';
 import { CodexProjection, type CodexRecord } from './projection.js';
@@ -48,6 +51,7 @@ import { haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin.js';
 import { findRuntimeCommandOnPath, resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
 import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities.js';
 import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
@@ -61,6 +65,8 @@ const DEFAULT_OPERATION_MS = 30_000;
 type CodexInstallation =
   | { readonly detected: Exclude<RuntimeDetectResult, { kind: 'available' }> }
   | { readonly detected: Extract<RuntimeDetectResult, { kind: 'available' }>; readonly invocation: RuntimeInvocation };
+const SUBSCRIPTION_REQUIRED = 'Codex subscription selection requires a ChatGPT login';
+type CodexLaunchInput = Parameters<NonNullable<PreparedRuntimeOperation['resolveRuntimeLaunch']>>[0];
 /** A Codex `sandbox_mode`, or `inherit` to pass no override so the user's `config.toml` applies. */
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
 const CODEX_SANDBOX_SETTINGS: readonly string[] = ['read-only', 'workspace-write', 'danger-full-access', 'inherit'];
@@ -73,6 +79,8 @@ export function assertCodexSandboxSetting(value: unknown, label: string): assert
 }
 
 export interface CodexAdapterOptions {
+  /** SDK install root in which to find a managed runtime. */
+  runtimeInstallRoot?: string;
   /** Absolute product native asset directory; scoped to this adapter. */
   nativeAssetRoot?: string;
   /** The environment Codex and its MCP servers get (#1095). Default: the login-shell snapshot. */
@@ -140,6 +148,8 @@ export interface CodexAdapterOptions {
  * the project root. The run directory itself has no `.byok/`.
  */
 const READER_PROJECT_ROOT_ARGS = Object.freeze(['-c', 'project_root_markers=[".byok"]']);
+const DISABLE_PLUGINS_ARGS = ['-c', 'features.plugins=false'] as const;
+const DISABLE_MEMORIES_ARGS = ['-c', 'features.memories=false'] as const;
 
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export class CodexAdapter implements RuntimeAdapter {
@@ -149,8 +159,9 @@ export class CodexAdapter implements RuntimeAdapter {
     return this.#runtimeReaders ??= createRuntimeReaders(this, {
       nativeAssetRoot: this.options.nativeAssetRoot,
       spawnFn: this.options.spawnFn,
-      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin).bin.command,
+      command: (_env) => resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex')).bin.command,
       version: codexVersionToken,
+      environment: env => ({ env: withoutProviderCredentials(env) }),
     });
   }
 
@@ -170,8 +181,8 @@ export class CodexAdapter implements RuntimeAdapter {
 
   get descriptor() { return freezeRuntimeAdapterDescriptor({
     id: 'codex',
-    supportsDispatchSelection: true,
-    supportsTaskExecutionOptions: true,
+    selectionModes: ['device-default', 'subscription'],
+    supportsEffort: true,
     progressMessageBoundary: 'event',
     platforms: ['darwin', 'linux', 'win32'],
     mcpToolApprovals: true,
@@ -220,8 +231,8 @@ export class CodexAdapter implements RuntimeAdapter {
 
   private async detectInstallation(): Promise<CodexInstallation> {
     try {
-      const { env } = await this.runtimeEnvironment();
-      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin);
+      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex'));
       const host = runtimeInvocationHost(env);
       const named = resolved.bin.command;
       const explicitlyPathed = named.includes('/') || (host.platform === 'win32' && named.includes('\\'));
@@ -282,7 +293,7 @@ export class CodexAdapter implements RuntimeAdapter {
     const { effort } = input.offer;
     let model: string | undefined;
     try {
-      model = subscriptionModel(modelLaneTarget(input.offer.target));
+      model = subscriptionModel(offerSelection(input.offer.target));
     } catch (error) {
       return {
         kind: 'reject',
@@ -303,36 +314,117 @@ export class CodexAdapter implements RuntimeAdapter {
     if (!mcpAllowlistSupported && (input.requiredToolsetIds.length > 0 || Object.keys(input.mcpServers ?? {}).length > 0)) {
       return { kind: 'reject', reason: CODEX_MCP_TOOL_ALLOWLIST_REFUSAL, retryable: false };
     }
+    const { invocation, detected: { version, executableSource, versionVerdict } } = installation;
+    let admittedLaunch: CodexAppServerLaunch | undefined;
     return {
       kind: 'prepared',
+      detected: { version, executableSource, versionVerdict },
       operation: {
-        start: (start) => this.start(start, installation.invocation, model, effort, mcpAllowlistSupported),
+        ...(model === undefined ? {} : { resolveRuntimeLaunch: async (resources: CodexLaunchInput) => {
+          if (admittedLaunch !== undefined) throw authority('Codex subscription launch was already resolved');
+          const signal = resources.signal ?? input.signal;
+          signal?.throwIfAborted();
+          const launch = await this.#appServerLaunch(resources);
+          let subscribed: boolean;
+          try { subscribed = await this.#readSubscription(invocation, launch, signal); }
+          catch {
+            signal?.throwIfAborted();
+            throw retryable('Codex could not confirm the CLI account type');
+          }
+          if (!subscribed) throw codexSubscriptionRequired();
+          admittedLaunch = launch;
+          return launch;
+        } }),
+        start: start => this.start(start, invocation, model, effort, mcpAllowlistSupported, admittedLaunch),
       },
     };
   }
+
+  async #appServerLaunch(resources: CodexLaunchInput): Promise<CodexAppServerLaunch> {
+    const { cwd, agentHome, scratch } = resources;
+    const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && agentHome !== undefined;
+    const excludeUserContext = this.options.agentUserContext === 'excluded' && agentHome !== undefined;
+    const env = withoutProviderCredentials({ ...resources.env, ...scratch.env });
+    if (excludeUserContext) env.CODEX_HOME = await createCodexAgentHome(resources.env, scratch.sdkDir, agentHome.canonicalHome);
+    const sandbox = this.options.sandbox ?? 'danger-full-access';
+    const launchArgs = [
+      ...(sandbox === 'inherit' ? [] : ['-c', `sandbox_mode="${sandbox}"`]),
+      ...(agentHome?.access === 'memory-reader' ? READER_PROJECT_ROOT_ARGS : []),
+      // Plugin sync and memory processing can start before the first thread opens.
+      ...(excludeUserMcp || excludeUserContext ? DISABLE_PLUGINS_ARGS : []),
+      ...(excludeUserContext ? DISABLE_MEMORIES_ARGS : []),
+    ];
+    return Object.freeze({ cwd, agentHome: agentHome === undefined ? undefined : Object.freeze({ ...agentHome }), scratch,
+      env: Object.freeze(env), launchArgs: Object.freeze(launchArgs), excludeUserMcp, excludeUserContext, release: () => scratch.release() });
+  }
+
+  async #readSubscription(invocation: RuntimeInvocation, launch: CodexAppServerLaunch, signal?: AbortSignal): Promise<boolean> {
+    const timeout = AbortSignal.timeout(DETECT_TIMEOUT_MS);
+    const deadline = signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+    deadline.throwIfAborted();
+    const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'codex account read' });
+    let child: ReturnType<typeof spawn> | undefined;
+    // account/read needs neither feature. Suppress their startup work even when the task inherits it.
+    const launchArgs = [
+      ...launch.launchArgs,
+      ...(launch.excludeUserMcp || launch.excludeUserContext ? [] : DISABLE_PLUGINS_ARGS),
+      ...(launch.excludeUserContext ? [] : DISABLE_MEMORIES_ARGS),
+    ];
+    try {
+      const client = codexRuntime.startAppServerClient((bin, args, options) => {
+        child = spawn(bin, [...invocation.args, ...args], options);
+        return child;
+      }, invocation.command, launch.env, {}, launch.cwd, { launchArgs });
+      client.handle({ onNotification() {}, onServerRequest() {} });
+      const stop = () => client.kill();
+      deadline.addEventListener('abort', stop, { once: true });
+      try {
+        deadline.throwIfAborted();
+        await client.spawned;
+        deadline.throwIfAborted();
+        await client.request('initialize', { clientInfo: { name: 'byok-sdk', version: '0.0.0' } });
+        deadline.throwIfAborted();
+        client.notify('initialized', {});
+        return codexHasSubscription(await client.request('account/read', {}));
+      } finally {
+        deadline.removeEventListener('abort', stop);
+      }
+    } finally {
+      await child?.dispose();
+    }
+  }
+
   private async start(
     input: RuntimeOperationStartInput,
     invocation: RuntimeInvocation,
     model: string | undefined,
     effort: string | undefined,
     mcpAllowlistSupported: boolean,
+    admittedLaunch: CodexAppServerLaunch | undefined,
   ): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string')
       throw authority('codex requires a resolved instruction');
     assertCodexMcpHubQualified(input);
-    if (subscriptionModel(input.manifest.modelTarget) !== model)
+    if (subscriptionModel(input.manifest.selection) !== model || input.manifest.effort !== effort)
       throw authority(
         'prepared codex operation received a manifest with different runtime selection',
       );
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('codex manifest has no sealed cwd');
+    const agentHome = input.manifest.agentRef === undefined ? undefined : {
+      canonicalHome: input.manifest.lease?.canonicalHome ?? '', access: input.manifest.homeAccess ?? 'writer' as const,
+    };
+    if (model !== undefined && (admittedLaunch === undefined || admittedLaunch !== input.runtimeLaunch
+      || admittedLaunch.cwd !== cwd || admittedLaunch.scratch !== input.scratch
+      || admittedLaunch.agentHome?.canonicalHome !== agentHome?.canonicalHome || admittedLaunch.agentHome?.access !== agentHome?.access)) {
+      throw authority('Codex subscription start requires its exact admitted launch');
+    }
     const workspace = await fs.realpath(cwd);
     // As OAR: the servers go in the thread/start or thread/resume config.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
     const taskServers = mcpServers.map(server => server.name);
     if (taskServers.length > 0 && !mcpAllowlistSupported) throw authority(CODEX_MCP_TOOL_ALLOWLIST_REFUSAL);
     const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
-    const excludeUserContext = this.options.agentUserContext === 'excluded' && input.manifest.agentRef !== undefined;
     const spawned = createOwnedLineProcessSpawn({
       nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
     });
@@ -350,7 +442,8 @@ export class CodexAdapter implements RuntimeAdapter {
     let rootPid: number | undefined;
     const cleanupOnAbort = process.platform !== 'win32';
     try {
-      const codexHome = excludeUserContext ? { CODEX_HOME: await createCodexAgentHome(input.env, input.scratch.sdkDir, input.manifest.lease?.canonicalHome) } : {};
+      const launch = admittedLaunch ?? await this.#appServerLaunch({ kind: input.kind, cwd, env: input.env, scratch: input.scratch, agentHome });
+      const { excludeUserMcp, excludeUserContext } = launch;
       // The open deadline covers spawn, initialize, the thread open and its read-back.
       const raw = await session.within('open', retryable, codexRuntime.codexSession(
         (bin, args, options) => {
@@ -365,22 +458,16 @@ export class CodexAdapter implements RuntimeAdapter {
         },
         { kind: 'available', via: 'executable', command: invocation.command },
         {
-          cwd,
-          env: { ...input.env, ...input.scratch.env, ...codexHome } as Record<string, string>,
+          cwd: launch.cwd,
+          env: launch.env,
           retainedBytes: this.maxRetainedBytes,
           endTurnProcessesOnAbort: cleanupOnAbort,
           ...(model === undefined ? {} : { model }),
           ...(effort === undefined ? {} : { effort }),
-          sandboxMode: this.options.sandbox ?? 'danger-full-access',
+          // The shared launch arguments already contain the SDK's sandbox override.
+          sandboxMode: 'inherit',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
-          launchArgs: [
-            ...(input.manifest.homeAccess === 'memory-reader' ? READER_PROJECT_ROOT_ARGS : []),
-            // Startup plugin sync precedes beforeOpen and the thread's feature overrides.
-            // Plugins are user context too, and the SDK home has no plugin cache to sync into.
-            ...(excludeUserMcp || excludeUserContext ? ['-c', 'features.plugins=false'] : []),
-            // The memory pipeline would extract from the user's own threads in the linked sessions/.
-            ...(excludeUserContext ? ['-c', 'features.memories=false'] : []),
-          ],
+          launchArgs: launch.launchArgs,
           ...(input.manifest.sessionRef === undefined
             ? {}
             : { resume: input.manifest.sessionRef }),
@@ -395,6 +482,9 @@ export class CodexAdapter implements RuntimeAdapter {
           beforeOpen: async (request, params) => {
             const inspectUserMcp = excludeUserMcp || taskServers.length > 0;
             const effective = inspectUserMcp || excludeUserContext ? await request('config/read', { cwd, includeLayers: false }) : undefined;
+            if (model !== undefined && !codexHasSubscription(await request('account/read', {}))) {
+              throw codexSubscriptionRequired();
+            }
             if (excludeUserContext) assertCodexFileCredentials(effective!);
             const userServerNames = inspectUserMcp ? codexUserMcpServerNames(effective!, taskServers) : [];
             return withCodexMcpToolGrants(
@@ -436,6 +526,28 @@ export class CodexAdapter implements RuntimeAdapter {
     }
   }
 }
+interface CodexAppServerLaunch {
+  readonly cwd: string;
+  readonly agentHome?: CodexLaunchInput['agentHome'];
+  readonly scratch: ExecutionScratch;
+  readonly env: Readonly<Record<string, string>>;
+  readonly launchArgs: readonly string[];
+  readonly excludeUserMcp: boolean;
+  readonly excludeUserContext: boolean;
+  release(): Promise<void>;
+}
+
+function codexSubscriptionRequired(): RuntimeExecutionFailure {
+  return new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason: SUBSCRIPTION_REQUIRED,
+    failure: { class: 'invalid_request' } });
+}
+
+function codexHasSubscription(result: Readonly<Record<string, unknown>>): boolean {
+  const account = result.account;
+  return account !== null && typeof account === 'object' && 'type' in account
+    && account.type === 'chatgpt' && result.requiresOpenaiAuth !== false;
+}
+
 const authority = (reason: string) =>
   new RuntimeExecutionFailure({
     phase: 'start',
@@ -623,7 +735,7 @@ class CodexSession implements Session {
     if (task.effort !== undefined && task.effort !== this.effort) {
       throw new PolicyUnsupportedError('codex persistent session cannot change effort');
     }
-    const model = subscriptionModel(modelLaneTarget(task.target));
+    const model = subscriptionModel(offerSelection(task.target));
     if (model !== undefined && model !== this.model)
       throw new PolicyUnsupportedError(
         'codex persistent session cannot change model',
@@ -683,10 +795,10 @@ class CodexSession implements Session {
   }
 }
 function subscriptionModel(
-  selection: ModelLaneTarget | undefined,
+  selection: HarnessSelection | undefined,
 ): string | undefined {
-  if (!selection) return undefined;
-  if (selection.lane !== 'subscription' || selection.runtimeId !== 'codex')
+  if (selection === undefined || selection.mode === 'device-default') return undefined;
+  if (selection.mode !== 'subscription')
     throw new PolicyUnsupportedError(
       'codex cannot execute this runtime selection',
     );

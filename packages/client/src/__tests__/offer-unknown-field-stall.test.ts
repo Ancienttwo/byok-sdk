@@ -67,7 +67,7 @@ describe('task.offer with a field this build does not know', () => {
       agentRef: { agentId: 'future-gate-agent', profileRevision: 'profile-r1' },
       session: { mode: 'fresh' },
       instruction: 'run only what this daemon understands',
-      target: { lane: 'runtime', runtimeId: 'pi' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     } as const;
     server.pushRawLongPollEvent({
@@ -112,7 +112,7 @@ describe('task.offer with a field this build does not know', () => {
     expect(((await server.waitFor((envelope) => envelope.type === 'conn.hello')).payload as { capabilities: string[] }).capabilities).toContain('native-sessions');
     const seq = server.nextSeq();
     server.send(createEnvelope('task.offer', {
-      target: { lane: 'runtime', runtimeId: 'pi' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       agentRef: { agentId: 'native-rule-agent', profileRevision: 'profile-r1' }, session: { mode: 'fresh' }, instruction: 'dream',
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 }, homeAccess: 'memory-reader',
     }, { taskId: 'offer-native-rule', seq }));

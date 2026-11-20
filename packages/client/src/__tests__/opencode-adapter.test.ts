@@ -9,7 +9,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { testExecutionScratch, testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { projectRuntimeBoundaryFailure, RuntimeDisposalFailure, RuntimeStartupDisposalFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
@@ -27,10 +27,11 @@ import { startPreparedOperation } from './fixtures/prepared-operation';
 import { validateRuntimeDetectResult } from '../runtime-detection';
 import type { MessageDraftDelta, Session } from '../types';
 
-const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode' } as const;
+const OPENCODE_TARGET = { lane: 'harness', harnessId: 'opencode', selection: { mode: 'device-default' } } as const;
 
 const fake = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 const models = ['fixture/first', 'fixture/next', 'fixture/third'];
+const TASK_MODEL_TARGET = { lane: 'harness', harnessId: 'opencode', selection: { mode: 'adapter-model', modelId: 'fixture/task' } } as const;
 const sessions: Session[] = [];
 const dirs: string[] = [];
 afterEach(async () => {
@@ -120,8 +121,23 @@ async function collect(session: Session) {
 
 it.each([
   ['1.18.35', '1.18.35'], ['opencode v2.0.26', '2.0.26'], ['1.19.5', '1.19.5'], ['opencode v2.3.0', '2.3.0'],
-  ['1.18.34', undefined], ['2.0.25', undefined], ['2.0.26-rc.1', undefined], ['opencode v3.0.0', undefined], ['garbage 1.18.35', undefined], ['1.18.35\n2.0.26', undefined],
-])('normalizes only a complete supported release token %s', (raw, expected) => expect(opencodeVersionToken(raw)).toBe(expected));
+  ['1.18.34', '1.18.34'], ['2.0.25', '2.0.25'], ['2.0.26-rc.1', '2.0.26-rc.1'],
+  ['opencode v3.0.0', undefined], ['garbage 1.18.35', undefined], ['1.18.35\n2.0.26', undefined],
+])('normalizes a complete release version %s from a supported major', (raw, expected) => expect(opencodeVersionToken(raw)).toBe(expected));
+
+it.each([
+  ['1.18.34', '1.18.35'], ['2.0.25', '2.0.26'], ['2.0.26-rc.1', '2.0.26'],
+])('reports %s below the ACP floor %s', async (installedVersion, requiredVersion) => {
+  const { adapter } = setup(installedVersion);
+  await expect(adapter.detect()).resolves.toEqual({
+    kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion },
+  });
+});
+
+it.each(['1.18.35', '2.0.26'])('detects %s at its ACP floor', async version => {
+  const { adapter } = setup(version);
+  await expect(adapter.detect()).resolves.toMatchObject({ kind: 'available', version });
+});
 
 for (const version of ['1.18.35', 'opencode v2.0.26']) {
   defineRuntimeCases(`OpenCode ${version} replay contract`, {
@@ -265,13 +281,37 @@ it('registers an opt-in adapter with truthful capabilities', async () => {
 });
 
 it.each([undefined, 'ses_opencode_fixture'])('applies OpenCode task options and never falls back from a task model (resume=%s)', async sessionRef => {
-  const box = setup('1.19.5', { FAKE_ACP_EFFORT_MENU: '1' });
-  const session = await startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, modelId: 'fixture/task', effort: 'high',
+  const box = setup('1.19.5', { FAKE_ACP_EFFORT_MENU: '1', OPENAI_API_KEY: 'host-key' });
+  const adapter = new OpenCodeAdapter({ models: [...models, 'fixture/task'], resolveBin: () => ({ command: fake, source: 'env' }),
+    runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } });
+  const session = await startPreparedOperation(adapter, { target: TASK_MODEL_TARGET, effort: 'high',
     instruction: 'opencode-limit-always', sessionRef }, { workspaceDir: box.cwd, env: box.env });
   sessions.push(session);
   await expect(collect(session)).rejects.toMatchObject({ retry: 'non-retryable', failure: { class: 'rate_limited' } });
   expect(box.facts().filter(row => row.kind === 'config').map(row => row.params.value)).toEqual(['fixture/task', 'high']);
   expect(box.facts().filter(row => row.kind === 'open')).toHaveLength(1);
+  expect(box.facts().find(row => row.kind === 'start')?.env).not.toHaveProperty('OPENAI_API_KEY');
+});
+
+it('uses an explicit model without a configured list and keeps native model refusal typed', async () => {
+  const box = setup('1.19.5', { FAKE_ACP_REFUSE_MODEL: 'fixture/task' });
+  const [adapter] = createRuntimeAdapters({ runtimeAllowlist: ['opencode'], runtimes: { opencode: { executable: fake,
+    runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } } } });
+  expect(adapter!.descriptor.selectionModes).toEqual(['adapter-model']);
+  await expect(startPreparedOperation(adapter!, { target: TASK_MODEL_TARGET, instruction: 'hello' }, { workspaceDir: box.cwd, env: box.env }))
+    .rejects.toMatchObject({ phase: 'start', failure: { class: 'model_unavailable' } });
+});
+
+it('rejects omitted or out-of-list models before probing the installation', async () => {
+  const resolveBin = vi.fn(() => ({ command: fake, source: 'env' as const }));
+  const dynamic = new OpenCodeAdapter({ resolveBin });
+  const fixed = new OpenCodeAdapter({ models, resolveBin });
+  expect(fixed.descriptor.defaultModelModes).toEqual(['adapter-model']);
+  await expect(dynamic.prepare({ offer: { target: OPENCODE_TARGET, instruction: 'test' }, descriptor: dynamic.descriptor, requiredToolsetIds: [] }))
+    .resolves.toMatchObject({ kind: 'reject', code: 'invalid_request' });
+  await expect(fixed.prepare({ offer: { target: TASK_MODEL_TARGET, instruction: 'test' }, descriptor: fixed.descriptor, requiredToolsetIds: [] }))
+    .resolves.toMatchObject({ kind: 'reject', code: 'model_unavailable' });
+  expect(resolveBin).not.toHaveBeenCalled();
 });
 
 it.each(['1.19.5', 'opencode v2.3.0'])('passes admitted MCP servers on new and resumed %s sessions', async version => {
@@ -342,6 +382,44 @@ it('retains the v1 appended-persona overlay and removes its private instruction 
   } finally { await raw.dispose(); }
 });
 
+it('refuses to start when the manifest changes the admitted model', async () => {
+  const box = setup();
+  const prepare = box.adapter.prepare.bind(box.adapter);
+  vi.spyOn(box.adapter, 'prepare').mockImplementation(async input => {
+    const prepared = await prepare(input);
+    if (prepared.kind === 'reject') return prepared;
+    return { kind: 'prepared', operation: { start: start => prepared.operation.start({ ...start,
+      manifest: { ...start.manifest, selection: { mode: 'adapter-model', modelId: models[1] } },
+    }) } };
+  });
+  await expect(box.start('hello')).rejects.toThrow('manifest with different runtime selection');
+  expect(existsSync(box.log)).toBe(false);
+});
+
+it('reports native model refusal after claim as task.fail', async () => {
+  const box = setup('1.19.5', { FAKE_ACP_REFUSE_MODEL: 'fixture/task' });
+  const adapter = new OpenCodeAdapter({ resolveBin: () => ({ command: fake, source: 'env' }),
+    runtimeEnvironment: { base: 'allowlist', pass: ['FAKE_ACP_*'] } });
+  const descriptor = adapter.descriptor;
+  vi.spyOn(adapter, 'descriptor', 'get').mockReturnValue({ ...descriptor, platforms: [process.platform] });
+  const sent: Envelope[] = [];
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, ...freshOfferRunnerDeps(),
+    getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+    adapters: [adapter], agentHome: new AgentHomeManager({ hostStorageRoot: path.join(box.cwd, 'homes') }),
+    agentSessionHandoffs: new AgentSessionHandoffStore(),
+    deviceId: 'device-1', productId: 'opencode-test', storeDir: path.join(box.cwd, 'store'),
+    send: envelope => { sent.push(envelope); }, approvalRegistry: new ApprovalRegistry(),
+    blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
+  });
+  try {
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: TASK_MODEL_TARGET,
+      agentRef: { agentId: 'opencode-agent', profileRevision: 'r1' }, instruction: 'hello', agentMemory: 'none', ...FRESH_OFFER,
+    }, { taskId: 'model-refusal', seq: 1 }));
+    expect(sent.find(envelope => envelope.type === 'task.claim')?.payload, JSON.stringify(sent.map(({ type, payload }) => ({ type, payload })))).toMatchObject({ executor: { id: 'opencode' } });
+    expect(sent.find(envelope => envelope.type === 'task.fail')?.payload).toMatchObject({ failure: { class: 'model_unavailable' } });
+  } finally { await runner.shutdownActiveTasks('test cleanup'); }
+});
+
 it('refuses a v2 Agent-memory reader before launching ACP', async () => {
   const box = setup('opencode v2.0.26');
   await expect(startPreparedOperation(box.adapter, { target: OPENCODE_TARGET, instruction: 'reader' }, {
@@ -361,14 +439,14 @@ it('keeps the admitted native identity in task.complete and persisted terminal e
   const sent: Envelope[] = [];
   const handoffs = new AgentSessionHandoffStore();
   const recorded = vi.spyOn(handoffs, 'recordTerminal');
-  const runner = new TaskRunner({ ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, ...freshOfferRunnerDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [box.adapter], agentHome: new AgentHomeManager({ hostStorageRoot: path.join(box.cwd, 'homes') }), agentSessionHandoffs: handoffs,
     deviceId: 'device-1', productId: 'opencode-test', storeDir: path.join(box.cwd, 'store'),
     send: envelope => { sent.push(envelope); }, approvalRegistry: new ApprovalRegistry(),
     blobClient: { resolveInstruction: async () => { throw new Error('unused'); }, uploadArtifact: async () => { throw new Error('unused'); } },
   });
   try {
-    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: 'opencode' }, agentRef: { agentId: 'opencode-agent', profileRevision: 'r1' },
+    await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: 'opencode', selection: { mode: 'device-default' } }, agentRef: { agentId: 'opencode-agent', profileRevision: 'r1' },
       instruction: 'opencode-limit', agentMemory: 'none', ...FRESH_OFFER }, { taskId: 'identity-fallback', seq: 1 }));
     expect(sent.some(envelope => envelope.type === 'task.started')).toBe(true);
     const published = box.facts().find(fact => fact.kind === 'native-session')!.sessionId;

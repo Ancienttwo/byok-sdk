@@ -11,7 +11,7 @@ import { hostFor, forgetHost } from '../daemon/task-runner/host';
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import type { BlobResolver } from '../daemon/blob-client';
 import { RuntimeExecutionFailure } from '../runtime-failure';
@@ -22,7 +22,7 @@ const unusedBlobClient: BlobResolver = {
 };
 
 function makeRunner(sent: Envelope[], overrides: Partial<TaskRunnerDeps> = {}): TaskRunner {
-  return new TaskRunner({
+  return new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },
     ...freshOfferRunnerDeps(),
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),
@@ -112,10 +112,10 @@ describe('TaskRunner offer/admission host wiring (S3)', () => {
       } } };
     });
     const runner = makeRunner(sent, { adapters: [{
-      descriptor: { ...stub.descriptor, supportsTaskExecutionOptions: supported },
+      descriptor: { ...stub.descriptor, supportsEffort: supported },
       detect: () => stub.detect(), runtimeEnvironment: () => stub.runtimeEnvironment(), prepare,
     }] });
-    await offer(runner, 'task-options', { target: { lane: 'harness', harnessId: 'grok', modelId: 'task-model', effort: 'high' } });
+    await offer(runner, 'task-options', { target: { lane: 'harness', harnessId: 'grok', selection: { mode: 'adapter-model', modelId: 'task-model' }, effort: 'high' } });
     expect(prepare).toHaveBeenCalledTimes(supported ? 1 : 0);
     expect(sent.some(envelope => envelope.type === 'task.claim')).toBe(supported);
     expect(sent.find(envelope => envelope.type === (supported ? 'task.fail' : 'task.decline'))?.payload).toMatchObject(supported
@@ -166,7 +166,7 @@ function memoryAdapter(): { adapter: RuntimeAdapter; stub: StubRuntimeAdapter; s
   } };
 }
 
-const nativeOffer = { target: { lane: 'runtime', runtimeId: 'pi' }, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 } };
+const nativeOffer = { target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentMemory: 'none', nativeSessions: { fromMs: 1, toMs: 2 } };
 const rendered = { jsonLine: '{"calls":[],"omittedCalls":0}', counts: {} };
 
 describe('native session dream wiring', () => {
@@ -176,7 +176,7 @@ describe('native session dream wiring', () => {
     [true, 'darwin', undefined, true, false], [true, 'darwin', '/sessions', false, false],
   ] as const)('declares only with switch=%s platform=%s directory=%s lane=%s', (enabled, platform, sessionDir, lane, expected) => {
     const { adapter, stub } = memoryAdapter();
-    const flags = computeCapabilities([lane ? adapter : stub], true, false, false, undefined, false, false, false, false, false,
+    const flags = computeCapabilities([lane ? adapter : stub], true, false, false, undefined, false, false, false, false,
       { enabled, platform, sessionDir });
     expect(flags.includes('native-sessions')).toBe(expected);
   });
@@ -206,7 +206,7 @@ describe('native session dream wiring', () => {
   it('refuses an explicitly selected non-Pi runtime with the selection rule', async () => {
     const sent: Envelope[] = [];
     const runner = makeRunner(sent, { adapters: [new StubRuntimeAdapter('codex')], nativeSessions: { sessionDir: '/sessions' } });
-    await offer(runner, 'native-non-pi', { ...nativeOffer, target: { lane: 'runtime', runtimeId: 'codex' } });
+    await offer(runner, 'native-non-pi', { ...nativeOffer, target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } });
     expect(sent.find(e => e.type === 'task.decline')?.payload).toMatchObject({ code: 'native_sessions_selection_invalid', retryable: false });
     expect(sent.some(e => e.type === 'task.claim')).toBe(false);
   });

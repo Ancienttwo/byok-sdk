@@ -5,7 +5,7 @@ import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runti
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapterDescriptor, type RuntimeOperationStartInput, type Session } from '../types';
 
 const descriptor = (progressMessageBoundary?: RuntimeAdapterDescriptor['progressMessageBoundary']): RuntimeAdapterDescriptor =>
-  freezeRuntimeAdapterDescriptor({ id: 'wrapped', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false }, progressMessageBoundary });
+  freezeRuntimeAdapterDescriptor({ id: 'wrapped', selectionModes: ['device-default'], capabilities: { steer: false, resume: false, approvalInteractive: false }, progressMessageBoundary });
 
 it('a startup deadline retains a late session until its close receipt', async () => {
 const __executionScratch = await testExecutionScratch();

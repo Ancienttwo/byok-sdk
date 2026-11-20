@@ -80,7 +80,7 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
         await presence.publish(TENANT_B, { deviceId: 'foreign', level: 'error', ttlMs: 60_000, minimumIntervalMs: 0 });
         const hint = await presence.publish(TENANT_A, {
           deviceId: 'c-working', level: 'working', detail: 'editing', configuredToolsets: ['git'],
-          clientVersion: 'test-client', protocolVersions: [2], runtimes: [{ id: 'pi', authPresent: true }],
+          clientVersion: 'test-client', protocolVersions: [2], harnesses: [{ id: 'pi', authPresent: true, capabilities: { selectionModes: ['byok-profile'], effort: false } }],
           ttlMs: 60_000, minimumIntervalMs: 0,
         });
 
@@ -97,7 +97,7 @@ export function runPairingConformance(factory: CloudCompositionFactory): void {
           deviceId: 'c-working', productId: 'product-1', deviceName: 'name-c-working', revoked: false,
           presence: {
             level: 'working', detail: 'editing', configuredToolsets: ['git'],
-            clientVersion: 'test-client', protocolVersions: [2], runtimes: [{ id: 'pi', authPresent: true }],
+            clientVersion: 'test-client', protocolVersions: [2], harnesses: [{ id: 'pi', authPresent: true, capabilities: { selectionModes: ['byok-profile'], effort: false } }],
             observedAt: hint.observedAt, expiresAt: hint.expiresAt,
           },
         });

@@ -22,7 +22,7 @@ import { McpToolsetRegistry, McpToolsetRevisionConflictError } from '../daemon/t
 import { freezeRuntimeAdapterDescriptor, type McpToolsetConfig, type RuntimeCapabilities, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeOperationStartInput } from '../types';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { observationOf } from './fixtures/mcp-observation';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
@@ -36,7 +36,7 @@ const FRESH_OFFER = { session: { mode: 'fresh' as const }, egressPolicy: DEFAULT
 
 class HostApprovalAdapter extends StubRuntimeAdapter {
   override readonly descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'codex', supportsDispatchSelection: true, mcpToolApprovals: true,
+    id: 'codex', selectionModes: ['device-default', 'subscription'], mcpToolApprovals: true,
     capabilities: { steer: false, resume: true, approvalInteractive: false, mcpToolsets: true },
   });
   readonly approvals: Array<RuntimeOperationStartInput['mcpToolApprovals']> = [];
@@ -103,7 +103,7 @@ async function makeRunner(
   getMcpToolsetSnapshot?: TaskRunnerDeps['getMcpToolsetSnapshot'],
   mcpToolsetToolsProbe: NonNullable<TaskRunnerDeps['mcpToolsetToolsProbe']> = stubToolsProbe,
 ): Promise<TaskRunner> {
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+  const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
     mcpToolsetToolsProbe,
     adapters: Array.isArray(adapter) ? adapter : [adapter],
     ...testAgentHomeDeps(),
@@ -133,7 +133,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     try {
       for (const [index, taskId] of ['before-reload', 'after-reload'].entries()) {
         await runner.handleEnvelope(createEnvelope('task.offer', {
-          agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'codex' }, requiredToolsets: ['host'],
+          agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, requiredToolsets: ['host'],
         }, { taskId, seq: index + 1 }));
       }
       expect(adapter.approvals).toEqual([{ host: ['read'] }, { host: ['read', 'write'] }]);
@@ -155,7 +155,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     const runner = await makeRunner(adapter, sent, undefined, () => registry.snapshot());
     try {
       await runner.handleEnvelope(createEnvelope('task.offer', {
-        agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['host'],
+        agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, requiredToolsets: ['host'],
       }, { taskId: 'unsupported-approvals', seq: 1 }));
       expect(sent.some(e => e.type === 'task.decline')).toBe(false);
       expect(sent.filter(e => e.type === 'task.claim')).toHaveLength(1);
@@ -195,7 +195,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     try {
       for (const [index, runtime] of (['codex', 'claude'] as const).entries()) {
         await runner.handleEnvelope(createEnvelope('task.offer', {
-          agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: runtime }, requiredToolsets: ['host'],
+          agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } }, requiredToolsets: ['host'],
         }, { taskId: `shared-${runtime}`, seq: index + 1 }));
       }
       expect(registry.status().revision).toBe(revision);
@@ -233,7 +233,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
         'task.offer',
         { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: 'find qualified leads',
-          target: { lane: 'runtime', runtimeId: 'claude' },
+          target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } },
           requiredToolsets: ['salesko'],
         },
         { taskId: 'task-mcp-1', seq: 1 },
@@ -270,7 +270,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
           'task.offer',
           { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
             instruction: 'x',
-            target: { lane: 'runtime', runtimeId: 'claude' },
+            target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } },
             requiredToolsets: ['salesko'],
           },
           { taskId: `task-missing-${registry ? 'id' : 'registry'}`, seq: 1 },
@@ -293,7 +293,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' }, requiredToolsets: ['salesko'] },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, requiredToolsets: ['salesko'] },
         { taskId: 'task-unsupported', seq: 1 },
       ),
     );
@@ -318,7 +318,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
         'task.offer',
         { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
           instruction: 'x',
-          target: { lane: 'runtime', runtimeId: 'claude' },
+          target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } },
           requiredToolsets: ['mail', 'social'],
         },
         { taskId: 'task-collision', seq: 1 },
@@ -347,7 +347,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
       await runner.handleEnvelope(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['salesko'] },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, requiredToolsets: ['salesko'] },
           { taskId: 'task-unobservable', seq: 1 },
         ),
       );
@@ -370,7 +370,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'first', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['salesko'] },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'first', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, requiredToolsets: ['salesko'] },
         { taskId: 'task-before-reload', seq: 1 },
       ),
     );
@@ -382,7 +382,7 @@ describe('TaskRunner logical MCP toolset resolution', () => {
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'second', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['salesko'] },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'second', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, requiredToolsets: ['salesko'] },
         { taskId: 'task-after-reload', seq: 2 },
       ),
     );
@@ -418,7 +418,7 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' }, requiredToolsets: ['salesko'] },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, requiredToolsets: ['salesko'] },
         { taskId: 'task-pi-no-probe', seq: 1 },
       ),
     );
@@ -452,7 +452,7 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['salesko'] },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, requiredToolsets: ['salesko'] },
         { taskId: 'task-ungrantable', seq: 1 },
       ),
     );
@@ -494,7 +494,7 @@ describe('TaskRunner toolset tools/list probe — who pays for it, and for how l
     await runner.handleEnvelope(
       createEnvelope(
         'task.offer',
-        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'claude' }, requiredToolsets: ['salesko'] },
+        { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, requiredToolsets: ['salesko'] },
         { taskId: 'task-probe-deadline', seq: 1 },
       ),
     );
@@ -746,7 +746,7 @@ describe('absolute toolset command, consistently across every runtime', () => {
       await runner.handleEnvelope(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: runtime }, requiredToolsets: ['salesko'] },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } }, requiredToolsets: ['salesko'] },
           { taskId: `task-refused-${runtime}`, seq: 1 },
         ),
       );
@@ -798,7 +798,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
     extra: Partial<TaskRunnerDeps> = {},
   ): Promise<TaskRunner> {
     const storeDir = await tmpDir('byok-host-toolset-store-');
-    const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       mcpToolsetToolsProbe: stubToolsProbe,
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: await tmpDir('byok-host-toolset-home-') }),
@@ -831,7 +831,7 @@ describe('TaskRunner host toolset context nonce injection', () => {
         'task.offer',
         {
           instruction: 'qualify the inbound lead',
-          target: { lane: 'runtime', runtimeId: 'pi' },
+          target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
           agentRef: { agentId: 'salesko-agent', profileRevision: 'profile-rev-1' },
           session: { mode: 'fresh' },
           egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

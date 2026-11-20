@@ -23,12 +23,12 @@ describe('U3 first-hop presence identity', () => {
       auth: auth(),
       intervalMs: 30_000,
       clientVersion: '0.4.2',
-      runtimes: [
+      harnesses: [
         {
           id: 'pi',
           version: '1.0.0',
           authPresent: true,
-          capabilities: { steer: true },
+          capabilities: { steer: true, selectionModes: ['byok-profile'], effort: false },
         },
       ],
     });
@@ -40,7 +40,7 @@ describe('U3 first-hop presence identity', () => {
         level: 'online',
         clientVersion: '0.4.2',
         // The conn.hello capability matrix rides along (#1103).
-        runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { steer: true } }],
+        harnesses: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { steer: true, selectionModes: ['byok-profile'], effort: false } }],
       },
     ]);
     publisher.stop();

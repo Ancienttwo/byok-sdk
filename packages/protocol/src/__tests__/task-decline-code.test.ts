@@ -19,8 +19,8 @@ describe('typed home-busy decline code', () => {
   it.each(['agent_home_writer_busy', 'agent_home_reader_busy'])(
     'preserves %s through wire decoding without a reason prefix', (code) => {
       const payload = { reason: 'display only', retryable: true, code };
-      expect(decodeEnvelope(wire(payload))).toMatchObject({ v: 7, type: 'task.decline', payload });
-      expect(PROTOCOL_VERSION).toBe(7);
+      expect(decodeEnvelope(wire(payload))).toMatchObject({ v: 8, type: 'task.decline', payload });
+      expect(PROTOCOL_VERSION).toBe(8);
     },
   );
 

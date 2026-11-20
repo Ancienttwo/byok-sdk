@@ -1,3 +1,4 @@
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, realpath, rm, readFile, stat, writeFile } from 'node:fs/promises';
@@ -46,7 +47,7 @@ function tool(res: import('node:http').ServerResponse, command: string, name = '
     { ...base, choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } },
   ].map(value => `data: ${JSON.stringify(value)}\n\n`).join('') + 'data: [DONE]\n\n');
 }
-async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}, gateFor?: (home: string) => Promise<ToolAuthorizationGate>, mcp?: Pick<RuntimeOperationStartInput, 'mcpServers' | 'mcpToolsetTools'>, providerId?: 'opencode-go', receipt: { profileRef?: string; providerId?: string } = {}) {
+async function fixture(respond: (res: import('node:http').ServerResponse, ordinal: number, body: string, paths: {home:string;store:string}) => void, lifecycle?: {ownsLease?():boolean; record?(kind:string,n:number):Promise<void>}, gateFor?: (home: string) => Promise<ToolAuthorizationGate>, mcp?: Pick<RuntimeOperationStartInput, 'mcpServers' | 'mcpToolsetTools'>, providerId?: 'opencode-go', receipt: { profileRef?: string; providerId?: string } = {}, modelId?: string) {
 const __executionScratch = await testExecutionScratch();
 
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'byok-durable-launch-'))); roots.push(root);
@@ -57,12 +58,14 @@ const __executionScratch = await testExecutionScratch();
   const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
   const profile = parseModelProviderProfile({ adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [], created_at: '2026-09-10T00:00:00.000Z', updated_at: '2026-09-10T00:00:00.000Z', display_name: 'Synthetic', enabled: true, kind: 'model', model: 'test', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, contextWindow: 4096, maxTokens: 64, reasoning: false, thinkingLevel: 'off', ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } });
   const children: ChildProcess[] = [];
-  const adapter = new PiAdapter({ durableLane: true, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
+  const adapter = new PiAdapter({ durableLane: true, validateProviderProfileBinding: async binding => {
+    expect(binding).toEqual(exactProviderProfileBinding(profile));
+  }, byokLauncher: { command: 'synthetic-custody-launcher', profileDbPath: path.join(root,'profiles'), sessionDir: path.join(root,'sessions') },
     spawnFn: ((_cmd, args, options) => {
       const parsed = parsePiProviderLauncherOptions(args as string[]); expect(parsed.runtimeEntry).toBe('pi-durable');
       const delegated = buildPiPreparedArgs(parsed.piArgs);
       const env = buildPiProviderChildEnvironment({ ambient: options!.env!, projectionDir: parsed.piProjectionDir!, sessionDir: parsed.sessionDir });
-      writeFileSync(path.join(env.PI_CODING_AGENT_DIR!, 'models.json'), JSON.stringify(buildPiProviderProjection(profile, parsed.runtimeEntry)), { mode: 0o600 });
+      writeFileSync(path.join(env.PI_CODING_AGENT_DIR!, 'models.json'), JSON.stringify(buildPiProviderProjection(profile, parsed.runtimeEntry, parsed.modelId)), { mode: 0o600 });
       const child = nativeSpawn(parsed.piBin, [...(parsed.piEntry ? [parsed.piEntry] : []), `--config-digest=${parsed.piConfigDigest}`, ...delegated], { ...options, env, cwd: parsed.piCwd!, stdio: ['pipe','pipe','pipe','ipc'], serialization: 'json' } as never);
       expect(env.PI_PROVIDER_API_KEY).toBeUndefined();
       expect(JSON.stringify(env)).not.toContain('DURABLE_PROVIDER_SENTINEL');
@@ -73,7 +76,7 @@ const __executionScratch = await testExecutionScratch();
       children.push(child); return child;
     }) as typeof nativeSpawn,
   });
-  const selection = { lane: 'byok' as const, runtimeId: 'pi' as const, providerId: 'probe', modelId: 'test' };
+  const selection = { lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'byok-profile' as const, providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [] }, ...(modelId === undefined ? {} : { modelId }) } };
   const offer = { instruction: 'Host authority input\nHost context second line', target: selection };
   const prepared = await adapter.prepare({ offer, ...mcp } as never);
   if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
@@ -84,7 +87,7 @@ const __executionScratch = await testExecutionScratch();
   await writeFile(path.join(ambientAgent, 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api_key', key: 'AMBIENT_AUTH_KEY' } }));
   const env = { ...testRuntimeEnv(), HOME: root, PI_CODING_AGENT_DIR: ambientAgent };
   const launch = await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch,  kind: 'instruction', cwd: home, env,  });
-  const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, modelTarget: selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
+  const manifest = sealRuntimeOperationManifest({ taskId: 'task', runtimeId: 'pi', descriptor: adapter.descriptor, selection: selection.selection, requiredToolsetIds: [], cwd: home, workspace: { workspaceDir: home }, agentRef: { agentId: 'agent', profileRevision: 'revision' }, lease: { leaseId: 'lease', canonicalHome: home }, forwardedEnvironmentNames: Object.keys(env) });
   const journal: string[] = [];
   const toolAuthorization = await gateFor?.(home);
   const session = await prepared.operation.start({ ...mcp, ...(toolAuthorization === undefined ? {} : { toolAuthorization }), scratch: (launch).scratch,  kind: 'instruction', instruction: 'Host authority input\nHost context second line', manifest, env, runtimeLaunch: launch, mcpEnv: projectPiMcpEnvironment(env), durableContext: { replicaRoot: path.join(store, 'durable-replicas'), tenantId: 'tenant', lifecycle: { ownsLease: () => lifecycle?.ownsLease?.() ?? true, record: async (kind,n) => { journal.push(`${kind}:${n}`); await lifecycle?.record?.(kind,n); } } } }); sessions.push(session);
@@ -112,9 +115,26 @@ describe.skipIf(process.platform === 'win32')('durable ordinary worker through c
     expect(events.filter(event => event.type === 'usage')).toEqual([{ type: 'usage', inputTokens: 3, cachedInputTokens: 0, outputTokens: 2, totalTokens: 5 }]);
     // Wire v3: no in-replica result document; a result-document outcome goes through submit_result.
     expect(f.session).not.toHaveProperty('resultDocument'); expect(events.some(event => event.type === 'artifact')).toBe(false);
+    expect(JSON.parse(f.bodies[0]!).model).toBe('test');
     expect(f.bodies[0]).toContain('Host authority input'); expect(JSON.parse(f.bodies[0]!).messages.some((message: {content:unknown}) => typeof message.content === 'string' && message.content.includes('Host context second line'))).toBe(true); expect(f.authorizations).toEqual(['Bearer DURABLE_PROVIDER_SENTINEL']);
     expect(f.bodies.join('')).not.toContain('DURABLE_PROVIDER_SENTINEL'); expect(f.calls()).toBe(1);
   });
+  it('sends the durable override as the provider request model', async () => {
+    const f = await fixture(res => finish(res, 'complete'), undefined, undefined, undefined, undefined, {}, 'org/alternate');
+    for await (const event of f.session.events) { if (event.type === 'turn_end') break; }
+    expect(f.bodies.map(body => JSON.parse(body).model)).toEqual(['org/alternate']);
+  });
+
+  it.each(['model_not_found', '模型不存在'])('reports a provider model refusal (%s) as model_unavailable', async message => {
+    const f = await fixture(res => {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message } }));
+    }, undefined, undefined, undefined, undefined, {}, 'absent');
+    await expect((async () => { for await (const _ of f.session.events) { /* drain */ } })())
+      .rejects.toMatchObject({ phase: 'run', failure: { class: 'model_unavailable' } });
+    expect(f.calls()).toBe(1);
+  });
+
   it('declared OpenCode Go uses only its launcher projection and credential, ignoring ambient user model/auth entries', async () => {
     const f = await fixture(res => finish(res, 'isolated'), undefined, undefined, undefined, 'opencode-go');
     const events: Array<AgentEvent | MessageDraftDelta> = []; for await (const event of f.session.events) events.push(event);

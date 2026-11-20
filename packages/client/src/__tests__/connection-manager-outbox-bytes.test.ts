@@ -34,7 +34,7 @@ describe('drainOutbox chunks outbound sends by encoded bytes', () => {
     manager = new ConnectionManager({
       onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url, deviceId: record.deviceId, productId: 'outbox-bytes-test',
-      capabilities: [], runtimes: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
+      capabilities: [], harnesses: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
       beforeOutboundPost: batch => { if (batch.every(e => e.type !== 'conn.hello')) posts.push([...batch]); },
       longPollRetryDelayMs: 10, longPollIdleDelayMs: 10,
     });
@@ -45,7 +45,7 @@ describe('drainOutbox chunks outbound sends by encoded bytes', () => {
 
   // `task.complete.summary` is unbounded text; a `task.fail` reason is capped by the schema (#1124).
   const big = (index: number, bytes: number): Envelope =>
-    createEnvelope('task.complete', { sessionRef: 'outbox-bytes-session', summary: 'x'.repeat(bytes), executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: `bytes-task-${index}` });
+    createEnvelope('task.complete', { sessionRef: 'outbox-bytes-session', summary: 'x'.repeat(bytes), executor: { id: 'pi' } }, { taskId: `bytes-task-${index}` });
   const bodyBytes = (batch: Envelope[]): number => Buffer.byteLength(JSON.stringify({ messages: batch }));
 
   it('splits a queue whose encoded size passes the body limit into several in-limit posts, in order', async () => {
@@ -93,7 +93,7 @@ describe('the outbox drops its oldest ephemeral envelopes past its byte cap', ()
     manager = new ConnectionManager({
       onStateChange: opens.onStateChange, onHalted: opens.onHalted,
       serverUrl: server.url, deviceId: record.deviceId, productId: 'outbox-cap-test',
-      capabilities: [], runtimes: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
+      capabilities: [], harnesses: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
       beforeOutboundPost: batch => { for (const e of batch) if (e.type !== 'conn.hello') posted.push(e); },
       onOutboundDropped: envelope => dropped.push(envelope),
       longPollRetryDelayMs: 10, longPollIdleDelayMs: 10,
@@ -104,7 +104,7 @@ describe('the outbox drops its oldest ephemeral envelopes past its byte cap', ()
       createEnvelope('task.progress', { seq, events: [{ type: 'progress', text: 'p'.repeat(chunk) }] }, { taskId: 'cap-task', seq });
     const count = Math.ceil(MAX_OUTBOX_EPHEMERAL_BYTES / chunk) + 3;
     const progresses = Array.from({ length: count }, (_, index) => progress(index + 1));
-    const terminal = createEnvelope('task.complete', { sessionRef: 'cap-session', summary: 't'.repeat(chunk), executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'cap-task' });
+    const terminal = createEnvelope('task.complete', { sessionRef: 'cap-session', summary: 't'.repeat(chunk), executor: { id: 'pi' } }, { taskId: 'cap-task' });
     for (const envelope of progresses.slice(0, 2)) manager.send(envelope);
     manager.send(terminal);
     for (const envelope of progresses.slice(2)) manager.send(envelope);
@@ -157,7 +157,7 @@ describe('draft outbox after a failed post', () => {
     const beforePost = vi.fn();
     const manager = new ConnectionManager({
       serverUrl: instance.url, deviceId: record.deviceId, productId: 'draft-outbox-test',
-      capabilities: [], runtimes: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
+      capabilities: [], harnesses: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
       onOutboundQueued: queued, beforeOutboundPost: beforePost,
       onOutboundSettled: async batch => { settled.push(...batch); },
       longPollRetryDelayMs: 10, longPollIdleDelayMs: 10,
@@ -174,7 +174,7 @@ describe('draft outbox after a failed post', () => {
       contentHash: `sha256:${createHash('sha256').update(body).digest('hex')}`,
     }, { taskId });
     const complete = createEnvelope('task.complete', {
-      summary: body, sessionRef: 'draft-session', executor: { kind: 'runtime', runtimeId: 'pi' },
+      summary: body, sessionRef: 'draft-session', executor: { id: 'pi' },
     }, { taskId });
     return { server: instance, manager, settled, queued, beforePost, draft, publish, complete };
   }

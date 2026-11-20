@@ -20,7 +20,7 @@ describe('task attempt phase instants (#980)', () => {
     const store = new InMemoryTaskAttemptStore(clock, state);
     const old = await store.get(TENANT_A, 'old');
     for (const field of ['offeredAt', 'claimedAt', 'firstOutputAt', 'terminalAt']) expect(old).not.toHaveProperty(field);
-    const claimed = await store.claim(TENANT_A, { taskId: 'old', deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } });
+    const claimed = await store.claim(TENANT_A, { taskId: 'old', deviceId: 'device-1', executor: { id: 'pi' } });
     expect(claimed).toMatchObject({ claimedAt: '2026-10-27T00:00:00.000Z' });
     expect(claimed).not.toHaveProperty('offeredAt');
   });
@@ -51,7 +51,7 @@ describe('task attempt phase instants (#980)', () => {
     expect(await draft('before claim', 1)).toEqual({ outcome: 'accepted' });
     expect(await stored()).toMatchObject({ revision: 1, text: 'before claim' });
     expect(await attempt()).not.toHaveProperty('firstOutputAt');
-    await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
+    await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId, executor: { id: 'pi' } });
     clock.advance(1_000);
     expect(await draft('', 2)).toEqual({ outcome: 'accepted' });
     expect(await stored()).toMatchObject({ revision: 2, text: '' });
@@ -79,7 +79,7 @@ describe('task attempt phase instants (#980)', () => {
     // The claim commits right after the draft lands, before inbound stamps.
     const racing: typeof stores = { ...stores, agentMessageDraft: { ...stores.agentMessageDraft, apply: async (input) => {
       const applied = await stores.agentMessageDraft.apply(input);
-      await stores.tasks.claim({ taskId, deviceId: device.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
+      await stores.tasks.claim({ taskId, deviceId: device.deviceId, executor: { id: 'pi' } });
       return applied;
     } } };
     expect(await handleInboundEnvelope(racing, device.deviceId,
@@ -103,7 +103,7 @@ describe('task attempt phase instants (#980)', () => {
     );
     const send = (type: MessageType, payload: object) =>
       handleInboundEnvelope(stores, device.deviceId, createEnvelope(type as Envelope['type'], payload as never, { taskId }) as Envelope);
-    expect(await send('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } })).toEqual({ outcome: 'accepted' });
+    expect(await send('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } })).toEqual({ outcome: 'accepted' });
     expect(await send('task.started', {})).toEqual({ outcome: 'accepted' });
     expect(await send('task.progress', { seq: 1, events: [{ type: 'progress', text: 'working' }] })).toEqual({ outcome: 'accepted' });
     const attempt = await harness.cloud.readTaskAttempt(TENANT_A, taskId);

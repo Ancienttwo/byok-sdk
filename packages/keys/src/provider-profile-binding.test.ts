@@ -63,12 +63,13 @@ describe('Agent-scoped provider profile binding', () => {
     expect(binding).toMatchObject({
       profileRef: 'openrouter-primary',
       profileRevision: String(Date.parse('2026-08-26T00:00:00.000Z')),
-      modelId: 'anthropic/claude-sonnet-4',
       requiredCapabilities: ['image-input'],
     });
     expect(binding.profileHash).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(JSON.stringify(binding)).not.toContain(profile.base_url);
     expect(() => keys.assertExactProviderProfileBinding(profile, binding)).not.toThrow();
+    expect(() => keys.assertExactProviderProfileBinding({ ...profile, model: 'other-default' }, binding))
+      .toThrow(/hash mismatch/);
     expect(() => keys.assertExactProviderProfileBinding(profile, {
       ...binding,
       profileRevision: String(Number(binding.profileRevision) + 1),

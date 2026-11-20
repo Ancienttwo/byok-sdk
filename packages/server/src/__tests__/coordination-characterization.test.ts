@@ -107,7 +107,7 @@ async function claimAndStartOverLongPoll(
     daemon,
     createEnvelope(
       'task.claim',
-      { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { kind: 'runtime', runtimeId: runtime }, capabilities: capabilities as never },
+      { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { id: runtime }, capabilities: capabilities as never },
       { taskId: handle.taskId },
     ),
   );
@@ -184,7 +184,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       daemon,
       createEnvelope(
         'task.complete',
-        { executor: { kind: 'runtime', runtimeId: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'all done', sessionRef: 'session-abc', document: { ok: true, items: [1, 2, 3] } },
+        { executor: { id: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'all done', sessionRef: 'session-abc', document: { ok: true, items: [1, 2, 3] } },
         { taskId: handle.taskId },
       ),
     );
@@ -231,7 +231,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
 
     const first = await sendOne(
       daemon,
-      createEnvelope('task.complete', { executor: { kind: 'runtime', runtimeId: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: { id: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'first', sessionRef: 'session-first' }, { taskId: handle.taskId }),
     );
     expect(first).toMatchObject({ status: 200, body: { accepted: 1 } });
     const recorded = (await started.byok.tasks.get(handle.taskId))?.result;
@@ -243,7 +243,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     // (§9 stale-terminal rule). "Ignored", not "refused", is the pin.
     const second = await sendOne(
       daemon,
-      createEnvelope('task.complete', { executor: { kind: 'runtime', runtimeId: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'second', sessionRef: 'session-second' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: { id: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'second', sessionRef: 'session-second' }, { taskId: handle.taskId }),
     );
     expect(second).toMatchObject({ status: 200, body: { accepted: 1 } });
 
@@ -272,7 +272,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       daemon,
       createEnvelope(
         'task.complete',
-        { executor: { kind: 'runtime', runtimeId: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'finished anyway', sessionRef: 'session-late', document: { applied: true } },
+        { executor: { id: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'finished anyway', sessionRef: 'session-late', document: { applied: true } },
         { taskId: handle.taskId },
       ),
     );
@@ -359,20 +359,20 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
       productId: PRODUCT_ID,
       runtimes: [PI_RUNTIME_INFO, CLAUDE_RUNTIME_INFO],
     });
-    expect((await started.byok.machines.list())[0]?.runtimes).toEqual([{ id: 'pi' }, { id: 'claude' }]);
+    expect((await started.byok.machines.list())[0]?.harnesses).toMatchObject([{ id: 'pi' }, { id: 'claude' }]);
 
     const handle = await started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'steer me' });
     await daemon.next();
     // The CLAIM reports claude (`steer: false`) — that is the authority.
     await claimAndStartOverLongPoll(started.byok, daemon, handle, 'claude', CLAUDE_RUNTIME_INFO.capabilities);
-    expect((await started.byok.tasks.get(handle.taskId))?.claimedExecutor).toEqual({ kind: 'runtime', runtimeId: 'claude' });
-    expect((await started.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities).toEqual(CLAUDE_RUNTIME_INFO.capabilities);
+    expect((await started.byok.tasks.get(handle.taskId))?.claimedExecutor).toEqual({ id: 'claude' });
+    expect((await started.byok.tasks.get(handle.taskId))?.claimedRuntimeCapabilities).toEqual({ steer: false, resume: true, approvalInteractive: true });
 
     const rejection = await handle.steer('change course').catch((error: unknown) => error);
     expect(rejection).toBeInstanceOf(SteerRejectedError);
     if (!(rejection instanceof SteerRejectedError)) throw new Error('unreachable');
     expect(rejection.code).toBe('steer_unsupported_runtime');
-    expect(rejection.executor).toEqual({ kind: 'runtime', runtimeId: 'claude' });
+    expect(rejection.executor).toEqual({ id: 'claude' });
     expect(rejection.state).toBe('Running');
 
     // Refused BEFORE any envelope exists: the device's next page is empty.
@@ -533,7 +533,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
     const snapshotBefore = await started.byok.tasks.get(handle.taskId);
     const foreign = await sendOne(
       stranger,
-      createEnvelope('task.complete', { executor: { kind: 'runtime', runtimeId: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'not mine', sessionRef: 'session-stranger' }, { taskId: handle.taskId }),
+      createEnvelope('task.complete', { executor: { id: 'pi' }, agentRef: TEST_AGENT_REF, summary: 'not mine', sessionRef: 'session-stranger' }, { taskId: handle.taskId }),
     );
     expect(foreign).toMatchObject({ status: 200, body: { accepted: 0, rejected: 1 } });
     expect(await started.byok.tasks.get(handle.taskId)).toEqual(snapshotBefore);
@@ -605,7 +605,7 @@ describe('WP3B Step 0: coordination characterization (public surface, long-poll 
 
     const admitted = await sendOne(
       daemon,
-      createEnvelope('task.claim', { executor: { kind: 'runtime', runtimeId: 'pi' }, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }),
+      createEnvelope('task.claim', { executor: { id: 'pi' }, agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId }, { taskId: handle.taskId }),
     );
     expect(admitted).toMatchObject({ status: 200, body: { accepted: 1 } });
     expect((await started.byok.stats()).rateLimitEvents).toBe(0);

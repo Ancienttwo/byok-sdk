@@ -121,7 +121,6 @@ export function toMachineInfo(
     connected: presence !== undefined,
     lastSeen: presence?.observedAt,
     ...(presence?.clientVersion === undefined ? {} : { clientVersion: presence.clientVersion }),
-    runtimes: presence?.runtimes,
     harnesses: device.harnesses,
     configuredToolsets: presence?.configuredToolsets,
   };

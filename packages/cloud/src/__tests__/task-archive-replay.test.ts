@@ -19,7 +19,7 @@ import { createHarness, grantAgentHome, offerPayload, TENANT_A, TEST_AGENT_REF }
 
 type Scenario = 'claimed' | 'claimed-recovery' | 'unclaimed-recovery';
 
-const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const PI_EXECUTOR = { id: 'pi' } as const;
 
 async function setUp(scenario: Scenario) {
   const h = createHarness();
@@ -61,7 +61,7 @@ describe('replays across the terminal-task archive', () => {
       ...(scenario === 'unclaimed-recovery' ? [] : [
         claim,
         // A claim that does not match the claim snapshot.
-        createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId }),
+        createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'codex' } }, { taskId }),
       ]),
       ...(scenario === 'claimed' ? [] : [recovery]),
     ];
@@ -87,7 +87,7 @@ describe('replays across the terminal-task archive', () => {
 
   it.each([
     ['task.claim', 'missing', false, 'h1', 'claim_offer_mismatch'],
-    ['task.claim', 'missing', false, undefined, undefined],
+    ['task.claim', 'missing', false, undefined, 'claim_offer_mismatch'],
     ['task.fail', 'missing', false, undefined, 'recovery_offer_mismatch'],
     ['task.claim', 'tombstone', false, undefined, 'claim_offer_mismatch'],
     ['task.fail', 'tombstone', false, undefined, 'recovery_offer_mismatch'],
@@ -99,7 +99,7 @@ describe('replays across the terminal-task archive', () => {
     const stores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
       { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
     await stores.devices.recordCapabilities({ capabilities: ['agent-home-contract'], harnesses: [
-      { id: 'h1', version: '1.0.0', capabilities: { steer: false, resume: false, approvalInteractive: false } },
+      { id: 'h1', version: '1.0.0', capabilities: { steer: false, resume: false, approvalInteractive: false, selectionModes: ['device-default'], effort: false } },
     ] });
     const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: offerPayload() });
     const originalAttempt = await stores.tasks.get(offer.taskId);
@@ -123,7 +123,7 @@ describe('replays across the terminal-task archive', () => {
     expect(await stores.receipts.get(terminalReceiptKey(offer.taskId))).toBeUndefined();
     const envelope = type === 'task.claim'
       ? createEnvelope(type, { deviceId, agentRef: TEST_AGENT_REF,
-        executor: harnessId === undefined ? PI_EXECUTOR : { kind: 'harness', harnessId } }, { taskId: offer.taskId })
+        executor: harnessId === undefined ? PI_EXECUTOR : { id: harnessId } }, { taskId: offer.taskId })
       : createEnvelope(type, { reason: 'daemon_interrupted', retryable: false, agentRef: TEST_AGENT_REF,
         recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } }, { taskId: offer.taskId });
     expect(await handleInboundEnvelope(guardedStores, deviceId, envelope)).toEqual(
@@ -140,12 +140,13 @@ describe('replays across the terminal-task archive', () => {
     await grantAgentHome(h, TENANT_A, deviceId);
     const stores = tenantStoresFor({ kind: 'device', tenantId: TENANT_A, productId: 'test-product', deviceId },
       { core: h.core, cloud: h.stores, mailboxWake: h.mailboxWake });
-    await stores.devices.recordCapabilities({ capabilities: ['agent-home-contract', 'dispatch-selection'], harnesses: [
-      { id: 'h1', version: '1.0.0', capabilities: { steer: false, resume: false, approvalInteractive: false } },
+    await stores.devices.recordCapabilities({ capabilities: ['agent-home-contract'], harnesses: [
+      { id: 'codex', capabilities: { selectionModes: ['subscription'], effort: false } },
+      { id: 'h1', version: '1.0.0', capabilities: { steer: false, resume: false, approvalInteractive: false, selectionModes: ['device-default'], effort: false } },
     ] });
     const offer = await h.cloud.enqueueAgentOffer(TENANT_A, deviceId, { payload: { ...offerPayload(),
-      target: { lane: 'subscription', runtimeId: 'codex', modelId: 'test-model' } } });
-    const envelope = createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'harness', harnessId: 'h1' } }, { taskId: offer.taskId });
+      target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'test-model' } } } });
+    const envelope = createEnvelope('task.claim', { deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'h1' } }, { taskId: offer.taskId });
     expect(await handleInboundEnvelope(stores, deviceId, envelope)).toEqual({ outcome: 'rejected', reason: 'claim_offer_mismatch' });
   });
 });

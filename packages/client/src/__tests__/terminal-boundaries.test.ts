@@ -138,13 +138,13 @@ describe('terminal durability and actual harness boundaries', () => {
         const accessToken = await deviceToken(cfg);
         await post(cloud.url, accessToken, createEnvelope('conn.hello', {
           deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [PROTOCOL_VERSION],
-          capabilities: ['custom-harness', 'agent-home-contract'], runtimes: [], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities } }],
+          capabilities: ['custom-harness', 'agent-home-contract'], harnesses: [{ id: 'acme-harness', capabilities: { ...adapter.descriptor.capabilities, selectionModes: ['device-default'], effort: false } }],
         }));
         // Never run, only recovered from the crash image: the offer names the harness or lets the device pick.
         const agentRef = freshTestAgentRef();
         const offer = await cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: {
           instruction: 'interrupted', agentRef, session: { mode: 'resume', sessionRef: 'interrupted-session' },
-          target: explicit ? { lane: 'harness', harnessId: 'acme-harness' } : { lane: 'auto' },
+          target: explicit ? { lane: 'harness', harnessId: 'acme-harness', selection: { mode: 'device-default' } } : { lane: 'auto' },
         } });
         const journal = new SqliteLocalTaskJournal({ storeDir: cfg.storeDir! });
         const bytes = encodeEnvelope(offer.envelope);
@@ -152,16 +152,16 @@ describe('terminal durability and actual harness boundaries', () => {
           taskId: offer.taskId, envelopeId: offer.envelope.id, seq: offer.seq, bytes, bytesHash: journalHash(bytes),
           opensTask: true, receivedAt: new Date().toISOString() });
         await journal.recordAdmission({ taskId: offer.taskId, admitted: true, claimedRuntime: 'acme-harness', decidedAt: new Date().toISOString() });
-        if (claimed) await post(cloud.url, accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, executor: { kind: 'harness', harnessId: 'acme-harness' }, agentRef }, { taskId: offer.taskId }));
+        if (claimed) await post(cloud.url, accessToken, createEnvelope('task.claim', { deviceId: device.deviceId, executor: { id: 'acme-harness' }, agentRef }, { taskId: offer.taskId }));
         await journal.close(); // Persisted crash image; no graceful task finalization.
         await daemon.start();
         await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
         const terminal = decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!);
-        expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', executor: { kind: 'harness', harnessId: 'acme-harness' }, retryable: false,
+        expect(terminal.payload).toMatchObject({ reason: 'daemon_interrupted', executor: { id: 'acme-harness' }, retryable: false,
           recovery: { kind: 'daemon_interrupted', offerId: offer.envelope.id } });
         // An unclaimed recovery settles the attempt without making the device its owner.
         const attempt = await cloud.readTaskAttempt(offer.taskId);
-        expect(attempt?.claimedExecutor).toEqual(claimed ? { kind: 'harness', harnessId: 'acme-harness' } : undefined);
+        expect(attempt?.claimedExecutor).toEqual(claimed ? { id: 'acme-harness' } : undefined);
         expect(attempt?.ownerDeviceId).toBe(claimed ? device.deviceId : undefined);
         expect(adapter.startCalls).toHaveLength(0);
       });
@@ -180,7 +180,7 @@ describe('terminal durability and actual harness boundaries', () => {
     adapter.sessions[0]!.emit({ type: 'progress', text: 'x'.repeat(8192) });
     adapter.sessions[0]!.emit({ type: 'turn_end' });
     await vi.waitFor(async () => expect((await cloud.readTaskAttempt(offer.taskId))?.status).toBe('failed'), { timeout: 4000 });
-    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, executor: { kind: 'harness', harnessId: 'acme-harness' } });
+    expect(decodeEnvelope((await cloud.readTerminalBody(offer.taskId))!).payload).toMatchObject({ reason: 'terminal_result_too_large', retryable: false, executor: { id: 'acme-harness' } });
     expect(adapter.startCalls).toHaveLength(1);
   });
 });
@@ -204,6 +204,7 @@ it('R1/R6: committed decline settles its failed receipt after cancellation filte
   // Both offers precede the daemon's first poll, so the capability snapshot fresh Agent admission reads is posted by hand.
   await post(cloud.url, await deviceToken(cfg), createEnvelope('conn.hello', {
     deviceId: device.deviceId, productId: cfg.productId, protocolVersions: [PROTOCOL_VERSION],
+    harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }],
     capabilities: ['agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection'],
   }));
   const a = await cloud.submitFreshAgent(device.deviceId, { instruction: 'declined while temporarily unavailable' });

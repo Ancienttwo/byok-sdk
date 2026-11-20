@@ -103,13 +103,13 @@ export type {
 } from './truth.js';
 
 // Presence (§12.3)
-export { freezePresenceRuntimeFact, PRESENCE_LEVELS } from './presence.js';
+export { freezePresenceHarnessFact, PRESENCE_LEVELS } from './presence.js';
 export type {
   PresenceHint,
   PresenceHintInput,
   PresenceLevel,
   PresenceRuntimeCapabilities,
-  PresenceRuntimeFact,
+  PresenceHarnessFact,
   PresenceStore,
   TenantReadinessDevice,
   TenantReadinessPresence,

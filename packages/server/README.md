@@ -410,7 +410,7 @@ await server.executions.submit({
   deviceId,
   payload: {
     instruction: 'Find five qualified prospects and draft follow-ups.',
-    target: { lane: 'runtime', runtimeId: 'claude' },
+    target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } },
     agentRef,
     egressPolicy,
     terminalProjection: { mode: 'none' },

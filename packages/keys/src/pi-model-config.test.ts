@@ -260,6 +260,10 @@ describe('assertPiLaunchArgs', () => {
     expect(() => buildPiProviderArgs(profile, ['--mode', 'rpc'])).toThrow(/is not accepted by the Pi rpc host/);
   });
 
+  it.each(['--flag', '  ', 'model\tname', 'model\u0085name', 'x'.repeat(161)])('refuses an invalid explicit model ID (%j)', modelId => {
+    expect(() => assertPiLaunchArgs(parseModelProviderProfile(profileInput), modelId)).toThrow(/Pi --model value/);
+  });
+
   it('refuses a profile without pi_model', () => {
     const { pi_model: _, ...directProfile } = profileInput;
     expect(() => assertPiLaunchArgs(parseModelProviderProfile(directProfile))).toThrow(/requires explicit pi_model/);

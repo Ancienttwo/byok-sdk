@@ -20,7 +20,7 @@ type CodexSpawnFn = typeof codexNodeSpawn;
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { BlobResolver } from '../daemon/blob-client';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 
 /**
  * `TaskRunner` hands every runtime its adapter's runtime environment — here
@@ -53,14 +53,15 @@ const unusedBlobClient: BlobResolver = {
 };
 
 /** Captures whatever `env` the wrapped spawn call actually received, then delegates to the real `spawn` so the fake-CLI fixture genuinely runs. */
-function makeCapturingSpawn<T>(sink: { env?: NodeJS.ProcessEnv }): T {
+function makeCapturingSpawn<T>(sink: { env?: NodeJS.ProcessEnv }, unwrapPiLauncher = false): T {
   const fn = (
     command: string,
     args: readonly string[] = [],
     options: { cwd?: string; env?: NodeJS.ProcessEnv; stdio?: unknown } = {},
   ) => {
     sink.env = options.env;
-    return realSpawn(command, [...args], options as Parameters<typeof realSpawn>[2]);
+    const childArgs = unwrapPiLauncher ? args.slice(args.indexOf('--') + 1) : [...args];
+    return realSpawn(command, childArgs, options as Parameters<typeof realSpawn>[2]);
   };
   return fn as unknown as T;
 }
@@ -76,9 +77,12 @@ interface Harness {
 async function makeHarness(): Promise<Harness> {
   const captured: Record<RuntimeId, { env?: NodeJS.ProcessEnv }> = { pi: {}, claude: {}, codex: {} };
 
+  const piHome = await tmpDir('byok-pi-env-launcher-');
   const piAdapter = new PiAdapter({
     resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }),
-    spawnFn: makeCapturingSpawn<PiSpawnFn>(captured.pi),
+    spawnFn: makeCapturingSpawn<PiSpawnFn>(captured.pi, true),
+    byokLauncher: { command: PI_FIXTURE, profileDbPath: path.join(piHome, 'profiles.db'), sessionDir: piHome },
+    validateProviderProfileBinding: async () => {},
   });
   const claudeAdapter = new ClaudeAdapter({
     resolveBin: () => ({ command: CLAUDE_FIXTURE, source: 'path' }),
@@ -90,7 +94,7 @@ async function makeHarness(): Promise<Harness> {
   });
 
   const sent: Envelope[] = [];
-  const deps: TaskRunnerDeps = { getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
+  const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(), ...freshOfferRunnerDeps(),
     adapters: [piAdapter, claudeAdapter, codexAdapter],
     ...testAgentHomeDeps(),
     deviceId: 'device-1',
@@ -113,9 +117,14 @@ async function makeHarness(): Promise<Harness> {
     // is awaited by `handleOffer` before `handleEnvelope` resolves, so the
     // capture below is always populated by the time this call returns —
     // no polling/`vi.waitFor` needed, unlike the full daemon-level tests.
-    await runner.handleEnvelope(
-      createEnvelope('task.offer', { agentRef: freshTestAgentRef(),  instruction: 'say hi', target: modelTarget ?? { lane: 'runtime', runtimeId: runtime }, ...FRESH_OFFER }, { taskId, seq: seq++ }),
-    );
+    const target = modelTarget ?? (runtime === 'pi' ? {
+      lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
+        profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
+      } },
+    } : { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } });
+    await runner.handleEnvelope(createEnvelope('task.offer', {
+      agentRef: freshTestAgentRef(), instruction: 'say hi', target, ...FRESH_OFFER,
+    }, { taskId, seq: seq++ }));
   }
 
   async function cancelAll(): Promise<void> {
@@ -124,6 +133,7 @@ async function makeHarness(): Promise<Harness> {
         runner.handleEnvelope(createEnvelope('task.cancel', { reason: 'test cleanup' }, { taskId, seq: seq++ })),
       ),
     );
+    await fs.rm(piHome, { recursive: true, force: true });
   }
 
   return { sent, captured, offer, cancelAll };
@@ -147,7 +157,7 @@ async function withEnv<T>(vars: Record<string, string>, fn: () => Promise<T>): P
 }
 
 describe('TaskRunner environment inheritance: real pi/claude/codex adapters via a spying spawnFn', () => {
-  it.each(['runtime', 'subscription'] as const)('passes user config, provider keys and loader names to the real Codex %s child and drops CLAUDECODE and BYOK_*', async (lane) => {
+  it.each(['device-default', 'subscription'] as const)('preserves user configuration and strips provider credentials from the Codex %s child', async (lane) => {
     const home = await tmpDir('byok-codex-env-home-');
     const receiptPath = path.join(home, 'env-receipt.json');
     // Explicit literals ensure the check also fails when the shared inventory is incomplete.
@@ -171,7 +181,7 @@ describe('TaskRunner environment inheritance: real pi/claude/codex adapters via 
         const harness = await makeHarness();
         try {
           await harness.offer('codex', `task-codex-env-${lane}`, lane === 'subscription'
-            ? { lane: 'subscription', runtimeId: 'codex', modelId: 'gpt-5' }
+            ? { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'gpt-5' } }
             : undefined);
           expect(harness.sent.some((e) => e.type === 'task.fail' || e.type === 'task.decline')).toBe(false);
           // Written by the fixture from its own process.env before initialize returns.
@@ -181,11 +191,11 @@ describe('TaskRunner environment inheritance: real pi/claude/codex adapters via 
             authDiscoveryMatches: boolean;
           };
           const spawnEnv = harness.captured.codex.env ?? {};
-          for (const name of refusedNames) {
+          for (const name of [...refusedNames, ...credentialNames]) {
             expect(receipt.present[name] === true, name).toBe(false);
             expect(Object.hasOwn(spawnEnv, name), name).toBe(false);
           }
-          for (const name of ['PATH', 'HOME', 'USER', 'CODEX_HOME', 'MY_ALLOWED_CONFIG', ...credentialNames, ...loaderNames]) {
+          for (const name of ['PATH', 'HOME', 'USER', 'CODEX_HOME', 'MY_ALLOWED_CONFIG', ...loaderNames]) {
             expect(spawnEnv[name] === process.env[name], name).toBe(true);
             // macOS dyld removes DYLD_* when the child execs through a
             // protected binary such as /usr/bin/env, so only the spawn
@@ -204,7 +214,7 @@ describe('TaskRunner environment inheritance: real pi/claude/codex adapters via 
     }
   });
 
-  it('passes an arbitrary user variable and provider keys to all three runtimes, and drops CLAUDECODE and BYOK_*', async () => {
+  it('passes user configuration to each runtime and strips ambient provider credentials', async () => {
     await withEnv(
       {
         MY_TEAM_SETTING: 'from-the-user-shell',
@@ -228,8 +238,8 @@ describe('TaskRunner environment inheritance: real pi/claude/codex adapters via 
             expect(env?.PATH, id).toBe(process.env.PATH);
             expect(env?.HOME, id).toBe(process.env.HOME);
             expect(env?.MY_TEAM_SETTING, id).toBe('from-the-user-shell');
-            expect(env?.ANTHROPIC_API_KEY, id).toBe('sentinel-anthropic-key');
-            expect(env?.OPENAI_API_KEY, id).toBe('sentinel-openai-key');
+            expect(env?.ANTHROPIC_API_KEY, id).toBeUndefined();
+            expect(env?.OPENAI_API_KEY, id).toBeUndefined();
             expect(env?.CLAUDECODE, id).toBeUndefined();
             expect(env?.BYOK_ANYTHING, id).toBeUndefined();
           }

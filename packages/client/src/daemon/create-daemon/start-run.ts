@@ -238,8 +238,8 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
   daemonState.blobLifecycleAbort = new AbortController();
   // Configuration errors stay synchronous to start; only the volume barrier is background work.
   await initializeAgentMemoryBackend(daemonScope);
-  const [{ runtimes, harnesses, observations, runtimeUnavailable }, blobClient] = await Promise.all([
-    detectRuntimes(adapters),
+  const [{ harnesses, observations, runtimeUnavailable }, blobClient] = await Promise.all([
+    detectRuntimes(adapters, config.runtimeAllowlist),
     Promise.resolve(new BlobClient(config.serverUrl, daemonState.auth, { signal: daemonState.blobLifecycleAbort.signal })),
   ]);
   // #1103 §2.6: compare this run with the stored baseline before replacing
@@ -258,14 +258,14 @@ export async function openStartRun(daemonScope: DaemonScope, requestEpoch: numbe
     ...(versionChanges.get(observation.id) === undefined ? {} : { versionChange: versionChanges.get(observation.id)! }),
   }));
   observer.noteRuntimesDetected(daemonState.runtimeObservations.map(observation => ({ ...observation })));
-  daemonState.detectedRuntimeFacts = runtimes;
+  daemonState.detectedHarnessFacts = harnesses;
   daemonState.detectedRuntimeUnavailable = runtimeUnavailable;
   // Startup reads readiness; only the run-owned background scheduler may probe.
   const agentMemoryBackend = agentMemoryBackendProof(daemonScope).backend;
   const agentMemoryIntentBackend = config.agentMemoryIntents === undefined ? undefined : agentMemoryBackend;
   return {
     record, activeJournal, activePressureEngine, journalIdentity, resultReplyRecoveryTasks,
-    sealedRun, recordRecoveryFailure, runtimes, harnesses, runtimeUnavailable, blobClient, agentMemoryBackend, agentMemoryIntentBackend,
+    sealedRun, recordRecoveryFailure, harnesses, runtimeUnavailable, blobClient, agentMemoryBackend, agentMemoryIntentBackend,
   };
 }
 

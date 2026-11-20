@@ -89,11 +89,14 @@ describe('custody child', () => {
     const profiles = new ProviderProfiles(keysDb);
     const seen: string[] = [];
     profiles.subscribe(next => seen.push(...next.map(profile => profile.profile_ref)));
-    const base = { deviceId: 'device', payload: { target: { lane: 'runtime', runtimeId: 'pi' }, instruction: 'reply' } } as unknown as ExecutionTemplate;
+    const base = { deviceId: 'device', payload: { target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, instruction: 'reply' } } as unknown as ExecutionTemplate;
     const [profile] = await profiles.load();
-    expect(catalogEntryFor(profile!, base)?.payload.target).toEqual({ lane: 'byok-profile', runtimeId: 'pi',
-      providerProfile: { profileRef: 'writer', profileRevision: status.profile_revision, profileHash: status.profile_hash,
-        modelId: 'writer-model', requiredCapabilities: [] } });
+    expect(catalogEntryFor(profile!, base)?.payload.target).toEqual({
+      lane: 'harness',
+      harnessId: 'pi',
+      selection: { mode: 'byok-profile', providerProfile: { profileRef: 'writer', profileRevision: status.profile_revision, profileHash: status.profile_hash,
+        requiredCapabilities: [] } },
+    });
     // K8's catalog: the brand entries, then one pinned Pi entry per profile Pi can launch; nothing for a profile without pi_model.
     const { pi_model: _piModel, ...withoutPi } = profile!;
     const catalog = executionCatalog({ instruction: 'reply', models: { pi: { label: 'Pi', runtime: 'pi' } } }, 'device',

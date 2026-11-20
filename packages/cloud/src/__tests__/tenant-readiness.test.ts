@@ -24,14 +24,14 @@ describe('SDK-owned tenant readiness projection', () => {
         level: 'working',
         clientVersion: '0.4.2',
         protocolVersions: [2],
-        runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
+        harnesses: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { selectionModes: ['byok-profile'], effort: false } }],
       }),
     });
     expect(presenceResponse.status).toBe(200);
     await expect(harness.core.presence.read(TENANT_A, active.deviceId)).resolves.toMatchObject({
       clientVersion: '0.4.2',
       protocolVersions: [2],
-      runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
+      harnesses: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { selectionModes: ['byok-profile'], effort: false } }],
     });
     await harness.core.presence.publish(TENANT_A, {
       deviceId: residual.deviceId,
@@ -99,7 +99,7 @@ describe('SDK-owned tenant readiness projection', () => {
             level: 'working',
             clientVersion: '0.4.2',
             protocolVersions: [2],
-            runtimes: [{ id: 'pi', version: '1.0.0', authPresent: true }],
+            harnesses: [{ id: 'pi', version: '1.0.0', authPresent: true, capabilities: { selectionModes: ['byok-profile'], effort: false } }],
             observedAt: '2026-01-01T00:00:00.000Z',
             expiresAt: '2026-01-01T00:01:00.000Z',
           },

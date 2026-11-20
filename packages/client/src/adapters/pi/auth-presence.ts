@@ -2,7 +2,6 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PI_PROVIDER_ENV_KEY_NAMES } from './pi-provider-env.generated.js';
 
 type Env = Readonly<Record<string, string | undefined>>;
 
@@ -78,8 +77,7 @@ function hasConfiguredApiKey(provider: unknown): boolean {
 
 /**
  * Pi's non-secret login-state observation, its equivalent of
- * `claude auth status`'s `loggedIn`. True when a known provider credential
- * env var *name* is set, or when the global `settings.json` `defaultProvider`
+ * `claude auth status`'s `loggedIn`. True when the global `settings.json` `defaultProvider`
  * (any provider when `settings.json` is absent or configures no default) has
  * a usable login record in pi's agent-dir `auth.json` or an `apiKey` in its
  * agent-dir `models.json`. An unreadable or malformed `auth.json` or
@@ -88,7 +86,6 @@ function hasConfiguredApiKey(provider: unknown): boolean {
  * This never throws and never returns, logs, or keeps any credential value.
  */
 export async function probePiAuthPresent(env: Env): Promise<boolean> {
-  if (PI_PROVIDER_ENV_KEY_NAMES.some((name) => env[name] !== undefined)) return true;
   try {
     const agentDir = resolvePiAgentDir(env);
     const auth = await readJsonObject(path.join(agentDir, 'auth.json'));

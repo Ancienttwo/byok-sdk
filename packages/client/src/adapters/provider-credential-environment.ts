@@ -39,12 +39,16 @@ export const PROVIDER_CREDENTIAL_ENV_DENY_NAMES: readonly string[] = Object.free
   ...PI_PROVIDER_ENV_KEY_NAMES,
   ...PI_AMBIENT_CREDENTIAL_ENV_NAMES,
   ...CODEX_AUTH_ENV_NAMES,
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'ANTHROPIC_CUSTOM_HEADERS',
   PI_PROJECTED_KEY_ENV,
 ]);
 
 const credentialNames = new Set<string>(PROVIDER_CREDENTIAL_ENV_DENY_NAMES);
 
 /** Return a copy that cannot pass ambient provider credentials to a child. */
+export function withoutProviderCredentials(env: Readonly<Record<string, string>>): Record<string, string>;
+export function withoutProviderCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
 export function withoutProviderCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const sanitized = { ...env };
   // Match Windows case aliases too.

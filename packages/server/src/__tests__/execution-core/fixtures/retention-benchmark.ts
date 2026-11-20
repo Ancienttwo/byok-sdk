@@ -18,7 +18,7 @@ try {
       ledger.transaction(state => {
         for (const key of keys) {
           const input: IntentInput = { key, source: 'user', waitUntil: 1000, execution: { deviceId: 'synthetic', payload: {
-            session: { mode: 'fresh' }, instruction: 'i'.repeat(instructionBytes), target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'main', profileRevision: '1' },
+            session: { mode: 'fresh' }, instruction: 'i'.repeat(instructionBytes), target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: { agentId: 'main', profileRevision: '1' },
             egressPolicy: { policyRevision: 'synthetic', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
               reliable: { maxPendingEventsPerAgent: 16, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 16384 },
               transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
@@ -27,7 +27,7 @@ try {
           const intent = enqueue(state, ledger.tenant, input);
           state.executions[intent.taskId]!.terminal = { recordedAt: '2026-01-01T00:00:00Z', envelope: {
             v: 1, id: '00000000-0000-4000-8000-000000000001', ts: '2026-01-01T00:00:00Z', type: 'task.complete',
-            task_id: intent.taskId, seq: 1, payload: { executor: { kind: 'runtime', runtimeId: 'pi' }, summary: '', sessionRef: 'synthetic', document: 'o'.repeat(documentBytes - 2) },
+            task_id: intent.taskId, seq: 1, payload: { executor: { id: 'pi' }, summary: '', sessionRef: 'synthetic', document: 'o'.repeat(documentBytes - 2) },
           } };
           state.applied[intent.taskId] = true;
           settle(state, intent, 'succeeded');

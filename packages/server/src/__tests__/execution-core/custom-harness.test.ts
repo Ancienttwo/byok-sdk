@@ -15,15 +15,15 @@ function input(target: unknown): IntentInput {
     terminalProjection: { mode: 'none' },
   } } as ExecutionTemplate };
 }
-const PI = { lane: 'runtime', runtimeId: 'pi' };
-const GROK = { lane: 'harness', harnessId: 'grok' };
-const MIXED = { lane: 'runtime', runtimeId: 'pi', harnessId: 'grok' };
+const PI = { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } };
+const GROK = { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } };
+const MIXED = { ...PI, runtimeId: 'pi' };
 
-it.each([PI, { lane: 'runtime', runtimeId: 'claude' }, { lane: 'runtime', runtimeId: 'codex' }, GROK, { lane: 'harness', harnessId: 'acme.test-1' }])(
+it.each([PI, { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, GROK, { lane: 'harness', harnessId: 'acme.test-1', selection: { mode: 'device-default' } }])(
   'accepts one valid execution identity: %j', target => expect(() => validateInput(input(target))).not.toThrow());
-it.each([undefined, { lane: 'auto' }, { lane: 'runtime', runtimeId: 'grok' }, { lane: 'runtime', runtimeId: '' }, { lane: 'runtime', runtimeId: 1 },
-  { lane: 'harness', harnessId: '' }, { lane: 'harness', harnessId: 'Bad ID' }, { lane: 'harness', harnessId: 'pi' }, { lane: 'harness', harnessId: 1 },
-  { lane: 'harness', harnessId: 'a'.repeat(129) }, { lane: 'harness', harnessId: null }, MIXED, { lane: 'harness', runtimeId: 'pi', harnessId: 'grok' }])(
+it.each([undefined, { lane: 'auto' }, { ...PI, selection: undefined }, { ...PI, harnessId: '' },
+  { ...PI, harnessId: 1 }, { ...PI, harnessId: 'Bad ID' }, { ...PI, harnessId: 'a'.repeat(129) },
+  { ...PI, harnessId: null }, MIXED, { ...GROK, selection: { mode: 'device-default', modelId: 'unexpected' } }])(
   'rejects malformed or mixed execution identity: %j', target => expect(() => validateInput(input(target))).toThrow());
 
 it.each([PI, GROK])('preserves %j through enqueue, submit, settle and durable replay', async selection => {

@@ -86,27 +86,31 @@ it('cancel while the target waits for persona readback -> cancelled at once, no 
   fixture = await openTeam({ routeMessages: true, holdProjection: () => hold ?? Promise.resolve() });
   const [a, b] = await t.createBots(2) as [string, string];
   hold = new Promise(resolve => { release = resolve; });
-  const update = await t.host().input('pending-profile', 'Update Bot 2');
-  await t.finish(update, { update_bot: [{ botId: b, persona: 'Pending persona' }] });
-  const root = await t.host().input('ask-pending', 'Ask Bot 2', a);
-  await t.finish(root, { delegate: [{ to: b, request: 'After your new profile' }] });
-  const d = t.delegationOf(t.taskOf(root));
-  expect(d.status).toBe('queued');
-  expect(t.host().core.intent(d.id)).toBeUndefined();
-  const cancel = vi.spyOn(t.host().core, 'cancel');
-  await t.host().cancelDelegation(d.id);
-  expect(cancel).not.toHaveBeenCalled();
-  expect(t.delegation(d.id)).toMatchObject({ verdict: 'cancelled', reason: 'user_cancelled',
-    cancel: { targetTurnId: d.id, delivered: true } });
-  expect(t.host().snapshot().turns[d.id]).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
-  release();
-  await vi.waitFor(async () => {
-    await t.host().drain();
-    expect(t.host().snapshot().team.bots[b]!.readyRevision).toBe('2');
-  }, { timeout: 5000 });
-  await t.finish(hash(['bot_reply', d.id]));
-  expect(t.host().core.intent(d.id)).toBeUndefined();
-  expect(fixture.adapter.starts.filter(start => start.manifest.taskId === taskId(d.id, 0))).toHaveLength(0);
+  try {
+    const update = await t.host().input('pending-profile', 'Update Bot 2');
+    await t.finish(update, { update_bot: [{ botId: b, persona: 'Pending persona' }] });
+    const root = await t.host().input('ask-pending', 'Ask Bot 2', a);
+    await t.finish(root, { delegate: [{ to: b, request: 'After your new profile' }] });
+    const d = t.delegationOf(t.taskOf(root));
+    expect(d.status).toBe('queued');
+    expect(t.host().core.intent(d.id)).toBeUndefined();
+    const cancel = vi.spyOn(t.host().core, 'cancel');
+    await t.host().cancelDelegation(d.id);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(t.delegation(d.id)).toMatchObject({ verdict: 'cancelled', reason: 'user_cancelled',
+      cancel: { targetTurnId: d.id, delivered: true } });
+    expect(t.host().snapshot().turns[d.id]).toMatchObject({ status: 'failed', conclusion: 'cancelled' });
+    release();
+    await vi.waitFor(async () => {
+      await t.host().drain();
+      expect(t.host().snapshot().team.bots[b]!.readyRevision).toBe('2');
+    }, { timeout: 5000 });
+    await t.finish(hash(['bot_reply', d.id]));
+    expect(t.host().core.intent(d.id)).toBeUndefined();
+    expect(fixture.adapter.starts.filter(start => start.manifest.taskId === taskId(d.id, 0))).toHaveLength(0);
+  } finally {
+    release();
+  }
 });
 
 it('crash after the arbitration commit and before core.cancel -> restart delivers the cancel to the frozen target', async () => {

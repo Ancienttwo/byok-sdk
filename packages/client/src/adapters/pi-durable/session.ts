@@ -14,6 +14,7 @@ import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import { AsyncQueue } from '../../util/async-queue.js';
 import { admitReplica, resetReplica } from './replica.js';
 import { DurableRecovery } from './recovery.js';
+import { PI_MODEL_UNAVAILABLE_REASON } from '../pi/events.js';
 
 export interface DurableStart {
   nativeAssetRoot?: string;
@@ -38,13 +39,12 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
   const manifest = input.manifest;
   if (!context || !manifest.agentRef || !manifest.lease || runtimeLaunch.credentialSource !== 'keys-profile' || runtimeLaunch.kind !== 'pi-durable'
     || manifest.cwd !== manifest.lease.canonicalHome || input.signal?.aborted) throw startFailure('durable requires current Agent lease and credential custody');
-  const selection = manifest.modelTarget;
-  if (!selection || (selection.lane !== 'byok' && selection.lane !== 'byok-profile')) throw startFailure('durable requires BYOK selection');
+  const selection = manifest.selection;
+  if (selection?.mode !== 'byok-profile') throw startFailure('durable requires an exact provider profile');
   const binding = { agentRef: { ...manifest.agentRef, tenantId: context.tenantId }, taskId: manifest.taskId, leaseId: manifest.lease.leaseId, canonicalHome: manifest.lease.canonicalHome };
   const configDir = input.scratch.sdkDir;
   const configPath = path.join(configDir, 'config.json');
-  const profileRef = selection.lane === 'byok-profile' ? selection.providerProfile.profileRef : selection.providerId;
-  const model = selection.lane === 'byok-profile' ? selection.providerProfile.modelId : selection.modelId;
+  const { profileRef } = selection.providerProfile;
   let serialized: ReturnType<typeof serializePiHostConfig>;
   let file: Awaited<ReturnType<typeof admitReplica>>;
   // One gate serves every worker of this execution, so a respawn asks the same
@@ -57,7 +57,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
     }
     serialized = serializePiHostConfig({ format: 'byok.pi.durable-launch', version: 5,
       replica: binding, replicaRoot: options.replicaRoot,
-      profileRef, model, instruction: input.instruction,
+      profileRef, model: selection.modelId ?? null, instruction: input.instruction,
       mcp: { mcpEnv: input.mcpEnv, mcpServers: input.mcpServers ?? {}, observation: input.mcpToolsetTools ?? {},
         launchCwd: binding.canonicalHome },
       toolAuthorization: gate?.config ?? null,
@@ -127,6 +127,7 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
       let crashed = false;
       /** The run ended because the worker stopped during a model request, not because the model failed. */
       let interrupted = false;
+      let modelUnavailable = false;
       /** An acknowledgement the worker's own exit rejected ends the run as that exit. */
       const ack = (message: Parameters<PiRpcClient['send']>[0]) => child.send(message).catch((error: unknown) => {
         crashed = child.processExited;
@@ -165,7 +166,12 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
               // The terminal rule is the daemon's: a result-document outcome
               // was staged through submit_result, never carried by this frame.
               completed = true; recovery.stop(); queue.push({ type: 'turn_end' }); queue.end(); return;
-            } else if (frame.type === 'durable_failed') { fatal = true; interrupted = frame.interrupted === true; break; }
+            } else if (frame.type === 'durable_failed') {
+              fatal = true;
+              interrupted = frame.interrupted === true;
+              modelUnavailable = frame.code === 'model_unavailable';
+              break;
+            }
             else throw new Error('unknown durable frame');
           }
           // Read before disposal: the SDK's own kill also closes the client.
@@ -182,8 +188,10 @@ export async function startDurablePi(options: DurableStart): Promise<Session> {
         if (!closing) {
           recovery.stop();
           failure = new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable',
-            reason: interrupted ? 'durable runtime was interrupted during a model request' : 'durable runtime failed or recovery was refused',
-            failure: { class: interrupted || crashed || exitedBeforeReceipt ? 'runtime_exited' : 'unknown' } }, { cause: error });
+            reason: modelUnavailable ? PI_MODEL_UNAVAILABLE_REASON
+              : interrupted ? 'durable runtime was interrupted during a model request' : 'durable runtime failed or recovery was refused',
+            failure: { class: modelUnavailable ? 'model_unavailable'
+              : interrupted || crashed || exitedBeforeReceipt ? 'runtime_exited' : 'unknown' } }, { cause: error });
           queue.push({ type: 'error', message: failure.message }); queue.end();
         }
       }

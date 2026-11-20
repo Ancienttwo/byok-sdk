@@ -1,4 +1,5 @@
 import type { Server as HttpServer } from 'node:http';
+import type { ExecutionTarget } from '@byok-sdk/protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as cloudModule from '@byok-sdk/cloud';
 import * as storeModule from '../stores';
@@ -15,7 +16,9 @@ import {
 const PRODUCT_ID = 'acme';
 /** Short enough that a poll expecting nothing answers in ~200ms instead of ~50s. */
 const SHORT_HOLD_MS = 200;
-const SELECTION = { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } as const;
+const SELECTION = { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', modelId: 'gpt-5.2', providerProfile: {
+  profileRef: 'local-openai', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
+} } } satisfies ExecutionTarget;
 const POLICY = {
   policyRevision: '1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
   reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -82,15 +85,15 @@ describe('dispatch target authority', () => {
       started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
         instruction: 'malformed target',
         target: {
-          lane: 'subscription',
-          runtimeId: 'pi',
-          modelId: 'gpt-5.2',
+          lane: 'harness',
+          harnessId: 'pi',
+          selection: { mode: 'subscription', modelId: 'gpt-5.2' },
         } as never,
       }),
     ).rejects.toThrow();
   });
 
-  it('refuses to send a selection to an older v1 daemon that would strip the additive field', async () => {
+  it('refuses to send an unsupported selection to a registered executor', async () => {
     const started = await start();
     const daemon = await connect(started, []);
 
@@ -98,9 +101,9 @@ describe('dispatch target authority', () => {
       started.byok.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId,
         instruction: 'must not degrade to runtime-only dispatch',
         target: {
-          lane: 'subscription',
-          runtimeId: 'codex',
-          modelId: 'gpt-5.6-sol',
+          lane: 'harness',
+          harnessId: 'codex',
+          selection: { mode: 'adapter-model', modelId: 'gpt-5.6-sol' },
         },
       }),
     ).rejects.toMatchObject({ name: 'ByokCloudError', code: 'agent_capability_missing' });
@@ -113,7 +116,7 @@ describe('dispatch target authority', () => {
     const cases = [
       { fields: { homeAccess: 'memory-reader', agentMemory: 'read-write' }, path: 'agentMemory' },
       { fields: { homeAccess: 'memory-reader', agentMemory: 'read-write-if-admitted' }, path: 'agentMemory' },
-      { fields: { target: SELECTION }, code: 'agent_capability_missing' },
+      { fields: { target: { ...SELECTION, harnessId: 'unadvertised' } }, code: 'agent_capability_missing' },
       { fields: { requiredToolsets: ['crm.readonly'] }, code: 'agent_capability_missing' },
       ...(lane === 'submit'
         ? [{ fields: { sealing: {} }, code: 'coordination_input_invalid' }, { fields: { sealed: {} }, code: 'coordination_input_invalid' }]
@@ -124,7 +127,7 @@ describe('dispatch target authority', () => {
       const taskId = `parity-${index}`;
       const payload = { instruction: 'same admission', agentRef: TEST_AGENT_DISPATCH.agentRef,
         session: lane === 'submit' ? { mode: 'fresh' } : { mode: 'resume', sessionRef: TEST_AGENT_DISPATCH.sessionRef },
-        ...(lane === 'dispatch' ? { target: { lane: 'auto' } } : { egressPolicy: POLICY, target: { lane: 'runtime', runtimeId: 'pi' }, terminalProjection: { mode: 'none' } }),
+        ...(lane === 'dispatch' ? { target: { lane: 'auto' } } : { egressPolicy: POLICY, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, terminalProjection: { mode: 'none' } }),
         ...test.fields };
       const input = { taskId, deviceId: daemon.deviceId, payload };
       const { session, ...fields } = payload;
@@ -173,7 +176,7 @@ describe('dispatch target authority', () => {
     const taskId = 'in-flight';
     const dispatch = { ...TEST_AGENT_DISPATCH, taskId, deviceId: daemon.deviceId, instruction: 'resume' };
     const execution = { taskId, deviceId: daemon.deviceId, payload: { instruction: 'fresh', agentRef: TEST_AGENT_DISPATCH.agentRef,
-      session: { mode: 'fresh' as const }, target: { lane: 'runtime', runtimeId: 'pi' } as const, egressPolicy: POLICY, terminalProjection: { mode: 'none' as const } } };
+      session: { mode: 'fresh' as const }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } as const, egressPolicy: POLICY, terminalProjection: { mode: 'none' as const } } };
     let release!: () => void;
     let entered!: () => void;
     const pendingAppend = new Promise<void>(resolve => { release = resolve; });

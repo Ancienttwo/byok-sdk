@@ -1,9 +1,11 @@
-import type { ModelProviderProfile } from './provider-profile.js';
+import { isProviderProfileModelId } from '@byok-sdk/core/provider-model';
+import type { ModelProviderProfile, ProviderModelCapability } from './provider-profile.js';
 import { isAbsolute } from 'node:path';
 import { ByokKeysError } from './errors.js';
-import { modelApiUrl } from './http.js';
+import { modelApiUrl } from './url.js';
 import { piApiOf } from './pi-api.js';
 import { PiModelConfigSchema } from './pi-model-config.js';
+import { PI_CATALOG_IMAGE_MODELS } from './pi-model-catalog.generated.js';
 
 /**
  * The environment name the launcher delivers the key under to a prepared host,
@@ -51,12 +53,16 @@ export function piProjectionProviderId(profile: ModelProviderProfile): string {
  *
  * The projected provider uses the profile's own ref unless `pi_model.providerId`
  * explicitly selects Pi's OpenCode Go behavior. Model
- * `input` modalities are projected from the profile's declared capabilities,
- * and the provider `api` from the adapter and `pi_model.api` — declared local
- * configuration is the only authority; nothing is inferred from the model name
- * or base URL.
+ * `input` comes from the saved capabilities for the default model and from
+ * the pinned catalog for an override. The provider `api` comes from the local
+ * adapter and `pi_model.api`.
  */
-export function buildPiProviderProjection(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntimeEntry): object {
+export function buildPiProviderProjection(
+  profile: ModelProviderProfile,
+  runtimeEntry: PiLauncherRuntimeEntry,
+  modelId = profile.model,
+  requiredCapabilities: readonly ProviderModelCapability[] = [],
+): object {
   const { thinkingLevel: _, api: declaredApi, providerId: _providerId, ...modelSettings } = requirePiModelConfig(profile);
   const api = piApiOf(profile.adapter, declaredApi);
   if (api === undefined) {
@@ -64,6 +70,12 @@ export function buildPiProviderProjection(profile: ModelProviderProfile, runtime
       'PROVIDER_PROFILE_INVALID',
       `${profile.profile_ref} Anthropic profiles project anthropic-messages and declare no Pi api`,
     );
+  }
+  const imageInput = modelId === profile.model
+    ? profile.capabilities.includes('image-input')
+    : PI_CATALOG_IMAGE_MODELS[profile.provider_kind]?.[api]?.includes(modelId) === true;
+  if (!imageInput && requiredCapabilities.includes('image-input')) {
+    throw new ByokKeysError('MODEL_PROVIDER_MODEL_NOT_FOUND', 'the selected Pi model lacks verified image input support');
   }
   const projectedProviderId = piProjectionProviderId(profile);
   return {
@@ -76,11 +88,11 @@ export function buildPiProviderProjection(profile: ModelProviderProfile, runtime
         models: [
           {
             ...modelSettings,
-            id: profile.model,
+            id: modelId,
             name: profile.display_name,
             input: [
               'text',
-              ...(profile.capabilities.includes('image-input') ? ['image'] : []),
+              ...(imageInput ? ['image'] : []),
             ],
           },
         ],
@@ -141,24 +153,24 @@ function piApiKey(profile: ModelProviderProfile, runtimeEntry: PiLauncherRuntime
 /**
  * Refuse a profile whose rpc launch values the Pi rpc host would refuse.
  *
- * The launcher appends `--provider`, `--model` and `--thinking` from the
- * profile. The `@byok-sdk/client` rpc host (`parsePiRpcHostArgs`) takes each
- * value only when it is non-empty and does not start with `--`, and takes
+ * The launcher appends `--provider` and `--thinking` from the profile and
+ * `--model` from the task override or the saved default. The launcher
+ * validates these values before passing them to `parsePiRpcHostArgs`. It takes
  * `--thinking` only from Pi's thinking levels. `PiModelConfigSchema` already
  * restricts `thinkingLevel` to those levels. A Host can call this on a parsed
  * profile when it saves the profile. The launcher calls it before admission
  * and again before spawn. A client test runs the same argv through the real
  * host parser.
  */
-export function assertPiLaunchArgs(profile: ModelProviderProfile): void {
+export function assertPiLaunchArgs(profile: ModelProviderProfile, modelId = profile.model): void {
   const config = requirePiModelConfig(profile);
   const values: readonly (readonly [string, string])[] = [
     ['--provider', piProjectionProviderId(profile)],
-    ['--model', profile.model],
+    ['--model', modelId],
     ['--thinking', config.thinkingLevel],
   ];
   for (const [flag, value] of values) {
-    if (value.length === 0 || value.startsWith('--')) {
+    if (!isProviderProfileModelId(value)) {
       throw new ByokKeysError(
         'PROVIDER_PROFILE_INVALID',
         `${profile.profile_ref} Pi ${flag} value ${JSON.stringify(value)} is not accepted by the Pi rpc host`,
@@ -169,13 +181,14 @@ export function assertPiLaunchArgs(profile: ModelProviderProfile): void {
 
 /**
  * Validate the credential-blind RPC argv the client may delegate, then bind
- * the Pi child to the declared projection and exact configured model.
+ * the Pi child to the declared projection and effective model.
  */
 export function buildPiProviderArgs(
   profile: ModelProviderProfile,
   delegatedArgs: readonly string[],
+  modelId = profile.model,
 ): string[] {
-  assertPiLaunchArgs(profile);
+  assertPiLaunchArgs(profile, modelId);
   const config = requirePiModelConfig(profile);
   if (delegatedArgs.length > 128) throw new Error('Pi launcher delegated argument limit exceeded');
   let modeCount = 0;
@@ -231,7 +244,7 @@ export function buildPiProviderArgs(
     '--provider',
     piProjectionProviderId(profile),
     '--model',
-    profile.model,
+    modelId,
     '--thinking',
     config.thinkingLevel,
   ];

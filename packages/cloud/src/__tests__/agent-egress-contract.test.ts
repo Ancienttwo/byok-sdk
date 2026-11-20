@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { agentReliabilityKey } from '../agent-reliability';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { TENANT_A, createHarness, decodeEventsPage, type CloudHarness } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, createHarness, decodeEventsPage, type CloudHarness } from './support/harness';
 
 const AGENT_REF = { agentId: 'agent-egress', profileRevision: 'profile-egress' } as const;
 const OTHER_AGENT_REF = { agentId: 'agent-egress-other', profileRevision: 'profile-egress' } as const;
@@ -41,7 +41,7 @@ function egressOfferPayload() {
 
 function freshEgressOfferPayload() {
   return {
-    target: { lane: 'runtime', runtimeId: 'codex' } as const,
+    target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const,
     terminalProjection: { mode: 'none' as const },
     instruction: 'start a fresh runtime with egress policy',
     agentRef: AGENT_REF,
@@ -94,6 +94,7 @@ function deviceStores(harness: CloudHarness, deviceId: string) {
 async function admitFullEgress(harness: CloudHarness, deviceId: string): Promise<void> {
   await harness.stores.devices.recordCapabilities(TENANT_A, {
     deviceId,
+    harnesses: TEST_HARNESSES,
     capabilities: [
       'agent-home-contract',
       'agent-egress-policy',
@@ -207,6 +208,7 @@ describe('hosted Agent egress contract', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: ['agent-home-contract'],
     });
 
@@ -236,6 +238,7 @@ describe('hosted Agent egress contract', () => {
 
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [
         'agent-home-contract',
         'agent-egress-policy',

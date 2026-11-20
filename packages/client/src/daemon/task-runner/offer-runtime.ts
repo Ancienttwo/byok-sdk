@@ -3,7 +3,8 @@
 import { awaitAdmission } from '../admission-wait.js';
 import { detectedRuntimeCapabilities, observeRuntimeDetection } from '../../runtime-detection.js';
 import { AGENT_USER_CONTEXT_WINDOWS_REMEDY, runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
-import { freezeRuntimeAdapterDescriptor, modelLaneTarget, type RuntimeAdapter } from '../../types.js';
+import { harnessSelectionNeedsModel, harnessSupportsTarget, type ExecutionTarget } from '@byok-sdk/protocol';
+import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type RuntimeAdapterDescriptor } from '../../types.js';
 import { RuntimeEnvironmentUnavailableError } from '../../runtime/environment.js';
 import type { McpStdioServerConfig } from '../../types.js';
 import type { ExecutionScratch } from '../retention/scratch.js';
@@ -19,6 +20,8 @@ import { MCP_HUB_SERVER_INFO, MCP_HUB_SERVER_NAME, MCP_HUB_TOOLS } from '../../m
 import { matchSearchRuntimeEvidence } from '../search-runtime-qualification.js';
 import { MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS } from '../../mcp-server/index.js';
 
+const SEARCH_UNAVAILABLE_REASON = 'MCP search exposure is unavailable on this device for the requested runtime or version';
+
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {
   const { taskId, decline, admissionWithdrawn } = phase;
   const {
@@ -29,7 +32,6 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   // `auto` leaves the pick to device preference. A native-sessions offer
   // reached here only with an explicit Pi target (selection rule 3).
   const { target } = payload;
-  const requestedRuntime = target.lane === 'auto' ? undefined : target.lane === 'harness' ? target.harnessId : target.runtimeId;
   const requiresAgentMemoryMcp = preparation === undefined && ordinaryMemoryMcp;
   const mcpToolApprovals = resolvedMcp?.ok ? resolvedMcp.mcpToolApprovals : undefined;
   const searchNames = Object.keys(resolvedMcp?.ok ? resolvedMcp.searchServers : {});
@@ -37,15 +39,13 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   let pick: PickResult;
   try {
     pick = await this['pickAdapter'](
-      requestedRuntime,
+      target,
       {
         mcpToolsets: requiredToolsets !== undefined
           || (preparation === undefined && (messageRequirement !== undefined || terminalProjection?.mode === 'result-document'))
           || requiresAgentMemoryMcp || preparedMemorySelected,
         resume: offered.sessionRef !== undefined,
-        dispatchSelection: modelLaneTarget(target) !== undefined,
         preparedInput: preparation !== undefined,
-        taskExecutionOptions: offered.effort !== undefined || offered.modelId !== undefined,
       },
       blobAbort.signal,
       searchExposure,
@@ -62,7 +62,8 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline({
       reason: pick.reason,
       retryable: pick.retryable,
-      ...(pick.runtimeUnavailable === undefined ? {} : { code: 'runtime_unavailable', runtimeUnavailable: pick.runtimeUnavailable }),
+      code: pick.runtimeUnavailable === undefined ? pick.code : 'runtime_unavailable',
+      ...(pick.runtimeUnavailable === undefined ? {} : { runtimeUnavailable: pick.runtimeUnavailable }),
     });
     return undefined;
   }
@@ -262,12 +263,13 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     }
     mcpToolsetTools = Object.freeze(observed);
   }
+  const { adapter, descriptor } = pick;
   let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
   try {
-    prepared = await awaitAdmission(() => pick.adapter.prepare({
+    prepared = await awaitAdmission(() => adapter.prepare({
       signal: blobAbort.signal,
       offer: offered,
-      descriptor: pick.descriptor,
+      descriptor,
       requiredToolsetIds: requiredToolsets ?? [],
       ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
       ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
@@ -278,8 +280,29 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   }
   if (admissionWithdrawn()) return undefined;
   if (prepared.kind === 'reject') {
-    decline({ reason: prepared.reason, retryable: prepared.retryable });
+    decline({ reason: prepared.reason, retryable: prepared.retryable,
+      ...(prepared.code === undefined ? {} : { code: prepared.code }) });
     return undefined;
+  }
+  const detected = prepared.detected;
+  if (detected?.versionVerdict?.state === 'block') {
+    const token = (detected.version ?? detected.versionVerdict.qualifiedVersion).replace(/[\r\n\t]/g, ' ').slice(0, 256);
+    decline({
+      reason: `runtime "${pick.descriptor.id}" version ${token} is blocked by the device version policy`,
+      retryable: runtimeUnavailableRetryable('version_blocked'),
+      code: 'runtime_unavailable',
+      runtimeUnavailable: { cause: 'version_blocked' },
+    });
+    return undefined;
+  }
+  if (searchExposure && pick.searchEvidence?.executableSource !== 'sdk-entry') {
+    const searchRows = this['deps'].mcpSearch?.candidates(pick.descriptor) ?? [];
+    const verifiedSearch = detected === undefined ? undefined : matchSearchRuntimeEvidence(searchRows, { kind: 'available', ...detected });
+    if (verifiedSearch === undefined) {
+      decline({ reason: SEARCH_UNAVAILABLE_REASON, retryable: true });
+      return undefined;
+    }
+    pick = { ...pick, searchEvidence: verifiedSearch };
   }
   // `approveTools` is a grant, projected only to a runtime that declares
   // `mcpToolApprovals`; it never takes part in admission or runtime selection.
@@ -290,9 +313,18 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
   };
 }
 
+function descriptorSupportsTarget(descriptor: RuntimeAdapterDescriptor, target: ExecutionTarget): boolean {
+  return harnessSupportsTarget({ id: descriptor.id, capabilities: {
+    selectionModes: descriptor.selectionModes,
+    defaultModelModes: descriptor.defaultModelModes,
+    effort: descriptor.supportsEffort === true,
+    byokProviderId: descriptor.byokProviderId,
+  } }, target);
+}
+
 export async function pickAdapter(
   this: TaskRunner,
-  requestedRuntime: string | undefined,
+  target: ExecutionTarget,
   requirements: RuntimeRequirements,
   signal: AbortSignal,
   searchExposure = false,
@@ -301,10 +333,13 @@ export async function pickAdapter(
   const searchCandidates = (descriptor: RuntimeAdapter['descriptor']) => descriptor.capabilities.durableLane === true
     ? [] : this['deps'].mcpSearch?.candidates(descriptor) ?? [];
   const searchUnavailable: PickResult = {
-    ok: false, retryable: true, reason: 'MCP search exposure is unavailable on this device for the requested runtime or version',
+    ok: false, retryable: true, reason: SEARCH_UNAVAILABLE_REASON,
   };
 
-  if (requestedRuntime) {
+  const advertised = this['deps'].advertisedHarnesses();
+
+  if (target.lane === 'harness') {
+    const requestedRuntime = target.harnessId;
     if (allowlist && !allowlist.includes(requestedRuntime)) {
       return {
         ok: false,
@@ -325,6 +360,16 @@ export async function pickAdapter(
     const descriptor = freezeRuntimeAdapterDescriptor(adapter.descriptor);
     const rows = searchExposure ? searchCandidates(descriptor) : [];
     if (searchExposure && rows.length === 0) return searchUnavailable;
+
+    const harness = advertised.find(harness => harness.id === requestedRuntime);
+    if (harness?.capabilities.selectionModes.includes(target.selection.mode)
+      && (harnessSelectionNeedsModel(target.selection, harness.capabilities.defaultModelModes)
+        || harnessSelectionNeedsModel(target.selection, descriptor.defaultModelModes))) {
+      return { ok: false, code: 'invalid_request', reason: 'the requested harness selection requires a model ID', retryable: false };
+    }
+    if (harness === undefined || !harnessSupportsTarget(harness, target) || !descriptorSupportsTarget(descriptor, target)) {
+      return { ok: false, reason: `runtime "${requestedRuntime}" has no advertised support for the requested selection or effort`, retryable: false };
+    }
     const unmet = unmetRequirements(descriptor, requirements);
     if (unmet.length > 0) {
       return {
@@ -361,12 +406,17 @@ export async function pickAdapter(
         runtimeUnavailable,
       };
     }
+    if (!this['deps'].advertisedHarnesses().some(harness => harnessSupportsTarget(harness, target))) {
+      return { ok: false, reason: `runtime "${requestedRuntime}" is no longer advertised for this target`, retryable: true };
+    }
     const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
     if (searchExposure && searchEvidence === undefined) return searchUnavailable;
     return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
   }
 
-  const eligible = allowlist ? this['deps'].adapters.filter((a) => allowlist.includes(a.descriptor.id)) : this['deps'].adapters;
+  const eligible = this['deps'].adapters.filter(({ descriptor }) =>
+    (allowlist === undefined || allowlist.includes(descriptor.id)) && descriptorSupportsTarget(descriptor, target)
+    && advertised.some(harness => harness.id === descriptor.id && harnessSupportsTarget(harness, target)));
   // M5 batch-3: product decision — pi is the FALLBACK runtime, not the
   // default. Ordered independently of `deps.adapters`'s own construction
   // order (which stays whatever `buildRuntimeAdapters`/the embedder built
@@ -383,7 +433,8 @@ export async function pickAdapter(
     capabilityEligible += 1;
     const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
-    if (detected.kind !== 'available' || detected.versionVerdict?.state === 'block') continue;
+    if (detected.kind !== 'available' || detected.versionVerdict?.state === 'block'
+      || !this['deps'].advertisedHarnesses().some(harness => harness.id === descriptor.id && harnessSupportsTarget(harness, target))) continue;
     const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
     if (!searchExposure || searchEvidence !== undefined) {
       return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };

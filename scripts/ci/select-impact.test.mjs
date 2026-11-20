@@ -913,8 +913,10 @@ test('the #1022 task events route selects only examples/basic', () => {
   assert.throws(() => selectImpact(['examples/basic/task-events-other.ts']));
 });
 
-test('the example page selects only examples/basic (#1036)', () => {
-  assert.deepEqual(selectImpact(['examples/basic/public/index.html']).dirs, ['examples/basic']);
+test('the example page and its DOM test select only examples/basic (#1036)', () => {
+  for (const path of ['examples/basic/public/index.html', 'examples/basic/page-runtimes.test.ts']) {
+    assert.deepEqual(selectImpact([path]).dirs, ['examples/basic'], path);
+  }
   assert.throws(() => selectImpact(['examples/basic/public/other.html']));
 });
 

@@ -253,7 +253,7 @@ describe('task assertion broker: task_assertion.issue', () => {
         'task.offer',
         {
           instruction: 'qualify the inbound lead',
-          target: { lane: 'runtime', runtimeId: 'pi' },
+          target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
           agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, ...FRESH_OFFER,
           requiredToolsets: [...requiredToolsets],
         },
@@ -719,7 +719,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const built = await pairedAndStartedUngated('acme-cap-no-tools', {}, false);
     try {
       server.send(createEnvelope('task.offer', {
-        instruction: 'no host tools', target: { lane: 'runtime', runtimeId: 'pi' },
+        instruction: 'no host tools', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, ...FRESH_OFFER,
       }, { taskId: 'task-no-host-tools', seq: server.nextSeq() }));
       await server.waitFor((event) => event.type === 'task.started' && event.task_id === 'task-no-host-tools');
@@ -735,7 +735,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const unsubscribe = built.daemon.subscribe((event) => events.push(event));
     try {
       server.send(createEnvelope('task.offer', {
-        instruction: 'wait then cancel', target: { lane: 'runtime', runtimeId: 'pi' },
+        instruction: 'wait then cancel', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, ...FRESH_OFFER, requiredToolsets: [READ_TOOLSET],
       }, { taskId: 'task-cancel-discovery', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));
@@ -754,7 +754,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     const unsubscribe = built.daemon.subscribe((event) => events.push(event));
     try {
       server.send(createEnvelope('task.offer', {
-        instruction: 'wait then stop', target: { lane: 'runtime', runtimeId: 'pi' },
+        instruction: 'wait then stop', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         agentRef: { agentId: AGENT_ID, profileRevision: PROFILE_REVISION }, ...FRESH_OFFER, requiredToolsets: [READ_TOOLSET],
       }, { taskId: 'task-stop-during-discovery', seq: server.nextSeq() }));
       await vi.waitFor(() => expect(events.some((event) => event.kind === 'offered')).toBe(true));

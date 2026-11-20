@@ -285,6 +285,7 @@
 //   LocalTerminalRecord -> dist/daemon/journal/journal.d.ts
 //   LocalToolApprovalPolicy -> dist/daemon/approvals.d.ts
 //   LocalTransitionRecord -> dist/daemon/journal/journal.d.ts
+//   ManagedRuntimeId -> dist/adapters/managed-runtime-path.d.ts
 //   McpStdioServerConfig -> dist/types.d.ts
 //   McpToolsetConfig -> dist/types.d.ts
 //   McpToolsetDefinitionRevisionConflictError -> dist/daemon/toolset-registry.d.ts
@@ -394,6 +395,9 @@
 //   RuntimeSessionLease -> dist/types.d.ts
 //   RuntimeStartupDisposalFailure -> dist/runtime-failure.d.ts
 //   RuntimeTaskInput -> dist/types.d.ts
+//   RuntimeUpgradeAdvice -> dist/runtime/runtime-releases.d.ts
+//   RuntimeUpgradeOptions -> dist/lifecycle/runtime-installation.d.ts
+//   RuntimeUpgradeResult -> dist/lifecycle/runtime-installation.d.ts
 //   RuntimeVersionChange -> dist/runtime-detection.d.ts
 //   RuntimeVersionChangeDirection -> dist/runtime-detection.d.ts
 //   RuntimeVersionPolicy -> dist/types.d.ts
@@ -506,6 +510,7 @@
 //   UpgradeFromRefusalCode -> dist/lifecycle/upgrade-from.d.ts
 //   UpgradeFromReport -> dist/lifecycle/upgrade-from.d.ts
 //   UpgradeTrainPackage -> dist/lifecycle/upgrade-from.d.ts
+//   UpgradeableRuntimeId -> dist/runtime/runtime-releases.d.ts
 //   WithheldOfferRecord -> dist/daemon/journal/journal.d.ts
 //   WithheldOfferTask -> dist/daemon/journal/journal.d.ts
 //   agentServiceDefinition -> dist/lifecycle/agent-service.d.ts
@@ -593,6 +598,8 @@
 //   serviceEnvironmentStatus -> dist/login-shell-environment.d.ts
 //   skillPacksRoot -> dist/daemon/skill-pack-installer.d.ts
 //   stableAgentHomeOwnerId -> dist/agent-home.d.ts
+//   uninstallManagedRuntime -> dist/lifecycle/runtime-installation.d.ts
+//   upgradeRuntime -> dist/lifecycle/runtime-installation.d.ts
 //   validateAgentRef -> dist/agent-home.d.ts
 //   validateDaemonConfig -> dist/daemon/config-schema/validate.d.ts
 //   validateInputPreparationLimits -> dist/input-preparation.d.ts
@@ -681,7 +688,7 @@
 //   createRuntimeAdapters -> dist/adapters/runtime-adapters.d.ts
 //   isWireRuntimeId -> dist/runtime-detection.d.ts
 //   observeRuntimeDetection -> dist/runtime-detection.d.ts
-//   projectRuntimeObservation -> dist/runtime-detection.d.ts
+//   projectRuntimeObservation -> dist/runtime/runtime-releases.d.ts
 //   taskRuntimeTarget -> dist/runtime-detection.d.ts
 //   validateRuntimeDetectResult -> dist/runtime-detection.d.ts
 // entry @byok-sdk/client/agent-memory
@@ -805,6 +812,9 @@ export declare class AgyAdapter implements RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
+// ==== @byok-sdk/client dist/adapters/antigravity/agy-version.d.ts ====
+// support
+export declare function agyVersionToken(output: string): string;
 // ==== @byok-sdk/client dist/adapters/claude/claude-adapter.d.ts ====
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types.js';
@@ -815,6 +825,11 @@ import type { spawn } from 'node:child_process';
 // support
 export type SpawnFn = typeof spawn;
 export interface ClaudeAdapterOptions {
+    runtimeInstallRoot?: string;
+    byok?: Readonly<{
+        providerId: string;
+        resolveKey: () => Promise<string>;
+    }>;
     nativeAssetRoot?: string;
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     resolveBin?: () => ResolvedBin;
@@ -833,6 +848,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     listModels(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
     accountUsage(options?: RuntimeReadOptions): Promise<RuntimeAccountUsage>;
     readonly descriptor: import("../index.js").RuntimeAdapterDescriptor;
+    private readonly byok?;
     private readonly nativeOptions?;
     private readonly environmentPolicy;
     private readonly effectiveVersionPolicy;
@@ -842,8 +858,8 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
+    private executionSelection;
     private startPrepared;
-    private probeAuthPresent;
     private resolveBin;
 }
 // ==== @byok-sdk/client dist/adapters/claude/resolve-bin.d.ts ====
@@ -861,6 +877,7 @@ import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../ru
 import { type ResolvedBin } from './resolve-bin.js';
 export type CodexSandboxSetting = 'read-only' | 'workspace-write' | 'danger-full-access' | 'inherit';
 export interface CodexAdapterOptions {
+    runtimeInstallRoot?: string;
     nativeAssetRoot?: string;
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     sandbox?: CodexSandboxSetting;
@@ -906,11 +923,13 @@ import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../ru
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface DshModelSelection {
     readonly provider: string;
-    readonly model: string;
+    readonly providerId?: string;
+    readonly model?: string;
     readonly baseUrl?: string;
 }
 export type DshSandboxMode = 'danger-full-access' | 'workspace-write' | 'read-only';
 export interface DshAdapterOptions {
+    runtimeInstallRoot?: string;
     home: string;
     model: DshModelSelection;
     resolveKey: () => Promise<string>;
@@ -934,6 +953,7 @@ export declare class DshAdapter implements RuntimeAdapter {
     private readonly effectiveVersionPolicy;
     private readonly interruptTimeoutMs;
     private readonly maxRetainedBytes;
+    private providerId;
     get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     constructor(options: DshAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
@@ -978,10 +998,14 @@ export declare class GrokAdapter implements RuntimeAdapter {
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
+// ==== @byok-sdk/client dist/adapters/grok/grok-version.d.ts ====
+// support
+export declare function grokVersionToken(output: string): string;
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionRefusalReason, } from '../types.js';
 export type { RuntimeAccountUsage, RuntimeAccountUsageUnsupportedReason, RuntimeAccountUsageWindow, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeModelEntry, RuntimeReadOptions, RuntimeUnsupportedVersion, } from '../runtime/runtime-reader-types.js';
-export { isWireRuntimeId, observeRuntimeDetection, projectRuntimeObservation, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
+export { isWireRuntimeId, observeRuntimeDetection, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
+export { projectRuntimeObservationWithUpgrade as projectRuntimeObservation } from '../runtime/runtime-releases.js';
 export type { RuntimeObservation } from '../runtime-detection.js';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure.js';
 export type { RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeExecutionFailureInput, RuntimeFailurePhase, RuntimeRetryDisposition, } from '../runtime-failure.js';
@@ -1007,6 +1031,8 @@ export type { RuntimeEnvironment, RuntimeEnvironmentConflictRule, RuntimeEnviron
 export { createExecutionScratch, ScratchRootPathError } from '../daemon/retention/scratch.js';
 export type { ExecutionScratch } from '../daemon/retention/scratch.js';
 export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter.js';
+// ==== @byok-sdk/client dist/adapters/managed-runtime-path.d.ts ====
+export type ManagedRuntimeId = 'claude' | 'codex' | 'dsh' | 'opencode';
 // ==== @byok-sdk/client dist/adapters/opencode/opencode-adapter.d.ts ====
 import type { spawn as nodeSpawn } from 'node:child_process';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
@@ -1014,7 +1040,8 @@ import { type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 export interface OpenCodeAdapterOptions {
-    models: readonly string[];
+    runtimeInstallRoot?: string;
+    models?: readonly string[];
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     versionPolicy?: RuntimeVersionPolicy;
     resolveBin?: () => ResolvedBin;
@@ -1030,7 +1057,7 @@ export declare class OpenCodeAdapter implements RuntimeAdapter {
     private readonly options;
     private readonly environment;
     private readonly policy?;
-    constructor(options: OpenCodeAdapterOptions);
+    constructor(options?: OpenCodeAdapterOptions);
     get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     runtimeEnvironment(): Promise<import("../index.js").RuntimeEnvironment>;
     private probe;
@@ -1107,6 +1134,7 @@ export declare const PI_MEMORY_LANE: Readonly<{
 }>;
 // ==== @byok-sdk/client dist/adapters/pi/pi-adapter.d.ts ====
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog } from '../../runtime/runtime-reader-types.js';
 import type { ProviderProfileBinding } from '@byok-sdk/protocol';
 import { type RuntimeAdapter, type RuntimeDetectResult, type RuntimeVersionPolicy, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult } from '../../types.js';
 import { type SdkHelperHostConfig } from '../../sdk-reserved-helper-host.js';
@@ -1124,7 +1152,7 @@ export interface PiAdapterOptions {
     spawnFn?: SpawnFn;
     byokLauncher?: PiByokLauncherConfig;
     sdkHelperHost?: SdkHelperHostConfig;
-    validateProviderProfileBinding?: (binding: ProviderProfileBinding, launcher: PiByokLauncherConfig) => Promise<void>;
+    validateProviderProfileBinding?: (binding: ProviderProfileBinding, launcher: PiByokLauncherConfig, modelId?: string) => Promise<void>;
     versionPolicy?: RuntimeVersionPolicy;
 }
 export interface PiByokLauncherConfig {
@@ -1143,6 +1171,7 @@ export declare class PiAdapter implements RuntimeAdapter {
     private readonly effectiveVersionPolicy;
     constructor(options?: PiAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
+    listModels(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
     projectMcpEnvironment(env: Readonly<Record<string, string>>): Readonly<Record<string, string>>;
     detect(): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
@@ -1187,6 +1216,7 @@ export interface PiRuntimeConfig {
 export interface RuntimeAdaptersRuntimes {
     pi?: PiRuntimeConfig;
     claude?: {
+        byok?: ClaudeAdapterOptions['byok'];
         agentUserContext?: ClaudeAdapterOptions['agentUserContext'];
         agentSessionPersistence?: ClaudeAdapterOptions['agentSessionPersistence'];
         versionPolicy?: RuntimeVersionPolicy;
@@ -1214,7 +1244,7 @@ export interface RuntimeAdaptersRuntimes {
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
     };
     opencode?: {
-        models: OpenCodeAdapterOptions['models'];
+        models?: OpenCodeAdapterOptions['models'];
         executable?: string;
         versionPolicy?: RuntimeVersionPolicy;
         runtimeEnvironment?: RuntimeEnvironmentPolicy;
@@ -1228,6 +1258,7 @@ export interface RuntimeAdaptersRuntimes {
     };
 }
 export interface RuntimeAdaptersConfig {
+    runtimeInstallRoot?: string;
     nativeAssetRoot?: string;
     sdkHelperHost?: SdkHelperHostConfig;
     runtimeAllowlist?: string[];
@@ -2292,7 +2323,7 @@ import { type LocalAgentReleaseIdentity } from '../release-identity.js';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter.js';
 import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
 import { type LocalToolApprovalPolicy } from './approvals.js';
-import { type DaemonLifecycle } from './daemon-lifecycle.js';
+import type { DaemonLifecycle } from './daemon-lifecycle.js';
 import { type ControlStorageStatus } from './control-protocol.js';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation.js';
 import { type OperationalHealthSnapshot } from './operational-health.js';
@@ -2346,6 +2377,7 @@ export interface DaemonConfig {
     defaultMaxDurationMs?: number;
     agentEgress?: AgentEgressConfig;
     runtimeAllowlist?: string[];
+    runtimeInstallRoot?: string;
     runtimes?: DaemonRuntimesConfig;
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
     piByokLauncher?: import('../adapters/pi/pi-adapter.js').PiByokLauncherConfig;
@@ -2662,7 +2694,7 @@ export type DaemonRecord = Extract<DaemonEvent, {
 } | {
     kind: 'runtimes-detected';
     ts: string;
-    runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict' | 'versionChange' | 'executablePath' | 'executableSource' | 'unsupportedVersion'>>;
+    runtimes: Array<Omit<RuntimeObservation, 'version' | 'versionVerdict' | 'versionChange' | 'executablePath' | 'executableSource' | 'unsupportedVersion' | 'upgrade'>>;
 } | {
     kind: 'shutdown-requested';
     ts: string;
@@ -4069,6 +4101,7 @@ export declare function inspectDaemonStores(input: InspectDaemonStoresInput): Pr
 import type { RuntimeDetectResult, RuntimeDetectionRefusalReason, RuntimeExecutableSource, RuntimeVersionVerdict } from '../types.js';
 import type { RuntimeVersionChange } from '../runtime-detection.js';
 import type { RuntimeUnsupportedVersion } from '../runtime/runtime-reader-types.js';
+import type { RuntimeUpgradeAdvice } from '../runtime/runtime-releases.js';
 import type { ControlStatusResult } from '../daemon/control-protocol.js';
 import type { OperationalHealthFileInspection } from '../daemon/operational-health.js';
 import type { DaemonLifecycle } from '../daemon/daemon-lifecycle.js';
@@ -4108,6 +4141,7 @@ export interface DiagnosticsSnapshot {
         reason?: RuntimeDetectionRefusalReason;
         versionPresent: boolean;
         unsupportedVersion?: RuntimeUnsupportedVersion;
+        upgrade?: RuntimeUpgradeAdvice;
         versionVerdict?: RuntimeVersionVerdict;
         versionChange?: RuntimeVersionChange;
         executablePath?: string;
@@ -4267,6 +4301,9 @@ export type { SdkHelperHostConfig, SdkReservedHelperKind, ResolvedSdkReservedHel
 export { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeStartupDisposalFailure, RuntimeDisposalFailure, RUNTIME_ADAPTER_CONTRACT_VIOLATION_REASON, isRuntimeDisposalFailure, isRuntimeExecutionFailure, projectRuntimeBoundaryFailure, projectRuntimeExecutionFailure, } from './runtime-failure.js';
 export type { RuntimeExecutionFailureInput, RuntimeDisposalFailureInput, RuntimeDisposalStage, RuntimeFailurePhase, RuntimeFailureProjection, RuntimeRetryDisposition, } from './runtime-failure.js';
 export { createDaemon, createDaemonWithAdapters } from './daemon/create-daemon.js';
+export { upgradeRuntime, uninstallManagedRuntime, type RuntimeUpgradeOptions, type RuntimeUpgradeResult } from './lifecycle/runtime-installation.js';
+export type { ManagedRuntimeId } from './adapters/managed-runtime-path.js';
+export type { UpgradeableRuntimeId, RuntimeUpgradeAdvice } from './runtime/runtime-releases.js';
 export { DAEMON_CONFIG_SCHEMA_VERSION, DaemonConfigInvalidError, checkDaemonConfig, validateDaemonConfig, type DaemonConfigCheck, type DaemonConfigCheckOptions, type DaemonConfigIssue, type DaemonConfigIssueCode, type DaemonConfigSource, type DaemonConfigValidation, type DaemonEffectiveConfig, type DaemonEffectiveMcpServer, type DaemonEffectiveRuntime, type DaemonEffectiveToolAuthorization, type DaemonMemoryHelperResolution, } from './daemon/config-schema/index.js';
 export { DaemonJournalProtocolUnsupportedError, DeviceStoreBindingMismatchError, EmbeddedPairingError, PairingAttemptRefusedError, PairingBusyError, PairingInputInvalidError, PairingCodeRejectedError, PairingSupersededError, type DaemonJournalProtocolRecord, } from './daemon/daemon-errors.js';
 export { APPROVAL_REQUIRES_HOST } from './daemon/approvals.js';
@@ -4776,6 +4813,27 @@ export declare function generateLaunchdPlist(def: {
 import { promises as fsp } from 'node:fs';
 // support
 export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readFile' | 'rm' | 'rename' | 'chmod'>;
+// ==== @byok-sdk/client dist/lifecycle/runtime-installation.d.ts ====
+import { type ManagedRuntimeId } from '../adapters/managed-runtime-path.js';
+import { type UpgradeableRuntimeId } from '../runtime/runtime-releases.js';
+export interface RuntimeUpgradeOptions {
+    readonly installRoot: string;
+    readonly runtimeId: UpgradeableRuntimeId;
+}
+export type RuntimeUpgradeResult = {
+    readonly kind: 'installed' | 'current';
+    readonly version: string;
+    readonly executable: string;
+} | {
+    readonly kind: 'vendor';
+    readonly command: string;
+    readonly reason: string;
+} | {
+    readonly kind: 'failed';
+    readonly reason: 'install_failed' | 'binary_unavailable' | 'version_mismatch' | 'probe_failed' | 'mutation_failed';
+};
+export declare function upgradeRuntime(options: RuntimeUpgradeOptions): Promise<RuntimeUpgradeResult>;
+export declare function uninstallManagedRuntime(installRoot: string, runtimeId: ManagedRuntimeId): Promise<void>;
 // ==== @byok-sdk/client dist/lifecycle/sdk-reserved-helper-command.d.ts ====
 export declare function runSdkReservedHelperCommand(argv?: readonly string[]): Promise<boolean>;
 // ==== @byok-sdk/client dist/lifecycle/service-environment.d.ts ====
@@ -5386,6 +5444,7 @@ export interface LocalAgentReleaseIdentity {
 }
 export declare function resolveLocalAgentReleaseIdentity(input: LocalAgentReleaseIdentity | undefined): Readonly<LocalAgentReleaseIdentity>;
 // ==== @byok-sdk/client dist/runtime-detection.d.ts ====
+import type { RuntimeUpgradeAdvice } from './runtime/runtime-releases.js';
 import type { RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
 import type { ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
 import { type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
@@ -5405,6 +5464,7 @@ export interface RuntimeObservation {
     code?: ServiceEnvironmentUnavailableCode;
     version?: string;
     unsupportedVersion?: RuntimeUnsupportedVersion;
+    upgrade?: RuntimeUpgradeAdvice;
     qualifiedVersion?: string;
     versionVerdict?: RuntimeVersionVerdict;
     versionChange?: RuntimeVersionChange;
@@ -5415,12 +5475,11 @@ export interface RuntimeObservation {
     resume: boolean;
     images?: boolean;
 }
-export declare function projectRuntimeObservation(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation;
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
 export declare function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult>;
 export declare function isWireRuntimeId(id: string): id is RuntimeId;
 export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): Extract<ExecutionTarget, {
-    readonly lane: 'runtime' | 'harness';
+    lane: 'harness';
 }>;
 // ==== @byok-sdk/client dist/runtime-failure.d.ts ====
 import type { TaskFailure } from '@byok-sdk/protocol';
@@ -5606,6 +5665,58 @@ export type RuntimeAccountUsage = {
         }[];
     };
 };
+// ==== @byok-sdk/client dist/runtime/runtime-releases.d.ts ====
+import { agyVersionToken } from '../adapters/antigravity/agy-version.js';
+import { grokVersionToken } from '../adapters/grok/grok-version.js';
+import { type RuntimeObservation } from '../runtime-detection.js';
+import type { RuntimeAdapterDescriptor, RuntimeDetectResult } from '../types.js';
+// support
+interface RuntimeRelease {
+    readonly qualifiedVersion: string;
+    readonly token: (output: string) => string | undefined;
+}
+// support
+declare const RUNTIME_RELEASES: {
+    readonly claude: RuntimeRelease & {
+        readonly kind: 'managed';
+        readonly package: string;
+    };
+    readonly codex: RuntimeRelease & {
+        readonly kind: 'managed';
+        readonly package: string;
+    };
+    readonly dsh: RuntimeRelease & {
+        readonly kind: 'managed';
+        readonly package: string;
+    };
+    readonly opencode: RuntimeRelease & {
+        readonly kind: 'managed';
+        readonly package: string;
+    };
+    readonly agy: {
+        readonly kind: 'vendor';
+        readonly qualifiedVersion: "1.5.11";
+        readonly token: typeof agyVersionToken;
+        readonly command: 'agy update';
+        readonly reason: 'Use the Antigravity vendor installer to update the standalone CLI.';
+    };
+    readonly grok: {
+        readonly kind: 'vendor';
+        readonly qualifiedVersion: "1.0.77";
+        readonly token: typeof grokVersionToken;
+        readonly command: 'npm install -g @xai-official/grok';
+        readonly reason: 'The Grok installer writes to the user’s global Grok directory.';
+    };
+};
+export type UpgradeableRuntimeId = keyof typeof RUNTIME_RELEASES;
+export interface RuntimeUpgradeAdvice {
+    readonly state: 'required' | 'available';
+    readonly installedVersion?: string;
+    readonly qualifiedVersion: string;
+    readonly minimumVersion?: string;
+    readonly command: string;
+}
+export declare function projectRuntimeObservationWithUpgrade(descriptor: RuntimeAdapterDescriptor, detected: RuntimeDetectResult): RuntimeObservation;
 // ==== @byok-sdk/client dist/sdk-hosting.d.ts ====
 import type { SdkHelperHostConfig } from './sdk-reserved-helper-host.js';
 export interface SdkHostingOptions {
@@ -5942,7 +6053,7 @@ import type { NativeInteractionCapabilities, NativeInteractionChannel } from './
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
 import type { PreparedAgentMemoryMode } from '@byok-sdk/protocol';
 import type { PreparedAgentMemoryState } from './agent-memory/prepared-agent-memory.js';
-import type { AgentEvent, ExecutionTarget, TaskOfferPlainPayload } from '@byok-sdk/protocol';
+import type { AgentEvent, DefaultModelSelectionMode, HarnessSelection, SelectionMode, TaskDeclineCode, TaskOfferPlainPayload } from '@byok-sdk/protocol';
 import type { InputPreparationModelV1 } from './input-preparation.js';
 import type { AgentRef } from './agent-home.js';
 import type { McpToolsetServerObservation } from './mcp/observation.js';
@@ -5961,10 +6072,6 @@ export type RuntimeTaskInput = Pick<TaskOfferPlainPayload, 'target' | 'limits'> 
     modelId?: string;
     sessionRef?: string;
 };
-// support
-export type ModelLaneTarget = Extract<ExecutionTarget, {
-    readonly lane: 'subscription' | 'byok' | 'byok-profile';
-}>;
 export type { AgentEgressPolicy } from '@byok-sdk/protocol';
 // support
 export declare const RUNTIME_DETECTION_FAILURE_KINDS: readonly ['not-found', 'not-executable', 'timeout', 'probe-failed', 'refused'];
@@ -5995,7 +6102,7 @@ export type RuntimeVersionVerdict = {
     readonly qualifiedVersion: string;
     readonly matched: string;
 };
-export type RuntimeExecutableSource = 'config' | 'path' | 'env';
+export type RuntimeExecutableSource = 'config' | 'path' | 'env' | 'managed';
 export type RuntimeDetectResult = {
     readonly kind: 'available';
     readonly version?: string;
@@ -6117,8 +6224,10 @@ export interface RuntimeAdapterDescriptor {
     readonly id: string;
     readonly capabilities: RuntimeCapabilities;
     readonly versionPolicy?: RuntimeVersionPolicy;
-    readonly supportsDispatchSelection: boolean;
-    readonly supportsTaskExecutionOptions?: boolean;
+    readonly selectionModes: readonly SelectionMode[];
+    readonly defaultModelModes?: readonly DefaultModelSelectionMode[];
+    readonly byokProviderId?: string;
+    readonly supportsEffort?: boolean;
     readonly requiresMcpToolsetToolObservation?: boolean;
     readonly mcpToolApprovals?: boolean;
     readonly progressMessageBoundary?: 'event' | 'session';
@@ -6141,12 +6250,16 @@ export interface RuntimeAdapterPrepareInput {
 export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServerObservation>>;
 export interface RuntimeAdapterRejectedOperation {
     kind: 'reject';
+    code?: TaskDeclineCode;
     reason: string;
     retryable: boolean;
 }
 export interface RuntimeAdapterPreparedOperation {
     kind: 'prepared';
     operation: PreparedRuntimeOperation;
+    detected?: Pick<Extract<RuntimeDetectResult, {
+        kind: 'available';
+    }>, 'version' | 'executableSource' | 'versionVerdict'>;
 }
 export type RuntimeAdapterPrepareResult = RuntimeAdapterRejectedOperation | RuntimeAdapterPreparedOperation;
 export interface RuntimeOperationManifest {
@@ -6155,7 +6268,8 @@ export interface RuntimeOperationManifest {
     readonly runtimeId: string;
     readonly descriptor: RuntimeAdapterDescriptor;
     readonly requiredToolsetIds: readonly string[];
-    readonly modelTarget?: ModelLaneTarget;
+    readonly selection?: HarnessSelection;
+    readonly effort?: string;
     readonly sessionRef?: string;
     readonly agentRef?: AgentRef;
     readonly cwd?: string;
@@ -6253,6 +6367,11 @@ export interface PreparedRuntimeOperation {
         cwd: string;
         env: Readonly<Record<string, string | undefined>>;
         scratch: ExecutionScratch;
+        signal?: AbortSignal;
+        agentHome?: {
+            readonly canonicalHome: string;
+            readonly access: 'writer' | 'memory-reader';
+        };
     }): Promise<RuntimeLaunchResources>;
     start(input: RuntimeOperationStartInput): Promise<Session>;
 }

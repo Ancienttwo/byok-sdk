@@ -6,10 +6,12 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentMessagePublishPlainPayload, Envelope } from '@byok-sdk/protocol';
 import type { AgentMessageDraftEvent } from '@byok-sdk/server';
-import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { createDaemonWithAdapters, PiAdapter, type Daemon, type RuntimeAdapter } from '@byok-sdk/client';
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
+import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
+import { SqliteProviderProfileStore } from '../../../keys/src/sqlite-profile-store';
+import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
-import { createDaemonWithAdapters, type Daemon } from '@byok-sdk/client';
-import type { RuntimeAdapter } from '../types';
 import { InMemoryDeviceCredentialBackend } from './fixtures/device-credentials';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { waitForDaemonOpen } from './fixtures/lifecycle-barrier';
@@ -37,13 +39,35 @@ afterEach(async () => {
   daemon = undefined; real = undefined; root = undefined; readerAbort = undefined;
 });
 
+async function seedPiProfile(profileDbPath: string) {
+  const store = new SqliteProviderProfileStore({ path: profileDbPath });
+  try {
+    await store.save(parseModelProviderProfile({
+      kind: 'model', profile_ref: 'fixture', provider_kind: 'custom', display_name: 'Draft fixture',
+      adapter: 'openai_compatible', auth_mode: 'none', base_url: 'http://127.0.0.1:1/v1',
+      model: 'draft-fixture', capabilities: [], enabled: true, pi_model: PI_MODEL_FIXTURE,
+      created_at: '2026-08-26T00:00:00Z', updated_at: '2026-08-26T00:00:00Z',
+    }));
+    const profile = await store.get('fixture');
+    if (profile === undefined) throw new Error('draft provider profile could not be read back');
+    const binding = exactProviderProfileBinding(profile);
+    return { ...binding, requiredCapabilities: [...binding.requiredCapabilities] };
+  } finally {
+    await store.close();
+  }
+}
+
 async function setup(options: { adapter?: RuntimeAdapter; gateReply?: boolean } = {}) {
   root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-draft-e2e-'));
   const gate = path.join(root, 'reply');
   await fs.mkdir(gate);
+  const profileDbPath = path.join(root, 'profiles.db');
+  const providerProfile = options.adapter === undefined ? await seedPiProfile(profileDbPath) : undefined;
   const adapter = options.adapter ?? new PiAdapter({
-    resolveBin: () => ({ command: piFixture, source: 'env' }),
-    spawnFn: ((command: string, args: readonly string[], spawnOptions?: SpawnOptions) => spawn(command, args, {
+    resolveBin: () => ({ command: piFixture, source: 'package' }),
+    byokLauncher: { command: process.execPath, profileDbPath, sessionDir: path.join(root, 'sessions') },
+    validateProviderProfileBinding: async (binding) => { expect(binding).toEqual(providerProfile); },
+    spawnFn: ((_command: string, args: readonly string[], spawnOptions?: SpawnOptions) => spawn(process.execPath, [piFixture, ...args.slice(args.indexOf('--') + 1)], {
       ...spawnOptions, env: { ...spawnOptions?.env,
         ...(options.gateReply ? { FAKE_PI_REPLY_GATE: gate } : {}) },
     })) as typeof spawn,
@@ -80,12 +104,17 @@ async function setup(options: { adapter?: RuntimeAdapter; gateReply?: boolean } 
   const submit = async (required = true) => {
     await server.byok.executions.submit({ taskId, deviceId, payload: {
       instruction: 'Write a reply.', agentRef, session: { mode: 'fresh' }, egressPolicy: policy,
-      target: adapter.descriptor.id === 'custom-draft' ? { lane: 'harness', harnessId: 'custom-draft' } : { lane: 'runtime', runtimeId: 'pi' },
+      target: providerProfile === undefined
+        ? { lane: 'harness', harnessId: adapter.descriptor.id, selection: { mode: 'device-default' } }
+        : { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile } },
       ...(required ? { messageEgress: {
         mode: 'required' as const, contract: 'draft.v1', contentType: 'text/plain' as const, maxBytes: 1024,
       } } : {}),
       terminalProjection: { mode: 'none' },
     }, ...(required ? { agentMessageContext: { destinationBinding: 'chat' } } : {}) });
+    await vi.waitFor(() => {
+      expect(sent.some(event => event.type === 'task.started'), JSON.stringify(sent.filter(event => event.type === 'task.decline' || event.type === 'task.fail'))).toBe(true);
+    });
   };
   const read = () => {
     readerAbort = new AbortController();
@@ -111,7 +140,7 @@ function drafts(sent: Envelope[]) {
 function assertWireCapability(sent: Envelope[], id: string, expected: true | undefined) {
   const hello = sent.find(e => e.type === 'conn.hello');
   if (hello?.type !== 'conn.hello') throw new Error('missing conn.hello');
-  const runtime = [...(hello.payload.runtimes ?? []), ...(hello.payload.harnesses ?? [])].find(r => r.id === id);
+  const runtime = hello.payload.harnesses.find(r => r.id === id);
   expect(runtime).toBeDefined();
   expect(runtime?.capabilities?.messageDraft).toBe(expected);
   const claim = sent.find(e => e.type === 'task.claim');

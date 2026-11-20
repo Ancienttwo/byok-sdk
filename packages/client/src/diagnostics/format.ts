@@ -256,10 +256,16 @@ export function formatUnsupportedRuntimeVersion(runtime: Pick<RuntimeObservation
   return versions === undefined ? undefined : `installedVersion=${versions.installedVersion ?? '(unknown)'} requiredVersion=${versions.requiredVersion}`;
 }
 
+export function formatRuntimeUpgrade(runtime: Pick<RuntimeObservation, 'upgrade'>): string | undefined {
+  const advice = runtime.upgrade;
+  return advice === undefined ? undefined : `upgrade=${advice.state} target=${advice.qualifiedVersion} action=${quote(advice.command)}`;
+}
+
 export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): string[] {
   if (runtimes.length === 0) return ['(no runtimes configured — check runtimeAllowlist)'];
   return runtimes.map((r) => {
-    if (!r.present) return `${r.id}: ${r.outcome}${r.outcome === 'refused' ? `:${refusalText(r)}` : ''}`;
+    const upgrade = formatRuntimeUpgrade(r);
+    if (!r.present) return [`${r.id}: ${r.outcome}${r.outcome === 'refused' ? `:${refusalText(r)}` : ''}`, upgrade].filter(Boolean).join(' ');
     const caps: string[] = [];
     if (r.steer) caps.push('steer');
     if (r.resume) caps.push('resume');
@@ -276,6 +282,7 @@ export function formatRuntimeLines(runtimes: readonly RuntimeObservation[]): str
         ? `versionChange=${r.versionChange.direction}(${r.versionChange.fromVersion}->${r.versionChange.toVersion})`
         : undefined,
       formatRuntimeExecutable(r),
+      upgrade,
       r.authPresent !== undefined ? `authPresent=${r.authPresent}` : undefined,
       `capabilities=${caps.length ? caps.join(',') : '(none)'}`,
     ].filter((part): part is string => Boolean(part));

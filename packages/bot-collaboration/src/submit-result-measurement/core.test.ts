@@ -143,7 +143,7 @@ it('keeps the digest of a terminal that arrives in the cancellation grace', () =
 });
 
 const planned = (cell: Record<string, unknown>) => plannedManifest({
-  runId: 'test', cellId: 'cell', mode: 'dry-run', runtime: 'pi', target: { lane: 'runtime', runtimeId: 'pi' }, rounds: 1, deadlineMs: 1000, maxTrials: 6,
+  runId: 'test', cellId: 'cell', mode: 'dry-run', runtime: 'pi', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, rounds: 1, deadlineMs: 1000, maxTrials: 6,
   capacityReasons: ['context_overflow'], calibrate: true, authorization: null, cell,
 });
 

@@ -99,8 +99,18 @@ function runtime(value: unknown): RuntimeId {
   if (!parsed.success) invalid();
   return parsed.data;
 }
+export function snapshotJsonObject(value: unknown): Record<string, unknown> {
+  const canonical = canonicalJson(value);
+  try {
+    return object(JSON.parse(canonical));
+  } catch (error) {
+    if (error instanceof SyntaxError) throw new Error('Canonical input could not be parsed', { cause: error });
+    throw error;
+  }
+}
+
 export function keySpec(value: unknown, stored = false): Omit<KeySpec, 'quota'> & { quota: Quota } {
-  const input = object(JSON.parse(canonicalJson(value)));
+  const input = snapshotJsonObject(value);
   keys(input, ['label', 'scopes', 'deviceIds', 'runtimes', 'agentRef', 'quota'], ['label', 'scopes', 'deviceIds', 'runtimes', ...(stored ? ['quota'] : [])]);
   const quota = { ...DEFAULT_QUOTA };
   if (input.quota !== undefined) {
@@ -120,7 +130,7 @@ export function keySpec(value: unknown, stored = false): Omit<KeySpec, 'quota'> 
     ...(parsedAgent?.success ? { agentRef: parsedAgent.data } : {}), quota };
 }
 export function taskArguments(value: unknown): TaskArguments {
-  const input = object(JSON.parse(canonicalJson(value)));
+  const input = snapshotJsonObject(value);
   keys(input, ['runtime', 'instruction', 'workspace', 'toolsets', 'resultSchema', 'clientRequestId'], ['runtime', 'instruction']);
   if (typeof input.instruction !== 'string' || !input.instruction.trim() || Buffer.byteLength(input.instruction) > MAX_INSTRUCTION_BYTES) invalid();
   const requestId = input.clientRequestId === undefined ? undefined : text(input.clientRequestId);
@@ -135,8 +145,8 @@ export function taskArguments(value: unknown): TaskArguments {
 }
 
 /** The offer target of a task argument `runtime`: the built-in runtime with the device's model. */
-export function runtimeTarget(runtimeId: RuntimeId): Extract<ExecutionTarget, { lane: 'runtime' }> {
-  return { lane: 'runtime', runtimeId };
+export function runtimeTarget(runtimeId: RuntimeId): Extract<ExecutionTarget, { lane: 'harness' }> {
+  return { lane: 'harness', harnessId: runtimeId, selection: { mode: 'device-default' } };
 }
 
 /** Bounded, deterministic JSON. Reject lossy values before they become identity. */

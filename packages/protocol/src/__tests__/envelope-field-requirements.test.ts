@@ -69,7 +69,7 @@ const DAEMON_TO_SERVER_TYPES = MESSAGE_TYPES.filter((t) => !isServerToDaemonType
 function minimalPayload(type: MessageType): unknown {
   switch (type) {
     case 'conn.hello':
-      return { protocolVersions: [1], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
+      return { protocolVersions: [1], harnesses: [], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
     case 'task.offer':
       return {
         instruction: 'run for agent',
@@ -205,7 +205,7 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.steer':
       return { text: 'hi' };
     case 'task.claim':
-      return { deviceId: 'device-1', executor: { kind: 'runtime', runtimeId: 'pi' } };
+      return { deviceId: 'device-1', executor: { id: 'pi' } };
     case 'task.started':
       return {};
     case 'task.decline':
@@ -217,7 +217,7 @@ function minimalPayload(type: MessageType): unknown {
     case 'task.await_approval':
       return { summary: 'about to do a thing', approvalId: 'approval-1' };
     case 'task.complete':
-      return { executor: { kind: 'runtime', runtimeId: 'pi' }, summary: 'done', sessionRef: 'sess-1' };
+      return { executor: { id: 'pi' }, summary: 'done', sessionRef: 'sess-1' };
     case 'task.fail':
       return { reason: 'boom' };
     case 'task.cancelled':
@@ -368,11 +368,11 @@ describe('createEnvelope: taskId/seq requiredness (finding F1)', () => {
 
   it('compiles and constructs cleanly for every message type using exactly the fields its own direction requires', () => {
     expect(() => {
-      createEnvelope('conn.hello', { protocolVersions: [1], capabilities: [], deviceId: 'd', productId: 'p' }); // no opts at all
+      createEnvelope('conn.hello', { protocolVersions: [1], harnesses: [], capabilities: [], deviceId: 'd', productId: 'p' }); // no opts at all
       createEnvelope('provider.provisioning.available', { requestId: '00000000-0000-4000-8000-000000000026' }, { seq: 1 });
       createEnvelope('task.offer', OFFER_PAYLOAD, { taskId: 't', seq: 1 });
-      createEnvelope('task.claim', { deviceId: 'd', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 't' }); // seq optional, may be omitted
-      createEnvelope('task.claim', { deviceId: 'd', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 't', seq: 1 }); // seq optional, may also be supplied
+      createEnvelope('task.claim', { deviceId: 'd', executor: { id: 'pi' } }, { taskId: 't' }); // seq optional, may be omitted
+      createEnvelope('task.claim', { deviceId: 'd', executor: { id: 'pi' } }, { taskId: 't', seq: 1 }); // seq optional, may also be supplied
     }).not.toThrow();
   });
 });

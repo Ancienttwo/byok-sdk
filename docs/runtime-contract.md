@@ -49,13 +49,10 @@ blocked; the fixture is the only exercise of that path. A policy block is
 admission-only: a nightly `latest` verdict of `warn` or `block` changes the
 reported verdict, not the suite's pass/fail rule.
 
-Declared hosts carry their reason in the adapter file. Currently there are
-two:
-
-- Claude's `auth status` checks an API key with `api.anthropic.com` during
-  detect.
-- Grok syncs its workspace and bundles with `cli-chat-proxy.grok.com` during a
-  turn, whatever the model provider.
+Declared hosts carry their reason in the adapter file. Grok syncs its
+workspace and bundles with `cli-chat-proxy.grok.com` during a turn, whatever
+the model provider. Claude's detection observes native login without
+forwarding the ambient API key or calling the Host's key resolver.
 
 dsh adds three cases of its own in `dsh.contract.ts`:
 

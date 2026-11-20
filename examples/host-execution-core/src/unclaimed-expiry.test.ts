@@ -43,7 +43,7 @@ it('distinguishes pre-claim cancellation from claimed cancellation through attem
     await daemon.stop(); // Registered and advertised, but no process can claim.
 
     const input = (taskId: string) => ({ taskId, deviceId, payload: {
-      instruction: 'Hold this execution until cancelled.', target: { lane: 'runtime' as const, runtimeId: 'pi' as const },
+      instruction: 'Hold this execution until cancelled.', target: { lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'device-default' as const } },
       session: { mode: 'fresh' as const }, agentRef: { agentId: 'probe-agent', profileRevision: '1' }, egressPolicy: policy,
       terminalProjection: { mode: 'none' as const },
     } });
@@ -68,7 +68,7 @@ it('distinguishes pre-claim cancellation from claimed cancellation through attem
     await vi.waitFor(() => expect(adapter.sessions.has('claim-before-cancel')).toBe(true), { timeout: 5000 });
     // Runtime creation does not wait for the SDK's durable claim receipt.
     await vi.waitFor(async () => expect(await server.tasks.attempt('claim-before-cancel')).toMatchObject({
-      ownerDeviceId: deviceId, claimedExecutor: { kind: 'runtime', runtimeId: 'pi' },
+      ownerDeviceId: deviceId, claimedExecutor: { id: 'pi' },
     }), { timeout: 5000 });
     const session = adapter.sessions.get('claim-before-cancel')!;
     expect(adapter.sessions.has('cancel-before-claim')).toBe(false);
@@ -82,7 +82,7 @@ it('distinguishes pre-claim cancellation from claimed cancellation through attem
     const interruptGate = new Promise<void>(resolve => { releaseInterrupt = resolve; });
     vi.spyOn(session, 'interrupt').mockImplementation(async () => { session.interrupted = true; await interruptGate; });
     expect(await server.tasks.cancel('claim-before-cancel', 'waiting limit')).toBeUndefined();
-    expect(await server.tasks.attempt('claim-before-cancel')).toMatchObject({ status: 'cancel_requested', claimedExecutor: { kind: 'runtime', runtimeId: 'pi' } });
+    expect(await server.tasks.attempt('claim-before-cancel')).toMatchObject({ status: 'cancel_requested', claimedExecutor: { id: 'pi' } });
     await vi.waitFor(() => expect(session.interrupted).toBe(true), { timeout: 5000 });
     releaseInterrupt!();
     await vi.waitFor(async () => expect(await server.tasks.deviceTerminal('claim-before-cancel')).toMatchObject({

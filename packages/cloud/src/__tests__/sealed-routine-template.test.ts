@@ -11,7 +11,7 @@
 import { decodeEnvelope, requiredReceiverCapabilities, type MessageType } from '@byok-sdk/protocol';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
-import { TENANT_A, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, createHarness, type CloudHarness, type PairedDevice } from './support/harness';
 import { SEALING, inlineMember, sealTemplate } from './support/sealed';
 
 type RoutineRef = { routineId: string; definitionVersion: number; notAfter: string };
@@ -19,7 +19,7 @@ type Payload = Record<string, unknown> & { routineRef: RoutineRef; agentRef: { a
 
 const TYPE = 'task.offer';
 const CONTEXT = { destinationBinding: 'conversation/654/routine/1' };
-const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const routineLines = readFileSync(new URL('../../../protocol/src/__tests__/golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Payload })
@@ -30,7 +30,7 @@ async function routineDevice(): Promise<{ harness: CloudHarness; device: PairedD
   const harness = createHarness({ agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const device = await harness.pairDevice(TENANT_A);
   await harness.stores.devices.recordCapabilities(TENANT_A, {
-    deviceId: device.deviceId, capabilities: requiredReceiverCapabilities(TYPE, occurrence() as never),
+    deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: requiredReceiverCapabilities(TYPE, occurrence() as never),
   });
   return { harness, device };
 }

@@ -79,7 +79,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
       deviceId: paired.deviceId,
       productId: 'reliability-test',
       capabilities: [],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: () => {},
@@ -176,7 +176,7 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const auth = await seededAuth();
-    const accepted = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'accepted-task' });
+    const accepted = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { id: 'pi' } }, { taskId: 'accepted-task' });
     const rejected = createEnvelope('task.started', {}, { taskId: 'rejected-task' });
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
@@ -200,8 +200,8 @@ describe('long-poll reliability regressions (#135, #136, #137)', () => {
     const cursorStore = { load: async () => undefined, save: async () => undefined } as unknown as CursorStore;
     const poisonFirst = createEnvelope('task.started', {}, { taskId: 'poison-first' });
     const poisonSecond = createEnvelope('task.started', {}, { taskId: 'poison-second' });
-    const acceptedBeforePoison = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'accepted-before-poison' });
-    const laterValid = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'later-valid' });
+    const acceptedBeforePoison = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { id: 'pi' } }, { taskId: 'accepted-before-poison' });
+    const laterValid = createEnvelope('task.claim', { deviceId: 'device-reliability', executor: { id: 'pi' } }, { taskId: 'later-valid' });
     const poisonIds = new Set([poisonFirst.id, poisonSecond.id]);
     const businessExecutions: string[] = [];
     const businessDedup = new Set<string>();

@@ -65,7 +65,7 @@ describe('POST /byok/messages', () => {
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
 
     const response = await send(harness, device.authorization, [
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId }),
       createEnvelope('task.started', {}, { taskId }),
     ]);
 
@@ -79,7 +79,7 @@ describe('POST /byok/messages', () => {
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId });
 
     await send(harness, device.authorization, [claim]);
     const response = await send(harness, device.authorization, [
@@ -107,7 +107,7 @@ describe('POST /byok/messages', () => {
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
     const response = await send(harness, device.authorization, [
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId }),
       createEnvelope('task.started', {}, { taskId }),
     ]);
 
@@ -138,7 +138,7 @@ describe('POST /byok/messages', () => {
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId });
     const broken = { ...createEnvelope('task.started', {}, { taskId }), task_id: 42 };
     const started = createEnvelope('task.started', {}, { taskId });
 
@@ -176,10 +176,10 @@ describe('POST /byok/messages', () => {
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
+    const claim = createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId });
     await send(harness, device.authorization, [claim]);
     await harness.stores.receipts.record(TENANT_A, { key: terminalReceiptKey(taskId), body: 'not an envelope' });
-    const fail = createEnvelope('task.fail', { reason: 'boom', retryable: false, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId });
+    const fail = createEnvelope('task.fail', { reason: 'boom', retryable: false, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId });
     const started = createEnvelope('task.started', {}, { taskId });
 
     const response = await send(harness, device.authorization, [fail, started]);
@@ -196,8 +196,8 @@ describe('POST /byok/messages', () => {
     const device = await harness.pairDevice(TENANT_A);
     await grantAgentHome(harness, TENANT_A, device.deviceId);
     const { taskId } = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { payload: offerPayload() });
-    await send(harness, device.authorization, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId })]);
-    const fail = { ...createEnvelope('task.fail', { reason: 'capacity', agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }) };
+    await send(harness, device.authorization, [createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId })]);
+    const fail = { ...createEnvelope('task.fail', { reason: 'capacity', agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId }) };
     const newer = { ...fail, payload: { ...fail.payload, retryable: true, failure: { class: 'provider_capacity', retryAfterMs: 30_000 } } };
 
     const response = await send(harness, device.authorization, [newer]);
@@ -216,7 +216,7 @@ describe('POST /byok/messages', () => {
       payload: offerPayload('full batch'),
     });
     const batch: Envelope[] = [
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId }),
       ...Array.from({ length: MAX_MESSAGES_PER_BATCH - 1 }, () => createEnvelope('task.progress', { seq: 1, events: [] }, { taskId })),
     ];
 

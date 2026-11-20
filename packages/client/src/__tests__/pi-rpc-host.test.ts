@@ -76,6 +76,21 @@ function evaluate(body: string) {
 }
 
 describe('SDK ordinary Pi RPC entry', () => {
+  it('opens the exact provider and model without interpreting a colon suffix as effort', async () => {
+    const f = fixture();
+    mkdirSync(f.env.PI_CODING_AGENT_DIR);
+    const models = [{ id: 'org/probe:high', name: 'Exact probe' }, { id: 'org/probe', name: 'Bare probe' }];
+    const native = { baseUrl: 'http://127.0.0.1:1/v1', api: 'openai-completions', apiKey: 'synthetic-not-a-secret', models };
+    writeFileSync(join(f.env.PI_CODING_AGENT_DIR, 'models.json'), JSON.stringify({ providers: { alternate: native, selected: native } }));
+    const client = new PiRpcClient({ command: bun, cwd: f.sealed, env: f.env, onFrame: () => {},
+      args: [f.entry, `--config-digest=${f.digest}`, '--config', f.configPath, '--mode', 'rpc',
+        '--provider', 'selected', '--model', 'org/probe:high', '--exact-model', 'true'],
+    });
+    try {
+      expect(await client.send({ type: 'get_state' })).toMatchObject({ success: true, data: { model: { provider: 'selected', id: 'org/probe:high' } } });
+    } finally { await client.dispose(); }
+  }, 20_000);
+
   it('pins the Pi private command parser and preserves literal extension messages (#1642)', async () => {
     expect(PI_VERSION).toBe('1.5.2');
     const parser = (AgentSession.prototype as unknown as { _throwIfExtensionCommand: unknown })._throwIfExtensionCommand;

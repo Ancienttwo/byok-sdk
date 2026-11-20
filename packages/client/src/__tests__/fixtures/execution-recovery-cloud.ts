@@ -114,6 +114,7 @@ await ownerWrite(() => db.exec(`
     proof_key_epoch INTEGER NOT NULL,
     machine_id TEXT,
     capabilities_json TEXT,
+    harnesses_json TEXT,
     PRIMARY KEY (tenant_id, device_id),
     UNIQUE (device_id)
   );
@@ -134,6 +135,7 @@ await ownerWrite(() => db.exec(`
 function deviceFromRow(row: Record<string, unknown> | undefined): DeviceRecord | undefined {
   if (row === undefined) return undefined;
   const capabilities = row.capabilities_json === null ? undefined : JSON.parse(String(row.capabilities_json));
+  const harnesses = row.harnesses_json === null ? undefined : JSON.parse(String(row.harnesses_json));
   return {
     tenantId: String(row.tenant_id) as TenantId,
     productId: String(row.product_id),
@@ -145,6 +147,7 @@ function deviceFromRow(row: Record<string, unknown> | undefined): DeviceRecord |
     revoked: false,
     ...(row.machine_id === null ? {} : { machineId: String(row.machine_id) }),
     ...(capabilities === undefined ? {} : { capabilities }),
+    ...(harnesses === undefined ? {} : { harnesses }),
   };
 }
 
@@ -180,7 +183,7 @@ class SqliteFixtureDevices implements DeviceDirectory {
              product_id = excluded.product_id, device_name = excluded.device_name,
              device_public_key = excluded.device_public_key, proof_key_id = excluded.proof_key_id,
              proof_key_epoch = excluded.proof_key_epoch, machine_id = excluded.machine_id,
-             capabilities_json = NULL`,
+             capabilities_json = NULL, harnesses_json = NULL`,
         ).run(
           owner,
           input.productId,
@@ -225,10 +228,10 @@ class SqliteFixtureDevices implements DeviceDirectory {
 
   async recordCapabilities(
     owner: TenantId,
-    input: { readonly deviceId: string; readonly capabilities: readonly string[] },
+    input: Parameters<DeviceDirectory['recordCapabilities']>[1],
   ): Promise<DeviceRecord | undefined> {
-    await ownerWrite(() => db.prepare('UPDATE fixture_device SET capabilities_json = ? WHERE tenant_id = ? AND device_id = ?')
-      .run(JSON.stringify([...input.capabilities]), owner, input.deviceId));
+    await ownerWrite(() => db.prepare('UPDATE fixture_device SET capabilities_json = ?, harnesses_json = ? WHERE tenant_id = ? AND device_id = ?')
+      .run(JSON.stringify(input.capabilities), input.harnesses === undefined ? null : JSON.stringify(input.harnesses), owner, input.deviceId));
     return this.get(owner, input.deviceId);
   }
 
@@ -474,7 +477,7 @@ lines.on('line', (line) => {
           taskId: params.taskId ?? globalThis.crypto.randomUUID(),
           deviceId: params.deviceId,
           payload: {
-            instruction: String(params.instruction), target: { lane: 'runtime', runtimeId: 'pi' },
+            instruction: String(params.instruction), target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
             agentRef: params.agentRef ?? { agentId: `recovery-${globalThis.crypto.randomUUID()}`, profileRevision: '1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -487,7 +490,7 @@ lines.on('line', (line) => {
           deviceId: params.deviceId,
           agentMessageContext: { destinationBinding: 'fixture-conversation', freshnessCursor: 'fixture-turn' },
           payload: {
-            instruction: 'publish durable reply', target: { lane: 'runtime', runtimeId: 'pi' },
+            instruction: 'publish durable reply', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
             agentRef: { agentId: 'agent-message', profileRevision: 'profile-v1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -501,7 +504,7 @@ lines.on('line', (line) => {
           taskId: params.taskId,
           deviceId: params.deviceId,
           payload: {
-            instruction: 'submit one structured result', target: { lane: 'runtime', runtimeId: 'pi' },
+            instruction: 'submit one structured result', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
             agentRef: { agentId: 'agent-result', profileRevision: 'profile-v1' },
             session: { mode: 'fresh' },
             egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

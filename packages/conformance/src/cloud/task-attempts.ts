@@ -263,7 +263,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         const repeat = await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-1',
-          executor: { kind: 'runtime', runtimeId: 'codex' },
+          executor: { id: 'codex' },
           capabilities: { steer: false },
         });
         expect(repeat?.claimedExecutor).toEqual(PI_EXECUTOR);
@@ -273,7 +273,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         await stores.tasks.claim(TENANT_A, {
           taskId: 'task-1',
           deviceId: 'device-2',
-          executor: { kind: 'harness', harnessId: 'acme-harness' },
+          executor: { id: 'acme-harness' },
         });
 
         const stored = await stores.tasks.get(TENANT_A, 'task-1');
@@ -286,8 +286,8 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       await withCloudComposition(factory, async ({ stores }) => {
         const taskId = 'custom-task';
         const deviceId = 'device-1';
-        const harness = { kind: 'harness', harnessId: 'acme-harness' } as const;
-        const other = { kind: 'harness', harnessId: 'other' } as const;
+        const harness = { id: 'acme-harness' } as const;
+        const other = { id: 'other' } as const;
         const expected = { ownerDeviceId: deviceId, claimedExecutor: harness,
           claimedRuntimeCapabilities: { steer: true }, status: 'claimed' };
         await stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId, agentRef: AGENT_REF });
@@ -573,7 +573,7 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
       });
     });
 
-    it('holds an executor to the offer target, and an unclaimed interruption records no claim (wire v7 §3.1)', async () => {
+    it('holds an executor to the offer target, and an unclaimed interruption records no claim', async () => {
       await withCloudComposition(factory, async ({ stores }) => {
         const base = createInMemoryByokCloud();
         const cloud = createByokCloud({
@@ -587,11 +587,12 @@ export function runTaskAttemptConformance(factory: CloudCompositionFactory): voi
         await base.core.quota.writeEntitlement(TENANT_A, { version: 1n, hardLimitBytes: 1_000_000_000n, maxObjectBytes: 100_000_000n,
           maxInlineBytes: 1_000_000n, mailboxLimitBytes: 100_000_000n, retentionPolicyId: 'test' });
         await stores.devices.register(TENANT_A, registration('device-a'));
-        await stores.devices.recordCapabilities(TENANT_A, { deviceId: 'device-a', capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
+        await stores.devices.recordCapabilities(TENANT_A, { deviceId: 'device-a', capabilities: [AGENT_HOME_CONTRACT_CAPABILITY],
+          harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } }] });
         const offer = (taskId: string) => cloud.enqueueAgentOffer(TENANT_A, 'device-a', { taskId, payload: {
-          instruction: 'work', agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'session' }, target: { lane: 'runtime', runtimeId: 'pi' },
+          instruction: 'work', agentRef: AGENT_REF, session: { mode: 'resume', sessionRef: 'session' }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         } });
-        const CODEX = { kind: 'runtime', runtimeId: 'codex' } as const;
+        const CODEX = { id: 'codex' } as const;
         const interrupted = (taskId: string, offerId: string, executor: typeof PI_EXECUTOR) => createEnvelope('task.fail', {
           agentRef: AGENT_REF, executor, reason: 'daemon_interrupted', retryable: false, recovery: { kind: 'daemon_interrupted', offerId },
         }, { taskId });

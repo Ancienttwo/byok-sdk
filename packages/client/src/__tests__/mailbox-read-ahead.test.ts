@@ -26,7 +26,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
     expect(await response.json()).toMatchObject({ accepted: 1 });
   };
   // Agent offer admission reads the durable capability snapshot a hello records.
-  await post(createEnvelope('conn.hello', { deviceId: device.deviceId, productId: 'read-ahead', protocolVersions: [PROTOCOL_VERSION], capabilities: ['agent-home-contract'] }));
+  await post(createEnvelope('conn.hello', { deviceId: device.deviceId, productId: 'read-ahead', protocolVersions: [PROTOCOL_VERSION], harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }], capabilities: ['agent-home-contract'] }));
   const resume = (instruction: string, sessionRef: string, agentRef = freshTestAgentRef()) =>
     cloud.cloud.enqueueAgentOffer(cloud.tenant, device.deviceId, { payload: { instruction, agentRef, session: { mode: 'resume', sessionRef }, target: { lane: 'auto' } } });
   const agentB = freshTestAgentRef();
@@ -38,7 +38,8 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   const controls: string[] = [];
   let aCalls = 0, bCalls = 0;
   const connection = new ConnectionManager({ serverUrl: cloud.url, deviceId: device.deviceId, productId: 'read-ahead',
-    capabilities: ['agent-home-contract'], runtimes: [], auth, cursorStore, longPollIdleDelayMs: 5, longPollRetryDelayMs: 5,
+    capabilities: ['agent-home-contract'], harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } }],
+    auth, cursorStore, longPollIdleDelayMs: 5, longPollRetryDelayMs: 5,
     onEnvelope: async envelope => {
       if (envelope.type === 'task.offer' && envelope.task_id === a.taskId) { aCalls++; await gate; }
       if (envelope.type === 'task.offer' && envelope.task_id === b.taskId) bCalls++;
@@ -47,7 +48,7 @@ it('real pageLimit=2 reaches approve/cancel behind an unfinished offer without a
   cleanup.push(async () => { release(); await connection.stop(); await auth.stop(); });
   await connection.start();
   await vi.waitFor(() => expect([aCalls, bCalls]).toEqual([1, 1]));
-  await post(createEnvelope('task.claim', { deviceId: device.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' }, agentRef: agentB }, { taskId: b.taskId }));
+  await post(createEnvelope('task.claim', { deviceId: device.deviceId, executor: { id: 'pi' }, agentRef: agentB }, { taskId: b.taskId }));
   await post(createEnvelope('task.started', {}, { taskId: b.taskId }));
   await post(createEnvelope('task.await_approval', { summary: 'approve B', approvalId: 'approval-b' }, { taskId: b.taskId }));
   await cloud.cloud.approveTask(cloud.tenant, b.taskId);

@@ -54,7 +54,9 @@ async function fixture() {
   await base.stores.devices.register(tenant, { productId: 'browser-product', deviceId, deviceName: deviceId,
     devicePublicKey: 'proof-public-key', proofKeyId: 'identity', proofKeyEpoch: 0, expectedDeviceDigest: null });
   await base.stores.devices.recordCapabilities(tenant, { deviceId, capabilities: ['sealed-payload-v1',
-    'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection'] });
+    'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection'],
+    harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } }],
+  });
   await provisionEntitlement(base.core, tenant);
   async function register(mac: string) {
     await store.registerMember(tenant, { deviceId, memberId: bundle.memberId, bundle: JSON.stringify(bundle), deviceMac: mac,

@@ -26,7 +26,8 @@ import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
 import * as vendoredProjection from '../../vendor/oar/a41628f/runtimes/codex/projection';
 
-const CODEX_TARGET = { lane: 'runtime', runtimeId: 'codex' } as const;
+const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
+const SUBSCRIPTION_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'wanted' } } as const;
 const fixture = fileURLToPath(
   new URL('./fixtures/fake-codex.mjs', import.meta.url),
 );
@@ -153,6 +154,22 @@ describe('Codex persistent app-server adapter', () => {
       version: output,
       versionVerdict: { state: 'warn', qualifiedVersion: '0.169.0' },
     });
+  });
+  it.each([
+    ['0.47.0', [], 'prepared'],
+    ['0.47.0', ['host-tools'], 'reject'],
+    ['0.48.0-rc.1', ['host-tools'], 'reject'],
+    ['0.48.0', ['host-tools'], 'prepared'],
+  ] as const)('applies the toolset floor to Codex %s with required toolsets %j', async (version, requiredToolsetIds, kind) => {
+    vi.stubEnv('FAKE_CODEX_VERSION', `codex-cli ${version}`);
+    const runtime = adapter();
+    const result = await runtime.prepare({
+      offer: { target: CODEX_TARGET, instruction: 'hello' },
+      descriptor: runtime.descriptor,
+      requiredToolsetIds,
+    });
+    expect(result.kind).toBe(kind);
+    if (result.kind === 'reject') expect(result.reason).toContain('codex_mcp_tool_allowlist_unsupported: task MCP tools require Codex CLI 0.48.0 or later');
   });
   it('detect admits the qualified version with an allow verdict', async () => {
     expect(await adapter().detect()).toMatchObject({
@@ -447,11 +464,7 @@ describe('Codex persistent app-server adapter', () => {
       adapter(),
       {
         ...task,
-        target: {
-          lane: 'subscription',
-          runtimeId: 'codex',
-          modelId: 'wanted',
-        },
+        target: SUBSCRIPTION_TARGET,
       },
       resources,
     );
@@ -460,9 +473,69 @@ describe('Codex persistent app-server adapter', () => {
       .trim()
       .split('\n')
       .map((line) => JSON.parse(line));
-    expect(frames.find((f) => f.method === 'thread/start').params.model).toBe(
-      'wanted',
-    );
+    const methods = frames.map(frame => frame.method);
+    expect(methods.indexOf('account/read')).toBeGreaterThanOrEqual(0);
+    expect(methods.indexOf('account/read')).toBeLessThan(methods.indexOf('thread/start'));
+    expect(frames.find((f) => f.method === 'thread/start').params.model).toBe('wanted');
+  });
+
+  it.each(['chatgpt', 'apiKey'])('disables plugins and memories in the inherit subscription probe for a %s account', async accountType => {
+    const userHome = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-inherit-'));
+    dirs.push(userHome);
+    const resources = await ctx({ CODEX_HOME: userHome, FAKE_CODEX_ACCOUNT_TYPE: accountType });
+    await fs.writeFile(path.join(userHome, 'config.toml'), '[features]\nplugins = true\nmemories = true\n');
+    resources.agentHome = resources.workspaceDir;
+    const launches: Array<{ args: string[]; cwd?: string; env?: NodeJS.ProcessEnv }> = [];
+    const a = adapter({ spawnFn: ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+      launches.push({ args, cwd: options?.cwd as string | undefined, env: options?.env });
+      return spawn(command, args, options);
+    }) as typeof spawn });
+    const result = open(a, { ...task, target: SUBSCRIPTION_TARGET }, resources);
+    const executionArgs = ['app-server', '-c', 'sandbox_mode="danger-full-access"', '--listen', 'stdio://'];
+    if (accountType === 'chatgpt') {
+      await turn(await result);
+      expect(launches).toHaveLength(2);
+      expect(launches[1]?.args).toEqual(executionArgs);
+      expect(launches[0]?.env).toEqual(launches[1]?.env);
+      expect(launches[0]?.cwd).toBe(launches[1]?.cwd);
+    } else {
+      await expect(result).rejects.toMatchObject({ retry: 'non-retryable', failure: { class: 'invalid_request' } });
+      expect(launches).toHaveLength(1);
+    }
+    expect(launches[0]?.args).toEqual([
+      ...executionArgs.slice(0, -2), '-c', 'features.plugins=false', '-c', 'features.memories=false', ...executionArgs.slice(-2),
+    ]);
+    expect(launches[0]?.env?.CODEX_HOME).toBe(userHome);
+    expect(launches[0]?.cwd).toBe(resources.workspaceDir);
+  });
+
+  it.each(['apiKey', 'amazonBedrock', 'absent'])('declines Codex subscription at admission for a %s account', async accountType => {
+    const resources = await ctx({ FAKE_CODEX_ACCOUNT_TYPE: accountType, OPENAI_API_KEY: 'host-provider-key' });
+    const receipt = path.join(resources.workspaceDir, 'admission.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    const owned = tracked();
+    await expect(open(adapter({ spawnFn: owned.spawnFn }), { ...task, target: SUBSCRIPTION_TARGET }, resources))
+      .rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+    const methods = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line).method);
+    expect(methods).toEqual(['initialize', 'initialized', 'account/read']);
+    expect(owned.pids).toHaveLength(1);
+    expect(gone(owned.pids[0]!)).toBe(true);
+  });
+
+  it('refuses a changed Codex account before opening a subscription thread', async () => {
+    const resources = await ctx();
+    const receipt = path.join(resources.workspaceDir, 'execution.jsonl');
+    resources.env.FAKE_CODEX_RPC_RECEIPT = receipt;
+    let starts = 0;
+    const a = adapter({ spawnFn: ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => spawn(command, args, {
+      ...options, env: { ...options?.env, FAKE_CODEX_ACCOUNT_TYPE: ++starts === 1 ? 'chatgpt' : 'apiKey' },
+    })) as typeof spawn });
+    await expect(open(a, { ...task, target: SUBSCRIPTION_TARGET }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' },
+    });
+    const methods = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line).method);
+    expect(methods.filter(method => method === 'account/read')).toHaveLength(2);
+    expect(methods).not.toContain('thread/start');
   });
   it('followUp uses one persistent process and the same event stream', async () => {
     let starts = 0;
@@ -971,6 +1044,36 @@ describe('CodexAdapter agentUserContext (#1565)', () => {
     expect(await fs.readdir(user)).not.toContain('sessions');
     const methods = (await fs.readFile(`${receipt}.rpc`, 'utf8')).trim().split('\n').map(line => JSON.parse(line)).filter(frame => frame.id !== undefined && typeof frame.method === 'string').map(frame => frame.method);
     expect(methods.slice(0, 3)).toEqual(['initialize', 'config/read', 'thread/start']);
+  });
+
+  it.each(['chatgpt', 'apiKey'])('starts the subscription probe under the execution isolation for a %s account', async accountType => {
+    const user = await userHome();
+    const resources = await ctx({ CODEX_HOME: user, FAKE_CODEX_ACCOUNT_TYPE: accountType, OPENAI_API_KEY: 'host-provider-key',
+      FAKE_CODEX_USER_CONFIG: JSON.stringify({ cli_auth_credentials_store: 'file' }) });
+    resources.reader = { canonicalHome: resources.workspaceDir };
+    resources.workspaceDir = path.join(resources.workspaceDir, '.byok', 'runs', 'subscription');
+    await fs.mkdir(resources.workspaceDir, { recursive: true });
+    const launches: Array<{ args: string[]; cwd?: string; env?: NodeJS.ProcessEnv }> = [];
+    const a = adapter({ agentUserContext: 'excluded', agentUserMcpServers: 'excluded', sandbox: 'read-only',
+      spawnFn: ((command: string, args: string[], options: Parameters<typeof spawn>[2]) => {
+        launches.push({ args, cwd: options?.cwd as string | undefined, env: options?.env });
+        return spawn(command, args, options);
+      }) as typeof spawn });
+    const result = open(a, { ...task, target: SUBSCRIPTION_TARGET }, resources);
+    if (accountType === 'chatgpt') {
+      await turn(await result);
+      expect(launches).toHaveLength(2);
+      expect(launches[0]).toEqual(launches[1]);
+    } else {
+      await expect(result).rejects.toMatchObject({ retry: 'non-retryable', failure: { class: 'invalid_request' } });
+      expect(launches).toHaveLength(1);
+    }
+    expect(launches[0]?.cwd).toBe(resources.workspaceDir);
+    expect(launches[0]?.args).toEqual(expect.arrayContaining([
+      'sandbox_mode="read-only"', 'project_root_markers=[".byok"]', 'features.plugins=false', 'features.memories=false',
+    ]));
+    expect(launches[0]?.env?.CODEX_HOME).toMatch(/codex-home$/u);
+    expect(launches[0]?.env?.OPENAI_API_KEY).toBeUndefined();
   });
 
   it('refuses a credential store other than file before the thread opens', async () => {

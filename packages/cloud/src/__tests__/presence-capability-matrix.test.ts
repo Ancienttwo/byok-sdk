@@ -7,11 +7,12 @@
  */
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import type { PresenceRuntimeCapabilities } from '@byok-sdk/core';
-import type { RuntimeCapabilities } from '@byok-sdk/protocol';
+import type { HarnessInfo } from '@byok-sdk/protocol';
 import { createHarness, TENANT_A } from './support/harness';
 
 const MATRIX = {
   steer: false, images: true, resume: true, approvalInteractive: false, mcpToolsets: true, messageDraft: true,
+  selectionModes: ['device-default', 'adapter-model'], defaultModelModes: ['adapter-model'], effort: false,
   toolAuthorizationAuto: true, durableLane: false, preparedLane: false,
   isolation: { userInstructions: true, userOutputStyle: false, userMemory: true, userSkills: false, userHookContext: true, userMcpServers: true, sessionPersistence: true },
 } as const;
@@ -19,13 +20,15 @@ const MATRIX = {
 describe('presence capability matrix', () => {
   it('core keeps the protocol capability shape', () => {
     // Core's copy is readonly; the zod-inferred protocol type is not.
-    expectTypeOf<Required<Omit<PresenceRuntimeCapabilities, 'isolation'>>>()
-      .toEqualTypeOf<Readonly<Required<Omit<RuntimeCapabilities, 'isolation'>>>>();
+    expectTypeOf<Required<Omit<PresenceRuntimeCapabilities, 'isolation' | 'selectionModes' | 'defaultModelModes'>>>()
+      .toEqualTypeOf<Readonly<Required<Omit<HarnessInfo['capabilities'], 'isolation' | 'selectionModes' | 'defaultModelModes'>>>>();
+    expectTypeOf<PresenceRuntimeCapabilities['defaultModelModes']>()
+      .toEqualTypeOf<Readonly<NonNullable<HarnessInfo['capabilities']['defaultModelModes']>> | undefined>();
     expectTypeOf<Required<NonNullable<PresenceRuntimeCapabilities['isolation']>>>()
-      .toEqualTypeOf<Readonly<Required<NonNullable<RuntimeCapabilities['isolation']>>>>();
+      .toEqualTypeOf<Readonly<Required<NonNullable<HarnessInfo['capabilities']['isolation']>>>>();
   });
 
-  it('stores and reads back every matrix field, drops unknown keys, and leaves an unreported matrix unknown', async () => {
+  it('stores and reads back every matrix field, drops unknown keys, and preserves each executor’s selection modes', async () => {
     const harness = createHarness({ presenceMinimumIntervalMs: 0 });
     const device = await harness.pairDevice(TENANT_A);
     const response = await harness.request('/byok/presence', {
@@ -33,18 +36,18 @@ describe('presence capability matrix', () => {
       headers: { ...device.authorization, 'content-type': 'application/json' },
       body: JSON.stringify({
         level: 'online',
-        runtimes: [
+        harnesses: [
           { id: 'claude', version: '2.1.326', capabilities: { ...MATRIX, futureFlag: true, isolation: { ...MATRIX.isolation, futureSource: true } } },
-          { id: 'codex', version: '0.165.0' },
+          { id: 'codex', version: '0.165.0', capabilities: { selectionModes: ['subscription'], effort: true } },
         ],
       }),
     });
     expect(response.status).toBe(200);
     const hint = await harness.core.presence.read(TENANT_A, device.deviceId);
-    expect(hint?.runtimes).toEqual([
+    expect(hint?.harnesses).toEqual([
       { id: 'claude', version: '2.1.326', capabilities: MATRIX },
-      { id: 'codex', version: '0.165.0' },
+      { id: 'codex', version: '0.165.0', capabilities: { selectionModes: ['subscription'], effort: true } },
     ]);
-    expect(Object.isFrozen(hint?.runtimes?.[0]?.capabilities?.isolation)).toBe(true);
+    expect(Object.isFrozen(hint?.harnesses?.[0]?.capabilities?.isolation)).toBe(true);
   });
 });

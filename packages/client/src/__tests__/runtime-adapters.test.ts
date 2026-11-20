@@ -137,7 +137,7 @@ describe('createRuntimeAdapters', () => {
   });
 
   it('reports what the dsh adapter refuses as a config issue', () => {
-    expectInvalid({ runtimeAllowlist: ['dsh'], runtimes: { dsh: { ...DSH, home: 'relative' } } }, 'runtimes.dsh', /home must be an absolute path/);
+    expectInvalid({ runtimeAllowlist: ['dsh'], runtimes: { dsh: { ...DSH, home: 'relative', resolveKey: AGY.resolveKey } } }, 'runtimes.dsh', /home must be an absolute path/);
     expectInvalid({ runtimes: { dsh: { ...DSH, home: 1 as never } } }, 'runtimes.dsh.home', /a string/);
     expectInvalid({ runtimes: { dsh: { home: DSH.home } as never } }, 'runtimes.dsh.model', /an object/);
     expectInvalid({ runtimes: { dsh: { ...DSH, sandbox: 'auto' as never } } }, 'runtimes.dsh.sandbox', /one of "danger-full-access"/);
@@ -195,11 +195,14 @@ const OPTION_SOURCES = {
     sdkHelperHost: 'sdkHelperHost', validateProviderProfileBinding: 'embedded-only', versionPolicy: 'runtimes.pi.versionPolicy',
   } satisfies Record<keyof PiAdapterOptions, OptionSource>,
   claude: {
+    runtimeInstallRoot: 'runtimeInstallRoot',
+    byok: 'embedded-only',
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', resolveBin: 'embedded-only', spawnFn: 'embedded-only',
     interruptTimeoutMs: 'embedded-only', maxRetainedBytes: 'embedded-only', nativeInteractions: 'embedded-only', agentUserContext: 'runtimes.claude.agentUserContext',
     agentSessionPersistence: 'runtimes.claude.agentSessionPersistence', versionPolicy: 'runtimes.claude.versionPolicy',
   } satisfies Record<keyof ClaudeAdapterOptions, OptionSource>,
   codex: {
+    runtimeInstallRoot: 'runtimeInstallRoot',
     nativeAssetRoot: 'nativeAssetRoot', runtimeEnvironment: 'runtimeEnvironment', sandbox: 'codexSandbox', resolveBin: 'embedded-only',
     spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only', operationTimeoutMs: 'embedded-only',
     nativeInteractions: 'embedded-only', agentUserMcpServers: 'runtimes.codex.agentUserMcpServers', agentUserContext: 'runtimes.codex.agentUserContext', versionPolicy: 'runtimes.codex.versionPolicy',
@@ -216,7 +219,9 @@ const OPTION_SOURCES = {
     resolveBin: 'embedded-only', spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof AgyAdapterOptions, OptionSource>,
   dsh: {
-    home: 'embedded-only', model: 'embedded-only', resolveKey: 'embedded-only', sandbox: 'embedded-only', nativeAssetRoot: 'nativeAssetRoot',
+    runtimeInstallRoot: 'runtimeInstallRoot',
+    resolveKey: 'embedded-only',
+    home: 'embedded-only', model: 'embedded-only', sandbox: 'embedded-only', nativeAssetRoot: 'nativeAssetRoot',
     runtimeEnvironment: 'runtimeEnvironment', versionPolicy: 'embedded-only',
     resolveBin: 'embedded-only', spawnFn: 'embedded-only', maxRetainedBytes: 'embedded-only', interruptTimeoutMs: 'embedded-only',
   } satisfies Record<keyof DshAdapterOptions, OptionSource>,

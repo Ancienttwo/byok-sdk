@@ -43,6 +43,13 @@ export function normalizeProviderUrl(value: string): string {
   return url.toString().replace(/\/+$/u, '');
 }
 
+/** Join a normalized base URL with an API path, idempotently (`providers.ts:1949-1953`). */
+export function modelApiUrl(baseUrl: string, suffix: string): string {
+  const normalized = normalizeProviderUrl(baseUrl);
+  if (normalized.endsWith(`/${suffix}`)) return normalized;
+  return `${normalized}/${suffix}`;
+}
+
 /** Whether an already-parseable provider URL points at a loopback host. */
 export function isLoopbackProviderUrl(value: string): boolean {
   return isLoopbackHost(new URL(value).hostname);

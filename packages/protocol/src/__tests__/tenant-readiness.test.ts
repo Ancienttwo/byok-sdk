@@ -6,6 +6,7 @@ describe('U3 frozen readiness identity projection', () => {
   it('retains the U4a release version in the handshake payload', () => {
     const parsed = ConnHelloPayloadSchema.parse({
       protocolVersions: [1],
+      harnesses: [],
       capabilities: [],
       deviceId: 'device-1',
       productId: 'product-1',
@@ -19,13 +20,13 @@ describe('U3 frozen readiness identity projection', () => {
     const parsed = PresencePublishRequestSchema.parse({
       level: 'online',
       clientVersion: '0.4.2',
-      runtimes: [{ id: 'pi' }],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['byok-profile'], effort: false } }],
     });
 
     expect(parsed).toEqual({
       level: 'online',
       clientVersion: '0.4.2',
-      runtimes: [{ id: 'pi' }],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['byok-profile'], effort: false } }],
     });
   });
 
@@ -33,6 +34,7 @@ describe('U3 frozen readiness identity projection', () => {
     expect(() =>
       ConnHelloPayloadSchema.parse({
         protocolVersions: [Number.MAX_SAFE_INTEGER + 1],
+        harnesses: [],
         capabilities: [],
         deviceId: 'device-1',
         productId: 'product-1',
@@ -58,11 +60,11 @@ describe('U3 frozen readiness identity projection', () => {
     expect(() => PresencePublishRequestSchema.parse({ ...valid, protocolVersions: Array(17).fill(1) })).toThrow();
     expect(() => PresencePublishRequestSchema.parse({
       ...valid,
-      runtimes: [{ id: 'pi', version: 'v'.repeat(129) }],
+      harnesses: [{ id: 'pi', version: 'v'.repeat(129), capabilities: { selectionModes: [], effort: false } }],
     })).toThrow();
     expect(() => PresencePublishRequestSchema.parse({
       ...valid,
-      runtimes: Array.from({ length: 17 }, () => ({ id: 'pi' })),
+      harnesses: Array.from({ length: 65 }, (_, i) => ({ id: `harness-${i}`, capabilities: { selectionModes: [], effort: false } })),
     })).toThrow();
   });
 });

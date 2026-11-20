@@ -23,8 +23,17 @@ const clientRoot = path.dirname(require.resolve('@byok-sdk/client/package.json')
 // The installed coding-agent manifest must match the approved official pin.
 const piEntry = fileURLToPath(import.meta.resolve(PI_DEPENDENCY_SPECIFIER));
 const piRoot = path.dirname(path.dirname(piEntry));
-const piManifest = JSON.parse(await readFile(path.join(piRoot, 'package.json'), 'utf8'));
-const clientManifest = JSON.parse(await readFile(path.join(clientRoot, 'package.json'), 'utf8'));
+async function readInstalledManifest(root) {
+  const manifestPath = path.join(root, 'package.json');
+  try {
+    return JSON.parse(await readFile(manifestPath, 'utf8'));
+  } catch (cause) {
+    throw new Error(`could not read installed smoke manifest ${manifestPath}`, { cause });
+  }
+}
+
+const piManifest = await readInstalledManifest(piRoot);
+const clientManifest = await readInstalledManifest(clientRoot);
 assert.equal(clientManifest.dependencies['@juicesharp/rpiv-todo'], undefined);
 const clientRequire = createRequire(path.join(clientRoot, 'package.json'));
 assert.throws(() => clientRequire.resolve('@juicesharp/rpiv-todo/package.json'), {code:'MODULE_NOT_FOUND'});
@@ -280,9 +289,9 @@ await runtime.dispose();
   for (const provider of Object.values(directModels.providers)) delete provider.apiKey;
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'models.json'),JSON.stringify(directModels));
   await writeFile(path.join(directEnv.PI_CODING_AGENT_DIR,'settings.json'),JSON.stringify({defaultProvider:'byok-sdk-packed-zai',defaultModel:profile.model}));
-  const prepared = await adapter.prepare({offer:{instruction:'Never sent',target:{lane:'runtime',runtimeId:'pi'}},descriptor:adapter.descriptor,requiredToolsetIds:[],
+  const prepared = await adapter.prepare({offer:{instruction:'Never sent',target:{ lane: 'auto' }},descriptor:adapter.descriptor,requiredToolsetIds:[],
     mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
-  assert.equal(prepared.kind,'prepared');
+  assert.equal(prepared.kind,'prepared',prepared.reason);
   assert.equal(typeof prepared.operation.resolveRuntimeLaunch,'function');
   let directRuntime;
   const directScratch = await createExecutionScratch({ root: scratchRoot });
@@ -351,7 +360,7 @@ await runtime.dispose();
     '--pi-bin', process.execPath,
     ...(runtimeEntry === undefined ? [] : ['--runtime-entry', runtimeEntry]),
     '--pi-entry', sdkPiEntry, '--profile-db', profileDbPath, '--session-dir', sessionDir,
-    '--provider', target.profileRef, '--model', target.modelId,
+    '--provider', target.profileRef,
     '--profile-revision', target.profileRevision, '--profile-hash', target.profileHash,
     '--required-capabilities', '[]', '--validate-only', 'true',
   ], { cwd: dir, env, encoding: 'utf8', timeout: 15_000 });
@@ -396,26 +405,24 @@ await runtime.dispose();
     // adapter's resource phase, exactly as a real operation does. No credential
     // is read: this profile declares auth_mode:none and start is intercepted.
     let keysInvocation;
-    let keysConfig;
     let keysConfigBytes;
     const keysAdapter=new PiAdapter({
       byokLauncher:{command:process.execPath,args:[path.join(keysRoot,'dist/bin/pi-provider-launcher.js')],profileDbPath,sessionDir},
       spawnFn:(command,args,options)=>{
         keysInvocation={command,args,options};
         keysConfigBytes=readFileSync(args[args.indexOf('--config')+1],'utf8');
-        keysConfig=JSON.parse(keysConfigBytes);
         throw new Error('capture before prompt');
       },
     });
-    const selection={lane:'byok-profile',runtimeId:'pi',providerProfile:binding};
+    const selection={ lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile:binding } };
     const keysPrepared=await keysAdapter.prepare({offer:{instruction:'Never sent',target:selection},
       descriptor:keysAdapter.descriptor,requiredToolsetIds:[],mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation});
-    assert.equal(keysPrepared.kind,'prepared');
+    assert.equal(keysPrepared.kind,'prepared',keysPrepared.reason);
     const keysScratch=await createExecutionScratch({root:scratchRoot});
     const keysRuntime=await keysPrepared.operation.resolveRuntimeLaunch({kind:'instruction',cwd:dir,env,scratch:keysScratch});
     try {
       const manifest=sealRuntimeOperationManifest({taskId:'packed-keys-capture',runtimeId:'pi',descriptor:keysAdapter.descriptor,
-        modelTarget:selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
+        selection:selection.selection,requiredToolsetIds:[],workspace:{workspaceDir:dir},forwardedEnvironmentNames:Object.keys(keysRuntime.env).sort()});
       await assert.rejects(keysPrepared.operation.start({kind:'instruction',mcpEnv:mcpTaskConfig.mcpEnv,manifest,instruction:'Never sent',env:keysRuntime.env,runtimeLaunch:keysRuntime,scratch:keysScratch,
         mcpServers:mcpTaskConfig.mcpServers,mcpToolsetTools:mcpTaskConfig.observation}),/pi runtime process could not be spawned/);
       const option=(name)=>keysInvocation.args[keysInvocation.args.indexOf(name)+1];

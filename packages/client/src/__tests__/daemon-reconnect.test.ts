@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
+import { CursorStore } from '../daemon/cursor-store';
 import { TestServer } from './fixtures/test-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -34,7 +35,7 @@ async function tmpDir(prefix: string): Promise<string> {
       {agentHome: testAgentHomeConfig(), agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY }, storage: { scratchRoot: testScratchRoot() }, localAgentRelease: { version: '0.0.0-test' }, productName: 'Test', productId: 'test-product', serverUrl: server.url, storeDir },
       [new StubRuntimeAdapter()],
     );
-    await daemon.pair('code');
+    const enrollment = await daemon.pair('code');
     await daemon.start();
 
     const offerSeq = server.nextSeq();
@@ -42,8 +43,11 @@ async function tmpDir(prefix: string): Promise<string> {
       createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x' }, { taskId: 'task-A', seq: offerSeq }),
     );
     await server.waitFor((e) => e.type === 'task.claim');
+    const cursorStore = new CursorStore(storeDir);
+    await vi.waitFor(async () => expect(await cursorStore.load(server.url, enrollment.deviceId)).toBe(offerSeq));
 
     await daemon.stop();
+    const beforeRestart = server.received.length;
 
     // A fresh daemon instance, same storeDir — no re-pair needed (device.json
     // persists), and it should know the cursor without ever having been told
@@ -55,10 +59,10 @@ async function tmpDir(prefix: string): Promise<string> {
     daemon = daemon2;
     await daemon2.start();
 
-    await vi.waitFor(() => expect(server.received.filter((e) => e.type === 'conn.hello')).toHaveLength(2));
-    const hellos = server.received.filter((e) => e.type === 'conn.hello');
-    expect(hellos).toHaveLength(2);
-    expect(hellos[1]?.payload).toMatchObject({ cursor: offerSeq });
+    await vi.waitFor(() => {
+      const hello = server.received.slice(beforeRestart).find((e) => e.type === 'conn.hello');
+      expect(hello?.payload).toMatchObject({ cursor: offerSeq });
+    });
   });
 
   it('dedupes a redelivered envelope whose seq is <= the already-processed cursor', async () => {

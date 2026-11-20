@@ -29,7 +29,7 @@ import {
   type TaskAttemptStore,
 } from '@byok-sdk/cloud';
 import type { Clock, TenantId } from '@byok-sdk/core';
-import type { ClaimedExecutor, RuntimeCapabilities, RuntimeId } from '@byok-sdk/protocol';
+import type { ClaimedExecutor, RuntimeCapabilities } from '@byok-sdk/protocol';
 import type { Pool } from 'pg';
 import type { ByokPool } from '../pool.js';
 
@@ -47,7 +47,6 @@ export interface TaskRow {
   readonly cancel_reason: string | null;
   readonly cancel_message_id: string | null;
   readonly claimed_harness_id: string | null;
-  readonly claimed_runtime: string | null;
   readonly claimed_runtime_capabilities: RuntimeCapabilities | null;
   readonly offered_at: Date | null;
   readonly claimed_at: Date | null;
@@ -58,7 +57,7 @@ export interface TaskRow {
 }
 
 export const TASK_SELECT_COLUMNS =
-  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_runtime, claimed_harness_id, claimed_runtime_capabilities, offered_at, claimed_at, first_output_at, terminal_at, archived_at, updated_at';
+  'tenant_id, task_id, device_id, agent_id, agent_profile_revision, owner_device_id, status, terminal_cause, cancel_requested_at, cancel_reason, cancel_message_id, claimed_harness_id, claimed_runtime_capabilities, offered_at, claimed_at, first_output_at, terminal_at, archived_at, updated_at';
 
 interface AgentMessageAdmissionRow {
   readonly message_id: string;
@@ -89,11 +88,7 @@ export function taskRowToAttempt(row: TaskRow): TaskAttempt {
     // former.
     ...(row.owner_device_id === null ? {} : { ownerDeviceId: row.owner_device_id }),
     status: row.status as TaskAttemptStatus,
-    // The executor columns are written only by the guarded claim UPDATE below,
-    // so a non-null value here is always the winning claim's own self-report.
-    // A CHECK keeps at most one of them set (0021), and exactly one once owned (0040).
-    ...(row.claimed_harness_id == null ? {} : { claimedExecutor: { kind: 'harness', harnessId: row.claimed_harness_id } }),
-    ...(row.claimed_runtime === null ? {} : { claimedExecutor: { kind: 'runtime', runtimeId: row.claimed_runtime as RuntimeId } }),
+    ...(row.claimed_harness_id === null ? {} : { claimedExecutor: { id: row.claimed_harness_id } }),
     ...(row.claimed_runtime_capabilities === null
       ? {}
       : { claimedRuntimeCapabilities: row.claimed_runtime_capabilities }),
@@ -373,8 +368,7 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
       `UPDATE task
           SET owner_device_id = $3,
               status = 'claimed',
-              claimed_runtime = $5,
-              claimed_harness_id = $7,
+              claimed_harness_id = $5,
               claimed_runtime_capabilities = $6::jsonb,
               claimed_at = $4,
               updated_at = $4
@@ -386,9 +380,8 @@ export class PostgresTaskAttemptStore implements TaskAttemptStore {
         input.taskId,
         input.deviceId,
         this.#now(),
-        input.executor.kind === 'runtime' ? input.executor.runtimeId : null,
+        input.executor.id,
         input.capabilities === undefined ? null : JSON.stringify(input.capabilities),
-        input.executor.kind === 'harness' ? input.executor.harnessId : null,
       ],
     );
     const won = claimed.rows[0];

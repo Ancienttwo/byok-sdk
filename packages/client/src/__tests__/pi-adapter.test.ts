@@ -1,6 +1,6 @@
 import { acquirePiSessionRetention } from '../util/pi-session-retention';
 import { PathMutationGateBusyError } from '../util/path-mutation-gate';
-import type { RuntimeTaskInput } from '../types';
+import { PolicyUnsupportedError, type RuntimeTaskInput } from '../types';
 import { testExecutionScratch } from "./fixtures/execution-scratch";
 import { fileURLToPath } from 'node:url';
 import { spawn as realSpawn } from 'node:child_process';
@@ -8,7 +8,7 @@ import { promises as fs, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { AgentEvent } from '@byok-sdk/protocol';
+import type { AgentEvent, ProviderProfileBinding } from '@byok-sdk/protocol';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { resolveFileScopeGrant } from '../file-scope-guard';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -19,13 +19,18 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import { setLoginShellSnapshotSource } from '../login-shell-environment';
 import { TEST_LOGIN_SHELL_SNAPSHOT } from './fixtures/runtime-env';
 import { observationOf } from './fixtures/mcp-observation';
-import {
-  projectMcpTools,
-  qualifiedMcpToolName,
-  type McpToolsetServerObservation,
-} from '../mcp';
 
-const PI_TARGET = { lane: 'runtime', runtimeId: 'pi' } as const;
+const PI_TARGET = { lane: 'auto' } as const;
+const PROFILE_BINDING: ProviderProfileBinding = {
+  profileRef: 'openai', profileRevision: 'r1',
+  profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
+};
+const PI_PROFILE_TARGET = {
+  lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: PROFILE_BINDING, modelId: 'gpt-5.2' },
+} as const;
+const validateProfile = async (binding: typeof PROFILE_BINDING) => {
+  expect(binding).toEqual(PROFILE_BINDING);
+};
 
 const FIXTURE_PATH = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 /** A product Pi asset root that holds the SDK asset manifest: the built package assets. */
@@ -59,6 +64,113 @@ const baseTask: RuntimeTaskInput = { target: PI_TARGET,
   instruction: 'say hi',
 };
 
+describe('Pi native model selection', () => {
+  const modelTarget = (modelId?: string) => ({ lane: 'harness', harnessId: 'pi', selection: { mode: 'adapter-model', modelId } } as const);
+
+  it('advertises native modes for RPC and binds the durable lane to a profile', () => {
+    const byokLauncher = { command: process.execPath, profileDbPath: FIXTURE_PATH, sessionDir: path.dirname(FIXTURE_PATH) };
+    expect(new PiAdapter().descriptor.selectionModes).toEqual(['device-default', 'adapter-model']);
+    expect(new PiAdapter({ byokLauncher }).descriptor.selectionModes).toEqual(['device-default', 'adapter-model', 'byok-profile']);
+    expect(new PiAdapter({ byokLauncher, durableLane: true }).descriptor.selectionModes).toEqual(['byok-profile']);
+    expect(new PiAdapter().descriptor.defaultModelModes).toBeUndefined();
+    for (const durableLane of [false, true]) {
+      expect(new PiAdapter({ byokLauncher, durableLane }).descriptor.defaultModelModes).toEqual(['byok-profile']);
+    }
+  });
+
+  it.each(['--flag', '  ', 'model\tname', 'model\u0085name', 'x'.repeat(161)])('rejects an invalid profile override before checking custody (%j)', async modelId => {
+    const validateProviderProfileBinding = vi.fn();
+    const adapter = new PiAdapter({ validateProviderProfileBinding, byokLauncher: {
+      command: process.execPath, profileDbPath: FIXTURE_PATH, sessionDir: path.dirname(FIXTURE_PATH),
+    } });
+    await expect(adapter.prepare({ offer: { instruction: 'hi', target: { ...PI_PROFILE_TARGET,
+      selection: { ...PI_PROFILE_TARGET.selection, modelId },
+    } } } as Parameters<PiAdapter['prepare']>[0])).resolves.toMatchObject({ kind: 'reject', code: 'invalid_request', retryable: false });
+    expect(validateProviderProfileBinding).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])('returns provider-qualified native model IDs through the SDK helper (self-hosted=%s)', async selfHosted => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pi-catalog-'));
+    const entry = fileURLToPath(new URL('../../dist/bin/byok-pi-rpc.js', import.meta.url));
+    const catalog = new PiAdapter({ ...(selfHosted ? { sdkHelperHost: { mode: 'self-executable', entry } } : {}),
+      runtimeEnvironment: { base: 'allowlist' } });
+    const environment = await catalog.runtimeEnvironment();
+    vi.spyOn(catalog, 'runtimeEnvironment').mockResolvedValue({ ...environment, env: { ...environment.env,
+      PI_CODING_AGENT_DIR: root, XAI_API_KEY: 'synthetic-ambient-key' } });
+    try {
+      await fs.writeFile(path.join(root, 'auth.json'), JSON.stringify({
+        anthropic: { type: 'api_key', key: 'synthetic-anthropic-catalog-auth' },
+        openai: { type: 'api_key', key: 'synthetic-openai-catalog-auth' },
+      }), { mode: 0o600 });
+      const result = await catalog.listModels();
+      expect(result.kind).toBe('ok');
+      if (result.kind !== 'ok') throw new Error(result.kind);
+      expect(new Set(result.models.flatMap(model => model.provider?.id ?? []))).toEqual(new Set(['anthropic', 'openai']));
+      expect(result.models.every(model => model.id.startsWith(`${model.provider?.id}/`))).toBe(true);
+      expect(JSON.stringify(result)).not.toContain('catalog-auth');
+    } finally { await fs.rm(root, { recursive: true, force: true }); }
+  }, 20_000);
+
+  it('matches the provider and full ID and passes them as separate arguments', async () => {
+    const spawnFn = vi.fn(realSpawn);
+    const adapter = new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }), spawnFn: spawnFn as never });
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [
+      { id: 'one/org/model:high', provider: { id: 'one' } }, { id: 'two/org/model:high', provider: { id: 'two' } },
+    ] });
+    const prepare = (modelId?: string) => adapter.prepare({ offer: { target: modelTarget(modelId), instruction: 'hi' }, descriptor: adapter.descriptor, requiredToolsetIds: [] });
+    await expect(prepare()).resolves.toMatchObject({ kind: 'reject', code: 'invalid_request' });
+    await expect(prepare('one/org/model')).resolves.toMatchObject({ kind: 'reject', code: 'model_unavailable' });
+    await expect(prepare('three/org/model:high')).resolves.toMatchObject({ kind: 'reject', code: 'model_unavailable' });
+    expect(spawnFn).not.toHaveBeenCalled();
+    const ctx = await makeCtx();
+    try {
+      const session = await startPreparedOperation(adapter, { target: modelTarget('two/org/model:high'), instruction: 'hi' }, ctx);
+      try { expect(spawnFn.mock.calls[0]?.[1]).toEqual(expect.arrayContaining(['--provider', 'two', '--model', 'org/model:high', '--exact-model', 'true'])); }
+      finally { await session.close(); }
+    } finally { await fs.rm(ctx.workspaceDir, { recursive: true, force: true }); }
+  });
+
+  const deviceDefault = { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } as const;
+  it.each([
+    [PI_TARGET, deviceDefault, [modelTarget('one/model'), PI_PROFILE_TARGET]],
+    [deviceDefault, deviceDefault, [modelTarget('one/model'), PI_PROFILE_TARGET]],
+    [modelTarget('one/model'), modelTarget('one/model'), [deviceDefault, modelTarget('one/other'), PI_PROFILE_TARGET]],
+  ] as const)('enforces native follow-up selection for %j', async (target, allowed, refused) => {
+    const adapter = fakePiAdapter();
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [{ id: 'one/model', provider: { id: 'one' } }] });
+    const ctx = await makeCtx();
+    try {
+      const session = await startAdapter(adapter, { ...baseTask, target }, ctx);
+      try {
+        for (const followUpTarget of refused) {
+          await expect(session.followUp({ instruction: 'switch selection', target: followUpTarget })).rejects.toBeInstanceOf(PolicyUnsupportedError);
+        }
+        await expect(session.followUp({ instruction: 'continue', target: allowed })).resolves.toBeUndefined();
+      } finally { await session.close(); }
+    } finally { await fs.rm(ctx.workspaceDir, { recursive: true, force: true }); }
+  });
+
+  it('refuses to launch when the manifest changes the admitted model', async () => {
+    const spawnFn = vi.fn(realSpawn);
+    const adapter = new PiAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }), spawnFn: spawnFn as never });
+    vi.spyOn(adapter, 'listModels').mockResolvedValue({ kind: 'ok', models: [{ id: 'one/model', provider: { id: 'one' } }] });
+    const prepare = adapter.prepare.bind(adapter);
+    vi.spyOn(adapter, 'prepare').mockImplementation(async input => {
+      const prepared = await prepare(input);
+      if (prepared.kind === 'reject') return prepared;
+      return { kind: 'prepared', operation: { ...prepared.operation, start: start => prepared.operation.start({ ...start,
+        manifest: { ...start.manifest, selection: modelTarget('two/model').selection },
+      }) } };
+    });
+    const ctx = await makeCtx();
+    try {
+      await expect(startPreparedOperation(adapter, { target: modelTarget('one/model'), instruction: 'hi' }, ctx))
+        .rejects.toThrow('manifest with different runtime selection');
+      expect(spawnFn).not.toHaveBeenCalled();
+    } finally { await fs.rm(ctx.workspaceDir, { recursive: true, force: true }); }
+  });
+});
+
 describe('PiAdapter against the fake-pi fixture', () => {
   const openSessions: Session[] = [];
 
@@ -71,8 +183,9 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const dir=await fs.mkdtemp(path.join(os.tmpdir(),'pi-retention-'));
     const spawnFn=((_command:string,args:string[],options:Parameters<typeof realSpawn>[2])=>realSpawn(FIXTURE_PATH,args.slice(args.indexOf('--')+1),options)) as never;
     const adapter=new PiAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'env'}),spawnFn,
+      validateProviderProfileBinding: validateProfile,
       byokLauncher:{command:'/opt/byok-pi-provider-launcher',profileDbPath:'/private/providers.sqlite',sessionDir:dir}});
-    const task:RuntimeTaskInput={...baseTask,target:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'},...(resume?{sessionRef:'fake-session-1'}:{})};
+    const task:RuntimeTaskInput={...baseTask,target:PI_PROFILE_TARGET,...(resume?{sessionRef:'fake-session-1'}:{})};
     let session:Session|undefined;
     try{
       session=await startAdapter(adapter,task,await makeCtx({...process.env,FAKE_PI_HANG_AFTER_TOOL:'1'}));
@@ -86,8 +199,9 @@ describe('PiAdapter against the fake-pi fixture', () => {
   it('rejects a forged admission lease before spawning a Pi writer',async()=>{
     const dir=await fs.mkdtemp(path.join(os.tmpdir(),'pi-retention-token-')),spawnFn=vi.fn(()=>{throw new Error('must not spawn');});
     const adapter=new PiAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'env'}),spawnFn:spawnFn as never,
+      validateProviderProfileBinding: validateProfile,
       byokLauncher:{command:'/opt/byok-pi-provider-launcher',profileDbPath:'/private/providers.sqlite',sessionDir:dir}});
-    const task:RuntimeTaskInput={...baseTask,sessionRef:'fake-session-1',target:{lane:'byok',runtimeId:'pi',providerId:'openai',modelId:'gpt-5.2'}};
+    const task:RuntimeTaskInput={...baseTask,sessionRef:'fake-session-1',target:PI_PROFILE_TARGET};
     let retained:import('../types').RuntimeSessionLease|undefined;
     const wrapped:import('../types').RuntimeAdapter={descriptor:adapter.descriptor,runtimeEnvironment:()=>adapter.runtimeEnvironment(),detect:()=>adapter.detect(),prepare:async input=>{
       const result=await adapter.prepare(input);if(result.kind!=='prepared')return result;
@@ -202,21 +316,14 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
       spawnFn,
+      validateProviderProfileBinding: validateProfile,
       byokLauncher: {
         command: '/opt/byok-pi-provider-launcher',
         profileDbPath: '/private/providers.sqlite',
         sessionDir: '/private/pi-sessions',
       },
     });
-    const task: RuntimeTaskInput = {
-      ...baseTask,
-      target: {
-        lane: 'byok',
-        runtimeId: 'pi',
-        providerId: 'openai',
-        modelId: 'gpt-5.2',
-      },
-    };
+    const task: RuntimeTaskInput = { ...baseTask, target: PI_PROFILE_TARGET };
     const ctx = await makeCtx({ ...process.env, OPENAI_API_KEY: 'sk-sentinel' });
     const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
@@ -234,6 +341,10 @@ describe('PiAdapter against the fake-pi fixture', () => {
       'openai',
       '--model',
       'gpt-5.2',
+      '--profile-revision', PROFILE_BINDING.profileRevision,
+      '--profile-hash', PROFILE_BINDING.profileHash,
+      '--required-capabilities', '[]',
+      '--validate-only', 'false',
       '--runtime-entry', 'pi-rpc',
       // The Pi process starts in the session cwd, as in OAR.
       '--pi-cwd', await fs.realpath(ctx.workspaceDir),
@@ -249,10 +360,9 @@ describe('PiAdapter against the fake-pi fixture', () => {
     await expect(session.followUp({
       instruction: 'switch provider',
       target: {
-        lane: 'byok',
-        runtimeId: 'pi',
-        providerId: 'deepseek',
-        modelId: 'deepseek-chat',
+        lane: 'harness',
+        harnessId: 'pi',
+        selection: { mode: 'byok-profile', providerProfile: PROFILE_BINDING, modelId: 'gpt-5.3' },
       },
     })).rejects.toThrow(/cannot change its authoritative BYOK provider\/model/);
   });
@@ -267,6 +377,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
     const adapter = new PiAdapter({
       resolveBin: () => ({ command: FIXTURE_PATH, source: 'env' }),
       spawnFn,
+      validateProviderProfileBinding: validateProfile,
       byokLauncher: {
         command: '/opt/byok-pi-provider-launcher',
         profileDbPath: '/private/providers.sqlite',
@@ -274,15 +385,7 @@ describe('PiAdapter against the fake-pi fixture', () => {
         macosKeychainPath: '/Users/test/Library/Keychains/login.keychain-db',
       },
     });
-    const task: RuntimeTaskInput = {
-      ...baseTask,
-      target: {
-        lane: 'byok',
-        runtimeId: 'pi',
-        providerId: 'openai',
-        modelId: 'gpt-5.2',
-      },
-    };
+    const task: RuntimeTaskInput = { ...baseTask, target: PI_PROFILE_TARGET };
 
     const ctx = await makeCtx();
     const session = await startAdapter(adapter, task, ctx);
@@ -303,6 +406,10 @@ describe('PiAdapter against the fake-pi fixture', () => {
         'openai',
         '--model',
         'gpt-5.2',
+        '--profile-revision', PROFILE_BINDING.profileRevision,
+        '--profile-hash', PROFILE_BINDING.profileHash,
+        '--required-capabilities', '[]',
+        '--validate-only', 'false',
         '--runtime-entry', 'pi-rpc',
         '--pi-cwd', await fs.realpath(ctx.workspaceDir),
         '--pi-projection-dir', expect.any(String),
@@ -349,10 +456,11 @@ describe('PiAdapter against the fake-pi fixture', () => {
       resolveBin: () => { throw new Error('a single-file product resolves no installed Pi package'); },
       spawnFn,
       sdkHelperHost: { mode: 'self-executable', executable: '/product/runtime', entry: '/product/release/sdk.js' },
+      validateProviderProfileBinding: validateProfile,
       byokLauncher: { command: '/opt/byok-pi-provider-launcher', profileDbPath: '/private/providers.sqlite', sessionDir: '/private/pi-sessions' },
       packageDir: PRODUCT_ASSETS,
     });
-    const task: RuntimeTaskInput = { ...baseTask, target: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } };
+    const task: RuntimeTaskInput = { ...baseTask, target: PI_PROFILE_TARGET };
     const ctx = await makeCtx();
     const session = await startAdapter(adapter, task, ctx);
     openSessions.push(session);
@@ -398,7 +506,7 @@ const __executionScratch = await testExecutionScratch();
   describe('the Pi asset root comes from packageDir only', () => {
     const resolveBin = () => { throw new Error('a single-file product resolves no installed Pi package'); };
     const bundle = { mode: 'self-executable', executable: process.execPath, entry: '/product/sdk.js' } as const;
-    const recordingSpawn = (spawned: Array<NodeJS.ProcessEnv | undefined>) => ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+    const recordingSpawn = (spawned: Array<NodeJS.ProcessEnv | undefined>) => ((_command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
       spawned.push(options?.env);
       return realSpawn(FIXTURE_PATH, args.slice(args.indexOf('__byok_sdk_helper') + 2), options);
     }) as never;
@@ -498,15 +606,7 @@ const __executionScratch = await testExecutionScratch();
   });
 
   it('fails closed before spawn when a BYOK selection has no credential launcher', async () => {
-    const task: RuntimeTaskInput = {
-      ...baseTask,
-      target: {
-        lane: 'byok',
-        runtimeId: 'pi',
-        providerId: 'openai',
-        modelId: 'gpt-5.2',
-      },
-    };
+    const task: RuntimeTaskInput = { ...baseTask, target: PI_PROFILE_TARGET };
     await expect(startAdapter(fakePiAdapter(), task, await makeCtx())).rejects.toThrow(
       /requires a configured credential-custody launcher/,
     );

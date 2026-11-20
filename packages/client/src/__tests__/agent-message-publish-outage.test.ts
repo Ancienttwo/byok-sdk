@@ -15,7 +15,7 @@ import { ConnectionManager } from '../daemon/connection-manager';
 import { CursorStore } from '../daemon/cursor-store';
 import { LongPollClient } from '../daemon/long-poll-transport';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { openBarrier } from './fixtures/lifecycle-barrier';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
@@ -65,7 +65,7 @@ async function openConnection() {
   const manager = new ConnectionManager({
     onStateChange: opens.onStateChange, onHalted: opens.onHalted,
     serverUrl: instance.url, deviceId: record.deviceId, productId: 'publish-outage-test',
-    capabilities: [], runtimes: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
+    capabilities: [], harnesses: [], auth, cursorStore: new CursorStore(storeDir), onEnvelope: () => {},
     onOutboundQueued: (envelope) => { if (isPublish(envelope)) queuedPublishes.push(envelope); },
     beforeOutboundPost: (batch) => { publishesPerPost.push(batch.filter(isPublish).length); },
     longPollRetryDelayMs: 20, longPollIdleDelayMs: 20,
@@ -77,7 +77,7 @@ async function openConnection() {
 }
 
 function runnerDeps(manager: ConnectionManager, sentPublishes: Envelope[], storeDir: string): TaskRunnerDeps {
-  return {
+  return { advertisedHarnesses() { return testHarnesses(this.adapters); },
     advertisedCapabilities: advertiseEveryDeviceFlag,
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [], storeDir, deviceId: 'device-outage',
@@ -116,7 +116,7 @@ describe('one pending agent.message.publish per message during a route outage (#
       agentMessageMcpPreflight: async () => {},
     });
     await runner.handleEnvelope(createEnvelope('task.offer', {
-      instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'outage-agent', profileRevision: '1' },
+      instruction: 'reply', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: { agentId: 'outage-agent', profileRevision: '1' },
       session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
     }, { taskId: 'live-outage', seq: 1 }));

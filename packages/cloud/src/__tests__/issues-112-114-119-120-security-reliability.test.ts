@@ -209,7 +209,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
     const harness = createHarness({ agentMessage: { consume: async () => { consumed += 1; return { outcome: 'accepted' }; } } });
     const device = await harness.pairDevice(TENANT_A);
     const taskId = await admitMessageEgress(harness, device.deviceId);
-    await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
+    await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId, executor: { id: 'pi' } });
     await expect(harness.cloud.cancelTask(TENANT_A, taskId, 'operator cancelled')).resolves.toMatchObject({
       status: 'cancel_requested',
       cancellation: { reason: 'operator cancelled' },
@@ -352,7 +352,7 @@ describe('Issues #112/#114/#119/#120 hosted cloud regressions', () => {
       if (terminalState === 'complete') {
         await harness.stores.tasks.recordStatus(TENANT_A, { taskId, status: 'complete', agentRef: AGENT_REF });
       } else {
-        await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } });
+        await harness.stores.tasks.claim(TENANT_A, { taskId, deviceId: device.deviceId, executor: { id: 'pi' } });
         await harness.cloud.cancelTask(TENANT_A, taskId, 'cancel after consume');
       }
 

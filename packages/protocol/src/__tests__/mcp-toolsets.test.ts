@@ -19,7 +19,7 @@ describe('requiredToolsets on an Agent offer', () => {
         instruction: 'find qualified leads',
         agentRef: AGENT_REF,
         session: RESUME_SESSION,
-        target: { lane: 'runtime', runtimeId: 'claude' },
+        target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } },
         requiredToolsets: ['salesko', 'crm.readonly'],
       },
       { taskId: 'task-toolsets-1', seq: 1 },
@@ -79,6 +79,7 @@ describe('requiredToolsets on an Agent offer', () => {
   it('adds an optional logical-only inventory to conn.hello', () => {
     const parsed = ConnHelloPayloadSchema.parse({
       protocolVersions: [1],
+      harnesses: [],
       capabilities: ['toolset-selection'],
       deviceId: 'device-1',
       productId: 'salesko',

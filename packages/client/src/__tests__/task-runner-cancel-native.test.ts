@@ -21,11 +21,23 @@ import { TestServer } from './fixtures/test-server';
 import { until } from './fixtures/until';
 import { readyGate } from './fixtures/start-ready';
 import { cancellationTiming } from './fixtures/task-runner-cancel-timing';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs', import.meta.url));
+
+function cancellationTarget(runtime: RuntimeId): import('@byok-sdk/protocol').ExecutionTarget {
+  if (runtime !== 'pi') return { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } };
+  return {
+    lane: 'harness', harnessId: 'pi', selection: {
+      mode: 'byok-profile', providerProfile: {
+        profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`,
+        requiredCapabilities: [],
+      },
+    },
+  };
+}
 const cases: Array<{ dir: string; gate: string; runner: TaskRunner; sessions: Session[];
   resultGate: string; startSettled: ReturnType<typeof deferred>; hasStarted: () => boolean;
   releaseStartupReceipt: () => void;
@@ -95,7 +107,12 @@ async function setup(runtime: RuntimeId, scenario: string, {
   const resolveBin = () => ({ command: fixture, source: 'path' as const });
   const adapter: RuntimeAdapter = runtime === 'claude' ? new ClaudeAdapter({ resolveBin, interruptTimeoutMs: 60, spawnFn: timing.spawnFn })
     : runtime === 'codex' ? new CodexAdapter({ resolveBin, interruptTimeoutMs: 60, spawnFn: timing.spawnFn })
-    : new PiAdapter({ resolveBin: () => ({ command: fixture, source: 'env' }), spawnFn: timing.spawnFn });
+    : new PiAdapter({
+        resolveBin: () => ({ command: fixture, source: 'env' }),
+        spawnFn: timing.spawnFn,
+        byokLauncher: { command: fixture, profileDbPath: path.join(dir, 'profiles.db'), sessionDir: dir },
+        validateProviderProfileBinding: async () => {},
+      });
   if (scenario === 'startup') {
     // Freeze a REAL installation observation before timing the owned-start
     // window. Version/auth probe scheduling is a different cancellation phase
@@ -140,7 +157,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const sent: Envelope[] = [];
   const terminalPublished = deferred();
-  const runner = new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(),...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter], deviceId: 't1-native-device', storeDir: dir, productId: 't1-cancel',
     send: event => {
       timing.observeTerminal(event); sent.push(event);
@@ -157,7 +174,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   });
   const taskId = 'native-task';
   const offer = (limits?: { maxDurationMs: number }) => runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
-    instruction: 'observe native cancellation', target: { lane: 'runtime', runtimeId: runtime }, limits,
+    instruction: 'observe native cancellation', target: cancellationTarget(runtime), limits,
   }, { taskId, seq: 1 }));
   const cancel = () => {
     timing.record('cancel.request');
@@ -362,7 +379,7 @@ describe.each(['claude', 'codex', 'pi'] as const)('TaskRunner through native %s 
     }, [c.adapter]);
     c.cleanup = async () => { await daemon.stop(); await server.close(); };
     await daemon.pair('pairing-code'); await daemon.start();
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'Host cancellation', target: { lane: 'runtime', runtimeId: runtime } },
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'Host cancellation', target: cancellationTarget(runtime) },
       { taskId: 'host-task', seq: server.nextSeq() }));
     await server.waitFor(event => event.type === 'task.progress' && event.task_id === 'host-task'
       && event.payload.sealed === undefined && event.payload.events.some(event => event.type === 'tool_use'));

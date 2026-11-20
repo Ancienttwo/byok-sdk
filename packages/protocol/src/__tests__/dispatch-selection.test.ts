@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-
-import {
-  ExecutionTargetSchema,
-  TaskOfferPayloadSchema,
-} from '../index';
+import { ClaimedExecutorSchema, ExecutionTargetSchema, HarnessInventorySchema, harnessSupportsTarget, TaskOfferPayloadSchema } from '../index';
 
 const OFFER = {
   instruction: 'hello',
@@ -12,48 +8,110 @@ const OFFER = {
 } as const;
 
 const PROFILE = {
-  profileRef: 'profile-1',
+  profileRef: 'local-profile',
   profileRevision: '1',
   profileHash: `sha256:${'c'.repeat(64)}`,
-  modelId: 'gpt-5.2',
   requiredCapabilities: ['image-input'],
-} as const;
+};
 
-describe('ExecutionTargetSchema (wire v7 offer target)', () => {
-  it.each([
-    { lane: 'auto' },
-    { lane: 'runtime', runtimeId: 'codex' },
-    { lane: 'subscription', runtimeId: 'claude', modelId: 'opus' },
-    { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' },
-    { lane: 'byok-profile', runtimeId: 'pi', providerProfile: PROFILE },
-    { lane: 'harness', harnessId: 'grok' },
-  ])('round-trips the $lane lane on task.offer', (target) => {
-    expect(ExecutionTargetSchema.parse(target)).toEqual(target);
-    expect(TaskOfferPayloadSchema.parse({ ...OFFER, target })).toMatchObject({ target });
+const target = (harnessId: string, selection: object) => ({ lane: 'harness', harnessId, selection });
+
+it.each([
+  { lane: 'auto' },
+  target('codex', { mode: 'device-default' }),
+  target('grok', { mode: 'adapter-model', modelId: 'grok-code' }),
+  target('opencode', { mode: 'adapter-model' }),
+  target('dsh', { mode: 'byok', providerId: 'deepseek' }),
+  target('claude', { mode: 'subscription', modelId: 'opus' }),
+  target('agy', { mode: 'byok', providerId: 'google', modelId: 'gemini' }),
+  target('pi', { mode: 'byok-profile', providerProfile: PROFILE }),
+  target('pi', { mode: 'byok-profile', providerProfile: PROFILE, modelId: 'org/model:high' }),
+])('round-trips target %j', value => {
+  expect(ExecutionTargetSchema.parse(value)).toEqual(value);
+  expect(TaskOfferPayloadSchema.parse({ ...OFFER, target: value }).target).toEqual(value);
+});
+
+it.each([
+  { lane: 'runtime', runtimeId: 'codex' },
+  { lane: 'subscription', runtimeId: 'claude', modelId: 'opus' },
+  { lane: 'byok', runtimeId: 'pi', providerId: 'local-profile', modelId: 'gpt-5.2' },
+  { lane: 'byok-profile', runtimeId: 'pi', providerProfile: PROFILE },
+  { lane: 'harness', harnessId: 'grok' },
+  { lane: 'harness', harnessId: 'grok', modelId: 'grok-code', selection: { mode: 'device-default' } },
+  { lane: 'auto', selection: { mode: 'device-default' } },
+  target('codex', { mode: 'device-default', modelId: 'gpt' }),
+  target('grok', { mode: 'adapter-model', modelId: 'grok-code', providerId: 'xai' }),
+  target('claude', { mode: 'subscription', modelId: 'opus', providerId: null }),
+  target('agy', { mode: 'byok', providerId: 'google', modelId: 'gemini', providerProfile: PROFILE }),
+  target('pi', { mode: 'byok-profile', providerProfile: { ...PROFILE, modelId: 'gpt' } }),
+])('refuses a legacy or widened target %j', value => {
+  expect(ExecutionTargetSchema.safeParse(value).success).toBe(false);
+});
+
+it('requires a target on task.offer', () => {
+  expect(TaskOfferPayloadSchema.safeParse(OFFER).success).toBe(false);
+});
+
+it.each([
+  ['runtime', { runtime: 'codex' }],
+  ['harnessId', { harnessId: 'grok' }],
+  ['dispatchSelection', { dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } }],
+])('refuses the v6 selector %s, alone or beside a target', (_key, legacy) => {
+  expect(TaskOfferPayloadSchema.safeParse({ ...OFFER, ...legacy }).success).toBe(false);
+  expect(TaskOfferPayloadSchema.safeParse({ ...OFFER, target: { lane: 'auto' }, ...legacy }).success).toBe(false);
+});
+
+describe('executor admission', () => {
+  const [agy] = HarnessInventorySchema.parse([{ id: 'agy', capabilities: { selectionModes: ['byok'], byokProviderId: 'google', effort: false } }]);
+  const google = { lane: 'harness', harnessId: 'agy', selection: { mode: 'byok', providerId: 'google', modelId: 'gemini' } } as const;
+
+  it('validates defaults against the advertised model-bearing modes', () => {
+    const item = { id: 'fixture', capabilities: { selectionModes: ['adapter-model'], effort: true } };
+    for (const defaultModelModes of [['byok'], ['adapter-model', 'adapter-model']]) {
+      expect(HarnessInventorySchema.safeParse([{ ...item, capabilities: { ...item.capabilities, defaultModelModes } }]).success).toBe(false);
+    }
+    expect(HarnessInventorySchema.safeParse([{ ...item, capabilities: { ...item.capabilities, defaultModelModes: ['adapter-model'] } }]).success).toBe(true);
   });
 
-  it.each([
-    { lane: 'subscription', runtimeId: 'pi', modelId: 'gpt-5.2' },
-    { lane: 'byok', runtimeId: 'codex', providerId: 'openai', modelId: 'gpt-5.2' },
-    { lane: 'byok-profile', runtimeId: 'claude', providerProfile: PROFILE },
-    // v7 drops the subscription providerId: a vendor CLI owns its provider.
-    { lane: 'subscription', runtimeId: 'claude', providerId: null, modelId: 'opus' },
-    { lane: 'auto', runtimeId: 'pi' },
-    { lane: 'runtime', runtimeId: 'grok' },
-  ])('refuses a cross-lane or widened target %#', (target) => {
-    expect(ExecutionTargetSchema.safeParse(target).success).toBe(false);
+  it('admits the announced BYOK provider', () => {
+    expect(harnessSupportsTarget(agy!, google)).toBe(true);
   });
 
-  it('requires a target on task.offer', () => {
-    expect(TaskOfferPayloadSchema.safeParse(OFFER).success).toBe(false);
+  it('rejects auto for a BYOK-only executor', () => {
+    expect(harnessSupportsTarget(agy!, { lane: 'auto' })).toBe(false);
   });
 
-  it.each([
-    ['runtime', { runtime: 'codex' }],
-    ['harnessId', { harnessId: 'grok' }],
-    ['dispatchSelection', { dispatchSelection: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' } }],
-  ])('refuses the v6 selector %s, alone or beside a target', (_key, selector) => {
-    expect(TaskOfferPayloadSchema.safeParse({ ...OFFER, ...selector }).success).toBe(false);
-    expect(TaskOfferPayloadSchema.safeParse({ ...OFFER, target: { lane: 'auto' }, ...selector }).success).toBe(false);
+  it('admits auto for a device-default executor', () => {
+    expect(harnessSupportsTarget({ id: 'codex', capabilities: { selectionModes: ['device-default'], effort: true } }, { lane: 'auto' })).toBe(true);
   });
+
+  it('rejects a different executor id', () => {
+    expect(harnessSupportsTarget(agy!, { ...google, harnessId: 'dsh' })).toBe(false);
+  });
+
+  it('rejects an unadvertised selection mode', () => {
+    expect(harnessSupportsTarget(agy!, { ...google, selection: { mode: 'device-default' } })).toBe(false);
+  });
+
+  it('rejects a different provider id', () => {
+    expect(harnessSupportsTarget(agy!, { ...google, selection: { ...google.selection, providerId: 'openai' } })).toBe(false);
+  });
+
+  it('rejects effort absent from the descriptor', () => {
+    expect(harnessSupportsTarget(agy!, { ...google, effort: 'high' })).toBe(false);
+  });
+
+  it('rejects a BYOK declaration without a provider id', () => {
+    expect(HarnessInventorySchema.safeParse([{ id: 'agy', capabilities: { selectionModes: ['byok'], effort: false } }]).success).toBe(false);
+  });
+
+  it('rejects a provider id without a BYOK declaration', () => {
+    expect(HarnessInventorySchema.safeParse([{ id: 'agy', capabilities: { selectionModes: [], byokProviderId: 'google', effort: false } }]).success).toBe(false);
+  });
+});
+
+it('a claim carries only one executor id', () => {
+  expect(ClaimedExecutorSchema.parse({ id: 'pi' })).toEqual({ id: 'pi' });
+  expect(ClaimedExecutorSchema.safeParse({ id: 'pi', modelId: 'model' }).success).toBe(false);
+  expect(ClaimedExecutorSchema.safeParse({ kind: 'runtime', runtimeId: 'pi' }).success).toBe(false);
 });

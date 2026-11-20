@@ -58,7 +58,7 @@ import { observationOf } from './fixtures/mcp-observation';
 import { validatePreparedAgentMemoryObservation } from '../agent-memory/prepared-capability';
 import { AGENT_MEMORY_MCP_SERVER_INFO, AGENT_MEMORY_TOOLS } from '../agent-memory/mcp-server';
 import { AGENT_MEMORY_MCP_SERVER_NAME } from '../sdk-reserved-mcp';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { reservedMcpContext, reservedMcpToken } from './fixtures/execution-scratch';
@@ -368,7 +368,7 @@ async function lane(options: {
 
 async function makeRunner(built: Lane, adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<TaskRunnerDeps> = {}): Promise<TaskRunner> {
   const storeDir = await tempDir('byok-prepared-runner-store-');
-  return new TaskRunner({ advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+  return new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
     adapters: [adapter],
     deviceId: DEVICE_ID,
     send: (envelope) => sent.push(envelope),
@@ -406,7 +406,7 @@ function preparedOffer(
     {
       session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
-      target: { lane: 'runtime', runtimeId: 'pi' },
+      target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       agentRef: AGENT_REF,
       preparation,
       agentMemory: 'none',
@@ -1835,7 +1835,7 @@ describe('ordinary offers are untouched by the prepared lane', () => {
       'task.offer',
       {
         instruction: 'an ordinary instruction',
-        target: { lane: 'runtime', runtimeId: 'pi' },
+        target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         agentRef: AGENT_REF,
         ...FRESH_OFFER,
         requiredToolsets: [TOOLSET_ID],
@@ -2088,7 +2088,7 @@ describe('a tool-less prepared record (requiredToolsets [], agentMemory none, th
 
   it('is rejected by the protocol schema when an offer names an empty requiredToolsets', () => {
     const parsed = TaskOfferPlainPayloadSchema.safeParse({
-      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, target: { lane: 'runtime', runtimeId: 'pi' },
+      session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       agentRef: AGENT_REF, preparation: { reference: 'r', requestDigest: REQUEST_DIGEST, artifactDigest: ENVELOPE_DIGEST },
       agentMemory: 'none', requiredToolsets: [], terminalProjection: selector,
     });

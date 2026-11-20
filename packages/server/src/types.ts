@@ -28,7 +28,6 @@ import type {
   AgentMemorySelection,
 } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
-import type { PresenceRuntimeFact } from '@byok-sdk/core';
 import type { WakeConsumer } from './wakes/types.js';
 import type { RateLimiterOptions } from './rate-limiter.js';
 
@@ -414,7 +413,6 @@ export interface MachineInfo {
   /** Most recent live observation. Omitted when the lease is absent or expired. */
   lastSeen?: string;
   clientVersion?: string;
-  runtimes?: readonly PresenceRuntimeFact[];
   harnesses?: readonly HarnessInfo[];
   configuredToolsets?: readonly string[];
 }

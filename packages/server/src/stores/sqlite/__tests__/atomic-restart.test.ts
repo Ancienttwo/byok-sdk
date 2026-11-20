@@ -17,7 +17,7 @@ import { createSqliteEmbeddedStores } from '..';
 import { isSqliteAvailable, SqliteSchemaError } from '../../../sqlite-support';
 
 // Faults run as TEMP triggers on the store's own connection: a trigger written
-// into the file is an object schema 10 does not know, and the open refuses it.
+// into the file is an object schema 11 does not know, and the open refuses it.
 const faults = vi.hoisted((): string[] => []);
 afterEach(() => { faults.length = 0; });
 vi.mock('../../../sqlite-support.js', async (importOriginal) => {
@@ -134,7 +134,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     expect(open).toThrow('Unsupported BYOK SQLite schema version');
     expect(open).toThrow(SqliteSchemaError);
     expect(open).toThrow(expect.objectContaining({
-      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '10',
+      code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: '999', requiredVersion: '11',
     }));
   });
 
@@ -150,7 +150,7 @@ describeSqlite('SQLite embedded atomicity and restart', () => {
     await expect(reopened.cloud.tasks.claim(TENANT, {
       taskId: 'task-target-fence',
       deviceId: 'device-intruder',
-      executor: { kind: 'runtime', runtimeId: 'pi' },
+      executor: { id: 'pi' },
     })).resolves.toMatchObject({
       deviceId: 'device-target',
       status: 'offered',

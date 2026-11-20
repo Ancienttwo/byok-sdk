@@ -324,7 +324,7 @@ describe('daemon presence wiring against the real @byok-sdk/cloud', () => {
       expect(hints[0]?.configuredToolsets).toEqual([]);
       expect(hints[0]?.clientVersion).toBe('0.0.0-test');
       // The conn.hello capability matrix reaches the Host through presence (#1103).
-      expect(hints[0]?.runtimes).toEqual([{
+      expect(hints[0]?.harnesses).toMatchObject([{
         id: 'pi', version: '0.0.0', capabilities: { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true },
       }]);
     });

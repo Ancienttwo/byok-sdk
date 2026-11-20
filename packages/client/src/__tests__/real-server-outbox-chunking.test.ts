@@ -99,7 +99,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
       deviceId: record.deviceId,
       productId: 'test-product',
       capabilities: [],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: () => {},
@@ -113,7 +113,7 @@ describe('drainOutbox chunks outbound sends to the server batch cap (finding P1,
     const totalEnvelopes = MAX_MESSAGES_PER_BATCH + 44; // comfortably over the cap — forces >= 2 chunked POSTs
     const sentIds = new Set<string>();
     for (let i = 0; i < totalEnvelopes; i++) {
-      const envelope = createEnvelope('task.claim', { deviceId: record.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: `chunk-task-${i}` });
+      const envelope = createEnvelope('task.claim', { deviceId: record.deviceId, executor: { id: 'pi' } }, { taskId: `chunk-task-${i}` });
       sentIds.add(envelope.id);
       connection.send(envelope);
     }

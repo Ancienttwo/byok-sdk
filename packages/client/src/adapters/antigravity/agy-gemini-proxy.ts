@@ -42,7 +42,12 @@ export interface AgyGeminiProxy {
  * during the session, but they cannot take the key.
  */
 export async function startAgyGeminiProxy({ apiKey, environment, upstreamOrigin = AGY_GEMINI_ORIGIN }: AgyGeminiProxyOptions): Promise<AgyGeminiProxy> {
-  const upstream = new URL(upstreamOrigin);
+  let upstream: URL;
+  try {
+    upstream = new URL(upstreamOrigin);
+  } catch {
+    throw new Error('agy Gemini proxy: invalid upstream origin');
+  }
   const transport = upstream.protocol === 'https:' ? https : http;
   let agent: http.Agent;
   try {

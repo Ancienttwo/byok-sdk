@@ -67,7 +67,7 @@ describe('host task abandonment', () => {
     const attempt = await harness.cloud.abandonTask(TENANT_A, offer.taskId, 'operator');
     const stores = deviceStores(harness, device.deviceId);
     const reports = [
-      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: offer.taskId }),
+      createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: TEST_AGENT_REF, executor: { id: 'pi' } }, { taskId: offer.taskId }),
       createEnvelope('task.started', {}, { taskId: offer.taskId }),
       createEnvelope('task.fail', { reason: 'late', retryable: true, agentRef: TEST_AGENT_REF }, { taskId: offer.taskId }),
     ];

@@ -26,8 +26,8 @@ import { tenantStoresFor, type TenantStores } from '../tenant-stores';
 import { TENANT_A, TEST_AGENT_REF, createHarness, grantAgentHome, offerPayload, type CloudHarness } from './support/harness';
 
 const KIB = 1024;
-const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
-const GHOST_EXECUTOR = { kind: 'harness', harnessId: 'ghost' } as const;
+const PI_EXECUTOR = { id: 'pi' } as const;
+const GHOST_EXECUTOR = { id: 'ghost' } as const;
 
 function storesFor(harness: CloudHarness, deviceId: string): TenantStores {
   return tenantStoresFor(
@@ -107,7 +107,7 @@ describe('observer.onInboundRefused', () => {
         productId: 'test-product',
         protocolVersions: [PROTOCOL_VERSION],
         capabilities: [],
-        runtimes: [],
+        harnesses: [],
         ...payload,
       } as never);
 

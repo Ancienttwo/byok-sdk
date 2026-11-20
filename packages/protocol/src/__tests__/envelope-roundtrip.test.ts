@@ -46,7 +46,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         capabilities: ['steer', 'blob-upload', 'agent-home-contract'],
         deviceId: 'device-1',
         productId: 'acme-agent',
-        runtimes: [
+        harnesses: [
           {
             id: 'claude',
             authPresent: true,
@@ -54,10 +54,10 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
               steer: true,
               resume: true,
               approvalInteractive: false,
+              selectionModes: ['subscription'], effort: true,
             },
           },
-          // Older/partial-detection shape: capabilities omitted entirely.
-          { id: 'pi' },
+          { id: 'pi', capabilities: { selectionModes: ['byok-profile'], effort: false } },
         ],
         cursor: 41,
       }),
@@ -97,7 +97,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'continue durable Agent work',
-          target: { lane: 'runtime', runtimeId: 'pi' },
+          target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
           agentRef: { agentId: 'agent-1', profileRevision: 'profile-r7' },
           session: { mode: 'resume', sessionRef: 'session-agent-1' },
         },
@@ -115,7 +115,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'continue typed egress Agent work',
-          target: { lane: 'subscription', runtimeId: 'claude', modelId: 'opus' },
+          target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'subscription', modelId: 'opus' } },
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
           session: { mode: 'resume', sessionRef: 'session-egress-1' },
           egressPolicy: {
@@ -147,7 +147,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         type,
         {
           instruction: 'start typed egress Agent work',
-          target: { lane: 'byok', runtimeId: 'pi', providerId: 'openai', modelId: 'gpt-5.2' },
+          target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok', providerId: 'openai', modelId: 'gpt-5.2' } },
           agentRef: { agentId: 'agent-egress', profileRevision: 'profile-egress-r1' },
           session: { mode: 'fresh' },
           egressPolicy: {
@@ -180,7 +180,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
         {
           agentMemory: 'none',
           egressPolicy: { policyRevision: 'default-v1', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 }, reliable: { maxPendingEventsPerAgent: 256, maxPendingBytesPerAgent: 4194304, maxPendingBytesPerTenant: 16777216 }, transfers: { workspace: 'disabled', transcript: 'disabled', artifact: 'disabled' } },
-          target: { lane: 'harness', harnessId: 'grok' },
+          target: { lane: 'harness', harnessId: 'grok', selection: { mode: 'device-default' } },
           agentRef: { agentId: 'agent-prepared', profileRevision: 'profile-prepared-r1' },
           session: { mode: 'fresh' },
           requiredToolsets: ['team'],
@@ -413,7 +413,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
     testedTypes.push(type);
     roundTrip(
       type,
-      createEnvelope(type, { deviceId: 'device-1', executor: { kind: 'harness', harnessId: 'grok' } }, { taskId: 'task-1' }),
+      createEnvelope(type, { deviceId: 'device-1', executor: { id: 'grok' } }, { taskId: 'task-1' }),
     );
   });
 
@@ -517,7 +517,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
       createEnvelope(
         type,
         {
-          executor: { kind: 'runtime', runtimeId: 'codex' },
+          executor: { id: 'codex' },
           summary: 'refactor complete, all tests passing',
           sessionRef: 'sess-1',
           artifactRefs: [
@@ -603,7 +603,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 
   // #654: each sealable type round-trips its first sealed-branch golden line,
   // which carries real ciphertext under a fixed test scope key.
-  const goldenLines = readFileSync(new URL('./golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+  const goldenLines = readFileSync(new URL('./golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
     .trimEnd().split('\n').map((raw) => JSON.parse(raw) as Envelope);
   it.each(Object.keys(SEALED_SPLIT_TABLE) as Array<keyof typeof SEALED_SPLIT_TABLE>)('sealed branch of %s', (type) => {
     testedTypes.push(type);
@@ -627,7 +627,7 @@ describe('envelope round-trip: every message type encodes/decodes losslessly', (
 describe('createEnvelope defaults', () => {
   it('fills v, id, ts when not supplied', () => {
     const envelope = createEnvelope('task.steer', { text: 'hi' }, { taskId: 'task-1', seq: 1 });
-    expect(envelope.v).toBe(7);
+    expect(envelope.v).toBe(8);
     expect(envelope.id).toMatch(UUID_RE);
     expect(() => new Date(envelope.ts).toISOString()).not.toThrow();
     expect(Number.isNaN(new Date(envelope.ts).getTime())).toBe(false);
@@ -637,7 +637,7 @@ describe('createEnvelope defaults', () => {
     const envelope = createEnvelope(
       'task.steer',
       { text: 'hi' },
-      { v: 7, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
+      { v: 8, id: '11111111-1111-4111-8111-111111111111', ts: '2026-07-16T00:00:00.000Z', taskId: 'task-1', seq: 7 },
     );
     expect(envelope.id).toBe('11111111-1111-4111-8111-111111111111');
     expect(envelope.ts).toBe('2026-07-16T00:00:00.000Z');
@@ -648,6 +648,7 @@ describe('createEnvelope defaults', () => {
   it('omits task_id/session_ref/seq entirely when not provided (no undefined leakage)', () => {
     const envelope = createEnvelope('conn.hello', {
       protocolVersions: [1],
+      harnesses: [],
       capabilities: [],
       deviceId: 'device-1',
       productId: 'acme-agent',

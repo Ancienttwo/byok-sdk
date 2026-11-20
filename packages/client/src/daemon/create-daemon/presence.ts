@@ -159,8 +159,8 @@ export function runPresenceDiscovery(daemonScope: DaemonScope): void {
           getConfiguredToolsets: () => toolsetRegistry.snapshot().configuredToolsets,
           clientVersion: localAgentRelease.version,
           protocolVersions: [PROTOCOL_VERSION],
-          runtimes: daemonState.detectedRuntimeFacts,
-          runtimeUnavailable: daemonState.detectedRuntimeUnavailable,
+          get harnesses() { return daemonState.detectedHarnessFacts; },
+          get runtimeUnavailable() { return daemonState.detectedRuntimeUnavailable; },
           ...presenceCadence,
           onDegraded: (reason) => console.warn(`[byok/client] ${reason}`),
         });

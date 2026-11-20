@@ -13,156 +13,53 @@ import {
   decodeEnvelope,
   parseMessage,
 } from '../index';
-import { ConnHelloPayloadSchema, RuntimeInfoSchema, TaskCancelledPayloadSchema } from '../messages';
+import { ConnHelloPayloadSchema, HarnessInfoSchema, TaskCancelledPayloadSchema } from '../messages';
 
-const PI_EXECUTOR = { kind: 'runtime', runtimeId: 'pi' } as const;
+const PI_EXECUTOR = { id: 'pi' } as const;
 
-describe('conn.hello: runtimes replaces agents (M1 gap #4)', () => {
-  it('accepts a typed runtimes array', () => {
-    const result = ConnHelloPayloadSchema.safeParse({
-      protocolVersions: [1],
-      capabilities: [],
-      deviceId: 'device-1',
-      productId: 'acme-agent',
-      runtimes: [
-        { id: 'claude', version: '1.2.3', authPresent: true },
-        { id: 'pi' },
-      ],
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.runtimes).toEqual([
-        { id: 'claude', version: '1.2.3', authPresent: true },
-        { id: 'pi' },
-      ]);
-    }
+const HELLO = { protocolVersions: [8], capabilities: [], deviceId: 'device-1', productId: 'acme-agent' };
+const DEFAULT_CAPS = { selectionModes: ['device-default'], effort: false };
+const HARNESS = { id: 'claude', version: '1.2.3', authPresent: true, capabilities: DEFAULT_CAPS };
+
+describe('conn.hello executor inventory', () => {
+  it('accepts declared vendor and custom harnesses in one inventory', () => {
+    const harnesses = [HARNESS, { id: 'acme-runner', capabilities: DEFAULT_CAPS }];
+    expect(ConnHelloPayloadSchema.parse({ ...HELLO, harnesses }).harnesses).toEqual(harnesses);
   });
 
-  it('rejects a runtimes entry with an unknown runtime id', () => {
-    const result = ConnHelloPayloadSchema.safeParse({
-      protocolVersions: [1],
-      capabilities: [],
-      deviceId: 'device-1',
-      productId: 'acme-agent',
-      runtimes: [{ id: 'gpt-5' }],
-    });
-    expect(result.success).toBe(false);
+  it('accepts an empty inventory when no executor is available', () => {
+    expect(ConnHelloPayloadSchema.parse({ ...HELLO, harnesses: [] }).harnesses).toEqual([]);
   });
 
-  it('runtimes is optional (a device may report none yet)', () => {
-    const result = ConnHelloPayloadSchema.safeParse({
-      protocolVersions: [1],
-      capabilities: [],
-      deviceId: 'device-1',
-      productId: 'acme-agent',
-    });
-    expect(result.success).toBe(true);
+  it('requires an inventory', () => {
+    expect(ConnHelloPayloadSchema.safeParse(HELLO).success).toBe(false);
   });
 
-  it('the old untyped "agents" field is no longer part of the schema (silently stripped, not required)', () => {
-    const result = ConnHelloPayloadSchema.safeParse({
-      protocolVersions: [1],
-      capabilities: [],
-      deviceId: 'device-1',
-      productId: 'acme-agent',
-      agents: { claude: { authPresent: true } }, // M0 shape — no longer meaningful
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('agents' in result.data).toBe(false);
-    }
+  it('rejects duplicate identities', () => {
+    expect(ConnHelloPayloadSchema.safeParse({ ...HELLO, harnesses: [HARNESS, HARNESS] }).success).toBe(false);
   });
 
-  it('conn.hello accepts an M1 redelivery cursor', () => {
-    const result = ConnHelloPayloadSchema.safeParse({
-      protocolVersions: [1],
-      capabilities: [],
-      deviceId: 'device-1',
-      productId: 'acme-agent',
-      cursor: 42,
-    });
-    expect(result.success).toBe(true);
+  it('rejects an invalid identity', () => {
+    expect(ConnHelloPayloadSchema.safeParse({ ...HELLO, harnesses: [{ ...HARNESS, id: 'Invalid ID' }] }).success).toBe(false);
   });
 
-  it('bounds the capability list (wire v7)', () => {
-    const hello = (count: number) => ({ protocolVersions: [7], deviceId: 'device-1', productId: 'acme-agent',
-      capabilities: Array.from({ length: count }, (_, index) => `flag-${index}`) });
+  it('keeps current fields when additional observability data arrives', () => {
+    expect(ConnHelloPayloadSchema.parse({ ...HELLO, harnesses: [], agents: {}, cursor: 42 })).toEqual({ ...HELLO, harnesses: [], cursor: 42 });
+  });
+
+  it('bounds the capability list', () => {
+    const hello = (count: number) => ({ ...HELLO, harnesses: [], capabilities: Array.from({ length: count }, (_, i) => `flag-${i}`) });
     expect(ConnHelloPayloadSchema.safeParse(hello(CONN_HELLO_CAPABILITIES_MAX_ITEMS)).success).toBe(true);
     expect(ConnHelloPayloadSchema.safeParse(hello(CONN_HELLO_CAPABILITIES_MAX_ITEMS + 1)).success).toBe(false);
   });
-});
 
-describe('runtimes[].capabilities: per-runtime feature flags (pre-freeze addition)', () => {
-  it('accepts a runtime entry with capabilities fully populated', () => {
-    const result = RuntimeInfoSchema.safeParse({
-      id: 'claude',
-      capabilities: {
-        steer: true,
-        resume: true,
-        approvalInteractive: false,
-      },
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.capabilities).toEqual({
-        steer: true,
-        resume: true,
-        approvalInteractive: false,
-      });
-    }
+  it('rejects an executor without selection capability declarations', () => {
+    expect(HarnessInfoSchema.safeParse({ id: 'pi' }).success).toBe(false);
   });
 
-  it('accepts a runtime entry with capabilities only partially populated (partial detection)', () => {
-    const result = RuntimeInfoSchema.safeParse({
-      id: 'codex',
-      capabilities: { approvalInteractive: true },
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.capabilities).toEqual({ approvalInteractive: true });
-    }
-  });
-
-  it('accepts a runtime entry with capabilities omitted entirely (older daemon shape)', () => {
-    const result = RuntimeInfoSchema.safeParse({ id: 'pi' });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect('capabilities' in result.data).toBe(false);
-    }
-  });
-
-  it('strips unknown keys inside capabilities (documented schema choice: strip, not passthrough)', () => {
-    const result = RuntimeInfoSchema.safeParse({
-      id: 'pi',
-      capabilities: { steer: true, futureFlag: 'from a newer daemon' },
-    });
-    expect(result.success).toBe(true);
-    if (result.success) {
-      expect(result.data.capabilities).toEqual({ steer: true });
-      expect(result.data.capabilities && 'futureFlag' in result.data.capabilities).toBe(false);
-    }
-  });
-
-  it('conn.hello validates with a runtimes[].capabilities present', () => {
-    const result = ConnHelloPayloadSchema.safeParse({
-      protocolVersions: [1],
-      capabilities: [],
-      deviceId: 'device-1',
-      productId: 'acme-agent',
-      runtimes: [{ id: 'claude', capabilities: { steer: true } }],
-    });
-    expect(result.success).toBe(true);
-  });
-
-  it('conn.hello validates with runtimes[].capabilities absent', () => {
-    const result = ConnHelloPayloadSchema.safeParse({
-      protocolVersions: [1],
-      capabilities: [],
-      deviceId: 'device-1',
-      productId: 'acme-agent',
-      runtimes: [{ id: 'claude' }],
-    });
-    expect(result.success).toBe(true);
+  it('preserves declared feature flags and strips unknown flags', () => {
+    const info = HarnessInfoSchema.parse({ ...HARNESS, capabilities: { ...DEFAULT_CAPS, steer: true, resume: true, approvalInteractive: false, futureFlag: true } });
+    expect(info.capabilities).toEqual({ ...DEFAULT_CAPS, steer: true, resume: true, approvalInteractive: false });
   });
 });
 
@@ -197,7 +94,7 @@ describe('task.claim.capabilities (additive-minor optional field)', () => {
   it('accepts a claim carrying a partially-populated capabilities block', () => {
     const result = TaskClaimPayloadSchema.safeParse({
       deviceId: 'device-1',
-      executor: { kind: 'runtime', runtimeId: 'claude' },
+      executor: { id: 'claude' },
       capabilities: { steer: false },
     });
     expect(result.success).toBe(true);
@@ -304,7 +201,7 @@ describe('taskId placement: envelope task_id is the sole routing key (M1 gap #7)
     // payload, and the envelope never sets task_id. M1 requires the envelope
     // field, so this must now be rejected rather than silently unroutable.
     const raw = {
-      v: 7,
+      v: 8,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.claim',
@@ -436,10 +333,10 @@ describe('runtime messageDraft capability', () => {
   it('is optional discovery data in hello and claim', () => {
     const capabilities = { messageDraft: true };
     const hello = MESSAGE_PAYLOAD_SCHEMAS['conn.hello'].parse({
-      protocolVersions: [7], capabilities: [], deviceId: 'device-1', productId: 'app',
-      runtimes: [{ id: 'pi', version: '1', authPresent: true, capabilities }],
+      protocolVersions: [8], capabilities: [], deviceId: 'device-1', productId: 'app',
+      harnesses: [{ id: 'pi', version: '1', authPresent: true, capabilities: { ...DEFAULT_CAPS, ...capabilities } }],
     });
-    expect(hello.runtimes?.[0]?.capabilities).toEqual(capabilities);
+    expect(hello.harnesses[0]?.capabilities).toEqual({ ...DEFAULT_CAPS, ...capabilities });
     expect(MESSAGE_PAYLOAD_SCHEMAS['task.claim'].parse({ deviceId: 'device-1', executor: PI_EXECUTOR, capabilities }).capabilities).toEqual(capabilities);
     expect(MESSAGE_PAYLOAD_SCHEMAS['task.claim'].parse({ deviceId: 'device-1', executor: PI_EXECUTOR }).capabilities).toBeUndefined();
   });

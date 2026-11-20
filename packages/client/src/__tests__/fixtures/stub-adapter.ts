@@ -281,12 +281,13 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
     this.detectResult = detectResult;
     this.descriptor = freezeRuntimeAdapterDescriptor({
       id,
-      supportsDispatchSelection: true,
+      selectionModes: ['device-default', 'adapter-model', 'subscription', 'byok-profile'],
+      supportsEffort: true,
       requiresMcpToolsetToolObservation,
       trajectoryEvidence,
       capabilities,
       ...(declarations.fileScope === undefined ? {} : { fileScope: declarations.fileScope }),
-      ...(declarations.providerProfileBinding === true ? { providerProfileBinding: true } : {}),
+      ...(declarations.providerProfileBinding === true ? { providerProfileBinding: true, defaultModelModes: ['byok-profile'] } : {}),
     });
     if (declarations.projectMcpEnvironment !== undefined) this.projectMcpEnvironment = declarations.projectMcpEnvironment;
   }
@@ -341,7 +342,7 @@ export class StubRuntimeAdapter implements RuntimeAdapter {
       task: {
         instruction: startInput.instruction,
         ...(startInput.images === undefined ? {} : { images: startInput.images }),
-        target: startInput.manifest.modelTarget ?? { lane: 'auto' },
+        target: prepared.offer.target,
         ...(startInput.manifest.sessionRef === undefined ? {} : { sessionRef: startInput.manifest.sessionRef }),
       },
       ctx: {

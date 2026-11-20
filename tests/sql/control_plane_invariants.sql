@@ -42,6 +42,7 @@
 --   deploy/sql/0038_task_agent_ref_required.sql (tenant-first task_agentless_retired: the task-id fence for tasks retired without an Agent identity; a whole task row plus retired_at)
 --   deploy/sql/0039_task_agent_ref_not_null.sql (task.agent_id and task.agent_profile_revision become NOT NULL; no new table or key)
 --   deploy/sql/0040_wire_v7.sql (tenant-first task_steer_refusal; byok_wire_epoch, the store's one-row wire epoch, which like the migration ledger belongs to no tenant; one-executor check on task)
+--   deploy/sql/0041_wire_v8.sql (single claimed executor column and harness presence inventory)
 --
 -- Every migration must be claimed here. `check-deploy-sql-order` enforces that
 -- the moment this file exists, and the friction is the point: a new table has
@@ -1085,7 +1086,7 @@ BEGIN
       VALUES
         ('client_version'::text, 'text'::regtype),
         ('protocol_versions'::text, 'jsonb'::regtype),
-        ('runtimes'::text, 'jsonb'::regtype)
+        ('harnesses'::text, 'jsonb'::regtype)
     ) AS required(name, type_oid)
    WHERE NOT EXISTS (
       SELECT 1
@@ -1278,16 +1279,20 @@ BEGIN
   END IF;
 END $$;
 
--- Custom execution identity stays disjoint from the built-in runtime identity.
+-- Wire v8 stores one immutable claimed executor ID and one inventory per device.
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
       AND table_name = 'device' AND column_name = 'harnesses' AND data_type = 'jsonb')
     OR NOT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
       AND table_name = 'task' AND column_name = 'claimed_harness_id' AND data_type = 'text')
+    OR EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema()
+      AND ((table_name = 'task' AND column_name = 'claimed_runtime')
+        OR (table_name = 'device_presence' AND column_name = 'runtimes')))
     OR NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid = 'task'::regclass
-      AND conname = 'task_claimed_identity_exclusive' AND contype = 'c') THEN
-    RAISE EXCEPTION 'custom harness discovery/claim identity migration is incomplete';
+      AND conname = 'task_claimed_executor_present' AND contype = 'c')
+    OR (SELECT epoch FROM byok_wire_epoch WHERE singleton) IS DISTINCT FROM 8 THEN
+    RAISE EXCEPTION 'wire v8 discovery/claim identity migration is incomplete';
   END IF;
 END $$;
 

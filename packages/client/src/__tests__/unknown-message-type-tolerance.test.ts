@@ -84,7 +84,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       deviceId: record.deviceId,
       productId: 'test-product',
       capabilities: [],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: (envelope) => {
@@ -493,7 +493,7 @@ describe('unknown NEW message type tolerance (M4 Phase 4 version-negotiation dri
       deviceId: record.deviceId,
       productId: 'test-product',
       capabilities: [],
-      runtimes: [],
+      harnesses: [],
       auth,
       cursorStore,
       onEnvelope: async (envelope) => {

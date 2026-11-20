@@ -16,11 +16,11 @@ import { materializeInputImages } from './input-images.js';
 import path from 'node:path';
 import { createEnvelope, type AgentMemoryStartRefusal, type TaskDeclineCode, type TaskFailure } from '@byok-sdk/protocol';
 import { readResidentMemory } from '../../resident-memory.js';
-import { modelLaneTarget, sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types.js';
+import { offerSelection, sealRuntimeOperationManifest, type RuntimeLaunchResources, type RuntimeOperationStartInput, type RuntimePreparedLaunchV1, type Session } from '../../types.js';
 import { admitPreparedOffer, type PreparedOfferServerProjection } from '../prepared-offer-admission.js';
 import type { InputPreparationStore } from '../input-preparation-store.js';
 import { inputPreparationDigest } from '../../input-preparation.js';
-import { isRuntimeStartupDisposalFailure, projectRuntimeBoundaryFailure } from '../../runtime-failure.js';
+import { isRuntimeExecutionFailure, isRuntimeStartupDisposalFailure, projectRuntimeBoundaryFailure } from '../../runtime-failure.js';
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities.js';
 import { prependAgentMemoryModeGuidance } from '../memory-guidance.js';
 import { isAgentMemorySecureFilesystemAvailable } from '../agent-memory.js';
@@ -110,10 +110,15 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
       const resolveRuntimeLaunch = prepared.operation.resolveRuntimeLaunch;
       runtimeLaunch = await admission.time('runtimeLaunchMs', () => resolveRuntimeLaunch({
         kind: preparation === undefined ? 'instruction' : 'prepared', cwd: workspaceDir, env,
-        scratch,
+        scratch, signal: blobAbort.signal,
+        agentHome: { canonicalHome: agentBinding.resolution.canonicalHome, access: homeAccess },
       }));
     } catch (error) {
-      if (!admissionWithdrawn()) decline({ reason: `runtime launch admission failed: ${errorMessage(error)}`, retryable: false });
+      if (!admissionWithdrawn()) {
+        const typed = isRuntimeExecutionFailure(error) && error.phase === 'start';
+        decline({ reason: `runtime launch admission failed: ${errorMessage(error)}`, retryable: typed && error.retry === 'retryable',
+          ...(typed && error.failure.class === 'invalid_request' ? { code: 'invalid_request' } : {}) });
+      }
       return;
     }
     if (admissionWithdrawn()) return;
@@ -122,14 +127,15 @@ export async function sealOfferManifest(this: TaskRunner, phase: OfferPhaseConte
   // `env` was built before admission (see its declaration above) so the
   // MCP probes and the runtime child are guaranteed to share one
   // allowlist decision rather than two computations that could drift.
-  const modelTarget = modelLaneTarget(offered.target);
+  const selection = offerSelection(offered.target);
   const manifest = sealRuntimeOperationManifest({
     ...(preparation === undefined ? {} : {agentMemory}),
     taskId,
     runtimeId: pick.descriptor.id,
     descriptor: pick.descriptor,
     requiredToolsetIds: requiredToolsets ?? [],
-    ...(modelTarget === undefined ? {} : { modelTarget }),
+    ...(selection === undefined ? {} : { selection }),
+    ...(offered.effort === undefined ? {} : { effort: offered.effort }),
     ...(sessionRef === undefined ? {} : { sessionRef }),
     agentRef: agentBinding.resolution.agentRef,
     cwd: workspaceDir,
@@ -292,9 +298,8 @@ export async function claimOffer(this: TaskRunner, phase: OfferPhaseContext, inp
   const { taskId, admissionWithdrawn, admission } = phase;
   const { agentBinding, agentRef, pick, scratch, manifest, preparedLaunch, blobAbort, payload, startupDeadline } = input;
   let { taskMcpServers } = input;
-  // All semantic admission is now in `prepare()` and the frozen manifest.
-  // Claim is the first externally visible commitment; instruction bytes and
-  // process creation remain after it.
+  // Claim is the first externally visible commitment. Instruction bytes and
+  // the execution session stay behind it.
   if (admissionWithdrawn()) return;
   const host = hostFor(this);
   // The admission journal is the last barrier before the claim is committed.

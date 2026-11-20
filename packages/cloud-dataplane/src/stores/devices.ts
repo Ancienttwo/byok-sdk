@@ -24,7 +24,9 @@ import { pairDeviceDigest, type HarnessInfo } from '@byok-sdk/protocol';
  * `BEGIN_OUTBOX_WRITE`, as every mailbox writer does.
  */
 import {
+  freezePresenceHarnessFact,
   type Clock,
+  type PresenceHarnessFact,
   type PresenceStore,
   type PresenceLevel,
   type TenantId,
@@ -131,7 +133,10 @@ async function runDeletes(
 async function rollback(client: PoolClient): Promise<void> {
   try {
     await client.query('ROLLBACK');
-  } catch {}
+  } catch {
+    // The caller reports the original transaction failure.
+    return;
+  }
 }
 
 /**
@@ -359,7 +364,7 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
       presence_configured_toolsets: readonly string[] | null;
       presence_client_version: string | null;
       presence_protocol_versions: readonly number[] | null;
-      presence_runtimes: ReadonlyArray<{ id: string; version?: string; authPresent?: boolean }> | null;
+      presence_harnesses: readonly PresenceHarnessFact[] | null;
       presence_observed_at: string | null;
       presence_expires_at: string | null;
       active_paired_device_count: number | string;
@@ -381,7 +386,7 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
          CASE WHEN NOT d.revoked THEN p.configured_toolsets END AS presence_configured_toolsets,
          CASE WHEN NOT d.revoked THEN p.client_version END AS presence_client_version,
          CASE WHEN NOT d.revoked THEN p.protocol_versions END AS presence_protocol_versions,
-         CASE WHEN NOT d.revoked THEN p.runtimes END AS presence_runtimes,
+         CASE WHEN NOT d.revoked THEN p.harnesses END AS presence_harnesses,
          CASE WHEN NOT d.revoked THEN p.observed_at END AS presence_observed_at,
          CASE WHEN NOT d.revoked THEN p.expires_at END AS presence_expires_at,
          (COUNT(*) FILTER (WHERE NOT d.revoked) OVER ())::int AS active_paired_device_count,
@@ -423,9 +428,9 @@ export class PostgresDeviceDirectory implements DeviceDirectory {
               ...(device.presence_protocol_versions === null
                 ? {}
                 : { protocolVersions: Object.freeze([...device.presence_protocol_versions]) }),
-              ...(device.presence_runtimes === null
+              ...(device.presence_harnesses === null
                 ? {}
-                : { runtimes: Object.freeze(device.presence_runtimes.map((runtime) => Object.freeze({ ...runtime }))) }),
+                : { harnesses: Object.freeze(device.presence_harnesses.map(freezePresenceHarnessFact)) }),
               observedAt: device.presence_observed_at!,
               expiresAt: device.presence_expires_at!,
             },

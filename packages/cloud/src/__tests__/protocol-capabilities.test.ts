@@ -27,6 +27,7 @@ describe('no server capability advertisement', () => {
     const device = await harness.pairDevice(TENANT_A);
     const hello = createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }],
       capabilities: [],
       deviceId: device.deviceId,
       productId: 'test-product',

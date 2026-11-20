@@ -105,7 +105,7 @@ export class BotStubSession implements Session {
 }
 export class BotStubAdapter implements RuntimeAdapter {
   readonly descriptor = freezeRuntimeAdapterDescriptor({
-    id: 'pi', supportsDispatchSelection: true, requiresMcpToolsetToolObservation: true,
+    id: 'pi', selectionModes: ['device-default'], requiresMcpToolsetToolObservation: true,
     // Linux hosts require the Agent-memory MCP projection for Agent-bound offers.
     capabilities: { steer: false, resume: false, mcpToolsets: true, approvalInteractive: false },
   });

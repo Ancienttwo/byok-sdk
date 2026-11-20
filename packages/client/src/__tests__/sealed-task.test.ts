@@ -20,7 +20,7 @@ import { AgentSessionHandoffStore } from '../daemon/agent-session-handoff-store'
 import { ApprovalRegistry } from '../daemon/approvals';
 import { SealedTasks, type SealedScopeKeyring } from '../daemon/sealed-task';
 import { TaskRunner } from '../daemon/task-runner';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -94,7 +94,7 @@ describe('SealedTasks memory after a terminal (#654 E3c)', () => {
     } as never, { taskId: 'finished', seq: 1 }));
 
     const sendTerminal = async (): Promise<WeakRef<Envelope>> => {
-      const sealed = await tasks.sealOutbound(createEnvelope('task.complete', { summary: 'r'.repeat(100_000), sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'finished' }));
+      const sealed = await tasks.sealOutbound(createEnvelope('task.complete', { summary: 'r'.repeat(100_000), sessionRef: 'session', executor: { id: 'pi' } }, { taskId: 'finished' }));
       expect(sealed?.type).toBe('task.complete');
       expect(sealed?.payload).toHaveProperty('sealed');
       tasks.plainOf(sealed!);
@@ -131,7 +131,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
       keyring: new GatedKeyring(), tenantId: 'draft-tenant', deviceId: 'draft-device',
       blobs: { download: async () => { throw new Error('unused'); }, upload: async () => { throw new Error('unused'); } },
     });
-    const runner = new TaskRunner({
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },
       getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot: path.join(root, 'home') }),
@@ -146,7 +146,7 @@ describe('Agent message drafts of a sealed task (#654 D9)', () => {
     });
     runners.push(runner);
     const payload = {
-      session: { mode: 'fresh' }, instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: { agentId: 'draft-agent', profileRevision: '1' }, egressPolicy: policy,
+      session: { mode: 'fresh' }, instruction: 'reply', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: { agentId: 'draft-agent', profileRevision: '1' }, egressPolicy: policy,
       messageEgress: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: 4096 },
     };
     await runner.handleEnvelope(sealing === undefined
@@ -233,8 +233,8 @@ describe('the failure class of a sealed task (#869)', () => {
     const keyless: SealedScopeKeyring = new GatedKeyring();
     const tasks = await sealedTasks(keyless, 'complete-unsealable');
     keyless.sealingKey = async () => undefined;
-    const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: 'complete-unsealable' });
-    expect((await tasks.sealOutbound(complete))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' }, executor: { kind: 'runtime', runtimeId: 'pi' } });
+    const complete = createEnvelope('task.complete', { summary: 'done', sessionRef: 'session', executor: { id: 'pi' } }, { taskId: 'complete-unsealable' });
+    expect((await tasks.sealOutbound(complete))?.payload).toEqual({ reason: 'sealed_key_unavailable', retryable: false, failure: { class: 'unknown' }, executor: { id: 'pi' } });
   });
 });
 

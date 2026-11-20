@@ -16,7 +16,7 @@ import { fullCapabilityDeclaration } from '../capabilities';
 import { AGENT_HOME_CONTRACT_CAPABILITY, createByokCloud } from '../cloud';
 import { createInMemoryByokCloud } from '../composition/in-memory';
 import { isCloudError } from '../errors';
-import { TENANT_A, createHarness, decodeEventsPage, grantAgentHome, offerPayload, TEST_AGENT_REF, type DecodedEventsPage } from './support/harness';
+import { TEST_HARNESSES, TENANT_A, createHarness, decodeEventsPage, grantAgentHome, offerPayload, TEST_AGENT_REF, type DecodedEventsPage } from './support/harness';
 
 async function poll(
   harness: ReturnType<typeof createHarness>,
@@ -35,12 +35,13 @@ describe('GET /byok/events cursor semantics', () => {
     const device = await harness.pairDevice(TENANT_A);
     await harness.stores.devices.recordCapabilities(TENANT_A, {
       deviceId: device.deviceId,
+      harnesses: TEST_HARNESSES,
       capabilities: [AGENT_HOME_CONTRACT_CAPABILITY, 'toolset-selection'],
     });
     const enqueued = await harness.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, {
       payload: {
         ...offerPayload('find qualified leads'),
-        target: { lane: 'runtime' as const, runtimeId: 'claude' as const },
+        target: { lane: 'harness' as const, harnessId: 'claude' as const, selection: { mode: 'device-default' as const } },
         requiredToolsets: ['salesko'],
       },
     });
@@ -338,7 +339,7 @@ describe('enqueueAgentOffer', () => {
       devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1,
       expectedDeviceDigest: null,
     });
-    await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: 'dev_whoever', capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
+    await base.stores.devices.recordCapabilities(TENANT_A, { deviceId: 'dev_whoever', harnesses: TEST_HARNESSES, capabilities: [AGENT_HOME_CONTRACT_CAPABILITY] });
     await expect(
       skewed.enqueueAgentOffer(TENANT_A, 'dev_whoever', { payload: offerPayload() }),
     ).rejects.toSatisfy((error: unknown) => isCloudError(error, 'mailbox_seq_mismatch'));

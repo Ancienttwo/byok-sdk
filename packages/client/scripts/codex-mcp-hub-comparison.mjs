@@ -123,7 +123,7 @@ async function runPair({ root, command, arm, annotations, interactive, cases }) 
         mcpToolApprovals = { [MCP_HUB_SERVER_NAME]: [HUB_SEARCH_TOOL, HUB_CALL_TOOL] };
       }
       const instruction = `Follow the synthetic contract ${turnId}.`;
-      const offer = { target: { lane: 'runtime', runtimeId: 'codex' }, instruction, sessionRef };
+      const offer = { target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } }, instruction, sessionRef };
       const prepared = await adapter.prepare({ offer, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers });
       if (prepared.kind !== 'prepared') throw new Error(`Codex refused preparation: ${prepared.reason}`);
       scratch = await createExecutionScratch({ root: join(dir, 'scratch') });

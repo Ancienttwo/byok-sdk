@@ -170,7 +170,7 @@ export async function startRealCloud(opts: StartRealCloudOptions): Promise<RealC
             deviceId,
             payload: {
               ...fields,
-              target: harnessId === undefined ? { lane: 'runtime', runtimeId: runtime ?? 'pi' } : { lane: 'harness', harnessId },
+              target: { lane: 'harness', harnessId: harnessId ?? runtime ?? 'pi', selection: { mode: 'device-default' } },
               agentRef: agentRef ?? freshTestAgentRef(),
               session: { mode: 'fresh' },
               egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

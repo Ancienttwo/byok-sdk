@@ -18,7 +18,7 @@ const request = {
 /** Closes the task's output, which closes its approval timeline (#1113 A3). */
 async function closeTask(store: SqliteEmbeddedStores, tenantOf: TenantId, taskId: string): Promise<void> {
   await store.cloud.tasks.reserveAgentOffer(tenantOf, { taskId, deviceId: 'device', agentRef: AGENT_REF });
-  await store.cloud.tasks.claim(tenantOf, { taskId, deviceId: 'device', executor: { kind: 'runtime', runtimeId: 'pi' } });
+  await store.cloud.tasks.claim(tenantOf, { taskId, deviceId: 'device', executor: { id: 'pi' } });
   await store.cloud.tasks.recordStatus(tenantOf, { taskId, status: 'complete', agentRef: AGENT_REF });
 }
 
@@ -146,7 +146,7 @@ describe('SQLite approval timeline persistence', () => {
     const db = new DatabaseSync(path);
     db.prepare("UPDATE byok_sqlite_meta SET value = ? WHERE key = 'schema_version'").run(version);
     const before = db.prepare('SELECT * FROM approval_timeline_tail').all(); db.close();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '10' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_UNSUPPORTED', foundVersion: version, requiredVersion: '11' }));
     const inspect = new DatabaseSync(path, { readOnly: true });
     try {
       expect(inspect.prepare("SELECT value FROM byok_sqlite_meta WHERE key = 'schema_version'").get()?.value).toBe(version);
@@ -157,7 +157,7 @@ describe('SQLite approval timeline persistence', () => {
   it('refuses missing approval authority without recreating it', async () => {
     const { path, open, close } = fixture(); await close(open());
     const db = new DatabaseSync(path); db.exec('DROP TABLE approval_timeline_tail'); db.close();
-    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '10' }));
+    expect(() => open()).toThrow(expect.objectContaining({ code: 'SQLITE_SCHEMA_INVALID', foundVersion: '11' }));
     const inspect = new DatabaseSync(path, { readOnly: true });
     try { expect(inspect.prepare("SELECT name FROM sqlite_master WHERE name = 'approval_timeline_tail'").get()).toBeUndefined(); }
     finally { inspect.close(); }

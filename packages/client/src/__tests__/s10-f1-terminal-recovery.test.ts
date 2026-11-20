@@ -13,7 +13,7 @@ import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner, type TaskRunnerDeps } from '../daemon/task-runner';
 import * as mutationGate from '../util/path-mutation-gate';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { reservedMcpToken } from './fixtures/execution-scratch';
 
@@ -56,7 +56,7 @@ async function cancellationFixture(overrides: Partial<TaskRunnerDeps> = {}) {
     const adapter = new StubRuntimeAdapter('pi', { kind: 'available' }, {
       steer: false, resume: true, approvalInteractive: false, mcpToolsets: true,
     });
-    const deps: TaskRunnerDeps = { advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
+    const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); }, advertisedCapabilities: advertiseEveryDeviceFlag, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }), agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       agentSessionHandoffs: new AgentSessionHandoffStore(), deviceId: 'device-cancel',
@@ -84,7 +84,7 @@ async function activeFixture(unsent: boolean, overrides: Partial<TaskRunnerDeps>
   const h = await cancellationFixture(overrides);
   // This fixture never spawns MCP/runtime processes.
   await h.runner.handleEnvelope(createEnvelope('task.offer', {
-    instruction: 'reply', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
+    instruction: 'reply', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT,
     session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     messageEgress: { mode: 'required', contract: 'chat.v1', contentType: 'text/markdown', maxBytes: 1000 },
   }, { taskId: TASK, seq: 1 }));
@@ -317,7 +317,7 @@ it('S10-F1 preserves cancellation selected during the durable startup handoff', 
     const result = await record(...args); recorded.resolve(); await gate.promise; return result;
   });
   const offering = h.runner.handleEnvelope(createEnvelope('task.offer', {
-    instruction: 'no message contract', target: { lane: 'runtime', runtimeId: 'pi' }, agentRef: AGENT,
+    instruction: 'no message contract', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, agentRef: AGENT,
     session: { mode: 'fresh' }, egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
   }, { taskId: TASK, seq: 1 }));
   try {

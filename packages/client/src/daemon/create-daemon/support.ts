@@ -1,18 +1,17 @@
-import type { Envelope, RuntimeInfo, CapabilityFlag, RuntimeId, AgentEgressPolicy, ContentReadPolicy, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
+import type { Envelope, CapabilityFlag, AgentEgressPolicy, ContentReadPolicy, RuntimeUnavailableEntry } from '@byok-sdk/protocol';
 import { type JournalIdentity, type ReceivedEnvelopeRecord, journalHash } from '../journal/journal.js';
-import { TASK_EXECUTION_OPTIONS_CAPABILITY } from '@byok-sdk/protocol/constants';
 import { encodeEnvelope, AGENT_HOME_READERS_CAPABILITY, AGENT_MEMORY_SELECTION_CAPABILITY, AGENT_MEMORY_READ_IF_ADMITTED_CAPABILITY, AGENT_MEMORY_READ_WRITE_IF_ADMITTED_CAPABILITY, AGENT_HOME_PROJECTION_CAPABILITY, AGENT_HOME_PROJECTION_HOST_REVISION_CAPABILITY, AGENT_INPUT_PREPARATION_CAPABILITY, PROVIDER_PROVISIONING_CAPABILITY, AGENT_MEMORY_INTENT_CAPABILITY, AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, AGENT_EGRESS_POLICY_CAPABILITY, AGENT_EGRESS_RELIABLE_ACK_CAPABILITY, AGENT_EGRESS_FRESH_SESSION_CAPABILITY, AGENT_MESSAGE_EGRESS_CAPABILITY } from '@byok-sdk/protocol';
 import type { RuntimeAdapter } from '../../types.js';
 import type { DaemonConfigIssue } from '../config-schema/validate.js';
 import { type HarnessInfo, HarnessIdSchema } from '@byok-sdk/protocol';
-import { type RuntimeObservation, detectedRuntimeCapabilities, observeRuntimeDetection, projectRuntimeObservation, isWireRuntimeId } from '../../runtime-detection.js';
+import { type RuntimeObservation, detectedRuntimeCapabilities, observeRuntimeDetection } from '../../runtime-detection.js';
+import { projectRuntimeObservationWithUpgrade } from '../../runtime/runtime-releases.js';
 import { runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
 import { runtimeVersionPolicyProjection } from '../../runtime-version-policy.js';
 import { toRuntimeInfoCapabilities } from '../runtime-capabilities.js';
 import { type AgentContentReadSurface, type AgentContentReadPolicySelection, AGENT_CONTENT_READ_CAPABILITIES, createAgentContentReadPolicy, type AgentContentReadPolicy } from '../agent-content-read.js';
 import { DEVICE_ASSERTION_AUDIENCE_MAX_BYTES, DEVICE_ASSERTION_DEFAULT_TTL_MS, DEVICE_ASSERTION_MAX_TTL_MS } from '@byok-sdk/core';
 import type { AgentContentReadConfig, DaemonConfig, DeviceAssertionConfig } from '../create-daemon.js';
-import { ALL_RUNTIME_IDS } from '../../adapters/runtime-adapters.js';
 import { agySessionStoreOf } from '../../util/agy-session-retention.js';
 import { LocalStorageConfigError, type ResolvedStorageConfig } from '../retention/config.js';
 
@@ -95,72 +94,75 @@ export function toJournalEnvelopeRecord(envelope: Envelope, identity: JournalIde
   };
 }
 
-/**
- * Runtimes actually detected as present on this device, typed per protocol
- * §10 gap #4 (`ConnHelloPayload.runtimes`), plus the optional
- * `runtimeUnavailable` projection of every non-available adapter (#1103 B2b).
- * Computed once at `start()` — re-probing on every reconnect would mean
- * re-spawning each runtime's `--version` check for no real benefit within one
- * daemon lifetime.
- *
- * The unavailable list carries the existing identity domain (built-in runtime
- * or custom harness id) on `conn.hello` and presence alike.
- */
-export async function detectRuntimes(adapters: RuntimeAdapter[]): Promise<{
-  runtimes: RuntimeInfo[];
+const RUNTIME_PROBE_CONCURRENCY = 8;
+
+/** Scan the configured adapters for executor inventory and local diagnostics. */
+export async function detectRuntimes(adapters: RuntimeAdapter[], allowlist?: readonly string[], signal?: AbortSignal): Promise<{
   harnesses: HarnessInfo[];
   observations: RuntimeObservation[];
   runtimeUnavailable: RuntimeUnavailableEntry[];
 }> {
-  const detections = await Promise.all(adapters.map(async (adapter) => ({ adapter, detected: await observeRuntimeDetection(adapter) })));
-  const runtimes: RuntimeInfo[] = [];
+  const pending = adapters.entries();
+  const detections: Awaited<ReturnType<typeof observeRuntimeDetection>>[] = [];
+  let failed = false;
+  async function probe(): Promise<void> {
+    try {
+      for (const [index, adapter] of pending) {
+        if (failed) return;
+        signal?.throwIfAborted();
+        detections[index] = await observeRuntimeDetection(adapter, signal);
+      }
+    } catch (error) {
+      failed = true;
+      throw error;
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(adapters.length, RUNTIME_PROBE_CONCURRENCY) }, probe));
   const harnesses: HarnessInfo[] = [];
   const observations: RuntimeObservation[] = [];
   const unavailable = new Map<string, RuntimeUnavailableEntry>();
-  for (const { adapter, detected } of detections) {
-    observations.push(projectRuntimeObservation(adapter.descriptor, detected));
-    if (detected.kind !== 'available') {
+  for (const [index, adapter] of adapters.entries()) {
+    const detected = detections[index]!;
+    const observation = projectRuntimeObservationWithUpgrade(adapter.descriptor, detected);
+    observations.push(observation);
+    const selectable = adapter.descriptor.selectionModes.length > 0;
+    if (detected.kind !== 'available' || detected.versionVerdict?.state === 'block' || !selectable) {
       // One typed cause per failure, with the same retryable default the
       // decline path reports. Never a guessed cause from display text.
-      const admission = runtimeUnavailableForDetection(detected);
+      const cause = detected.kind !== 'available' ? runtimeUnavailableForDetection(detected).cause
+        : detected.versionVerdict?.state === 'block' ? 'version_blocked' : 'runtime_not_configured';
       if (!unavailable.has(adapter.descriptor.id)) {
         unavailable.set(adapter.descriptor.id, {
           id: adapter.descriptor.id,
-          cause: admission.cause,
-          retryable: runtimeUnavailableRetryable(admission.cause),
+          cause,
+          retryable: runtimeUnavailableRetryable(cause),
         });
       }
       continue;
     }
-    if (detected.versionVerdict?.state === 'warn') {
+    if (signal === undefined && detected.versionVerdict?.state === 'warn') {
       console.warn(`[byok/client] ${adapter.descriptor.id} ${detected.version ?? '(unknown version)'} is not the qualified ${detected.versionVerdict.qualifiedVersion}; continuing`);
     }
     // Absence of a verdict means the adapter declares no policy: omit the
     // field rather than inventing `allow` (#1103 D8/D9).
     const versionPolicy = runtimeVersionPolicyProjection(detected.versionVerdict);
     const capabilities = toRuntimeInfoCapabilities(detectedRuntimeCapabilities(adapter.descriptor, detected));
-    if (!isWireRuntimeId(adapter.descriptor.id)) {
-      harnesses.push({ id: HarnessIdSchema.parse(adapter.descriptor.id),
-        ...(detected.version === undefined ? {} : { version: detected.version }),
-        capabilities,
-        ...(versionPolicy === undefined ? {} : { versionPolicy }) });
-      continue;
-    }
-    const info: RuntimeInfo = { id: adapter.descriptor.id };
-    if (detected.version !== undefined) info.version = detected.version;
-    if (detected.authPresent !== undefined) info.authPresent = detected.authPresent;
-    // Pre-freeze addition (`RuntimeInfo.capabilities`, `messages.ts`):
-    // surfaces this adapter descriptor's capabilities into
-    // the per-runtime wire field — see `toRuntimeInfoCapabilities`'s doc
-    // comment.
-    info.capabilities = capabilities;
-    if (versionPolicy !== undefined) info.versionPolicy = versionPolicy;
-    runtimes.push(info);
+    if (allowlist !== undefined && !allowlist.includes(adapter.descriptor.id)) continue;
+    harnesses.push({
+      id: HarnessIdSchema.parse(adapter.descriptor.id),
+      ...(observation.version === undefined || observation.version.length === 0 ? {} : { version: observation.version.slice(0, 128) }),
+      ...(detected.authPresent === undefined ? {} : { authPresent: detected.authPresent }),
+      capabilities: {
+        ...capabilities,
+        selectionModes: [...adapter.descriptor.selectionModes],
+        ...(adapter.descriptor.defaultModelModes === undefined ? {} : { defaultModelModes: [...adapter.descriptor.defaultModelModes] }),
+        effort: adapter.descriptor.supportsEffort === true,
+        ...(adapter.descriptor.byokProviderId === undefined ? {} : { byokProviderId: adapter.descriptor.byokProviderId }),
+      },
+      ...(versionPolicy === undefined ? {} : { versionPolicy }),
+    });
   }
-  // `RuntimeUnavailableListSchema` caps a hello at 16 unique entries. A
-  // daemon with more adapters than that keeps the first sixteen; identity is
-  // never duplicated.
-  return { runtimes, harnesses, observations, runtimeUnavailable: [...unavailable.values()].slice(0, 16) };
+  return { harnesses, observations, runtimeUnavailable: [...unavailable.values()] };
 }
 
 /**
@@ -173,30 +175,17 @@ export function computeCapabilities(
   agentHomeProjectionConfigured = false,
   agentEgressConfigured = false,
   contentReadPolicies?: Readonly<Record<AgentContentReadSurface, AgentContentReadPolicySelection>>,
-  providerProfileBindingConfigured = false,
   inputPreparationConfigured = false,
   providerProvisioningConfigured = false,
   agentMemoryIntentsProven = false,
   agentMemoryBackendProven = false,
   nativeSessions?: { enabled?: boolean; platform?: NodeJS.Platform; sessionDir?: string },
-  runtimeAllowlist?: readonly string[],
 ): CapabilityFlag[] {
   const flags: CapabilityFlag[] = [];
-  if (adapters.some(({ descriptor }) => descriptor.supportsTaskExecutionOptions === true
-    && (runtimeAllowlist === undefined || runtimeAllowlist.includes(descriptor.id)))) flags.push(TASK_EXECUTION_OPTIONS_CAPABILITY);
   if (nativeSessions?.enabled === true
     && ['darwin', 'linux'].includes(nativeSessions.platform ?? process.platform)
     && nativeSessions.sessionDir !== undefined
     && adapters.some(adapter => adapter.descriptor.id === 'pi' && adapter.descriptor.memoryLane !== undefined)) flags.push('native-sessions');
-  const selectionAdapters = adapters.filter((adapter) =>
-    ALL_RUNTIME_IDS.includes(adapter.descriptor.id as RuntimeId),
-  );
-  if (
-    selectionAdapters.length > 0 &&
-    selectionAdapters.every((adapter) => adapter.descriptor.supportsDispatchSelection === true)
-  ) {
-    flags.push('dispatch-selection');
-  }
   if (adapters.some((adapter) => adapter.descriptor.capabilities.mcpToolsets === true)) {
     flags.push('toolset-selection');
   }
@@ -306,11 +295,12 @@ export function policyRevisionMismatchPolicies(
 const CREATE_DAEMON_ONLY_KEYS = [
   ['codexSandbox', 'configure the injected Codex adapter directly'],
   ['runtimeEnvironment', 'pass runtimeEnvironment to each injected adapter'],
+  ['runtimeInstallRoot', 'pass runtimeInstallRoot to each injected adapter'],
   ['runtimes', 'pass the isolation options to each injected adapter'],
 ] as const;
 
 /** The createDaemon-only keys `config` sets, in check order, with the message `createDaemonWithAdapters` throws. */
-export function injectedAdapterConfigConflicts(config: object): { readonly key: string; readonly message: string }[] {
+export function injectedAdapterConfigConflicts(config: Pick<DaemonConfig, (typeof CREATE_DAEMON_ONLY_KEYS)[number][0]>): { readonly key: string; readonly message: string }[] {
   return CREATE_DAEMON_ONLY_KEYS
     .filter(([key]) => Object.hasOwn(config, key))
     .map(([key, remedy]) => ({ key, message: `DaemonConfig.${key} is only supported by createDaemon; ${remedy}` }));

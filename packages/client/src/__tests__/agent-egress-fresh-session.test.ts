@@ -12,7 +12,7 @@ import { createDaemonWithAdapters, type Daemon } from '../daemon/create-daemon';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 
 const roots: string[] = [];
@@ -73,7 +73,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'mint a native session only after start',
-        target: { lane: 'runtime', runtimeId: 'pi' },
+        target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },
@@ -97,7 +97,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'mint a native session only after start',
-        target: { lane: 'runtime', runtimeId: 'pi' },
+        target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },
@@ -182,7 +182,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         instruction: 'this must not become fresh',
-        target: { lane: 'runtime', runtimeId: 'pi' },
+        target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         agentRef,
         session: { mode: 'resume', sessionRef: 'mismatched-resume-session' },
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -202,7 +202,7 @@ describe('fresh Agent egress session authority', () => {
     const handoffs = new AgentSessionHandoffStore();
     vi.spyOn(handoffs, 'record').mockRejectedValueOnce(new Error('fsync unavailable'));
     const sent: Envelope[] = [];
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
@@ -222,7 +222,7 @@ describe('fresh Agent egress session authority', () => {
       'task.offer',
       {
         session: { mode: 'fresh' }, instruction: 'fail only at handoff fsync',
-        target: { lane: 'runtime', runtimeId: 'pi' },
+        target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
         agentRef,
         egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
       },

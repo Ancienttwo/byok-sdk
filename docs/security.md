@@ -316,9 +316,8 @@ Presence checks remain limited to non-secret login-state signals —
 report (`adapters/codex/codex-adapter.ts`), and pi's login-state probe
 (`adapters/pi/auth-presence.ts`) — never a file read of `~/.claude` or
 `~/.codex`. Pi's own `auth check` needs an explicit provider and a single-file
-product exposes no pi CLI, so the pi probe checks provider credential env-var
-*names* and then reads `auth.json`, `settings.json`, and `models.json` in pi's
-agent directory. It checks the `settings.json` `defaultProvider`, or any
+product exposes no pi CLI, so the pi probe reads `auth.json`, `settings.json`,
+and `models.json` in Pi's agent directory. It checks the `settings.json` `defaultProvider`, or any
 provider if no default is set. A login is an `auth.json` record with pi's
 `api_key`/`oauth` shape, or a `models.json` provider with a non-empty `apiKey`.
 The probe does not resolve env references or execute `!command` keys.
@@ -368,14 +367,16 @@ Then `CLAUDECODE` (so a child agent starts as its own top-level session) and
 this SDK's own control-plane variables (`BYOK_*`) are removed, whatever listed
 them, and `NO_PROXY`/`no_proxy` gain `127.0.0.1` and `localhost` so a user's
 proxy never carries the traffic to the daemon's loopback gate and MCP servers.
-Claude also drops the shell's `ANTHROPIC_*`, `CLAUDE_CODE_USE_BEDROCK`,
-`CLAUDE_CODE_USE_VERTEX`, `CLAUDE_CODE_OAUTH_TOKEN` and
-`AWS_BEARER_TOKEN_BEDROCK` when `pass` supplies a provider. Provider API keys,
-cloud credentials and loader variables such as `NODE_OPTIONS`, `LD_*` and
-`DYLD_*` that the user's shell sets reach the child as set. The daemon does not
-read, persist or transmit these values; it passes the environment through. A
-user who does not want a secret in agent children must not export it from
-their login shell.
+Claude, Codex, Grok, OpenCode and Pi remove provider credential variables
+from their native launches using the shared denylist. Claude also removes
+`CLAUDE_CODE_USE_BEDROCK`, `CLAUDE_CODE_USE_VERTEX`, and
+`CLAUDE_CODE_USE_FOUNDRY`. For `subscription`, Claude checks `auth status`
+in the task's working directory before claim and again before session launch.
+Codex checks `account/read` before claim and before opening the thread. The
+first read uses the execution's runtime home, working directory and
+environment. The probe always disables plugins and memories at startup.
+Other environment keys, including loader variables such as `NODE_OPTIONS`, `LD_*`
+and `DYLD_*`, follow the configured environment policy.
 
 The durable Pi tool shell and the prepared Pi lane
 use the narrow form `buildAllowlistedEnv`. The `@byok-sdk/keys` launcher also rebuilds

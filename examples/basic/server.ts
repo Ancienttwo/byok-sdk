@@ -38,7 +38,7 @@ const PRODUCT_ID = process.env.BYOK_EXAMPLE_PRODUCT_ID ?? 'byok-example-basic';
 // is whatever that machine reports in `GET /api/machines`, and the page builds
 // its runtime list from that report.
 const KNOWN_RUNTIMES = new Set(['pi', 'claude', 'codex']);
-type Runtime = Extract<AgentExecutionInput['payload']['target'], { lane: 'runtime' }>['runtimeId'];
+type Runtime = Extract<AgentExecutionInput['payload']['target'], { lane: 'harness' }>['harnessId'];
 
 // Every task runs as one Agent in the daemon's Agent home. This demo has one
 // Agent, so a device runs one of its tasks at a time; a second is declined
@@ -135,7 +135,7 @@ app.post('/api/tasks', async (c) => {
   const instruction = body.instruction;
   const deviceId = body.deviceId;
   const runtime = body.runtime as Runtime | undefined;
-  const target = runtime === undefined ? { lane: 'auto' as const } : { lane: 'runtime' as const, runtimeId: runtime };
+  const target = runtime === undefined ? { lane: 'auto' as const } : { lane: 'harness' as const, harnessId: runtime, selection: { mode: 'device-default' as const } };
 
   try {
     let taskId: string;

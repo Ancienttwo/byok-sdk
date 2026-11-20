@@ -698,44 +698,32 @@ export declare const AgentExecutionInputSchema: z.ZodObject<{
         target: z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"auto">;
         }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"runtime">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-                pi: "pi";
-            }>;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"subscription">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-            }>;
-            modelId: z.ZodString;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerId: z.ZodString;
-            modelId: z.ZodString;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok-profile">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerProfile: z.ZodObject<{
-                profileRef: z.ZodString;
-                profileRevision: z.ZodString;
-                profileHash: z.ZodString;
-                modelId: z.ZodString;
-                requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                    "image-input": "image-input";
-                }>>;
-            }, z.core.$strict>;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"harness">;
             harnessId: z.ZodString;
-            modelId: z.ZodOptional<z.ZodString>;
+            selection: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"device-default">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"adapter-model">;
+                modelId: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"subscription">;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"byok">;
+                providerId: z.ZodString;
+                modelId: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"byok-profile">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+                modelId: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>], "mode">;
             effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -846,44 +834,32 @@ export declare const SealedAgentExecutionInputSchema: z.ZodObject<{
         target: z.ZodDiscriminatedUnion<[z.ZodObject<{
             lane: z.ZodLiteral<"auto">;
         }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"runtime">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-                pi: "pi";
-            }>;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"subscription">;
-            runtimeId: z.ZodEnum<{
-                claude: "claude";
-                codex: "codex";
-            }>;
-            modelId: z.ZodString;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerId: z.ZodString;
-            modelId: z.ZodString;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
-            lane: z.ZodLiteral<"byok-profile">;
-            runtimeId: z.ZodLiteral<"pi">;
-            providerProfile: z.ZodObject<{
-                profileRef: z.ZodString;
-                profileRevision: z.ZodString;
-                profileHash: z.ZodString;
-                modelId: z.ZodString;
-                requiredCapabilities: z.ZodArray<z.ZodEnum<{
-                    "image-input": "image-input";
-                }>>;
-            }, z.core.$strict>;
-            effort: z.ZodOptional<z.ZodString>;
-        }, z.core.$strict>, z.ZodObject<{
             lane: z.ZodLiteral<"harness">;
             harnessId: z.ZodString;
-            modelId: z.ZodOptional<z.ZodString>;
+            selection: z.ZodDiscriminatedUnion<[z.ZodObject<{
+                mode: z.ZodLiteral<"device-default">;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"adapter-model">;
+                modelId: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"subscription">;
+                modelId: z.ZodString;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"byok">;
+                providerId: z.ZodString;
+                modelId: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>, z.ZodObject<{
+                mode: z.ZodLiteral<"byok-profile">;
+                providerProfile: z.ZodObject<{
+                    profileRef: z.ZodString;
+                    profileRevision: z.ZodString;
+                    profileHash: z.ZodString;
+                    requiredCapabilities: z.ZodArray<z.ZodEnum<{
+                        "image-input": "image-input";
+                    }>>;
+                }, z.core.$strict>;
+                modelId: z.ZodOptional<z.ZodString>;
+            }, z.core.$strict>], "mode">;
             effort: z.ZodOptional<z.ZodString>;
         }, z.core.$strict>], "lane">;
         terminalProjection: z.ZodNonOptional<z.ZodOptional<z.ZodDiscriminatedUnion<[z.ZodObject<{
@@ -1988,6 +1964,7 @@ export declare const CLOUD_ERROR_CODES: {
     readonly device_retired: 'device_retired';
     readonly task_not_awaiting_approval: 'task_not_awaiting_approval';
     readonly agent_capability_missing: 'agent_capability_missing';
+    readonly invalid_request: 'invalid_request';
     readonly agent_ref_mismatch: 'agent_ref_mismatch';
     readonly agent_task_already_exists: 'agent_task_already_exists';
     readonly task_offer_append_refused: 'task_offer_append_refused';

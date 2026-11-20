@@ -7,7 +7,7 @@ import { createByokServer, createHmacTokenSigner } from '../index';
 import { connectFakeDaemonLongPoll, startServer, stopServer, claimAndStart, sendOne, TEST_AGENT_DISPATCH, TEST_AGENT_REF } from './test-support';
 
 /** What a device claims for the dispatch's claude target. */
-const CLAUDE = { kind: 'runtime', runtimeId: 'claude' } as const;
+const CLAUDE = { id: 'claude' } as const;
 
 describe('public facade request recovery', () => {
   it('reads the original offer/result and cancels by pre-persisted identity after reopen', async () => {
@@ -17,7 +17,7 @@ describe('public facade request recovery', () => {
     let byok = createByokServer(options); let http = await startServer(byok);
     try {
       const daemon = await connectFakeDaemonLongPoll(http.baseUrl, byok, { productId: options.productId });
-      const input = { ...TEST_AGENT_DISPATCH, taskId: 'host-persisted-a', deviceId: daemon.deviceId, instruction: 'original', target: { lane: 'runtime', runtimeId: 'claude' } as const };
+      const input = { ...TEST_AGENT_DISPATCH, taskId: 'host-persisted-a', deviceId: daemon.deviceId, instruction: 'original', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const };
       await expect(byok.dispatch({ ...TEST_AGENT_DISPATCH, ...input, deviceId: undefined } as never)).rejects.toThrow('explicit deviceId');
       await expect(byok.dispatch({ ...TEST_AGENT_DISPATCH, ...input, taskId: '' })).rejects.toThrow('non-empty');
       const mutable = { ...input, taskId: 'captured-before-await' };
@@ -28,7 +28,7 @@ describe('public facade request recovery', () => {
       expect(handle.taskId).toBe(input.taskId);
       const original = await byok.tasks.offer(input.taskId);
       expect(original).toMatchObject({ taskId: input.taskId, deviceId: daemon.deviceId, delivered: true,
-        type: 'task.offer', payload: { instruction: 'original', target: { lane: 'runtime', runtimeId: 'claude' } } });
+        type: 'task.offer', payload: { instruction: 'original', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } } });
       for (const retry of [input, { ...input, instruction: 'changed' }]) {
         await expect(byok.dispatch(retry)).rejects.toMatchObject({ code: 'agent_task_already_exists' });
       }

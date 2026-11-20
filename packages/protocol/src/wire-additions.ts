@@ -28,7 +28,6 @@ import {
   INPUT_IMAGES_CAPABILITY,
   SEALED_PAYLOAD_CAPABILITY,
   SEALED_PAYLOAD_V2_CAPABILITY,
-  TASK_EXECUTION_OPTIONS_CAPABILITY,
 } from './capability-constants.js';
 import type { MessageType } from './messages.js';
 import { SEALED_CATEGORY_CAPABILITY, SEALED_SPLIT_TABLE, type SealableMessageType, type SealedSplitEntry } from './sealed-split-table.js';
@@ -82,14 +81,6 @@ const PLAIN_ROWS: readonly WireAddition[] = [
   // field and value names the device flag a daemon advertises when it is
   // configured for it.
   offerRow(undefined, 'agent-home-contract'),
-  offerRow('target.lane', 'dispatch-selection', 'subscription'),
-  offerRow('target.lane', 'dispatch-selection', 'byok'),
-  offerRow('target.lane', 'dispatch-selection', 'byok-profile'),
-  offerRow('target.effort', TASK_EXECUTION_OPTIONS_CAPABILITY),
-  {
-    surface: 'task.offer', field: 'target.modelId', when: { field: 'target.lane', value: 'harness' },
-    capability: TASK_EXECUTION_OPTIONS_CAPABILITY,
-  },
   offerRow('images', INPUT_IMAGES_CAPABILITY),
   { surface: 'task.steer', field: 'images', capability: INPUT_IMAGES_CAPABILITY },
   offerRow('requiredToolsets', 'toolset-selection'),

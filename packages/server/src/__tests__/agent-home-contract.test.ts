@@ -208,6 +208,7 @@ describe('agent-home-contract reference server', () => {
     const daemon = await pairFakeDaemon(started.baseUrl, code);
     const hello = createEnvelope('conn.hello', {
       protocolVersions: [PROTOCOL_VERSION],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: true } }, { id: 'claude', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }, { id: 'codex', capabilities: { selectionModes: ['device-default', 'subscription'], effort: true } }],
       capabilities: ['agent-home-contract'],
       deviceId: daemon.deviceId,
       productId: PRODUCT_ID,

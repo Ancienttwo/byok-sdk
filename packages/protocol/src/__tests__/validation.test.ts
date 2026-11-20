@@ -34,7 +34,7 @@ describe('malformed payload rejection', () => {
 
   it('rejects task.steer with wrong payload field type', () => {
     const raw = {
-      v: 7,
+      v: 8,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.steer',
@@ -47,7 +47,7 @@ describe('malformed payload rejection', () => {
 
   it('rejects an envelope with a non-uuid id', () => {
     const raw = {
-      v: 7,
+      v: 8,
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
@@ -60,7 +60,7 @@ describe('malformed payload rejection', () => {
 
   it('rejects an envelope with a non-ISO-8601 timestamp', () => {
     const raw = {
-      v: 7,
+      v: 8,
       id: '11111111-1111-4111-8111-111111111111',
       ts: 'yesterday',
       type: 'task.approve',
@@ -77,7 +77,7 @@ describe('malformed payload rejection', () => {
 
   it('EnvelopeValidationError carries the zod issues for diagnostics', () => {
     const raw = {
-      v: 7,
+      v: 8,
       id: 'not-a-uuid',
       ts: new Date().toISOString(),
       type: 'task.approve',
@@ -118,7 +118,7 @@ describe('unknown-field tolerance (forward-compat)', () => {
 describe('unknown message type handling', () => {
   it('throws UnknownMessageTypeError (not EnvelopeValidationError) for an unrecognized type', () => {
     const raw = {
-      v: 7,
+      v: 8,
       id: '11111111-1111-4111-8111-111111111111',
       ts: new Date().toISOString(),
       type: 'task.teleport', // does not exist (yet)
@@ -158,11 +158,11 @@ describe('unknown message type handling', () => {
   });
 
   it('missing/non-string type is also treated as unknown, not a hard parse error', () => {
-    expect(() => parseMessage({ v: 7, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString() })).toThrow(
+    expect(() => parseMessage({ v: 8, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString() })).toThrow(
       UnknownMessageTypeError,
     );
     expect(() =>
-      parseMessage({ v: 7, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString(), type: 42 }),
+      parseMessage({ v: 8, id: '11111111-1111-4111-8111-111111111111', ts: new Date().toISOString(), type: 42 }),
     ).toThrow(UnknownMessageTypeError);
   });
 });

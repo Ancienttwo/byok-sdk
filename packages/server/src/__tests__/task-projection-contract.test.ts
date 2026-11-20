@@ -129,7 +129,7 @@ function resultFields(payload: object): object {
   return Object.fromEntries(Object.entries(payload).filter(([key]) => !Object.hasOwn(evidenceOnly, key)));
 }
 
-const PI = { kind: 'runtime', runtimeId: 'pi' } as const;
+const PI = { id: 'pi' } as const;
 const usage = {
   runtime: 'pi' as const, provider: 'observed-provider', model: 'observed-model',
   promptTokens: 17, completionTokens: 5, durationMs: 123,

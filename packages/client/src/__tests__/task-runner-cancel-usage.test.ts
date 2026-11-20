@@ -8,7 +8,7 @@ import { createEnvelope, type Envelope } from '@byok-sdk/protocol';
 import { ApprovalRegistry } from '../daemon/approvals';
 import { TaskRunner } from '../daemon/task-runner';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
@@ -31,7 +31,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
     const sent: Envelope[] = [];
     let enteredUpload!: () => void;
     const uploading = new Promise<void>(resolve => { enteredUpload = resolve; });
-    const runner = new TaskRunner({...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },...testAgentHomeDeps(),  getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       adapters: [adapter],
       // An enrolled daemon always passes its tenant; without it a closing Agent task logs a skipped memory snapshot on Linux.
       tenantId: 'cancel-usage-tenant', deviceId: 'cancel-usage-device', send: event => { sent.push(event); },
@@ -49,7 +49,7 @@ describe('TaskRunner metering at the cancellation boundary', () => {
       maxInlineEventBytes: 4096,
     });
     await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
-      instruction: 'cancel while metering settles', target: { lane: 'runtime', runtimeId: runtime },
+      instruction: 'cancel while metering settles', target: { lane: 'harness', harnessId: runtime, selection: { mode: 'device-default' } },
     }, { taskId: 'metered-task', seq: 1 }));
     const session = adapter.sessions[0]!;
     // Trace recorded inside the real interrupt boundary, before its receipt:

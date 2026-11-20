@@ -25,7 +25,7 @@ function offlineDream(nativeSessions?: boolean, harnessOnly = false): AgentExecu
   ledger.transaction(s => {
     const state = stateOf(s.application); seedCollaboration(state); state.turns.t1!.status = 'succeeded';
     if (harnessOnly) {
-      state.team.bots.main!.execution.payload = { ...state.team.bots.main!.execution.payload, target: { lane: 'harness', harnessId: 'test-harness' } };
+      state.team.bots.main!.execution.payload = { ...state.team.bots.main!.execution.payload, target: { lane: 'harness', harnessId: 'test-harness', selection: { mode: 'device-default' } } };
     }
     reconcileDreamRoutines(s, policy, models, WINDOW_START);
     const routine = Object.values(s.routines)[0]!, key = 'dream-key';
@@ -42,7 +42,7 @@ it('freezes the default native session request with the dream window', () => {
 });
 it('promotes a valid harness-only Bot template without a native session request', () => {
   const { payload } = offlineDream(undefined, true);
-  expect(payload.target).toEqual({ lane: 'harness', harnessId: 'test-harness' });
+  expect(payload.target).toEqual({ lane: 'harness', harnessId: 'test-harness', selection: { mode: 'device-default' } });
   expect(payload.nativeSessions).toBeUndefined();
   expect(HostOfferPlainPayloadSchema.safeParse(payload).success).toBe(true);
 });
@@ -176,7 +176,7 @@ it('omits native sessions from the cloud offer when the device does not advertis
   const harness = createHarness(), device = await harness.pairDevice(TENANT_A);
   await harness.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: [
     'agent-home-contract', 'agent-egress-policy', 'agent-egress-reliable-ack', 'agent-egress-fresh-session', 'terminal-projection-selection', 'agent-memory-selection',
-  ] });
+  ], harnesses: [{ id: 'pi', capabilities: { steer: false, resume: true, selectionModes: ['device-default'], effort: false } }] });
   await harness.cloud.submitAgentExecution(TENANT_A, { ...execution, deviceId: device.deviceId, taskId: 'dream' });
   expect((await harness.cloud.readTaskOffer(TENANT_A, 'dream'))!.payload).not.toHaveProperty('nativeSessions');
   expect(execution.payload.nativeSessions).toMatchObject({ ifAdvertised: true });
@@ -184,16 +184,21 @@ it('omits native sessions from the cloud offer when the device does not advertis
 
 it('takes the first listed template on the Bot device, falls back to the Bot template, and skips without one', async () => {
   fixture = await openHost({ externalCore: true, ledgerOptions: botLedgerOptions, consume: (wake, signal) => bot!.consume(wake, signal) });
-  const own = template(fixture.deviceId), cheap = { ...own, payload: { ...own.payload, target: { lane: 'runtime', runtimeId: 'claude' } as const } };
+  const own = template(fixture.deviceId), cheap = { ...own, payload: { ...own.payload, target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const } };
   await open({ models: { default: own, far: template('other-device'), cheap }, dreaming: { timeZone: ZONE, models: ['gone', 'far', 'cheap'] } });
   await completedTurn('one');
   const first = await due();
   const offered = bot!.core.intent(first)!.execution.payload;
-  expect(offered).toMatchObject({ target: { lane: 'runtime', runtimeId: 'claude' }, limits: { maxDurationMs: DEFAULT_DREAM_MAX_DURATION_MS } });
+  expect(offered).toMatchObject({ target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } }, limits: { maxDurationMs: DEFAULT_DREAM_MAX_DURATION_MS } });
   // Only a Pi target carries the native session request.
   expect(offered).not.toHaveProperty('nativeSessions');
-  // The stub device has no Claude runtime and declines, and a dream that did not succeed keeps its window.
-  await vi.waitFor(async () => { await bot!.drain(); expect(record()?.last).toMatchObject({ template: 'cheap', fallback: false, outcome: 'declined' }); }, { timeout: 5000 });
+  // The device advertises Pi. The explicit Claude offer cannot be enqueued,
+  // and expiry leaves the dream window available for the next slot.
+  const firstIntent = bot!.core.intent(first)!;
+  expect(await fixture.server.tasks.offer(firstIntent.taskId)).toBeUndefined();
+  clock = firstIntent.waitUntil;
+  await bot!.drain();
+  expect(record()?.last).toMatchObject({ template: 'cheap', fallback: false, outcome: 'expired' });
   await bot!.setModels({ default: own });
   const second = await due();
   expect(bot!.core.intent(second)!.execution.payload.instruction).toContain('one');

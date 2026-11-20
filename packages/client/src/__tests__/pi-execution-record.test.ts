@@ -13,7 +13,7 @@ import { PiRpcClient, type PiRpcMessage, type SpawnFn } from '../adapters/pi/rpc
 import { ApprovalRegistry } from '../daemon/approvals';
 import type { ExecutionRecord } from '../daemon/execution-record';
 import { TaskRunner } from '../daemon/task-runner';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
 import { AgentEgressController } from '../daemon/agent-egress-controller';
@@ -59,7 +59,7 @@ async function replay(record: string, ending: 'exit' | 'killed'): Promise<{ clie
 /** The real PiAdapter and its fake Pi child, driven by a directly built TaskRunner. */
 async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: ExecutionRecord[] }> {
   const directory = await temporaryDirectory();
-  const spawnFn = ((command: string, args: readonly string[], options: SpawnOptions) => realSpawn(command, [...args], {
+  const spawnFn = ((command: string, args: readonly string[], options: SpawnOptions) => realSpawn(command, args.slice(args.indexOf('--') + 1), {
     ...options,
     env: { ...options.env, ...(trajectory === undefined ? {} : { FAKE_PI_TRAJECTORY: trajectory }) },
   })) as unknown as SpawnFn;
@@ -67,8 +67,13 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
   const records: ExecutionRecord[] = [];
   let recorded!: () => void;
   const published = new Promise<void>(resolve => { recorded = resolve; });
-  const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
-    adapters: [new PiAdapter({ resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }), spawnFn })],
+  const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+    adapters: [new PiAdapter({
+      resolveBin: () => ({ command: PI_FIXTURE, source: 'env' }),
+      spawnFn,
+      byokLauncher: { command: PI_FIXTURE, profileDbPath: path.join(directory, 'profiles.db'), sessionDir: directory },
+      validateProviderProfileBinding: async () => {},
+    })],
     ...testAgentHomeDeps(),
     deviceId: 'pi-record-device',
     send: envelope => { sent.push(envelope); },
@@ -81,7 +86,12 @@ async function runPi(trajectory?: string): Promise<{ sent: Envelope[]; records: 
     productId: 'pi-record-product',
     onExecutionRecord: record => { records.push(record); recorded(); },
   });
-  await runner.handleEnvelope(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'say hi', target: { lane: 'runtime', runtimeId: 'pi' } }, { taskId: TASK_ID, seq: 1 }));
+  await runner.handleEnvelope(createEnvelope('task.offer', {
+    agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'say hi',
+    target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: {
+      profileRef: 'fixture', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
+    } } },
+  }, { taskId: TASK_ID, seq: 1 }));
   // The runner publishes the record after Session.close() and lets the task go right after it.
   await published;
   await vi.waitFor(() => expect(runner.activeTaskCount).toBe(0));

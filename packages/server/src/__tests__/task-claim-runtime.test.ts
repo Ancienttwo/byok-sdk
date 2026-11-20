@@ -58,27 +58,27 @@ describe('claimed executor: task.claim.executor -> TaskSnapshot.claimedExecutor'
 
     const claim = await sendOne(
       daemon,
-      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { kind: 'runtime', runtimeId: 'pi' } }, { taskId: handle.taskId }),
+      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { id: 'pi' } }, { taskId: handle.taskId }),
     );
     expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
 
     const snapshot = await instance.tasks.get(handle.taskId);
     expect(snapshot?.state).toBe('Claimed');
-    expect(snapshot?.claimedExecutor).toEqual({ kind: 'runtime', runtimeId: 'pi' });
+    expect(snapshot?.claimedExecutor).toEqual({ id: 'pi' });
   });
 
   it('an offer dispatched WITH a runtime target: task.claim.executor is recorded independently as claimedExecutor', async () => {
     const { byok: instance, daemon } = await startWithDaemon();
 
-    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'explicit runtime', target: { lane: 'runtime', runtimeId: 'claude' } });
+    const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'explicit runtime', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } });
 
     const claim = await sendOne(
       daemon,
-      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { kind: 'runtime', runtimeId: 'claude' } }, { taskId: handle.taskId }),
+      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { id: 'claude' } }, { taskId: handle.taskId }),
     );
     expect(claim).toMatchObject({ status: 200, body: { accepted: 1 } });
 
-    expect((await instance.tasks.get(handle.taskId))?.claimedExecutor).toEqual({ kind: 'runtime', runtimeId: 'claude' });
+    expect((await instance.tasks.get(handle.taskId))?.claimedExecutor).toEqual({ id: 'claude' });
   });
 
   it('the task.state ByokServerEvent fired on Offered -> Claimed carries claimedExecutor, mirroring the snapshot', async () => {
@@ -87,7 +87,7 @@ describe('claimed executor: task.claim.executor -> TaskSnapshot.claimedExecutor'
     const handle = await instance.dispatch({ ...TEST_AGENT_DISPATCH, deviceId: daemon.deviceId, instruction: 'observe the server event' });
     await sendOne(
       daemon,
-      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId: handle.taskId }),
+      createEnvelope('task.claim', { agentRef: TEST_AGENT_REF, deviceId: daemon.deviceId, executor: { id: 'codex' } }, { taskId: handle.taskId }),
     );
 
     const event = await waitForServerEvent(
@@ -95,7 +95,7 @@ describe('claimed executor: task.claim.executor -> TaskSnapshot.claimedExecutor'
       (e) => e.kind === 'task.state' && e.taskId === handle.taskId && e.state === 'Claimed',
     );
     if (event.kind !== 'task.state') throw new Error('unreachable');
-    expect(event.claimedExecutor).toEqual({ kind: 'runtime', runtimeId: 'codex' });
+    expect(event.claimedExecutor).toEqual({ id: 'codex' });
     expect(event.claimedExecutor).toEqual((await instance.tasks.get(handle.taskId))?.claimedExecutor);
   });
 });

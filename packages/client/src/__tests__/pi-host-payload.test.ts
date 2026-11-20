@@ -356,7 +356,7 @@ if (process.argv[2] !== 'task') {
       ...(input.nativeAssetRoot === undefined ? {} : { nativeAssetRoot: input.nativeAssetRoot }) });
     report.stage = 'detect'; report.detect = await adapter.detect();
     report.stage = 'prepare';
-    const prepared = await adapter.prepare({ offer: { target: { lane: 'runtime', runtimeId: 'pi' }, instruction: input.instruction }, descriptor: adapter.descriptor,
+    const prepared = await adapter.prepare({ offer: { target: { lane: 'auto' }, instruction: input.instruction }, descriptor: adapter.descriptor,
       requiredToolsetIds: [], mcpServers: {}, mcpToolsetTools: {} });
     if (prepared.kind !== 'prepared') throw new Error(prepared.reason);
     const scratch=await sdk.createExecutionScratch({root:input.scratchRoot});
@@ -380,7 +380,7 @@ if (process.argv[2] !== 'task') {
       if (event.type === 'turn_end') break;
     }
     if (input.statusProbe) {
-      await session.followUp({ target: { lane: 'runtime', runtimeId: 'pi' }, instruction: 'STATUS_PROBE_1642' });
+      await session.followUp({ target: { lane: 'auto' }, instruction: 'STATUS_PROBE_1642' });
       for await (const event of session.events) {
         report.events.push(event);
         if (event.type === 'turn_end') break;

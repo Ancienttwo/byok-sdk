@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { bindMcpToolsetServerObservation, observeMcpServer } from '../../mcp/observation';
-import type { McpStdioServerConfig, McpToolsetToolObservation, MessageDraftDelta, RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeDetectResult, RuntimeIsolationAbsentSources, RuntimeIsolationSource, Session } from '../../types';
+import type { McpStdioServerConfig, McpToolsetToolObservation, MessageDraftDelta, RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeDetectResult, RuntimeIsolationAbsentSources, RuntimeIsolationSource, RuntimeTaskInput, Session } from '../../types';
 import { startPreparedOperation, type PreparedOperationResources } from '../fixtures/prepared-operation';
 import { runtimeVersionPolicyProjection } from '../../runtime-version-policy';
 import { bindDeclaredSessionMembers } from '../../daemon/session-contract';
@@ -379,9 +379,10 @@ export async function runTurn(
   adapter: RuntimeAdapter,
   instruction: string,
   resources: PreparedOperationResources,
-  timeoutMs = 120_000,
+  target: RuntimeTaskInput['target'] = { lane: 'auto' },
 ): Promise<TurnEvent[]> {
-  const session: Session = await startPreparedOperation(adapter, { instruction, target: { lane: 'auto' } }, resources);
+  const timeoutMs = 120_000;
+  const session: Session = await startPreparedOperation(adapter, { instruction, target }, resources);
   const events: TurnEvent[] = [];
   let timer: NodeJS.Timeout | undefined;
   try {

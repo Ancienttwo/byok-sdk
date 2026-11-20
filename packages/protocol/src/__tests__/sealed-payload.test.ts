@@ -42,7 +42,7 @@ import { agentMemoryProjectionBase64UrlByteLength } from '../agent-memory-projec
 
 type Json = { [key: string]: unknown };
 
-const corpus = readFileSync(new URL('golden/v7.envelopes.ndjson', import.meta.url), 'utf8')
+const corpus = readFileSync(new URL('golden/v8.envelopes.ndjson', import.meta.url), 'utf8')
   .trimEnd()
   .split('\n')
   .map((raw) => JSON.parse(raw) as { type: MessageType; ts: string; payload: Json });

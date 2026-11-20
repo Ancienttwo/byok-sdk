@@ -127,7 +127,8 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'available' }]);
     expect(report.byokNames).toEqual(['BYOK_TEST_ENV_MARKER']);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
-    expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['claude']);
+    if (hello.type !== 'conn.hello') throw new Error('expected hello');
+    expect(hello.payload.harnesses.map(runtime => runtime.id)).toEqual(['claude']);
     expect(await stop(child)).toBe(0);
   }, 60_000);
 
@@ -142,7 +143,8 @@ describe.runIf(supportedShell)('service login-shell environment, end to end (iss
     expect(report.detected).toEqual(['claude']);
     expect(report.runtimes).toMatchObject([{ id: 'claude', outcome: 'available' }]);
     const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
-    expect((hello.payload as { runtimes: Array<{ id: string }> }).runtimes.map((runtime) => runtime.id)).toEqual(['claude']);
+    if (hello.type !== 'conn.hello') throw new Error('expected hello');
+    expect(hello.payload.harnesses.map(runtime => runtime.id)).toEqual(['claude']);
     expect(await stop(child)).toBe(0);
   }, 60_000);
 

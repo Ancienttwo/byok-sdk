@@ -132,7 +132,7 @@ async function unusedLoopbackPort(): Promise<number> {
 describe('diagnostics collector', () => {
   it('#392: old or malformed online observations remain unknown and never trigger local probes', async () => {
     const dir = await tempDir();
-    const adapter = { descriptor: freezeRuntimeAdapterDescriptor({ id: 'private', supportsDispatchSelection: false, capabilities: { steer: false, resume: false, approvalInteractive: false } }), detect: vi.fn(), prepare: vi.fn(), runtimeEnvironment: vi.fn() };
+    const adapter = { descriptor: freezeRuntimeAdapterDescriptor({ id: 'private', selectionModes: ['device-default'], capabilities: { steer: false, resume: false, approvalInteractive: false } }), detect: vi.fn(), prepare: vi.fn(), runtimeEnvironment: vi.fn() };
     for (const overrides of [
       { runtimes: undefined, environment: undefined },
       { runtimes: [{ id: 'pi' }], environment: { source: 'login-shell', shell: '/private/secret', durationMs: 1 } },
@@ -599,7 +599,7 @@ describe('diagnostics collector', () => {
       runtimeEnvironment: async () => testRuntimeEnvironment(),
       descriptor: freezeRuntimeAdapterDescriptor({
         id: 'hanging',
-        supportsDispatchSelection: false,
+        selectionModes: ['device-default'],
         capabilities: { steer: false, resume: false, approvalInteractive: false },
       }),
       detect: () => new Promise(() => undefined),

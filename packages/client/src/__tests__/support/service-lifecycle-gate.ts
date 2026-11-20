@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, vi, type MockInstance } from 'vitest';
 import * as mutationGate from '../../util/path-mutation-gate';
 
+const realAcquirePathMutationGate = mutationGate.acquirePathMutationGate;
+
 /**
  * Replaces only the `service-lifecycle` kernel gate with an in-process one
  * for the calling test file; every other scope stays the real OS lock. The
@@ -11,10 +13,10 @@ import * as mutationGate from '../../util/path-mutation-gate';
 export function useInProcessServiceLifecycleGate(): void {
   let spy: MockInstance<typeof mutationGate.acquirePathMutationGate> | undefined;
   beforeEach(() => {
-    const original = mutationGate.acquirePathMutationGate;
+    spy?.mockRestore();
     let held = false;
     spy = vi.spyOn(mutationGate, 'acquirePathMutationGate').mockImplementation(async (input, options) => {
-      if (input.scope !== 'service-lifecycle') return original(input, options);
+      if (input.scope !== 'service-lifecycle') return realAcquirePathMutationGate(input, options);
       if (held) throw new mutationGate.PathMutationGateBusyError('service-lifecycle', '*');
       held = true;
       let released = false;

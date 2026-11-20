@@ -11,7 +11,7 @@ import { createSqliteEmbeddedStores } from '../stores/sqlite';
 import { submitFrozen, type FrozenInput } from '../execution-core';
 
 // Faults run as TEMP triggers on the store's own connection: a trigger written
-// into the file is an object schema 10 does not know, and the open refuses it.
+// into the file is an object schema 11 does not know, and the open refuses it.
 const faults = vi.hoisted((): string[] => []);
 afterEach(() => { faults.length = 0; });
 vi.mock('../sqlite-support.js', async (importOriginal) => {
@@ -83,10 +83,10 @@ describeSqlite('createByokServer SQLite composition', () => {
     const openStores = () => createSqliteEmbeddedStores({ path }, { clock: createMutableClock(), crypto: createWebCrypto() });
     const seed = openStores();
     await seed.cloud.devices.register(tenant, { deviceId, productId, deviceName: 'fixture', devicePublicKey: 'key', proofKeyId: 'proof', proofKeyEpoch: 1, expectedDeviceDigest: null });
-    await seed.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities });
+    await seed.cloud.devices.recordCapabilities(tenant, { deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: false } }, { id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }], capabilities });
     await seed.close();
     faults.push("CREATE TEMP TRIGGER fail_append BEFORE INSERT ON main.mailbox_message BEGIN SELECT RAISE(ABORT, 'injected append failure'); END;");
-    const input: FrozenInput = { taskId: 'conditional-retry', deviceId, payload: { instruction: 'dream', target: { lane: 'runtime', runtimeId: 'pi' },
+    const input: FrozenInput = { taskId: 'conditional-retry', deviceId, payload: { instruction: 'dream', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } },
       agentRef: { agentId: 'main', profileRevision: '1' }, session: { mode: 'fresh' }, agentMemory: 'none', terminalProjection: { mode: 'none' },
       egressPolicy: { policyRevision: 'test', activity: { delivery: 'latest-value', maxCoalesceMs: 250, maxEventBytes: 262144 },
         reliable: { maxPendingEventsPerAgent: 10, maxPendingBytesPerAgent: 4096, maxPendingBytesPerTenant: 8192 },
@@ -100,7 +100,7 @@ describeSqlite('createByokServer SQLite composition', () => {
       await server.close();
       faults.length = 0;
       const reopened = openStores();
-      await reopened.cloud.devices.recordCapabilities(tenant, { deviceId, capabilities: [...capabilities, capability] });
+      await reopened.cloud.devices.recordCapabilities(tenant, { deviceId, harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default', 'byok-profile'], effort: false } }, { id: 'codex', capabilities: { selectionModes: ['device-default'], effort: false } }], capabilities: [...capabilities, capability] });
       await reopened.close();
       server = createByokServer({ productId, storage: { kind: 'sqlite', path } });
       await expect(submit()).resolves.toBe('delivered');

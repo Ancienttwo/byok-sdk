@@ -465,11 +465,11 @@
     },
     "maxConcurrentReaderAttemptsPerAgentHome": {
       "type": "number",
-      "description": "How many `homeAccess: 'memory-reader'` Attempts this daemon lets run\nCONCURRENTLY in one canonical Agent home, across every lane and every\nsession. Default DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME (4).\n\nReaders are counted apart from the writer. A home has at most one writer\nAttempt, fixed: the writer runs in the home itself, so a second writer\nwould co-write `MEMORY.md`, `notes/` and `.git`. Each reader runs in its\nown run directory, `<home>/.byok/runs/<taskId>/`. An offer over either\nlimit is declined retryably before adapter preparation, the claim, or any\nprocess side effect.\n\nValidated up front, the same way `maxTaskOutputBytes` is: a positive safe\ninteger, so `0`, a negative number, `NaN` and a non-integer are\nconstruction errors rather than a silently reinterpreted \"unlimited\".\n\nThe removed `maxConcurrentMutableSessionsPerAgentHome` is a construction\nerror: a value above 1 let Attempts co-write one home, which reader\nAttempts replace."
+      "description": "How many `homeAccess: 'memory-reader'` Attempts this daemon lets run\nCONCURRENTLY in one canonical Agent home, across every lane and every\nsession. Default import ('./task-runner.js').DEFAULT_MAX_CONCURRENT_READER_ATTEMPTS_PER_AGENT_HOME (4).\n\nReaders are counted apart from the writer. A home has at most one writer\nAttempt, fixed: the writer runs in the home itself, so a second writer\nwould co-write `MEMORY.md`, `notes/` and `.git`. Each reader runs in its\nown run directory, `<home>/.byok/runs/<taskId>/`. An offer over either\nlimit is declined retryably before adapter preparation, the claim, or any\nprocess side effect.\n\nValidated up front, the same way `maxTaskOutputBytes` is: a positive safe\ninteger, so `0`, a negative number, `NaN` and a non-integer are\nconstruction errors rather than a silently reinterpreted \"unlimited\".\n\nThe removed `maxConcurrentMutableSessionsPerAgentHome` is a construction\nerror: a value above 1 let Attempts co-write one home, which reader\nAttempts replace."
     },
     "maxConcurrentTasks": {
       "type": "number",
-      "description": "How many tasks this daemon runs at once, across every Agent home, lane and\nruntime. Default DEFAULT_MAX_CONCURRENT_TASKS (8).\n\nActive tasks and offers already admitted but still starting both count.\nAn offer over the cap is declined retryably (`task.decline` with\n`retryable: true` and no code) before adapter preparation, the claim, or\nany process side effect, so the Host can offer it again later or to\nanother device.\n\nValidated up front: a positive safe integer. There is no \"uncapped\"\nvalue; `0`, a negative number, `NaN` and a non-integer are construction\nerrors."
+      "description": "How many tasks this daemon runs at once, across every Agent home, lane and\nruntime. Default import ('./task-runner.js').DEFAULT_MAX_CONCURRENT_TASKS (8).\n\nActive tasks and offers already admitted but still starting both count.\nAn offer over the cap is declined retryably (`task.decline` with\n`retryable: true` and no code) before adapter preparation, the claim, or\nany process side effect, so the Host can offer it again later or to\nanother device.\n\nValidated up front: a positive safe integer. There is no \"uncapped\"\nvalue; `0`, a negative number, `NaN` and a non-integer are construction\nerrors."
     },
     "defaultMaxDurationMs": {
       "type": "number",
@@ -821,6 +821,10 @@
       },
       "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildRuntimeAdapters`; the `grok`, `dsh` and `agy`\ncustom harnesses are built only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
     },
+    "runtimeInstallRoot": {
+      "type": "string",
+      "description": "SDK install root to read for explicitly installed, managed runtime CLIs."
+    },
     "runtimes": {
       "type": "object",
       "properties": {
@@ -1042,6 +1046,11 @@
         "claude": {
           "type": "object",
           "properties": {
+            "byok": {
+              "x-byok-surface": "embedded-only",
+              "not": {},
+              "description": "Catalog identity and per-spawn provider key resolver for an embedded Host."
+            },
             "agentUserContext": {
               "enum": [
                 "excluded",
@@ -1671,7 +1680,7 @@
         "dsh": {
           "x-byok-surface": "embedded-only",
           "not": {},
-          "description": "Required when `runtimeAllowlist` lists `dsh`, and applies only then. dsh has no default model and runs on darwin and linux only."
+          "description": "Required when `runtimeAllowlist` lists `dsh`. DSH runs on macOS and Linux."
         },
         "opencode": {
           "type": "object",
@@ -1873,11 +1882,8 @@
               "description": "This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged."
             }
           },
-          "required": [
-            "models"
-          ],
           "additionalProperties": false,
-          "description": "Required when runtimeAllowlist lists opencode. Native user configuration is inherited."
+          "description": "Optional OpenCode settings. Native user configuration is inherited."
         },
         "agy": {
           "x-byok-surface": "embedded-only",
@@ -2082,7 +2088,7 @@
     },
     "maxTaskOutputBytes": {
       "type": "number",
-      "description": "M5 batch-3 (workstream 2): caps accumulated (approximate,\nserialized-event-length) agent-event output bytes this daemon will\ntolerate for a single task before tearing it down as a resource-limit\nviolation (`task.fail`, `retryable: false`, reason prefixed\n`resource limit exceeded: maxTaskOutputBytes` — see\n`MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner/state.ts`) — see\n`TaskRunner.pump`'s own doc comment for exactly what's counted and what\nisn't. Default DEFAULT_MAX_TASK_OUTPUT_BYTES (64 MiB) when\nunset.\n\n`0` or a negative number is a config validation error, thrown\nsynchronously from `createDaemonWithAdapters`/`createDaemon` — NOT a\nsupported way to disable the cap. Pass `Number.POSITIVE_INFINITY`\nexplicitly instead to opt out of enforcement altogether."
+      "description": "M5 batch-3 (workstream 2): caps accumulated (approximate,\nserialized-event-length) agent-event output bytes this daemon will\ntolerate for a single task before tearing it down as a resource-limit\nviolation (`task.fail`, `retryable: false`, reason prefixed\n`resource limit exceeded: maxTaskOutputBytes` — see\n`MAX_OUTPUT_BYTES_EXCEEDED_REASON_PREFIX`, `task-runner/state.ts`) — see\n`TaskRunner.pump`'s own doc comment for exactly what's counted and what\nisn't. Default import ('./task-runner.js').DEFAULT_MAX_TASK_OUTPUT_BYTES (64 MiB) when\nunset.\n\n`0` or a negative number is a config validation error, thrown\nsynchronously from `createDaemonWithAdapters`/`createDaemon` — NOT a\nsupported way to disable the cap. Pass `Number.POSITIVE_INFINITY`\nexplicitly instead to opt out of enforcement altogether."
     },
     "artifactLimits": {
       "type": "object",
@@ -2107,7 +2113,7 @@
     },
     "maxInlineEventBytes": {
       "type": "number",
-      "description": "Per-EVENT inline ceiling (default DEFAULT_MAX_INLINE_EVENT_BYTES,\n64 KiB) for the two `AgentEvent` fields a runtime authors freely:\n`tool_use.input` and `tool_result.output`. An event whose serialization\nexceeds this leaves `TaskRunner.pump` with that field replaced by a\nUTF-8-safe head/tail preview (`{ preview: { head, tail } }`) and an\nadditive `spill` descriptor; the full JSON serialization is uploaded to\nthe blob plane under an idempotent, content-addressed key, and\n`spill.blob` is where a consumer reads it back. If the upload fails the\npreview still ships, carrying `spill.unstoredReason` instead — omission\nis always described, never silent.\n\nThis is a per-event bound, orthogonal to `maxTaskOutputBytes` (a\nwhole-task total, counted AFTER spilling) and to\nthe server-advertised activity ingress budget.\n\n**Consumer contract:** `spill`'s presence is the only signal that the\ninline field is a preview. A consumer that renders `tool_result.output`\nwithout checking `spill` renders a truncation as the whole result.\n\nMust be a positive safe integer of at least\nMIN_MAX_INLINE_EVENT_BYTES (4096) — below that a legitimate\n`spill` descriptor no longer fits inside the cap it exists to enforce.\nAnything else (0, negative, non-integer, `NaN`,\n`Number.POSITIVE_INFINITY`) is a config validation error thrown\nsynchronously from `createDaemonWithAdapters`/`createDaemon`; there is\nno opt-out, because \"unbounded event\" is exactly the state this exists\nto prevent."
+      "description": "Per-EVENT inline ceiling (default import ('./event-spill.js').DEFAULT_MAX_INLINE_EVENT_BYTES,\n64 KiB) for the two `AgentEvent` fields a runtime authors freely:\n`tool_use.input` and `tool_result.output`. An event whose serialization\nexceeds this leaves `TaskRunner.pump` with that field replaced by a\nUTF-8-safe head/tail preview (`{ preview: { head, tail } }`) and an\nadditive `spill` descriptor; the full JSON serialization is uploaded to\nthe blob plane under an idempotent, content-addressed key, and\n`spill.blob` is where a consumer reads it back. If the upload fails the\npreview still ships, carrying `spill.unstoredReason` instead — omission\nis always described, never silent.\n\nThis is a per-event bound, orthogonal to `maxTaskOutputBytes` (a\nwhole-task total, counted AFTER spilling) and to\nthe server-advertised activity ingress budget.\n\n**Consumer contract:** `spill`'s presence is the only signal that the\ninline field is a preview. A consumer that renders `tool_result.output`\nwithout checking `spill` renders a truncation as the whole result.\n\nMust be a positive safe integer of at least\nimport ('./event-spill.js').MIN_MAX_INLINE_EVENT_BYTES (4096) — below that a legitimate\n`spill` descriptor no longer fits inside the cap it exists to enforce.\nAnything else (0, negative, non-integer, `NaN`,\n`Number.POSITIVE_INFINITY`) is a config validation error thrown\nsynchronously from `createDaemonWithAdapters`/`createDaemon`; there is\nno opt-out, because \"unbounded event\" is exactly the state this exists\nto prevent."
     },
     "progressBatch": {
       "type": "object",

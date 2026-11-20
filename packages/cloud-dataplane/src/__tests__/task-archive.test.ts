@@ -116,9 +116,9 @@ describe.skipIf(SKIP_DATAPLANE)(`terminal-task archive on Postgres — ${SKIP_RE
         const answers = [];
         for (const envelope of [
           completeEnvelope(taskA, canaryA.text),
-          createEnvelope('task.fail', { reason: 'a different terminal', retryable: false, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId: taskA }),
+          createEnvelope('task.fail', { reason: 'a different terminal', retryable: false, agentRef: AGENT_REF, executor: { id: 'codex' } }, { taskId: taskA }),
           progressEnvelope(taskA, 2, canaryA.text),
-          createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId: taskA }),
+          createEnvelope('task.claim', { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { id: 'codex' } }, { taskId: taskA }),
         ]) {
           // Each replay is a new envelope id; the answer is what is compared.
           const { status, body } = await device.send(envelope);
@@ -199,7 +199,7 @@ describe.skipIf(SKIP_DATAPLANE)(`terminal-task archive on Postgres — ${SKIP_RE
       await runTask(host, device, taskId, createCanary('redacted'));
       const claim = async () => {
         const { outcomes, ...counts } = (await device.send(createEnvelope('task.claim',
-          { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { kind: 'runtime', runtimeId: 'codex' } }, { taskId }))).body as { outcomes: { id: string }[] };
+          { deviceId: device.deviceId, agentRef: AGENT_REF, executor: { id: 'codex' } }, { taskId }))).body as { outcomes: { id: string }[] };
         return { ...counts, outcomes: outcomes.map(({ id: _id, ...outcome }) => outcome) };
       };
       const refused = { accepted: 0, rejected: 1, outcomes: [{ outcome: 'rejected', reason: 'not_permitted' }] };

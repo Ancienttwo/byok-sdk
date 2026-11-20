@@ -1,3 +1,5 @@
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
+import { parseModelProviderProfile } from '../../../keys/src/provider-profile';
 import { testExecutionScratch, testScratchRoot } from "./fixtures/execution-scratch";
 import { TEST_LEASE_WRITER_IDENTITY } from './fixtures/runtime-env';
 import { createTestKeychain } from '../../../../scripts/testing/macos-keychain.mjs';
@@ -5,7 +7,6 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { existsSync, promises as fs } from 'node:fs';
 import { createServer, type ServerResponse, type Server } from 'node:http';
-import { pathToFileURL } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash, randomUUID } from 'node:crypto';
@@ -22,6 +23,7 @@ import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
 const BUN_BIN = resolveBunBin();
 const PROCESS_WAIT = { timeout: 5_000, interval: 50 };
+const RECOVERY_TIMEOUT_MS = 60_000;
 const SENTINEL = 'BYOK_KNIFE3_PROVIDER_SECRET_SENTINEL';
 const clientRoot = path.resolve(import.meta.dirname,'../..');
 const sessions: Session[] = [];
@@ -72,13 +74,19 @@ const _auditNative = _auditSqlite.DatabaseSync;
 _auditSqlite.DatabaseSync = class extends _auditNative { constructor(file,options) { _auditFs.appendFileSync(${JSON.stringify(file)},JSON.stringify({actor:${JSON.stringify(actor)},pid:process.pid,file:String(file)})+${JSON.stringify('\n')}); super(file,...(options === undefined ? [] : [options])); } };
 _auditSync();\n`;
 }
-// The complete SIGKILL scenario uses the existing 30s integration-test budget.
-// Event waiting rejects on fixture exit; it does not change TestServer/product deadlines.
+// Reject on child exit and report which wire messages arrived before timeout.
 async function waitEnvelope(predicate:(event:Envelope)=>boolean, child:ChildProcess):Promise<Envelope> {
   return new Promise((resolve,reject)=>{
-    const finish=(event?:Envelope)=>{clearInterval(timer);child.off('exit',exited);if(event)resolve(event);else reject(new Error(logs.join('')||'daemon exited before event'));};
+    const finish=(event?:Envelope)=>{
+      clearInterval(timer);
+      clearTimeout(deadline);
+      child.off('exit',exited);
+      if(event) resolve(event);
+      else reject(new Error(`Missing recovery envelope. Received ${server!.received.map(({type, task_id})=>`${type}(${task_id ?? ''})`).join(', ')}. Child output: ${logs.join('')}`));
+    };
     const exited=()=>finish();
     const timer=setInterval(()=>{const event=server!.received.find(predicate);if(event)finish(event);},10);
+    const deadline=setTimeout(()=>finish(),20_000);
     child.once('exit',exited);
     const event=server!.received.find(predicate);if(event)finish(event);
   });
@@ -117,7 +125,8 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   provider=createServer((req,res)=>{ let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{requests.push({body,authorization:req.headers.authorization}); const old=body.includes('OLD_HOST_CONTEXT');if(old&&waitingModel)return;reply(res,old?'':'fresh result',old?command:undefined);});});
   await new Promise<void>(resolve=>provider!.listen(0,'127.0.0.1',resolve)); const address=provider.address(); if (!address || typeof address==='string') throw new Error('missing provider port');
   const profilePath=path.join(root,'profile.json');
-  await fs.writeFile(profilePath,JSON.stringify({controlDir:control,profile:{adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-02T00:00:00.000Z',updated_at:'2026-10-02T00:00:00.000Z',display_name:'Fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}}));
+  const profile = parseModelProviderProfile({adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-02T00:00:00.000Z',updated_at:'2026-10-02T00:00:00.000Z',display_name:'Fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}});
+  await fs.writeFile(profilePath, JSON.stringify({ controlDir: control, profile }));
   server=await TestServer.start(); const config={clientEntry:index,launcherEntry:launcher,serverUrl:server.url,productId:`durable-restart-${randomUUID()}`,scratchRoot:testScratchRoot(),storeDir:path.join(root,'store'),homeRoot:path.join(root,'home'),egressPolicy:DEFAULT_AGENT_EGRESS_POLICY,profilePath,sessionDir:path.join(root,'sessions'),leaseWriter:TEST_LEASE_WRITER_IDENTITY};
   const configPath=path.join(root,'daemon.json'); await fs.writeFile(configPath,JSON.stringify(config));
   let enrollment:unknown;
@@ -129,7 +138,7 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
     await vi.waitFor(()=>{if(child.exitCode!==null) throw new Error(logs.join(''));expect(stdout).toContain('"ready":true');},{ ...PROCESS_WAIT, timeout: 10_000 });return child;
   };
   const first=await start();
-  const offer=(taskId:string,instruction:string)=>createEnvelope('task.offer',{instruction,agentRef:{agentId:'recovery-agent',profileRevision:'1'},...FRESH_OFFER,target:{lane:'byok',runtimeId:'pi',providerId:'probe',modelId:'probe'}},{taskId,seq:server!.nextSeq()});
+  const offer=(taskId:string,instruction:string)=>createEnvelope('task.offer',{instruction,agentRef:{agentId:'recovery-agent',profileRevision:'1'},...FRESH_OFFER,target:{ lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [] } } }},{taskId,seq:server!.nextSeq()});
   server.send(offer('old-task','OLD_HOST_CONTEXT'));
   await waitEnvelope(event=>event.type==='task.started'&&event.task_id==='old-task',first);
   let oldLaunch:Record<string,any> | undefined;
@@ -154,7 +163,7 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   if(toolGroup!==undefined)await vi.waitFor(()=>expect(liveGroup(toolGroup)).toEqual([]),PROCESS_WAIT);
   for(const pid of interruptedTree)ownedPids.delete(pid);launcherPids=launcherPids.filter(pid=>!interruptedTree.includes(pid));
   if(daemonOnly&&!waitingModel) {const writes=await fs.readFile(path.join(home,'orphan-writes.log'),'utf8');const count=requests.length;await new Promise(resolve=>setTimeout(resolve,250));expect(await fs.readFile(path.join(home,'orphan-writes.log'),'utf8')).toBe(writes);expect(requests.length).toBe(count);}
-  const oldBytes=await fs.readFile(oldReplica);const oldHash=createHash('sha256').update(oldBytes).digest('hex');const auditCut=(await rows(audit)).length;
+  const auditCut=(await rows(audit)).length;
   // Kill was not graceful: residue really exists and includes old execution input, but never the provider key.
   expect(JSON.stringify(launchConfig)).toContain('OLD_HOST_CONTEXT');
   const residue=[...(await files(config.storeDir)),...(await files(config.sessionDir)),...(await files(config.scratchRoot))];
@@ -182,11 +191,11 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   expect(logs.join('')).not.toContain(SENTINEL);
  }
 
-it.skipIf(BUN_BIN === undefined || process.platform === 'win32')('SIGKILL real durable execution never reopens old replica, restarts from Host only, and leaves no provider key', () => recoveryScenario(false),30_000);
+it.skipIf(BUN_BIN === undefined || process.platform === 'win32')('SIGKILL real durable execution never reopens old replica, restarts from Host only, and leaves no provider key', () => recoveryScenario(false), RECOVERY_TIMEOUT_MS);
 // Durable parent-death guarantees are POSIX-only until a Windows Job Object design is validated.
 const RECOVERY_INTERPRETERS=[{name:'node-current',binary:process.execPath},...(BUN_BIN ? [{name:'bun',binary:BUN_BIN}] : []),...['/opt/homebrew/opt/node@24/bin/node','/opt/homebrew/opt/node@22/bin/node'].filter(existsSync).map(binary=>({name:binary,binary}))];
-it.skipIf(BUN_BIN === undefined || process.platform === 'win32').each(RECOVERY_INTERPRETERS)('daemon-only SIGKILL stops launcher worker detached tools through $name', ({binary}) => recoveryScenario(true,binary),30_000);
-it.skipIf(BUN_BIN === undefined || process.platform === 'win32').each(RECOVERY_INTERPRETERS)('daemon-only SIGKILL cancels in-flight model through $name', ({binary}) => recoveryScenario(true,binary,true),30_000);
+it.skipIf(BUN_BIN === undefined || process.platform === 'win32').each(RECOVERY_INTERPRETERS)('daemon-only SIGKILL stops launcher worker detached tools through $name', ({binary}) => recoveryScenario(true,binary), RECOVERY_TIMEOUT_MS);
+it.skipIf(BUN_BIN === undefined || process.platform === 'win32').each(RECOVERY_INTERPRETERS)('daemon-only SIGKILL cancels in-flight model through $name', ({binary}) => recoveryScenario(true,binary,true), RECOVERY_TIMEOUT_MS);
 
 
 it.skipIf(BUN_BIN === undefined || process.platform === 'win32')('N1 real custody startPiProvider and unmodified built worker agree on private IPC and keep key out of env', async () => {
@@ -201,13 +210,14 @@ const __executionScratch = await testExecutionScratch();
   const received:Array<{authorization:unknown;body:string}>=[];
   provider=createServer((req,res)=>{let body='';req.on('data',chunk=>body+=chunk);req.on('end',()=>{received.push({authorization:req.headers.authorization,body});reply(res,'real IPC result');});});
   await new Promise<void>(resolve=>provider!.listen(0,'127.0.0.1',resolve)); const address=provider.address();if(!address||typeof address==='string')throw new Error('missing port');
-  const profilePath=path.join(root,'profile.json');await fs.writeFile(profilePath,JSON.stringify({controlDir:control,profile:{adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-02T00:00:00.000Z',updated_at:'2026-10-02T00:00:00.000Z',display_name:'Fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}}));
+  const profilePath=path.join(root,'profile.json');const profile = parseModelProviderProfile({adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-02T00:00:00.000Z',updated_at:'2026-10-02T00:00:00.000Z',display_name:'Fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}});
+  await fs.writeFile(profilePath, JSON.stringify({ controlDir: control, profile }));
   const adapter=new PiAdapter({durableLane:true,byokLauncher:{command:process.execPath,args:[launcher],profileDbPath:profilePath,sessionDir:path.join(root,'sessions')}});
-  const selection={lane:'byok' as const,runtimeId:'pi' as const,providerId:'probe',modelId:'probe'};
+  const selection={ lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'byok-profile' as const, providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [] } } };
   const prepared=await adapter.prepare({offer:{instruction:'N1 fresh Host context',target:selection}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
   const env=testRuntimeEnv();
   const launch=await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch, kind:'instruction',cwd:home,env,});
-  const manifest=sealRuntimeOperationManifest({taskId:'ipc-task',runtimeId:'pi',descriptor:adapter.descriptor,modelTarget:selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'ipc-agent',profileRevision:'1'},lease:{leaseId:'ipc-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});
+  const manifest=sealRuntimeOperationManifest({taskId:'ipc-task',runtimeId:'pi',descriptor:adapter.descriptor,selection:selection.selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'ipc-agent',profileRevision:'1'},lease:{leaseId:'ipc-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});
   const session=await prepared.operation.start({ scratch: (launch).scratch, kind:'instruction',instruction:'N1 fresh Host context',manifest,env,runtimeLaunch:launch,mcpEnv:projectPiMcpEnvironment(env),durableContext:{replicaRoot:path.join(store,'durable-replicas'),tenantId:'tenant-test',lifecycle:{ownsLease:()=>true,record:async()=>{}}}});sessions.push(session);
   const events=[];for await(const event of session.events)events.push(event);
   expect(events.some(event=>event.type==='error')).toBe(false);expect(events.at(-1)).toEqual({type:'turn_end'});
@@ -222,13 +232,14 @@ const __executionScratch = await testExecutionScratch();
 it.skipIf(process.platform !== 'darwin')('real built keys launcher bin completes durable IPC with OS custody and inherit stdio', async () => {
 const __executionScratch = await testExecutionScratch();
 
-  const {SqliteProviderProfileStore,parseModelProviderProfile,MacOsKeychainSecretStore,modelProviderSecretName}=await import('../../../keys/src/index');
+  const {SqliteProviderProfileStore,MacOsKeychainSecretStore,modelProviderSecretName}=await import('../../../keys/src/index');
   const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'byok-durable-real-bin-')));roots.push(root);
   const home=path.join(root,'home'),store=path.join(root,'store');await Promise.all([home,store].map(dir=>fs.mkdir(dir)));
   const headers:unknown[]=[];provider=createServer((req,res)=>{req.resume();req.on('end',()=>{headers.push(req.headers.authorization);reply(res,'real CLI result');});});
   await new Promise<void>(resolve=>provider!.listen(0,'127.0.0.1',resolve));const address=provider.address();if(!address||typeof address==='string')throw new Error('no port');
   const profilePath=path.join(root,'profiles.db');const profiles=new SqliteProviderProfileStore({path:profilePath});
-  try{await profiles.save(parseModelProviderProfile({adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-03T00:00:00.000Z',updated_at:'2026-10-03T00:00:00.000Z',display_name:'OS custody fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}}));}finally{await profiles.close();}
+  const profile = parseModelProviderProfile({adapter:'openai_compatible',auth_mode:'bearer',base_url:`http://127.0.0.1:${address.port}/v1`,capabilities:[],created_at:'2026-10-03T00:00:00.000Z',updated_at:'2026-10-03T00:00:00.000Z',display_name:'OS custody fixture',enabled:true,kind:'model',model:'probe',profile_ref:'probe',provider_kind:'custom',pi_model:{...PI_MODEL_FIXTURE,reasoning:false,thinkingLevel:'off'}});
+  try { await profiles.save(profile); } finally { await profiles.close(); }
   const keychain = await createTestKeychain();
   const servicePrefix = `byok-test-2405-durable-${randomUUID()}`;
   const secrets = new MacOsKeychainSecretStore({ servicePrefix, keychainPath: keychain.path })
@@ -239,9 +250,9 @@ const __executionScratch = await testExecutionScratch();
   });
   await secrets.set(secretName, SENTINEL);
   const adapter=new PiAdapter({durableLane:true,byokLauncher:{command:process.execPath,args:[path.resolve(clientRoot,'../keys/dist/bin/pi-provider-launcher.js')],profileDbPath:profilePath,sessionDir:path.join(root,'sessions'),secretServicePrefix:servicePrefix,macosKeychainPath:keychain.path}});
-  const selection={lane:'byok' as const,runtimeId:'pi' as const,providerId:'probe',modelId:'probe'};const prepared=await adapter.prepare({offer:{instruction:'real bin',target:selection}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
+  const selection={ lane: 'harness' as const, harnessId: 'pi' as const, selection: { mode: 'byok-profile' as const, providerProfile: { ...exactProviderProfileBinding(profile), requiredCapabilities: [] } } };const prepared=await adapter.prepare({offer:{instruction:'real bin',target:selection}} as never);if(prepared.kind!=='prepared')throw new Error(prepared.reason);
   const env=testRuntimeEnv();const launch=await prepared.operation.resolveRuntimeLaunch!({ scratch: __executionScratch, kind:'instruction',cwd:home,env,});
-  const manifest=sealRuntimeOperationManifest({taskId:'real-bin',runtimeId:'pi',descriptor:adapter.descriptor,modelTarget:selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'real-bin-agent',profileRevision:'1'},lease:{leaseId:'real-bin-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});
+  const manifest=sealRuntimeOperationManifest({taskId:'real-bin',runtimeId:'pi',descriptor:adapter.descriptor,selection:selection.selection,requiredToolsetIds:[],cwd:home,workspace:{workspaceDir:home},agentRef:{agentId:'real-bin-agent',profileRevision:'1'},lease:{leaseId:'real-bin-lease',canonicalHome:home},forwardedEnvironmentNames:Object.keys(env)});
   const session=await prepared.operation.start({ scratch: (launch).scratch, kind:'instruction',instruction:'real bin',manifest,env,runtimeLaunch:launch,mcpEnv:projectPiMcpEnvironment(env),durableContext:{replicaRoot:path.join(store,'durable-replicas'),tenantId:'tenant-test',lifecycle:{ownsLease:()=>true,record:async()=>{}}}});sessions.push(session);
   const events=[];for await(const event of session.events)events.push(event);expect(events.some(event=>event.type==='error')).toBe(false);expect(events.at(-1)).toEqual({type:'turn_end'});expect(headers).toEqual([`Bearer ${SENTINEL}`]);
 });

@@ -3,6 +3,7 @@
 // The adapter processes are the existing fake CLI fixtures, selected through
 // each adapter's public resolver seam; no vendor binary or model call is used.
 
+import assertNode from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
@@ -17,9 +18,14 @@ const clientDistIndex = path.join(clientDir, 'dist', 'index.js');
 const serverDistIndex = path.join(clientDir, '..', 'server', 'dist', 'index.js');
 const fixtureDir = path.join(clientDir, 'src', '__tests__', 'fixtures');
 const runtimes = ['claude', 'codex', 'pi'];
-// A custom harness on an executable .mjs fixture, which Windows cannot execFile.
+// The AGY fixture is executable on POSIX. Windows cannot execFile its .mjs.
 const runsAgy = process.platform !== 'win32';
 const allowedRuntimes = runsAgy ? [...runtimes, 'agy'] : runtimes;
+const piProfile = Object.freeze({ profileRef: 'smoke', profileRevision: '1', profileHash: `sha256:${'a'.repeat(64)}`,
+  requiredCapabilities: [] });
+const smokeTarget = (harnessId) => ({ lane: 'harness', harnessId, selection: harnessId === 'pi'
+  ? { mode: 'byok-profile', providerProfile: piProfile, modelId: 'smoke-model' }
+  : { mode: 'device-default' } });
 const timeoutMs = 20_000;
 // The client default Agent egress policy. The daemon below runs it (an empty
 // `agentEgress`) and declines an offer that names any other policy.
@@ -324,16 +330,21 @@ try {
   // Each fake reads its lifecycle variables, set on the live environment below, from its child environment.
   const fakeEnvironment = (runtime) => ({ pass: ['PATH', `FAKE_${runtime.toUpperCase()}_*`] });
   const agyLog = path.join(workDir, 'agy.jsonl');
-  Object.assign(process.env, { FAKE_ACP_VERSION: '1.5.11', FAKE_ACP_LOG: agyLog });
+  const agyModel = 'gemini-3-pro-preview';
+  Object.assign(process.env, { FAKE_ACP_VERSION: '1.5.11', FAKE_ACP_LOG: agyLog, FAKE_ACP_MODEL_CATALOG: agyModel });
   const adapters = [
     new client.ClaudeAdapter({ runtimeEnvironment: fakeEnvironment('claude'), resolveBin: () => ({ command: runtimeShim('claude'), source: 'path' }) }),
     new client.CodexAdapter({ runtimeEnvironment: fakeEnvironment('codex'), resolveBin: () => ({ command: runtimeShim('codex'), source: 'path' }) }),
     lifecycleAdapter(new client.PiAdapter({
       runtimeEnvironment: fakeEnvironment('pi'),
       resolveBin: () => ({ command: fake('pi'), source: 'path' }),
+      byokLauncher: { command: fake('pi'), profileDbPath: path.join(workDir, 'pi-profiles.sqlite'), sessionDir: path.join(workDir, 'pi-sessions') },
+      validateProviderProfileBinding: async (binding) => assertNode.deepEqual(binding, piProfile),
       spawnFn: (command, args, options) => {
         piSpawnCount += 1;
-        return spawnFixture(command, args, options);
+        const separator = args.indexOf('--');
+        assert(separator !== -1, 'Pi launch did not pass through the profile launcher');
+        return spawnFixture(command, args.slice(separator + 1), options);
       },
     })),
     ...(runsAgy ? [new client.AgyAdapter({
@@ -413,40 +424,18 @@ try {
   };
 
   const preAdmissionPiSpawns = piSpawnCount;
-  const rejected = await withTimeout(
-    submit('adapter-smoke-pi-byok', {
-      instruction: 'adapter task smoke: missing Pi BYOK launcher',
-      target: {
-        lane: 'byok',
-        runtimeId: 'pi',
-        providerId: 'openai',
-        modelId: 'gpt-5.2',
-      },
-    }),
-    'Pi BYOK missing-launcher submit',
-  );
-  const rejectedResult = await terminalResult(rejected.taskId, 'Pi BYOK missing-launcher lifecycle');
-  // Server terminal receipt precedes the HTTP answer and the daemon's
-  // journal-backed settlement. Observe the Host independently before reading it.
-  await waitFor(
-    () => localEvents.some((event) => event.taskId === rejected.taskId && event.kind === 'failed'),
-    'Pi BYOK missing-launcher Host settlement',
-  );
-  const rejectedSnapshot = await byok.tasks.get(rejected.taskId);
-  const rejectedLocalKinds = localEvents
-    .filter((event) => event.taskId === rejected.taskId)
-    .map((event) => event.kind);
-  assert(rejectedResult.state === 'Failed', `missing launcher result was not Failed: ${JSON.stringify(rejectedResult)}`);
-  assert(rejectedSnapshot?.state === 'Failed', `missing launcher task was not Failed: ${JSON.stringify(rejectedSnapshot)}`);
-  assert(serverStates.of(rejected.taskId).includes('Failed'), `missing launcher did not reach Failed: ${JSON.stringify(serverStates.of(rejected.taskId))}`);
-  assert(rejectedLocalKinds.includes('failed'), `missing launcher did not project local failure: ${JSON.stringify(rejectedLocalKinds)}`);
-  assert(!rejectedLocalKinds.includes('claimed') && !rejectedLocalKinds.includes('started'), `missing launcher published claim/start: ${JSON.stringify(rejectedLocalKinds)}`);
-  assert(piSpawnCount === preAdmissionPiSpawns, `missing launcher spawned Pi before decline (${preAdmissionPiSpawns} -> ${piSpawnCount})`);
-  console.log('PASS pi BYOK missing launcher: decline -> failed without claim/start/spawn');
+  const missingModelTask = 'adapter-smoke-pi-missing-model';
+  await assertNode.rejects(withTimeout(submit(missingModelTask, {
+    instruction: 'adapter task smoke: omit a required Pi model',
+    target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'adapter-model' } },
+  }), 'Pi selection with missing model'), { code: 'invalid_request' });
+  assert(await byok.tasks.offer(missingModelTask) === undefined, 'a missing Pi model created an offer');
+  assert(piSpawnCount === preAdmissionPiSpawns, 'a missing model spawned Pi');
+  console.log('PASS pi: cloud refused a missing model before enqueue or spawn');
 
   for (const runtime of runtimes) {
     const handle = await withTimeout(
-      submit(`adapter-smoke-${runtime}`, { instruction: `adapter task smoke: ${runtime}`, target: { lane: 'runtime', runtimeId: runtime } }),
+      submit(`adapter-smoke-${runtime}`, { instruction: `adapter task smoke: ${runtime}`, target: smokeTarget(runtime) }),
       `${runtime} submit`,
     );
     const result = await terminalResult(handle.taskId, `${runtime} task lifecycle`);
@@ -464,7 +453,7 @@ try {
 
     assert(result.state === 'Complete', `${runtime} result was not Complete: ${JSON.stringify(result)}`);
     assert(snapshot?.state === 'Complete', `${runtime} server task was not Complete: ${JSON.stringify(snapshot)}`);
-    assert(snapshot.claimedExecutor?.kind === 'runtime' && snapshot.claimedExecutor.runtimeId === runtime, `${runtime} server claimedExecutor mismatch: ${JSON.stringify(snapshot)}`);
+    assert(snapshot.claimedExecutor?.id === runtime, `${runtime} server claimedExecutor mismatch: ${JSON.stringify(snapshot)}`);
     assert(localTask?.state === 'Complete', `${runtime} local observer task was not Complete: ${JSON.stringify(localTask)}`);
     assert(localClaim?.claimedRuntime === runtime, `${runtime} local claimed event runtime mismatch: ${JSON.stringify(localClaim)}`);
     assert(localTask?.claimedRuntime === runtime, `${runtime} local observer claimedRuntime mismatch: ${JSON.stringify(localTask)}`);
@@ -485,7 +474,8 @@ try {
   }
 
   if (runsAgy) {
-    const handle = await withTimeout(submit('adapter-smoke-agy', { instruction: 'adapter task smoke: agy', target: { lane: 'harness', harnessId: 'agy' } }), 'agy submit');
+    const handle = await withTimeout(submit('adapter-smoke-agy', { instruction: 'adapter task smoke: agy',
+      target: { lane: 'harness', harnessId: 'agy', selection: { mode: 'byok', providerId: 'google', modelId: agyModel } } }), 'agy submit');
     const result = await terminalResult(handle.taskId, 'agy task lifecycle');
     assert(result.state === 'Complete', `agy result was not Complete: ${JSON.stringify(result)}`);
     const started = (await fs.readFile(agyLog, 'utf8')).trim().split('\n').map((line) => JSON.parse(line)).find((fact) => fact.kind === 'start');
@@ -510,7 +500,7 @@ try {
     process.env[envNames.hang] = '1';
     try {
       const handle = await withTimeout(
-        submit(`adapter-lifecycle-${runtime}`, { instruction: `adapter lifecycle smoke: ${runtime}`, target: { lane: 'runtime', runtimeId: runtime } }),
+        submit(`adapter-lifecycle-${runtime}`, { instruction: `adapter lifecycle smoke: ${runtime}`, target: smokeTarget(runtime) }),
         `${runtime} lifecycle submit`,
       );
       await waitFor(

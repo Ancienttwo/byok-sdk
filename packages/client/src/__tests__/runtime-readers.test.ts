@@ -62,7 +62,7 @@ function codexHarness() {
   vi.stubEnv('READER_DAEMON_ONLY', 'daemon-only-value');
   const adapter = new CodexAdapter({
     resolveBin: () => ({ command: executable, source: 'env' }),
-    runtimeEnvironment: { base: 'allowlist', allow: ['READER_API_KEY'] },
+    runtimeEnvironment: { base: 'allowlist', allow: ['READER_API_KEY', 'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'] },
     spawnFn: ((_command: string, args: readonly string[], options: SpawnOptions) => {
       environments.push(options.env);
       const child = spawn(process.execPath, ['-e', codexFixture, '--', version, mode, ...args], options);
@@ -77,13 +77,17 @@ function codexHarness() {
 it('queries the catalog and quota in process using only the filtered runtime environment', async () => {
   const { adapter, environments } = codexHarness();
   vi.stubEnv('BYOK_TOOL_AUTHORIZATION_GATE', 'private-gate-credential');
+  vi.stubEnv('OPENAI_API_KEY', 'host-openai-key');
+  vi.stubEnv('ANTHROPIC_API_KEY', 'host-anthropic-key');
   await expect(adapter.listModels()).resolves.toEqual({ kind: 'ok', models: [{ id: 'test-model', displayName: 'display-[redacted]',
     effortLevels: ['low', 'high'], defaultEffort: 'low', default: true, serviceTiers: ['priority', 'fast'],
     serviceTierDetails: [{ id: 'priority', displayName: 'Priority', description: 'tier-[redacted]' }, { id: 'fast' }] }] });
   await expect(adapter.accountUsage()).resolves.toMatchObject({ kind: 'available', plan: 'test-plan', windows: [{ usedRatio: 0.25 }] });
   const { env } = await adapter.runtimeEnvironment();
   expect(env.READER_API_KEY).toBe(credential);
-  expect(environments).toEqual([env, env, env, env]);
+  const { OPENAI_API_KEY, ANTHROPIC_API_KEY, ...childEnv } = env;
+  expect([OPENAI_API_KEY, ANTHROPIC_API_KEY]).toEqual(['host-openai-key', 'host-anthropic-key']);
+  expect(environments).toEqual([childEnv, childEnv, childEnv, childEnv]);
   expect(env).not.toHaveProperty('READER_DAEMON_ONLY');
   expect(env).not.toHaveProperty('BYOK_TOOL_AUTHORIZATION_GATE');
 });
@@ -288,7 +292,10 @@ it.skipIf(process.platform === 'win32')('keeps native version floor evidence loc
     runtimeEnvironment: { base: 'allowlist' } });
   const { observations, ...hello } = await detectRuntimes([adapter]);
   const versions = { installedVersion: '1.4.9', requiredVersion: '1.5.0' };
-  expect(parseControlStatusRuntimes({ runtimes: observations })?.[0]?.unsupportedVersion).toEqual(versions);
+  expect(parseControlStatusRuntimes({ runtimes: observations })?.[0]).toMatchObject({
+    unsupportedVersion: versions,
+    upgrade: { state: 'required', installedVersion: '1.4.9', minimumVersion: '1.5.0', command: 'agy update' },
+  });
   const lines = formatLiveStatusLines({
     pid: 1, uptimeMs: 1, paired: true, lifecycle: { phase: 'running', connection: 'open' }, runtimes: observations,
     toolsets: { revision: '1', toolsets: [] },

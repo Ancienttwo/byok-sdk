@@ -44,6 +44,22 @@ to record those details. This query observes current state. Keep the service
 stopped and hold exclusive
 store ownership through the recovery write.
 
+## Managed runtime upgrades
+
+Use `runtimeInstallRoot` in the daemon configuration and pass the same
+absolute directory to the Host operation.
+
+```ts
+import { upgradeRuntime } from '@byok-sdk/client';
+
+const result = await upgradeRuntime({ installRoot, runtimeId: 'codex' });
+```
+
+The SDK stages the exact qualified Claude, Codex, DSH, or OpenCode v2 release
+and publishes it after the version and liveness checks. For AGY and Grok,
+the result gives the vendor command and reason. Pi ships with the SDK. See
+[the Host upgrade checklist](../../docs/releases/host-upgrade-next-minor.md#managed-runtime-upgrades).
+
 ## Exact provider-profile admission
 
 When `DaemonConfig.piByokLauncher` is configured, the daemon advertises the

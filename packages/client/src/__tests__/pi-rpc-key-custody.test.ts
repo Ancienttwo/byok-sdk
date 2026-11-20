@@ -1,3 +1,4 @@
+import { exactProviderProfileBinding } from '../../../keys/src/provider-profile-binding';
 import { afterEach, describe, expect, it } from 'vitest';
 import { execFileSync, spawn } from 'node:child_process';
 import { promises as fs, readFileSync } from 'node:fs';
@@ -61,8 +62,8 @@ describe('pi-rpc BYOK key custody (#385)', () => {
 
   type Respond = (res: ServerResponse, ordinal: number) => void;
 
-  /** One BYOK pi-rpc operation through the adapter, the real keys launch sequence and the built host. */
-  async function runLane(instruction: string, respond: Respond, prepareHome?: (home: string) => Promise<void>, providerId?: 'opencode-go') {
+  /** BYOK Pi operations through the adapter, the real keys launch sequence and the built host. */
+  async function runLane(instruction: string, respond: Respond, prepareHome?: (home: string) => Promise<void>, providerId?: 'opencode-go', modelIds: Array<string | undefined> = [undefined]) {
     const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-385-'))); roots.push(root);
     const control = path.join(root, 'control'), home = path.join(root, 'home'); await fs.mkdir(control); await fs.mkdir(home);
     await prepareHome?.(home);
@@ -75,7 +76,7 @@ describe('pi-rpc BYOK key custody (#385)', () => {
 
     const received: Array<{ authorization: unknown; body: string }> = [];
     const hostEnvironments: string[] = [];
-    const hostPid = (): number => JSON.parse(readFileSync(path.join(control, 'launches.jsonl'), 'utf8').trim().split('\n')[0]!).hostPid as number;
+    const hostPid = (): number => JSON.parse(readFileSync(path.join(control, 'launches.jsonl'), 'utf8').trim().split('\n').at(-1)!).hostPid as number;
     const server = createServer((req, res) => {
       let body = ''; req.on('data', chunk => { body += chunk; });
       req.on('end', () => {
@@ -96,14 +97,14 @@ describe('pi-rpc BYOK key custody (#385)', () => {
     servers.push(server); await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     const address = server.address(); if (!address || typeof address === 'string') throw new Error('no provider port');
     const profileDbPath = path.join(root, 'profile.json');
-    await fs.writeFile(profileDbPath, JSON.stringify({ controlDir: control, secret: CANARY, profile: {
+    const profile = parseModelProviderProfile({
       adapter: 'openai_compatible', auth_mode: 'bearer', base_url: `http://127.0.0.1:${address.port}/v1`, capabilities: [],
       created_at: '2026-10-13T00:00:00.000Z', updated_at: '2026-10-13T00:00:00.000Z', display_name: 'Probe', enabled: true, kind: 'model',
       model: 'probe', profile_ref: 'probe', provider_kind: 'custom', pi_model: { ...PI_MODEL_FIXTURE, reasoning: false, thinkingLevel: 'off',
-        ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } } }));
+        ...(providerId === undefined ? {} : { api: 'openai-completions', providerId }) } });
+    await fs.writeFile(profileDbPath, JSON.stringify({ controlDir: control, secret: CANARY, profile }));
 
     const sessionDir = path.join(root, 'sessions');
-    const scratch = await testExecutionScratch();
     const adapter = new PiAdapter({ byokLauncher: { command: process.execPath, args: [launcher], profileDbPath, sessionDir } });
     const ambientAgent = path.join(root, '.pi', 'agent');
     await fs.mkdir(ambientAgent, { recursive: true });
@@ -111,17 +112,41 @@ describe('pi-rpc BYOK key custody (#385)', () => {
       baseUrl: 'http://127.0.0.1:9/v1', apiKey: 'AMBIENT_MODEL_KEY', models: [{ id: 'probe' }],
     } } }));
     await fs.writeFile(path.join(ambientAgent, 'auth.json'), JSON.stringify({ 'opencode-go': { type: 'api_key', key: 'AMBIENT_AUTH_KEY' } }));
-    const session = await startPreparedOperation(adapter, {
-      instruction,
-      target: { lane: 'byok', runtimeId: 'pi', providerId: 'probe', modelId: 'probe' },
-    }, { workspaceDir: home, scratch, env: { ...testRuntimeEnv(), HOME: root, PI_CODING_AGENT_DIR: ambientAgent } });
-    sessions.push(session);
     const events: Array<AgentEvent | MessageDraftDelta> = [];
-    for await (const event of session.events) { events.push(event); if (event.type === 'turn_end' || event.type === 'error') break; }
+    const binding = { ...exactProviderProfileBinding(profile), requiredCapabilities: [] };
+    const runs = [];
+    for (const modelId of modelIds) {
+      const scratch = await testExecutionScratch();
+      const session = await startPreparedOperation(adapter, {
+        instruction,
+        target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile: binding,
+          ...(modelId === undefined ? {} : { modelId }) } },
+      }, { workspaceDir: home, scratch, env: { ...testRuntimeEnv(), HOME: root, PI_CODING_AGENT_DIR: ambientAgent } });
+      sessions.push(session);
+      runs.push({ session, scratch });
+      for await (const event of session.events) { events.push(event); if (event.type === 'turn_end' || event.type === 'error') break; }
+    }
     const launches = readFileSync(path.join(control, 'launches.jsonl'), 'utf8').trim().split('\n')
       .map(line => JSON.parse(line) as { args: string[]; env: Record<string, string>; stdio: unknown });
-    return { events, received, hostEnvironments, launches, session, sessionDir, home, scratch };
+    return { events, received, hostEnvironments, launches, ...runs[0]!, sessionDir, home };
   }
+
+  it.skipIf(BUN_BIN === undefined)('sends two overrides and the default against one saved profile', async () => {
+    const modelIds = ['org/first:high', 'org/second', undefined];
+    const lane = await runLane('Reply once.', res => stream(res, { role: 'assistant', content: 'done' }, 'stop'), undefined, undefined, modelIds);
+    const expected = ['org/first:high', 'org/second', 'probe'];
+    expect(lane.received.map(request => JSON.parse(request.body).model)).toEqual(expected);
+    expect(lane.received.map(request => request.authorization)).toEqual(expected.map(() => `Bearer ${CANARY}`));
+    expect(lane.launches.map(({ args }) => args[args.indexOf('--model') + 1])).toEqual(expected);
+  }, 60_000);
+
+  it.skipIf(BUN_BIN === undefined).each(['model_not_found', '模型不存在'])('reports a model refusal (%s) from the actual provider stream', async message => {
+    await expect(runLane('Reply once.', res => {
+      res.writeHead(400, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ error: { message } }));
+    }, undefined, undefined, ['absent']))
+      .rejects.toMatchObject({ phase: 'run', failure: { class: 'model_unavailable' } });
+  }, 60_000);
 
   it.skipIf(BUN_BIN === undefined)('declared OpenCode Go ignores ambient user models.json and auth.json on RPC', async () => {
     const lane = await runLane('Use only the configured model.', res => stream(res, { role: 'assistant', content: 'done' }, 'stop'), undefined, 'opencode-go');

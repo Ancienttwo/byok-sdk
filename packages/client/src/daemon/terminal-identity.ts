@@ -1,9 +1,8 @@
-import { HarnessIdSchema, RuntimeIdSchema, type AgentRef, type ClaimedExecutor } from '@byok-sdk/protocol';
+import { ClaimedExecutorSchema, type AgentRef, type ClaimedExecutor } from '@byok-sdk/protocol';
 
-/** What `task.claim.executor` names for the adapter this device picked: a wire runtime id, else a custom harness. */
+/** The executor named by the adapter this device picked. */
 export function claimedExecutorFor(descriptorId: string): ClaimedExecutor {
-  const runtime = RuntimeIdSchema.safeParse(descriptorId);
-  return runtime.success ? { kind: 'runtime', runtimeId: runtime.data } : { kind: 'harness', harnessId: HarnessIdSchema.parse(descriptorId) };
+  return ClaimedExecutorSchema.parse({ id: descriptorId });
 }
 
 /**

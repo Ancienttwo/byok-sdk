@@ -123,7 +123,7 @@ describe('#1103: version verdicts in local status and doctor', () => {
 
   it('projects every state on the detailed runtimes lines and bounds the local block reason', () => {
     const descriptor = (id: string) => freezeRuntimeAdapterDescriptor({
-      id, supportsDispatchSelection: false,
+      id, selectionModes: ['device-default'],
       capabilities: { steer: true, resume: true, approvalInteractive: false },
     });
     const observations = [

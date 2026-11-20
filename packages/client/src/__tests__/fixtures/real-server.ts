@@ -115,14 +115,14 @@ export async function waitForTaskEvent(
  */
 export async function submitAgentTask(
   real: Pick<RealServerHandle, 'byok'>,
-  input: { taskId: string; deviceId: string; instruction: string; runtime?: RuntimeId; agentRef?: AgentRef },
+  input: { taskId: string; deviceId: string; instruction: string; runtime?: RuntimeId; target?: ExecutionTarget; agentRef?: AgentRef },
 ): Promise<string> {
   await real.byok.executions.submit({
     taskId: input.taskId,
     deviceId: input.deviceId,
     payload: {
       instruction: input.instruction,
-      target: { lane: 'runtime', runtimeId: input.runtime ?? 'pi' },
+      target: input.target ?? { lane: 'harness', harnessId: input.runtime ?? 'pi', selection: { mode: 'device-default' } },
       agentRef: input.agentRef ?? { agentId: `e2e-agent-${randomUUID()}`, profileRevision: 'rev-1' },
       session: { mode: 'fresh' },
       egressPolicy: DEFAULT_AGENT_EGRESS_POLICY,

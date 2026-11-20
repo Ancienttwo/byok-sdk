@@ -3,7 +3,7 @@ import { createEnvelope, AGENT_MESSAGE_DRAFT_FRAME_MAX_BYTES } from '@byok-sdk/p
 import { describe, expect, it, vi } from 'vitest';
 import { handleInboundEnvelope } from '../inbound';
 import { tenantStoresFor } from '../tenant-stores';
-import { createHarness, TENANT_A, TENANT_B } from './support/harness';
+import { TEST_HARNESSES, createHarness, offerPayload, TENANT_A, TENANT_B } from './support/harness';
 
 const taskId = 'draft-readback';
 const agentRef = { agentId: 'draft-readback-agent', profileRevision: '1' };
@@ -11,8 +11,8 @@ async function setup() {
   const clock = createMutableClock();
   const h = createHarness({ clock, agentMessage: { consume: async () => ({ outcome: 'accepted' }) } });
   const device = await h.pairDevice(TENANT_A);
-  await h.stores.tasks.reserveAgentOffer(TENANT_A, { taskId, deviceId: device.deviceId, agentRef });
-  await h.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, capabilities: ['agent-message-egress'] });
+  await h.stores.devices.recordCapabilities(TENANT_A, { deviceId: device.deviceId, harnesses: TEST_HARNESSES, capabilities: ['agent-home-contract', 'agent-message-egress'] });
+  await h.cloud.enqueueAgentOffer(TENANT_A, device.deviceId, { taskId, payload: { ...offerPayload(), agentRef } });
   await h.stores.receipts.record(TENANT_A, { key: `agent-message-offer:${device.deviceId}:${taskId}`,
     body: JSON.stringify({ agentRef, requirement: { mode: 'required', contract: 'draft.v1', contentType: 'text/plain', maxBytes: 16 },
       context: { destinationBinding: 'chat' } }) });
@@ -70,7 +70,7 @@ describe('cloud Agent message draft readback', () => {
       contentHash: `sha256:${'a'.repeat(64)}` }, { taskId });
     expect(await send(published)).toEqual({ outcome: 'accepted' });
     expect(await read()).toMatchObject({ state: 'ended', text: 'hello' });
-    const executor = { kind: 'runtime', runtimeId: 'pi' } as const;
+    const executor = { id: 'pi' } as const;
     expect(await send(createEnvelope('task.claim', { deviceId: device.deviceId, agentRef, executor }, { taskId }))).toEqual({ outcome: 'accepted' });
     expect(await send(createEnvelope('task.complete', { agentRef, summary: 'done', sessionRef: 'session', executor }, { taskId }))).toEqual({ outcome: 'accepted' });
     expect(await h.stores.agentMessageDraft.read(TENANT_A, taskId)).toBeUndefined();

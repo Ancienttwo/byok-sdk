@@ -24,7 +24,7 @@ import { isAgentMemorySecureFilesystemAvailable } from '../daemon/agent-memory';
 import { TaskRunner } from '../daemon/task-runner';
 import { McpToolsetRegistry } from '../daemon/toolset-registry';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { expectAgentMemoryNameRules, expectAgentMemoryRawByteCompare, expectAgentMemoryRestoreCleanup } from './fixtures/agent-memory-name-rules';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
@@ -219,7 +219,7 @@ describe('Agent memory MCP local authority', () => {
       approvalInteractive: true,
       mcpToolsets: false,
     });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -241,7 +241,7 @@ describe('Agent memory MCP local authority', () => {
       'task.offer',
       {
         ...FRESH_OFFER, instruction: 'strict Agent task must not receive an unsupported MCP surface',
-        target: { lane: 'runtime', runtimeId: 'codex' },
+        target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
         agentRef: { agentId: 'agent-memory-mcp-toolsets', profileRevision: 'profile-1' },
       },
       { taskId: 'task-memory-mcp-toolsets', seq: 1 },
@@ -269,7 +269,7 @@ describe('Agent memory MCP local authority', () => {
       approvalInteractive: true,
       mcpToolsets: true,
     });
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       adapters: [unsupported, supported],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -313,7 +313,7 @@ describe('Agent memory MCP local authority', () => {
     const hostStorageRoot = await root();
     const adapter = new StubRuntimeAdapter('codex', { kind: 'available' }, { steer: true, resume: true, approvalInteractive: true, mcpToolsets: true });
     const releaseStart = adapter.blockStart();
-    const runner = new TaskRunner({ getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
+    const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); }, getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, advertisedCapabilities: advertiseEveryDeviceFlag, agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY, agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }), scratchRoot: testScratchOwner(),
       adapters: [adapter],
       agentHome: new AgentHomeManager({ hostStorageRoot }),
       agentSessionHandoffs: new AgentSessionHandoffStore(),
@@ -331,7 +331,7 @@ describe('Agent memory MCP local authority', () => {
       ...(process.platform === 'darwin' ? { resolveAgentMemoryFilesystemHelperBin: () => '/opt/byok-agent-memory-fs' } : {}),
     });
     const offer = runner.handleEnvelope(createEnvelope('task.offer', {
-      ...FRESH_OFFER, instruction: 'recall memory in the first turn', target: { lane: 'runtime', runtimeId: 'codex' },
+      ...FRESH_OFFER, instruction: 'recall memory in the first turn', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } },
       agentRef: { agentId: 'agent-memory-start', profileRevision: 'profile-1' },
     }, { taskId: 'task-memory-start', seq: 1 }));
     await vi.waitFor(() => expect(adapter.startCalls).toHaveLength(1));

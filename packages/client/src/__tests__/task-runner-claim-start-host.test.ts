@@ -16,7 +16,7 @@ import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult } from '..
 import { FRESH_OFFER, freshOfferRunnerDeps } from './fixtures/fresh-offer';
 import { freshTestAgentRef, testAgentHomeDeps } from './fixtures/test-agent';
 import { testScratchOwner } from './fixtures/execution-scratch';
-import { testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
+import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
 const unusedBlobClient: BlobResolver = {
@@ -28,7 +28,7 @@ function makeRunner(
   sent: Envelope[],
   overrides: Partial<TaskRunnerDeps> = {},
 ): { runner: TaskRunner; deps: TaskRunnerDeps } {
-  const deps: TaskRunnerDeps = {
+  const deps: TaskRunnerDeps = { advertisedHarnesses() { return testHarnesses(this.adapters); },
     ...freshOfferRunnerDeps(),
     getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement,
     scratchRoot: testScratchOwner(),
@@ -253,7 +253,7 @@ describe('TaskRunner claim/start/cancel host wiring (S4)', () => {
     expect(adapter.startCalls).toHaveLength(0);
     expect(wireTypes(sent, taskId)).toEqual(['task.claim', 'task.cancelled']);
     const cancelled = sent.find(envelope => envelope.type === 'task.cancelled')!;
-    expect(cancelled.payload).toMatchObject({ reason: 'stop before start', executor: { kind: 'runtime' } });
+    expect(cancelled.payload).toMatchObject({ reason: 'stop before start', executor: { id: 'pi' } });
     expect(hostFor(runner).archivedTask(taskId)?.terminal).toMatchObject({ kind: 'cancelled', reason: 'stop before start' });
     expect(runner.activeTaskCount).toBe(0);
     forgetHost(runner);
@@ -275,7 +275,7 @@ describe('TaskRunner claim/start/cancel host wiring (S4)', () => {
     expect(adapter.startCalls).toHaveLength(0);
     expect(wireTypes(sent, taskId)).toEqual(['task.claim', 'task.fail']);
     expect(sent.find(envelope => envelope.type === 'task.fail')?.payload).toMatchObject({
-      reason: 'runtime startup deadline exceeded', retryable: true, executor: { kind: 'runtime' },
+      reason: 'runtime startup deadline exceeded', retryable: true, executor: { id: 'pi' },
     });
     expect(hostFor(runner).archivedTask(taskId)?.terminal).toMatchObject({ kind: 'failed', retryable: true });
     forgetHost(runner);

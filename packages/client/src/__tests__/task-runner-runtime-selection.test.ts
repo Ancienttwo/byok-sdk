@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
+import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
 import type { RuntimeAdapter, RuntimeOperationStartInput } from '../types';
 import { TestServer } from './fixtures/test-server';
@@ -77,7 +80,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     const prepare = vi.spyOn(adapter, 'prepare');
     await setup([adapter]);
     const taskId = 'unsupported-resume';
-    server.send(createEnvelope('task.offer', { target: { lane: 'runtime', runtimeId: id }, agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: id, selection: { mode: 'device-default' } }, agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
     const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
     expect(decline.payload).toMatchObject({ reason: `runtime "${id}" cannot resume a session`, retryable: false });
     expect(decline.payload).not.toHaveProperty('runtimeUnavailable');
@@ -110,23 +113,73 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       const taskId = 'auto-resume-capable';
       server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), session: { mode: 'resume', sessionRef: 'prior' }, instruction: 'x' }, { taskId, seq: server.nextSeq() }));
       const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === taskId);
-      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
+      expect(claim.payload).toMatchObject({ executor: { id: 'pi' } });
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
       expect(prepare).not.toHaveBeenCalled();
       expect(pi.startCalls).toHaveLength(1);
     } finally { handoff.mockRestore(); }
   });
 
+  it('skips an advertised OpenCode that requires an explicit model on auto', async () => {
+    const opencode = new OpenCodeAdapter();
+    const descriptor = opencode.descriptor;
+    vi.spyOn(opencode, 'descriptor', 'get').mockReturnValue({ ...descriptor, platforms: [process.platform] });
+    vi.spyOn(opencode, 'detect').mockResolvedValue({ kind: 'available' });
+    const prepare = vi.spyOn(opencode, 'prepare');
+    await setup([opencode]);
+    const hello = await server.waitFor(envelope => envelope.type === 'conn.hello');
+    expect(hello.payload).toMatchObject({ harnesses: expect.arrayContaining([expect.objectContaining({ id: 'opencode', capabilities: expect.objectContaining({ selectionModes: ['adapter-model'] }) })]) });
+    const taskId = 'auto-explicit-model';
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    const decline = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === taskId);
+    expect(decline.payload).toMatchObject({ runtimeUnavailable: { cause: 'none_available' } });
+    const explicitId = 'missing-adapter-model';
+    server.send(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: 'opencode', selection: { mode: 'adapter-model' } },
+      agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId: explicitId, seq: server.nextSeq() }));
+    const missing = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === explicitId);
+    expect(missing.payload).toMatchObject({ code: 'invalid_request', retryable: false });
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it.each(['invalid_request', 'model_unavailable'] as const)('forwards adapter rejection %s before claiming', async code => {
+    const adapter = new StubRuntimeAdapter('pi');
+    vi.spyOn(adapter, 'prepare').mockResolvedValue({ kind: 'reject', code, reason: 'selection refused', retryable: false });
+    await setup([adapter]);
+    const taskId = `reject-${code}`;
+    server.send(createEnvelope('task.offer', { target: { lane: 'auto' }, agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    const declined = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === taskId);
+    expect(declined.payload).toMatchObject({ code, retryable: false });
+    expect(server.received.some(envelope => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
+  });
+
+  it.each(['claude', 'codex'] as const)('declines %s API-key login before claiming a subscription offer', async id => {
+    const fake = fileURLToPath(new URL(`./fixtures/fake-${id}.mjs`, import.meta.url));
+    const resolveBin = () => ({ command: fake, source: 'env' as const });
+    const environment: Record<string, string> = id === 'claude'
+      ? { FAKE_CLAUDE_AUTH_STATUS: JSON.stringify({ loggedIn: true, authMethod: 'api_key', apiKeySource: 'apiKeyHelper' }) }
+      : { FAKE_CODEX_ACCOUNT_TYPE: 'apiKey' };
+    const adapter = id === 'claude' ? new ClaudeAdapter({ resolveBin }) : new CodexAdapter({ resolveBin });
+    const runtimeEnvironment = testRuntimeEnvironment();
+    vi.spyOn(adapter, 'runtimeEnvironment').mockResolvedValue({ ...runtimeEnvironment, env: { ...runtimeEnvironment.env, ...environment } });
+    await setup([adapter]);
+    const taskId = `subscription-key-${id}`;
+    server.send(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: id, selection: { mode: 'subscription', modelId: 'fixture-model' } },
+      agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+    const declined = await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === taskId);
+    expect(declined.payload, JSON.stringify(declined.payload)).toMatchObject({ code: 'invalid_request', retryable: false });
+    expect(server.received.some(envelope => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
+  });
+
   it('declines an undeclared dispatch selection before preparing or claiming', async () => {
     const base = new StubRuntimeAdapter('claude');
     let supportsSelection = true;
-    const adapter: RuntimeAdapter = { get descriptor() { return { ...base.descriptor, supportsDispatchSelection: supportsSelection }; }, detect: () => base.detect(), prepare: vi.fn((input) => base.prepare(input)), runtimeEnvironment: () => base.runtimeEnvironment() };
+    const adapter: RuntimeAdapter = { get descriptor() { return { ...base.descriptor, selectionModes: supportsSelection ? ['device-default', 'subscription'] as const : ['device-default'] as const }; }, detect: () => base.detect(), prepare: vi.fn((input) => base.prepare(input)), runtimeEnvironment: () => base.runtimeEnvironment() };
     await setup([adapter]);
     supportsSelection = false;
     const taskId = 'unsupported-selection';
-    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'subscription', runtimeId: 'claude', modelId: 'model' } }, { taskId, seq: server.nextSeq() }));
+    server.send(createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'claude', selection: { mode: 'subscription', modelId: 'model' } } }, { taskId, seq: server.nextSeq() }));
     const decline = await server.waitFor((e) => e.type === 'task.decline' && e.task_id === taskId);
-    expect(decline.payload).toMatchObject({ reason: 'runtime "claude" cannot take a dispatch selection', retryable: false });
+    expect(decline.payload).toMatchObject({ reason: 'runtime "claude" has no advertised support for the requested selection or effort', retryable: false });
     expect(server.received.some((e) => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
     expect(adapter.prepare).not.toHaveBeenCalled();
     expect(base.startCalls).toHaveLength(0);
@@ -143,7 +196,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'claude' } });
+      expect(claim.payload).toMatchObject({ executor: { id: 'claude' } });
       // `task.claim` is sent before `adapter.start()` is actually invoked
       // (workspace-dir creation awaits in between — see `handleOffer`) —
       // wait for `task.started` too before asserting on `startCalls`,
@@ -163,7 +216,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
+      expect(claim.payload).toMatchObject({ executor: { id: 'pi' } });
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-order-2');
       expect(pi.startCalls).toHaveLength(1);
     });
@@ -180,7 +233,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     );
 
     const claim = await server.waitFor((e) => e.type === 'task.claim');
-    expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'codex' } });
+    expect(claim.payload).toMatchObject({ executor: { id: 'codex' } });
     await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-preference-1');
     expect(codex.startCalls).toHaveLength(1);
     expect(claude.startCalls).toHaveLength(0);
@@ -195,13 +248,15 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     };
 
     it('declines an explicit blocked runtime non-retryably, without claiming or starting it', async () => {
-      const blocked = new StubRuntimeAdapter('codex', blockedDetect);
+      const blocked = new StubRuntimeAdapter('codex');
       await setup([blocked]);
+      await server.waitFor(envelope => envelope.type === 'conn.hello');
+      vi.spyOn(blocked, 'detect').mockResolvedValue(blockedDetect);
       const taskId = 'task-version-block-explicit';
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'runtime', runtimeId: 'codex' } },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'x', target: { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } },
           { taskId, seq: server.nextSeq() },
         ),
       );
@@ -227,7 +282,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         ),
       );
       const claim = await server.waitFor((e) => e.type === 'task.claim' && e.task_id === taskId);
-      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'claude' } });
+      expect(claim.payload).toMatchObject({ executor: { id: 'claude' } });
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === taskId);
       expect(blocked.startCalls).toHaveLength(0);
       expect(claude.startCalls).toHaveLength(1);
@@ -242,15 +297,16 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       // covered end-to-end by daemon-task-loop.test.ts's own identical
       // scenario; asserted again here so this workstream's own test file is
       // self-contained proof the explicit path wasn't disturbed.
-      const pi = new StubRuntimeAdapter('pi', { kind });
+      const pi = new StubRuntimeAdapter('pi');
       await setup([pi]);
       const hello = await server.waitFor((envelope) => envelope.type === 'conn.hello');
-      expect(hello.payload).toMatchObject({ runtimes: [] });
+      expect(hello.payload).toMatchObject({ harnesses: [{ id: 'pi' }] });
+      vi.spyOn(pi, 'detect').mockResolvedValue({ kind });
 
       server.send(
         createEnvelope(
           'task.offer',
-          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } },
+          { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } },
           { taskId: 'task-unavailable-1', seq: server.nextSeq() },
         ),
       );
@@ -266,7 +322,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     it('seals one descriptor snapshot through preparation, claim, environment projection, and prepared start', async () => {
       const sourceDescriptor = {
         id: 'pi',
-        supportsDispatchSelection: true,
+        selectionModes: ['device-default', 'subscription'] as const,
         capabilities: {
           steer: true,
           resume: true,
@@ -305,7 +361,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         await setup([adapter]);
         const taskId = 'task-descriptor-snapshot';
         server.send(
-          createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', target: { lane: 'runtime', runtimeId: 'pi' } }, { taskId, seq: server.nextSeq() }),
+          createEnvelope('task.offer', { agentRef: freshTestAgentRef(), ...FRESH_OFFER,  instruction: 'x', target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } } }, { taskId, seq: server.nextSeq() }),
         );
         const claim = await server.waitFor((envelope) => envelope.type === 'task.claim' && envelope.task_id === taskId);
         await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);
@@ -325,7 +381,12 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       }
     });
 
-    it('falsifier: missing Pi BYOK launcher must decline before claim, start, spawn, or workspace mutation', async () => {
+    const providerProfile = {
+      profileRef: 'openai', profileRevision: '1',
+      profileHash: `sha256:${'a'.repeat(64)}`, requiredCapabilities: [],
+    };
+
+    it('refuses a Pi profile before prepare when the device has no launcher', async () => {
       const taskId = 'task-pi-missing-launcher-falsifier';
       const storeDir = await tmpDir('byok-pi-falsifier-store-');
       const spawnCalls: unknown[] = [];
@@ -356,10 +417,9 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
           { agentRef: freshTestAgentRef(), ...FRESH_OFFER,
             instruction: 'x',
             target: {
-              lane: 'byok',
-              runtimeId: 'pi',
-              providerId: 'openai',
-              modelId: 'gpt-5.2',
+              lane: 'harness',
+              harnessId: 'pi',
+              selection: { mode: 'byok-profile', providerProfile },
             },
           },
           { taskId, seq: server.nextSeq() },
@@ -373,19 +433,18 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
         prepares: prepareSpy.mock.calls.length,
         started: server.received.some((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId),
         spawns: spawnCalls.length,
-      }).toEqual({ declined: true, claimed: false, prepares: 1, started: false, spawns: 0 });
+      }).toEqual({ declined: true, claimed: false, prepares: 0, started: false, spawns: 0 });
     });
 
-    it('selects the adapter from a byok target', async () => {
+    it('selects Pi from its advertised provider-profile mode', async () => {
       const pi = new StubRuntimeAdapter('pi');
       const claude = new StubRuntimeAdapter('claude');
       await setup([claude, pi]);
 
       const target = {
-        lane: 'byok' as const,
-        runtimeId: 'pi' as const,
-        providerId: 'openai',
-        modelId: 'gpt-5.2',
+        lane: 'harness' as const,
+        harnessId: 'pi' as const,
+        selection: { mode: 'byok-profile' as const, providerProfile, modelId: 'gpt-5.2' },
       };
       server.send(
         createEnvelope(
@@ -396,7 +455,7 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
       );
 
       const claim = await server.waitFor((e) => e.type === 'task.claim');
-      expect(claim.payload).toMatchObject({ executor: { kind: 'runtime', runtimeId: 'pi' } });
+      expect(claim.payload).toMatchObject({ executor: { id: 'pi' } });
       await server.waitFor((e) => e.type === 'task.started' && e.task_id === 'task-selection-1');
       expect(pi.startCalls[0]?.task.target).toEqual(target);
       expect(claude.startCalls).toHaveLength(0);

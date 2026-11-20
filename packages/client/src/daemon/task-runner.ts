@@ -11,6 +11,8 @@ import {
   type AgentMessageEgressRequirement,
   type AgentEgressPolicy,
   type Envelope,
+  type ExecutionTarget,
+  type HarnessInfo,
   type SealedDeclineCode,
   type ClaimedExecutor,
   type SteerRefusalReason,
@@ -132,6 +134,7 @@ export interface TaskRunnerDeps {
   /** Present only when the device declared native-sessions. */
   readonly nativeSessions?: { readonly sessionDir: string };
   adapters: RuntimeAdapter[];
+  advertisedHarnesses: () => readonly HarnessInfo[];
   runtimeAllowlist?: string[];
   /**
    * M5 batch-3 (workstream 1): auto-select priority order for `pickAdapter`'s
@@ -1632,11 +1635,11 @@ export class TaskRunner {
    * different device's installed runtime set might satisfy it.
    */
   private pickAdapter(
-    requestedRuntime: string | undefined,
+    target: ExecutionTarget,
     requirements: RuntimeRequirements,
     signal: AbortSignal,
     searchExposure = false,
   ): Promise<PickResult> {
-    return pickAdapter.call(this, requestedRuntime, requirements, signal, searchExposure);
+    return pickAdapter.call(this, target, requirements, signal, searchExposure);
   }
 }

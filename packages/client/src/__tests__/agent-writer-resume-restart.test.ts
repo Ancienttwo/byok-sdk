@@ -45,7 +45,7 @@ describe('Agent writer session resume across a daemon restart', () => {
       agentEgress: { policy: DEFAULT_AGENT_EGRESS_POLICY },
     };
     const offer = (taskId: string, sessionRef?: string) => server.send(createEnvelope('task.offer', {
-      instruction: taskId, agentRef, target: { lane: 'runtime', runtimeId: 'pi' }, ...(sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef } }),
+      instruction: taskId, agentRef, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }, ...(sessionRef === undefined ? FRESH_OFFER : { session: { mode: 'resume' as const, sessionRef } }),
     }, { taskId, seq: server.nextSeq() }));
 
     const first = new StubRuntimeAdapter('pi');
