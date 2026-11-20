@@ -286,14 +286,25 @@ export class DshAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: `dsh cannot attach the task MCP servers: ${(error as Error).message}`, retryable: false };
     }
-    const command = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'dsh')).bin.command;
+    const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'dsh'));
+    const command = resolved.bin.command;
     const { env: base } = await this.runtimeEnvironment();
     const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, dshEnvironment(base, this.root, this.sandbox));
     if (version.kind !== 'available') {
       return { kind: 'reject', reason: `dsh installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
     }
-    const resolved = { ...configured, model };
-    return { kind: 'prepared', operation: { start: (start) => this.start(start, command, resolved, modelId, effort) } };
+    const token = dshVersionToken(version.stdout);
+    const unsupported = dshVersionUnsupported(token);
+    if (unsupported !== null) {
+      return { kind: 'reject', reason: `dsh installation refused: ${unsupported.reason}`, retryable: false };
+    }
+    const { executableSource } = runtimeExecutableFields(resolved, command);
+    const modelSelection = { ...configured, model };
+    return {
+      kind: 'prepared',
+      operation: { start: (start) => this.start(start, command, modelSelection, modelId, effort) },
+      detected: { version: token, executableSource, ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, token) },
+    };
   }
 
   private async start(input: RuntimeOperationStartInput, command: string, selection: DshModelSelection & { model: string }, modelId: string | undefined, effort: string | undefined): Promise<Session> {

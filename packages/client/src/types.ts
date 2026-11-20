@@ -480,6 +480,8 @@ export interface RuntimeAdapterRejectedOperation {
 export interface RuntimeAdapterPreparedOperation {
   kind: 'prepared';
   operation: PreparedRuntimeOperation;
+  /** Facts about the installation captured by this operation. */
+  detected?: Pick<Extract<RuntimeDetectResult, { kind: 'available' }>, 'version' | 'executableSource' | 'versionVerdict'>;
 }
 
 export type RuntimeAdapterPrepareResult = RuntimeAdapterRejectedOperation | RuntimeAdapterPreparedOperation;

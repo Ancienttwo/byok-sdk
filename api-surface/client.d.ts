@@ -6257,6 +6257,9 @@ export interface RuntimeAdapterRejectedOperation {
 export interface RuntimeAdapterPreparedOperation {
     kind: 'prepared';
     operation: PreparedRuntimeOperation;
+    detected?: Pick<Extract<RuntimeDetectResult, {
+        kind: 'available';
+    }>, 'version' | 'executableSource' | 'versionVerdict'>;
 }
 export type RuntimeAdapterPrepareResult = RuntimeAdapterRejectedOperation | RuntimeAdapterPreparedOperation;
 export interface RuntimeOperationManifest {

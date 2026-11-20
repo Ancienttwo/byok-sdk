@@ -314,10 +314,11 @@ export class CodexAdapter implements RuntimeAdapter {
     if (!mcpAllowlistSupported && (input.requiredToolsetIds.length > 0 || Object.keys(input.mcpServers ?? {}).length > 0)) {
       return { kind: 'reject', reason: CODEX_MCP_TOOL_ALLOWLIST_REFUSAL, retryable: false };
     }
-    const { invocation } = installation;
+    const { invocation, detected: { version, executableSource, versionVerdict } } = installation;
     let admittedLaunch: CodexAppServerLaunch | undefined;
     return {
       kind: 'prepared',
+      detected: { version, executableSource, versionVerdict },
       operation: {
         ...(model === undefined ? {} : { resolveRuntimeLaunch: async (resources: CodexLaunchInput) => {
           if (admittedLaunch !== undefined) throw authority('Codex subscription launch was already resolved');
@@ -424,7 +425,6 @@ export class CodexAdapter implements RuntimeAdapter {
     const taskServers = mcpServers.map(server => server.name);
     if (taskServers.length > 0 && !mcpAllowlistSupported) throw authority(CODEX_MCP_TOOL_ALLOWLIST_REFUSAL);
     const excludeUserMcp = this.options.agentUserMcpServers === 'excluded' && input.manifest.agentRef !== undefined;
-    const excludeUserContext = this.options.agentUserContext === 'excluded' && input.manifest.agentRef !== undefined;
     const spawned = createOwnedLineProcessSpawn({
       nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn,
     });

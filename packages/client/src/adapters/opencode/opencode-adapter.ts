@@ -143,14 +143,18 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     const probe = await this.probe();
     if (probe.detected.kind !== 'available' || probe.command === undefined || probe.version === undefined)
       return { kind: 'reject', reason: `opencode installation refused: ${probe.detected.kind}`, retryable: false };
-    const { command, version } = probe;
-    return { kind: 'prepared', operation: { start: start => {
-      const actual = start.manifest.selection;
-      if (actual?.mode !== selection?.mode || (actual?.mode === 'adapter-model' && actual.modelId !== modelId) || start.manifest.effort !== effort) {
-        throw authority('prepared OpenCode operation received a manifest with different runtime selection');
-      }
-      return this.start(start, command, version, models, effort);
-    } } };
+    const { command, version, detected: { executableSource, versionVerdict } } = probe;
+    return {
+      kind: 'prepared',
+      detected: { version, executableSource, versionVerdict },
+      operation: { start: start => {
+        const actual = start.manifest.selection;
+        if (actual?.mode !== selection?.mode || (actual?.mode === 'adapter-model' && actual.modelId !== modelId) || start.manifest.effort !== effort) {
+          throw authority('prepared OpenCode operation received a manifest with different runtime selection');
+        }
+        return this.start(start, command, version, models, effort);
+      } },
+    };
   }
 
   private async start(input: RuntimeOperationStartInput, command: string, version: string, models: readonly string[], effort: string | undefined): Promise<Session> {

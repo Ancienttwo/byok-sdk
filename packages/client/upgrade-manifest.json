@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.44.1",
-    "snapshotSha256": "9a5334ea7a88f1afb4ea79850c0346c8b5059b4b85d015912933f7cde36924c5"
+    "snapshotSha256": "2db0dad9459ef4b89560ee95030b1043b4f8cdd9a9389d38ae5c2bf809cf04ff"
   },
   "configFields": {
     "status": "tracked",
@@ -252,6 +252,16 @@
       "items": [
         "export:@byok-sdk/client#inspectStoreServiceState",
         "export:@byok-sdk/client#StoreServiceState"
+      ]
+    },
+    {
+      "id": "prepared-runtime-detection",
+      "impact": "additive",
+      "summary": "Prepared runtime operations can report the version, executable source and version verdict for the installation they will start. The daemon uses these facts to recheck external CLI search eligibility before claim.",
+      "migration": "https://github.com/Ancienttwo/byok-sdk/issues/2419",
+      "items": [
+        "export:@byok-sdk/client#RuntimeAdapterPreparedOperation",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterPreparedOperation"
       ]
     },
     {
@@ -683,6 +693,11 @@
       "entry": "wire-v8-harness-selection"
     },
     {
+      "item": "export:@byok-sdk/client#RuntimeAdapterPreparedOperation",
+      "change": "changed",
+      "entry": "prepared-runtime-detection"
+    },
+    {
       "item": "export:@byok-sdk/client#RuntimeAdapterRejectedOperation",
       "change": "changed",
       "entry": "harness-model-defaults"
@@ -821,6 +836,11 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
       "change": "changed",
       "entry": "wire-v8-harness-selection"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterPreparedOperation",
+      "change": "changed",
+      "entry": "prepared-runtime-detection"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapterRejectedOperation",

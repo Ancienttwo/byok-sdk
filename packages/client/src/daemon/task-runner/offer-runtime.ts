@@ -20,6 +20,8 @@ import { MCP_HUB_SERVER_INFO, MCP_HUB_SERVER_NAME, MCP_HUB_TOOLS } from '../../m
 import { matchSearchRuntimeEvidence } from '../search-runtime-qualification.js';
 import { MCP_SERVER_SUPPORTED_PROTOCOL_VERSIONS } from '../../mcp-server/index.js';
 
+const SEARCH_UNAVAILABLE_REASON = 'MCP search exposure is unavailable on this device for the requested runtime or version';
+
 export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseContext, input: OfferRuntimeInput) {
   const { taskId, decline, admissionWithdrawn } = phase;
   const {
@@ -261,12 +263,13 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     }
     mcpToolsetTools = Object.freeze(observed);
   }
+  const { adapter, descriptor } = pick;
   let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
   try {
-    prepared = await awaitAdmission(() => pick.adapter.prepare({
+    prepared = await awaitAdmission(() => adapter.prepare({
       signal: blobAbort.signal,
       offer: offered,
-      descriptor: pick.descriptor,
+      descriptor,
       requiredToolsetIds: requiredToolsets ?? [],
       ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
       ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
@@ -280,6 +283,26 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     decline({ reason: prepared.reason, retryable: prepared.retryable,
       ...(prepared.code === undefined ? {} : { code: prepared.code }) });
     return undefined;
+  }
+  const detected = prepared.detected;
+  if (detected?.versionVerdict?.state === 'block') {
+    const token = (detected.version ?? detected.versionVerdict.qualifiedVersion).replace(/[\r\n\t]/g, ' ').slice(0, 256);
+    decline({
+      reason: `runtime "${pick.descriptor.id}" version ${token} is blocked by the device version policy`,
+      retryable: runtimeUnavailableRetryable('version_blocked'),
+      code: 'runtime_unavailable',
+      runtimeUnavailable: { cause: 'version_blocked' },
+    });
+    return undefined;
+  }
+  if (searchExposure && pick.searchEvidence?.executableSource !== 'sdk-entry') {
+    const searchRows = this['deps'].mcpSearch?.candidates(pick.descriptor) ?? [];
+    const verifiedSearch = detected === undefined ? undefined : matchSearchRuntimeEvidence(searchRows, { kind: 'available', ...detected });
+    if (verifiedSearch === undefined) {
+      decline({ reason: SEARCH_UNAVAILABLE_REASON, retryable: true });
+      return undefined;
+    }
+    pick = { ...pick, searchEvidence: verifiedSearch };
   }
   // `approveTools` is a grant, projected only to a runtime that declares
   // `mcpToolApprovals`; it never takes part in admission or runtime selection.
@@ -310,7 +333,7 @@ export async function pickAdapter(
   const searchCandidates = (descriptor: RuntimeAdapter['descriptor']) => descriptor.capabilities.durableLane === true
     ? [] : this['deps'].mcpSearch?.candidates(descriptor) ?? [];
   const searchUnavailable: PickResult = {
-    ok: false, retryable: true, reason: 'MCP search exposure is unavailable on this device for the requested runtime or version',
+    ok: false, retryable: true, reason: SEARCH_UNAVAILABLE_REASON,
   };
 
   const advertised = this['deps'].advertisedHarnesses();
