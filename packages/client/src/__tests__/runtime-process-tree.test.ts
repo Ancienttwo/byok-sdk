@@ -368,6 +368,28 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     await expect(disposeOwnedProcessTree(options)).resolves.toBeUndefined();
   });
 
+  it('settles disposal when a remembered cross-group descendant is a zombie', async () => {
+    const rootPid = 900_003;
+    const descendantPid = 900_004;
+    let rootRunning = true;
+    const child = { pid: rootPid, exitCode: null, get signalCode() { return rootRunning ? null : 'SIGTERM'; } } as ChildProcess;
+    const descendant = { pid: descendantPid, ppid: rootPid, pgid: descendantPid, start: 'descendant start' };
+    const liveTable = new Map([[descendantPid, descendant]]);
+    const zombieTable = new Map([[descendantPid, { ...descendant, zombie: true as const }]]);
+    const observeProcessTableFn = vi.fn(() => ({ table: rootRunning ? liveTable : zombieTable }));
+    await expect(disposeOwnedProcessTree({
+      child, label: 'zombie descendant', waitClosed: async () => {}, isClosed: () => !rootRunning, killGraceMs: 0,
+      observeProcessTableFn,
+      killFn(pid, signal) {
+        expect(pid).toBe(-rootPid);
+        if (!rootRunning) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+        if (signal === 'SIGTERM') rootRunning = false;
+      },
+    })).resolves.toBeUndefined();
+    expect(observeProcessTableFn).toHaveNthReturnedWith(1, { table: liveTable });
+    expect(observeProcessTableFn).toHaveNthReturnedWith(2, { table: zombieTable });
+  });
+
   it('a disposal whose last table read timed out still ends the remembered setsid grandchild on retry (#2105)', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-process-tree-retry-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');

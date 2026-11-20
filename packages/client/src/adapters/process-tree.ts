@@ -651,7 +651,7 @@ function isRunning(child: ChildProcess): boolean {
  * descendants, those that left its process group included (OAR 0.37.0
  * `spawnLineProcess().kill()`, 6d1589d). Read while the root runs: once it is
  * gone, what left its group is re-parented and no longer found below it. An
- * entry seen before stays while it has the same start time or cannot be read.
+ * entry seen before stays while the same identity is live or cannot be read.
  */
 function rememberDescendants(child: ChildProcess, pid: number, read: () => OwnedProcessTableRead): void {
   if (!isRunning(child)) return;
@@ -659,9 +659,12 @@ function rememberDescendants(child: ChildProcess, pid: number, read: () => Owned
   const state = stateFor(child);
   const remembered = new Map<number, ProcessEntry>();
   for (const entry of state.descendants) {
-    if (unreadable?.has(entry.pid) || table.get(entry.pid)?.start === entry.start) remembered.set(entry.pid, entry);
+    const current = table.get(entry.pid);
+    if (unreadable?.has(entry.pid) || (current?.start === entry.start && current.zombie !== true)) remembered.set(entry.pid, entry);
   }
-  for (const entry of descendantsOf(table, pid)) remembered.set(entry.pid, entry);
+  for (const entry of descendantsOf(table, pid)) {
+    if (entry.zombie !== true) remembered.set(entry.pid, entry);
+  }
   state.descendants = [...remembered.values()];
 }
 
@@ -751,9 +754,9 @@ function killDescendants(child: ChildProcess, read: () => OwnedProcessTableRead,
       continue;
     }
     const current = table.get(entry.pid);
-    if (current?.start === entry.start) {
+    if (current?.start === entry.start && current.zombie !== true) {
       pending.set(entry.pid, current);
-      if (current.zombie !== true) running.push(current);
+      running.push(current);
     }
   }
   killEntries(running, table);
