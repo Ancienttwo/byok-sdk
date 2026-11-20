@@ -17,7 +17,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createByokServer, listenLoopback } from '@byok-sdk/server';
 import { bundledSdkHelperHost, createDaemon, resolveSdkHosting, runSdkReservedHelperCommand } from '@byok-sdk/client';
-import { InMemorySecretStore, parseModelProviderProfile, parsePiProviderLauncherOptions, runPiProviderLauncher, SqliteProviderProfileStore } from '@byok-sdk/keys';
+import { InMemorySecretStore, exactProviderProfileBinding, parseModelProviderProfile, parsePiProviderLauncherOptions, runPiProviderLauncher, SqliteProviderProfileStore } from '@byok-sdk/keys';
 import { InMemoryDeviceCredentialBackend } from '@byok-sdk/client/testing';
 
 const MARKER = 'BYOK_EMBEDDED_HOST';
@@ -88,7 +88,11 @@ async function host(): Promise<void> {
     pi_model: { contextWindow: 8192, maxTokens: 1024, reasoning: false, thinkingLevel: 'off',
       compat: { supportsStore: false, supportsDeveloperRole: false, supportsUsageInStreaming: true, maxTokensField: 'max_tokens' } },
   }));
+  const profile = await profiles.get('packaging');
   await profiles.close();
+  if (profile === undefined) throw new Error('packaging provider profile could not be read back');
+  const binding = exactProviderProfileBinding(profile);
+  const providerProfile = { ...binding, requiredCapabilities: [...binding.requiredCapabilities] };
   const daemon = createDaemon({
     localAgentRelease: { version: '0.0.0-packaging' }, productName: 'BYOK Packaging', productId: PRODUCT_ID, deviceName: 'packaging-host', serverUrl,
     storeDir: path.join(root, 'store'), storage: { scratchRoot: path.join(root, 'scratch') },
@@ -104,7 +108,7 @@ async function host(): Promise<void> {
     const { taskId } = await byok.executions.submit({
       taskId: randomUUID(), deviceId,
       payload: { instruction: 'reply once', session: { mode: 'fresh' }, agentRef: AGENT, egressPolicy: EGRESS_POLICY,
-        terminalProjection: { mode: 'none' }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok', providerId: 'packaging', modelId: 'packaging-model' } } },
+        terminalProjection: { mode: 'none' }, target: { lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile } } },
     });
     const task = await until(async () => {
       const snapshot = await byok.tasks.get(taskId);

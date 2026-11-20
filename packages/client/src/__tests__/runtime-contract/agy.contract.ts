@@ -63,7 +63,7 @@ async function turn(where: 'user' | 'owned', script: ProviderScript = submitResu
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home, resolveBin, resolveKey }), provider.origin);
     const env = { ...baseEnv(box.home), ...recorder.env };
-    const events = await runTurn(runtime, 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } });
+    const events = await runTurn(runtime, 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } }, AGY_TARGET);
     return { events, provider, box, calls: await readReceipt(receipt), userSpawned: spawned(userReceipt), mcpEnv: await fs.readFile(`${receipt}.env`, 'utf8') };
   } finally {
     await provider.close();
@@ -86,7 +86,7 @@ async function shellEnvironment() {
   try {
     const recorder = await fileEgress();
     const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
-    const events = await runTurn(runtime, 'Run the command.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } });
+    const events = await runTurn(runtime, 'Run the command.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } }, AGY_TARGET);
     return { text: await fs.readFile(file, 'utf8'), events, command, provider };
   } finally {
     await provider.close();
@@ -108,7 +108,7 @@ async function daemonPid(): Promise<number> {
   try {
     const recorder = await fileEgress();
     const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
-    await runTurn(runtime, 'Start the daemon.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } });
+    await runTurn(runtime, 'Start the daemon.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } }, AGY_TARGET);
     return Number(await fs.readFile(file, 'utf8'));
   } finally {
     await provider.close();
@@ -270,7 +270,7 @@ defineRuntimeCases(`agy runtime contract: agy cases (${target.mode} ${target.exp
       const dead = 'http://127.0.0.1:9';
       const env = { ...baseEnv(box.home), HTTP_PROXY: dead, HTTPS_PROXY: dead, NO_PROXY: new URL(provider.origin).host };
       const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
-      const events = await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env });
+      const events = await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env }, AGY_TARGET);
       expect(events.at(-1)?.type).toBe('turn_end');
       expect(provider.requests.some(request => request.model && request.apiKey === REAL_KEY)).toBe(true);
     } finally {

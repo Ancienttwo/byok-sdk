@@ -551,10 +551,8 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     expect(harness.pi.startCalls).toHaveLength(1);
   });
 
-  // Retention passes the test runs by hand. One pass can end without removing an expired ledger (#2343): it skips a home
-  // whose base lease is still being released after `activeAttempts` reads 0, and a pass that runs out of its per-home
-  // deletion window leaves a directory cursor that the next pass resumes past entries it already read. So the test
-  // runs passes, each told apart by its report, until `removed` holds; `eachPass` checks what every pass must keep.
+  // A pass that runs out of its per-home deletion window leaves a directory cursor that the next pass resumes past
+  // entries it already read. Each test waits for the home lease to release before starting maintenance.
   async function sweepUntil(harness: Harness, sweep: () => (() => void) | undefined, removed: () => Promise<boolean>,
     eachPass: () => Promise<void> = async () => {}): Promise<void> {
     let used: (() => void) | undefined;
@@ -593,7 +591,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await claimed('expired-writer');
     const sessionRef = harness.pi.sessions[0]!.sessionRef;
     await complete(harness, 0, 'expired-writer');
-    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the writer to release');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeHomes === 0, 'the writer home lease to release');
     const ledgers = await expireSessionLedgers(harness, 'ledger-a', retention.sweep);
     expect((await fs.readdir(ledgers)).filter((name) => !name.includes('-task-'))).toEqual([]);
 
@@ -611,7 +609,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await claimed('expired-reader');
     const sessionRef = harness.pi.sessions[0]!.sessionRef;
     await complete(harness, 0, 'expired-reader');
-    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the reader to release');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeHomes === 0, 'the reader home lease to release');
     await expireSessionLedgers(harness, 'ledger-b', retention.sweep);
 
     offer('expired-reader-resume', 'ledger-b', { reader: true, sessionRef });
@@ -628,13 +626,13 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     await claimed('kept-writer');
     const sessionRef = harness.pi.sessions[0]!.sessionRef;
     await complete(harness, 0, 'kept-writer');
-    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the writer to release');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeHomes === 0, 'the first writer home lease to release');
     // Control: a second session in the same home, aged the same but never resumed.
     offer('stale-writer', 'ledger-c');
     await claimed('stale-writer');
     const staleRef = harness.pi.sessions[1]!.sessionRef;
     await complete(harness, 1, 'stale-writer');
-    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the second writer to release');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeHomes === 0, 'the second writer home lease to release');
     const ledgers = path.join(await harness.home('ledger-c'), '.byok', 'runtime-sessions');
     const ledgerName = (ref: string): string => `pi-${createHash('sha256').update(ref, 'utf8').digest('hex')}.jsonl`;
     const expired = new Date(Date.now() - 31 * DAY_MS);
@@ -643,7 +641,7 @@ describe('memory-reader Attempts in one Agent home (#317)', () => {
     offer('kept-writer-resume', 'ledger-c', { sessionRef });
     await claimed('kept-writer-resume');
     await complete(harness, 2, 'kept-writer-resume');
-    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeAttempts === 0, 'the resume to release');
+    await waitUntil(() => harness.daemon.status().agentHomeExecution.activeHomes === 0, 'the resumed writer home lease to release');
     const sessionLedgers = async (): Promise<string[]> => (await fs.readdir(ledgers)).filter((name) => !name.includes('-task-'));
     await sweepUntil(harness, retention.sweep, async () => !(await sessionLedgers()).includes(ledgerName(staleRef)),
       async () => { expect(await sessionLedgers()).toContain(ledgerName(sessionRef)); });

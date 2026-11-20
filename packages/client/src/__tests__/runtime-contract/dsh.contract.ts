@@ -119,7 +119,7 @@ async function turn() {
     await writeUserContext(box.home, await writeSubmitResultServer(box.root, userReceipt, 'user_tool'));
     await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
     const env = { ...baseEnv(box.home), ...recorder.env };
-    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } });
+    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Call the submit_result tool, then finish.', { workspaceDir: box.workspace, env, mcpServers: { host } }, DSH_TARGET);
     return { events, provider, calls: await readReceipt(receipt), userSpawned: spawned(userReceipt),
       mcpEnv: await fs.readFile(`${receipt}.env`, 'utf8'), shellEnv: await fs.readFile(shellEnv, 'utf8'),
       credentialFiles: [...await credentialFiles(box.root, PROVIDER_KEY), ...await credentialFiles((await rootBox()).root, PROVIDER_KEY)],
@@ -147,7 +147,7 @@ async function controlTurn(label: string, write: (root: string) => Promise<void>
     if (init.kind !== 'available') throw new Error(`dsh control root init: ${JSON.stringify(init)}`);
     await write(root);
     const env = { ...baseEnv(box.home), ...recorder.env };
-    await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env });
+    await runTurn(runtime, 'Reply.', { workspaceDir: box.workspace, env }, DSH_TARGET);
     return provider;
   } finally {
     await provider.close();
@@ -366,7 +366,7 @@ async function toolInputTurn() {
   const provider = await startLoopbackProvider('openai-chat', script, MODEL);
   try {
     const env = { ...baseEnv(box.home), ...recorder.env };
-    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Run the tools.', { workspaceDir: box.workspace, env });
+    const events = await runTurn(await adapter(loopbackModel(provider.baseUrl)), 'Run the tools.', { workspaceDir: box.workspace, env }, DSH_TARGET);
     const uses = events.filter(event => event.type === 'tool_use');
     return { calls, uses, risks: uses.map(use => classifyToolCall({ toolName: use.tool, input: use.input as Record<string, unknown>, cwd: box.workspace }, box.workspace, box.home).level) };
   } finally {

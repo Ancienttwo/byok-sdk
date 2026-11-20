@@ -725,8 +725,8 @@ export function selectImpact(paths, context = {}) {
       || path === 'examples/basic/task-events-route.ts' || path === 'examples/basic/task-events-route.test.ts') {
       dirs.add('examples/basic'); continue;
     }
-    // The example page; page-runtimes.test.ts checks its DOM.
-    if (path === 'examples/basic/public/index.html') { dirs.add('examples/basic'); continue; }
+    // The example page and its DOM test.
+    if (path === 'examples/basic/public/index.html' || path === 'examples/basic/page-runtimes.test.ts') { dirs.add('examples/basic'); continue; }
     // The usage notes of the clarification and goal/btw examples.
     if (path === 'examples/basic/clarification-usage.md' || path === 'examples/basic/goal-btw-usage.md') { dirs.add('examples/basic'); continue; }
     // #1061: Codex reference Host fixture (questions-only after native permission fold).

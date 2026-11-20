@@ -21,6 +21,9 @@ const USER_MARKER = 'BYOK-CONTRACT-CODEX-USER-5d02';
 const MEMORY_MARKER = 'BYOK-CONTRACT-CODEX-MEMORY-0f47';
 const FIRST_MARKER = 'BYOK-CONTRACT-CODEX-FIRST-TURN-93b8';
 const placeholderKey = 'sk-runtime-contract-placeholder';
+// The local contract provider uses its own synthetic env key. The adapter
+// scrubs ambient provider credentials before it launches the native CLI.
+const loopbackKeyEnv = 'BYOK_CONTRACT_CODEX_PROVIDER_KEY';
 
 /** Codex prints the version token after the `codex-cli` prefix. */
 const identifies = (version: string, expected: string) => /^codex-cli (\S+)$/.exec(version.trim())?.[1] === expected;
@@ -44,13 +47,13 @@ async function writeUserHome(box: Awaited<ReturnType<typeof createSandbox>>, cod
     'cli_auth_credentials_store = "file"', 'model = "contract-model"', 'model_provider = "contract"',
     '[features]', 'plugins = false', 'memories = true',
     '[model_providers.contract]', 'name = "contract"', `base_url = "${baseUrl}"`, 'wire_api = "responses"',
-    'env_key = "OPENAI_API_KEY"', 'supports_websockets = false', ...extraConfig, '',
+    `env_key = "${loopbackKeyEnv}"`, 'supports_websockets = false', ...extraConfig, '',
   ].join('\n'), { mode: 0o600 });
   await fs.writeFile(path.join(box.workspace, 'AGENTS.md'), `# Project\n\n${PROJECT_MARKER}\n`);
   await fs.writeFile(path.join(codexHome, 'AGENTS.md'), `# User\n\n${USER_MARKER}\n`);
   await fs.mkdir(path.join(codexHome, 'memories'), { recursive: true });
   await fs.writeFile(path.join(codexHome, 'memories', 'memory_summary.md'), `${MEMORY_MARKER}\n`);
-  return { ...baseEnv(box.home), CODEX_HOME: codexHome, OPENAI_API_KEY: placeholderKey, ...egressEnv };
+  return { ...baseEnv(box.home), CODEX_HOME: codexHome, [loopbackKeyEnv]: placeholderKey, ...egressEnv };
 }
 
 /**

@@ -130,7 +130,7 @@
 //   isSqliteAvailable -> dist/sqlite-support.d.ts
 //   listProviderProfileSecretNames -> dist/provider-secret-recovery.d.ts
 //   loadSqliteModule -> dist/sqlite-support.d.ts
-//   modelApiUrl -> dist/http.d.ts
+//   modelApiUrl -> dist/url.d.ts
 //   modelMessageText -> dist/http.d.ts
 //   modelProviderSecretName -> dist/secret-store.d.ts
 //   modelProviderVendor -> dist/provider-catalog.d.ts
@@ -395,14 +395,15 @@ export interface ProviderAuthProfile {
 export declare function requiredProviderSecret(profile: ProviderAuthProfile, secret: string | undefined): string | undefined;
 export declare function providerHeaders(profile: ProviderAuthProfile, secret: string | undefined): Record<string, string>;
 // ==== @byok-sdk/keys dist/http.d.ts ====
-export { classifyModelProviderHttpError } from '@byok-sdk/core/provider-model';
+import { classifyModelProviderHttpError } from '@byok-sdk/core/provider-model';
+export { classifyModelProviderHttpError };
+export { modelApiUrl } from './url.js';
 export type ProviderFetch = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 export declare const PROVIDER_RESPONSE_MAX_BYTES: number;
 export declare const PROVIDER_TIMEOUT_MS = 15000;
 export declare function fetchWithProviderGuards(fetchImpl: ProviderFetch, url: string, init: RequestInit, signal: AbortSignal, timeoutMs?: number): Promise<Response>;
 export declare function parseBoundedJsonResponse(response: Response): Promise<unknown>;
 export declare function readModelProviderResponse(response: Response): Promise<unknown>;
-export declare function modelApiUrl(baseUrl: string, suffix: string): string;
 export declare function modelMessageText(value: unknown): string;
 export declare function objectValue(value: unknown): Record<string, unknown> | undefined;
 export declare function assertLiveModelResponse(value: string): void;
@@ -1375,6 +1376,7 @@ import type { StoreCompatibility } from '@byok-sdk/core';
 export declare function inspectProviderProfileStore(path: string): Promise<StoreCompatibility>;
 // ==== @byok-sdk/keys dist/url.d.ts ====
 export declare function normalizeProviderUrl(value: string): string;
+export declare function modelApiUrl(baseUrl: string, suffix: string): string;
 export declare function isLoopbackProviderUrl(value: string): boolean;
 export declare function isLoopbackHost(hostname: string): boolean;
 export declare function isPrivateNetworkLiteral(hostname: string): boolean;

@@ -1,6 +1,6 @@
 import { existsSync, promises as fs } from 'node:fs';
 import path from 'node:path';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 import { ClaudeAdapter, type ClaudeAdapterOptions } from '../../adapters/claude/claude-adapter';
 import { ClaudeStreamSession } from '../../adapters/claude/stream-session';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime';
@@ -17,12 +17,15 @@ import {
 } from './loopback';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
 
-const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
+const CLAUDE_KEY = 'sk-ant-runtime-contract-placeholder';
+const CLAUDE_MODEL = 'claude-sonnet-4-6';
+const CLAUDE_BYOK = { providerId: 'anthropic', resolveKey: async () => CLAUDE_KEY };
+const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'byok', providerId: CLAUDE_BYOK.providerId, modelId: CLAUDE_MODEL } } as const;
 
 import { defineMcpSearchProbes } from './mcp-search-probe';
 const target = contractTarget('claude', QUALIFIED_CLAUDE_VERSION);
 const resolveBin = () => ({ command: target.bin, source: 'env' as const });
-const adapter = (options: ClaudeAdapterOptions = {}) => new ClaudeAdapter({ resolveBin, ...options });
+const adapter = (options: ClaudeAdapterOptions = {}) => new ClaudeAdapter({ resolveBin, byok: CLAUDE_BYOK, ...options });
 const PROJECT_MARKER = 'BYOK-CONTRACT-CLAUDE-PROJECT-3a9d';
 const USER_MARKER = 'BYOK-CONTRACT-CLAUDE-USER-b42f';
 const ANCESTOR_MARKER = 'BYOK-CONTRACT-CLAUDE-ANCESTOR-7c20';
@@ -46,8 +49,8 @@ async function detectEnv(label: string, files: Record<string, string> = {}) {
 /** The Host's runtime environment for Claude: the loopback provider, no nonessential traffic. */
 function runtimeEnv(home: string, config: string, origin: string, egress: Readonly<Record<string, string>>): NodeJS.ProcessEnv {
   return {
-    ...baseEnv(home), CLAUDE_CONFIG_DIR: config, ANTHROPIC_BASE_URL: origin, ANTHROPIC_API_KEY: 'sk-ant-runtime-contract-placeholder',
-    ANTHROPIC_MODEL: 'claude-sonnet-4-6', ANTHROPIC_SMALL_FAST_MODEL: 'claude-sonnet-4-6',
+    ...baseEnv(home), CLAUDE_CONFIG_DIR: config, ANTHROPIC_BASE_URL: origin,
+    ANTHROPIC_MODEL: CLAUDE_MODEL, ANTHROPIC_SMALL_FAST_MODEL: CLAUDE_MODEL,
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1', DISABLE_AUTOUPDATER: '1', ...egress,
   };
 }
@@ -101,7 +104,7 @@ async function turn(mode: 'inherit' | 'excluded', agentStyle = false) {
     const events = await runTurn(adapter(options), 'Call the submit_result tool, then finish.', {
       workspaceDir: box.workspace, agentHome: box.workspace, env: runtimeEnv(box.home, config, provider.origin, recorder.env),
       mcpServers: { host },
-    });
+    }, CLAUDE_TARGET);
     const transcripts = existsSync(path.join(config, 'projects'))
       ? (await fs.readdir(path.join(config, 'projects'), { recursive: true })).filter(name => String(name).endsWith('.jsonl'))
       : [];
@@ -128,7 +131,7 @@ async function gateTurn() {
     } });
     const events = await runTurn(adapter(), 'Write the requested file, then finish.', {
       workspaceDir: box.workspace, agentHome: box.workspace, env: runtimeEnv(box.home, config, provider.origin, recorder.env), toolAuthorization,
-    });
+    }, CLAUDE_TARGET);
     return { events, summaries, written: existsSync(outside), outside, provider };
   } finally {
     await provider.close();
@@ -136,11 +139,12 @@ async function gateTurn() {
 }
 
 defineMcpSearchProbes({
-  runtime: 'claude', variant: 'agentSessionPersistence=enabled,agentUserContext=inherit', wire: 'anthropic-messages', model: 'claude-sonnet-4-6',
+  target: CLAUDE_TARGET,
+  runtime: 'claude', variant: 'agentSessionPersistence=enabled,agentUserContext=inherit', wire: 'anthropic-messages', model: CLAUDE_MODEL,
   async configure(box, provider, spawnFn) {
     const config = path.join(box.home, '.claude');
     await fs.mkdir(config);
-    return { adapter: new ClaudeAdapter({ spawnFn }), env: { ...runtimeEnv(box.home, config, provider.origin, {}), BYOK_CLAUDE_BIN: target.bin } };
+    return { adapter: new ClaudeAdapter({ spawnFn, byok: CLAUDE_BYOK }), env: { ...runtimeEnv(box.home, config, provider.origin, {}), BYOK_CLAUDE_BIN: target.bin } };
   },
 });
 
@@ -159,7 +163,12 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
     expectAuth(await detectWith(adapter(), await detectEnv('claude-auth-absent')), false);
   }),
   'detect.auth.apiKey': check(async () => {
-    expectAuth(await detectWith(adapter(), { ...await detectEnv('claude-auth-key'), ANTHROPIC_API_KEY: 'sk-ant-runtime-contract-placeholder' }), true);
+    // Discovery observes native login and neither uses an ambient key nor reads the Host resolver.
+    const resolveKey = vi.fn(async () => CLAUDE_KEY);
+    expectAuth(await detectWith(adapter({ byok: { providerId: CLAUDE_BYOK.providerId, resolveKey } }), {
+      ...await detectEnv('claude-auth-key'), ANTHROPIC_API_KEY: CLAUDE_KEY,
+    }), false);
+    expect(resolveKey).not.toHaveBeenCalled();
   }),
   'detect.auth.login': check(async () => {
     // The file form of a claude.ai login (`claude auth login` on Linux, or any platform with CLAUDE_CONFIG_DIR).
@@ -214,9 +223,7 @@ defineRuntimeContract(`claude runtime contract (${target.mode} ${target.expected
     expect(summaries.some(summary => summary.includes(outside))).toBe(true);
     expect(written).toBe(false);
   }),
-  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await agentStyled(); await agentStyledInherited(); await gated(); await ownTurn(); }, [
-    { phase: 'detect', target: 'api.anthropic.com:443', reason: '`claude auth status` checks an ANTHROPIC_API_KEY with Anthropic' },
-  ]),
+  'egress.declaredHostsOnly': egressCheck(async () => { await excluded(); await inherited(); await agentStyled(); await agentStyledInherited(); await gated(); await ownTurn(); }),
 }, CLAUDE_ABSENT_ISOLATION_SOURCES);
 
 const FOLLOW_UP = 'BYOK-CONTRACT-CLAUDE-FOLLOW-UP-6d18';

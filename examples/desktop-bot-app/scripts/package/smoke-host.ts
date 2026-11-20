@@ -4,9 +4,9 @@
 // asset root. Two Pi dispatches against an OpenAI-compatible endpoint inside this
 // process, no provider key and no OS credential store:
 //
-// 1. Keys launcher lane (byok target): the model calls memory_recall,
+// 1. Keys launcher lane (byok-profile selection): the model calls memory_recall,
 //    then replies. Under a BYOK keys profile Pi registers no subagent tool.
-// 2. Pi auth store lane (runtime target, PI_CODING_AGENT_DIR passed): the
+// 2. Pi auth store lane (device-default selection, PI_CODING_AGENT_DIR passed): the
 //    model asks for a background subagent, which the SEA refuses with
 //    pi_background_unavailable (#1499 R2); the task still completes.
 //
@@ -152,16 +152,10 @@ async function smoke(): Promise<void> {
       return task.state === 'Complete' ? { state: task.state, reply } : { state: task.state, result: task.result };
     };
     const keys = await run({ lane: 'harness', harnessId: 'pi', selection: { mode: 'byok-profile', providerProfile } });
-    let refused = false;
-    try {
-      await run({ lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } });
-    } catch (error) {
-      if (!(error instanceof Error) || !('code' in error) || error.code !== 'agent_capability_missing') throw error;
-      refused = true;
-    }
+    const piAuth = await run({ lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } });
     const memory = log.toolResults.some(result => result.includes('"revision"'));
-    const piAuth = refused ? 'selection_refused' : 'unexpectedly_admitted';
-    const ok = keys.state === 'Complete' && keys.reply === MODEL_REPLY && memory && refused;
+    const refused = log.toolResults.some(result => result.includes('pi_background_unavailable'));
+    const ok = [keys, piAuth].every(task => task.state === 'Complete' && task.reply === MODEL_REPLY) && memory && refused;
     console.log(`${MARKER} ${JSON.stringify({ ok, keys, piAuth, memory, refused, agentMemoryMcp: daemon.status().agentMemoryMcp,
       helperHost: helperHost.entry === undefined ? 'executable' : 'node-entry', execPath: process.execPath,
       modelRequests: log.requests.length, offeredTools: log.offeredTools, toolResults: log.toolResults })}`);

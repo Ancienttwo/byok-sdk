@@ -95,8 +95,8 @@ describe('custody child', () => {
       lane: 'harness',
       harnessId: 'pi',
       selection: { mode: 'byok-profile', providerProfile: { profileRef: 'writer', profileRevision: status.profile_revision, profileHash: status.profile_hash,
-        modelId: 'writer-model', requiredCapabilities: [] } },
-});
+        requiredCapabilities: [] } },
+    });
     // K8's catalog: the brand entries, then one pinned Pi entry per profile Pi can launch; nothing for a profile without pi_model.
     const { pi_model: _piModel, ...withoutPi } = profile!;
     const catalog = executionCatalog({ instruction: 'reply', models: { pi: { label: 'Pi', runtime: 'pi' } } }, 'device',

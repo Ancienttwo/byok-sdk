@@ -124,7 +124,9 @@ describe('a sealed frozen input on the cloud (#953)', () => {
     const { deviceId } = await paired.json() as { deviceId: string };
     const probe = await sealedInput('probe', deviceId);
     await stores.devices.recordCapabilities(tenant, { deviceId,
-      capabilities: requiredReceiverCapabilities('task.offer', probe.payload as never) });
+      capabilities: requiredReceiverCapabilities('task.offer', probe.payload as never),
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } }],
+    });
     const port: FrozenSubmitPort = {
       submit: input => cloud.submitAgentExecution(tenant, input),
       submitSealed: input => cloud.submitSealedAgentExecution(tenant, input),

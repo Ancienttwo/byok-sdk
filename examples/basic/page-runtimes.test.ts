@@ -7,6 +7,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseHTML } from 'linkedom';
+import type { HarnessInfo } from '@byok-sdk/protocol';
 import { describe, expect, it, vi } from 'vitest';
 
 const pagePath = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public', 'index.html');
@@ -22,7 +23,7 @@ interface Machine {
   deviceId: string;
   deviceName: string;
   connected: boolean;
-  runtimes?: Array<{ id: string; version?: string; authPresent?: boolean }>;
+  harnesses?: HarnessInfo[];
 }
 
 async function loadPage(initial: Machine[]) {
@@ -76,8 +77,9 @@ async function loadPage(initial: Machine[]) {
   };
 }
 
-const device = (id: string, connected: boolean, runtimes?: Machine['runtimes']): Machine => ({
-  deviceId: id, deviceName: id, connected, ...(runtimes === undefined ? {} : { runtimes }),
+const device = (id: string, connected: boolean, entries?: Array<Omit<HarnessInfo, 'capabilities'>>): Machine => ({
+  deviceId: id, deviceName: id, connected,
+  ...(entries === undefined ? {} : { harnesses: entries.map(entry => ({ ...entry, capabilities: { selectionModes: ['device-default'], effort: false } })) }),
 });
 
 describe('examples/basic page runtime list', () => {
@@ -161,5 +163,11 @@ describe('examples/basic page runtime list', () => {
     expect(page.options()).toEqual([{ value: '', text: 'no runtime reported' }]);
     expect(page.select.disabled).toBe(true);
     expect(page.dispatch.disabled).toBe(false);
+    submit();
+    await vi.waitFor(() => {
+      const submissions = page.requests.filter(request => request.url === '/api/tasks');
+      expect(submissions).toHaveLength(2);
+      expect(JSON.parse(submissions[1]!.body!)).toEqual({ instruction: 'say hi', deviceId: 'd1' });
+    });
   });
 });

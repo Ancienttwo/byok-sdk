@@ -2,7 +2,7 @@ import { isProviderProfileModelId } from '@byok-sdk/core/provider-model';
 import type { ModelProviderProfile, ProviderModelCapability } from './provider-profile.js';
 import { isAbsolute } from 'node:path';
 import { ByokKeysError } from './errors.js';
-import { modelApiUrl } from './http.js';
+import { modelApiUrl } from './url.js';
 import { piApiOf } from './pi-api.js';
 import { PiModelConfigSchema } from './pi-model-config.js';
 import { PI_CATALOG_IMAGE_MODELS } from './pi-model-catalog.generated.js';

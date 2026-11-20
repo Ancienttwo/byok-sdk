@@ -2,7 +2,8 @@ import { classifyModelProviderHttpError } from '@byok-sdk/core/provider-model';
 import { ByokKeysError } from './errors.js';
 import { normalizeProviderUrl } from './url.js';
 
-export { classifyModelProviderHttpError } from '@byok-sdk/core/provider-model';
+export { classifyModelProviderHttpError };
+export { modelApiUrl } from './url.js';
 
 /** Injectable `fetch`. Defaults to `globalThis.fetch` at every call site. */
 export type ProviderFetch = (
@@ -281,13 +282,6 @@ function modelProviderHttpError(
     `Model provider request failed with HTTP ${status}`,
     { httpStatus: status },
   );
-}
-
-/** Join a normalized base URL with an API path, idempotently (`providers.ts:1949-1953`). */
-export function modelApiUrl(baseUrl: string, suffix: string): string {
-  const normalized = normalizeProviderUrl(baseUrl);
-  if (normalized.endsWith(`/${suffix}`)) return normalized;
-  return `${normalized}/${suffix}`;
 }
 
 /**
