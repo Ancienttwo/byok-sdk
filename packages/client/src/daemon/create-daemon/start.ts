@@ -49,9 +49,8 @@ async function refreshHarnessInventory(scope: DaemonScope, signal: AbortSignal):
 export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch: number): Promise<void> {
   const {
     terminalCommits, daemonState, setLifecycle, storeDir, config, startPresenceProducer,
-    startDeviceMember, startupHaltReason, operationalHealth, halted, runShutdownSequence, pendingLateMutationBarriers,
+    startDeviceMember, startupHaltReason, operationalHealth, halted, runShutdownSequence,
   } = daemonScope;
-  if (pendingLateMutationBarriers.size > 0) throw new DaemonHaltError('store_owned');
   terminalCommits.resume();
   // A new run begins; a previous run's halt or crash no longer describes it.
   if (daemonState.lifecycle.phase === 'halted' || daemonState.lifecycle.phase === 'crashed') setLifecycle({ phase: 'stopped' });

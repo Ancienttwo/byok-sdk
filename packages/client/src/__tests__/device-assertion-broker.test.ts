@@ -30,10 +30,8 @@ import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { formatDaemonEventLine } from '../diagnostics/format';
 import { NONCE_SIGNING_DOMAIN } from '../daemon/device-keys';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
-import * as controlServer from '../daemon/control-server';
 import type { DaemonScope } from '../daemon/create-daemon/scope';
 import { performControlShutdown } from '../daemon/create-daemon/shutdown';
-import { until } from './fixtures/until';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
@@ -522,39 +520,6 @@ describe('device assertion broker: assertion.issue', () => {
 
     expect(requestShutdown).toHaveBeenCalledOnce();
     expect(events).toEqual(['shutdown-requested', 'shutdown-complete']);
-  });
-
-  it('rejects a queued restart while a timed-out task writer still holds the lease', async () => {
-    const startControlServer = controlServer.startControlServer;
-    vi.spyOn(controlServer, 'startControlServer').mockImplementationOnce(async (options) => {
-      const handle = await startControlServer(options);
-      // Keep the real socket open through the first stop to observe the latch
-      // after the grace deadline. The cleanup stop closes it normally.
-      vi.spyOn(handle, 'stopServing').mockResolvedValueOnce(undefined);
-      return handle;
-    });
-    const built = await pairedAndStarted('acme-assert-late-writer', { shutdownGraceMs: 20 });
-    const client = await control(built.storeDir, built.config.productId);
-    const params = { audience: ALLOWED_AUDIENCE };
-    await client.request<AssertionIssueResult>('assertion.issue', params);
-    const { releaseTask } = await holdActiveTaskClose(built, 'task-late-writer');
-    const installationCheck = vi.spyOn(serviceInstallation, 'installationHoldsStart')
-      .mockRejectedValueOnce(new Error('startup reached the installation check during late teardown'));
-    try {
-      const [stopping, restarting] = await Promise.allSettled([built.daemon.stop(), built.daemon.start()]);
-      expect(stopping).toMatchObject({
-        status: 'rejected', reason: { message: expect.stringContaining('grace deadline') },
-      });
-      expect(restarting).toMatchObject({ status: 'rejected', reason: { name: 'DaemonHaltError', reason: 'store_owned' } });
-      expect(installationCheck).not.toHaveBeenCalled();
-      await expect(daemonOwner.acquireDaemonOwner(built.storeDir, 'doctor')).rejects.toBeInstanceOf(daemonOwner.DaemonOwnerActiveError);
-      expect((await expectControlError(client.request('assertion.issue', params))).code).toBe('shutting_down');
-      expect(built.signer.count).toBe(1);
-    } finally {
-      releaseTask();
-      await until(() => built.daemon.status().activeTaskCount === 0, () => `activeTaskCount=${built.daemon.status().activeTaskCount}`);
-      await built.daemon.stop();
-    }
   });
 
   it('codex F1: a pipelined shutdown+assertion.issue batch mints nothing — the latch is armed synchronously', async () => {
