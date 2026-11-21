@@ -23,8 +23,9 @@ import {
   type DeviceAssertionVerifier,
 } from '@byok-sdk/core';
 import { buildDaemonWithAdapters, createDaemonWithAdapters, type Daemon, type DaemonConfig, type DaemonOverrides } from '../daemon/create-daemon';
-import { ControlError, type AssertionIssueResult } from '../daemon/control-protocol';
-import { connectControlClient, type ControlClient } from '../daemon/control-client';
+import { ControlError, controlTokenPath, type AssertionIssueResult, type ControlStatusResult } from '../daemon/control-protocol';
+import { connectControlClient, isControlDaemonGone, type ControlClient } from '../daemon/control-client';
+import * as controlServer from '../daemon/control-server';
 import { createAuditAppender, auditLogPath } from '../daemon/audit-log';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { formatDaemonEventLine } from '../diagnostics/format';
@@ -233,6 +234,113 @@ describe('device assertion broker: assertion.issue', () => {
     expect(parseDeviceAssertionEnvelope(result.assertion).protected.audience).toBe(ALLOWED_AUDIENCE);
     expect(built.signer.count).toBe(2);
   });
+
+  it.each([false, true])('restores status and assertion issuance after restarting from a timed-out stop (final chmod fails: %s)', async (failFinalChmod) => {
+    const built = await pairedAndStarted('acme-assert-timeout-restart', { shutdownGraceMs: 100 });
+    const { storeDir, config: { productId } } = built;
+    const tokenPath = controlTokenPath(storeDir);
+    const firstToken = await fs.readFile(tokenPath, 'utf8');
+    const params = { audience: ALLOWED_AUDIENCE };
+    const firstClient = await control(storeDir, productId);
+    await firstClient.request<AssertionIssueResult>('assertion.issue', params);
+    const taskId = 'task-timeout-restart';
+    const { session, releaseTask } = await holdActiveTaskClose(built, taskId);
+
+    try {
+      await expect(built.daemon.stop()).rejects.toThrow('active task teardown did not settle before the shutdown grace deadline');
+      expect(session.closeCalled).toBe(false);
+      expect(await connectControlClient({ storeDir, productId })).toMatchObject({
+        ok: false, reason: expect.stringContaining('control socket not reachable'),
+      });
+      expect(await isControlDaemonGone(storeDir, productId)).toBe(false);
+      await expect(daemonOwner.acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(daemonOwner.DaemonOwnerActiveError);
+
+      releaseTask();
+      await vi.waitFor(() => {
+        expect(session.closeCalled).toBe(true);
+        expect(built.daemon.status().activeTaskCount).toBe(0);
+      });
+      const startControlServer = controlServer.startControlServer;
+      const livenessAtRebind: boolean[] = [];
+      const rename = fs.rename;
+      const tokenPresentAtPublish: boolean[] = [];
+      vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (to === tokenPath) tokenPresentAtPublish.push((await fs.readFile(tokenPath, 'utf8')) === firstToken);
+        return rename(from, to);
+      });
+      const chmod = fs.chmod;
+      const finalChmodError = new Error('fixture denied chmod on the already published token');
+      const finalChmod = vi.spyOn(fs, 'chmod').mockImplementation(async (file, mode) => {
+        if (failFinalChmod && file === tokenPath) throw finalChmodError;
+        return chmod(file, mode);
+      });
+      vi.spyOn(controlServer, 'startControlServer').mockImplementationOnce(async (options) => {
+        // Sample before the real bind, while only the retained token can keep the exit gate closed.
+        livenessAtRebind.push(await isControlDaemonGone(storeDir, productId));
+        await expect(daemonOwner.acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(daemonOwner.DaemonOwnerActiveError);
+        return startControlServer(options);
+      });
+      await built.daemon.start();
+      await server.waitFor((event) => event.type === 'task.fail' && event.task_id === taskId);
+
+      const nextClient = await control(storeDir, productId);
+      expect(await nextClient.request<ControlStatusResult>('status')).toMatchObject({ lifecycle: { phase: 'running' } });
+      const result = await nextClient.request<AssertionIssueResult>('assertion.issue', params);
+      expect(parseDeviceAssertionEnvelope(result.assertion).protected.audience).toBe(ALLOWED_AUDIENCE);
+      expect(built.signer.count).toBe(2);
+      expect(livenessAtRebind).toEqual([false]);
+      expect(tokenPresentAtPublish).toEqual([true]);
+      expect(finalChmod).toHaveBeenCalledWith(tokenPath, 0o600);
+      expect((await fs.readFile(tokenPath, 'utf8')) === firstToken).toBe(false);
+      expect(await isControlDaemonGone(storeDir, productId)).toBe(false);
+      await expect(daemonOwner.acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(daemonOwner.DaemonOwnerActiveError);
+
+      await built.daemon.stop();
+      expect(await isControlDaemonGone(storeDir, productId)).toBe(true);
+      const doctorLease = await daemonOwner.acquireDaemonOwner(storeDir, 'doctor');
+      await doctorLease.release();
+    } finally {
+      releaseTask();
+    }
+  }, 20_000);
+
+  it('keeps the stopped listener token until a clean stop when the rebind cannot publish a token', async () => {
+    const built = await pairedAndStarted('acme-assert-rebind-failure', { shutdownGraceMs: 100 });
+    const { storeDir, config: { productId } } = built;
+    const tokenPath = controlTokenPath(storeDir);
+    const firstToken = await fs.readFile(tokenPath, 'utf8');
+    const taskId = 'task-rebind-failure';
+    const { session, releaseTask } = await holdActiveTaskClose(built, taskId);
+    try {
+      await expect(built.daemon.stop()).rejects.toThrow('active task teardown did not settle before the shutdown grace deadline');
+      releaseTask();
+      await vi.waitFor(() => expect(session.closeCalled).toBe(true));
+
+      const rename = fs.rename;
+      const publish = vi.spyOn(fs, 'rename').mockImplementation(async (from, to) => {
+        if (to === tokenPath) throw new Error('fixture refused to publish the new control token');
+        return rename(from, to);
+      });
+      const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      await built.daemon.start();
+      await server.waitFor((event) => event.type === 'task.fail' && event.task_id === taskId);
+      expect(publish).toHaveBeenCalledWith(expect.any(String), tokenPath);
+      expect(warning).toHaveBeenCalledWith(expect.stringContaining('fixture refused to publish the new control token'));
+      expect(await connectControlClient({ storeDir, productId })).toMatchObject({
+        ok: false, reason: expect.stringContaining('control socket not reachable'),
+      });
+      expect((await fs.readFile(tokenPath, 'utf8')) === firstToken).toBe(true);
+      expect(await isControlDaemonGone(storeDir, productId)).toBe(false);
+      await expect(daemonOwner.acquireDaemonOwner(storeDir, 'doctor')).rejects.toBeInstanceOf(daemonOwner.DaemonOwnerActiveError);
+
+      await built.daemon.stop();
+      expect(await isControlDaemonGone(storeDir, productId)).toBe(true);
+      const doctorLease = await daemonOwner.acquireDaemonOwner(storeDir, 'doctor');
+      await doctorLease.release();
+    } finally {
+      releaseTask();
+    }
+  }, 20_000);
 
   it('honours a configured ttlMs and never lets a caller choose one', async () => {
     const built = await pairedAndStarted('acme-assert-ttl', {

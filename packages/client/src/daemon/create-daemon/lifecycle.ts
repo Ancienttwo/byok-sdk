@@ -31,8 +31,8 @@ export async function runLifecycleMutation<T>(daemonScope: DaemonScope, operatio
  * Serves the full or the enrollment-only method table. A running endpoint
  * switches tables in place on its same listener and token: closing it would
  * publish "gone" (`isControlDaemonGone`) while this daemon still holds its
- * store lease, and a contender would then find the live mutex. Only a daemon
- * without an endpoint binds one.
+ * store lease, and a contender would then find the live mutex. A stopped
+ * listener is replaced while its token still holds the liveness signal.
  */
 export async function replaceControlServer(daemonScope: DaemonScope, required: boolean, enrollmentOnly = false): Promise<void> {
   const { daemonState, controlMethods, storeDir, config, operationalHealth } = daemonScope;
@@ -46,19 +46,23 @@ export async function replaceControlServer(daemonScope: DaemonScope, required: b
         stream: {},
       }
     : controlMethods;
-  if (daemonState.controlServerHandle) {
-    daemonState.controlServerHandle.setMethods(methods);
+  const previous = daemonState.controlServerHandle;
+  if (previous?.isServing()) {
+    previous.setMethods(methods);
     return;
   }
   let refusal: PrivateDirectoryRefusedError | PrivateSocketPathError | PrivateSocketModeError | undefined;
   try {
+    // Keep the old token until the new listener atomically replaces it. The
+    // new handle takes over cleanup at the same endpoint and fallback path.
+    await previous?.stopServing();
     daemonState.controlServerHandle = await startControlServer({ storeDir, productId: config.productId, methods });
   } catch (err) {
     if (required || err instanceof AnotherControlServerRunningError) throw err;
     console.warn(
       `[byok/client] control socket failed to start (continuing without it): ${err instanceof Error ? err.message : String(err)}`,
     );
-    daemonState.controlServerHandle = undefined;
+    // A stopped handle still owns token cleanup on the next clean stop.
     // doctor cannot ask a daemon without an endpoint, so a typed refusal is recorded in the health file.
     if (!(err instanceof PrivateDirectoryRefusedError || err instanceof PrivateSocketPathError || err instanceof PrivateSocketModeError)) return;
     refusal = err;
