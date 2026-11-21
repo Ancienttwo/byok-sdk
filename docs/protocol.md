@@ -426,7 +426,7 @@ observability fields and events retain the tolerance described below.
 does not keep a reader for the prior major. No cut so far has an N-1 reader:
 v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6, v6 → v7 and v7 → v8 each made the server
 side and the daemons upgrade together. The server accepted only `v:2`, then
-`v:3`, `v:4`, `v:5`, `v:6`, and now only `v:7`. A daemon whose
+`v:3`, `v:4`, `v:5`, `v:6`, `v:7`, and now only `v:8`. A daemon whose
 `conn.hello.protocolVersions[]` omits the server's major is refused at the
 handshake. From v7 on, that refusal has a frozen shape a peer of any major
 reads ([Cross-version refusal](#cross-version-refusal-frozen)).

@@ -20,8 +20,14 @@ Review the [known issues](v0.45.0.md#known-issues) before switching traffic.
    Initialize fresh local daemon journals, outboxes, and K4/K8 ledgers.
    Follow the provider store steps below in the same window.
 3. Upgrade the Host, server, and daemons together and pair the devices against
-   the new server. Wait for each device to publish its harness inventory before
-   submitting explicit offers. Wire v7 and v8 peers refuse each other.
+   the new server. Pairing from a fresh `storeDir` with the same `productId`
+   fails with `DeviceStoreBindingMismatchError` (`device_store_not_bound`)
+   while the old enrollment occupies that product's OS credential slot.
+   Explicitly replace the enrollment with `replaceOtherStore: true`, or
+   unpair the old enrollment or clear its credential entry first. Use a
+   distinct `productId` to keep the old OS credential entry intact.
+   Wait for each device to publish its harness inventory before submitting
+   explicit offers. Wire v7 and v8 peers refuse each other.
 4. Use `{ lane: 'auto' }` to let a device choose an advertised executor that
    supports device defaults. For explicit routing, pass `lane: 'harness'`, the
    advertised `harnessId`, and a supported `selection`. Use `device-default`
@@ -33,11 +39,17 @@ Review the [known issues](v0.45.0.md#known-issues) before switching traffic.
    mode in `capabilities.defaultModelModes`. DSH can use a configured default
    or an explicit model within the configured route. OpenCode without a
    configured model list requires `adapter-model` with an explicit ID.
-   Preserve the original target when replaying a task ID. Replaying the ID
-   with different offer bytes returns `binding_conflict`.
+   Preserve the original executable offer when replaying an undelivered task
+   ID. A different offer body returns `coordination_input_invalid`. A
+   different target device or Agent identity returns `agent_ref_mismatch`.
+   Resubmitting a delivered task ID for the same device and Agent returns
+   `agent_task_already_exists`.
 5. Verify pairing, task start and terminal delivery before restoring traffic.
-   For rollback, restore a matching set of 0.44.1 binaries, configuration,
-   stores and credentials.
+   Replacing the OS credential entry leaves the preserved 0.44.1 store
+   unbound. To roll back, restore the matching 0.44.1 binaries,
+   configuration, and stores. If you replaced or cleared the old entry,
+   restore the preserved OS credential entry or re-pair the device against
+   the restored 0.44.1 server.
 
 ### Harness model selection
 
