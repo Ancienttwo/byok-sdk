@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect, it, vi } from 'vitest';
+import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 
 const fixture = fileURLToPath(new URL('./fixtures/task-runner-cancel-runtime.mjs', import.meta.url));
 type Receipt = { rootPid: number; descendantPid: number; grandchildPid: number };
@@ -106,7 +107,8 @@ it('the cancellation fixture reaps its tree when its test worker is SIGKILLed be
   const pids = Object.values(receipt);
   expect(new Set(pids).size).toBe(3);
   for (const pid of pids) expect(alive(pid)).toBe(true);
+  const identities = pids.map(captureProcessIdentity);
   worker.kill('SIGKILL'); await exited;
   // Assert before the emergency hook sweep: all three must die on EOF.
-  await vi.waitFor(() => { for (const pid of pids) expect(alive(pid), `orphan PID ${pid}`).toBe(false); });
+  await vi.waitFor(() => identities.forEach(expectProcessNotLive));
 });

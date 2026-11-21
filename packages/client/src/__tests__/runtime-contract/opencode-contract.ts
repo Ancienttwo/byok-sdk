@@ -2,6 +2,7 @@ import { execFileSync, spawn, type ChildProcess, type SpawnOptions } from 'node:
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { expect } from 'vitest';
+import { captureProcessIdentity, isProcessLive } from '../support/process-liveness';
 // Sharing the canary predicate also includes the observer in the client typecheck.
 import { isCwdRefusal } from '../../../../../scripts/qualification/opencode-native-canary';
 import { startPreparedOperation } from '../fixtures/prepared-operation';
@@ -144,10 +145,6 @@ export function openCodeContract(
   };
   return { title: `${line} runtime contract (${target.mode} ${target.expectedVersion})`, descriptor, plan, lifecycle, target, openCodeEnv, declaredHosts };
 }
-
-const isAlive = (pid: number): boolean => {
-  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
-};
 
 async function waitFor<T>(read: () => Promise<T | undefined>, ms: number, what: string): Promise<T> {
   const deadline = Date.now() + ms;
@@ -295,12 +292,13 @@ export function openCodeLifecycle(runtime: Extract<ContractRuntime, 'opencode1' 
       const drained = (async () => { for await (const event of session.events) { events.push(event.type); log.push(JSON.stringify(event).slice(0, 300)); if (event.type === 'turn_end') break; } })();
       const tool = Number(await waitFor(async () => (await fs.readFile(pidFile, 'utf8').catch(() => '')).trim() || undefined, 60_000, 'the shell tool pid')
         .catch((error: Error) => { throw new Error(`${error.message}; events: ${log.slice(-8).join(' | ')}`); }));
+      const identity = captureProcessIdentity(tool);
       await session.interrupt();
       await drained;
       // Before close(): a close would reap the process and hide a cancel that left it running.
-      const exitedBeforeClose = await waitFor(async () => isAlive(tool) ? undefined : true, 10_000, 'the shell tool to exit after the interrupt').catch(() => false);
+      const exitedBeforeClose = await waitFor(async () => isProcessLive(identity) ? undefined : true, 10_000, 'the shell tool to exit after the interrupt').catch(() => false);
       await session.close();
-      const toolGone = exitedBeforeClose || await waitFor(async () => isAlive(tool) ? undefined : true, 10_000, 'the shell tool to exit').catch(() => false);
+      const toolGone = exitedBeforeClose || await waitFor(async () => isProcessLive(identity) ? undefined : true, 10_000, 'the shell tool to exit').catch(() => false);
       if (!toolGone) try { process.kill(tool, 'SIGKILL'); } catch { /* already gone */ }
       const leaked = await waitFor(async () => { const rows = openCodeProcesses().filter(row => !before.has(pidOf(row))); return rows.length === 0 ? [] : undefined; }, 10_000, 'the OpenCode processes to exit').catch(() => openCodeProcesses().filter(row => !before.has(pidOf(row))));
       return { events, toolGone, exitedBeforeClose, leaked };

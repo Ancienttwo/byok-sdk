@@ -2,6 +2,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { expect } from 'vitest';
+import { captureProcessIdentity, expectProcessNotLive, type ProcessIdentity } from '../support/process-liveness';
 import { AgyAdapter } from '../../adapters/antigravity/agy-adapter';
 import { agyAdapterWithEndpoint } from '../../adapters/antigravity/agy-endpoint';
 import { QUALIFIED_AGY_VERSION } from '../../adapters/antigravity/agy-version';
@@ -93,15 +94,20 @@ async function shellEnvironment() {
   }
 }
 
-/** A command agy starts as a daemon, in its own process group, and the process id it recorded. */
-async function daemonPid(): Promise<number> {
+/** Capture the daemon command's identity before the provider ends the turn. */
+async function daemonIdentity(): Promise<ProcessIdentity> {
   const box = await createSandbox('agy-daemon');
   const file = path.join(box.root, 'daemon.pid');
   const command = process.platform === 'win32'
     ? `Set-Content -LiteralPath ${JSON.stringify(file)} -Value $PID; Start-Sleep -Seconds 300`
     : `echo $$ > ${JSON.stringify(file)}; exec sleep 300`;
-  const provider = await startLoopbackProvider('gemini', (request) => {
-    const tool = request.toolResults === 0 ? request.tools.find(candidate => candidate.name === 'run_command') : undefined;
+  let identity: ProcessIdentity | undefined;
+  const provider = await startLoopbackProvider('gemini', async (request) => {
+    if (request.toolResults > 0) {
+      identity ??= captureProcessIdentity(Number(await fs.readFile(file, 'utf8')));
+      return { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS };
+    }
+    const tool = request.tools.find(candidate => candidate.name === 'run_command');
     return tool === undefined ? { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS }
       : { kind: 'tool', tool, args: { CommandLine: command, toolSummary: 'Start the daemon', WaitMsBeforeAsync: 5_000, IsDaemon: true } };
   });
@@ -109,7 +115,8 @@ async function daemonPid(): Promise<number> {
     const recorder = await fileEgress();
     const runtime = agyAdapterWithEndpoint(new AgyAdapter({ home: await ownedHome(), resolveBin, resolveKey }), provider.origin);
     await runTurn(runtime, 'Start the daemon.', { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env } }, AGY_TARGET);
-    return Number(await fs.readFile(file, 'utf8'));
+    if (identity === undefined) throw new Error('The provider did not receive the daemon tool result');
+    return identity;
   } finally {
     await provider.close();
   }
@@ -184,7 +191,7 @@ if (target.mode === 'qualified' && process.env.BYOK_SEARCH_RECEIPT_DIR !== undef
 const userTurn = once(() => turn('user'));
 const ownedTurn = once(() => turn('owned'));
 const shellEnv = once(shellEnvironment);
-const daemon = once(daemonPid);
+const daemon = once(daemonIdentity);
 const resume = once(resumed);
 const descriptor = new AgyAdapter({ home: path.resolve('/agy-descriptor-only'), resolveKey }).descriptor;
 
@@ -278,9 +285,7 @@ defineRuntimeCases(`agy runtime contract: agy cases (${target.mode} ${target.exp
     }
   })],
   'agy.turnEnd': ['a daemon command does not outlive the turn', check(async () => {
-    const pid = await daemon();
-    expect(pid).toBeGreaterThan(0);
-    expect(() => process.kill(pid, 0)).toThrow();
+    expectProcessNotLive(await daemon());
   })],
   'agy.resume': ['a saved conversation resumes with its id on the same cwd', check(async () => {
     const { events, sessionRef, resumedRef } = await resume();

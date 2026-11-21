@@ -3,6 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import {
   adoptOwnedProcessTree,
   attachOwnedProcessGroupLedger,
@@ -19,7 +20,7 @@ import {
 import { disposeDurableShellGroups } from '../adapters/pi-durable/process-groups';
 import { isLiveProcessState, processSignalState, readProcessGroupRows } from '../util/process-signal-state';
 import { OWNED_PROCESSES_DIRECTORY, OwnedProcessLedger, OwnedProcessResidueError } from '../daemon/owned-process-ledger';
-import { readProcessTable } from '../runtime/oar-process-tree.js';
+import { readProcessTable, type ProcessEntry } from '../runtime/oar-process-tree.js';
 import { execFileSync } from 'node:child_process';
 
 /**
@@ -228,14 +229,14 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     const record = recordFor(pgid);
     const nativeKill = process.kill.bind(process);
     let first = true;
-    let late: number[] = [];
+    let late: ProcessEntry[] = [];
     const signals = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
       if (Math.abs(pid) === pgid && signal === 'SIGKILL' && first) {
         first = false;
         // Real births after reclaim's first snapshot, missed by its first delivery.
         nativeKill(pgid, 'SIGUSR2');
         execFileSync('/bin/sh', ['-c', 'while ! test -f "$1"; do sleep 0.01; done', 'wait', marker], { timeout: 2000 });
-        late = [...readProcessTable().values()].filter(entry => entry.pgid === pgid && entry.pid !== pgid).map(entry => entry.pid);
+        late = [...readProcessTable().values()].filter(entry => entry.pgid === pgid && entry.pid !== pgid);
         expect(late.length).toBeGreaterThan(0);
         return nativeKill(pgid, 'SIGKILL');
       }
@@ -243,9 +244,9 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     });
     expect(await reapOwnedProcessGroups([record])).toEqual({ ...NOTHING, found: 1, terminated: 1, ended: [record] });
     expect(first).toBe(false);
-    expect(late.every(pid => !processAlive(pid))).toBe(true);
+    late.forEach(expectProcessNotLive);
     expect(readProcessGroupRows().filter(row => Number(row[2]) === pgid && isLiveProcessState(row[3]!))).toEqual([]);
-    expect(signals.mock.calls.some(([pid, signal]) => late.includes(pid) && signal === 'SIGKILL')).toBe(true);
+    expect(signals.mock.calls.some(([pid, signal]) => signal === 'SIGKILL' && late.some(entry => entry.pid === pid))).toBe(true);
   });
 
   it('an unreadable process table fails the adoption instead of skipping the record', async () => {
@@ -303,11 +304,11 @@ describe.skipIf(process.platform === 'win32')('owned runtime process groups afte
     await ledger.adopted(recordFor(tree.pgid));
     // The root ignored EOF and is not this process's child: nothing here owns it.
     expect(readProcessTable().get(tree.pgid)?.ppid).not.toBe(process.pid);
+    const descendants = [tree.toolPid, tree.sessionPid].map(captureProcessIdentity);
 
     expect(await ledger.reconcile()).toEqual({ recorded: 1, found: 1, terminated: 1, survived: 0, liveWriter: 0 });
     expect(groupAlive(tree.pgid)).toBe(false);
-    expect(processAlive(tree.toolPid)).toBe(false);
-    expect(processAlive(tree.sessionPid)).toBe(false);
+    descendants.forEach(expectProcessNotLive);
     expect(await ledgerFiles()).toEqual([]);
   });
 

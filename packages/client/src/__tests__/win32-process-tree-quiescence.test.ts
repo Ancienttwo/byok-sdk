@@ -2,6 +2,7 @@ import { spawn as realSpawn, type spawn, type ChildProcess } from 'node:child_pr
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { disposeOwnedProcessTree, requestOwnedProcessTreeTermination, type OwnedProcessTreeOptions } from '../adapters/process-tree';
 import { isRuntimeDisposalFailure } from '../runtime-failure';
+import { expectProcessNotLive } from './support/process-liveness';
 
 /**
  * The win32 disposal branch, exercised from POSIX CI through
@@ -214,7 +215,7 @@ describe('win32 measured process-tree quiescence', () => {
     await expect(disposeOwnedProcessTree(win32Options({ child: root, spawnFn, killGraceMs: 800 }))).resolves.toBeUndefined();
 
     expect(Date.now() - startedAt).toBeGreaterThanOrEqual(400);
-    for (const pid of [root.pid!, descendant.pid!, grandchild.pid!]) expect(processExists(pid)).toBe(false);
+    [root.pid!, descendant.pid!, grandchild.pid!].forEach(expectProcessNotLive);
   });
 
   it('still sweeps when the root has already closed, so its descendants stay measured', async () => {
@@ -264,7 +265,7 @@ describe('win32 measured process-tree quiescence', () => {
 
     // Exactly one walk total: disposal measured the interrupt's recorded set.
     expect(targets).toEqual([root.pid]);
-    for (const pid of [root.pid!, descendant.pid!]) expect(processExists(pid)).toBe(false);
+    [root.pid!, descendant.pid!].forEach(expectProcessNotLive);
   });
 
   it('merges a still-in-flight interrupt sweep with disposal own walk into one set', async () => {

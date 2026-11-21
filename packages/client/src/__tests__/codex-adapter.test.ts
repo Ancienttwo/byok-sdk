@@ -23,6 +23,7 @@ import {
 } from './fixtures/prepared-operation';
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
+import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { CodexProjection } from '../adapters/codex/projection';
 import * as vendoredProjection from '../../vendor/oar/7961a59/runtimes/codex/projection';
 
@@ -520,7 +521,7 @@ describe('Codex persistent app-server adapter', () => {
     const methods = (await fs.readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line).method);
     expect(methods).toEqual(['initialize', 'initialized', 'account/read']);
     expect(owned.pids).toHaveLength(1);
-    expect(gone(owned.pids[0]!)).toBe(true);
+    expectProcessNotLive(owned.pids[0]!);
   });
 
   it('refuses a changed Codex account before opening a subscription thread', async () => {
@@ -721,9 +722,10 @@ describe('Codex persistent app-server adapter', () => {
     const pids = JSON.parse(await fs.readFile(receipt, 'utf8')) as { child: number; mcp: number };
     expect(gone(pids.child)).toBe(false);
     expect(gone(pids.mcp)).toBe(false);
+    const child = captureProcessIdentity(pids.child);
     await s.interrupt();
     expect(await turn(s)).toContainEqual({ type: 'turn_end' });
-    await expect.poll(() => gone(pids.child)).toBe(true);
+    await vi.waitFor(() => expectProcessNotLive(child));
     expect(gone(pids.mcp)).toBe(false);
     await s.followUp(task);
     expect(await turn(s)).toContainEqual(expect.objectContaining({ type: 'tool_result', toolCallId: 'mcp-after-abort',
@@ -781,7 +783,7 @@ describe('Codex persistent app-server adapter', () => {
     const failure = await turn(s).then(() => undefined, (error) => error);
     expect(failure).toMatchObject({ message: 'projection failed' });
     await s.close();
-    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+    await vi.waitFor(() => expectProcessNotLive(pids[0]!));
   });
   it('a vendored fold failure during a turn kills the app-server and keeps the fold reason, unknown (#869)', async () => {
     const { pids, spawnFn } = tracked();
@@ -791,7 +793,7 @@ describe('Codex persistent app-server adapter', () => {
     const failure = await turn(s).then(() => undefined, (error) => error);
     expect(failure).toMatchObject({ message: 'projection failed', failure: { class: 'unknown' } });
     await s.close();
-    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+    await vi.waitFor(() => expectProcessNotLive(pids[0]!));
   });
   it('a record consumer that fails on the record of an exit the app-server made on its own keeps runtime_exited (#869)', async () => {
     const consume = CodexProjection.prototype.consume;
@@ -824,7 +826,7 @@ describe('Codex persistent app-server adapter', () => {
     });
     expect(Date.now() - started).toBeLessThan(operationTimeoutMs + 10_000);
     expect(pids).toHaveLength(1);
-    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+    await vi.waitFor(() => expectProcessNotLive(pids[0]!));
   });
   it('keeps the class of a failure that halted the record stream during the start (#869)', async () => {
     const consume = CodexProjection.prototype.consume;
@@ -850,7 +852,7 @@ describe('Codex persistent app-server adapter', () => {
     await expect(s.steer('redirect')).rejects.toThrow('codex steer timed out after 3000ms');
     await expect(turn(s)).rejects.toMatchObject({ message: 'codex steer timed out after 3000ms' });
     await s.close();
-    await vi.waitFor(() => expect(gone(pids[0]!)).toBe(true));
+    await vi.waitFor(() => expectProcessNotLive(pids[0]!));
   });
   it('close joins a pending persistent followUp and rejects its RPC instead of leaving it hanging', async () => {
     const s = await open(

@@ -12,6 +12,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { ChildProcess, spawn } from 'node:child_process';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { expectProcessNotLive } from './support/process-liveness';
 import { launchUnit, runBounded } from '../lifecycle/platform-command';
 import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError, stopRoot } from '../util/command-timeouts';
 
@@ -20,15 +21,6 @@ afterEach(async () => {
   vi.useRealTimers();
   await Promise.all(dirs.splice(0).map((dir) => fs.rm(dir, { recursive: true, force: true })));
 });
-
-function alive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 describe('lifecycle/platform-command: runBounded (#1971)', () => {
   it('#2184 refuses NUL input before spawn with a slot-only diagnostic', async () => {
@@ -81,8 +73,8 @@ describe('lifecycle/platform-command: runBounded (#1971)', () => {
     expect((failure as Error).cause).toBeUndefined();
     expect(Date.now() - started).toBeLessThan(10_000);
     const [command, child] = (await fs.readFile(pids, 'utf8')).split(' ').map(Number);
-    expect(alive(command!)).toBe(false);
-    expect(alive(child!)).toBe(false);
+    expectProcessNotLive(command!);
+    expectProcessNotLive(child!);
   });
 
   /** A node command that records its pid in a fresh directory and runs until killed. */

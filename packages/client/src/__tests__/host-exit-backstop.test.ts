@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it } from 'vitest';
+import { isProcessLive } from './support/process-liveness';
 import { __hostExitBackstopForTests, adoptOwnedProcessTree, withOwnedProcessTree } from '../adapters/process-tree';
 
 /**
@@ -56,7 +57,7 @@ function reap(pids: number[]): void {
 async function waitGone(pids: number[], timeoutMs: number): Promise<number[]> {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
-    const live = pids.filter((pid) => processExists(pid));
+    const live = pids.filter(isProcessLive);
     if (live.length === 0) return [];
     if (Date.now() >= deadline) return live;
     await new Promise((resolve) => setTimeout(resolve, 20));
