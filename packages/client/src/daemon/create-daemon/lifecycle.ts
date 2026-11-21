@@ -254,24 +254,30 @@ export async function stop(daemonScope: DaemonScope, opts: { drainTimeoutMs?: nu
 }
 
 /**
- * Cancels every start and pair requested before now, the queued and the
- * running. Call it synchronously when a stop is requested (`stop()`, the
- * control `shutdown` RPC), before any await.
+ * Invalidates queued starts and pairs before any shutdown wait. By default,
+ * also aborts an in-flight credential operation.
  */
-export function cancelAuthOperations(daemonScope: DaemonScope): void {
+export function cancelAuthOperations(daemonScope: DaemonScope, { abortInFlight = true } = {}): void {
   const { daemonState } = daemonScope;
   daemonState.authCancellationEpoch += 1;
   // A start or pair may be blocked in an OS credential call (a locked
   // keychain) and the teardown queues behind it. Signal first: the auth
   // manager's stop is the one cancellation for those calls; then await the
   // operation settling.
-  if (daemonState.pendingAuthOperations > 0) void daemonState.auth.stop().catch(() => undefined);
+  if (abortInFlight && daemonState.pendingAuthOperations > 0) void daemonState.auth.stop().catch(() => undefined);
 }
 
-export function requestShutdown(daemonScope: DaemonScope, reason: string, opts: { drainTimeoutMs?: number } = {}): Promise<void> {
+export function requestShutdown(
+  daemonScope: DaemonScope,
+  reason: string,
+  opts: { drainTimeoutMs?: number; beforeTeardown?: () => Promise<void> | void } = {},
+): Promise<void> {
   const { daemonState, runLifecycleMutation, runShutdownSequence } = daemonScope;
   if (daemonState.shutdownPromise) return daemonState.shutdownPromise;
-  const current = runLifecycleMutation(() => runShutdownSequence(reason, opts));
+  const current = runLifecycleMutation(async () => {
+    await opts.beforeTeardown?.();
+    await runShutdownSequence(reason, { drainTimeoutMs: opts.drainTimeoutMs });
+  });
   daemonState.shutdownPromise = current;
   void current.finally(() => {
     if (daemonState.shutdownPromise === current) daemonState.shutdownPromise = undefined;

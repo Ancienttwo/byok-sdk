@@ -10,7 +10,7 @@ import { AgentEgressController } from '../agent-egress-controller.js';
 import { PairedWithoutMemberError } from './support.js';
 import type { DaemonScope } from './scope.js';
 import type { EmbeddedPairingServer } from '../create-daemon.js';
-import { runAuthOperation } from './lifecycle.js';
+import { cancelAuthOperations, runAuthOperation } from './lifecycle.js';
 
 /** Pairing and unpairing the device, each under the daemon owner lease (#926). */
 
@@ -250,6 +250,8 @@ export async function unpair(daemonScope: DaemonScope): Promise<void> {
   // clears `device.json`, so any assertion minted in the queue-wait window
   // would be for a device that is being unpaired.
   daemonState.shuttingDown = true;
+  // Let an in-flight pair finish committing the identity that unpair will remove.
+  cancelAuthOperations(daemonScope, { abortInFlight: daemonState.startInProgress });
   await runLifecycleMutation(unpairUnderLease);
 }
 

@@ -63,6 +63,8 @@ export async function runStartUnderLease(daemonScope: DaemonScope, requestEpoch:
     }
   }
   try {
+    if (requestEpoch !== daemonState.authCancellationEpoch) throw new AuthRequestAbortedError('stopped');
+    daemonState.shuttingDown = false;
   // An installation mid-restore owns the stores even after its installer died (#2011).
   if (await installationHoldsStart(storeDir)) throw new DaemonHaltError('store_owned');
   const run = await openStartRun(daemonScope, requestEpoch);

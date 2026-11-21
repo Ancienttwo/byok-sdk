@@ -9,6 +9,7 @@ import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../dae
 import { controlTokenPath, type ControlStatusResult } from '../daemon/control-protocol';
 import { DAEMON_OWNER_FILENAME } from '../util/daemon-owner';
 import { AuthManager } from '../daemon/auth-manager';
+import { RetentionSweeper } from '../daemon/retention/sweeper';
 import { connectControlClient, isControlDaemonGone } from '../daemon/control-client';
 import { runUnpairCommand } from '../bin/commands/unpair';
 import type { RuntimeDetectResult } from '../types';
@@ -267,31 +268,33 @@ describe('service enrollment handover (#1165 WinSW unpair)', () => {
 
   it('shutdown pipelined ahead of enrollment.pair on one connection: the pair is refused and never reaches the server', async () => {
     const current = await enrolling();
-    // Hold the teardown the shutdown handler defers, so both requests reach
-    // the daemon before it destroys the connection. The two are separate
-    // writes, and a pipe may deliver the second after that teardown ran.
-    const teardowns: Array<() => void> = [];
-    const realSetImmediate = globalThis.setImmediate;
-    const held = vi.spyOn(globalThis, 'setImmediate').mockImplementation(((callback: (...args: unknown[]) => void, ...args: unknown[]) => {
-      if (String(callback).includes('performControlShutdown')) {
-        teardowns.push(() => callback(...args));
-        return realSetImmediate(() => undefined);
-      }
-      return realSetImmediate(callback, ...args);
-    }) as typeof setImmediate);
+    // The socket stays open and the lease stays held while maintenance stops.
+    const stopReached = Promise.withResolvers<void>();
+    const releaseStop = Promise.withResolvers<void>();
+    const stopRetention = RetentionSweeper.prototype.stop;
+    vi.spyOn(RetentionSweeper.prototype, 'stop').mockImplementationOnce(async function (this: RetentionSweeper) {
+      stopReached.resolve();
+      await releaseStop.promise;
+      await stopRetention.call(this);
+    });
     const client = await connect();
-    const shutdown = client.request('shutdown', { reason: 'unpair' });
-    const pairing = client.request('enrollment.pair', { pairingCode: 'pairing-code' });
-    expect(await shutdown).toEqual({ acknowledged: true });
-    await expect(pairing).rejects.toMatchObject({ code: 'shutting_down' });
-    expect(teardowns).toHaveLength(1);
-    expect(server.pairRequests).toHaveLength(0);
-    expect(leaseHeld()).toBe(true);
-    held.mockRestore();
-    teardowns[0]!();
+    try {
+      const [shutdown, pairing] = await Promise.allSettled([
+        client.request('shutdown', { reason: 'unpair' }),
+        client.request('enrollment.pair', { pairingCode: 'pairing-code' }),
+      ]);
+      expect(shutdown).toEqual({ status: 'fulfilled', value: { acknowledged: true } });
+      expect(pairing).toMatchObject({ status: 'rejected', reason: { code: 'shutting_down' } });
+      await stopReached.promise;
+      expect(server.pairRequests).toHaveLength(0);
+      expect(leaseHeld()).toBe(true);
+      expect(await gone()).toBe(false);
+    } finally {
+      releaseStop.resolve();
+      client.close();
+    }
     await expectStoppedForGood(current);
     expect(server.pairRequests).toHaveLength(0);
-    client.close();
   }, 15_000);
 
   it('a start that fails after promotion releases the lease before gone, and a fresh unpair then succeeds', async () => {
