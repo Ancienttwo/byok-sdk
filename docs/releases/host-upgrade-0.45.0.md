@@ -46,10 +46,19 @@ Review the [known issues](v0.45.0.md#known-issues) before switching traffic.
    `agent_task_already_exists`.
 5. Verify pairing, task start and terminal delivery before restoring traffic.
    Replacing the OS credential entry leaves the preserved 0.44.1 store
-   unbound. To roll back, restore the matching 0.44.1 binaries,
-   configuration, and stores. If you replaced or cleared the old entry,
-   restore the preserved OS credential entry or re-pair the device against
-   the restored 0.44.1 server.
+   unbound. To roll back, restore the matching 0.44.1 binaries, configuration,
+   and stores.
+
+   - To restore the old enrollment, restore its matching 0.44.1 OS credential
+     entry. For an E2EE device, restore the matching E2EE member keys and
+     state entries along with that credential.
+   - To re-pair against the restored 0.44.1 server, first unpair the v8
+     enrollment or clear its OS credential entry. You can also replace that
+     entry explicitly with `replaceOtherStore: true` on 0.44.1 `pair()`.
+     A plain re-pair returns `device_store_not_bound` while the v8 enrollment
+     still occupies the shared `productId` credential slot. For an E2EE
+     device, pass the `verificationSecret` when re-pairing to enroll a new
+     E2EE member against the restored server.
 
 ### Harness model selection
 
