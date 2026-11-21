@@ -5,7 +5,7 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-The 0.45.0 candidate supports wire major `8`. Published 0.44.x packages
+The 0.45.0 release supports wire major `8`. Published 0.44.x packages
 use wire v7. The [Freeze rule](#freeze-rule) governs changes within v8.
 
 **Wire major 8.** Every explicit offer names a harness ID and supplies exactly
@@ -167,9 +167,9 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 `PROTOCOL_VERSION` is `8`. Every v8 change takes exactly one of three paths.
 `packages/protocol/src/__tests__/compat.test.ts` checks compatibility.
-0.45.0 is the first registered v8 candidate. The suite checks v8 corpus
+0.45.0 is the first published v8 release. The suite checks v8 corpus
 self-consistency and rejection by the published 0.44.1 decoder. Proving
-cross-release v8 gates requires a published v8 decoder.
+cross-release v8 gates requires pinning a published v8 decoder.
 
 **Changes that need a major.** Each of these narrows something a release
 already shipped, so it takes path 1:
@@ -270,9 +270,9 @@ token and reads it as `unknown`.
   `golden/v8.http.ndjson` cover the current schemas, including the unified
   `harness` lane, selection modes, inventory and the frozen cross-version
   refusal. The current decoder round-trips the envelope lines and checks
-  the HTTP bodies against their committed values. The first stable train
-  registration in `golden/v8.releases.json` pins 514 envelope lines and
-  41 HTTP lines for 0.45.0. Covered prefixes are immutable.
+  the HTTP bodies against their committed values. `golden/v8.releases.json`
+  registers the published 0.45.0 release and pins 514 envelope lines and
+  41 HTTP lines. Covered prefixes are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.44.1 registry tarball, the last v7 release. It rejects v8
   envelopes, including a v8 `conn.hello`, and reads the frozen cross-version
