@@ -229,17 +229,23 @@ export async function performControlShutdown(
   const { daemonState, observer, requestShutdown } = daemonScope;
   const effectiveReason = reason ?? 'operator';
   daemonState.shuttingDown = true;
-  const teardown = requestShutdown(effectiveReason, {
+  const teardown = requestShutdown(`control socket shutdown (${effectiveReason})`, {
     beforeTeardown: opts.deferTeardown ? () => new Promise<void>((resolve) => setImmediate(resolve)) : undefined,
   });
-  // Schedule the audit event before the lifecycle slot can schedule teardown.
-  // This also emits the event when requestShutdown reuses a pending teardown.
-  if (opts.deferTeardown) setImmediate(() => observer.noteShutdownRequested(effectiveReason));
-  else observer.noteShutdownRequested(effectiveReason);
+  // An in-flight teardown may settle before the scheduled notification runs.
+  let requestedEmitted = false;
+  const emitRequested = () => {
+    if (requestedEmitted) return;
+    requestedEmitted = true;
+    observer.noteShutdownRequested(effectiveReason);
+  };
+  if (opts.deferTeardown) setImmediate(emitRequested);
+  else emitRequested();
 
   try {
     await teardown;
   } finally {
+    emitRequested();
     // The foreground command waits for completion even if teardown throws.
     observer.noteShutdownComplete(effectiveReason, daemonState.connection?.outboxLength() ?? 0);
   }
