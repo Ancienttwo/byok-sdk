@@ -20,36 +20,23 @@ function resolveNativePiSessionPath(raw: string): string {
 }
 
 /**
- * Pi 1.4 restores a resumed transcript's recorded tool loadout. It activates
- * an extension tool the transcript never mentioned, but it keeps the recorded
- * built-in tools instead of the current `defaultTools`, and it reactivates a
- * declared extension tool that now registers default-inactive, deferred or
- * codemode. As OAR 0.67 does (#416), reset a resumed default-tools session to
- * the current native defaults and default-active extension tools before
- * `session_start`, so it offers the same tools as a new session with the same
- * options. Pi still applies `excludeTools` and exposure rules.
- *
- * The restore also keeps the transcript's not-yet-registered tools pending,
- * and a registration during `session_start` would activate them. Pi drops
- * pending tools only when a call deactivates an active tool, so the reset
- * activates every registered tool, empties the set, then sets the loadout.
- * When Pi activates none of them, it offers no way to drop the pending tools,
- * so the open fails.
+ * Resume with the current defaults (#416). Pi 1.6 only clears pending
+ * transcript tools when an active tool from that transcript is removed.
+ * Suppress transcript restoration at creation so a tool registered during
+ * session_start follows its current defaultActive and exposure.
  */
-export function resetResumedPiTools(
-  session: CreateAgentSessionResult['session'], settingsManager: SettingsManager, cwd: string,
-): void {
-  if (session.sessionManager.buildSessionContext().messages.length === 0) return;
-  const registered = session.getAllTools();
-  const defaults = settingsManager.getDefaultTools() ?? createCodingTools(cwd).map((tool) => tool.name);
-  const extensions = registered.filter((tool) =>
-    tool.sourceInfo.path !== `builtin:${tool.name}`
-    && session.getToolDefinition(tool.name)?.defaultActive !== false
-    && (tool.exposure === 'direct' || tool.exposure === 'model-only'));
-  session.setActiveToolsByName(registered.map((tool) => tool.name));
-  if (session.getActiveToolNames().length === 0) throw new Error('a resumed Pi session with no activatable tool cannot drop its restored pending tools');
-  session.setActiveToolsByName([]);
-  session.setActiveToolsByName([...defaults, ...extensions.map((tool) => tool.name)]);
+export async function createPiSessionWithCurrentTools(
+  options: CreateAgentSessionOptions & { cwd: string; sessionManager: SessionManager; settingsManager: SettingsManager },
+): Promise<CreateAgentSessionResult> {
+  if (options.tools !== undefined || options.noTools !== undefined
+    || options.sessionManager.buildSessionContext().messages.length === 0) {
+    return createAgentSession(options);
+  }
+  const created = await createAgentSession({ ...options, noTools: 'builtin' });
+  const defaults = options.settingsManager.getDefaultTools() ?? createCodingTools(options.cwd).map((tool) => tool.name);
+  const extensionTools = created.session.getActiveToolNames();
+  created.session.setActiveToolsByName([...defaults, ...extensionTools]);
+  return created;
 }
 
 /** Session ids are native minted references, never fuzzy search terms. */
@@ -249,7 +236,7 @@ export async function runPiSessionRuntime(options: {
     if (resolved?.error) options.reject(resolved.error);
     if (options.model !== undefined && exact === undefined && !resolved?.model) options.reject('requested model could not be resolved');
     if (resolved?.warning) process.stderr.write(`${options.label}: ${resolved.warning}\n`);
-    const created = await createAgentSession({
+    const created = await createPiSessionWithCurrentTools({
       cwd: options.cwd, agentDir, sessionManager, sessionStartEvent,
       modelRuntime: services.modelRuntime, settingsManager: services.settingsManager, resourceLoader: services.resourceLoader,
       model: exact ?? resolved?.model, thinkingLevel: options.thinking ?? resolved?.thinkingLevel,
@@ -257,7 +244,6 @@ export async function runPiSessionRuntime(options: {
     });
     subagentAbort.bind(created.session);
     options.configureSession?.(created.session);
-    if (options.tools === undefined && options.noTools === undefined) resetResumedPiTools(created.session, services.settingsManager, options.cwd);
     // A replacement is visible to RPC while session_start is awaiting. Keep
     // the ordinary scoped boundary established before it can become current.
     if (options.memoryLane === undefined && options.assertToolLoadout !== undefined) {

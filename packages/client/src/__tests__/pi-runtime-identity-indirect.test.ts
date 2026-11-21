@@ -7,12 +7,11 @@ import { OFFICIAL_PI_PROVENANCE } from '../adapters/pi/official-pi-installation.
 import { preparedCompileRequest } from './fixtures/prepared-compile-snapshot';
 
 /**
- * pi-coding-agent and pi-ai depend on these five packages with a caret range,
- * so a fresh npm install takes the newest compatible release. The version is
- * synthetic: it only has to be newer than the official pin.
+ * Simulate a Host resolving an indirect Pi dependency to a newer release.
+ * The version is synthetic and distinct from the official pin.
  */
 const INDIRECT_PI_PACKAGES = ['pi-telemetry', 'pi-schema', 'pi-tui', 'pi-codemode', 'pi-mcp'];
-const NEWER_INDIRECT_VERSION = '1.6.0';
+const NEWER_INDIRECT_VERSION = '1.7.0';
 const INDIRECT_MANIFEST = new RegExp(`[\\\\/]@earendil-works[\\\\/](?:${INDIRECT_PI_PACKAGES.join('|')})[\\\\/]package\\.json$`, 'u');
 
 // Every module in this graph that reads an installed indirect manifest sees the

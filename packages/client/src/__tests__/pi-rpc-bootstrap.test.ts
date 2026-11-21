@@ -236,7 +236,7 @@ ${PROMPT_WATCH}export default function(pi) {
     } finally { await loopback.close(); }
   }, 60_000);
 
-  // `PiSession` reads a turn from this order, which is Pi 1.5.2's
+  // `PiSession` reads a turn from this order, which is Pi 1.6.0's
   // implementation, not a documented contract: runs never overlap, and a
   // `started` prompt response is written before that run's `agent_start`.
   // A Pi that changes either fails here.

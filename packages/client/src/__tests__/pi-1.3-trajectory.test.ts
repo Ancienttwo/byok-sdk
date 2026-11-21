@@ -79,15 +79,15 @@ async function coreRecord(scenario: 'normal' | 'tool-error' | 'abort-tool' | 'ab
   return { events, execute, providerFrames };
 }
 
-describe('Octop T0: fixed Pi 1.5.2 emitter with synthetic model responses', () => {
-  it('binds the research to the reviewed closure and installed emitter bytes', () => {
-    expect(OFFICIAL_PI_PROVENANCE).toMatchObject({ packageVersion: '1.5.2',
-      upstreamCommit: 'b4afdddf44e059c67ccf5097e5317d913521b470',
-      closureDigest: '5b49e488317320fd0fbaf2a452b2d6f1455e40a2522c16e3e87b85d43daca603' });
+describe('Octop T0: fixed Pi 1.6.0 emitter with synthetic model responses', () => {
+  it('binds the trajectory checks to the reviewed closure and installed emitter bytes', () => {
+    expect(OFFICIAL_PI_PROVENANCE).toMatchObject({ packageVersion: '1.6.0',
+      upstreamCommit: 'faac585884ae2c013a6b1400f3e9e77f10b34bac',
+      closureDigest: '333cc8da49277af64d9255bbbbb8e9eca91e931c5ade6a82fd6345a6525f7a94' });
     const root = new URL('../../node_modules/@earendil-works/pi-agent-core/', import.meta.url);
-    expect(JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).version).toBe('1.5.2');
+    expect(JSON.parse(readFileSync(new URL('package.json', root), 'utf8')).version).toBe('1.6.0');
     expect(createHash('sha256').update(readFileSync(new URL('dist/agent-loop.js', root))).digest('hex'))
-      .toBe('22ee81f9977e211044c1ad41a763876c793ca7fc1c5b39b9fa7f76f3cb281129');
+      .toBe('804c6b15e67f265cb1fe5f09b4e0c7a3fd502e3e5f086ae0378ca6864436b75e');
   });
 
   it.each(['sequential', 'parallel'] as const)('pairs successful tools in %s mode and retains the later final response', async mode => {

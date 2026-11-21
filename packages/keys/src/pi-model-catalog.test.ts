@@ -6,14 +6,14 @@ import { buildPiProviderProjection } from './pi-provider-projection';
 import { MODEL_PROVIDER_VENDORS } from './provider-catalog';
 import { parseModelProviderProfile } from './provider-profile';
 
-// pi-ai 1.3.0 `providers/data/zai.json` glm-5.3, as `getBuiltinModels('zai')` returns it.
+// pi-ai 1.6.0 `providers/data/zai.json` glm-5.3, as `getBuiltinModels('zai')` returns it.
 const GLM_5_3 = {
   id: 'glm-5.3', name: 'GLM-5.3', api: 'openai-completions', provider: 'zai',
   baseUrl: 'https://api.z.ai/api/coding/paas/v4', reasoning: true,
   thinkingLevelMap: { off: null, minimal: null, low: 'low', medium: null, high: 'high', xhigh: null, max: 'max' },
   input: ['text'], cost: { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 0 },
   compat: {
-    supportsStore: false, supportsDeveloperRole: false, supportsReasoningEffort: true, maxTokensField: 'max_tokens',
+    supportsStore: false, supportsReasoningEffort: true, maxTokensField: 'max_tokens',
     thinkingFormat: 'zai', supportsStrictMode: true, zaiToolStream: true,
   },
   contextWindow: 1_000_000, maxTokens: 131_072, type: 'chat',
@@ -107,6 +107,7 @@ describe('piModelConfigFromPinnedCatalog', () => {
     { provider: 'custom', api: 'openai-completions', model: 'glm-5.3' },
     { provider: 'zai', api: 'openai-responses', model: 'glm-5.3' },
     { provider: 'zai', api: 'openai-completions', model: 'glm-0' },
+    { provider: 'vercel-ai-gateway', api: 'anthropic-messages', model: 'alibaba/qwen-3-235b' },
     { provider: '__proto__', api: 'openai-completions', model: 'glm-5.3' },
     { provider: 'zai', api: 'openai-completions', model: 'constructor' },
     { provider: 'zai', api: 'bedrock-converse-stream', model: 'glm-5.3' },
@@ -120,11 +121,11 @@ describe('pinned entries that declare sendSessionAffinityHeaders or allowEmptySi
   const timestamps = { created_at: '2026-10-26T00:00:00.000Z', updated_at: '2026-10-26T00:00:00.000Z' };
 
   it('returns an OpenRouter completions entry with sendSessionAffinityHeaders and projects it to Pi', () => {
-    // pi-ai 1.5.2 `providers/data/openrouter.json` deepseek/deepseek-chat.
+    // pi-ai 1.6.0 `providers/data/openrouter.json` deepseek/deepseek-chat.
     const result = piModelConfigFromPinnedCatalog({ provider: 'openrouter', api: 'openai-completions', model: 'deepseek/deepseek-chat', thinkingLevel: 'off' });
-    const compat = { supportsDeveloperRole: false, thinkingFormat: 'openrouter', supportsStrictMode: true, sendSessionAffinityHeaders: true };
+    const compat = { thinkingFormat: 'openrouter', supportsStrictMode: true, sendSessionAffinityHeaders: true };
     expect(result).toEqual({
-      ok: true, config: { contextWindow: 163_840, maxTokens: 16_384, reasoning: false, thinkingLevel: 'off', compat }, input: ['text'],
+      ok: true, config: { contextWindow: 128_000, maxTokens: 16_000, reasoning: false, thinkingLevel: 'off', compat }, input: ['text'],
     });
     if (!result.ok) throw new Error(result.reason);
     const vendor = MODEL_PROVIDER_VENDORS.openrouter;
@@ -140,21 +141,21 @@ describe('pinned entries that declare sendSessionAffinityHeaders or allowEmptySi
   });
 
   it('returns a Vercel AI Gateway anthropic-messages entry with allowEmptySignature and projects it to Pi', () => {
-    // pi-ai 1.4.0 `providers/data/vercel-ai-gateway.json` alibaba/qwen-3-235b.
-    const result = piModelConfigFromPinnedCatalog({ provider: 'vercel-ai-gateway', api: 'anthropic-messages', model: 'alibaba/qwen-3-235b', thinkingLevel: 'off' });
+    // pi-ai 1.6.0 `providers/data/vercel-ai-gateway.json` openai/gpt-oss-120b.
+    const result = piModelConfigFromPinnedCatalog({ provider: 'vercel-ai-gateway', api: 'anthropic-messages', model: 'openai/gpt-oss-120b', thinkingLevel: 'high' });
     expect(result).toEqual({
       ok: true,
-      config: { contextWindow: 262_144, maxTokens: 16_384, reasoning: false, thinkingLevel: 'off', compat: { allowEmptySignature: true } },
+      config: { contextWindow: 131_072, maxTokens: 131_072, reasoning: true, thinkingLevel: 'high', compat: { allowEmptySignature: true } },
       input: ['text'],
     });
     if (!result.ok) throw new Error(result.reason);
     const vendor = MODEL_PROVIDER_VENDORS['vercel-ai-gateway'];
     const profile = parseModelProviderProfile({
       ...timestamps, adapter: vendor.adapter, auth_mode: vendor.auth_mode, base_url: vendor.base_url, capabilities: [],
-      display_name: 'Qwen 3 235B', enabled: true, kind: 'model', model: 'alibaba/qwen-3-235b', profile_ref: 'vercel-qwen',
+      display_name: 'GPT OSS 120B', enabled: true, kind: 'model', model: 'openai/gpt-oss-120b', profile_ref: 'vercel-gpt-oss',
       provider_kind: 'vercel-ai-gateway', pi_model: result.config,
     });
-    const provider = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-vercel-qwen'];
+    const provider = (buildPiProviderProjection(profile, 'pi-rpc') as any).providers['byok-sdk-vercel-gpt-oss'];
     expect(provider.api).toBe('anthropic-messages');
     expect(provider.models[0].compat).toEqual({ allowEmptySignature: true });
     expect(() => assertPiPreparedProviderProfile(profile)).toThrow(/anthropic adapter/);
@@ -168,8 +169,8 @@ describe('pinned entries that declare sendSessionAffinityHeaders or allowEmptySi
       const entry = models[id]!;
       return 'config' in entry && !Object.hasOwn(entry.config.compat, 'cacheControlFormat');
     });
-    expect(undeclared, 'pi-ai detects compat.cacheControlFormat only for provider id "openrouter" (pi-ai 1.4.0 '
-      + 'api/openai-completions.js:1269). The byok-sdk-<ref> projected provider never matches it, so such an entry '
+    expect(undeclared, 'pi-ai detects compat.cacheControlFormat only for provider id "openrouter" (pi-ai 1.6.0 '
+      + 'api/openai-completions.js:1262). The byok-sdk-<ref> projected provider never matches it, so such an entry '
       + 'must declare cacheControlFormat explicitly or stay unrepresentable').toEqual([]);
   });
 });
