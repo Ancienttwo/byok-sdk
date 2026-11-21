@@ -1406,17 +1406,14 @@ function piPromptDisposition(response: PiRpcMessage): 'started' | 'queued' | 'ha
  * `prompt` response to the first `agent_settled` read after it; frames outside
  * that window belong to another run and are not the task's.
  *
- * The window rests on Pi 1.5.2's implementation order, not on a documented
- * contract, and `pi-rpc-bootstrap.test.ts` pins it against the installed Pi:
- * - runs never overlap: `isStreaming` is `_isAgentRunActive`
- *   (dist/core/agent-session.js:1127-1129); `prompt()` while a run is active
- *   queues into it or refuses (:1745-1756), and `prompt()` and a triggered
- *   `sendCustomMessage` during settlement are deferred until after the
- *   `agent_settled` event (:1696-1699, :1966-1970, :744-749);
- * - a `started` response is written after the run is marked active and
- *   before its `agent_start` (`_startRun` :1487-1506 calls the preflight
- *   callback that writes it, dist/modes/rpc/rpc-mode.js:325-328), on the same
- *   ordered stdout as every event (rpc-mode.js:272-273);
+ * The window depends on the implementation order in Pi 1.6.0.
+ * `pi-rpc-bootstrap.test.ts` verifies it against the installed Pi.
+ * - `AgentSession.isStreaming` reads `_isAgentRunActive`. While active,
+ *   `prompt()` queues into the run or refuses it. During settlement, `prompt()`
+ *   and a triggering `sendCustomMessage` wait until after `agent_settled`.
+ * - `AgentSession._startRun` marks the run active before the preflight
+ *   callback writes the `started` response. The RPC host writes that response
+ *   before `agent_start`, on the same stdout as the events.
  * - a `queued` response is written while the run it joined is active, so that
  *   run's settlement ends the turn, with the rest of that run's output.
  */

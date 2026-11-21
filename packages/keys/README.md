@@ -233,7 +233,7 @@ must preserve a stable OpenCode session for requests from one Pi session.
 The prepared runtime entry refuses both the provider id and this compat key,
 so this profile does not run on `pi-prepared`. The recorded run used `pi-rpc`.
 
-Pi 1.5.2 uses the declared `opencode-go` identity to replay a streamed
+Pi 1.6.0 uses the declared `opencode-go` identity to replay a streamed
 `reasoning` value as `reasoning_content`, including on an assistant message
 that carries a tool call. A gateway that already returns `reasoning_content`
 keeps that field. The declared identity also makes Pi send
@@ -452,11 +452,10 @@ if (submission.ok) {
   field by field. Pi's run-time branches on its own provider id are not part
   of that promise, because catalog-derived providers use `byok-sdk-<profile_ref>`.
   A manually declared `pi_model.providerId: 'opencode-go'` selects Pi's own
-  OpenCode Go replay and session-header branches. In pi-ai 1.5.2 the other
-  branches are:
-  - Anthropic message threads, on by default only for provider `anthropic`
-    at `api.anthropic.com`. A projected anthropic profile sends full
-    requests, and `pi_model.compat` has no `supportsMessageThreads`.
+  OpenCode Go replay and session-header branches. In pi-ai 1.6.0 Anthropic
+  message threads default on for requests to `api.anthropic.com`, including
+  projected Anthropic profiles when a session ID is available. The other
+  branches that differ by provider ID include the following.
   - openrouter `anthropic/*` `cacheControlFormat`. No representable entry is
     affected.
   - the xai `reasoning.encrypted_content` include. Only grok-4.3 at `off`
@@ -467,7 +466,7 @@ if (submission.ok) {
     document a `store: false` replay of a reasoning item without
     `encrypted_content`. Not checked against the xAI API.
   - cerebras body-less overflow detection. Only a 400 with an empty body
-    differs. The pinned `openai` 7.19.0 keeps an error body that has no
+    differs. The pinned `openai` 7.59.0 keeps an error body that has no
     `error` key, and the overflow body Cerebras is reported to send
     (`context_length_exceeded`) matches pi-ai's generic overflow patterns
     under any provider id, so both ids compact and retry. No empty-body 400
