@@ -74,6 +74,8 @@ export interface ControlServerOptions {
 export interface ControlServerHandle {
   /** The bound Unix socket path or Windows pipe name. */
   endpoint: string;
+  /** Whether this handle still serves requests. False once {@link stopServing} is called. */
+  readonly isServing: () => boolean;
   /**
    * Stops accepting new connections and destroys every open one. The runtime
    * removes the Unix socket while closing its listener; the token remains.
@@ -396,10 +398,25 @@ function handleConnection(
   });
 }
 
+async function publishControlToken(tokenPath: string, token: string): Promise<void> {
+  try {
+    await atomicWriteFile(tokenPath, token, { mode: 0o600 });
+  } catch (error) {
+    // The writer hardens the temp file before rename. Its redundant chmod on
+    // the final path can fail after publication. Keep the listener and its
+    // cleanup handle if the new token is already installed with the right mode.
+    const published = await fs.lstat(tokenPath).catch(() => undefined);
+    if (!published?.isFile()) throw error;
+    if (process.platform !== 'win32' && (published.mode & 0o777) !== 0o600) throw error;
+    const publishedToken = await fs.readFile(tokenPath, 'utf8').catch(() => undefined);
+    if (publishedToken !== token) throw error;
+  }
+}
+
 /**
  * Binds the platform endpoint (Unix socket or Windows pipe — see
- * `control-protocol.ts`) FIRST, and only once that succeeds generates and
- * persists a fresh per-session token to `<storeDir>/control.token` (0600).
+ * `control-protocol.ts`) before atomically publishing a fresh per-session token
+ * at `<storeDir>/control.token` (0600).
  * This ordering matters: if a bind fails because ANOTHER daemon's control
  * server already owns this endpoint (see
  * {@link AnotherControlServerRunningError}), that other daemon's own token
@@ -450,31 +467,10 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
   await bindControlEndpoint(server, endpoint); // throws without ever touching the token file — see doc comment above
 
   try {
-    await atomicWriteFile(tokenPath, token, { mode: 0o600 });
+    await publishControlToken(tokenPath, token);
   } catch (err) {
-    // Finding F9 (cross-model adversarial review): the bind just above
-    // already succeeded — `server` is actively listening on `endpoint`. A
-    // token-write failure (disk full, storeDir removed out from under this
-    // call, a permission change mid-flight) used to propagate straight out
-    // of this function without ever tearing that listener down: the caller
-    // never gets a `ControlServerHandle` to `close()` (the throw happens
-    // before this function ever returns one — see `create-daemon.ts`'s own
-    // "continuing without it" degrade path, which only ever sees the
-    // exception, never the live socket underneath it), so the listener was
-    // silently ORPHANED — unreachable for the rest of the process's
-    // lifetime, and blocking every future bind attempt at this exact
-    // `endpoint` with `EADDRINUSE`/{@link AnotherControlServerRunningError}
-    // (e.g. a later retry, or this same daemon's next `start()`) even
-    // though nothing valid is actually listening behind it anymore in any
-    // useful sense (its token was never written, so no client could ever
-    // complete a handshake against it either). `atomicWriteFile` itself
-    // already guarantees `tokenPath` was never created/left partial on
-    // failure (its own temp-file-only cleanup — see `util/atomic-write.ts`),
-    // so there is nothing to unwind on that side; only the listener this
-    // function itself just stood up needs tearing down before rethrowing.
-    // Mirrors `close()`'s teardown below: destroy connections, close the
-    // listener (which removes its Unix socket), and reclaim an empty fallback
-    // directory.
+    // The bind succeeded but no usable token was published. Close the new
+    // listener and leave any retained liveness token in place for shutdown.
     for (const socket of sockets) socket.destroy();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     // Runtime close removes the Unix socket synchronously. Never unlink this
@@ -523,6 +519,7 @@ export async function startControlServer(opts: ControlServerOptions): Promise<Co
 
   return {
     endpoint,
+    isServing: () => stopServingPromise === undefined,
     stopServing,
     close,
     setMethods: (next) => {
