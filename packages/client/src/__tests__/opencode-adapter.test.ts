@@ -24,6 +24,7 @@ import { opencodeSession, opencodeV2RefusedSessionOptions } from '../../vendor/o
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { captureProcessIdentity, expectProcessNotLive, type ProcessIdentity } from './support/process-liveness';
 import { validateRuntimeDetectResult } from '../runtime-detection';
 import type { MessageDraftDelta, Session } from '../types';
 
@@ -256,9 +257,19 @@ it.each(['appendSystemPrompt', 'systemPrompt'] as const)('refuses v2 %s before l
 it('cleans a detached descendant before reporting success', async () => {
   const box = setup();
   const pidFile = path.join(box.cwd, 'daemon.pid');
-  await collect(await box.start(`agy-daemon:${pidFile}`));
-  const pid = Number(readFileSync(pidFile, 'utf8'));
-  expect(() => process.kill(pid, 0)).toThrow();
+  const remember = processTree.rememberOwnedDescendants;
+  let daemon: ProcessIdentity | undefined;
+  const observe = vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(child => {
+    if (daemon === undefined && existsSync(pidFile)) daemon = captureProcessIdentity(Number(readFileSync(pidFile, 'utf8')));
+    remember(child);
+  });
+  try {
+    await collect(await box.start(`agy-daemon:${pidFile}`));
+    if (daemon === undefined) throw new Error('The descendant was never observed before disposal');
+    expectProcessNotLive(daemon);
+  } finally {
+    observe.mockRestore();
+  }
 });
 
 it('distinguishes declared v1 steering from v2 negotiation', async () => {
@@ -606,7 +617,7 @@ it('disposes the native session after running with a small retained-record budge
   sessions.push(session);
   expect((await collect(session)).at(-1)).toEqual({ type: 'turn_end' });
   const started = box.facts().find(fact => fact.kind === 'start')!;
-  expect(() => process.kill(started.pid, 0)).toThrow();
+  expectProcessNotLive(started.pid);
 });
 
 it('retries a halt whose cleanup failed before signalling without retaining its rejected exit receipt', async () => {
@@ -637,7 +648,7 @@ it('retries a halt whose cleanup failed before signalling without retaining its 
     await (error as RuntimeStartupDisposalFailure).retryDisposal();
     expect(release).toHaveBeenCalledTimes(1);
     expect(box.facts().some(fact => fact.kind === 'close')).toBe(false);
-    expect(() => process.kill(owned!.child.pid!, 0)).toThrow();
+    expectProcessNotLive(owned!.child.pid!);
   } finally {
     blocked = false;
     spy.mockRestore();

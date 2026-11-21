@@ -21,6 +21,7 @@ import { TestServer } from './fixtures/test-server';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
+import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 const BUN_BIN = resolveBunBin();
 const PROCESS_WAIT = { timeout: 5_000, interval: 50 };
 const RECOVERY_TIMEOUT_MS = 60_000;
@@ -40,11 +41,6 @@ function processTree(seeds: number[]): number[] {
   }
   const data=execFileSync('ps',['-eo','pid=,ppid='],{encoding:'utf8'}).trim().split('\n').map(line=>line.trim().split(/\s+/u).map(Number));
   const found=new Set(seeds);for(const pid of found)for(const [child,parent] of data)if(parent===pid)found.add(child!);return [...found];
-}
-function live(pid: number): boolean {
-  try { process.kill(pid,0); } catch {return false;}
-  if(process.platform !== 'win32') {try{return !execFileSync('ps',['-p',String(pid),'-o','stat='],{encoding:'utf8'}).trim().startsWith('Z');}catch{return false;}}
-  return true;
 }
 function liveGroup(pgid: number): number[] {
   return execFileSync('ps',['-eo','pid=,pgid=,stat='],{encoding:'utf8'}).trim().split('\n').map(line=>line.trim().split(/\s+/u)).filter(([,group,stat])=>Number(group)===pgid&&!stat!.startsWith('Z')).map(([pid])=>Number(pid));
@@ -157,9 +153,10 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   const toolGroup=waitingModel?undefined:Number(execFileSync('ps',['-p',(await fs.readFile(path.join(home,'tool-pid'),'utf8')).trim(),'-o','pgid='],{encoding:'utf8'}).trim());
   if(toolGroup!==undefined)expect(liveGroup(toolGroup).length).toBeGreaterThan(0);
   const interruptedTree=processTree([first.pid!,oldLaunch!.launcherPid]);for(const pid of interruptedTree)ownedPids.add(pid);
+  const interruptedIdentities = interruptedTree.map(captureProcessIdentity);
   first.kill('SIGKILL'); await new Promise(resolve=>first.once('exit',resolve));expect(first.signalCode).toBe('SIGKILL');
   if(!daemonOnly) { kill(oldLaunch!.launcherPid,true); for(const pid of interruptedTree)if(pid!==first.pid)kill(pid); }
-  await vi.waitFor(()=>expect(interruptedTree.filter(live)).toEqual([]),PROCESS_WAIT);
+  await vi.waitFor(() => interruptedIdentities.forEach(expectProcessNotLive), PROCESS_WAIT);
   if(toolGroup!==undefined)await vi.waitFor(()=>expect(liveGroup(toolGroup)).toEqual([]),PROCESS_WAIT);
   for(const pid of interruptedTree)ownedPids.delete(pid);launcherPids=launcherPids.filter(pid=>!interruptedTree.includes(pid));
   if(daemonOnly&&!waitingModel) {const writes=await fs.readFile(path.join(home,'orphan-writes.log'),'utf8');const count=requests.length;await new Promise(resolve=>setTimeout(resolve,250));expect(await fs.readFile(path.join(home,'orphan-writes.log'),'utf8')).toBe(writes);expect(requests.length).toBe(count);}

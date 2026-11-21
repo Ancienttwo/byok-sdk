@@ -25,6 +25,7 @@ import { hostToolsetToken, testScratchOwner } from '../fixtures/execution-scratc
 import { FRESH_OFFER, freshOfferRunnerDeps } from '../fixtures/fresh-offer';
 import { testRuntimeEnvironment } from '../fixtures/runtime-env';
 import { freshTestAgentRef, testAgentHomeDeps } from '../fixtures/test-agent';
+import { isProcessLive } from '../support/process-liveness';
 import { contractMode, createSandbox, fileEgress, readReceipt, withProcessEnv, writeSubmitResultServer, type ContractRuntime, type Sandbox } from './contract';
 import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type LoopbackProvider, type ProviderRequest, type ProviderStep, type ProviderTool, type ProviderWire } from './loopback';
 
@@ -126,13 +127,6 @@ function shutdownPid(pid: number): void {
   }
 }
 
-function alive(pid: number): boolean {
-  try { process.kill(pid, 0); return true; } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ESRCH') return false;
-    throw error;
-  }
-}
-
 async function probe(options: ProbeOptions, scenario: Scenario) {
   const box = await createSandbox(`search-${options.runtime}`);
   const recorder = await fileEgress();
@@ -186,7 +180,6 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
   let fdPending: Promise<void> | undefined;
   let staleCall: boolean | undefined;
   let innerAuthority: boolean | undefined;
-  let leaks: number[] = [];
   let mode: RuntimeDetectResult | undefined;
   let context: McpHubContext | undefined;
   let helperArgs: readonly string[] | undefined;
@@ -431,7 +424,8 @@ async function probe(options: ProbeOptions, scenario: Scenario) {
     if (frame.method === 'exit') liveChildren.delete(Number(frame.pid));
     innerPeak = Math.max(innerPeak, liveChildren.size);
   }
-  await vi.waitFor(() => { leaks = pids.filter(alive); expect(leaks).toEqual([]); }, { timeout: 3000 }).catch(() => undefined);
+  await vi.waitFor(() => expect(pids.filter(isProcessLive)).toEqual([]), { timeout: 3000 }).catch(() => undefined);
+  const leaks = pids.filter(isProcessLive);
   const progress = sent.flatMap(envelope => envelope.type === 'task.progress' && envelope.task_id === 'search-contract'
     && 'events' in envelope.payload ? envelope.payload.events : []);
   const toolEvents = progress.flatMap(event => {

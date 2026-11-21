@@ -17,6 +17,7 @@ import { RuntimeDisposalFailure, RuntimeExecutionFailure } from '../runtime-fail
 import * as processTree from '../adapters/process-tree';
 import { testScratchOwner } from './fixtures/execution-scratch';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
+import { captureProcessIdentity, expectProcessNotLive, isProcessLive, type ProcessIdentity } from './support/process-liveness';
 import { GrokProjection } from '../adapters/grok/projection';
 import { AgyAdapter, type AgyAdapterOptions } from '../adapters/antigravity/agy-adapter';
 import { agyAdapterWithEndpoint } from '../adapters/antigravity/agy-endpoint';
@@ -399,15 +400,17 @@ describe('GrokAdapter sessions', () => {
     const s = await open(adapter(), { target: GROK_TARGET, instruction: 'orphan-tool' }, { ...resources, env: { ...resources.env, FAKE_ACP_TOOL_TREE: treeFile } });
     await until(() => { try { return JSON.parse(readFileSync(treeFile, 'utf8')).grandchildPid > 0; } catch { return false; } });
     const { descendantPid: parent, grandchildPid: tool } = JSON.parse(readFileSync(treeFile, 'utf8')) as { descendantPid: number; grandchildPid: number };
+    const toolIdentity = captureProcessIdentity(tool);
     try {
+      const parentIdentity = captureProcessIdentity(parent);
       await s.interrupt();
-      await until(() => !alive(parent));
+      await until(() => !isProcessLive(parentIdentity));
       expect(alive(tool)).toBe(true);
       await s.close();
-      expect(alive(tool)).toBe(false);
+      expectProcessNotLive(toolIdentity);
     } finally {
       vi.useRealTimers();
-      if (alive(tool)) process.kill(tool, 'SIGKILL');
+      if (isProcessLive(toolIdentity)) process.kill(tool, 'SIGKILL');
     }
   });
 
@@ -494,7 +497,7 @@ describe('GrokAdapter sessions', () => {
     expect(await failureOf(s)).toMatchObject({ message: 'projection failed' });
     await s.close();
     const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
-    if (process.platform !== 'win32') await vi.waitFor(() => expect(() => process.kill(started!.pid, 0)).toThrow());
+    if (process.platform !== 'win32') await vi.waitFor(() => expectProcessNotLive(started!.pid));
   });
 
   it('fails as infrastructure when the agent exits on its own', async () => {
@@ -526,10 +529,11 @@ describe('GrokAdapter sessions', () => {
     const resources = await ctx();
     const s = await open(adapter(), { target: GROK_TARGET, instruction: 'hold-silent' }, resources);
     await vi.waitFor(() => expect(facts(resources.log).some(fact => fact.kind === 'prompt')).toBe(true));
+    const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
+    const identity = captureProcessIdentity(started!.pid);
     await Promise.all([s.close(), s.close()]);
     await s.close();
-    const [started] = facts(resources.log).filter(fact => fact.kind === 'start');
-    if (process.platform !== 'win32') expect(() => process.kill(started!.pid, 0)).toThrow();
+    if (process.platform !== 'win32') expectProcessNotLive(identity);
   });
 });
 
@@ -927,7 +931,7 @@ describe('AgyAdapter', () => {
     expect(await failureOf(s)).toMatchObject({ message: 'Process table ps: timeout after 5000 ms' });
     expect(facts(resources.log).some(fact => fact.kind === 'close')).toBe(true);
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
-    expect(() => process.kill(start.pid, 0)).toThrow();
+    expectProcessNotLive(start.pid);
     await expect(fetch(start.env.GOOGLE_GEMINI_BASE_URL)).rejects.toThrow();
     await s.close();
     expect(observe).toHaveBeenCalledTimes(2); // The failed stop is not remembered: the close stops again.
@@ -948,11 +952,21 @@ describe('AgyAdapter', () => {
     const home = await agyVersion('1.5.11');
     const resources = await agyCtx();
     const pidFile = path.join(resources.workspaceDir, 'daemon.pid');
-    const s = await open(agy(home), { target: AGY_TARGET, instruction: `agy-daemon:${pidFile}` }, resources);
-    for await (const event of s.events) if (event.type === 'turn_end') break;
-    const pid = Number(readFileSync(pidFile, 'utf8'));
-    await vi.waitFor(() => expect(() => process.kill(pid, 0)).toThrow());
-    await expect(s.followUp({ target: AGY_TARGET, instruction: 'x' })).rejects.toBeInstanceOf(PolicyUnsupportedError);
+    const remember = processTree.rememberOwnedDescendants;
+    let daemon: ProcessIdentity | undefined;
+    const observe = vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(child => {
+      if (daemon === undefined && existsSync(pidFile)) daemon = captureProcessIdentity(Number(readFileSync(pidFile, 'utf8')));
+      remember(child);
+    });
+    try {
+      const s = await open(agy(home), { target: AGY_TARGET, instruction: `agy-daemon:${pidFile}` }, resources);
+      for await (const event of s.events) if (event.type === 'turn_end') break;
+      if (daemon === undefined) throw new Error('The daemon was never observed before disposal');
+      expectProcessNotLive(daemon);
+      await expect(s.followUp({ target: AGY_TARGET, instruction: 'x' })).rejects.toBeInstanceOf(PolicyUnsupportedError);
+    } finally {
+      observe.mockRestore();
+    }
   });
 
   it('answers a writer with allow_once, and fails a reader the model never answered after a reject_once', async () => {

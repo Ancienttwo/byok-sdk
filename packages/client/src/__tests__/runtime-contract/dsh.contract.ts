@@ -2,6 +2,7 @@ import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnOptions } 
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { beforeAll, expect } from 'vitest';
+import { captureProcessIdentity, isProcessLive } from '../support/process-liveness';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
 import { OWNED_TREE_OBSERVE_MS } from '../../adapters/process-tree';
 import { classifyToolCall } from '../../tool-authorization';
@@ -154,10 +155,6 @@ async function controlTurn(label: string, write: (root: string) => Promise<void>
   }
 }
 
-const isAlive = (pid: number): boolean => {
-  try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
-};
-
 async function waitFor<T>(read: () => Promise<T | undefined>, ms: number, what: string): Promise<T> {
   const deadline = Date.now() + ms;
   for (;;) {
@@ -203,6 +200,7 @@ async function toolTreeTurn(stop: 'close' | 'sigkill') {
       const found = (await fs.readFile(pidFile, 'utf8').catch(() => '')).trim().split(/\s+/).map(Number).filter(pid => Number.isSafeInteger(pid) && pid > 0);
       return found.length === 2 ? found : undefined;
     }, 120_000, 'the shell tool pids');
+    const identities = tools.map(captureProcessIdentity);
     const before = `dsh root ${child?.pid}; ${processRows(tools)}`;
     if (stop === 'sigkill') {
       // The tools run in a group of their own: only an observation taken while the root ran leads to them.
@@ -211,7 +209,8 @@ async function toolTreeTurn(stop: 'close' | 'sigkill') {
       try { for await (const _event of session.events) { /* drain to the root's exit */ } } catch { /* the session fails with the root */ }
     }
     await session.close();
-    const survivors = await waitFor(async () => tools.some(isAlive) ? undefined : [], 10_000, 'the tool processes to exit').catch(() => tools.filter(isAlive));
+    const survivors = await waitFor(async () => identities.some(isProcessLive) ? undefined : [], 10_000, 'the tool processes to exit')
+      .catch(() => identities.filter(isProcessLive).map(({ pid }) => pid));
     const after = processRows(survivors);
     for (const pid of survivors) process.kill(pid, 'SIGKILL');
     return { survivors, diagnostic: `before: ${before}; after: ${after}` };
@@ -291,7 +290,7 @@ async function backgroundTurn() {
     }
     // turn_end follows the disposal, so the tree is already gone here.
     const pids = await Promise.all([childPid, jobPid].map(async file => Number(await fs.readFile(file, 'utf8'))));
-    const survivors = pids.filter(isAlive);
+    const survivors = pids.filter(isProcessLive);
     const diagnostic = processRows(survivors);
     for (const pid of survivors) process.kill(pid, 'SIGKILL');
     const sessionRef = opened.sessionRef;

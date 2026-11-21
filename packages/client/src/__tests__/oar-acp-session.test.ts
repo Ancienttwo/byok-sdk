@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { expectProcessNotLive } from './support/process-liveness';
 import { acpSession, type AcpSessionHooks } from '../../vendor/oar/7961a59/shared/acp/session';
 import type { AcpSessionProfile } from '../../vendor/oar/7961a59/shared/acp/profile';
 import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/7961a59/contracts/session';
@@ -465,6 +466,6 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
       cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log },
     }, { onReady: () => { throw new Error('unexpected session id'); } })).rejects.toThrow('unexpected session id');
     const [started] = facts(log).filter(fact => fact.kind === 'start');
-    if (process.platform !== 'win32') expect(() => process.kill(started!.pid, 0)).toThrow();
+    if (process.platform !== 'win32') expectProcessNotLive(started!.pid);
   });
 });

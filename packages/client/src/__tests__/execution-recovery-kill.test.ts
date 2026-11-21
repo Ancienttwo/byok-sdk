@@ -10,6 +10,7 @@ import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { randomUUID } from 'node:crypto';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { BYOK_CAPABILITIES_PATH, decodeEnvelope } from '@byok-sdk/protocol';
 import { AgentHomeBusyError, AgentHomeManager } from '../agent-home';
 import { sdkNativeAssetTargets } from '../sdk-native-assets';
@@ -199,7 +200,9 @@ async function waitForFile(file: string, timeoutMs = 10_000): Promise<void> {
     try {
       await fs.access(file);
       return;
-    } catch {}
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
     if (Date.now() >= deadline) throw new Error(`timed out waiting for ${file}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
@@ -457,6 +460,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     expect(processAlive(tree.rootPid)).toBe(true);
     expect(processAlive(tree.toolPid)).toBe(true);
     expect(processAlive(tree.sessionPid)).toBe(true);
+    const descendants = [tree.toolPid, tree.sessionPid].map(captureProcessIdentity);
     expect(journalRows('SELECT * FROM journal_terminal')).toHaveLength(0);
 
     // The next daemon dies exactly where it would first send the recovered terminal.
@@ -464,8 +468,7 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     const second = await spawnDaemon({ ownedRuntimeTree: true, recoveryFault: 'terminal:before-send' });
     expect((await second.exited()).signal).toBe('SIGKILL');
     expect(groupAlive(tree.rootPid)).toBe(false);
-    expect(processAlive(tree.toolPid)).toBe(false);
-    expect(processAlive(tree.sessionPid)).toBe(false);
+    descendants.forEach(expectProcessNotLive);
     expect(second.stderr).toContain('recorded=1 found=1 terminated=1 survived=0');
     expect((await cloud.rpc('readTaskAttempt', { taskId: offer.taskId }) as { status: string }).status).toBe('running');
     expect(await ownedProcessRecords()).toEqual([]);
@@ -486,11 +489,12 @@ describe.skipIf(process.platform !== 'darwin' && process.platform !== 'linux')('
     const tree = await runtimeTree();
     await waitForAttempt(cloud, offer.taskId, 'running');
     expect(await ownedProcessRecords()).toHaveLength(1);
+    const tool = captureProcessIdentity(tree.sessionPid);
     await finish(offer.taskId, 'disposed normally');
     await waitForAttempt(cloud, offer.taskId, 'complete');
     await waitForFile(path.join(current!.daemonBase.controlDir, `${offer.taskId}.closed`));
     expect(groupAlive(tree.rootPid)).toBe(false);
-    expect(processAlive(tree.sessionPid)).toBe(false);
+    expectProcessNotLive(tool);
     // The disposal receipt removed the record while the daemon still runs.
     expect(await ownedProcessRecords()).toEqual([]);
     daemon.child.stdin.write(`${JSON.stringify({ command: 'stop' })}\n`);

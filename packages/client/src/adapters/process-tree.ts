@@ -13,7 +13,7 @@ const POLL_MS = 20;
 /**
  * Time limit of each synchronous `ps` and `sysctl` run here; past it the
  * command is SIGKILLed and the read fails as exit unconfirmed (#2105).
- * Each poll can spend up to this limit on the final observation. The
+ * The best-effort zombie reap caps ps at the remaining reap grace. The
  * host-exit sweep shares one read across all trees, and the owned-root
  * observer shares one read per {@link OWNED_TREE_OBSERVE_MS}.
  * Residual: a `ps` stuck in uninterruptible kernel sleep outlives SIGKILL,
@@ -59,9 +59,9 @@ export interface OwnedProcessTreeOptions {
   /** DI seam for liveness probing — defaults to `process.kill`. */
   killFn?: KillFn;
   /** DI seam for POSIX table reads that only return readable processes. */
-  readProcessTableFn?: () => ProcessTable;
+  readProcessTableFn?: (timeoutMs?: number) => ProcessTable;
   /** DI seam for POSIX observations, including temporarily unreadable identities. */
-  observeProcessTableFn?: () => Pick<ProcessTableRead, 'table' | 'unreadable'>;
+  observeProcessTableFn?: (timeoutMs?: number) => OwnedProcessTableRead;
 }
 
 type OwnedProcessTableRead = Pick<ProcessTableRead, 'table' | 'unreadable'>;
@@ -688,19 +688,22 @@ export function readOwnedProcessTable(source?: ProcessTableSource, command?: str
 }
 
 /**
- * The process table now, synchronously. Give SDK-owned `ps` its shorter
- * {@link PROCESS_COMMAND_TIMEOUT_MS} and SIGKILL deadline. A timeout throws.
- * Procfs and Windows use the vendored observation. `command` is a test seam.
+ * The process table now, synchronously, including unreadable identities.
+ * Give SDK-owned `ps` a SIGKILL deadline no longer than
+ * {@link PROCESS_COMMAND_TIMEOUT_MS}. A timeout throws. Procfs and Windows
+ * use the vendored observation. `command` is a test seam.
  */
-function observeOwnedProcessTable(
+export function observeOwnedProcessTable(
   source: ProcessTableSource = process.platform === 'linux' ? 'procfs' : (process.platform === 'win32' ? 'windows' : 'ps'),
   command = '/bin/ps',
+  timeoutMs = PROCESS_COMMAND_TIMEOUT_MS,
 ): OwnedProcessTableRead {
   if (source !== 'ps') {
     const result = observeProcessTable(source);
     if (result.ok) return result;
     throw new Error(`Process table ${result.source}: ${result.reason}${result.code === undefined ? '' : ` (${result.code})`} after ${result.elapsedMs.toFixed(0)} ms`, { cause: result });
   }
+  const timeout = Math.max(1, Math.min(PROCESS_COMMAND_TIMEOUT_MS, Math.floor(timeoutMs)));
   let output: string;
   try {
     // By absolute path, as the vendored read does: the host's PATH may not name /bin.
@@ -708,7 +711,7 @@ function observeOwnedProcessTable(
       encoding: 'utf8',
       env: { ...process.env, LC_ALL: 'C' },
       stdio: ['ignore', 'pipe', 'ignore'],
-      timeout: PROCESS_COMMAND_TIMEOUT_MS,
+      timeout,
       killSignal: 'SIGKILL',
       maxBuffer: 16 * 1024 * 1024,
     });
@@ -716,7 +719,7 @@ function observeOwnedProcessTable(
     // Node's error embeds the output and the command line; only its code leaves.
     const code = (cause as NodeJS.ErrnoException).code;
     throw new Error(code === 'ETIMEDOUT'
-      ? `Process table ps: timed out after ${PROCESS_COMMAND_TIMEOUT_MS} ms, exit unconfirmed`
+      ? `Process table ps: timed out after ${timeout} ms, exit unconfirmed`
       : `Process table ps: read failed (${code ?? 'exit status'})`);
   }
   const result = parseProcessPs(output);
@@ -725,11 +728,11 @@ function observeOwnedProcessTable(
 }
 
 /** Disposal's process-table read fails typed without signalling on a guess. */
-function readDisposalTable(options: OwnedProcessTreeOptions, stage: 'signal' | 'quiescence' = 'signal'): OwnedProcessTableRead {
+function readDisposalTable(options: OwnedProcessTreeOptions, stage: 'signal' | 'quiescence' = 'signal', timeoutMs?: number): OwnedProcessTableRead {
   try {
-    if (options.observeProcessTableFn !== undefined) return options.observeProcessTableFn();
-    if (options.readProcessTableFn !== undefined) return { table: options.readProcessTableFn() };
-    return observeOwnedProcessTable();
+    if (options.observeProcessTableFn !== undefined) return options.observeProcessTableFn(timeoutMs);
+    if (options.readProcessTableFn !== undefined) return { table: options.readProcessTableFn(timeoutMs) };
+    return observeOwnedProcessTable(undefined, undefined, timeoutMs);
   } catch (cause) {
     throw new RuntimeDisposalFailure({
       stage,
@@ -1106,14 +1109,20 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   if (zombies.size > 0 && reapGraceMs > 0) {
     // Exited descendants can still answer PID probes until the OS reaps them.
     // Their already-confirmed exit stands if this optional observation fails.
-    await waitUntil(() => {
+    const deadline = Date.now() + reapGraceMs;
+    for (;;) {
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
       try {
-        const { table } = readDisposalTable(options, 'quiescence');
-        return [...zombies.values()].some(entry => table.get(entry.pid)?.start === entry.start);
+        const { table } = readDisposalTable(options, 'quiescence', remainingMs);
+        if (![...zombies.values()].some(entry => table.get(entry.pid)?.start === entry.start)) break;
       } catch {
-        return false;
+        break;
       }
-    }, reapGraceMs);
+      const sleepMs = Math.min(POLL_MS, deadline - Date.now());
+      if (sleepMs <= 0) break;
+      await new Promise<void>(resolve => setTimeout(resolve, sleepMs));
+    }
   }
   await forgetOwnedGroup(options.child);
 }

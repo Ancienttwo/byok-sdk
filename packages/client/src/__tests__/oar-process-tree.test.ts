@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { expectProcessNotLive } from './support/process-liveness';
 import { descendantsOf, killEntries, parseProcessPs, readProcessTable, type ProcessEntry } from '../runtime/oar-process-tree.js';
 
 // Ported from OAR v0.37.0 tests/process-tree.test.ts (6d1589d) for the vendored
@@ -15,22 +16,13 @@ const LEADER = String.raw`
   setTimeout(() => {}, 60000);
 `;
 
-function alive(pid: number): boolean {
+function exists(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
   } catch (error) {
     return (error as NodeJS.ErrnoException).code !== 'ESRCH';
   }
-}
-
-async function gone(pid: number, withinMs = 5_000): Promise<boolean> {
-  const deadline = Date.now() + withinMs;
-  while (alive(pid)) {
-    if (Date.now() > deadline) return false;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  return true;
 }
 
 /** A Node process sleeping for a minute; `detached` puts it in a session of its own. */
@@ -99,9 +91,9 @@ describe('OAR process table', () => {
       const current = table.get(pid);
       expect(current).toBeDefined();
       killEntries([{ ...current!, start: `${current!.start}-earlier` }], table);
-      expect(await gone(pid, 300)).toBe(false);
+      await expect(vi.waitFor(() => expect(exists(pid)).toBe(false), { timeout: 300 })).rejects.toThrow();
       killEntries([current!], readProcessTable());
-      expect(await gone(pid)).toBe(true);
+      await vi.waitFor(() => expectProcessNotLive(current!));
     });
   });
 
@@ -116,9 +108,10 @@ describe('OAR process table', () => {
       const [host, leaderEntry, targetEntry] = [table.get(process.pid), table.get(leaderPid), table.get(target)];
       expect(host && leaderEntry && targetEntry).toBeTruthy();
       expect([targetEntry!.pgid, table.get(member)?.pgid]).toEqual([host!.pgid, leaderPid]);
+      const memberEntry = table.get(member)!;
       killEntries([host!, leaderEntry!, targetEntry!], table);
-      expect([await gone(leaderPid), await gone(member), await gone(target)]).toEqual([true, true, true]);
-      expect(await gone(sibling, 300)).toBe(false);
+      await vi.waitFor(() => [leaderEntry!, memberEntry, targetEntry!].forEach(expectProcessNotLive));
+      await expect(vi.waitFor(() => expect(exists(sibling)).toBe(false), { timeout: 300 })).rejects.toThrow();
     });
   });
 });

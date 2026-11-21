@@ -13,6 +13,7 @@ import { RuntimeExecutionFailure } from '../runtime-failure';
 import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
+import { expectProcessNotLive } from './support/process-liveness';
 
 const DSH_TARGET = { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'openai', modelId: 'byok-custom/loop-model' } } as const;
 
@@ -535,9 +536,9 @@ describe('DshAdapter sessions', () => {
     const session = await open();
     await turn(session);
     await session.close();
-    expect((await facts()).some((fact) => fact.method === 'dispose')).toBe(true);
-    const pid = (await facts()).find((fact) => fact.kind === 'start')!.pid as number;
-    expect(() => process.kill(pid, 0)).toThrow();
+    const recorded = await facts();
+    expect(recorded.some((fact) => fact.method === 'dispose')).toBe(true);
+    expectProcessNotLive(recorded.find((fact) => fact.kind === 'start')!.pid as number);
   });
 
   it('resumes a known session in the same workspace and re-sends its MCP servers', async () => {

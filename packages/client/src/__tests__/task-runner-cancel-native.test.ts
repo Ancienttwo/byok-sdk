@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { expectProcessNotLive } from './support/process-liveness';
 import { createEnvelope, type Envelope, type RuntimeId } from '@byok-sdk/protocol';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
@@ -186,7 +187,7 @@ async function setup(runtime: RuntimeId, scenario: string, {
   const assertTreeReaped = async () => {
     const pids = JSON.parse(await fs.readFile(tree, 'utf8')) as Record<string, number>;
     expect(Object.keys(pids).sort()).toEqual(['descendantPid', 'grandchildPid', 'rootPid']);
-    for (const pid of Object.values(pids)) expect(alive(pid), `PID ${pid} still live`).toBe(false);
+    Object.values(pids).forEach(expectProcessNotLive);
   };
   const assertReaped = async () => {
     await assertTreeReaped();
