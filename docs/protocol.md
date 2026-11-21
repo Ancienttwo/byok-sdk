@@ -167,9 +167,8 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 
 `PROTOCOL_VERSION` is `8`. Every v8 change takes exactly one of three paths.
 `packages/protocol/src/__tests__/compat.test.ts` checks compatibility.
-0.45.0 is the first published v8 release. The suite checks v8 corpus
-self-consistency and rejection by the published 0.44.1 decoder. Proving
-cross-release v8 gates requires pinning a published v8 decoder.
+The suite uses 0.45.0, the first published v8 release, to check cross-release
+compatibility and 0.44.1 to check rejection across wire majors.
 
 **Changes that need a major.** Each of these narrows something a release
 already shipped, so it takes path 1:
@@ -277,10 +276,11 @@ token and reads it as `unknown`.
   published 0.44.1 registry tarball, the last v7 release. It rejects v8
   envelopes, including a v8 `conn.hello`, and reads the frozen cross-version
   refusal. The v7 release is recorded in the v7 registry.
-
-Once a published v8 decoder is pinned as a baseline, the current schema
-must accept every released v8 shape and a new gated row must carry a flag
-unknown to that release.
+- **Published v8 baseline.** `byok-protocol-v8-baseline` pins the 0.45.0
+  registry tarball and its lockfile integrity. The suite checks that current
+  schemas accept the released shapes and that the published decoder reads the
+  v8 envelope corpus and published HTTP surfaces. Each new gated row must name
+  a flag unknown to 0.45.0.
 
 Wire v8 checks target selection against the device’s `harnesses` inventory.
 The `WireAddition` table covers server-to-daemon capability flags and uses

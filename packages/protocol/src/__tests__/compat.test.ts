@@ -2,9 +2,11 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import * as v7Release from 'byok-protocol-previous';
+import * as v8Release from 'byok-protocol-v8-baseline';
 import * as currentModule from '../http-api';
 import { TerminalResidentMemoryOverLimitSchema, pairDeviceDigest } from '../index';
 import {
@@ -31,7 +33,7 @@ import {
 import { AgentMemorySelectionSchema } from '../messages';
 import { type WireAddition } from '../wire-additions';
 
-/** Frozen former majors, v8 corpus coverage, and a published v7 rejection oracle. */
+/** Frozen former majors, v8 corpus coverage, the published v8 baseline, and the v7 rejection oracle. */
 
 const require = createRequire(import.meta.url);
 const goldenDir = fileURLToPath(new URL('./golden/', import.meta.url));
@@ -484,8 +486,7 @@ describe('compat v7: frozen evidence rejected by v8', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Wire v8 self-consistency. The 0.45.0 candidate pins both corpus prefixes.
-// A published v8 decoder is still needed to prove cross-release compatibility.
+// 7. Wire v8 corpus and the published 0.45.0 baseline
 // ---------------------------------------------------------------------------
 
 const v8Lines = ndjsonLines(readGolden('v8.envelopes.ndjson'));
@@ -495,7 +496,7 @@ const v8HttpLines = ndjsonLines(v8HttpText);
 const v8HttpCorpus = httpCorpusOf(v8HttpLines);
 const v8Registry = JSON.parse(readGolden('v8.releases.json')) as { readonly releases: readonly ReleaseEntry[] };
 
-describe('compat v8 registry: no published v8 decoder exists yet, so cross-release gates are unproven', () => {
+describe('compat v8 registry', () => {
   it('the v8 registry has releases only, and no floor until a v8 release is supported', () => {
     expect(Object.keys(v8Registry)).toEqual(['releases']);
     expect(Array.isArray(v8Registry.releases)).toBe(true);
@@ -537,7 +538,7 @@ describe('compat v8 registry: no published v8 decoder exists yet, so cross-relea
   });
 });
 
-describe('compat v8: the current decoder reads every v8 corpus line exactly (self-consistency; no published v8 decoder yet)', () => {
+describe('compat v8: the current decoder reads every v8 corpus line exactly', () => {
   it.each(v8Corpus.map((line) => [line.index + 1, line.type, line] as const))(
     'v8 line %i (%s) decodes, round-trips and deep-equals the committed JSON',
     (_n, _type, line) => {
@@ -577,7 +578,7 @@ function fieldValues(root: unknown, field: string): unknown[] {
   }), [root]);
 }
 
-function carries(line: CorpusLine, entry: WireAddition): boolean {
+function carries(line: Pick<CorpusLine, 'type' | 'payload'>, entry: WireAddition): boolean {
   if (line.type !== entry.surface) return false;
   if (entry.when !== undefined && !fieldValues(line.payload, entry.when.field).includes(entry.when.value)) return false;
   if (entry.field === undefined) return true;
@@ -793,6 +794,90 @@ describe('compat v8: HTTP corpus', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Published v8 compatibility
+// ---------------------------------------------------------------------------
+
+const V8_BASELINE = '0.45.0';
+const newV8Gates = WIRE_ADDITIONS.filter((row) => !v8Release.WIRE_ADDITIONS.some((old) => isDeepStrictEqual(old, row)));
+// The query schema is internal and has no runtime export in the 0.45.0 tarball.
+const publishedV8HttpCorpus = v8HttpCorpus.filter((line) => line.surface !== 'EventsPollQuery');
+
+function readV8BaselineEntry() {
+  const entry = v8Registry.releases.find((release) => release.version === V8_BASELINE);
+  if (!entry?.http) throw new Error(`missing released envelope or HTTP prefix for ${V8_BASELINE}`);
+  return { envelopes: entry.envelopes, http: entry.http };
+}
+
+function assertBaselineDecoded(original: Record<string, unknown>, decoded: Record<string, unknown>, released: boolean, context: string): void {
+  if (released) expect(decoded, context).toEqual(original);
+  else expect(original, context).toMatchObject(decoded);
+}
+
+describe('compat v8: published 0.45.0 baseline', () => {
+  it('loads the registered published v8 package from the baseline alias', () => {
+    expect(packageVersion('byok-protocol-v8-baseline')).toBe(V8_BASELINE);
+    expect(v8Release.PROTOCOL_VERSION).toBe(8);
+    expect(readV8BaselineEntry().envelopes.lines).toBeGreaterThan(0);
+    expect(readV8BaselineEntry().http.lines).toBeGreaterThan(0);
+  });
+
+  it('current JSON Schemas accept the released envelope and HTTP shapes', () => {
+    const assertCompatible = (name: string, released: unknown, current: unknown) => {
+      expect(schemaAcceptsReleased(schemaNode(jsonSchema(released))!, schemaNode(jsonSchema(current))!), name).toBe(true);
+    };
+    assertCompatible('Envelope', v8Release.EnvelopeSchema, EnvelopeSchema);
+    for (const surface of new Set(publishedV8HttpCorpus.map((line) => line.surface))) {
+      assertCompatible(surface, httpSchema(v8Release, surface), httpSchema(currentModule, surface));
+    }
+  });
+
+  it('the published decoder reads the v8 envelope corpus', () => {
+    const { envelopes } = readV8BaselineEntry();
+    for (const line of v8Corpus) {
+      const released = line.index < envelopes.lines;
+      if (!released && newV8Gates.some((row) => carries(line, row))) continue;
+      const original = JSON.parse(line.raw) as Record<string, unknown>;
+      const decoded = v8Release.decodeEnvelope(line.raw);
+      assertBaselineDecoded(original, decoded, released, `envelope line ${line.index + 1} (${line.type})`);
+      expect(parseMessage(decoded)).toEqual(decoded);
+    }
+  });
+
+  it('the published decoder reads the exported HTTP corpus and decodes each eligible entry', () => {
+    const { http } = readV8BaselineEntry();
+    for (const line of publishedV8HttpCorpus) {
+      const released = line.index < http.lines;
+      const context = `HTTP line ${line.index + 1} (${line.surface})`;
+      const decoded = httpSchema(v8Release, line.surface).parse(JSON.parse(line.body));
+      assertBaselineDecoded(line.value, decoded, released, context);
+      expect(httpSchema(currentModule, line.surface).parse(decoded), context).toEqual(decoded);
+      assertBatchCounts(line, decoded);
+      for (const entry of undecodedEntries(line, decoded) ?? []) {
+        const envelope = entry as Pick<CorpusLine, 'type' | 'payload'> & { v: number };
+        if (envelope.v !== v8Release.PROTOCOL_VERSION) {
+          expect(() => v8Release.parseMessage(entry), context).toThrow(v8Release.EnvelopeValidationError);
+          continue;
+        }
+        if (!released && newV8Gates.some((row) => carries(envelope, row))) continue;
+        assertBaselineDecoded(envelope, v8Release.parseMessage(entry), released, context);
+      }
+    }
+  });
+
+  it('new gated additions require flags unknown to the published decoder', () => {
+    for (const row of newV8Gates) {
+      const context = JSON.stringify(row);
+      expect(v8Release.CAPABILITY_FLAGS, context).not.toContain(row.capability);
+      for (const line of v8Corpus.filter((line) => carries(line, row))) {
+        expect(requiredReceiverCapabilities(line.type, line.payload), context).toContain(row.capability);
+        const decoded = v8Release.EnvelopeSchema.safeParse(JSON.parse(line.raw));
+        expect(decoded.success && carries(decoded.data, row), context).toBe(false);
+      }
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 8. Published rejection oracle: a published v7 decoder cannot read v8 bytes
 // ---------------------------------------------------------------------------
 
@@ -895,6 +980,113 @@ function branches(node: SchemaNode): readonly SchemaNode[] {
   return [...(Array.isArray(node.anyOf) ? node.anyOf : []), ...(Array.isArray(node.oneOf) ? node.oneOf : [])]
     .map((branch) => schemaNode(branch)!);
 }
+
+function literalValues(node: SchemaNode): readonly Json[] | undefined {
+  return 'const' in node ? [node.const!] : Array.isArray(node.enum) ? node.enum : undefined;
+}
+
+/** Zod's discriminated unions have a required, disjoint literal in each pair of branches. */
+function hasDisjointDiscriminator(left: SchemaNode, right: SchemaNode): boolean {
+  const rightRequired = Array.isArray(right.required) ? right.required : [];
+  const leftProperties = schemaNode(left.properties);
+  const rightProperties = schemaNode(right.properties);
+  return Array.isArray(left.required) && left.required.some((key) => {
+    if (typeof key !== 'string' || !rightRequired.includes(key)) return false;
+    const leftValues = literalValues(schemaNode(leftProperties?.[key]) ?? {});
+    const rightValues = literalValues(schemaNode(rightProperties?.[key]) ?? {});
+    return leftValues !== undefined && rightValues !== undefined
+      && leftValues.every((value) => !rightValues.some((other) => isDeepStrictEqual(value, other)));
+  });
+}
+
+const COMPARED_SCHEMA_KEYS = new Set([
+  '$schema', '$defs', '$ref', 'title', 'description', 'default', 'examples',
+  'properties', 'required', 'type', 'const', 'enum', 'anyOf', 'oneOf', 'allOf',
+  'items', 'additionalProperties', 'propertyNames', 'minimum', 'exclusiveMinimum',
+  'minLength', 'minItems', 'minProperties', 'maximum', 'exclusiveMaximum', 'maxLength', 'maxItems', 'maxProperties',
+]);
+
+/** Conservative structural inclusion for the emitted wire schemas. */
+function schemaAcceptsReleased(released: SchemaNode, current: SchemaNode, oldRoot = released, newRoot = current, seen = new Set<string>()): boolean {
+  const acceptsReleased = (old: SchemaNode, next: SchemaNode) => schemaAcceptsReleased(old, next, oldRoot, newRoot, seen);
+  if (current.$ref !== undefined) {
+    if (typeof released.$ref !== 'string' || typeof current.$ref !== 'string') return false;
+    const pair = JSON.stringify([released.$ref, current.$ref]);
+    if (!seen.has(pair) && !schemaAcceptsReleased(
+      definition(oldRoot, released.$ref).node, definition(newRoot, current.$ref).node, oldRoot, newRoot, new Set([...seen, pair]),
+    )) return false;
+  }
+  const oldBranches = branches(released);
+  const newBranches = branches(current);
+  if (newBranches.length && (!oldBranches.length || !oldBranches.every((old) => newBranches.some((next) =>
+    acceptsReleased(old, next) && (current.oneOf === undefined || newBranches.every((other) => other === next || hasDisjointDiscriminator(old, other))),
+  )))) return false;
+
+  const oldParts = Array.isArray(released.allOf) ? released.allOf : [];
+  if (Array.isArray(current.allOf) && !current.allOf.every((part) =>
+    oldParts.some((old) => acceptsReleased(schemaNode(old)!, schemaNode(part)!)),
+  )) return false;
+
+  const oldProperties = schemaNode(released.properties) ?? {};
+  const newProperties = schemaNode(current.properties) ?? {};
+  for (const [key, value] of Object.entries(oldProperties)) {
+    const next = schemaNode(newProperties[key]);
+    if (!next || !acceptsReleased(schemaNode(value)!, next)) return false;
+  }
+  const oldRequired = Array.isArray(released.required) ? released.required : [];
+  if (Array.isArray(current.required) && !current.required.every((key) => oldRequired.includes(key))) return false;
+  const oldValues = literalValues(released);
+  const newValues = literalValues(current);
+  if (newValues && !oldValues?.every((value) => newValues.some((candidate) => isDeepStrictEqual(value, candidate)))) return false;
+  const oldTypes = Array.isArray(released.type) ? released.type : [released.type];
+  const newTypes: readonly (Json | undefined)[] = Array.isArray(current.type) ? current.type : [current.type];
+  if (current.type !== undefined && !oldTypes.every((type) =>
+    newTypes.includes(type) || (type === 'integer' && newTypes.includes('number')),
+  )) return false;
+  for (const key of ['minimum', 'exclusiveMinimum', 'minLength', 'minItems', 'minProperties'] as const) {
+    const next = current[key];
+    const old = released[key];
+    if (typeof next === 'number' && (typeof old !== 'number' || next > old)) return false;
+  }
+  for (const key of ['maximum', 'exclusiveMaximum', 'maxLength', 'maxItems', 'maxProperties'] as const) {
+    const next = current[key];
+    const old = released[key];
+    if (typeof next === 'number' && (typeof old !== 'number' || next < old)) return false;
+  }
+  for (const key of ['items', 'additionalProperties', 'propertyNames'] as const) {
+    if (current[key] === false && released[key] !== false) return false;
+    const next = schemaNode(current[key]);
+    const old = schemaNode(released[key]);
+    if (next && released[key] !== false && (!old || !acceptsReleased(old, next))) return false;
+  }
+  return Object.entries(current).every(([key, value]) => COMPARED_SCHEMA_KEYS.has(key) || isDeepStrictEqual(value, released[key]));
+}
+
+it('the released schema comparison detects narrower constraints and ambiguous discriminators', () => {
+  const shape = { type: 'object', properties: { mode: { enum: ['a', 'b'] } }, required: ['mode'] };
+  const narrowings: SchemaNode[] = [
+    { ...shape, properties: { mode: { const: 'a' } } },
+    { ...shape, properties: { mode: { ...shape.properties.mode, pattern: '^a' } } },
+    { ...shape, required: ['mode', 'extra'] },
+    { ...shape, additionalProperties: false },
+  ];
+  for (const narrowed of narrowings) expect(schemaAcceptsReleased(shape, narrowed)).toBe(false);
+  expect(schemaAcceptsReleased(shape, { ...shape, properties: { ...shape.properties, extra: { type: 'string' } } })).toBe(true);
+  const nullable = { type: ['string', 'null'] };
+  expect(schemaAcceptsReleased(nullable, { type: 'string' })).toBe(false);
+  expect(schemaAcceptsReleased(nullable, { type: ['string', 'null', 'number'] })).toBe(true);
+
+  const ref = { $ref: '#/$defs/value' };
+  const original = { ...ref, $defs: { value: { type: 'array', items: { type: 'string' } } } };
+  const narrowed = { ...ref, $defs: { value: { type: 'array', items: { type: 'string', minLength: 1 } } } };
+  expect(schemaAcceptsReleased(original, narrowed)).toBe(false);
+
+  const branch = (mode: string) => ({ ...shape, properties: { mode: { const: mode } } });
+  const union = { oneOf: [branch('a'), branch('b')] };
+  expect(schemaAcceptsReleased(union, { oneOf: [branch('a')] })).toBe(false);
+  expect(schemaAcceptsReleased(union, { oneOf: [...union.oneOf, branch('a')] })).toBe(false);
+  expect(schemaAcceptsReleased(union, { oneOf: [...union.oneOf, branch('c')] })).toBe(true);
+});
 
 function requiredCoverage(root: SchemaNode, prefix: string, exempt: (path: string) => boolean): SchemaCoverage {
   const required: SchemaCoverage = { paths: new Set(), values: new Set() };

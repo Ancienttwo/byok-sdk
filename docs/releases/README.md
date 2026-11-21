@@ -36,8 +36,7 @@ from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 8
 ([Wire v8](host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)).
 0.44.1 is the last v7 release. `golden/v8.releases.json` pins the first
-v8 release, 0.45.0. The compatibility suite still needs a published v8 decoder
-pinned as a baseline.
+v8 release, 0.45.0, which also serves as the published decoder baseline.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -103,6 +102,9 @@ registration.
 
 ### Published v8 decoder baseline
 
-Pin the published 0.45.0 registry tarball as a v8 baseline so the compatibility
-test can read current corpus bytes and prove gated rows against a published
-v8 decoder.
+The `byok-protocol-v8-baseline` devDependency pins the published 0.45.0
+registry tarball and its lockfile integrity. The suite checks that current
+schemas accept the released shapes and that 0.45.0 reads the v8 envelope
+corpus and the corpus cases for 12 published HTTP surfaces. The internal
+`EventsPollQuerySchema` is covered by the current-decoder suite. Every new
+capability-gated addition must use a flag unknown to 0.45.0.
