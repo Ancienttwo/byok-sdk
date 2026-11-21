@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.128.1",
-    "commit": "0624c128840ff49ea0451cdace11206b706f9a7b"
+    "commit": "b50b41c687774c6bb9a404e5e21e9f035847128d"
   },
   "release": {
     "ecosystem": "npm",
@@ -627,7 +627,8 @@
       "path": "runtimes/dsh/bridge.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/bridge.ts",
       "upstreamSha256": "af062b9609e21f18691ca5c6652c3411ac5528b50f0b6377e141344feeb617b2",
-      "vendoredSha256": "af062b9609e21f18691ca5c6652c3411ac5528b50f0b6377e141344feeb617b2"
+      "vendoredSha256": "4aec25e675e074c3987f1d9250e997586472bd9868e83e720e117120edb59b3a",
+      "delta": "Leave the native session-file lookup (persistence.stat) out of open and dispose: the opened frame names no sessionFile or sessionFileStat, a rejecting stat cannot fail the open, and dispose reports no sessionFiles."
     },
     {
       "path": "runtimes/dsh/compaction.ts",
@@ -665,8 +666,8 @@
       "path": "runtimes/dsh/list-models.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/list-models.ts",
       "upstreamSha256": "3ff747ef77ddbdd5892cee14abef94dd022757d398b3423a1039a576ccb878b0",
-      "vendoredSha256": "0994516e475bb521f86346d60652407f4cfa916c8223fb62c4a50cf7c99bf31d",
-      "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1."
+      "vendoredSha256": "409cdce93715794e20baee4de378964ad5d46e1782677462bbe5f25002111d29",
+      "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1. Pass the query-deadline signal to the cold-profile wait."
     },
     {
       "path": "runtimes/dsh/mcp.ts",
@@ -698,8 +699,8 @@
       "path": "runtimes/dsh/session.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/session.ts",
       "upstreamSha256": "937aa46cd04f78527260c992ef814952e1a17788c7fdb192b2630a2c976f4ec8",
-      "vendoredSha256": "64f5a8188f20193852307f1d94466d4ff39c79fe480622804e28ff32a71ba601",
-      "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure. The caller's retainedBytes goes to the upstream kernel's record retention. Share Runtime.sessionCapabilities with the narrow BYOK bridge."
+      "vendoredSha256": "fa3932e4dc61febf72ba1d5fb8b71be695b9dbc04c773c10f06867fc6c18cb6a",
+      "delta": "Take an injected process and an explicit launch, redact through the SDK session kernel, read the process table before a native cancel, and refuse a dsh that does not offer steer as a typed invalid_request failure. The caller's retainedBytes goes to the upstream kernel's record retention. Share Runtime.sessionCapabilities with the narrow BYOK bridge. Take the caller start signal in the hooks and end the cold-profile wait with it, joined with the bridge ready timeout."
     },
     {
       "path": "runtimes/dsh/version.ts",

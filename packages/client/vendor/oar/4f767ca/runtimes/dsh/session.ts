@@ -22,7 +22,7 @@ import { checkSessionName, refuseSessionOptions } from "../../shared/session-opt
 import { sessionCredentialRedactor, type CredentialRedactor } from "../../shared/credential-redactor.js";
 import { createSessionKernel } from "../../shared/session-kernel.js";
 import { dshCompaction } from "./compaction.js";
-import { DshCommandError, dshControl, isDshExitedError, type DshControl } from "./control.js";
+import { DSH_READY_TIMEOUT_MS, DshCommandError, dshControl, isDshExitedError, type DshControl } from "./control.js";
 import { isBackgroundShellJob } from "./jobs.js";
 import { launchDsh, type DshLaunch, type DshLineProcess, type SpawnDshLineProcess } from "./launch.js";
 import { dshMcpRows } from "./mcp.js";
@@ -49,6 +49,8 @@ export interface DshSessionHooks {
   readonly onRouteMismatch?: () => void;
   /** A kernel observer from seq 0. The kernel swallows its errors, so it fails the session itself. */
   readonly onRecord?: (record: RawEvent) => void;
+  /** BYOK change: the caller's start cancellation; it also ends a wait for another opener's cold profile. */
+  readonly signal?: AbortSignal;
 }
 
 /** Typed opening refusals from native evidence; anything else keeps its own message and native error as cause. */
@@ -127,7 +129,11 @@ async function open(spawnLineProcess: SpawnDshLineProcess, command: string, opti
   if (hooks.onRecord !== undefined) { kernel.rawEvents(hooks.onRecord); }
   hooks.onReady?.(sessionId);
   let projection = initialDshProjection(sessionId);
-  const { child, profileReady }: { child: DshLineProcess; profileReady: () => void } = await launchDsh(spawnLineProcess, command, options.launch, { mcpRows, disableSessionLogUpload: options.sessionLogUpload === "off" });
+  const { child, profileReady }: { child: DshLineProcess; profileReady: () => void } = await launchDsh(spawnLineProcess, command, options.launch, {
+    mcpRows, disableSessionLogUpload: options.sessionLogUpload === "off",
+    // BYOK change: the caller's abort ends the cold-profile wait, still bounded by the bridge ready timeout.
+    ...(hooks.signal === undefined ? {} : { signal: AbortSignal.any([hooks.signal, AbortSignal.timeout(DSH_READY_TIMEOUT_MS)]) }),
+  });
   const fallback = createAbortFallback(() => { child.kill(); });
   const control = dshControl(child, (message) => {
     const { state, frame } = foldDsh(projection, message, credentials);

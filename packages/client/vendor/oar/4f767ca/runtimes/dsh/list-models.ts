@@ -63,8 +63,9 @@ export async function dshListModels(installation: AvailableInstallation, options
   if (installation.via !== "executable") { return { kind: "unsupported", reason: "DSH model listing requires its executable" }; }
   const refusal = dshVersionUnsupported(installation.version);
   if (refusal !== null) { return refusal; }
-  return withQueryDeadline("DSH model listing", options.timeoutMs, async (_signal, own) => {
-    const { child, profileReady } = await launchDsh(options.spawn, installation.command, launch);
+  return withQueryDeadline("DSH model listing", options.timeoutMs, async (signal, own) => {
+    // BYOK change: the cold-profile wait ends with the listing's deadline or the caller's abort.
+    const { child, profileReady } = await launchDsh(options.spawn, installation.command, launch, { signal });
     own(child);
     const control = dshControl(child, () => {});
     try {

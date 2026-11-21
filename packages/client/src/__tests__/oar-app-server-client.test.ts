@@ -210,7 +210,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
   });
   expect(manifest.packageVersion).toBe(manifest.release.version);
   expect(manifest.commit).toBe(manifest.release.gitCommit);
-  expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: 'byok/0.128.1', commit: '0624c128840ff49ea0451cdace11206b706f9a7b' });
+  expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: 'byok/0.128.1', commit: 'b50b41c687774c6bb9a404e5e21e9f035847128d' });
   expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual([
     'contracts/failure.ts',
     'contracts/list-models.ts',
@@ -239,6 +239,7 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     'runtimes/codex/rpc-control.ts',
     'runtimes/codex/session.ts',
     'runtimes/codex/turn-processes.ts',
+    'runtimes/dsh/bridge.ts',
     'runtimes/dsh/control.ts',
     'runtimes/dsh/launch.ts',
     'runtimes/dsh/list-models.ts',

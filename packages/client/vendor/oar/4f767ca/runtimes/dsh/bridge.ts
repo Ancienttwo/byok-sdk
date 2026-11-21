@@ -1,3 +1,4 @@
+// BYOK change: Modified from OAR 4f767ca to leave native session-file lookups out of open and dispose (Apache-2.0).
 import { dshInputSource } from "./bridge-input.js";
 import { dshControlSource } from "./bridge-controls.js";
 import { dshGoalSource } from "./bridge-goal.js";
@@ -135,13 +136,11 @@ ${dshInputSource}
     handles.set(agent.session.id, handle);
     routes.set(agent, route);
     const modelCurrent = typeof agent.model?.current === "function";
-    const sessionFile = await sessionFileOf(agent.session.id);
+    // BYOK change: no persistence.stat lookup: the SDK exposes no native session file, so the opened frame names no host path and a failing stat cannot fail the open.
     return { compact: typeof ctx.get("compaction")?.compactNow === "function", imageTypes: await imageTypes(agent), sessionId: agent.session.id, header: agent.session.header, status: agent.status,
       jobMethods: methods(jobs, ["get", "kill", "wait"]),
       methods: methods(agent, AGENT_METHODS), inboxMethods: methods(agent.inbox, INBOX_METHODS),
       pending: { nextTurn: agent.inbox?.nextTurn?.length, nextStep: agent.inbox?.nextStep?.length },
-      sessionFileStat: typeof persistence?.stat === "function",
-      ...(sessionFile === undefined ? {} : { sessionFile }),
       modelCurrent, ...(modelCurrent ? { model: agent.model.current() } : {}) };
   };
 
@@ -261,20 +260,13 @@ ${dshGoalSource}
       return { providers, default: defaultRoute() };
     },
     async dispose() {
-      const ids = [...handles.keys()];
       const results = await Promise.allSettled([...handles.values()].map(async (handle) => { await handle.dispose(); }));
       handles.clear();
       if (typeof persistence?.flush === "function") { await persistence.flush(); }
-      const sessionFiles = {};
-      for (const id of ids) {
-        try {
-          const path = await sessionFileOf(id);
-          if (path !== undefined) { sessionFiles[id] = path; }
-        } catch {}
-      }
+      // BYOK change: dispose reports no native session files.
       const failed = results.find((result) => result.status === "rejected");
       if (failed !== undefined) { throw failed.reason; }
-      return Object.keys(sessionFiles).length === 0 ? {} : { sessionFiles };
+      return {};
     },
   };
 
