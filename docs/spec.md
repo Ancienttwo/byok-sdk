@@ -405,11 +405,13 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-The current aligned release is `0.44.1`, also the stable npm release,
-published on 2026-11-19 (UTC) with registry readback for all nine packages.
-The packed and published keys `@byok-sdk/core` edge must pin the corresponding
-release version. Verify the release edge at `0.44.1` in an isolated standard
-npm install.
+The current aligned release is `0.45.0` (candidate). The stable npm release is
+`0.44.1`, published on 2026-11-19 (UTC) with registry readback for all nine
+packages.
+The packed keys `@byok-sdk/core` edge must pin the corresponding release
+version. Verify the exact `0.45.0` edge in an isolated install of the accepted
+candidate tarballs. Publication requires separate authorization and registry
+readback.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
 0.28.2. Before that decision keys had its own version line, and its last
@@ -418,6 +420,13 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.45.0 is the MINOR candidate after 0.44.1 and the first wire v8 candidate.
+All nine public packages move together. Upgrade both peers, provision fresh
+stores and ledgers, and re-pair devices. The 0.44.1 → 0.45.0 upgrade manifest
+has 12 breaking and 14 additive entries.
+[0.45.0 candidate notes](releases/v0.45.0.md) ·
+[Host upgrade checklist](releases/host-upgrade-0.45.0.md)
 
 0.44.1 is the published owner-approved PATCH after 0.44.0. It keeps the nine
 public packages aligned on wire v7 and carries six additive upgrade-manifest
@@ -3998,7 +4007,7 @@ daemon picks an advertised executor that accepts device defaults.
 The first claim binds the actual executor to the original offer and the
 device's inventory. It records `claimedExecutor.id` once. After claim, a
 terminal echoes that identity. Hosts choose the device and the target. The
-[wire v8 Host checklist](releases/host-upgrade-next-minor.md#wire-v8-and-the-provider-store-cutover)
+[wire v8 Host checklist](releases/host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)
 covers draining and rebuilding the stores.
 
 ### Terminal boundary acceptance follow-up (#163 / #167)

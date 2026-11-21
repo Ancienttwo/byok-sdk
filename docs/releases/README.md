@@ -12,13 +12,17 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
-The 0.44.1 release carries the 0.44.0 → 0.44.1 manifest. Its six additive
-entries and Host steps are in the [0.44.1 release notes](v0.44.1.md). The
-cut manifest is archived at `packages/client/upgrade-history/0.44.0-0.44.1.json`
-and the baseline reflects the published snapshot. Keep using the [0.44.0 Host upgrade checklist](host-upgrade-0.44.0.md)
-when migrating from wire v6. The 0.43.0 → 0.44.0 manifest is archived at
-`packages/client/upgrade-history/0.43.0-0.44.0.json`. Changes planned for the
-next MINOR belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
+The [0.45.0 candidate](v0.45.0.md) carries the 0.44.1 → 0.45.0 manifest
+with 12 breaking and 14 additive entries. Follow its
+[Host upgrade checklist](host-upgrade-0.45.0.md). The publication record
+archives the cut manifest and rebaselines to the published snapshot.
+Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
+
+The 0.44.0 → 0.44.1 manifest is archived at
+`packages/client/upgrade-history/0.44.0-0.44.1.json`. Keep using the
+[0.44.0 Host upgrade checklist](host-upgrade-0.44.0.md) when migrating from
+wire v6. The 0.43.0 → 0.44.0 manifest is archived at
+`packages/client/upgrade-history/0.43.0-0.44.0.json`.
 The published 0.42.0 → 0.43.0 manifest remains in
 `packages/client/upgrade-history/0.42.0-0.43.0.json`.
 
@@ -28,10 +32,10 @@ A release ships `packages/client/upgrade-manifest.json` with one entry per Host-
 
 `packages/protocol/src/__tests__/compat.test.ts` decides wire compatibility
 from evidence, not the author's judgment (see "Freeze rule" in
-`docs/protocol.md`). The wire is at major 7 ([Wire v7](host-upgrade-0.44.0.md#wire-v7)).
-0.43.0 is the last v6 release. `golden/v7.releases.json` pins the first v7
-release, 0.44.0, and the 0.44.1 release. A published v7 decoder has not yet
-been pinned as an oracle.
+`docs/protocol.md`). The wire is at major 8
+([Wire v8](host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)).
+0.44.1 is the last v7 release. `golden/v8.releases.json` pins the first
+v8 candidate, 0.45.0. The published v8 decoder baseline awaits publication.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -57,18 +61,21 @@ the v0.43.0 tag, read-only and pinned by whole-file hash. The current decoder
 rejects every v6 envelope. Lines appended to the v6 corpora after 0.43.0 were
 never released; their cases are in the v7 corpus.
 
-v7 evidence. `golden/v7.envelopes.ndjson` and `golden/v7.http.ndjson` are
-produced by `packages/protocol/src/__tests__/generate-v7-corpus.mjs` from the frozen
-v6 corpora plus the v7 lines it appends. Both the 0.44.0 and 0.44.1
-registrations pin the same 507 envelope and 40 HTTP lines. The covered
-prefixes are immutable, and further lines are append-only.
-`golden/v7.releases.json` records each stable v7 release's corpus line counts
-and SHA-256 prefixes; each entry pins both `envelopes` and `http`.
-Prereleases are not registered and are outside the guarantee.
+Retired v7 evidence. `golden/v7.envelopes.ndjson`, `golden/v7.http.ndjson`
+and `golden/v7.releases.json` are read-only and pinned by whole-file hash.
+The 0.44.0 and 0.44.1 registrations cover the same 507 envelope and 40 HTTP
+lines. The current decoder rejects v7 envelopes.
+
+v8 evidence. The generator `packages/protocol/src/__tests__/generate-v8-corpus.mjs`
+builds `golden/v8.envelopes.ndjson` and `golden/v8.http.ndjson` from the frozen
+v7 corpora. The 0.45.0 registration pins 514 envelope and 41 HTTP lines.
+Covered prefixes are immutable, and further lines are append-only. Each
+stable entry in `golden/v8.releases.json` pins line counts and SHA-256 prefixes
+for both corpora. The guarantee covers registered stable releases.
 
 Rejection oracle. The `devDependencies` alias `byok-protocol-previous` in
-`packages/protocol/package.json` pins 0.43.0, the last v6 release. The suite
-uses it to prove that a v6 decoder rejects every v7 corpus line and a v7
+`packages/protocol/package.json` pins 0.44.1, the last v7 release. The suite
+uses it to prove that a v7 decoder rejects v8 envelopes, including a v8
 `conn.hello`, and that its `MessagesSendResponseSchema` reads the frozen
 cross-version refusal as `rejected > 0`. Aliases are registry tarball URLs
 (`https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-<version>.tgz`),
@@ -79,8 +86,8 @@ the "released" decoder the current source.
 ### Every stable release
 
 1. Before tagging, run `bun run --filter @byok-sdk/protocol test`. When the
-   package version is not registered (and is not a v6 release), the test
-   fails and prints the exact entry to append to `golden/v7.releases.json`,
+   package version is neither registered in v8 nor a v7 release, the test
+   fails and prints the exact entry to append to `golden/v8.releases.json`,
    with both `envelopes` and `http` prefixes. Append it unchanged only as
    part of the stable release preparation whose published bytes it will
    record. The diagnostic is print-only.
@@ -92,8 +99,8 @@ public API change is recorded under CHANGELOG `Unreleased`. A breaking entry
 requires a MINOR. Release preparation owns the version bump and corpus
 registration.
 
-### Published v7 decoder baseline
+### Published v8 decoder baseline
 
-None yet. When the first v7 release is published, a `byok-protocol-v7-baseline`
-devDependency pins its registry tarball, and the compatibility test reads
-current corpus bytes with it and proves gated rows against it.
+After 0.45.0 is published, pin its registry tarball as a v8 baseline so the
+compatibility test can read current corpus bytes and prove gated rows against
+a published v8 decoder.

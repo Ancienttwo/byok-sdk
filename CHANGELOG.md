@@ -2,9 +2,20 @@
 
 ## Unreleased
 
-- **Breaking (keys, #2409)** — `discoverProviderModels` takes `auth_mode` and `base_url` and drops `providerKind` from its connection object. Provider URL normalization is idempotent. [Host upgrade steps](docs/releases/host-upgrade-next-minor.md#model-discovery-connection-fields)
-- **Breaking (keys, #2405)** — Each provider store owns its credential namespace. Pre-namespace stores require a fresh database and re-entered keys. Upgrade the Host and Pi launcher together. [Host upgrade steps](docs/releases/host-upgrade-next-minor.md#provider-store-credential-namespace)
-- **Fixed (keys, #2402 and #2407)** — `discoverProviderModels` reports transport failures while connecting or reading a successful response body as `MODEL_LIST_UNREACHABLE` and preserves the original error in `cause`.
+## 0.45.0 — 2026-11-21 (candidate)
+
+[Candidate notes](docs/releases/v0.45.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.45.0.md)
+
+- **Breaking (wire and stores, #2419 and #2430)** — Wire v8 routes explicit offers through the `harness` lane and validates selections against the device's advertised inventory. Drain v7 work, start fresh stores and ledgers, and re-pair devices. [Cutover steps](docs/releases/host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)
+- **Breaking (keys, #2409)** — `discoverProviderModels` takes `auth_mode` and `base_url` and drops `providerKind` from its connection object. Provider URL normalization is idempotent. [Host upgrade steps](docs/releases/host-upgrade-0.45.0.md#model-discovery-connection-fields)
+- **Breaking (keys, #2405)** — Each provider store owns its credential namespace. Pre-namespace stores require a fresh database and re-entered keys. Upgrade the Host and Pi launcher together. [Host upgrade steps](docs/releases/host-upgrade-0.45.0.md#provider-store-credential-namespace)
+- **Changed (Host APIs)** — The upgrade manifest carries 12 breaking and 14 additive entries, including the DSH and AGY key resolver, Codex task MCP grants, and Bot collaboration test vectors. [Manifest index](docs/releases/v0.45.0.md#breaking-changes)
+- **Added (client and protocol, #2430)** — Hosts can stage qualified managed runtimes and select a model per task using the advertised harness modes. [Selection and runtime upgrades](docs/releases/v0.45.0.md#wire-v8-and-runtime-selection)
+- **Added (client, #2396 and #2410)** — Qualified Pi and DSH tasks can opt in to MCP search through `byok-mcp-hub`. Embedded Hosts can also preflight resident Agent memory before opening the helper. [Host setup](docs/releases/v0.45.0.md#mcp-runtime-credentials-and-agent-memory)
+- **Changed (client and desktop reference app, #2432 and #2433)** — The client vendors OAR 0.124.0, and the desktop updater stages rollback snapshots before replacing them. [Runtime and updater details](docs/releases/v0.45.0.md#oar-01240-and-desktop-updater)
+- **Fixed (keys, #2402 and #2407)** — `discoverProviderModels` reports transport failures while connecting or reading a successful response body as `MODEL_LIST_UNREACHABLE` and preserves the original error in `cause`. [Model discovery errors](docs/releases/v0.45.0.md#model-list-unreachable)
+- **Fixed (client, #2434 and #2436)** — An embedded `Daemon` resets `shuttingDown` after acquiring the owner lease and checking the auth cancellation epoch, so `assertion.issue` and `task_assertion.issue` resume after `start()` → `stop()` → `start()` on the same instance. `unpair()` invalidates queued starts and any start still acquiring the lease. An in-flight `pair()` credential write can finish. The control `shutdown` RPC reserves its lifecycle slot before acknowledging, so an immediate restart waits for teardown. [Daemon lifecycle fixes](docs/releases/v0.45.0.md#fixed)
+- **Known issues (#2437, #2435, and #2098)** — A same-instance restart after a timed-out stop can leave the control listener unavailable. Keep the Host undici override at 8.12.4 for Pi 1.5.2. [Known issues](docs/releases/v0.45.0.md#known-issues)
 
 ## 0.44.1 — 2026-11-19 (published)
 

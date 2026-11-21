@@ -6,8 +6,8 @@
     "snapshotSha256": "9fd69dfc3fe57c07d629b6b90a91008776de0972fe10739df9de49e6705edd26"
   },
   "to": {
-    "version": "0.44.1",
-    "snapshotSha256": "2db0dad9459ef4b89560ee95030b1043b4f8cdd9a9389d38ae5c2bf809cf04ff"
+    "version": "0.45.0",
+    "snapshotSha256": "417350abb369f8a9ceb425d0ef04c5f4d0b6f5690c33f88f6f7d3cd0ca018411"
   },
   "configFields": {
     "status": "tracked",
@@ -39,7 +39,7 @@
       "impact": "breaking",
       "acceptance": "new-path-repair",
       "summary": "@byok-sdk/keys requires a credential namespace in each provider store. Existing stores return PROVIDER_STORE_SCHEMA_STALE. Preserve the old database, create a fresh store on a new path and re-enter provider keys. Automatic credential cleanup requires a recognized namespaced retired store.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#provider-store-credential-namespace",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#provider-store-credential-namespace",
       "items": [
         "export:@byok-sdk/keys#InMemoryProviderProfileStore",
         "export:@byok-sdk/keys#ProviderProfileStore",
@@ -52,7 +52,7 @@
       "id": "provider-credential-scope-binding",
       "impact": "breaking",
       "summary": "ProviderRegistry, applySealedProviderProvisioning, runPiProviderLauncher and the bundled Pi launcher scope the Host's base credential store to the selected database's namespace. Pass the base scope and upgrade the Host and launcher together.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#provider-store-credential-namespace",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#provider-store-credential-namespace",
       "items": [
         "behavior:provider-credential-scope-binding"
       ]
@@ -61,7 +61,7 @@
       "id": "model-discovery-connection-fields",
       "impact": "breaking",
       "summary": "ModelDiscoveryConnection uses auth_mode and base_url to match provider profiles. Remove providerKind from the connection object and keep adapter.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#model-discovery-connection-fields",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#model-discovery-connection-fields",
       "items": [
         "export:@byok-sdk/keys#ModelDiscoveryConnection"
       ]
@@ -70,7 +70,7 @@
       "id": "model-list-unreachable",
       "impact": "additive",
       "summary": "discoverProviderModels reports transport failures while connecting or reading a successful response body as MODEL_LIST_UNREACHABLE and preserves the original error as the cause.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/v0.45.0.md#model-list-unreachable",
       "items": [
         "export:@byok-sdk/keys#BYOK_KEYS_ERROR_CODES"
       ]
@@ -116,7 +116,7 @@
       "id": "mcp-toolset-exposure-config",
       "impact": "additive",
       "summary": "Set exposure to search on a @byok-sdk/client DaemonConfig.mcpToolsets entry to opt in on a qualified runtime. Prepared inputs require direct exposure, which is the default.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#mcp-toolset-search",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#mcp-toolset-search",
       "items": [
         "config:mcpToolsets",
         "export:@byok-sdk/client#McpToolsetConfig"
@@ -136,7 +136,7 @@
       "id": "dream-instruction-input-types",
       "impact": "additive",
       "summary": "Import DreamBudget, DreamInstructionInput and DreamWindow from @byok-sdk/protocol when typing inputs to buildDreamInstruction.",
-      "migration": "CHANGELOG.md#unreleased",
+      "migration": "docs/releases/v0.45.0.md#dream-instruction-input-types",
       "items": [
         "export:@byok-sdk/protocol#DreamBudget",
         "export:@byok-sdk/protocol#DreamInstructionInput",
@@ -175,7 +175,7 @@
       "id": "runtime-provider-key-resolvers",
       "impact": "breaking",
       "summary": "dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters require a Host resolveKey callback for each authenticated spawn. Remove dsh model.keyEnv. Plain JSON configuration cannot start these runtimes.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#dsh-and-agy-provider-keys",
       "items": [
         "config:runtimes",
         "export:@byok-sdk/client#AgyAdapter",
@@ -193,7 +193,7 @@
       "id": "runtime-provider-key-environment",
       "impact": "breaking",
       "summary": "dsh and agy in @byok-sdk/client and @byok-sdk/client/adapters authenticate through resolveKey and omit authPresent from installation detection. Remove provider key names from runtimeEnvironment.pass and allow, and use the Host store to determine whether an account has a saved key.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#dsh-and-agy-provider-keys",
       "items": [
         "behavior:runtime-provider-key-environment"
       ]
@@ -202,7 +202,7 @@
       "id": "runtime-provider-key-minimum-length",
       "impact": "breaking",
       "summary": "dsh and agy resolveKey and Claude's BYOK environment reject credentials shorter than 20 characters or all whitespace. Set a placeholder of at least 20 characters for a local endpoint that does not authenticate.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#dsh-and-agy-provider-keys",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#dsh-and-agy-provider-keys",
       "items": [
         "behavior:runtime-provider-key-minimum-length"
       ]
@@ -211,7 +211,7 @@
       "id": "agent-memory-home-resident-check",
       "impact": "additive",
       "summary": "@byok-sdk/client/agent-memory checkAgentMemoryHome supports resident scope so embedded Hosts can check MEMORY.md on device sync without opening the helper or walking notes.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-preflight-and-helper-path",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#agent-memory-preflight-and-helper-path",
       "items": [
         "export:@byok-sdk/client/agent-memory#checkAgentMemoryHome"
       ]
@@ -220,7 +220,7 @@
       "id": "agent-memory-helper-path-resolver",
       "impact": "additive",
       "summary": "@byok-sdk/client/agent-memory exports resolveAgentMemoryFilesystemHelper for embedded Hosts that need the verified installed or relocated SDK helper path.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#agent-memory-preflight-and-helper-path",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#agent-memory-preflight-and-helper-path",
       "items": [
         "export:@byok-sdk/client/agent-memory#resolveAgentMemoryFilesystemHelper"
       ]
@@ -229,7 +229,7 @@
       "id": "codex-task-mcp-allowlist",
       "impact": "breaking",
       "summary": "Codex exposes only the exact local approveTools for each injected Host server. Add explicit grants for tools that previously ran through readOnlyHint or ad hoc approval. Rename colliding user or injected servers under inherit and upgrade Codex to at least 0.48.0 for toolset offers.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#codex-task-mcp-allowlists",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#codex-task-mcp-allowlists",
       "items": [
         "behavior:codex-task-mcp-allowlist"
       ]
@@ -238,7 +238,7 @@
       "id": "codex-task-mcp-version-floor",
       "impact": "breaking",
       "summary": "CodexAdapter declines offers requiring MCP toolsets before claim if the local CLI version predates 0.48.0 or cannot be determined.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#codex-task-mcp-allowlists",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#codex-task-mcp-allowlists",
       "items": [
         "export:@byok-sdk/client#CodexAdapter",
         "export:@byok-sdk/client/adapters#CodexAdapter"
@@ -269,7 +269,7 @@
       "impact": "breaking",
       "acceptance": "new-path-repair",
       "summary": "Wire v8 unifies explicit executor routing under the harness lane. Ordinary Pi supports native device defaults and exact catalog model selection. Pi profile execution requires an exact local binding and takes an optional per-task model ID on the selection. Drain v7 tasks and intents, then create fresh stores and ledgers when upgrading peers together.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#wire-v8-and-the-provider-store-cutover",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover",
       "items": [
         "example:host-execution-core",
         "export:@byok-sdk/client#ClaudeAdapter",
@@ -339,7 +339,7 @@
       "id": "managed-runtime-upgrades",
       "impact": "additive",
       "summary": "Hosts can explicitly stage and activate the SDK-qualified Claude, Codex, DSH, or OpenCode release in the SDK install root. Local diagnostics report compatibility floor failures and upgrade guidance.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#managed-runtime-upgrades",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#managed-runtime-upgrades",
       "items": [
         "config:runtimeInstallRoot",
         "export:@byok-sdk/client#CodexAdapterOptions",
@@ -365,7 +365,7 @@
       "id": "harness-model-defaults",
       "impact": "additive",
       "summary": "Harnesses advertise configured model defaults by selection mode. Native Pi exposes a catalog, and DSH and OpenCode accept task models without requiring a configured fallback. Missing and unavailable models carry typed admission errors.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#harness-model-selection",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#harness-model-selection",
       "items": [
         "entry:@byok-sdk/core/provider-model",
         "export:@byok-sdk/client#OpenCodeAdapter",
@@ -391,7 +391,7 @@
       "id": "native-subscription-admission",
       "impact": "additive",
       "summary": "The launch-resources hook receives the local Agent home and cancellation signal for pre-claim checks. Native subscription offers require the vendor's subscription login.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#harness-model-selection",
+      "migration": "docs/releases/host-upgrade-0.45.0.md#harness-model-selection",
       "items": [
         "export:@byok-sdk/client#PreparedRuntimeOperation",
         "export:@byok-sdk/client/adapters#PreparedRuntimeOperation"
