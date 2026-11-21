@@ -80,6 +80,18 @@ The F suite recorded 18 Claude observations and exited 1. The two in-flight scen
 
 E's P3 startup control held the adapter before `task.started`. The hub token proved live and search returned the selected tool. The first high-risk inner call matched an `alwaysAsk` rule and yielded the SDK verdict `tool_authorization_unavailable` with reason `tool approval is unavailable during runtime startup`. The hub returned `MCP tool call is not authorized.` The invocation produced zero target calls and emitted no approval request. Pi's early mixed search exercised the live token before `task.started`, and its approval-denied call came later in the turn.
 
+## 0.46 Pi retest
+
+### Pi 1.6.0
+
+The retest on 2026-11-21 used SDK `32c31ea4853e8d942575851b0960bc09c7c6ce37`, macOS 26.5 (25F71), Darwin 25.5.0 arm64, Node 24.18.0 and Bun 1.4.4. It used the loopback providers, synthetic homes and macOS child sandbox above. A sandboxed connection to `192.0.2.1` returned `EPERM`.
+
+The baseline produced 19 JSON receipts. All 18 candidate scenarios recorded `acceptance.status: pass`. The production `qualified-launch` control recorded `closed` and declined before claim, with zero model attempts and zero target writes, while the table still pinned Pi 1.5.2.
+
+After replacing the Pi row with 1.6.0 and rebuilding the same SDK revision with that change, the strict `*` run exited 0 and all 19 JSON receipts recorded `acceptance.status: pass`. Discovery covered 256 servers with a peak of eight inner children. The call deadline produced a timeout after one target write and no replay. Cancellation during discovery produced no writes. The mixed case rejected both search and dispatch with the retired token while the next Attempt was active.
+
+`qualified-launch` used the production table and the Node distribution helper directly. The ordinary Attempt was claimed, started and completed with seven model tool attempts and four target writes (two to alpha, one to beta and one to the direct server). The rejected approval produced zero writes and the unselected server never started. Matching `tool_use` events carried the inner identity and hub results kept the outer identity. The Attempt token was revoked and no fixture processes remained.
+
 ## Original F qualification results
 
 The attempt counts below are steps sent by the loopback model after any runtime-native discovery. Executions count only synthetic target `tools/call` receipts and include direct calls in the mixed case. Search discovery itself increments no write receipt. The outer names shown are model-visible. The runtime only emits an inner identity where the SDK has a qualified raw-arguments path and can verify a frozen match.
