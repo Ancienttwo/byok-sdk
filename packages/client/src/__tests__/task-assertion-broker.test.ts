@@ -248,6 +248,7 @@ describe('task assertion broker: task_assertion.issue', () => {
     taskId: string,
     requiredToolsets: readonly string[] = [READ_TOOLSET, PROPOSE_TOOLSET],
   ): Promise<Record<string, string>> {
+    const startIndex = built.adapter.startCalls.length;
     server.send(
       createEnvelope(
         'task.offer',
@@ -261,9 +262,8 @@ describe('task assertion broker: task_assertion.issue', () => {
       ),
     );
     await server.waitFor((envelope) => envelope.type === 'task.started' && envelope.task_id === taskId);
-    await vi.waitFor(() => expect(built.adapter.startCalls.length).toBeGreaterThan(0));
-    // One offer per test, so the single start call is this task's.
-    const servers = built.adapter.startCalls[0]!.ctx.mcpServers ?? {};
+    await vi.waitFor(() => expect(built.adapter.startCalls.length).toBeGreaterThan(startIndex));
+    const servers = built.adapter.startCalls[startIndex]!.ctx.mcpServers ?? {};
     const tokens: Record<string, string> = {};
     for (const [name, definition] of Object.entries(servers)) {
       const token = hostToolsetToken(definition);
@@ -368,6 +368,30 @@ describe('task assertion broker: task_assertion.issue', () => {
       audience: ALLOWED_AUDIENCE,
     });
     expect(parseTaskAssertionEnvelope(other.assertion).protected.toolsetId).toBe(PROPOSE_TOOLSET);
+    expect(built.signer.count).toBe(2);
+  });
+
+  it('issues assertions for a new task after restarting the same daemon and rejects the old token', async () => {
+    const built = await pairedAndStarted('acme-task-restart');
+    const firstTokens = await offerAgentTask(built, 'task-before-restart', [READ_TOOLSET]);
+    const firstClient = await control(built.storeDir, built.config.productId);
+    const oldRequest = { contextToken: firstTokens[READ_SERVER], audience: ALLOWED_AUDIENCE };
+    const first = await firstClient.request<TaskAssertionIssueResult>('task_assertion.issue', oldRequest);
+    expect(parseTaskAssertionEnvelope(first.assertion).protected.taskId).toBe('task-before-restart');
+    firstClient.close();
+    await built.daemon.stop();
+
+    const previousEnvelopes = new Set(server.received);
+    await built.daemon.start();
+    await server.waitFor((event) => event.type === 'conn.hello' && !previousEnvelopes.has(event) && hasTaskCapability(event));
+    const nextTokens = await offerAgentTask(built, 'task-after-restart', [READ_TOOLSET]);
+    const nextClient = await control(built.storeDir, built.config.productId);
+    const next = await nextClient.request<TaskAssertionIssueResult>('task_assertion.issue', {
+      contextToken: nextTokens[READ_SERVER],
+      audience: ALLOWED_AUDIENCE,
+    });
+    expect(parseTaskAssertionEnvelope(next.assertion).protected.taskId).toBe('task-after-restart');
+    expect((await expectControlError(nextClient.request('task_assertion.issue', oldRequest))).code).toBe('context_token_invalid');
     expect(built.signer.count).toBe(2);
   });
 

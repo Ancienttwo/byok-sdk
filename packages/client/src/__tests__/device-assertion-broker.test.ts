@@ -34,6 +34,8 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { TestServer } from './fixtures/test-server';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
+import * as daemonOwner from '../util/daemon-owner';
+import * as serviceInstallation from '../util/service-installation-record';
 
 /**
  * Plan `device-assertion-broker`, client half: the `assertion.issue` control
@@ -202,6 +204,23 @@ describe('device assertion broker: assertion.issue', () => {
     expect(result.expiresAt).toBe(envelope.protected.expiresAt);
     // Default TTL, and no caller influence over it.
     expect(Date.parse(envelope.protected.expiresAt) - Date.parse(envelope.protected.issuedAt)).toBe(120_000);
+  });
+
+  it('issues device assertions again after restarting the same daemon', async () => {
+    const built = await pairedAndStarted('acme-assert-restart');
+    const firstClient = await control(built.storeDir, built.config.productId);
+    const params = { audience: ALLOWED_AUDIENCE };
+    await firstClient.request<AssertionIssueResult>('assertion.issue', params);
+    expect(built.signer.count).toBe(1);
+    firstClient.close();
+
+    await built.daemon.stop();
+    await built.daemon.start();
+
+    const nextClient = await control(built.storeDir, built.config.productId);
+    const result = await nextClient.request<AssertionIssueResult>('assertion.issue', params);
+    expect(parseDeviceAssertionEnvelope(result.assertion).protected.audience).toBe(ALLOWED_AUDIENCE);
+    expect(built.signer.count).toBe(2);
   });
 
   it('honours a configured ttlMs and never lets a caller choose one', async () => {
@@ -481,6 +500,73 @@ describe('device assertion broker: assertion.issue', () => {
       await pairP.catch(() => undefined);
     }
   }, 30_000);
+
+  it.each(['stop', 'unpair'] as const)('%s cancels a queued start and immediately blocks assertion issuance', async (cancel) => {
+    const built = await pairedAndStarted(`acme-assert-queued-${cancel}`);
+    const client = await control(built.storeDir, built.config.productId);
+    const params = { audience: ALLOWED_AUDIENCE };
+    await client.request<AssertionIssueResult>('assertion.issue', params);
+
+    const pairRequests = () => server.httpRequests.filter(({ pathname }) => pathname === '/byok/pair').length;
+    const priorPairRequests = pairRequests();
+    const releasePair = server.blockNextPair();
+    const pairing = Promise.allSettled([built.daemon.pair('pairing-code-2')]);
+    try {
+      await vi.waitFor(() => expect(pairRequests()).toBe(priorPairRequests + 1));
+      const starting = Promise.allSettled([built.daemon.start()]);
+      const cancelling = Promise.allSettled([built.daemon[cancel]()]);
+      try {
+        expect((await expectControlError(client.request('assertion.issue', params))).code).toBe('shutting_down');
+        expect(built.signer.count).toBe(1);
+      } finally {
+        releasePair();
+        await cancelling;
+      }
+      expect((await cancelling)[0]).toMatchObject({ status: 'fulfilled' });
+      expect((await starting)[0]).toMatchObject({
+        status: 'rejected', reason: { name: 'AuthRequestAbortedError', reason: 'stopped' },
+      });
+    } finally {
+      releasePair();
+      await pairing;
+    }
+  });
+
+  it.each(['stop', 'unpair'] as const)('%s cancels a restart while it acquires the owner lease', async (cancel) => {
+    const built = await pairedAndStarted(`acme-assert-lease-${cancel}`);
+    const client = await control(built.storeDir, built.config.productId);
+    await client.request<AssertionIssueResult>('assertion.issue', { audience: ALLOWED_AUDIENCE });
+    client.close();
+
+    const acquireOwner = daemonOwner.acquireDaemonOwner;
+    const leaseAcquired = Promise.withResolvers<void>();
+    const resumeStart = Promise.withResolvers<void>();
+    vi.spyOn(daemonOwner, 'acquireDaemonOwner').mockImplementationOnce(async (...args) => {
+      const lease = await acquireOwner(...args);
+      leaseAcquired.resolve();
+      await resumeStart.promise;
+      return lease;
+    });
+    const installationCheck = vi.spyOn(serviceInstallation, 'installationHoldsStart');
+    const stopping = built.daemon.stop();
+    const starting = Promise.allSettled([built.daemon.start()]);
+    try {
+      await stopping;
+      await leaseAcquired.promise;
+      const cancelling = Promise.allSettled([built.daemon[cancel]()]);
+      resumeStart.resolve();
+
+      expect((await cancelling)[0]).toMatchObject({ status: 'fulfilled' });
+      expect(installationCheck).not.toHaveBeenCalled();
+      expect((await starting)[0]).toMatchObject({
+        status: 'rejected', reason: { name: 'AuthRequestAbortedError', reason: 'stopped' },
+      });
+      expect(built.signer.count).toBe(1);
+    } finally {
+      resumeStart.resolve();
+      await starting;
+    }
+  });
 
   // -------------------------------------------------------------------------
   // jti: unpredictable, never reused, including under concurrency
