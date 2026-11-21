@@ -9,16 +9,8 @@ export async function runShutdownSequence(daemonScope: DaemonScope, reason: stri
     daemonState, pendingLateMutationBarriers, config, retentionSweeper, terminalCommits, overrides,
     setLifecycle, operationalHealth,
   } = daemonScope;
-  // Plan `device-assertion-broker` (codex F1): the assertion-minting latch is
-  // armed at the top of THIS function, synchronously, before the first
-  // `await` below. This is the single choke point EVERY teardown path crosses
-  // — the control-socket `shutdown` RPC, the public `daemon.stop()`, and
-  // `unpair()` all funnel here — so arming it here means `stop()`/`unpair()`
-  // close the minting window too, not only the RPC. The RPC handler
-  // additionally arms it before its own `setImmediate` defer (see
-  // `controlMethods.shutdown`) so a pipelined `shutdown`+`assertion.issue`
-  // batch cannot mint in the gap between the RPC returning and this function
-  // being scheduled. Latched, never cleared.
+  // All teardown paths close assertion issuance before their first await.
+  // A later start can reopen it once its own lifecycle slot and lease are held.
   daemonState.shuttingDown = true;
   // Release status waits before service/connection drain. Their mailbox rows
   // remain unacknowledged for a fresh lifecycle to recover authoritatively.
@@ -228,70 +220,27 @@ export async function runShutdownSequence(daemonScope: DaemonScope, reason: stri
   daemonState.daemonStarted = false;
 }
 
-/**
- * The control socket's `shutdown` RPC — see this method's own protocol
- * doc comment (`control-protocol.ts`'s `ShutdownParams`) for the wire
- * contract. M5 batch-3 (workstream 2): delegates the actual teardown
- * sequence to `runShutdownSequence` — see that function's own doc comment
- * for the full "stop accepting -> fail active tasks -> drain -> close"
- * sequence every graceful-shutdown path now shares — and wraps it with
- * this RPC's own audit events. Invoked from the RPC handler via
- * `setImmediate` (see `controlMethods` below) so the `{acknowledged:true}`
- * response has already been written to the wire before any of this runs.
- *
- * Gatekeeper-confirmed regression (fixed pre-M5; PRESERVED, not
- * reintroduced, by this refactor): `noteShutdownRequested` fires
- * SYNCHRONOUSLY, before `shutdownActiveTasks` even calls
- * `session.interrupt()` — `observer.emit()` calls its listeners
- * synchronously, so `bin/commands/start.ts`'s subscriber used to be woken
- * IMMEDIATELY, race ahead, and call `daemon.stop()` (which sets
- * `ConnectionManager.stopped = true` synchronously) before the active
- * task's `task.fail` was ever sent — silently stranding it in a
- * post-`stopped` outbox that `drainOutbox` refuses to flush. Fixed by
- * emitting a SEPARATE, later `shutdown-complete` event only once
- * `runShutdownSequence` below has fully resolved — `start.ts` now waits
- * for that one instead, so it can never race ahead of this function's own
- * internal ordering. `shutdown-requested` is kept as an earlier,
- * informational-only audit marker; nothing may gate teardown decisions on
- * it. The ordering itself (stopAcceptingOffers -> shutdownActiveTasks ->
- * THEN connection teardown) now lives inside `runShutdownSequence` rather
- * than duplicated in this function's own body, but the observable
- * guarantee `start.ts` depends on — `shutdown-complete` fires only after
- * every active task's `task.fail` has actually been enqueued and the
- * connection has begun closing — is unchanged.
- */
-export async function performControlShutdown(daemonScope: DaemonScope, reason: ShutdownReason | undefined): Promise<void> {
+/** Reserves shutdown before the RPC ACK and wraps teardown with audit events. */
+export async function performControlShutdown(
+  daemonScope: DaemonScope,
+  reason: ShutdownReason | undefined,
+  opts: { deferTeardown?: boolean } = {},
+): Promise<void> {
   const { daemonState, observer, requestShutdown } = daemonScope;
   const effectiveReason = reason ?? 'operator';
-  // Plan `device-assertion-broker` (codex F1): belt-and-suspenders re-arm of
-  // the minting latch. The `shutdown` RPC handler already set it
-  // synchronously before deferring this function, and `runShutdownSequence`
-  // (called below, via `requestShutdown`) sets it again — but re-asserting it
-  // here keeps this function correct on its own terms regardless of how it is
-  // reached, and setting an already-`true` boolean is free.
   daemonState.shuttingDown = true;
-  observer.noteShutdownRequested(effectiveReason);
-  // Hardening finding (P2 re-gate): `noteShutdownComplete` now fires in a
-  // `finally` — `start.ts`'s own wait for THIS event (see the doc comment
-  // above) is what makes `runStartCommand` return at all. Before this fix,
-  // a throw anywhere in the body below (every step `runShutdownSequence`
-  // takes is best-effort in its OWN implementation today, but nothing here
-  // guaranteed one of them could never throw in the future) would
-  // propagate out of this function without ever emitting
-  // `shutdown-complete`, leaving `start.ts` waiting forever — exactly the
-  // class of hang this event was introduced to prevent in the first
-  // place. `finally` runs on both the success path and any throw, and does
-  // not swallow the throw itself (it still propagates to this function's
-  // own caller — the `shutdown` control method's `.catch()` in
-  // `controlMethods` below — afterward).
+  const teardown = requestShutdown(effectiveReason, {
+    beforeTeardown: opts.deferTeardown ? () => new Promise<void>((resolve) => setImmediate(resolve)) : undefined,
+  });
+  // Schedule the audit event before the lifecycle slot can schedule teardown.
+  // This also emits the event when requestShutdown reuses a pending teardown.
+  if (opts.deferTeardown) setImmediate(() => observer.noteShutdownRequested(effectiveReason));
+  else observer.noteShutdownRequested(effectiveReason);
+
   try {
-    await requestShutdown(`control socket shutdown (${effectiveReason})`);
+    await teardown;
   } finally {
-    // Finding F5(b): read AFTER runShutdownSequence() returns — 0 means
-    // the drain genuinely finished in time; a positive count is an honest
-    // record that this many envelopes (almost certainly including a
-    // task.fail shutdownActiveTasks just sent) never actually left the
-    // outbox, rather than the audit log silently implying full delivery.
+    // The foreground command waits for completion even if teardown throws.
     observer.noteShutdownComplete(effectiveReason, daemonState.connection?.outboxLength() ?? 0);
   }
 }

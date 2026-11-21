@@ -250,7 +250,8 @@ export async function unpair(daemonScope: DaemonScope): Promise<void> {
   // clears `device.json`, so any assertion minted in the queue-wait window
   // would be for a device that is being unpaired.
   daemonState.shuttingDown = true;
-  cancelAuthOperations(daemonScope);
+  // Let an in-flight pair finish committing the identity that unpair will remove.
+  cancelAuthOperations(daemonScope, { abortInFlight: daemonState.startInProgress });
   await runLifecycleMutation(unpairUnderLease);
 }
 

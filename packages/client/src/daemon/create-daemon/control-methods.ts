@@ -33,35 +33,15 @@ export function createControlMethods(daemonScope: DaemonScope): ControlMethods {
       [RUNTIMES_ENVIRONMENT_METHOD]: () => describeRuntimeEnvironments(daemonScope.adapters),
       ...runtimeReaderMethods(daemonScope.adapters),
       shutdown: (params) => {
-        // Plan `device-assertion-broker` (codex F1): arm the minting latch
-        // SYNCHRONOUSLY, as the very first statement of this handler, BEFORE
-        // the `setImmediate` defer below. The teardown itself is deferred so
-        // the `{acknowledged:true}` response is written first — but the LATCH
-        // must not be. A client can pipeline `shutdown` and `assertion.issue`
-        // as two NDJSON lines in one write; the server dispatches them in
-        // order on the same tick, so if the latch were only set inside the
-        // deferred `performControlShutdown` (next macrotask), the
-        // `assertion.issue` that runs on THIS tick would still see
-        // `shuttingDown === false` and mint. Setting it here, before yielding,
-        // closes that exact window. `runShutdownSequence` sets it again
-        // (idempotent) so the non-RPC `stop()`/`unpair()` paths are covered
-        // too.
+        // Close assertion issuance and cancel older auth requests before
+        // the server dispatches another RPC from the same batch.
         daemonState.shuttingDown = true;
-        // Also synchronous: a start or pair requested before this shutdown,
-        // queued or running, must not take the store lease again after the
-        // teardown has released it (service enrollment's deferred start, an
-        // `enrollment.pair` pipelined behind this request).
         cancelAuthOperations(daemonScope);
         const { reason } = parseShutdownParams(params);
-        // Fire-and-forget, deliberately AFTER this handler's own return
-        // value has been serialized and written to the socket (see
-        // `control-server.ts`'s dispatch: it awaits this handler, THEN
-        // writes the response) — `setImmediate` schedules the teardown for
-        // the next macrotask tick, strictly after that write.
-        setImmediate(() => {
-          void performControlShutdown(reason).catch((err: unknown) => {
-            console.error('[byok/client] error during control-socket shutdown teardown:', err);
-          });
+        // Reserve the lifecycle slot now and give the dispatcher a turn to
+        // write the ACK before teardown can close the socket.
+        void performControlShutdown(reason, { deferTeardown: true }).catch((err: unknown) => {
+          console.error('[byok/client] error during control-socket shutdown teardown:', err);
         });
         return { acknowledged: true };
       },

@@ -164,6 +164,15 @@ describe('device assertion broker: assertion.issue', () => {
     return conn.client;
   }
 
+  async function holdActiveTaskClose(built: Started, taskId: string) {
+    server.send(createEnvelope('task.offer', {
+      target: { lane: 'auto' }, agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'work',
+    }, { taskId, seq: server.nextSeq() }));
+    await server.waitFor((event) => event.type === 'task.started' && event.task_id === taskId);
+    const session = built.adapter.sessions[0]!;
+    return { session, releaseTask: session.blockClose() };
+  }
+
   async function expectControlError(promise: Promise<unknown>): Promise<ControlError> {
     try {
       await promise;
@@ -443,6 +452,55 @@ describe('device assertion broker: assertion.issue', () => {
     }
   }, 30_000);
 
+  it('queues a restart requested by a shutdown observer behind control teardown', async () => {
+    const built = await pairedAndStarted('acme-assert-control-restart', { shutdownGraceMs: 60_000 });
+    const client = await control(built.storeDir, built.config.productId);
+    const params = { audience: ALLOWED_AUDIENCE };
+    await client.request<AssertionIssueResult>('assertion.issue', params);
+    const { session, releaseTask } = await holdActiveTaskClose(built, 'task-control-restart');
+
+    const releaseEarlyStart = Promise.withResolvers<void>();
+    const checkInstallation = serviceInstallation.installationHoldsStart;
+    const installationCheck = vi.spyOn(serviceInstallation, 'installationHoldsStart').mockImplementationOnce(async (...args) => {
+      if (!session.interruptCalled) {
+        // Hold an incorrectly ordered restart at its first await after the latch reset.
+        await releaseEarlyStart.promise;
+        throw new Error('restart reached startup before control teardown');
+      }
+      return checkInstallation(...args);
+    });
+    let restart: Promise<PromiseSettledResult<void>[]> | undefined;
+    const shutdownEvents: string[] = [];
+    const unsubscribe = built.daemon.subscribe((event) => {
+      if (event.kind === 'shutdown-requested') {
+        shutdownEvents.push(event.kind);
+        restart ??= Promise.allSettled([built.daemon.start()]);
+      } else if (event.kind === 'shutdown-complete') {
+        shutdownEvents.push(event.kind);
+      }
+    });
+    try {
+      await expect(client.request('shutdown', { reason: 'operator' })).resolves.toEqual({ acknowledged: true });
+      await vi.waitFor(() => expect(session.interruptCalled || installationCheck.mock.calls.length > 0).toBe(true));
+      expect((await expectControlError(client.request('assertion.issue', params))).code).toBe('shutting_down');
+      expect(built.signer.count).toBe(1);
+      expect(installationCheck).not.toHaveBeenCalled();
+      expect(shutdownEvents).toEqual(['shutdown-requested']);
+
+      releaseTask();
+      expect((await restart)?.[0]).toMatchObject({ status: 'fulfilled' });
+      expect(shutdownEvents).toEqual(['shutdown-requested', 'shutdown-complete']);
+      const restartedClient = await control(built.storeDir, built.config.productId);
+      await restartedClient.request<AssertionIssueResult>('assertion.issue', params);
+      expect(built.signer.count).toBe(2);
+    } finally {
+      unsubscribe();
+      releaseTask();
+      releaseEarlyStart.resolve();
+      await restart;
+    }
+  }, 30_000);
+
   it('codex F1: a pipelined shutdown+assertion.issue batch mints nothing — the latch is armed synchronously', async () => {
     const built = await pairedAndStarted('acme-assert-pipeline');
     daemon = built.daemon;
@@ -502,10 +560,11 @@ describe('device assertion broker: assertion.issue', () => {
   }, 30_000);
 
   it.each(['stop', 'unpair'] as const)('%s cancels a queued start and immediately blocks assertion issuance', async (cancel) => {
-    const built = await pairedAndStarted(`acme-assert-queued-${cancel}`);
+    const built = await pairedAndStarted(`acme-assert-queued-${cancel}`, { shutdownGraceMs: 60_000 });
     const client = await control(built.storeDir, built.config.productId);
     const params = { audience: ALLOWED_AUDIENCE };
     await client.request<AssertionIssueResult>('assertion.issue', params);
+    const { releaseTask } = await holdActiveTaskClose(built, 'task-queued-start');
 
     const pairRequests = () => server.httpRequests.filter(({ pathname }) => pathname === '/byok/pair').length;
     const priorPairRequests = pairRequests();
@@ -519,6 +578,7 @@ describe('device assertion broker: assertion.issue', () => {
         expect((await expectControlError(client.request('assertion.issue', params))).code).toBe('shutting_down');
         expect(built.signer.count).toBe(1);
       } finally {
+        releaseTask();
         releasePair();
         await cancelling;
       }
@@ -526,7 +586,9 @@ describe('device assertion broker: assertion.issue', () => {
       expect((await starting)[0]).toMatchObject({
         status: 'rejected', reason: { name: 'AuthRequestAbortedError', reason: 'stopped' },
       });
+      if (cancel === 'unpair') expect((await pairing)[0]).toMatchObject({ status: 'fulfilled' });
     } finally {
+      releaseTask();
       releasePair();
       await pairing;
     }
