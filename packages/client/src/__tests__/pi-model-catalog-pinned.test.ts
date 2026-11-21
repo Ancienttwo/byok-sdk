@@ -171,10 +171,8 @@ type PiProviderBranch = readonly [file: string, line: string, kind: 'url' | 'dec
 const COPILOT = 'github-copilot is not a catalog vendor';
 const OPENCODE_GO = 'pi_model.providerId explicitly declares opencode-go with openai-completions';
 
-/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.5.2. */
+/** Every pinned pi-ai line that branches on a provider id, reviewed against pi-ai 1.6.0. */
 const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
-  ['api/anthropic-messages.js', '(model.provider === "anthropic" && model.baseUrl.includes("api.anthropic.com")),', 'differs',
-    'message threads default on only for the built-in anthropic provider; a projected anthropic profile sends full requests, and pi_model compat has no supportsMessageThreads'],
   ['api/anthropic-messages.js', 'const isOpenRouter = model.provider === "openrouter" || model.baseUrl.includes("openrouter.ai");', 'url', 'openrouter base_url contains openrouter.ai'],
   ['api/anthropic-messages.js', 'if (model.provider !== "anthropic" || hasRequestAuth(apiKey, headers))', 'unreachable', 'federation runs only without a key; a byok launch always supplies one'],
   ['api/anthropic-messages.js', 'if (model.provider === "github-copilot") {', 'unreachable', COPILOT],
@@ -197,6 +195,8 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['api/openai-completions.js', 'provider === "xai" ||', 'url', 'the next operand matches api.x.ai, which the xai base_url contains'],
   ['api/openai-completions.js', 'provider === "opencode" ||', 'unreachable', 'opencode is not a catalog vendor'],
   ['api/openai-completions.js', 'const isGrok = provider === "xai" || baseUrl.includes("api.x.ai");', 'url', 'xai base_url contains api.x.ai'],
+  ['api/openai-completions.js', 'const isOpenAI = provider === "openai" || baseUrl.includes("api.openai.com");', 'url',
+    'developer-role detection also matches api.openai.com; the openai catalog vendor projects openai-responses only'],
   ['api/openai-completions.js', 'const cacheControlFormat = provider === "openrouter" && model.id.startsWith("anthropic/") ? "anthropic" : undefined;', 'differs',
     'no URL branch; every OpenRouter anthropic/* completions entry is unrepresentable (keys pi-model-catalog.test.ts guards each row)'],
   ['api/openai-responses-shared.js', 'if (!allowedToolCallProviders.has(model.provider))', 'differs',
@@ -230,7 +230,7 @@ const REVIEWED_PI_PROVIDER_BRANCHES: readonly PiProviderBranch[] = [
   ['utils/identity.js', 'return (target.provider === "opencode" || target.provider === "opencode-go" || matchesHost(target.baseUrl, OPENCODE_HOST));', 'declared',
     'getOpenCodeSessionHeaders matches declared opencode-go, including gateways; it also matches the opencode.ai host'],
   ['utils/overflow.js', 'if (message.provider === "cerebras" && CEREBRAS_BODYLESS_OVERFLOW_PATTERN.test(message.errorMessage)) {', 'differs',
-    'only an empty-body 400 differs: pinned openai 7.19.0 keeps a body without an error key, and the overflow body '
+    'only an empty-body 400 differs: pinned openai 7.59.0 keeps a body without an error key, and the overflow body '
     + 'cerebras is reported to send matches the generic patterns under any provider id; no empty-body 400 overflow '
     + 'has been captured'],
 ];

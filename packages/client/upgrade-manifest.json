@@ -7,13 +7,38 @@
   },
   "to": {
     "version": "0.45.0",
-    "snapshotSha256": "417350abb369f8a9ceb425d0ef04c5f4d0b6f5690c33f88f6f7d3cd0ca018411"
+    "snapshotSha256": "1a53fd719e254dc594fc29148704a4a011a1376f6cb16018164be22b1c30e5d0"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "pi-160-closure",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "Pi 1.6.0 changes closureDigest and requires new preparations. The keys catalog follows pi-ai 1.6.0 and removed entries return not_in_catalog. Replicas with pi.tool v4 or pi.generation v3 cannot resume on Pi 1.5.2. Pi now pins undici 8.12.4.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-160-closure",
+      "items": [
+        "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+        "store:pi-durable"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-160-closure"
+    },
+    {
+      "item": "store:pi-durable",
+      "change": "changed",
+      "before": "@earendil-works/pi-durable@1.5.2",
+      "after": "@earendil-works/pi-durable@1.6.0",
+      "entry": "pi-160-closure"
+    }
+  ]
 }

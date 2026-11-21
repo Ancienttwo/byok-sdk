@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager, type ExtensionFactory,
 } from '@earendil-works/pi-coding-agent';
-import { resetResumedPiTools } from '../bin/pi-session-runtime';
+import { createPiSessionWithCurrentTools } from '../bin/pi-session-runtime';
 
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
@@ -43,11 +43,11 @@ async function open(
   const settingsManager = SettingsManager.create(cwd, agentDir);
   const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager, extensionFactories: [extension] });
   await resourceLoader.reload();
-  const { session } = await createAgentSession({
+  const create = options.reset ? createPiSessionWithCurrentTools : createAgentSession;
+  const { session } = await create({
     cwd, agentDir, sessionManager, settingsManager, resourceLoader, excludeTools: options.excludeTools,
   });
   try {
-    if (options.reset) resetResumedPiTools(session, settingsManager, cwd);
     await session.bindExtensions({});
     return session.getActiveToolNames().sort();
   } finally {
@@ -80,10 +80,8 @@ async function resumedAndFresh(
 
 const DEFAULTS = ['read', 'bash', 'edit', 'write'];
 
-describe('resumed Pi session tools (Pi 1.4)', () => {
-  // Pi 1.3 kept a load-time tool the transcript did not declare inactive;
-  // Pi 1.4 (upstream #11062) activates it natively.
-  it('without the reset, native Pi 1.4 offers a load-time tool the transcript did not declare', async () => {
+describe('resumed Pi session tools', () => {
+  it('native Pi offers a load-time tool the transcript did not declare', async () => {
     const { resumed, fresh } = await resumedAndFresh(dirs(), [...DEFAULTS, 'mcp_A'],
       { atLoad: [{ name: 'mcp_A' }, { name: 'mcp_B' }] }, { reset: false });
     expect(fresh).toContain('mcp_B');
@@ -142,14 +140,13 @@ describe('resumed Pi session tools (Pi 1.4)', () => {
     expect(resumed).toEqual(fresh);
   });
 
-  it('refuses a resume with no activatable tool instead of keeping pending transcript tools', async () => {
+  it('resumes with no activatable tools and drops pending transcript tools', async () => {
     const paths = dirs();
     const file = previousTranscript(paths, ['late_off']);
     const registrations = { atLoad: [], atStart: [{ name: 'late_off', defaultActive: false }] };
     const excludeTools = ['read', 'bash', 'powershell', 'edit', 'write', 'grep', 'find', 'ls'];
-    await expect(open(paths, SessionManager.open(file, paths.sessionDir), registrations, { excludeTools, reset: true }))
-      .rejects.toThrow('cannot drop its restored pending tools');
-    // Native Pi 1.3 would otherwise offer the inactive tool; a new open does not.
+    expect(await open(paths, SessionManager.open(file, paths.sessionDir), registrations, { excludeTools, reset: true })).toEqual([]);
+    // A native resume still activates the tool from the transcript.
     expect(await open(paths, SessionManager.open(file, paths.sessionDir), registrations, { excludeTools, reset: false })).toEqual(['late_off']);
     expect(await open(paths, SessionManager.create(paths.cwd, paths.sessionDir), registrations, { excludeTools, reset: true })).toEqual([]);
   });

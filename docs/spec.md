@@ -332,16 +332,16 @@ and makes no network request.
   provider id are outside that promise, because the projected provider id is
   `byok-sdk-<profile_ref>` unless the profile explicitly declares `opencode-go`.
   The declared identity enables Pi's OpenCode Go reasoning replay and session
-  headers. In pi-ai 1.5.2 the other branches are Anthropic message threads,
-  on by default only for provider `anthropic` at `api.anthropic.com`
-  (`api/anthropic-messages.js:163`), so a projected anthropic profile sends
-  full requests, `cacheControlFormat` for
-  openrouter `anthropic/*` models (`api/openai-completions.js:1260`), the
+  headers. In pi-ai 1.6.0, Anthropic message threads default on for
+  `api.anthropic.com` regardless of provider id, including projected profiles
+  when a session ID is available (`api/anthropic-messages.js:162`). The
+  branches that differ include `cacheControlFormat` for
+  openrouter `anthropic/*` models (`api/openai-completions.js:1262`), the
   xai `reasoning.encrypted_content` include, which differs only for grok-4.3
   at `off` (`api/openai-responses.js:305`), cerebras body-less overflow
   detection, which differs only for a 400 with an empty body
   (`utils/overflow.js:148`), the Responses tool-call id kept only for `OPENAI_TOOL_CALL_PROVIDERS`
-  (`api/openai-responses.js:15`, `api/openai-responses-shared.js:104`), which
+  (`api/openai-responses.js:15`, `api/openai-responses-shared.js:105`), which
   applies only when replaying history from another model or provider id
   (`api/transform-messages.js:87`, `:120`),
   the error message prefix (`api/openai-responses.js:177`), and openrouter
@@ -2212,12 +2212,12 @@ remain the only device protocol.
 ## Core pi runtime contract
 
 Pi is a required BYOK capability. The SDK pins the official unmodified
-`@earendil-works/pi-coding-agent@1.5.2` plus chord, pi-agent-core, pi-ai and
-pi-durable to exactly 1.5.2 (upstream commit
-`b4afdddf44e059c67ccf5097e5317d913521b470`, closureDigest
-`5b49e488317320fd0fbaf2a452b2d6f1455e40a2522c16e3e87b85d43daca603`). pi-codemode, pi-mcp,
+`@earendil-works/pi-coding-agent@1.6.0` plus chord, pi-agent-core, pi-ai and
+pi-durable to exactly 1.6.0 (upstream commit
+`faac585884ae2c013a6b1400f3e9e77f10b34bac`, closureDigest
+`333cc8da49277af64d9255bbbbb8e9eca91e931c5ade6a82fd6345a6525f7a94`). pi-codemode, pi-mcp,
 pi-schema, pi-telemetry and pi-tui reach an install only through the
-dependencies of the official packages, which pin them exactly in 1.5.2.
+dependencies of the official packages, which pin them exactly in 1.6.0.
 The SDK reads their installed version and does not gate it. Fork aliases and dual runtimes are
 retired. `resolvePiRuntimeIdentity()` reads the static dependency projection;
 resolved name/version mismatch fails closed. There is no implicit global Pi fallback.
@@ -4268,7 +4268,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.5.2 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.124.0 source at `packages/client/vendor/oar/7961a59/`, from upstream commit `7961a59316b451b137d1c48d0a3e02aec7dcde7f`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.6.0 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.124.0 source at `packages/client/vendor/oar/7961a59/`, from upstream commit `7961a59316b451b137d1c48d0a3e02aec7dcde7f`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -4289,6 +4289,18 @@ Pi 1.4.0 ruling (2026-10-24, requested by the owner: 「你来并行开一个PR�
 Pi 1.5.0 ruling (2026-11-03, requested by the owner, who ruled E1–E7 as recommended in `docs/researches/2026-11-03-pi-1.5.0-upgrade.md`): all ten official packages are pinned at exactly 1.5.0 (upstream commit `f9a26365568127461c47a07a37dcb42c140a3ac5`, closureDigest `9c94eaec01a9b7054843c0780a553d0c670a03f38d2b7d91fb6702835cbcf4b8`); the change is breaking and ships in a MINOR. E1: pi-durable 1.5.0 removed its event stream, so both durable lanes read `Conversation.watch()` and the `pi.live` document; the Host event contract is unchanged. E2: opening a replica migrates `pi.live` to v3, `pi.tool` to v3 and `pi.generation` to v2, which a 0.36.0 build cannot open, so a deployment cannot roll back past this release. E3: a model request in flight when the host stopped is not sent again; with retry off the run ends unanswered with reason `interrupted`, which the client durable lane reports as `runtime_exited` (`durable runtime was interrupted during a model request`) and cloud-do as `CLOUD_EXECUTION_INTERRUPTED`. E4: progress reaches Storage at the upstream default `progress.persistWithinMs` of 1,000 ms; watches see it at once. E5: tool arguments are validated by pi-schema, which coerces them first and words its messages differently; `CloudToolDefinition.parameters` is pi-schema-typed, and pi-ai no longer exports `Type`, so a Host builds schemas with `Type` from `typebox` or with pi-schema. E6: pi-schema joins the provenance record and `PI_RUNTIME_CLOSURE` as an indirect package, like pi-telemetry. E7: rpiv-todo's `tool/types.ts` defines `StringEnum` locally with pi-ai 1.4.0's TypeBox implementation (same schema), recorded in its PROVENANCE and source manifest. The closureDigest change makes a preparation compiled for 1.4.0 decline with `preparation_runtime_identity_mismatch`; prepare it again. The pinned keys catalog follows pi-ai 1.5.0, and 30 entries it admitted before return `not_in_catalog`.
 
 Pi 1.5.2 ruling (2026-11-11, joint decision of the orchestrator and the advisor on [#1864](https://github.com/Ancienttwo/byok-sdk/issues/1864)): all ten official packages are pinned at exactly 1.5.2 (upstream commit `b4afdddf44e059c67ccf5097e5317d913521b470`, closureDigest `5b49e488317320fd0fbaf2a452b2d6f1455e40a2522c16e3e87b85d43daca603`). pi-durable 1.5.2 keeps persisted state compatible in both directions: `storage/sqlite/migrations.js` and `schema.js` are byte-identical to 1.5.0, `documents.js` changes only its `copyJson` import (chord root to `chord/json`), the SQLite row encoding is the same, and the document versions are unchanged (`pi.live` v3). The only new persisted field, `agent.compaction` (per-conversation compaction settings from `configure({ compaction })`), is optional and the SDK never sets it. Chord 1.5.1 moved v1 off the package root; the SDK imports only `chord/context` and `chord/json`. Every SDK Pi RPC session caps its settings getter at Pi's native `"streaming"` cache-warming mode, preserving `"off"` without rewriting device settings (Pi 1.5.1 defaults `cacheWarming` to `"idle"`). Pi cancels the warmer at settlement and revalidates pending decisions before dispatch.
+
+Pi 1.6.0 (#2098) pins undici 8.12.4 in the official coding agent. A prepared
+input bound to the 1.5.2 closure must be prepared again. The keys catalog drops
+40 entries from the 48 chat model entries removed upstream. Pi-durable 1.6.0
+opens 1.5.2 replicas without a SQLite schema migration. Pi 1.5.2 refuses newer
+`pi.tool` v4 and `pi.generation` v3 task records with `task_too_old`.
+
+The SDK creates resumed RPC sessions with Pi's public `noTools: 'builtin'`
+option to suppress transcript tool restoration. Before `session_start` it
+adds the current default tools to the native default-active extension tools.
+A tool registered during `session_start` follows its current defaultActive
+and exposure even when the starting tool set is empty.
 
 Exactness of the direct pins has three independent checks: bun.lock exact versions and sha512 integrity under frozen install (the root `overrides` also hold the repo's own install of the indirect packages at the pin); the build entry check that each installed direct package is at the pin; release-pack and registry-readback isolated installs, which require the direct pins with the locked integrities and prove the coding agent against its official tarball. The indirect packages are read, not gated: the release gates log their installed version, and input preparation does not read them. The SDK does not attest the Pi executable at launch (ADR-037).
 
@@ -4336,7 +4348,7 @@ retain the existing fail-closed behavior.
 
 Codex reports `tokenUsage.last.totalTokens` against `modelContextWindow`;
 its cumulative `total` remains the provider cost authority. Claude reports
-`result.modelUsage`'s window using the init model identity. Official Pi 1.5.2
+`result.modelUsage`'s window using the init model identity. Official Pi 1.6.0
 reports `get_session_stats.contextUsage` as an estimate before task settlement;
 null occupancy stays unknown, and a statistics read that times out or fails after settlement leaves it unknown without failing the task. On the prepared Pi lane, Host `pi_model`
 configuration is the context window authority even if runtime stats differ.
@@ -4427,7 +4439,7 @@ workspace language server and a separate model reviewer with its own tool loop,
 which does not pass through the session tool-authorization hooks. The host
 refuses the command with a failed RPC response carrying
 `pi_host_command_denied`, before Pi can defer the prompt during `agent_settled`
-or run its command handler. The ingress check uses Pi 1.5.2's private
+or run its command handler. The ingress check uses Pi 1.6.0's private
 `_throwIfExtensionCommand` parser with a read-only registry façade; there is no
 SDK copy of its parser. If that method is missing or not a function, the host
 refuses startup with `pi_host_command_boundary_unavailable`. The dependency

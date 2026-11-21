@@ -61,7 +61,7 @@ function makeRoot(t, {
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const manifest of [
     { name: '@byok-sdk/core', version: release },
-    { name: '@byok-sdk/client', version: release, byok: { piRuntimePin: '1.5.2' } },
+    { name: '@byok-sdk/client', version: release, byok: { piRuntimePin: '1.6.0' } },
     { name: '@byok-sdk/server', version: release },
     { name: '@byok-sdk/keys', version: keys },
     { name: '@byok-sdk/testkit', version: '0.0.0', private: true },

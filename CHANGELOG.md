@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Breaking (client, keys)** — Pi 1.6.0 requires re-preparing inputs compiled for 1.5.2. Removed model entries return `not_in_catalog`, and durable replicas with new task records cannot resume on 1.5.2. Pi pins undici 8.12.4, so Hosts can remove their override. Closes #2098. [Host upgrade steps](docs/releases/host-upgrade-next-minor.md#pi-160-closure)
+
 ## 0.45.0 — 2026-11-21 (published)
 
 [Release notes](docs/releases/v0.45.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.45.0.md)
