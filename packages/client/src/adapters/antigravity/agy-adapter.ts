@@ -253,10 +253,10 @@ export class AgyAdapter implements RuntimeAdapter {
       const { env, proxy, credentials } = await this.authenticatedEnvironment({ ...input.env, ...input.scratch.env }, input.signal);
       session.useProxy(proxy);
       if (input.signal?.aborted) throw infrastructure('agy start was aborted');
-      const redactor = sessionCredentialRedactor({ env });
-      for (const value of credentials) redactor.addExplicit(value);
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
-      const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'agy acp' });
+      const redactor = sessionCredentialRedactor({ env, mcpServers });
+      for (const value of credentials) redactor.addExplicit(value);
+      const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'agy acp', stderrRedactor: redactor });
       const hooks: NonNullable<Parameters<typeof import('../../runtime/acp-session-runtime.js').antigravitySession>[4]> = {
         credentialsForRedaction: credentials,
         onReady: id => session.ready(id),

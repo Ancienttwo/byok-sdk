@@ -64,7 +64,6 @@ type AuthenticatedModelReader = (
 /** Each adapter owns one cache entry for its current executable and version. */
 export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConfig) {
   let cache: { key: string; catalog: RuntimeModelCatalog } | undefined;
-  const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: config.nativeAssetRoot, spawnFn: config.spawnFn, label: `${adapter.descriptor.id} reader` });
   const read = <T>(options: RuntimeReadOptions, query: (
     installation: Parameters<ModelReader>[0], reader: ActiveReader, key: string | undefined,
     redactValue: <Value>(value: Value) => Value, authenticate: AuthenticateReader,
@@ -77,6 +76,7 @@ export function createRuntimeReaders(adapter: RuntimeAdapter, config: ReaderConf
       const redactor = sessionCredentialRedactor({ env: base });
       for (const value of sessionCredentialRedactor({ env }).values()) redactor.add(value);
       for (const value of credentials ?? []) redactor.addExplicit(value);
+      const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: config.nativeAssetRoot, spawnFn: config.spawnFn, label: `${adapter.descriptor.id} reader`, stderrRedactor: redactor });
       const authenticate: AuthenticateReader = async (baseEnv, requestSignal, use) => {
         if (config.authenticate === undefined) return use(baseEnv);
         const { env: authenticated, credentials, close } = await config.authenticate(baseEnv, requestSignal);

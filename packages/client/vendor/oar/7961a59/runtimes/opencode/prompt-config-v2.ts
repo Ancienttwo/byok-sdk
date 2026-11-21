@@ -1,0 +1,77 @@
+import { UnsupportedOptionError } from "../../contracts/errors.js";
+import type { SessionOptions } from "../../contracts/session.js";
+import { type CredentialRedactor, sessionCredentialRedactor } from "../../shared/credential-redactor.js";
+import { sessionEnvironment } from "../../shared/environment.js";
+import { processFailure, StderrTail } from "../../shared/executable/diagnostics.js";
+import { reportedStderr } from "../../shared/executable/reported-stderr.js";
+import { asRecord, type JsonRecord } from "../../shared/json.js";
+import { configContent, type ExecutableRunner, instructionsFile, openedAgent, validateOpenCodePrompts, type OpenCodePromptConfig } from "./prompt-config.js";
+import { opencodeV2PromptRefusals } from "./options.js";
+import { acquireOpenCodeStartup } from "./startup-gate.js";
+import type { OpencodeRelease } from "./version.js";
+
+/** The private server opens the native database like an ACP start does, so it waits its turn behind the same gate. */
+async function gated<T>(options: SessionOptions, work: () => Promise<T>): Promise<T> {
+  const release = await acquireOpenCodeStartup(options);
+  try { return await work(); } finally { release(); }
+}
+
+/**
+ * The agents a v2 session can open on: primary or all-mode agents that are not
+ * hidden, from `debug agents` on a private server with the session's own
+ * environment and directory. Subagents and hidden agents (compaction, title)
+ * keep their native prompts.
+ */
+async function primaryAgents(command: string, options: SessionOptions, run: ExecutableRunner, credentials: CredentialRedactor): Promise<readonly string[]> {
+  // oxlint-disable-next-line typescript/promise-function-async -- the runner already returns its promise.
+  const result = await gated(options, () => run(command, ["debug", "agents", "--standalone"], { cwd: options.cwd, env: sessionEnvironment(options.env, {}), timeoutMs: 30_000 }));
+  if (!result.ok) {
+    const tail = new StderrTail();
+    tail.append(credentials.redact(result.stderr));
+    const stderr = reportedStderr(tail.observation(), credentials.redact);
+    throw processFailure("opencode debug agents failed while resolving the session's agents", { exitCode: result.exitCode, signal: null, stderr });
+  }
+  let listed: unknown = undefined;
+  try { listed = JSON.parse(result.stdout); } catch { /* reported below */ }
+  if (!Array.isArray(listed)) {
+    throw new TypeError("opencode debug agents returned no agent list while resolving the session's agents");
+  }
+  const agents = listed.map((entry) => asRecord(entry)).flatMap((entry) =>
+    entry !== null && typeof entry.id === "string" && entry.mode !== "subagent" && entry.hidden !== true ? [entry.id] : []);
+  if (agents.length === 0) {
+    throw new UnsupportedOptionError("systemPrompt", "opencode reports no visible primary agent whose system prompt could be replaced");
+  }
+  return agents;
+}
+
+/**
+ * v2: `systemPrompt` sets `agents.<id>.system` on every visible primary agent
+ * that already exists, so it holds whichever of them the session opens on or
+ * switches to, a new session and a resume alike. `appendSystemPrompt` is one
+ * session-owned file in `instructions`. Nothing is created or written to the
+ * user's configuration.
+ */
+export async function prepareOpenCodeV2Prompts(command: string, release: OpencodeRelease, options: SessionOptions, run: ExecutableRunner, credentialsForRedaction?: readonly string[]): Promise<OpenCodePromptConfig> {
+  const credentials = sessionCredentialRedactor(options);
+  for (const value of credentialsForRedaction ?? []) { credentials.addExplicit(value); }
+  validateOpenCodePrompts(options);
+  const refused = opencodeV2PromptRefusals(release);
+  for (const option of ["appendSystemPrompt", "systemPrompt"] as const) {
+    const reason = refused[option];
+    if (options[option] !== undefined && reason !== undefined) { throw new UnsupportedOptionError(option, reason); }
+  }
+  const agents = options.systemPrompt === undefined ? undefined : await primaryAgents(command, options, run, credentials);
+  const instructions = await instructionsFile(options.appendSystemPrompt);
+  const overlay = {
+    ...(agents === undefined ? {} : { agents: Object.fromEntries(agents.map((agent) => [agent, { system: options.systemPrompt }])) }),
+    ...(instructions.path === undefined ? {} : { instructions: [instructions.path] }),
+  };
+  return { options: { ...options, env: { ...options.env, OPENCODE_CONFIG_CONTENT: configContent(overlay) } }, ...(agents === undefined ? {} : { agents }), cleanup: instructions.cleanup };
+}
+
+export function verifyOpenCodeAgents(response: JsonRecord, expected: readonly string[]): void {
+  const actual = openedAgent(response);
+  if (typeof actual !== "string" || !expected.includes(actual)) {
+    throw new Error(`opencode opened on agent ${actual === undefined ? "<unreported>" : JSON.stringify(actual)}, but the system prompt was configured for ${expected.map((agent) => JSON.stringify(agent)).join(", ")}`);
+  }
+}

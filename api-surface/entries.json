@@ -619,7 +619,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 715000,
+      "budgetBytes": 735120,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1005,7 +1005,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 667000,
+      "budgetBytes": 687306,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1081,7 +1081,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 181000,
+      "budgetBytes": 196898,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1250,7 +1250,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private on-demand OAR runtime readers",
-      "budgetBytes": 67358,
+      "budgetBytes": 75307,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1269,6 +1269,7 @@
       ],
       "bareImports": [
         "node:crypto",
+        "node:fs",
         "node:fs/promises",
         "node:path",
         "node:url"
@@ -1280,6 +1281,7 @@
       "nodeBuiltins": {
         "workspace": [
           "node:crypto",
+          "node:fs",
           "node:fs/promises",
           "node:path",
           "node:url"

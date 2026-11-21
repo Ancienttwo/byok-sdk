@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { describe, expect, it } from 'vitest';
-import { descendantsOf, killEntries, readProcessTable, type ProcessEntry } from '../runtime/oar-process-tree.js';
+import { descendantsOf, killEntries, parseProcessPs, readProcessTable, type ProcessEntry } from '../runtime/oar-process-tree.js';
 
 // Ported from OAR v0.37.0 tests/process-tree.test.ts (6d1589d) for the vendored
 // shared/executable/process-tree.ts that src/adapters/process-tree.ts calls.
@@ -59,6 +59,14 @@ function entry(pid: number, ppid: number): ProcessEntry {
 const sorted = (pids: number[]): number[] => [...pids].sort((left, right) => left - right);
 
 describe('OAR process table', () => {
+  it('reads five ps columns and identifies zombies by their status', () => {
+    const start = 'Thu Jan  1 00:00:00 1970';
+    const { table } = parseProcessPs(`6001 1 6001 S+ ${start}
+6002 6001 6002 Z ${start}
+`);
+    expect(table.get(6001)).toEqual({ pid: 6001, ppid: 1, pgid: 6001, start });
+    expect(table.get(6002)).toEqual({ pid: 6002, ppid: 6001, pgid: 6002, start, zombie: true });
+  });
   it('descendantsOf finds children and theirs, nothing above or beside, and ends on a cycle', () => {
     const table = new Map([
       entry(10, 1), entry(11, 10), entry(12, 10), entry(13, 12), entry(20, 1), entry(21, 20),

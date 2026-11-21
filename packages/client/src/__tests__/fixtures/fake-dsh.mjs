@@ -42,6 +42,16 @@ if (process.env.FAKE_DSH_OPEN_EXIT === '1') {
   throw new Error('failed to start the bridge');
 }
 
+if (process.env.FAKE_DSH_OPEN_EXIT === 'tail') {
+  const sample = process.env.FAKE_DSH_STDERR_SAMPLE ?? process.env.BYOK_DSH_PROVIDER_API_KEY;
+  const marker = '\nDSH startup marker\n';
+  const padBytes = 64 * 1024 - 17 - marker.length;
+  await new Promise(resolve => process.stderr.write('x'.repeat(4096) + ':' + sample.slice(0, 11), resolve));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  await new Promise(resolve => process.stderr.write(sample.slice(11) + ' ' + 'p'.repeat(padBytes) + marker, resolve));
+  process.exit(3);
+}
+
 const sessions = path.join(home, 'fake-sessions');
 const write = (value) => process.stdout.write(`${JSON.stringify(value)}\n`);
 const event = (sessionId, type, data = {}) => write({ type: 'native', channel: 'session/event', sessionId, event: { type, data } });

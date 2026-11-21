@@ -13,6 +13,117 @@ const MAX_STDERR_BYTES = 64 * 1024;
 
 type StderrRedactor = Pick<ClaudeCredentialRedactor, 'redactChunk' | 'finishRedaction'>;
 
+// Keep the same patterns and replacement order as OAR's redactTokenShapes.
+const TOKEN_CHARACTER = /[\w-]/u;
+const KEY_PAYLOAD_LENGTH = 16;
+const MAX_JWT_CANDIDATE_LENGTH = 16 * 1024;
+
+function streamTokenShape(prefix: 'sk-' | 'eyJ') {
+  const initial = prefix.charAt(0);
+  const jwt = prefix === 'eyJ';
+  let previous = '';
+  let pending = '';
+  let dots = 0;
+  let draining = false;
+
+  return {
+    write(text: string): string {
+      let output = '';
+      for (let index = 0; index < text.length; index++) {
+        const char = text.charAt(index);
+        if (!draining && pending === '' && char !== initial) {
+          // Emit ordinary runs as slices without keeping them between writes.
+          const next = text.indexOf(initial, index + 1);
+          const end = next === -1 ? text.length : next;
+          output += text.slice(index, end);
+          previous = text.charAt(end - 1);
+          index = end - 1;
+          continue;
+        }
+
+        const followsToken = TOKEN_CHARACTER.test(previous);
+        const atBoundary = !followsToken || previous === '-';
+        previous = char;
+        const tokenCharacter = TOKEN_CHARACTER.test(char);
+        const nextSegment = jwt && dots < 2 && char === '.' && followsToken;
+
+        if (draining) {
+          if (tokenCharacter) continue;
+          // Only the oversized-JWT fallback can be draining before two dots.
+          if (nextSegment) { dots++; continue; }
+          draining = false;
+        } else if (pending !== '') {
+          const continues = pending.length < prefix.length
+            ? char === prefix.charAt(pending.length)
+            : tokenCharacter || (nextSegment && pending.length > prefix.length);
+          if (continues) {
+            pending += char;
+            if (char === '.') dots++;
+            const matched = jwt ? dots === 2 && tokenCharacter : pending.length >= prefix.length + KEY_PAYLOAD_LENGTH;
+            if (matched || pending.length >= MAX_JWT_CANDIDATE_LENGTH) {
+              output += '[redacted]';
+              pending = '';
+              draining = true;
+            }
+            continue;
+          }
+          output += pending;
+          pending = '';
+        }
+
+        // A terminator may itself start a candidate, including at a chunk edge.
+        if (atBoundary && char === initial) {
+          pending = char;
+          dots = 0;
+        } else {
+          output += char;
+        }
+      }
+      return output;
+    },
+    finish(): string {
+      const rest = pending;
+      pending = '';
+      return rest;
+    },
+  };
+}
+
+function captureStderr(redactor: StderrRedactor | undefined) {
+  const decoder = new StringDecoder('utf8');
+  const keys = streamTokenShape('sk-');
+  const jwt = streamTokenShape('eyJ');
+  let tail = Buffer.alloc(0);
+  let pending: ReturnType<StderrRedactor['redactChunk']>['pending'];
+
+  const redactExplicit = (text: string): string => {
+    if (redactor === undefined) return text;
+    const result = redactor.redactChunk(text, pending);
+    pending = result.pending;
+    return result.ready;
+  };
+  const retainStderr = (text: string): void => {
+    if (text.length === 0) return;
+    const bytes = Buffer.from(text);
+    tail = Buffer.concat([tail, bytes.subarray(-MAX_STDERR_BYTES)]).subarray(-MAX_STDERR_BYTES);
+  };
+
+  return {
+    write(chunk: Buffer): void {
+      retainStderr(jwt.write(keys.write(redactExplicit(decoder.write(chunk)))));
+    },
+    finish(): void {
+      const ready = redactExplicit(decoder.end()) + (redactor?.finishRedaction(pending) ?? '');
+      pending = undefined;
+      const keyOutput = keys.write(ready) + keys.finish();
+      retainStderr(jwt.write(keyOutput) + jwt.finish());
+    },
+    diagnostic(): string {
+      return tail.length === 0 ? '' : `; stderr: ${tail.toString('utf8').trim()}`;
+    },
+  };
+}
+
 interface SpawnDependencies {
   nativeAssetRoot?: string;
   spawnFn?: (command: string, args: readonly string[], options: SpawnOptions) => ChildProcess;
@@ -55,13 +166,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     let exitCode: number | null = null;
     let failure: Error | undefined;
     const pendingWrites = new Set<(error: Error) => void>();
-    let stderrTail = Buffer.alloc(0);
-    const stderrRedactor = options.onOutput === undefined ? deps.stderrRedactor : undefined;
-    const stderrDecoder = stderrRedactor === undefined ? undefined : new StringDecoder('utf8');
-    let pendingStderr: ReturnType<StderrRedactor['redactChunk']>['pending'];
-    const retainStderr = (chunk: Buffer): void => {
-      if (chunk.length > 0) stderrTail = Buffer.concat([stderrTail, chunk.subarray(-MAX_STDERR_BYTES)]).subarray(-MAX_STDERR_BYTES);
-    };
+    const stderr = options.onOutput === undefined ? captureStderr(deps.stderrRedactor) : undefined;
     let disposal: Promise<void> | undefined;
     let resolveClosed!: () => void;
     const closeReceipt = new Promise<void>(resolve => { resolveClosed = resolve; });
@@ -124,11 +229,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     // Drain stderr without retaining unbounded output or inheriting daemon stdio.
     child.stderr.on('data', (chunk: Buffer) => {
       if (options.onOutput !== undefined) options.onOutput('stderr', chunk);
-      else if (stderrRedactor !== undefined && stderrDecoder !== undefined) {
-        const { ready, pending } = stderrRedactor.redactChunk(stderrDecoder.write(chunk), pendingStderr);
-        pendingStderr = pending;
-        retainStderr(Buffer.from(ready));
-      } else retainStderr(chunk);
+      else stderr?.write(chunk);
     });
     child.stdin.on('error', fail);
     child.stdout.on('error', fail);
@@ -144,11 +245,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
     child.once('close', (code: number | null) => {
       if (closed) return;
       closed = true; exitCode = code;
-      if (stderrRedactor !== undefined && stderrDecoder !== undefined) {
-        const { ready, pending } = stderrRedactor.redactChunk(stderrDecoder.end(), pendingStderr);
-        retainStderr(Buffer.from(ready + stderrRedactor.finishRedaction(pending)));
-        pendingStderr = undefined;
-      }
+      stderr?.finish();
       resolveClosed();
       exitedOnItsOwn = !terminationRequested && failure === undefined;
       for (const reject of [...pendingWrites]) reject(failure ?? new Error('owned line process closed during write'));
@@ -170,7 +267,7 @@ export function createOwnedLineProcessSpawn(deps: SpawnDependencies = {}) {
       get exitedOnItsOwn() { return exitedOnItsOwn; },
       /** Before an ACP native cancel: its tools stay killable at disposal after the cancel orphans them. */
       observeDescendants: (): void => rememberOwnedDescendants(child),
-      exitError: () => failure ?? new Error(`${deps.label ?? 'app-server'} exited (code=${exitCode})${stderrTail.length ? `; stderr: ${stderrTail.toString('utf8').trim()}` : ''}`),
+      exitError: () => failure ?? new Error(`${deps.label ?? 'app-server'} exited (code=${exitCode})${stderr?.diagnostic() ?? ''}`),
       write(text: string) {
         if (!adopted || closed || failure !== undefined) throw failure ?? new Error('owned line process is not writable');
         child.stdin.write(text);

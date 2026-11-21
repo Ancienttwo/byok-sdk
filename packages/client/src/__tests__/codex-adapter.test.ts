@@ -24,7 +24,7 @@ import {
 import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/a41628f/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/7961a59/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 const SUBSCRIPTION_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'wanted' } } as const;
@@ -373,13 +373,14 @@ describe('Codex persistent app-server adapter', () => {
       ),
     ).rejects.toBeInstanceOf(RuntimeExecutionFailure);
   });
-  it('bounds and redacts the 64 KiB app-server stderr tail on its way to the wire reason (#1124)', async () => {
+  it('redacts token shapes in the app-server stderr diagnostic and bounds the wire reason (#1124)', async () => {
     const key = ['sk', 'proj', 'Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6'].join('-');
     const stderr = `Authorization: Bearer opaqueBearerValue0123 OPENAI_API_KEY=${key} ${'e'.repeat(16 * 1024)}`;
     const failure = await open(adapter(), task, await ctx({ FAKE_CODEX_CRASH_WITH_STDERR: stderr }))
       .then(() => undefined, (error: unknown) => error);
     expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
-    expect(failure).toHaveProperty('message', expect.stringContaining(key));
+    expect(failure).toHaveProperty('message', expect.stringContaining('OPENAI_API_KEY=[redacted]'));
+    expect(failure).not.toHaveProperty('message', expect.stringContaining(key));
     const projection = projectRuntimeBoundaryFailure(failure, 'start');
     const wire = encodeEnvelope(createEnvelope('task.fail', { reason: projection.reason, retryable: projection.retryable },
       { taskId: '7c5b6b0e-7d0b-4d5f-9b0a-2b9f8b4f0c11' }));

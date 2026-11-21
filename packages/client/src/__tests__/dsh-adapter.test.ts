@@ -319,6 +319,24 @@ describe('DshAdapter sessions', () => {
     expect(JSON.stringify(error, Object.getOwnPropertyNames(error))).not.toContain(key);
   });
 
+  it.each([
+    ['registered credential', '/synthetic-dsh-credential-distinctive-suffix'],
+    ['unregistered key', 'sk-synthetic_dsh_key_distinctive_suffix'],
+    ['unregistered JWT', ['eyJsyntheticHeader', 'syntheticPayload', 'syntheticSignatureSuffix'].join('.')],
+  ])('redacts a split %s before keeping the 64 KiB stderr tail', async (kind, sample) => {
+    const key = kind === 'registered credential' ? sample : 'sdk-test-dsh-resolver-key';
+    const env = { FAKE_DSH_OPEN_EXIT: 'tail', ...(key === sample ? {} : { FAKE_DSH_STDERR_SAMPLE: sample }) };
+    const { open } = await setup({ resolveKey: async () => key }, env);
+    const error = await open().catch(error => error);
+    expect(error).toBeInstanceOf(RuntimeExecutionFailure);
+    expect(error).toMatchObject({ phase: 'start', failure: { class: 'runtime_exited' } });
+    const diagnostics = JSON.stringify(error, Object.getOwnPropertyNames(error));
+    expect(diagnostics).toContain('DSH startup marker');
+    expect(diagnostics).toContain('[redacted]');
+    expect(diagnostics).not.toContain(sample);
+    expect(diagnostics).not.toContain(sample.slice(-16));
+  });
+
   it.each(['non-provider-prefix-fixture-key', '/looks/like/a/provider/key'])('redacts an echoed key from the native event before projection (%s)', async key => {
     const { open } = await setup({ resolveKey: async () => key });
     const events = await turn(await open({ target: DSH_TARGET, instruction: 'echo-provider-key' }));

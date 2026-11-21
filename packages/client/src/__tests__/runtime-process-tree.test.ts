@@ -1,5 +1,5 @@
 import type { RuntimeTaskInput } from '../types';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -55,11 +55,10 @@ function allPids(receipt: ProcessTreeReceipt): number[] {
 
 function reapAll(pids: number[]): void {
   for (const pid of pids) {
-    if (!processExists(pid)) continue;
     try {
       process.kill(pid, 'SIGKILL');
     } catch {
-      // A process that exited between the probe and cleanup is already safe.
+      // Best-effort cleanup after the test.
     }
   }
 }
@@ -345,6 +344,107 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     }
   });
 
+  it('retains an unreadable cross-group descendant until a retry can confirm exit', async () => {
+    const rootPid = 900_001;
+    const descendantPid = 900_002;
+    let rootRunning = true;
+    const child = { pid: rootPid, exitCode: null, get signalCode() { return rootRunning ? null : 'SIGTERM'; } } as ChildProcess;
+    const descendant = { pid: descendantPid, ppid: rootPid, pgid: descendantPid, start: 'descendant start' };
+    const unreadable = new Set([descendantPid]);
+    const options = {
+      child, label: 'unreadable descendant', waitClosed: async () => {}, isClosed: () => !rootRunning, killGraceMs: 0,
+      observeProcessTableFn: () => rootRunning ? { table: new Map([[descendantPid, descendant]]) } : { table: new Map(), unreadable },
+      killFn(pid: number, signal: NodeJS.Signals | number) {
+        expect(pid).toBe(-rootPid);
+        if (!rootRunning) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+        if (signal === 'SIGTERM') rootRunning = false;
+      },
+    };
+    const unconfirmed = { name: 'RuntimeDisposalFailure', stage: 'quiescence', message: expect.stringContaining('not confirmed exited') };
+    await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject(unconfirmed);
+    await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject(unconfirmed);
+    unreadable.clear();
+    await expect(disposeOwnedProcessTree(options)).resolves.toBeUndefined();
+  });
+
+  function zombieDescendantDisposal(killGraceMs: number) {
+    const rootPid = 900_003;
+    const descendantPid = 900_004;
+    let rootRunning = true;
+    const child = { pid: rootPid, exitCode: null, get signalCode() { return rootRunning ? null : 'SIGTERM'; } } as ChildProcess;
+    const host = { pid: process.pid, ppid: process.ppid, pgid: process.pid, start: 'host start' };
+    const descendant = { pid: descendantPid, ppid: rootPid, pgid: descendantPid, start: 'descendant start' };
+    const liveTable = new Map([[host.pid, host], [descendantPid, descendant]]);
+    const zombie = { ...descendant, zombie: true as const };
+    const zombieTable = new Map([[host.pid, host], [descendantPid, zombie]]);
+    const observeProcessTableFn = vi.fn(() => ({ table: rootRunning ? liveTable : zombieTable }));
+    const dispose = () => disposeOwnedProcessTree({
+      child, label: 'zombie descendant', waitClosed: async () => {}, isClosed: () => !rootRunning, killGraceMs,
+      observeProcessTableFn,
+      killFn(pid, signal) {
+        expect(pid).toBe(-rootPid);
+        if (!rootRunning) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+        if (signal === 'SIGTERM') rootRunning = false;
+      },
+    });
+    return { dispose, observeProcessTableFn, liveTable, zombieTable };
+  }
+
+  it('settles disposal when a remembered cross-group descendant is a zombie', async () => {
+    const { dispose, observeProcessTableFn, liveTable, zombieTable } = zombieDescendantDisposal(0);
+    await expect(dispose()).resolves.toBeUndefined();
+    expect(observeProcessTableFn).toHaveBeenCalledTimes(2);
+    expect(observeProcessTableFn).toHaveNthReturnedWith(1, { table: liveTable });
+    expect(observeProcessTableFn).toHaveNthReturnedWith(2, { table: zombieTable });
+  });
+
+  it('waits for a remembered cross-group zombie to be reaped without signalling it', async () => {
+    vi.useFakeTimers();
+    const nativeKill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    try {
+      const { dispose, observeProcessTableFn } = zombieDescendantDisposal(250);
+      const settled = vi.fn();
+      const done = dispose().then(settled);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(observeProcessTableFn).toHaveBeenCalledTimes(3);
+      expect(settled).not.toHaveBeenCalled();
+      observeProcessTableFn.mockReturnValue({ table: new Map() });
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(done).resolves.toBeUndefined();
+      expect(settled).toHaveBeenCalledOnce();
+      expect(observeProcessTableFn).toHaveBeenCalledTimes(4);
+      expect(nativeKill).not.toHaveBeenCalled();
+    } finally {
+      nativeKill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(['timeout', 'read error'] as const)('settles with a persistent zombie when the reap wait ends by %s', async (reason) => {
+    vi.useFakeTimers();
+    const nativeKill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    try {
+      const { dispose, observeProcessTableFn } = zombieDescendantDisposal(40);
+      const settled = vi.fn();
+      const done = dispose().then(settled);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(observeProcessTableFn).toHaveBeenCalledTimes(3);
+      expect(settled).not.toHaveBeenCalled();
+      if (reason === 'read error') observeProcessTableFn.mockImplementationOnce(() => { throw new Error('reap observation failed'); });
+      const stopAt = reason === 'timeout' ? 40 : 20;
+      await vi.advanceTimersByTimeAsync(stopAt - 1);
+      expect(settled).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(done).resolves.toBeUndefined();
+      expect(settled).toHaveBeenCalledOnce();
+      expect(observeProcessTableFn).toHaveBeenCalledTimes(reason === 'timeout' ? 5 : 4);
+      expect(nativeKill).not.toHaveBeenCalled();
+    } finally {
+      nativeKill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
   it('a disposal whose last table read timed out still ends the remembered setsid grandchild on retry (#2105)', async () => {
     const workspaceDir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-process-tree-retry-'));
     const receiptFile = path.join(workspaceDir, 'process-tree.json');
@@ -366,7 +466,8 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
       await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', message: expect.stringContaining('exit unconfirmed') });
       expect(processExists(receipt.grandchildPid)).toBe(true);
       await disposeOwnedProcessTree(options);
-      expect(reads).toBe(3);
+      // The successful retry reads once to signal and again to confirm exit.
+      expect(reads).toBeGreaterThanOrEqual(4);
       expect(processExists(receipt.grandchildPid)).toBe(false);
     } finally {
       reapAll([receipt.descendantPid, receipt.grandchildPid]);

@@ -30,6 +30,7 @@ import {
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
+import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
 import type { AcpRecord, RawAcpSession } from '../../runtime/acp-session-runtime.js';
@@ -294,7 +295,8 @@ export class GrokAdapter implements RuntimeAdapter {
     }
     // As OAR: the servers go in the ACP mcpServers of session/new or session/resume.
     const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
-    const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'grok agent' });
+    const redactor = sessionCredentialRedactor({ env: { ...env, ...agentEnv }, mcpServers });
+    const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'grok agent', stderrRedactor: redactor });
     const spawnTerminal = createOwnedTerminalSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn });
     // The ACP stack and its protocol SDK load only when a Grok session starts.
     const acp = await import('#byok-acp-runtime');

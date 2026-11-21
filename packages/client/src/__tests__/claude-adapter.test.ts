@@ -17,7 +17,7 @@ import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
-import type { RawEvent } from '../../vendor/oar/a41628f/contracts/session';
+import type { RawEvent } from '../../vendor/oar/7961a59/contracts/session';
 import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 
 const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;

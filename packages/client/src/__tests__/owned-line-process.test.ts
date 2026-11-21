@@ -7,7 +7,7 @@ import { createOwnedTerminalSpawn } from '../runtime/owned-terminal-process';
 import { PiRpcClient } from '../adapters/pi/rpc-client';
 import { McpStdioClient } from '../mcp/client';
 import { spawnStartError } from '@byok-sdk/core/system-tool';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/a41628f/runtimes/codex/app-server-client';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/7961a59/runtimes/codex/app-server-client';
 
 // Pass-through spy: every spawn below, including MCP's direct one, is observable.
 vi.mock('node:child_process', async importOriginal => {
@@ -23,6 +23,32 @@ afterEach(async () => { for (const child of live.splice(0)) { child.kill(); awai
 function firstLine(child: LineProcess): Promise<string> {
   return new Promise(resolve => child.onLine(resolve));
 }
+
+async function stderrDiagnostic(chunks: readonly string[], stderrRedactor?: ReturnType<typeof sessionCredentialRedactor>): Promise<string> {
+  const native = Promise.withResolvers<ReturnType<typeof spawn>>();
+  const child = createOwnedLineProcessSpawn({
+    stderrRedactor,
+    spawnFn(command, args, options) {
+      const process = spawn(command, args, options);
+      native.resolve(process);
+      return process;
+    },
+  })(process.execPath, ['-e', 'process.stdin.resume()'], { env: {} });
+  live.push(child);
+  await child.spawned;
+  const processChild = await native.promise;
+  for (const chunk of chunks) processChild.stderr!.emit('data', Buffer.from(chunk));
+  processChild.stdin!.end();
+  expect(await child.exited).toBe(0);
+  const [, diagnostic] = child.exitError().message.split('; stderr: ');
+  expect(diagnostic).toBeDefined();
+  return diagnostic!;
+}
+
+const SHAPE_TOKENS = [
+  ['key', ['s', 'k-', 'synthetic_long_key_material_0123456789']],
+  ['JWT', ['e', 'yJ', 'synthetic_header.', 'synthetic_payload.', 'synthetic_signature_0123456789']],
+] as const;
 
 describe('BYOK owned line process', () => {
   it('passes exactly the filtered env through spawn and into a real child', async () => {
@@ -80,6 +106,36 @@ describe('BYOK owned line process', () => {
     expect(await child.exited).toBe(0);
     const diagnostic = child.exitError().message.split('; stderr: ')[1];
     expect(diagnostic === 'x'.repeat(64 * 1024 - '[redacted]'.length) + '[redacted]').toBe(true);
+  });
+
+  it.each(SHAPE_TOKENS.flatMap(([shape, chunks]) => [false, true].map(withRedactor => ({ shape, chunks, withRedactor }))))(
+    'redacts a split $shape before the 64 KiB cut with explicit redactor=$withRedactor', async ({ chunks, withRedactor }) => {
+      const credentials = withRedactor ? sessionCredentialRedactor({}) : undefined;
+      const marker = '\nlast diagnostic line';
+      const padding = ' ' + 'p'.repeat(64 * 1024 - 17 - marker.length) + marker;
+      const token = chunks.join('');
+      const stream = ['x'.repeat(4096) + ':', ...chunks, padding];
+      expect(stream.join('').slice(-64 * 1024)).toBe(token.slice(-16) + padding);
+      const diagnostic = await stderrDiagnostic(stream, credentials);
+      expect(diagnostic.includes(token.slice(-16))).toBe(false);
+      expect(diagnostic === 'xxxxx:[redacted]' + padding).toBe(true);
+    },
+  );
+
+  it('keeps word boundaries across chunks and flushes unmatched token prefixes', async () => {
+    const longKey = SHAPE_TOKENS[0][1].join('');
+    const jwt = SHAPE_TOKENS[1][1].join('');
+    await expect(stderrDiagnostic(['x', longKey, ' x', jwt, ':', longKey, '.', jwt, ' / sk-', 'short eyJ', 'hello']))
+      .resolves.toBe('x' + longKey + ' x' + jwt + ':[redacted].[redacted] / sk-short eyJhello');
+    await expect(stderrDiagnostic(['eyJincomplete.', 'second-part.', ' / sk-'])).resolves.toBe('eyJincomplete.second-part. / sk-');
+  });
+
+  it('drains oversized JWT candidates through the signature using bounded pending state', async () => {
+    const longSegment = 'h'.repeat(16 * 1024);
+    const oversized = await stderrDiagnostic(['ey', 'J', longSegment.slice(0, 8192), longSegment.slice(8192), '.payload.', 'signature', '.end']);
+    expect(oversized === '[redacted].end').toBe(true);
+    await expect(stderrDiagnostic(['eyJ', longSegment.slice(0, -20), '.body.', 'signature / ', 'eyJsmall.payload.', 'signature']))
+      .resolves.toBe('[redacted] / [redacted]');
   });
 
   it('rejects NUL-bearing spawn input on every client spawn before starting it, naming only the slot', async () => {
