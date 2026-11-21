@@ -1,13 +1,13 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/7961a59/runtimes/codex/session';
-import * as projection from '../../vendor/oar/7961a59/runtimes/codex/projection';
-import * as rpc from '../../vendor/oar/7961a59/runtimes/codex/rpc-control';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/7961a59/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/7961a59/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/7961a59/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/7961a59/contracts/errors';
-import { inputImagesRefusal } from '../../vendor/oar/7961a59/shared/input-images';
+import { codexSession } from '../../vendor/oar/4f767ca/runtimes/codex/session';
+import * as projection from '../../vendor/oar/4f767ca/runtimes/codex/projection';
+import * as rpc from '../../vendor/oar/4f767ca/runtimes/codex/rpc-control';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/4f767ca/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/4f767ca/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/4f767ca/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/4f767ca/contracts/errors';
+import { inputImagesRefusal } from '../../vendor/oar/4f767ca/shared/input-images';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -561,7 +561,7 @@ describe('unconnected OAR Codex adapter', () => {
     vi.mocked(fake.child.write).mockImplementationOnce((line: string) => {
       fake.frame({ id: JSON.parse(line).id, error: { code: -32600, message: 'turn already ended' } });
     });
-    expect((await session.abort()).response.body).toEqual({ kind: 'rejected', code: 'runtime_refused', reason: 'turn already ended' });
+    expect((await session.abort()).response.body).toEqual({ kind: 'rejected', code: 'runtime_refused', reason: 'turn already ended', native: { code: -32600, message: 'turn already ended' } });
     await vi.advanceTimersByTimeAsync(10_000);
     expect(fake.child.kill).not.toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);

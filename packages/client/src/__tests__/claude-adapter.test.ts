@@ -18,7 +18,7 @@ import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
-import type { RawEvent } from '../../vendor/oar/7961a59/contracts/session';
+import type { RawEvent } from '../../vendor/oar/4f767ca/contracts/session';
 import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
 
 const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;

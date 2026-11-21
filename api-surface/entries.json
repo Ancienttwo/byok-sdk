@@ -1250,7 +1250,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private on-demand OAR runtime readers",
-      "budgetBytes": 78438,
+      "budgetBytes": 90230,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1271,6 +1271,7 @@
         "node:crypto",
         "node:fs",
         "node:fs/promises",
+        "node:os",
         "node:path",
         "node:url"
       ],
@@ -1283,6 +1284,7 @@
           "node:crypto",
           "node:fs",
           "node:fs/promises",
+          "node:os",
           "node:path",
           "node:url"
         ],

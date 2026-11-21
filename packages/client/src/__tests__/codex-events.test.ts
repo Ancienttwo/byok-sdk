@@ -4,9 +4,9 @@ import { describe, expect, it } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import type { MessageDraftDelta } from '../types';
 import { CodexProjection } from '../adapters/codex/projection';
-import { createSessionKernel } from '../../vendor/oar/7961a59/shared/session-kernel';
-import { sessionCredentialRedactor } from '../../vendor/oar/7961a59/shared/credential-redactor';
-import { redactCodexRecord } from '../../vendor/oar/7961a59/runtimes/codex/session';
+import { createSessionKernel } from '../../vendor/oar/4f767ca/shared/session-kernel';
+import { sessionCredentialRedactor } from '../../vendor/oar/4f767ca/shared/credential-redactor';
+import { redactCodexRecord } from '../../vendor/oar/4f767ca/runtimes/codex/session';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 function setup() {
   const kernel = createSessionKernel('root');
