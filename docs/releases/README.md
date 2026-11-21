@@ -12,10 +12,11 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
-The [0.45.0 candidate](v0.45.0.md) carries the 0.44.1 → 0.45.0 manifest
+The [0.45.0 release](v0.45.0.md) carries the 0.44.1 → 0.45.0 manifest
 with 12 breaking and 14 additive entries. Follow its
-[Host upgrade checklist](host-upgrade-0.45.0.md). The publication record
-archives the cut manifest and rebaselines to the published snapshot.
+[Host upgrade checklist](host-upgrade-0.45.0.md). The cut manifest is archived
+at `packages/client/upgrade-history/0.44.1-0.45.0.json` and the baseline reflects
+the published snapshot.
 Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
 
 The 0.44.0 → 0.44.1 manifest is archived at
@@ -35,7 +36,8 @@ from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 8
 ([Wire v8](host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)).
 0.44.1 is the last v7 release. `golden/v8.releases.json` pins the first
-v8 candidate, 0.45.0. The published v8 decoder baseline awaits publication.
+v8 release, 0.45.0. The compatibility suite still needs a published v8 decoder
+pinned as a baseline.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -101,6 +103,6 @@ registration.
 
 ### Published v8 decoder baseline
 
-After 0.45.0 is published, pin its registry tarball as a v8 baseline so the
-compatibility test can read current corpus bytes and prove gated rows against
-a published v8 decoder.
+Pin the published 0.45.0 registry tarball as a v8 baseline so the compatibility
+test can read current corpus bytes and prove gated rows against a published
+v8 decoder.

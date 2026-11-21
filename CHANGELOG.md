@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.45.0 — 2026-11-21 (candidate)
+## 0.45.0 — 2026-11-21 (published)
 
-[Candidate notes](docs/releases/v0.45.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.45.0.md)
+[Release notes](docs/releases/v0.45.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.45.0.md)
 
 - **Breaking (wire and stores, #2419 and #2430)** — Wire v8 routes explicit offers through the `harness` lane and validates selections against the device's advertised inventory. Drain v7 work, start fresh stores and ledgers, and re-pair devices. [Cutover steps](docs/releases/host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)
 - **Breaking (keys, #2409)** — `discoverProviderModels` takes `auth_mode` and `base_url` and drops `providerKind` from its connection object. Provider URL normalization is idempotent. [Host upgrade steps](docs/releases/host-upgrade-0.45.0.md#model-discovery-connection-fields)

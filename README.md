@@ -7,9 +7,9 @@ composition over Postgres and R2.
 
 ## Release status
 
-**0.45.0 is in preparation.** The candidate moves all nine public packages to
-wire v8. Upgrade the Host and devices together with fresh stores and device
-enrollment. [0.45.0 candidate notes](docs/releases/v0.45.0.md) ·
+**0.45.0 is published** on npm `latest` on 2026-11-21 (UTC) for all nine public
+packages. It introduces wire v8. Upgrade the Host and devices together with
+fresh stores and device enrollment. [0.45.0 release notes](docs/releases/v0.45.0.md) ·
 [Host upgrade checklist](docs/releases/host-upgrade-0.45.0.md)
 
 **0.44.1 is published** on 2026-11-19 (UTC) as a wire v7 patch for all nine public packages.
@@ -125,7 +125,7 @@ Another earlier stable release is **0.30.2** for all nine packages. See the
 notes do not say that 0.30.2, or a Host on it, is ready for production; the
 product loop gate (#977) moves to 0.34.0 with the Host upgrade checklist.
 
-A registry read on 2026-11-19 (UTC) shows `latest` **0.44.1** for all nine
+A registry read on 2026-11-21 (UTC) shows `latest` **0.45.0** for all nine
 packages in the release train. The registry lists 0.42.0 (2026-11-13, UTC), the first
 publication of `@byok-sdk/bot-collaboration`, and 0.41.0 (2026-11-09, UTC), 0.40.0 (2026-11-08, UTC), 0.39.0 (2026-11-06, UTC), 0.38.0 and 0.37.0 (2026-11-04, UTC), 0.36.0 (2026-11-03, UTC), 0.35.0 and 0.34.0 (2026-11-02, UTC), 0.33.0 and 0.32.0 (2026-11-01, UTC), 0.31.0 (2026-10-29,
 UTC), 0.30.2 (2026-10-26, UTC), 0.30.1 and 0.30.0 (2026-10-24, UTC), 0.29.0
@@ -146,8 +146,7 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the 0.45.0 candidate. Use accepted
-candidate tarballs for validation. The stable npm release is 0.44.1.
+Versioned install examples below name the stable npm release, 0.45.0.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 

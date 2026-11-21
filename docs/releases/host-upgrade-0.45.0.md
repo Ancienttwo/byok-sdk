@@ -7,6 +7,8 @@ earlier release first follow the [0.44.1 notes](v0.44.1.md) and the
 Plan the [wire and store cutover](#wire-v8-and-the-provider-store-cutover)
 together with the [provider store migration](#provider-store-credential-namespace).
 Review the [known issues](v0.45.0.md#known-issues) before switching traffic.
+The [archived upgrade manifest](../../packages/client/upgrade-history/0.44.1-0.45.0.json)
+records the Host-visible changes in this release.
 
 ## Wire v8 and the provider store cutover
 
@@ -126,7 +128,7 @@ replace a directory between the path check and the recursive delete.
 
 ## Provider store credential namespace
 
-1. Precheck the existing database with the candidate's
+1. Precheck the existing database with the 0.45.0 build's
    `inspectProviderProfileStore(path)`. If it reports `new-path-repair` with
    `PROVIDER_STORE_SCHEMA_STALE`, preserve the original files, create a store
    on another path, configure its providers and ask users to re-enter keys.
