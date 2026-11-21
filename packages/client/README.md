@@ -58,7 +58,7 @@ const result = await upgradeRuntime({ installRoot, runtimeId: 'codex' });
 The SDK stages the exact qualified Claude, Codex, DSH, or OpenCode v2 release
 and publishes it after the version and liveness checks. For AGY and Grok,
 the result gives the vendor command and reason. Pi ships with the SDK. See
-[the Host upgrade checklist](../../docs/releases/host-upgrade-next-minor.md#managed-runtime-upgrades).
+[the Host upgrade checklist](../../docs/releases/host-upgrade-0.45.0.md#managed-runtime-upgrades).
 
 ## Exact provider-profile admission
 

@@ -484,7 +484,8 @@ describe('compat v7: frozen evidence rejected by v8', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 6. v8: self-consistency only — no published v8 decoder exists yet
+// 7. Wire v8 self-consistency. The 0.45.0 candidate pins both corpus prefixes.
+// A published v8 decoder is still needed to prove cross-release compatibility.
 // ---------------------------------------------------------------------------
 
 const v8Lines = ndjsonLines(readGolden('v8.envelopes.ndjson'));
@@ -792,7 +793,7 @@ describe('compat v8: HTTP corpus', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 7. Published rejection oracle: a published v7 decoder cannot read v8 bytes
+// 8. Published rejection oracle: a published v7 decoder cannot read v8 bytes
 // ---------------------------------------------------------------------------
 
 describe('compat: published 0.44.1 (byok-protocol-previous) is the v8 rejection oracle', () => {

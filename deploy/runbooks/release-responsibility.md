@@ -77,6 +77,11 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
+0.45.0 is the MINOR candidate for all nine public packages and the first
+wire v8 cut. Plan the cloud, device and provider-store cutover together.
+[Candidate notes](../../docs/releases/v0.45.0.md) ·
+[Host upgrade checklist](../../docs/releases/host-upgrade-0.45.0.md)
+
 0.44.1 is the published owner-approved PATCH for all nine public packages. See the
 [release notes](../../docs/releases/v0.44.1.md).
 
@@ -108,7 +113,7 @@ differs from the train. `@byok-sdk/implementation-identity` remains retired. Eve
 the dist-tag `latest`, observed at 0.44.1 for all nine packages on 2026-11-19 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the historical 0.44.1 pre-publication baseline: prior `latest` 0.44.0 and
+records the 0.45.0 candidate baseline with prior `latest` 0.44.1 and
 `priorPublication: existing` for all nine packages, including
 `@byok-sdk/bot-collaboration`. Recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies

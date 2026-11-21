@@ -5,9 +5,8 @@ the M1-2 (server) and M1-3 (client) implementers — the schemas in
 `packages/protocol/src/` are authoritative; this document explains the rules
 those schemas encode and why.
 
-Only wire major `8` is supported by the current source tree. Wire v7 is the
-published 0.44.x contract. The [Freeze rule](#freeze-rule) governs changes
-within v8.
+The 0.45.0 candidate supports wire major `8`. Published 0.44.x packages
+use wire v7. The [Freeze rule](#freeze-rule) governs changes within v8.
 
 **Wire major 8.** Every explicit offer names a harness ID and supplies exactly
 one selection. `auto` lets the device choose an advertised harness that accepts
@@ -15,7 +14,7 @@ its defaults. Hello and presence share a bounded `harnesses` inventory. A first
 claim requires the original offer receipt and an eligible advertised executor.
 The claim records exactly one executor ID and terminals echo it. Wire v7 and
 v8 refuse each other. Hosts drain work and start v8 on fresh stores and ledgers.
-See the [Host upgrade checklist](releases/host-upgrade-next-minor.md#wire-v8-and-the-provider-store-cutover).
+See the [Host upgrade checklist](releases/host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover).
 
 **Wire major 7.** v7 changes how an offer names what to run, what a claim
 reports, and how a peer of another major is refused:
@@ -167,11 +166,10 @@ envelope as v2. Package/application SemVer remains unrelated to wire admission.
 ## Freeze rule
 
 `PROTOCOL_VERSION` is `8`. Every v8 change takes exactly one of three paths.
-Compatibility is decided by `packages/protocol/src/__tests__/compat.test.ts`,
-not by author judgment. 0.44.0 is the first published v7 release; no published v7
-decoder is pinned as an oracle yet: until one is, the suite proves v7
-self-consistency only and cross-release gates are unproven (see the evidence
-list below).
+`packages/protocol/src/__tests__/compat.test.ts` checks compatibility.
+0.45.0 is the first registered v8 candidate. The suite checks v8 corpus
+self-consistency and rejection by the published 0.44.1 decoder. Proving
+cross-release v8 gates requires a published v8 decoder.
 
 **Changes that need a major.** Each of these narrows something a release
 already shipped, so it takes path 1:
@@ -264,32 +262,25 @@ token and reads it as `unknown`.
   Rewriting only the version is not an upgrade: v7 replaced the offer
   selectors with `target`, made the claim's `executor` required and removed
   the server capability advertisement.
-- **v7 self-consistency.** `golden/v7.envelopes.ndjson` and
-  `golden/v7.http.ndjson` start from the v6 corpora, rewritten to the v7
-  shapes by a script, plus lines for the v7 additions: `task.steer_refused`
-  with each known reason and an unknown token, each `target` lane, both
-  `executor` kinds, the decline code groups, the steer text bound, and the
-  per-entry `rejected` answers of `POST /byok/messages`. Until
-  `golden/v7.releases.json` registers a release, a line can still be edited
-  in place; after that the corpora are append-only. The current decoder reads
-  every line back to the committed JSON, and the current HTTP decoders read
-  every literal body to its independently authored value (messages responses
-  must account for their `batchLength`). The v7 corpus carries every message
-  type, every `WIRE_ADDITIONS` entry, a result-document `task.offer` with
-  `schema` for each offer lane (resume, resume with `egressPolicy`, fresh,
-  prepared), and an `approvalId` on every approval request and decision.
-  `golden/v7.releases.json` registers the published 0.44.0 and 0.44.1 releases with
-  the same corpus prefixes. The covered lines are immutable.
+- **Retired v7 evidence (negative oracle).** `golden/v7.envelopes.ndjson`,
+  `golden/v7.http.ndjson` and `golden/v7.releases.json` (0.44.0 and 0.44.1)
+  are read-only and pinned by whole-file hash. The current decoder rejects
+  the v7 envelope corpus and the envelopes in v7 HTTP bodies.
+- **v8 self-consistency.** `golden/v8.envelopes.ndjson` and
+  `golden/v8.http.ndjson` cover the current schemas, including the unified
+  `harness` lane, selection modes, inventory and the frozen cross-version
+  refusal. The current decoder round-trips the envelope lines and checks
+  the HTTP bodies against their committed values. The first stable train
+  registration in `golden/v8.releases.json` pins 514 envelope lines and
+  41 HTTP lines for 0.45.0. Covered prefixes are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
-  published 0.43.0 registry tarball, the last v6 release. It rejects every v7
-  corpus line and a v7 `conn.hello`: a v6 peer cannot read v7 bytes. Nothing it
-  produces is v7 evidence, and it never enters the v7 registry.
+  published 0.44.1 registry tarball, the last v7 release. It rejects v8
+  envelopes, including a v8 `conn.hello`, and reads the frozen cross-version
+  refusal. The v7 release is recorded in the v7 registry.
 
-No test runs a published v7 decoder yet, so the gated declarations are not
-proven against a released v7 decoder. That evidence starts when a published
-v7 release is pinned as an oracle. From then on, the current schema must
-accept every released shape, and a new gated row must carry a flag unknown to
-that release.
+Once a published v8 decoder is pinned as a baseline, the current schema
+must accept every released v8 shape and a new gated row must carry a flag
+unknown to that release.
 
 Wire v8 checks target selection against the device’s `harnesses` inventory.
 The `WireAddition` table covers server-to-daemon capability flags and uses
@@ -421,7 +412,7 @@ extends the earlier official-Pi exception to input-preparation v8. The strict
 preparation request, receipt binding and the prepared offer require explicit
 `agentMemory: 'none' | 'read' | 'read-write'`. `INPUT_PREPARATION_WIRE_VERSION` and
 record schema were 8 at that cut; admission requires `agent-input-preparation-v8`. The outer
-envelope was then v1 (it is v7 now). Binding and observation digests use domain v2. This is a paired
+envelope was then v1 (it is v8 now). Binding and observation digests use domain v2. This is a paired
 upgrade, with no old reader, mode default or dual token. Drain pre-cut preparation
 requests and prepared Executions first. The exception does not change unrelated
 strict messages; downstream deployment is separate from this source cut.
@@ -433,7 +424,7 @@ observability fields and events retain the tolerance described below.
 
 **One major at a time.** A server accepts only its own `PROTOCOL_VERSION`; it
 does not keep a reader for the prior major. No cut so far has an N-1 reader:
-v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6 and v6 → v7 each made the server
+v1 → v2, v2 → v3, v3 → v4, v4 → v5, v5 → v6, v6 → v7 and v7 → v8 each made the server
 side and the daemons upgrade together. The server accepted only `v:2`, then
 `v:3`, `v:4`, `v:5`, `v:6`, and now only `v:7`. A daemon whose
 `conn.hello.protocolVersions[]` omits the server's major is refused at the
@@ -3741,7 +3732,8 @@ upgrade of the server side and the daemons resolves it.
 | --- | --- |
 | v6 daemon → v7 cloud | The v7 frame accepts the v6 entry and answers it `rejected` with `protocol_version_unsupported`. The v6 daemon reads `rejected > 0` on its lone hello as a refused handshake and halts with `handshake_rejected`; it does not reconnect. A v6 daemon that was not paired again into the v7 store stops earlier, at authentication. Cloud side, tested by replaying the v6 golden requests in cloud `protocol-version-admission.test.ts` › stops a v6 daemon that was not paired again at authentication, before its hello is read: its challenge and token requests get the typed `device_not_registered` 401, and a bearer it still holds gets a 401 before its hello is read, which sends it to that renewal. Daemon side, confirmed by reading `AuthManager.readUnauthorized` and `markRevoked` in `packages/client/src/daemon/auth-manager.ts` at `v0.43.0` and not by running a v6 binary: on that typed 401 it marks the device revoked and halts with `device_revoked` without retrying |
 | v7 daemon → v6 cloud | The v6 frame requires `v: 6`, so the whole request fails with HTTP 400. The v7 daemon halts with `ProtocolNegotiationError` (`httpStatus: 400`, no `peerVersion`) |
-| v7 daemon → later cloud | The later cloud answers with the frozen shape above. The v7 daemon halts with `ProtocolNegotiationError` |
+| v7 daemon → v8 cloud | If the daemon reaches the messages route, the v8 cloud refuses the hello with the frozen shape above. The v7 daemon halts with `ProtocolNegotiationError`. |
+| v8 daemon → v7 cloud | The v7 cloud refuses the v8 hello with the same shape. The v8 daemon halts with `ProtocolNegotiationError`. |
 
 Authed (bearer access token). Each envelope in `messages` is routed through
 the server's single inbound gate (the reference implementation's
@@ -3807,9 +3799,8 @@ request schema (`MessagesSendRequestSchema`) checks only the frame, and each
 entry is decoded on its own, so an undecodable entry is answered
 `rejected: payload_invalid` and the rest of the batch applies (#1121). The
 frame is what still 400s the whole request: a body that is not
-`{ messages: [...] }`, an entry whose `v` is not this wire major (the sender
-could not read this version's outcomes), an entry without a UUID `id` its
-outcome could be correlated by, or more than 256 entries.
+`{ messages: [...] }`, an entry without a positive integer `v`, an entry
+without a UUID `id` to correlate its outcome, or more than 256 entries.
 
 **`accepted` counts every envelope the server took in and will not ask the
 daemon to resend** — including one it recognized as an already-processed
@@ -4541,12 +4532,9 @@ a normal slow turn.
 ## 13. Compatibility suite
 
 Compatibility between releases is decided by
-`packages/protocol/src/__tests__/compat.test.ts` (see "Freeze rule"; it tests
-v7 self-consistency and that the last v6 release rejects v7 bytes). It replaces the hand-built
-future-peer simulation this section used to describe. What remains below is
-the receiver policy that the suite and the behavioural tests rely on: which
-unknowns a current receiver tolerates and which it refuses. Four scenarios,
-each with its real evidence:
+`packages/protocol/src/__tests__/compat.test.ts`. It checks v8
+self-consistency and verifies that 0.44.1 rejects v8 bytes. The suite and
+the behavioural tests exercise the following receiver policies.
 
 1. **Unknown additive fields on observability-class messages are tolerated**
    (parsed, field stripped, no throw) —
@@ -4577,8 +4565,8 @@ each with its real evidence:
    through the real end-to-end `decodeEnvelope` entrypoint (not just the
    isolated payload schema) to close the loop.
 4. **Handshake version negotiation: a daemon advertising a set that contains
-   the server's single `PROTOCOL_VERSION` (today `7`) agrees on it; a set
-   without it (e.g. `[6]`) gets a clean, typed failure, not a hang.** The
+   the server's single `PROTOCOL_VERSION` (`8`) agrees on it. A set
+   without it (e.g. `[7]`) gets a typed failure.** The
    schema half (`conn.hello.protocolVersions` accepts a set that overlaps the
    server's version and a disjoint one; the schema never referees
    negotiation) is in `version-negotiation-drill.test.ts`. The negotiated version is selected at
@@ -4588,8 +4576,8 @@ each with its real evidence:
    path and a timeout race, so incompatibility is observable rather than a
    hanging request. An envelope whose `v` is another major is refused per
    entry with `protocol_version_unsupported`
-   ([Cross-version refusal](#cross-version-refusal-frozen)). No cut, v6 → v7
-   included, has an N-1 reader.
+   ([Cross-version refusal](#cross-version-refusal-frozen)). Each wire cut
+   accepts only its current major.
 
 **Adjacent honest note (gatekeeper advisory, docs-only, no code change): an
 interrupted HTTP poll is not an at-most-once claim.** Rate limiting, network
@@ -4708,23 +4696,16 @@ Older consumers ignore these optional fields.
 
 ## SQLite startup check for wire-major upgrades
 
-The embedded server checks every pending mailbox row when it opens SQLite.
-A major other than the current `PROTOCOL_VERSION` (7), a missing major, or
+The embedded server checks pending mailbox rows when it opens SQLite. A
+major other than the current `PROTOCOL_VERSION` (8), a missing major, or
 malformed JSON causes `SqliteSchemaError` with code
-`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. The SQLite schema version alone does
-not prove that the pending wire rows use v7. Retained `acked` and `expired`
-rows do not block startup. The check does not change or retire mailbox rows.
-Stored v3, v4, v5 and v6 receipts are not migrated.
+`SQLITE_MAILBOX_PROTOCOL_UNSUPPORTED`. The check reads pending rows and
+leaves the mailbox intact.
 
-**v7 starts on a new store.** Retained v6 records (terminal receipts, task
-history, attempts) are not migrated, so a store a v6 build wrote is not
-supported, even when no pending v6 row is left: start the v7 server side on a
-new store. The Host exports the history it needs before it upgrades, devices
-pair again into the new store, and the Host's frozen work and outbox
-snapshots rotate. The startup check below catches only pending rows of
-another major; passing it does not make an older store usable. A store a v3
-build wrote is not supported either; a store a v4 or v5 build wrote opened
-under v6 once no pending row of that major was left.
+**v8 starts on a new store.** Create a fresh SQLite database even after
+draining all pending v7 rows. Export the history you need with the v7 build,
+re-pair devices into the new store, and rotate the Host's frozen work and
+outbox snapshots. The query below checks only the wire major of pending rows.
 
 On an offline copy, this query lists the pending rows that would stop
 startup:
@@ -4734,15 +4715,12 @@ SELECT tenant_id, device_id, seq, message_id
 FROM mailbox_message
 WHERE state = 'pending'
   AND CASE WHEN json_valid(body)
-    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 7
+    THEN json_type(body, '$.v') IS NOT 'integer' OR json_extract(body, '$.v') <> 8
     ELSE 1 END;
 ```
 
-An empty result confirms only the envelope-major check. It does not prove full
-payload validity or task completion. The v6 to v7 cut has no drain tool or
-upgrade precheck, and it starts on a new store anyway: move the database
-aside and start on a new store, as the
-[0.44.0 Host upgrade checklist](releases/host-upgrade-0.44.0.md#wire-v7)
-describes. Do not delete rows to force startup.
-A fresh server database needs fresh device enrollment. Changing only the client
-`storeDir` keeps the OS credential for the same `productId`.
+An empty result confirms only the envelope-major check. Preserve the old
+database and follow the cutover checklist for fresh storage and device
+enrollment. Changing only the client `storeDir` keeps the OS credential for
+the same `productId`.
+[0.45.0 Host upgrade checklist](releases/host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)
