@@ -7,13 +7,9 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/claude-adapter';
 import { RuntimeExecutionFailure } from '../runtime-failure';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import { expectProcessNotLive } from './support/process-liveness';
 
 const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
-
-function exists(pid: number): boolean {
-  try { process.kill(pid, 0); return true; }
-  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
-}
 
 // Only inert Node fixtures run here. No installed runtime, provider or MCP.
 describe('Claude rejected startup process-tree receipt', () => {
@@ -42,12 +38,14 @@ describe('Claude rejected startup process-tree receipt', () => {
       expect(failure).toBeInstanceOf(RuntimeExecutionFailure);
       expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
       const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8')) as { rootPid: number; descendantPid: number; grandchildPid: number };
-      for (const pid of Object.values(receipt)) expect(exists(pid)).toBe(false);
+      Object.values(receipt).forEach(expectProcessNotLive);
     } finally {
       // The baseline intentionally fails while the fixture is still alive.
       // Reap only the exact detached process group this test spawned.
       if (child?.pid !== undefined) {
-        try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+        try { process.kill(-child.pid, 'SIGKILL'); } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+        }
         if (child.exitCode === null && child.signalCode === null) {
           await new Promise<void>(resolve => child!.once('close', () => resolve()));
         }

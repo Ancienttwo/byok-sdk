@@ -8,11 +8,7 @@ import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import type { SpawnFn } from '../adapters/claude/claude-adapter';
 import { RuntimeStartupDisposalFailure } from '../runtime-failure';
 import { sealRuntimeOperationManifest } from '../types';
-
-function exists(pid: number): boolean {
-  try { process.kill(pid, 0); return true; }
-  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
-}
+import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 
 it.skipIf(process.platform === 'win32')('cancels a silent inert runtime and retains its TERM-resistant process tree until disposal', async () => {
 const __executionScratch = await testExecutionScratch();
@@ -47,13 +43,16 @@ const __executionScratch = await testExecutionScratch();
     void startup.catch(error => { failure = error; });
     await expect.poll(async () => fs.access(receiptFile).then(() => true, () => false), { timeout: 3000 }).toBe(true);
     const receipt = JSON.parse(await fs.readFile(receiptFile, 'utf8')) as { rootPid: number; descendantPid: number; grandchildPid: number };
+    const identities = Object.values(receipt).map(captureProcessIdentity);
     controller.abort();
     await expect.poll(() => failure, { timeout: 1000 }).toBeInstanceOf(RuntimeStartupDisposalFailure);
     await (failure as RuntimeStartupDisposalFailure).retryDisposal();
-    for (const pid of Object.values(receipt)) expect(exists(pid)).toBe(false);
+    identities.forEach(expectProcessNotLive);
   } finally {
     if (child?.pid !== undefined) {
-      try { process.kill(-child.pid, 'SIGKILL'); } catch {}
+      try { process.kill(-child.pid, 'SIGKILL'); } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+      }
       if (child.exitCode === null && child.signalCode === null) {
         await new Promise<void>(resolve => child!.once('close', () => resolve()));
       }

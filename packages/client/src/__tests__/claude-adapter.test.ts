@@ -16,6 +16,7 @@ import { memoryClaude } from './fixtures/memory-claude';
 import { ClaudeStreamSession } from '../adapters/claude/stream-session';
 import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
+import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
 import type { RawEvent } from '../../vendor/oar/7961a59/contracts/session';
 import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
@@ -696,14 +697,21 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     let pid=0;const adapter=new ClaudeAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'path'}),interruptTimeoutMs:40,spawnFn:((...args:Parameters<typeof realSpawn>)=>{const child=realSpawn(...args);pid=child.pid??0;return child;}) as typeof realSpawn});
     const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_NO_ACK:'1'};
     const session=await startAdapter(adapter,baseTask,ctx);openSessions.push(session);
-    await session.interrupt();expect(()=>process.kill(pid,0)).toThrow();await session.close();
+    const identity = captureProcessIdentity(pid);
+    await session.interrupt();
+    expectProcessNotLive(identity);
+    await session.close();
   });
   it('an interrupt Claude refuses reaches owned termination fallback at once, not at the deadline', async () => {
     let pid=0;const adapter=new ClaudeAdapter({resolveBin:()=>({command:FIXTURE_PATH,source:'path'}),interruptTimeoutMs:10_000,spawnFn:((...args:Parameters<typeof realSpawn>)=>{const child=realSpawn(...args);pid=child.pid??0;return child;}) as typeof realSpawn});
     const ctx=await makeCtx();ctx.env={...ctx.env,FAKE_CLAUDE_HANG_AFTER_TOOL:'1',FAKE_CLAUDE_INTERRUPT_ERROR:'1'};
     const session=await startAdapter(adapter,baseTask,ctx);openSessions.push(session);
-    const started=Date.now();await session.interrupt();expect(Date.now()-started).toBeLessThan(5_000);
-    expect(()=>process.kill(pid,0)).toThrow();await session.close();
+    const identity = captureProcessIdentity(pid);
+    const started = Date.now();
+    await session.interrupt();
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expectProcessNotLive(identity);
+    await session.close();
   });
   it.each([
     ['an unwritable interrupt', 'interrupt', (_claude: ReturnType<typeof memoryClaude>) => {}],

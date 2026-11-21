@@ -1,5 +1,6 @@
 import type { RuntimeTaskInput } from '../types';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
+import * as childProcess from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,11 +13,58 @@ import { isRuntimeDisposalFailure } from '../runtime-failure';
 import { taskRuntimeTarget } from '../runtime-detection';
 import { OWNED_TREE_OBSERVE_MS, adoptOwnedProcessTree, disposeOwnedProcessTree, readOwnedProcessTable, withOwnedProcessTree } from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+import * as processTree from '../adapters/process-tree';
+import { captureProcessIdentity, expectProcessNotLive, isProcessLive, type ProcessIdentity } from './support/process-liveness';
+
+vi.mock('node:child_process', { spy: true });
 
 const PI_FIXTURE = fileURLToPath(new URL('./fixtures/fake-pi.mjs', import.meta.url));
 const CLAUDE_FIXTURE = fileURLToPath(new URL('./fixtures/fake-claude.mjs', import.meta.url));
 const CODEX_FIXTURE = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
 const DESCENDANT_FIXTURE = fileURLToPath(new URL('./fixtures/process-tree-descendant.mjs', import.meta.url));
+
+describe.skipIf(process.platform === 'win32')('POSIX process liveness assertions', () => {
+  const live = { pid: 42, ppid: 41, pgid: 40, start: 'first' };
+
+  it('accepts a missing PID', () => {
+    const read = vi.spyOn(processTree, 'observeOwnedProcessTable').mockReturnValue({ table: new Map() });
+    try {
+      expect(isProcessLive(live.pid)).toBe(false);
+      expectProcessNotLive(live.pid);
+    } finally { read.mockRestore(); }
+  });
+
+  it('rejects a live PID with its process identity', () => {
+    const read = vi.spyOn(processTree, 'observeOwnedProcessTable').mockReturnValue({ table: new Map([[live.pid, live]]) });
+    try {
+      expect(isProcessLive(live.pid)).toBe(true);
+      expect(() => expectProcessNotLive(live.pid)).toThrow('Process still live: pid=42 ppid=41 pgid=40 start=first');
+    } finally { read.mockRestore(); }
+  });
+
+  it('accepts a zombie and a PID reused after identity capture', () => {
+    const read = vi.spyOn(processTree, 'observeOwnedProcessTable').mockReturnValue({ table: new Map([[live.pid, live]]) });
+    try {
+      const identity = captureProcessIdentity(live.pid);
+      expect(identity).toEqual({ pid: live.pid, start: live.start });
+      read.mockReturnValue({ table: new Map([[live.pid, { ...live, zombie: true }]]) });
+      expectProcessNotLive(identity);
+      read.mockReturnValue({ table: new Map([[live.pid, { ...live, start: 'second' }]]) });
+      expectProcessNotLive(identity);
+      expect(isProcessLive(live.pid)).toBe(true);
+    } finally { read.mockRestore(); }
+  });
+
+  it('fails closed on an unreadable PID even when a zombie row is present', () => {
+    const read = vi.spyOn(processTree, 'observeOwnedProcessTable').mockReturnValue({
+      table: new Map([[live.pid, { ...live, zombie: true }]]), unreadable: new Set([live.pid]),
+    });
+    try {
+      expect(() => captureProcessIdentity(live.pid)).toThrow('pid=42: process identity is unreadable');
+      expect(() => expectProcessNotLive(live)).toThrow('pid=42: process identity is unreadable');
+    } finally { read.mockRestore(); }
+  });
+});
 
 const forkingDirectories: string[] = [];
 const forkingGroups = new Set<number>();
@@ -26,7 +74,7 @@ afterEach(async () => {
       try { process.kill(-pgid, 'SIGKILL'); } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
       }
-      return [...readOwnedProcessTable().values()].some(entry => entry.pgid === pgid);
+      return [...readOwnedProcessTable().values()].some(entry => entry.pgid === pgid && entry.zombie !== true);
     }, { timeout: 5000, interval: 20 }).toBe(false);
   }
   forkingGroups.clear();
@@ -95,9 +143,10 @@ describe('bundled runtime process-tree disposal', () => {
     const receipt = await readReceipt(receiptFile);
     const startedAt = Date.now();
     try {
+      const identities = allPids(receipt).map(captureProcessIdentity);
       await session.close();
       if (process.platform !== 'win32') expect(Date.now() - startedAt).toBeGreaterThanOrEqual(650);
-      for (const pid of allPids(receipt)) expect(processExists(pid)).toBe(false);
+      identities.forEach(expectProcessNotLive);
     } finally {
       reapAll(allPids(receipt));
     }
@@ -113,7 +162,7 @@ describe('bundled runtime process-tree disposal', () => {
     vi.stubEnv('PATH', '');
     try {
       await disposeOwnedProcessTree({ child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'win32 fixture' });
-      expect(processExists(child.pid!)).toBe(false);
+      expectProcessNotLive(child.pid!);
     } finally {
       vi.unstubAllEnvs();
       reapAll([child.pid!]);
@@ -133,9 +182,10 @@ describe('bundled runtime process-tree disposal', () => {
 
     try {
       for (const pid of allPids(receipt)) expect(processExists(pid)).toBe(true);
+      const identities = allPids(receipt).map(captureProcessIdentity);
       await session.interrupt();
       await session.close();
-      for (const pid of allPids(receipt)) expect(processExists(pid)).toBe(false);
+      identities.forEach(expectProcessNotLive);
     } finally {
       reapAll(allPids(receipt));
     }
@@ -170,6 +220,7 @@ describe('bundled runtime process-tree disposal', () => {
       return raw.split('\n').map((line) => Number(line.trim())).filter((pid) => Number.isSafeInteger(pid) && pid > 0);
     };
     const escapeesBefore = await readEscapees();
+    const before = process.platform === 'win32' ? undefined : readOwnedProcessTable();
 
     let disposalFailure: unknown;
     try {
@@ -183,7 +234,7 @@ describe('bundled runtime process-tree disposal', () => {
       expect(escapeesBefore.length).toBeGreaterThan(0);
       if (disposalFailure === undefined) {
         // Resolved: every recorded process must already be gone.
-        for (const pid of recorded) expect(processExists(pid)).toBe(false);
+        for (const pid of recorded) expectProcessNotLive(before?.get(pid) ?? pid);
       } else {
         // Failed: it must be a typed quiescence failure, never a silent resolve.
         expect(isRuntimeDisposalFailure(disposalFailure)).toBe(true);
@@ -218,9 +269,10 @@ describe('bundled runtime process-tree disposal', () => {
 
     try {
       for (const pid of allPids(receipt)) expect(processExists(pid)).toBe(true);
+      const identities = allPids(receipt).map(captureProcessIdentity);
       await session.interrupt();
       await session.close();
-      for (const pid of allPids(receipt)) expect(processExists(pid)).toBe(false);
+      identities.forEach(expectProcessNotLive);
     } finally {
       reapAll(allPids(receipt));
     }
@@ -248,6 +300,7 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     const pids = [receipt.descendantPid, receipt.grandchildPid];
     try {
       expect(pids.map(processExists)).toEqual([true, true]);
+      const identities = pids.map(captureProcessIdentity);
       await adoptOwnedProcessTree({ child, label: 'setsid fixture' });
       if (outsideKill) {
         await new Promise((resolve) => setTimeout(resolve, 2 * OWNED_TREE_OBSERVE_MS));
@@ -258,7 +311,7 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
       await disposeOwnedProcessTree({
         child, waitClosed: () => closeReceipt, isClosed: () => closed, label: 'setsid fixture', termGraceMs: 300,
       });
-      expect(pids.map(processExists)).toEqual([false, false]);
+      identities.forEach(expectProcessNotLive);
     } finally {
       vi.unstubAllEnvs();
       reapAll(pids);
@@ -266,7 +319,7 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     }
   });
 
-  it('disposal reaps members born while the group continuously forks', async () => {
+  it('disposal ends members born while the group continuously forks', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-forking-tree-'));
     forkingDirectories.push(directory);
     const marker = path.join(directory, 'forked');
@@ -281,7 +334,7 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
       child.once('error', reject);
     });
     let first = true;
-    let missed: number[] = [];
+    let missed: ProcessIdentity[] = [];
     await disposeOwnedProcessTree({
       child, waitClosed: () => closed, isClosed: () => child.signalCode !== null, label: 'forking fixture', termGraceMs: 0,
       killFn: (pid, signal) => {
@@ -290,15 +343,15 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
           // Model the kernel's first delivery missing births after the pre-kill snapshot.
           process.kill(pgid, 'SIGUSR2');
           execFileSync('/bin/sh', ['-c', 'while ! test -f "$1"; do sleep 0.01; done', 'wait', marker], { timeout: 2000 });
-          missed = [...readOwnedProcessTable().values()].filter(entry => entry.pgid === pgid && entry.pid !== pgid).map(entry => entry.pid);
+          missed = [...readOwnedProcessTable().values()].filter(entry => entry.pgid === pgid && entry.pid !== pgid);
           expect(missed.length).toBeGreaterThan(0);
           process.kill(pgid, signal);
         } else process.kill(pid, signal);
       },
     });
     expect(first).toBe(false);
-    expect(missed.every(pid => !processExists(pid))).toBe(true);
-    expect([...readOwnedProcessTable().values()].filter(entry => entry.pgid === pgid)).toEqual([]);
+    missed.forEach(expectProcessNotLive);
+    expect([...readOwnedProcessTable().values()].filter(entry => entry.pgid === pgid && entry.zombie !== true)).toEqual([]);
   });
 
   it('a resend EPERM retains the quiescence error at the original kill deadline', async () => {
@@ -377,7 +430,9 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     const liveTable = new Map([[host.pid, host], [descendantPid, descendant]]);
     const zombie = { ...descendant, zombie: true as const };
     const zombieTable = new Map([[host.pid, host], [descendantPid, zombie]]);
-    const observeProcessTableFn = vi.fn(() => ({ table: rootRunning ? liveTable : zombieTable }));
+    const observeProcessTableFn = vi.fn((_timeoutMs?: number): ReturnType<typeof processTree.observeOwnedProcessTable> => ({
+      table: rootRunning ? liveTable : zombieTable,
+    }));
     const dispose = () => disposeOwnedProcessTree({
       child, label: 'zombie descendant', waitClosed: async () => {}, isClosed: () => !rootRunning, killGraceMs,
       observeProcessTableFn,
@@ -420,27 +475,57 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     }
   });
 
-  it.each(['timeout', 'read error'] as const)('settles with a persistent zombie when the reap wait ends by %s', async (reason) => {
+  it('settles at the 250 ms reap deadline with a persistent zombie', async () => {
     vi.useFakeTimers();
-    const nativeKill = vi.spyOn(process, 'kill').mockReturnValue(true);
+    const started = Date.now();
     try {
-      const { dispose, observeProcessTableFn } = zombieDescendantDisposal(40);
+      const { dispose, observeProcessTableFn } = zombieDescendantDisposal(2_000);
       const settled = vi.fn();
-      const done = dispose().then(settled);
-      await vi.advanceTimersByTimeAsync(0);
-      expect(observeProcessTableFn).toHaveBeenCalledTimes(3);
-      expect(settled).not.toHaveBeenCalled();
-      if (reason === 'read error') observeProcessTableFn.mockImplementationOnce(() => { throw new Error('reap observation failed'); });
-      const stopAt = reason === 'timeout' ? 40 : 20;
-      await vi.advanceTimersByTimeAsync(stopAt - 1);
+      const done = dispose().then(() => settled(Date.now() - started));
+      await vi.advanceTimersByTimeAsync(249);
       expect(settled).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      await expect(done).resolves.toBeUndefined();
-      expect(settled).toHaveBeenCalledOnce();
-      expect(observeProcessTableFn).toHaveBeenCalledTimes(reason === 'timeout' ? 5 : 4);
-      expect(nativeKill).not.toHaveBeenCalled();
+      expect(settled).toHaveBeenCalledExactlyOnceWith(250);
+      expect(observeProcessTableFn).toHaveBeenLastCalledWith(10);
+      await done;
     } finally {
-      nativeKill.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it('passes the remaining reap budget to ps and settles when ps times out', async () => {
+    vi.useFakeTimers();
+    const started = Date.now();
+    const ps = vi.spyOn(childProcess, 'execFileSync');
+    try {
+      const { dispose, observeProcessTableFn, liveTable, zombieTable } = zombieDescendantDisposal(250);
+      const budgets: number[] = [];
+      ps.mockImplementation((_file, _args, options) => {
+        const timeout = options?.timeout ?? 0;
+        budgets.push(timeout);
+        if (budgets.length === 1) {
+          vi.setSystemTime(Date.now() + 215);
+          return [...zombieTable.values()].map(entry =>
+            `${entry.pid} ${entry.ppid} ${entry.pgid} ${'zombie' in entry ? 'Z' : 'S'} ${entry.start}`,
+          ).join('\n');
+        }
+        vi.setSystemTime(Date.now() + timeout);
+        throw Object.assign(new Error('ps stalled'), { code: 'ETIMEDOUT' });
+      });
+      // Keep the synthetic state during the signal and quiescence checks.
+      // Use the real ps reader as soon as the reap wait supplies a deadline.
+      observeProcessTableFn.mockImplementation(timeoutMs => timeoutMs === undefined
+        ? { table: zombieTable }
+        : processTree.observeOwnedProcessTable('ps', undefined, timeoutMs));
+      observeProcessTableFn.mockReturnValueOnce({ table: liveTable });
+      const settled = vi.fn();
+      const done = dispose().then(() => settled(Date.now() - started));
+      await vi.advanceTimersByTimeAsync(20);
+      expect(budgets).toEqual([250, 15]);
+      expect(settled).toHaveBeenCalledExactlyOnceWith(250);
+      await done;
+    } finally {
+      ps.mockRestore();
       vi.useRealTimers();
     }
   });
@@ -465,10 +550,11 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     try {
       await expect(disposeOwnedProcessTree(options)).rejects.toMatchObject({ name: 'RuntimeDisposalFailure', message: expect.stringContaining('exit unconfirmed') });
       expect(processExists(receipt.grandchildPid)).toBe(true);
+      const grandchild = captureProcessIdentity(receipt.grandchildPid);
       await disposeOwnedProcessTree(options);
       // The successful retry reads once to signal and again to confirm exit.
       expect(reads).toBeGreaterThanOrEqual(4);
-      expect(processExists(receipt.grandchildPid)).toBe(false);
+      expectProcessNotLive(grandchild);
     } finally {
       reapAll([receipt.descendantPid, receipt.grandchildPid]);
       await fs.rm(workspaceDir, { recursive: true, force: true });
