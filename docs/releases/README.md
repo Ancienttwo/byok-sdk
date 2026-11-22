@@ -12,6 +12,10 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
+The [0.45.1 candidate](v0.45.1.md) carries the 0.45.0 → 0.45.1 manifest
+with zero breaking and zero additive entries. The publication record archives
+the cut manifest and rebaselines to the published snapshot.
+
 The [0.45.0 release](v0.45.0.md) carries the 0.44.1 → 0.45.0 manifest
 with 12 breaking and 14 additive entries. Follow its
 [Host upgrade checklist](host-upgrade-0.45.0.md). The cut manifest is archived
@@ -36,7 +40,7 @@ from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 8
 ([Wire v8](host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)).
 0.44.1 is the last v7 release. `golden/v8.releases.json` pins the first
-v8 release, 0.45.0. The compatibility suite still needs a published v8 decoder
+v8 release, 0.45.0, and the 0.45.1 candidate. The compatibility suite still needs a published v8 decoder
 pinned as a baseline.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
@@ -70,7 +74,8 @@ lines. The current decoder rejects v7 envelopes.
 
 v8 evidence. The generator `packages/protocol/src/__tests__/generate-v8-corpus.mjs`
 builds `golden/v8.envelopes.ndjson` and `golden/v8.http.ndjson` from the frozen
-v7 corpora. The 0.45.0 registration pins 514 envelope and 41 HTTP lines.
+v7 corpora. The 0.45.0 and 0.45.1 registrations pin the same 514 envelope
+and 41 HTTP lines.
 Covered prefixes are immutable, and further lines are append-only. Each
 stable entry in `golden/v8.releases.json` pins line counts and SHA-256 prefixes
 for both corpora. The guarantee covers registered stable releases.
