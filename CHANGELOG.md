@@ -2,7 +2,19 @@
 
 ## Unreleased
 
-- **Breaking (client, keys)** — Pi 1.6.0 requires re-preparing inputs compiled for 1.5.2. Removed model entries return `not_in_catalog`, and durable replicas with new task records cannot resume on 1.5.2. Pi pins undici 8.12.4, so Hosts can remove their override. Closes #2098. [Host upgrade steps](docs/releases/host-upgrade-next-minor.md#pi-160-closure)
+## 0.46.0 — 2026-11-22 (prepared)
+
+[Candidate notes](docs/releases/v0.46.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.46.0.md)
+
+0.46.0 keeps wire v8. Existing 0.45.0 server databases, daemon journals, provider stores, and device pairings carry forward in place.
+
+- **Breaking (client, keys, #2098 and #2442)** — Pi 1.6.0 requires re-preparing inputs compiled for 1.5.2. Removed model entries return `not_in_catalog`, and durable replicas with new task records cannot resume on 1.5.2. Pi pins undici 8.12.4, so Hosts can remove their override. [Host upgrade steps](docs/releases/host-upgrade-0.46.0.md#pi-160-closure)
+- **Breaking (client, #2446 and #2451)** — DSH sessions opened by the SDK run with `sessionLogUpload: 'off'`, so official DeepSeek requests no longer carry `dsh_session_log`. `dsh_plugin_packages` is unchanged. A DSH build that cannot confirm the uploader is off fails the open non-retryably with an `UnsupportedOptionError` (`option: 'sessionLogUpload'`). [Host upgrade steps](docs/releases/host-upgrade-0.46.0.md#dsh-session-log-upload-off)
+- **Added (client, #2444 and #2448)** — MCP toolset search is qualified for SDK-built Pi 1.6.0 in the ordinary lane on macOS arm64. [Qualification](docs/releases/v0.46.0.md#pi-160)
+- **Changed (client, #2445, #2449, and #2451)** — The client vendors OAR 0.129.1 (from 0.124.0); the Host-visible changes come from 0.128.1, and the 0.129.1 step adds none. Claude and Codex `rateLimited` reflects only account-wide limits, Claude usage can report the plan display name, and Grok returns `reauth_required` only for ACP `-32000`. DSH reports `unauthenticated` for an empty default model list, gates idle `steer` and overlapping `prompt`, reports `runtime_exited` after bridge exit, and serializes cold profile initialization for session launches and `listModels` within one process. Codex abort refusals map `thread not found` to `session_not_found`, and context-overflow `other` turns report `unknown`. [OAR details](docs/releases/v0.46.0.md#oar-01291)
+- **Fixed (client, #2437 and #2440)** — A restart on the same `Daemon` instance after a timed-out `stop()` restores the local control listener. [Fixed](docs/releases/v0.46.0.md#fixed)
+- **Fixed (client, #2435 and #2441)** — The best-effort zombie reap wait bounds its poll sleep and the macOS `ps` probe timeout by the remaining `reapGraceMs`; a synchronous Linux `procfs` read is not cut short, so this is not a hard deadline there. [Fixed](docs/releases/v0.46.0.md#fixed)
+- **Changed (protocol, #2443 and #2447)** — The published `@byok-sdk/protocol@0.45.0` decoder is pinned as the Wire v8 compatibility baseline. [Protocol compatibility](docs/releases/v0.46.0.md#protocol-compatibility)
 
 ## 0.45.0 — 2026-11-21 (published)
 

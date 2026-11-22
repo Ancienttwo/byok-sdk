@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 3366272,
+      "budgetBytes": 3374349,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -312,7 +312,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3881259,
+      "budgetBytes": 3889336,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -483,7 +483,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 3001590,
+      "budgetBytes": 3009668,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -619,7 +619,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 806913,
+      "budgetBytes": 818917,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1005,7 +1005,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 754318,
+      "budgetBytes": 766322,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1081,7 +1081,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 212188,
+      "budgetBytes": 216598,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1250,7 +1250,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private on-demand OAR runtime readers",
-      "budgetBytes": 90230,
+      "budgetBytes": 89943,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1297,7 +1297,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 668986,
+      "budgetBytes": 664648,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2310,7 +2310,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local provider credential custody",
-      "budgetBytes": 297989,
+      "budgetBytes": 298793,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2382,7 +2382,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Headless Pi model route: choices, linkage, field errors and submission",
-      "budgetBytes": 355728,
+      "budgetBytes": 352272,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2466,7 +2466,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Pinned pi-ai catalog lookup for pi_model",
-      "budgetBytes": 325263,
+      "budgetBytes": 321807,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -3049,7 +3049,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 3001200,
+      "budgetBytes": 3009277,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -3508,7 +3508,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Provider credential custody launcher",
-      "budgetBytes": 234365,
+      "budgetBytes": 235169,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

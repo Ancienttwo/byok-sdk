@@ -77,6 +77,12 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
+0.46.0 is the MINOR candidate for all nine public packages. It keeps wire v8;
+its two breaking manifest entries are `pi-160-closure` (Pi 1.6.0 closure) and
+`dsh-session-log-upload-off` (DSH session-log upload off).
+[Candidate notes](../../docs/releases/v0.46.0.md) ·
+[Host upgrade checklist](../../docs/releases/host-upgrade-0.46.0.md)
+
 0.45.0 is the published MINOR for all nine public packages and the first wire
 v8 release. It was published on npm `latest` on 2026-11-21 (UTC) from
 `v0.45.0` (`02bffc8c8`) using exact-SHA release validation
@@ -117,7 +123,7 @@ differs from the train. `@byok-sdk/implementation-identity` remains retired. Eve
 the dist-tag `latest`, observed at 0.45.0 for all nine packages on 2026-11-21 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the historical 0.45.0 pre-publication baseline with prior `latest` 0.44.1 and
+records the 0.46.0 candidate baseline with prior `latest` 0.45.0 and
 `priorPublication: existing` for all nine packages, including
 `@byok-sdk/bot-collaboration`. Recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
