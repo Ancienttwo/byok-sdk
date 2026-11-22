@@ -66,7 +66,7 @@ export declare function dshSession(
     resume?: string;
     mcpServers?: readonly (
       | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }
-      | { readonly name: string; readonly type: 'http'; readonly url: string; readonly headers?: Readonly<Record<string, string>> }
+      | { readonly name: string; readonly type: 'http'; readonly url: string; readonly headers?: Readonly<Record<string, string>>; readonly origin?: 'serveMcpTools' }
     )[];
     /** The process directory, the SDK patches before the bridge overlay, and the explicit environment. */
     launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> };

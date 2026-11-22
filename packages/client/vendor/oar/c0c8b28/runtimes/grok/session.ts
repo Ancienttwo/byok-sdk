@@ -1,4 +1,5 @@
 // BYOK change (Apache-2.0): route appended persona rules through documented session metadata.
+import { grokMcpStartup } from "./mcp-startup.js";
 import { grokTaskViews } from "./tasks.js";
 
 // BYOK change: the narrow bridge reads the same declaration as Runtime.sessionCapabilities.
@@ -165,6 +166,7 @@ export const grokAcpProfile: AcpSessionProfile = {
   // hands an ACP image block to the model (live, docs/runtimes/grok.md).
   capabilities: { queue: { durable: false }, attribution: "nested", images: true },
   extensionNotifications: GROK_EXTENSION_NOTIFICATIONS,
+  openReadiness: grokMcpStartup,
   redactExtensionNotification: redactGrokNotification,
   failureOutcome: grokFailureOutcome,
   terminalShellCommand: true,

@@ -16,9 +16,9 @@ import { testExecutionScratch } from './fixtures/execution-scratch';
 import { expectProcessNotLive } from './support/process-liveness';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { acquireDshProfile } from '../../vendor/oar/4f767ca/runtimes/dsh/profile-startup.js';
-import { dshListModels } from '../../vendor/oar/4f767ca/runtimes/dsh/list-models.js';
-import { dshBridgeSource } from '../../vendor/oar/4f767ca/runtimes/dsh/bridge.js';
+import { acquireDshProfile } from '../../vendor/oar/c0c8b28/runtimes/dsh/profile-startup.js';
+import { dshListModels } from '../../vendor/oar/c0c8b28/runtimes/dsh/list-models.js';
+import { dshBridgeSource } from '../../vendor/oar/c0c8b28/runtimes/dsh/bridge.js';
 
 const DSH_TARGET = { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'openai', modelId: 'byok-custom/loop-model' } } as const;
 
