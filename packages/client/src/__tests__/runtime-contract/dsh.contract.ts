@@ -1,6 +1,7 @@
 import { execFileSync, spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import { promises as fs } from 'node:fs';
+import { promises as fs, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { zstdDecompressSync } from 'node:zlib';
 import { beforeAll, expect } from 'vitest';
 import { captureProcessIdentity, isProcessLive } from '../support/process-liveness';
 import { DshAdapter, type DshAdapterOptions, type DshModelSelection } from '../../adapters/dsh/dsh-adapter';
@@ -16,7 +17,7 @@ import {
   baseEnv, absent, check, contractTarget, createSandbox, defineRuntimeCases, defineRuntimeContract, detectWith, egressCheck,
   credentialFiles, expectDetectedVersion, fileEgress, notAdvertised, once, readReceipt, runTurn, skip, spawned, withProcessEnv, writeSubmitResultServer,
 } from './contract';
-import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type ProviderScript } from './loopback';
+import { CONTRACT_REPLY_CHUNKS, mcpTool, startLoopbackProvider, type ProviderRequest, type ProviderScript } from './loopback';
 
 import { defineMcpSearchProbes } from './mcp-search-probe';
 import { searchMcpEnvironmentFor } from '../../daemon/search-runtime-qualification';
@@ -373,6 +374,124 @@ async function toolInputTurn() {
   }
 }
 
+const SESSION_LOG_MODEL = 'deepseek-flash';
+const DEEPSEEK_TARGET = { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'deepseek', modelId: `deepseek-official/${SESSION_LOG_MODEL}` } } as const;
+const SESSION_LOG_ROW = 'session-log-deepseek';
+const DELIVERY_ACCEPTED = 'session-log-deepseek/delivery-accepted';
+type OverlayRow = { id?: string; insert?: { id?: string; config?: Record<string, unknown> }[] };
+
+/** The adapter's own launch with OAR's session-log switch taken out of its overlay: the positive control. */
+const uploadingSpawn = ((command: string, args: readonly string[], options: SpawnOptions) => {
+  const overlay = args.at(-1) ?? '';
+  if (path.basename(overlay) !== 'oar-dsh-bridge.patch.json') return spawn(command, [...args], options);
+  const rows = JSON.parse(readFileSync(overlay, 'utf8')) as OverlayRow[];
+  const kept = rows.filter(row => row.id !== SESSION_LOG_ROW);
+  if (kept.length === rows.length) throw new Error(`the launch overlay has no ${SESSION_LOG_ROW} row: ${JSON.stringify(rows)}`);
+  for (const entry of kept.flatMap(row => row.insert ?? [])) if (entry.id === 'oar-dsh-bridge') delete entry.config?.sessionLogPlugin;
+  writeFileSync(overlay, JSON.stringify(kept));
+  return spawn(command, [...args], options);
+}) as typeof spawn;
+
+/** Which turn a DeepSeek Messages request belongs to, read from its conversation alone, never from the session-log field. */
+function sessionLogRole(request: ProviderRequest): 'root' | 'child' | 'resume' | 'other' {
+  const messages = JSON.stringify((JSON.parse(request.text) as { messages?: unknown }).messages ?? []);
+  if (messages.includes(RESUME_MARKER)) return 'resume';
+  if (messages.includes(ROOT_MARKER)) return 'root';
+  return messages.includes(CHILD_MARKER) ? 'child' : 'other';
+}
+
+/**
+ * The text of a zstd file dsh writes one frame per append. Node's zstd
+ * decoder stops after the first frame, so the frames are split by their block
+ * headers (RFC 8878 §3.1) and decoded one by one.
+ */
+function zstdText(data: Buffer): string {
+  const frames = [];
+  for (let at = 0; at < data.length;) {
+    const magic = data.readUInt32LE(at);
+    if ((magic & 0xfffffff0) === 0x184d2a50) { at += 8 + data.readUInt32LE(at + 4); continue; }
+    if (magic !== 0xfd2fb528) throw new Error(`no zstd frame at byte ${at}`);
+    const descriptor = data[at + 4]!;
+    const singleSegment = (descriptor >> 5) & 1;
+    let end = at + 5 + (singleSegment ? 0 : 1) + [0, 1, 2, 4][descriptor & 3]! + [singleSegment, 2, 4, 8][descriptor >> 6]!;
+    for (let last = 0; last === 0;) {
+      const block = data.readUIntLE(end, 3);
+      last = block & 1;
+      end += 3 + (((block >> 1) & 3) === 1 ? 1 : block >> 3);
+    }
+    end += ((descriptor >> 2) & 1) * 4;
+    frames.push(zstdDecompressSync(data.subarray(at, end)));
+    at = end;
+  }
+  return Buffer.concat(frames).toString('utf8');
+}
+
+/** The saved sessions (`session.v4.jsonl.zstd`) in a dsh home that record the session-log delivery-accepted watermark. */
+async function acceptedSessionLogs(root: string): Promise<readonly string[]> {
+  const logs = (await fs.readdir(path.join(root, 'sessions'), { recursive: true, withFileTypes: true }))
+    .filter(entry => entry.isFile() && entry.name.endsWith('.jsonl.zstd')).map(entry => path.join(entry.parentPath, entry.name));
+  if (logs.length === 0) throw new Error(`no saved dsh session under ${root}`);
+  const accepted = [];
+  for (const log of logs) {
+    const text = zstdText(await fs.readFile(log));
+    if (!text.includes(ROOT_MARKER) && !text.includes(CHILD_MARKER)) throw new Error(`${path.relative(root, log)} holds neither the root nor the child prompt`);
+    if (text.includes(DELIVERY_ACCEPTED)) accepted.push(path.relative(root, log));
+  }
+  return accepted;
+}
+
+/**
+ * A root turn on dsh's official DeepSeek route that runs a native subagent,
+ * then a resume of the same session, against a DeepSeek Messages loopback
+ * (`DEEPSEEK_BASE_URL`). The root waits until the child's first request was
+ * answered, so every role reaches the wire.
+ */
+async function sessionLogTurn(upload: 'control' | 'default') {
+  const box = await createSandbox(`dsh-session-log-${upload}`);
+  const recorder = await fileEgress();
+  const childStarted = path.join(box.workspace, 'child.started');
+  const script: ProviderScript = request => {
+    const tool = (name: string) => request.tools.find(candidate => candidate.name === name);
+    const role = sessionLogRole(request);
+    const step = role === 'child' && request.toolResults === 0
+      ? { tool: tool('bash'), args: { command: `touch ${JSON.stringify(childStarted)}`, description: 'Mark the child' } }
+      : role !== 'root' ? undefined
+      : request.toolResults === 0 ? { tool: tool('subagent'), args: { description: 'Mark the child', prompt: CHILD_MARKER } }
+      : request.toolResults === 1 ? { tool: tool('bash'), args: { command: `until [ -e ${JSON.stringify(childStarted)} ]; do sleep 0.1; done`, description: 'Wait for the child' } }
+      : undefined;
+    return step?.tool === undefined ? { kind: 'text', chunks: CONTRACT_REPLY_CHUNKS } : { kind: 'tool', tool: step.tool, args: step.args };
+  };
+  const provider = await startLoopbackProvider('anthropic-messages', script, SESSION_LOG_MODEL);
+  try {
+    const root = path.join(box.root, 'dsh');
+    const runtime = new DshAdapter({ home: root, resolveBin, model: { provider: 'deepseek', model: SESSION_LOG_MODEL }, resolveKey, ...(upload === 'control' ? { spawnFn: uploadingSpawn } : {}) });
+    const init = await detectWith(runtime, baseEnv(box.home));
+    if (init.kind !== 'available') throw new Error(`dsh session-log root init: ${JSON.stringify(init)}`);
+    const resources = { workspaceDir: box.workspace, env: { ...baseEnv(box.home), ...recorder.env, DEEPSEEK_BASE_URL: provider.origin } };
+    const turnOf = async (offer: Parameters<typeof startPreparedOperation>[1]) => {
+      const session = await startPreparedOperation(runtime, offer, resources);
+      const events = [];
+      try {
+        for await (const event of session.events) {
+          events.push(event);
+          if (event.type === 'turn_end') break;
+        }
+      } finally {
+        await session.close();
+      }
+      return { sessionRef: session.sessionRef, events };
+    };
+    const opened = await turnOf({ target: DEEPSEEK_TARGET, instruction: `Start the child. ${ROOT_MARKER}` });
+    const resumed = await turnOf({ target: DEEPSEEK_TARGET, instruction: `Continue. ${RESUME_MARKER}`, sessionRef: opened.sessionRef });
+    const requests = provider.requests.filter(request => request.model).map(request => ({
+      role: sessionLogRole(request), uploads: Object.hasOwn(JSON.parse(request.text) as object, 'dsh_session_log'),
+    }));
+    return { opened, resumed, requests, accepted: await acceptedSessionLogs(root) };
+  } finally {
+    await provider.close();
+  }
+}
+
 defineMcpSearchProbes({
   target: DSH_TARGET,
   runtime: 'dsh', variant: 'sandbox=danger-full-access', wire: 'openai-chat', model: MODEL,
@@ -399,6 +518,8 @@ const skillControl = once(() => controlTurn('skill', async root => {
 }));
 const instructionsControl = once(() => controlTurn('instructions', root => fs.writeFile(path.join(root, 'AGENTS.md'), `# User\n\n${USER_MARKER}\n`)));
 const personaControl = once(() => controlTurn('persona', root => fs.writeFile(path.join(root, 'cordis.patch.yml'), `${JSON.stringify([PERSONA_ROW], null, 2)}\n`)));
+const sessionLogControl = once(() => sessionLogTurn('control'));
+const sessionLogDefault = once(() => sessionLogTurn('default'));
 const closed = once(() => toolTreeTurn('close'));
 const sigkilled = once(() => toolTreeTurn('sigkill'));
 const descriptor = new DshAdapter({ home: path.resolve('/dsh-descriptor-only'), model: detectModel, resolveKey }).descriptor;
@@ -457,7 +578,7 @@ defineRuntimeContract(`dsh runtime contract (${target.mode} ${target.expectedVer
   'isolation.sessionPersistence': skip('the dsh adapter has no session persistence option; dsh keeps sessions under the SDK-owned DSH_HOME, which resume needs'),
   drafts: notAdvertised(descriptor, 'messageDraft'),
   'gate.auto': notAdvertised(descriptor, 'toolAuthorizationAuto'),
-  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await instructionsControl(); await personaControl(); await closed(); await sigkilled(); await background(); await steered(); await toolInput(); await readerPersona(); }),
+  'egress.declaredHostsOnly': egressCheck(async () => { await contractTurn(); await skillControl(); await instructionsControl(); await personaControl(); await closed(); await sigkilled(); await background(); await steered(); await toolInput(); await readerPersona(); await sessionLogControl(); await sessionLogDefault(); }),
 }, DSH_ABSENT_ISOLATION_SOURCES);
 
 defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.expectedVersion})`, {
@@ -509,6 +630,20 @@ defineRuntimeCases(`dsh runtime contract: dsh cases (${target.mode} ${target.exp
       expect(counts.every(count => count === 1), JSON.stringify(counts)).toBe(true);
     }
   }, 240_000)],
+  'dsh.sessionLogUpload': ['the SDK default sends no DeepSeek session log on root, native child or resumed requests (positive control: the same launch without the switch does)', check(async () => {
+    const roles = ['root', 'child', 'resume'] as const;
+    const control = await sessionLogControl();
+    const evidence = JSON.stringify(control.requests);
+    for (const role of roles) expect(control.requests.some(request => request.role === role && request.uploads), `control ${role}: ${evidence}`).toBe(true);
+    expect(control.accepted, 'control: delivery-accepted watermark in the dsh home').not.toEqual([]);
+    const { opened, resumed, requests, accepted } = await sessionLogDefault();
+    expect(opened.events.at(-1)?.type).toBe('turn_end');
+    expect(resumed.events.at(-1)?.type).toBe('turn_end');
+    expect(resumed.sessionRef).toBe(opened.sessionRef);
+    for (const role of roles) expect(requests.some(request => request.role === role), `default ${role}: ${JSON.stringify(requests)}`).toBe(true);
+    expect(requests.filter(request => request.uploads)).toEqual([]);
+    expect(accepted).toEqual([]);
+  }, 480_000)],
   'dsh.close': ['closing a session while its shell tool runs reaps the tool processes', check(async () => {
     const { survivors, diagnostic } = await closed();
     expect(survivors, diagnostic).toEqual([]);
