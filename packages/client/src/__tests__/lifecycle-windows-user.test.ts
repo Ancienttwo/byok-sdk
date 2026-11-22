@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createServiceLifecycle } from '../lifecycle/create-service-lifecycle';
+import { createWindowsUserLifecycle, resolveWindowsUserSid } from '../lifecycle/windows-user';
 import { COMMAND_TIMEOUT_MS, PlatformCommandTimeoutError } from '../util/command-timeouts';
 import { SERVICE_UNIT_MARKER, ServiceUnitError } from '../lifecycle/service-unit';
 import type { ServiceDefinition } from '../lifecycle/service-types';
@@ -121,6 +122,83 @@ describe('lifecycle/windows-user (#1337)', () => {
   it('reports service_unload_timeout when the launcher outlives the stop deadline', async () => {
     const { lifecycle } = harness([true]);
     await expect(lifecycle.stop()).rejects.toEqual(new ServiceUnitError('service_unload_timeout'));
+  });
+
+  it('#2452: the launcher query skips unreadable command lines and still fails closed on a WMI error', async () => {
+    const run = vi.fn(async (): Promise<RunResult> => ({ code: 1, stdout: '', stderr: 'Get-CimInstance : Access denied' }));
+    const lifecycle = createServiceLifecycle(def(), { platform: 'win32', deps: { fs: memoryServiceFs(), run, appData: () => 'C:\\Users\\Jo Smith\\AppData\\Roaming' } });
+    expect(await lifecycle.status()).toMatchObject({ running: false, determinate: false });
+    const script = (run.mock.calls[0] as unknown as [string, string[]])[1].at(-1)!;
+    expect(script).toMatch(/^\$ErrorActionPreference = 'Stop'; /u);
+    expect(script).toContain('Where-Object { $_.CommandLine -and ');
+    expect(script).not.toContain('throw');
+  });
+
+  it.each([
+    ['records the resolved user SID', 'S-1-5-21-1004336348-1177238915-682003330-1001', { sid: 'S-1-5-21-1004336348-1177238915-682003330-1001' }],
+    ['omits the SID when it cannot be resolved', undefined, {}],
+  ])('#2452: install %s in the owner record', async (_name, sid, expected) => {
+    const fs = memoryServiceFs();
+    const lifecycle = createWindowsUserLifecycle(def(), {
+      fs,
+      run: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })),
+      appData: () => 'C:\\Users\\Jo Smith\\AppData\\Roaming',
+      launchUnit: async () => {},
+      getWindowsSid: async () => sid,
+    });
+    await lifecycle.install();
+    const record = [...fs.files].find(([file]) => file.endsWith('lifecycle-owner.json'))![1];
+    expect(JSON.parse(record).registration).toEqual({ manager: 'windows-user', launcher: LAUNCHER, ...expected });
+  });
+
+  describe('#2452: resolveWindowsUserSid', () => {
+    const SID = 'S-1-5-21-1004336348-1177238915-682003330-1001';
+    const answer = (result: RunResult | Error) => vi.fn(async (): Promise<RunResult> => {
+      if (result instanceof Error) throw result;
+      return result;
+    });
+
+    it('reads the current identity with PowerShell and returns the trimmed SID', async () => {
+      const run = answer({ code: 0, stdout: `${SID}\r\n`, stderr: '' });
+      expect(await resolveWindowsUserSid({ run, platform: 'win32' })).toBe(SID);
+      expect(run).toHaveBeenCalledExactlyOnceWith('powershell', ['-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value']);
+    });
+
+    it.each([
+      ['malformed output', { code: 0, stdout: 'S-1-5\r\n', stderr: '' }],
+      ['a non-zero exit', { code: 1, stdout: SID, stderr: 'failed' }],
+      ['a failed start', new Error('spawn powershell ENOENT')],
+    ])('returns undefined for %s and caches nothing', async (_name, result) => {
+      expect(await resolveWindowsUserSid({ run: answer(result), platform: 'win32' })).toBeUndefined();
+      const next = answer({ code: 0, stdout: SID, stderr: '' });
+      expect(await resolveWindowsUserSid({ run: next, platform: 'win32' })).toBe(SID);
+      expect(next).toHaveBeenCalledOnce();
+    });
+
+    it('rethrows a command timeout', async () => {
+      const timeout = new PlatformCommandTimeoutError('powershell timed out', true);
+      await expect(resolveWindowsUserSid({ run: answer(timeout), platform: 'win32' })).rejects.toBe(timeout);
+    });
+
+    it('returns undefined off Windows without running anything', async () => {
+      const run = answer({ code: 0, stdout: SID, stderr: '' });
+      expect(await resolveWindowsUserSid({ run, platform: 'linux' })).toBeUndefined();
+      expect(run).not.toHaveBeenCalled();
+    });
+  });
+
+  it('#2452: install reports a timed-out SID lookup as service_command_timeout and records no owner', async () => {
+    const fs = memoryServiceFs();
+    const timeout = new PlatformCommandTimeoutError('powershell timed out', false);
+    const lifecycle = createWindowsUserLifecycle(def(), {
+      fs,
+      run: vi.fn(async () => ({ code: 0, stdout: '', stderr: '' })),
+      appData: () => 'C:\\Users\\Jo Smith\\AppData\\Roaming',
+      launchUnit: async () => {},
+      getWindowsSid: async () => { throw timeout; },
+    });
+    await expect(lifecycle.install()).rejects.toMatchObject({ name: 'ServiceUnitError', code: 'service_command_timeout', exitConfirmed: false, cause: timeout });
+    expect([...fs.files.keys()].some(file => file.endsWith('lifecycle-owner.json'))).toBe(false);
   });
 
   it('#1971: the default Host stop program runs within the hostStop bound', async () => {

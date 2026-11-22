@@ -7,6 +7,11 @@ composition over Postgres and R2.
 
 ## Release status
 
+**0.45.1 is in preparation** (2026-11-23, UTC) on `release/0.45` as a wire v8
+PATCH for all nine public packages. It fixes the Windows user-scope service on
+non-elevated desktops (#2452) with zero breaking and zero additive manifest
+entries. [0.45.1 candidate notes](docs/releases/v0.45.1.md)
+
 **0.45.0 is published** on npm `latest` on 2026-11-21 (UTC) for all nine public
 packages. It introduces wire v8. Upgrade the Host and devices together with
 fresh stores and device enrollment. [0.45.0 release notes](docs/releases/v0.45.0.md) ·
@@ -146,7 +151,8 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the stable npm release, 0.45.0.
+Versioned install examples below name the 0.45.1 candidate. Use accepted
+candidate tarballs for validation. The stable npm release is 0.45.0.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -260,7 +266,7 @@ Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
 daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/client@0.45.0 @byok-sdk/server@0.45.0 @byok-sdk/keys@0.45.0
+npm install @byok-sdk/client@0.45.1 @byok-sdk/server@0.45.1 @byok-sdk/keys@0.45.1
 ```
 
 Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -276,7 +282,7 @@ for the Postgres + R2 data plane (`@byok-sdk/cloud-dataplane/runtime` on
 Workers through Hyperdrive), and `ui-runtime` for the Live Activity Timeline.
 
 ```sh
-npm install @byok-sdk/cloud@0.45.0 @byok-sdk/cloud-dataplane@0.45.0 @byok-sdk/ui-runtime@0.45.0
+npm install @byok-sdk/cloud@0.45.1 @byok-sdk/cloud-dataplane@0.45.1 @byok-sdk/ui-runtime@0.45.1
 ```
 
 Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -446,7 +452,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.45.0
+npm install @byok-sdk/keys@0.45.1
 ```
 
 ## Host connector composition
@@ -462,7 +468,7 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.45.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.45.1`
 require Node.js 24.22.1 or newer. MIT licensed.
 
 ## Entry dependencies

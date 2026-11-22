@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.45.1 — 2026-11-23 (prepared)
+
+[Candidate notes](docs/releases/v0.45.1.md)
+
+0.45.1 is a PATCH on `release/0.45`. It keeps wire v8 and the public API; the upgrade manifest has zero breaking and zero additive entries.
+
+- **Fixed (client, #2452)** — A `windows-user` lifecycle no longer fails on a non-elevated desktop when another user's, a Session 0, or an elevated `cmd.exe` command line is unreadable. `install()` records the current user's SID, and `inspectStoreServiceState` reports `unknown` instead of `stopped` for a different user. Re-run `install()` to add the SID to a 0.45.0 record. [Fixed](docs/releases/v0.45.1.md#fixed)
+
 ## 0.45.0 — 2026-11-21 (published)
 
 [Release notes](docs/releases/v0.45.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.45.0.md)
