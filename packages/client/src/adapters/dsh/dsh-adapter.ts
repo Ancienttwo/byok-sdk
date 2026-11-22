@@ -365,6 +365,7 @@ export class DshAdapter implements RuntimeAdapter {
           onRouteMismatch: () => session.refuseRoute(),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.
           onRecord: (record) => session.record(record),
+          ...(input.signal === undefined ? {} : { signal: input.signal }),
         },
       );
       session.bind(raw);

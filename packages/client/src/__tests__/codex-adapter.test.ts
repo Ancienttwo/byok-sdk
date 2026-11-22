@@ -25,7 +25,7 @@ import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/7961a59/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/4f767ca/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 const SUBSCRIPTION_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'wanted' } } as const;
@@ -632,7 +632,8 @@ describe('Codex persistent app-server adapter', () => {
   });
   it.each([
     ['Anthropic limit wording', { type: 'error', error: { type: 'invalid_request_error', message: 'Your credit balance is too low to access the Anthropic API.' } }, { class: 'unknown' }],
-    ['an invalid_request_error type', { type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long' } }, { class: 'invalid_request' }],
+    ['an invalid_request_error type', { type: 'error', error: { type: 'invalid_request_error', message: 'messages: field required' } }, { class: 'invalid_request' }],
+    ['context overflow wording', { type: 'error', error: { type: 'invalid_request_error', message: 'prompt is too long' } }, { class: 'unknown' }],
     ['an error code', { error: { code: 'insufficient_quota', message: 'You exceeded your current quota.' } }, { class: 'quota' }],
     ['a structured quota reset', { error: { type: 'usage_limit_reached', resets_at: 1795068000 } }, { class: 'quota', resetsAt: '2026-11-19T06:00:00.000Z' }],
   ] as const)('classifies codexErrorInfo other with %s from the body, sending unknown for a text rule (#869)', async (_label, body, failure) => {

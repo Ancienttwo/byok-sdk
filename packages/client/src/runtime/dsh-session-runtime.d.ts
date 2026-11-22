@@ -80,6 +80,8 @@ export declare function dshSession(
     onReady?: (sessionId: string) => void;
     readonly onRouteMismatch?: () => void;
     onRecord?: (record: DshRecord) => void;
+    /** Start cancellation; it also ends a wait for another opener's cold profile. */
+    readonly signal?: AbortSignal;
   },
 ): Promise<RawDshSession>;
 

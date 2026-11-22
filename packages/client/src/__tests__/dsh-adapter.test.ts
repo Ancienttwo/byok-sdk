@@ -1,4 +1,4 @@
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -14,6 +14,11 @@ import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { expectProcessNotLive } from './support/process-liveness';
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { acquireDshProfile } from '../../vendor/oar/4f767ca/runtimes/dsh/profile-startup.js';
+import { dshListModels } from '../../vendor/oar/4f767ca/runtimes/dsh/list-models.js';
+import { dshBridgeSource } from '../../vendor/oar/4f767ca/runtimes/dsh/bridge.js';
 
 const DSH_TARGET = { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'openai', modelId: 'byok-custom/loop-model' } } as const;
 
@@ -310,6 +315,69 @@ describe('DshAdapter sessions', () => {
     await expect(fs.stat(scratch.sdkDir)).rejects.toMatchObject({ code: 'ENOENT' });
     pending.resolve('late-key');
     expect((await facts()).some(row => row.kind === 'start')).toBe(false);
+  });
+
+  it('ends a start queued behind a held cold profile on abort and spawns nothing after the holder releases', async () => {
+    const { open, facts, root } = await setup();
+    const release = await acquireDshProfile({ DSH_HOME: root }, root);
+    const scratch = await testExecutionScratch();
+    const controller = new AbortController();
+    const outcome = open(undefined, { scratch, signal: controller.signal }).then(() => 'started', (error: unknown) => error);
+    // launchDsh writes its patch file right before it waits for the profile.
+    await vi.waitFor(() => fs.stat(path.join(scratch.sdkDir, 'oar-dsh-bridge.patch.json')));
+    controller.abort('private cancellation value');
+    expect(await outcome).toBeInstanceOf(Error);
+    release(false);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect((await facts()).some(row => row.kind === 'start')).toBe(false);
+  });
+
+  it('ends a model listing queued behind a held cold profile on abort and spawns nothing after the holder releases', async () => {
+    const root = await tempDir('bdm-');
+    const directory = await tempDir('bdmd-');
+    const release = await acquireDshProfile({ DSH_HOME: root }, root);
+    const spawnProcess = vi.fn(() => { throw new Error('no spawn expected'); });
+    const controller = new AbortController();
+    const listing = dshListModels(
+      { kind: 'available', via: 'executable', command: 'dsh', version: QUALIFIED_DSH_VERSION },
+      { env: { DSH_HOME: root }, timeoutMs: 60_000, signal: controller.signal, spawn: spawnProcess, run: vi.fn(), redact: (text: string) => text },
+      { directory, patches: [], env: { DSH_HOME: root } },
+    ).then(() => 'listed', (error: unknown) => error);
+    await vi.waitFor(() => fs.stat(path.join(directory, 'oar-dsh-bridge.patch.json')));
+    controller.abort();
+    expect(await listing).toBeInstanceOf(Error);
+    release(false);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    expect(spawnProcess).not.toHaveBeenCalled();
+  });
+
+  it('opens through the bridge with a rejecting persistence.stat and reports no session file', async () => {
+    const dir = await tempDir('bdb-');
+    const bridge = path.join(dir, 'bridge.mjs');
+    await fs.writeFile(bridge, dshBridgeSource);
+    const harness = path.join(dir, 'harness.mjs');
+    await fs.writeFile(harness, `
+      const { apply } = await import(${JSON.stringify(pathToFileURL(bridge).href)});
+      const services = {
+        loader: { await: async () => {} },
+        agents: { create: async ({ sessionId, meta }) => ({ agent: { session: { id: sessionId, header: { id: sessionId, cwd: meta.cwd } }, status: 'idle', inbox: { nextTurn: [], nextStep: [] } }, dispose: async () => {} }) },
+        sessionPersistence: { stat: async () => { throw new Error('stat failed'); }, flush: async () => {} },
+      };
+      apply({ get: (name) => services[name], on: () => {}, effect: () => {} }, {});
+    `);
+    const child = spawn(process.execPath, [harness], { stdio: ['pipe', 'pipe', 'inherit'] });
+    try {
+      const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+      const next = async () => JSON.parse((await lines.next()).value as string);
+      expect(await next()).toMatchObject({ type: 'ready' });
+      child.stdin!.write(`${JSON.stringify({ id: 'o1', method: 'open', sessionId: 's1', cwd: dir })}\n`);
+      const opened = await next();
+      expect(opened).toMatchObject({ type: 'response', id: 'o1', result: { sessionId: 's1' } });
+      expect(opened.result).not.toHaveProperty('sessionFile');
+      expect(opened.result).not.toHaveProperty('sessionFileStat');
+      child.stdin!.write(`${JSON.stringify({ id: 'd1', method: 'dispose' })}\n`);
+      expect(await next()).toEqual({ type: 'response', id: 'd1', result: {} });
+    } finally { child.kill(); }
   });
 
   it('redacts echoed key bytes from an early native exit', async () => {
