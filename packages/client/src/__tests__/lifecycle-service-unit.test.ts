@@ -166,6 +166,50 @@ describe('inspectStoreServiceState (#2421)', () => {
     expect(run).toHaveBeenCalledExactlyOnceWith('powershell', expect.arrayContaining([expect.stringContaining(launcher)]));
   }));
 
+  describe('windows-user registration scoped by user SID (#2452)', () => {
+    const launcher = 'C:\\Users\\jo\\.byok\\store\\service\\production.launcher.cmd';
+    const sid = 'S-1-5-21-1004336348-1177238915-682003330-1001';
+    const launcherRun = (stdout: string, code = 0, stderr = '') => vi.fn<Runner>().mockResolvedValue({ code, stdout, stderr });
+
+    it.each([
+      ['a stopped launcher for the recorded user', '', sid, 'stopped'],
+      ['a running launcher for the recorded user', '4242', sid, 'running'],
+    ] as const)('reports %s', (_name, stdout, current, state) => withStore(async storeDir => {
+      await claim(storeDir, { manager: 'windows-user', launcher, sid });
+      const run = launcherRun(stdout);
+      expect(await inspectStoreServiceStateWith(storeDir, 'win32', { run, getWindowsSid: () => current })).toEqual({ state, owner });
+      expect(run).toHaveBeenCalledExactlyOnceWith('powershell', expect.arrayContaining([expect.stringContaining(launcher)]));
+    }));
+
+    it.each([
+      ['a different user', 'S-1-5-21-1004336348-1177238915-682003330-1002'],
+      ['an unresolved current user', undefined],
+    ])('leaves the state unknown for %s without querying launchers', (_name, current) => withStore(async storeDir => {
+      await claim(storeDir, { manager: 'windows-user', launcher, sid });
+      const run = launcherRun('');
+      expect(await inspectStoreServiceStateWith(storeDir, 'win32', { run, getWindowsSid: async () => current })).toEqual({ state: 'unknown', owner });
+      expect(run).not.toHaveBeenCalled();
+    }));
+
+    it('leaves the state unknown when the launcher query fails', () => withStore(async storeDir => {
+      await claim(storeDir, { manager: 'windows-user', launcher, sid });
+      const run = launcherRun('', 1, 'Get-CimInstance : Access denied');
+      expect(await inspectStoreServiceStateWith(storeDir, 'win32', { run, getWindowsSid: () => sid })).toEqual({ state: 'unknown', owner });
+    }));
+
+    it.each([['4242', 'running'], ['', 'unknown']] as const)('a 0.45.0 record without a SID reports launcher output %j as %s', (stdout, state) => withStore(async storeDir => {
+      await claim(storeDir, { manager: 'windows-user', launcher });
+      const getWindowsSid = vi.fn(() => sid);
+      expect(await inspectStoreServiceStateWith(storeDir, 'win32', { run: launcherRun(stdout), getWindowsSid })).toEqual({ state, owner });
+      expect(getWindowsSid).not.toHaveBeenCalled();
+    }));
+
+    it.each([['S-1-5'], ['s-1-5-21'], ['S-1-5-21-x'], [1001], [null]])('refuses a recorded SID of %j', (bad) => withStore(async storeDir => {
+      const registration = { manager: 'windows-user', launcher, sid: bad } as unknown as ServiceRegistration;
+      expect(await codeOf(claim(storeDir, registration))).toBe('lifecycle_owner_unreadable');
+    }));
+  });
+
   it('does not infer a launchd GUI domain for a legacy owner record', () => withStore(async storeDir => {
     await claimServiceLifecycleOwner({ storeDir, ...owner });
     const run = vi.fn<Runner>().mockResolvedValue({ code: 113, stdout: '', stderr: 'Could not find service' });

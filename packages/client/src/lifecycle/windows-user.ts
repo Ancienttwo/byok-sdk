@@ -61,10 +61,15 @@ async function runStopProgram(program: ServiceProgram): Promise<number | null> {
   }
 }
 
-/** PowerShell that prints the pid of every `cmd.exe` whose command line names `launcherPath`. */
+/**
+ * PowerShell that prints the pid of every `cmd.exe` whose command line names
+ * `launcherPath`. A non-elevated query reads an empty command line for other
+ * users' and elevated processes; those cannot be this user's launcher, so they
+ * are skipped rather than failing the query (#2452). A WMI error still fails it.
+ */
 function launcherQuery(launcherPath: string): string {
   const literal = launcherPath.replaceAll("'", "''");
-  return `$ErrorActionPreference = 'Stop'; $p = '${literal}'; $launcherPids = @(); $hidden = $false; Get-CimInstance Win32_Process -Filter 'Name=''cmd.exe''' | ForEach-Object { if (-not $_.CommandLine) { $hidden = $true } elseif ($_.CommandLine.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0) { $launcherPids += $_.ProcessId } }; if ($launcherPids.Count -gt 0) { $launcherPids } elseif ($hidden) { throw 'Incomplete launcher process visibility' }`;
+  return `$ErrorActionPreference = 'Stop'; $p = '${literal}'; Get-CimInstance Win32_Process -Filter 'Name=''cmd.exe''' | Where-Object { $_.CommandLine -and $_.CommandLine.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | ForEach-Object { $_.ProcessId }`;
 }
 
 async function queryLauncher(launcherPath: string, run: Runner) {
@@ -74,6 +79,46 @@ async function queryLauncher(launcherPath: string, run: Runner) {
   return { running: determinate && pids.length > 0, determinate,
     detail: !determinate ? (result.stderr || result.stdout).trim() : pids.length > 0 ? `launcher running (pid ${pids.join(', ')})` : 'launcher not running',
     code: result.code };
+}
+
+const WINDOWS_SID_RE = /^S-1-\d+(?:-\d+)+$/u;
+let currentWindowsSid: string | undefined;
+
+/** Resolves the current user's SID; `undefined` when it cannot be read. @internal */
+export type WindowsSidResolver = () => Promise<string | undefined> | string | undefined;
+
+/** {@link WindowsUserDeps} plus the SID seam, kept off the public type. @internal */
+export interface WindowsUserInternalDeps extends WindowsUserDeps {
+  getWindowsSid?: WindowsSidResolver;
+}
+
+/**
+ * The current Windows user's SID, which scopes a `windows-user` registration
+ * to the user whose launchers a query can see (#2452). `undefined` off
+ * Windows or when it cannot be read. A query that outlives its bound rejects
+ * with `PlatformCommandTimeoutError`, so `install()` reports the timeout
+ * rather than recording no SID. The process's own SID, read with the default
+ * runner, is cached.
+ *
+ * @internal
+ */
+export async function resolveWindowsUserSid(
+  { run = defaultRunner, platform = process.platform }: Pick<WindowsUserDeps, 'run'> & { platform?: NodeJS.Platform } = {},
+): Promise<string | undefined> {
+  if (platform !== 'win32') return undefined;
+  const cacheable = run === defaultRunner && platform === process.platform;
+  if (cacheable && currentWindowsSid !== undefined) return currentWindowsSid;
+  let result;
+  try {
+    result = await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', '[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value']);
+  } catch (error) {
+    if (error instanceof PlatformCommandTimeoutError) throw error;
+    return undefined;
+  }
+  const sid = result.code === 0 ? result.stdout.trim() : '';
+  if (!WINDOWS_SID_RE.test(sid)) return undefined;
+  if (cacheable) currentWindowsSid = sid;
+  return sid;
 }
 
 /** Check the launcher path a user-scope install registers for this store. @internal */
@@ -98,7 +143,7 @@ export async function queryWindowsUserService(launcherPath: string, { run = defa
  *   more, so `stop()` and `uninstall()` work without the program (#2279).
  * - `status()` reports the launcher process, found by its command line.
  */
-export function createWindowsUserLifecycle(def: ServiceDefinition, deps: WindowsUserDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
+export function createWindowsUserLifecycle(def: ServiceDefinition, deps: WindowsUserInternalDeps = {}, gateRoot?: string): ManagedServiceLifecycle {
   const windows = def.windows;
   if (windows?.scope !== 'user') throw new Error("Windows user-scope lifecycle requires `ServiceDefinition.windows.scope: 'user'`");
   const hostStop = windows.stop;
@@ -108,6 +153,7 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
   const stopProgram = deps.runStopProgram ?? runStopProgram;
   const launch = deps.launchUnit ?? launchUnit;
+  const getWindowsSid = deps.getWindowsSid ?? (() => resolveWindowsUserSid());
 
   const appData = (deps.appData ?? (() => process.env.APPDATA))();
   if (appData === undefined || !path.win32.isAbsolute(appData)) {
@@ -152,7 +198,10 @@ export function createWindowsUserLifecycle(def: ServiceDefinition, deps: Windows
 
   return createManagedLifecycle(def, {
     serviceName: name,
-    registration: () => ({ manager: 'windows-user', launcher: launcherPath }),
+    async registration() {
+      const sid = await getWindowsSid();
+      return { manager: 'windows-user', launcher: launcherPath, ...(sid === undefined ? {} : { sid }) };
+    },
     unitPath,
     launcherPath,
     files: () => [
