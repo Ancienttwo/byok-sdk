@@ -27,13 +27,15 @@ test('reviewed graph covers every workspace and all local dependency edges', () 
   assert.deepEqual(workspaceGraph, actual);
 });
 
-test('only the 0.41.0 v6 decoder alias may leave the protocol manifest', t => {
-  const cwd = mkdtempSync(join(tmpdir(), 'ci-v6-alias-removal-'));
+test('only the exact published v8 decoder alias may be added to the protocol manifest', t => {
+  const cwd = mkdtempSync(join(tmpdir(), 'ci-v8-alias-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, 'packages/protocol'), { recursive: true });
   const path = 'packages/protocol/package.json';
-  const alias = 'byok-protocol-v6-baseline';
-  const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz';
+  const alias = 'byok-protocol-v8-baseline';
+  const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.45.0.tgz';
+  const previous = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.44.1.tgz';
+  const manifest = { name: '@byok-sdk/protocol', version: '0.45.0', devDependencies: { 'byok-protocol-previous': previous } };
   const write = value => writeFileSync(join(cwd, path), JSON.stringify(value));
   const git = (...args) => spawnSync('git', args, { cwd, encoding: 'utf8' });
   assert.equal(git('init').status, 0);
@@ -43,25 +45,34 @@ test('only the 0.41.0 v6 decoder alias may leave the protocol manifest', t => {
     assert.equal(git('-c', 'user.name=CI', '-c', 'user.email=ci@example.invalid', 'commit', '-m', 'base').status, 0);
     return git('rev-parse', 'HEAD').stdout.trim();
   };
-  const manifest = spec => ({ name: '@byok-sdk/protocol', version: '0.43.0', devDependencies: { previous: '1.0.0', [alias]: spec } });
-  const removed = { ...manifest(tarball), devDependencies: { previous: '1.0.0' } };
-  let base = commit(manifest(tarball));
-  write(removed);
+  const base = commit(manifest);
+  const withAlias = spec => ({ ...manifest, devDependencies: { ...manifest.devDependencies, [alias]: spec } });
+  write(withAlias(tarball));
   assert.ok(selectImpact([path], { cwd, base }).dirs.includes('packages/protocol'));
-  // Another alias removed, or this key still present with another value: refused.
-  for (const invalid of [{ ...manifest(tarball), devDependencies: { [alias]: tarball } }, manifest(null)]) {
+  for (const invalid of [
+    withAlias(previous),
+    withAlias(`${tarball}#sha512-other`),
+    withAlias('npm:@byok-sdk/protocol@0.45.0'),
+    { ...withAlias(tarball), private: true },
+    { ...manifest, devDependencies: { ...manifest.devDependencies, other: tarball } },
+    { ...manifest, devDependencies: { [alias]: tarball } },
+    { ...manifest, dependencies: { [alias]: tarball } },
+  ]) {
     write(invalid);
     assert.throws(() => selectImpact([path], { cwd, base }), /Reviewed CI mapping required/);
   }
-  // The key kept as it was: the admission does not fire and the existing rules decide.
-  write({ ...manifest(tarball), devDependencies: { previous: '1.0.1', [alias]: tarball } });
-  assert.ok(selectImpact([path], { cwd, base }).dirs.includes('packages/protocol'));
-  // The alias pinned another version or carrying another integrity: refused.
-  for (const spec of [tarball.replace('0.41.0', '0.42.0'), `${tarball}#sha512-other`]) {
-    base = commit(manifest(spec));
-    write(removed);
-    assert.throws(() => selectImpact([path], { cwd, base }), /Reviewed CI mapping required/);
-  }
+
+  const pinnedBase = commit(withAlias(tarball));
+  write(withAlias(previous));
+  assert.throws(() => selectImpact([path], { cwd, base: pinnedBase }), /Reviewed CI mapping required/);
+
+  // The one-time v6 removal admission expired when that alias left main.
+  const v6Base = commit({ ...manifest, devDependencies: {
+    ...manifest.devDependencies,
+    'byok-protocol-v6-baseline': 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz',
+  } });
+  write(manifest);
+  assert.throws(() => selectImpact([path], { cwd, base: v6Base }), /Reviewed CI mapping required/);
 });
 
 test('the Worker browser sources retain their workspace checks', () => {

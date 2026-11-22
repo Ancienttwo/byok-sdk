@@ -367,20 +367,21 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   const qualify = [];
   const before = parse(beforeText), after = parse(afterText);
   if (path.startsWith('examples/') && (before.private !== true || after.private !== true)) throw new Error('Example workspaces must stay private');
-  if (path !== 'bun.lock') qualify.push(...normalizeDependencyVersions(before, after, path, cwd));
   if (path === 'packages/protocol/package.json') {
-    // One-time admission for #1757 (wire v7 phase 0): no v7 release exists yet,
-    // so the published v6 decoder alias leaves. Only this alias at exactly the
-    // 0.41.0 tarball may be removed. It expires when the alias is gone from
-    // main's manifest, that is once integration/wire-v7 merges into main; then
-    // delete it as #2218 deleted the spent admissions.
-    const alias = 'byok-protocol-v6-baseline';
-    const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.41.0.tgz';
-    if (before.devDependencies?.[alias] === tarball && plain(after.devDependencies) && !Object.hasOwn(after.devDependencies, alias)) {
-      delete before.devDependencies[alias];
+    // Check the baseline pin before generic dependency updates can normalize it.
+    const alias = 'byok-protocol-v8-baseline';
+    const tarball = 'https://registry.npmjs.org/@byok-sdk/protocol/-/protocol-0.45.0.tgz';
+    const previous = before.devDependencies?.[alias];
+    const current = after.devDependencies?.[alias];
+    if (previous !== current) {
+      if (previous !== undefined || current !== tarball) {
+        throw new Error('Reviewed CI mapping required: #2443 admits only the exact published v8 decoder pin');
+      }
+      delete after.devDependencies[alias];
       qualify.push('packages/protocol');
     }
   }
+  if (path !== 'bun.lock') qualify.push(...normalizeDependencyVersions(before, after, path, cwd));
   if (path === 'bun.lock') {
     // Newly introduced hosted workspaces retain their shape/ownership gate.
     for (const example of PRIVATE_HOSTED) {
