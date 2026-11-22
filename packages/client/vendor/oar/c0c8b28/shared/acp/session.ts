@@ -273,6 +273,7 @@ async function openAcpRuntimeSession(
     };
     const opening = createAcpOpening();
     const configUpdates = createAcpConfigUpdates(credentials.redactValue);
+    const readiness = profile.openReadiness?.(options);
     // BYOK change: a child's own update projects events only when it was read while a prompt awaited its answer (records.ts).
     const promptAnswers = createAcpPromptAnswers();
     const recorder = createAcpRecorder(usageGate, profile.attributeUpdate, tokenUsage, undefined, profile.projectUpdate, profile.projectExtension, nativeTurns, {
@@ -284,6 +285,7 @@ async function openAcpRuntimeSession(
         configUpdates.observe(notification);
       },
       extension: (method, params, receivedAt, afterOpen) => {
+        readiness?.observe(method, params);
         recorder.extension(method, profile.redactExtensionNotification?.(method, params) ?? params, afterOpen ?? opening.afterOpen(params), receivedAt);
       },
       requested: (id, method, params, receivedAt) => {
@@ -314,7 +316,7 @@ async function openAcpRuntimeSession(
         const opened = await openAcpSession(runtime, profile, options, (step) => {
           if (step.method === "initialize") { releaseStartup?.(); }
           recorder.step(step.method, step.response);
-        }, configUpdates, initializeStartedAt).catch(async (error: unknown) => {
+        }, { configUpdates, readiness }, initializeStartedAt).catch(async (error: unknown) => {
           await release();
           throw withoutCredentials(error);
         });

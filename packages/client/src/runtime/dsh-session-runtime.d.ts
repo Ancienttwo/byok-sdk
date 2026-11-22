@@ -3,7 +3,7 @@ import type { spawnOwnedLineProcess } from './owned-line-process';
 export declare function dshMcpRows(
   servers: readonly (
     | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }
-    | { readonly name: string; readonly type: 'http'; readonly url: string; readonly headers?: Readonly<Record<string, string>> }
+    | { readonly name: string; readonly type: 'http'; readonly url: string; readonly headers?: Readonly<Record<string, string>>; readonly origin?: 'serveMcpTools' }
   )[] | undefined,
   cwd: string,
 ): readonly Record<string, unknown>[];
@@ -58,7 +58,7 @@ export declare class ModelConfirmationError extends Error {
 }
 export declare function dshSession(
   spawn: typeof spawnOwnedLineProcess,
-  installation: { kind: 'available'; via: 'executable'; command: string },
+  installation: { kind: 'available'; via: 'executable'; command: string; version: string },
   options: {
     cwd: string;
     model: string;
@@ -66,12 +66,14 @@ export declare function dshSession(
     resume?: string;
     mcpServers?: readonly (
       | { readonly name: string; readonly command: string; readonly args?: readonly string[]; readonly env?: Readonly<Record<string, string>> }
-      | { readonly name: string; readonly type: 'http'; readonly url: string; readonly headers?: Readonly<Record<string, string>> }
+      | { readonly name: string; readonly type: 'http'; readonly url: string; readonly headers?: Readonly<Record<string, string>>; readonly origin?: 'serveMcpTools' }
     )[];
     /** The process directory, the SDK patches before the bridge overlay, and the explicit environment. */
     launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> };
     /** OAR SessionOptions.retainedBytes: past it the kernel elides the oldest native payloads. */
     retainedBytes: number;
+    /** OAR SessionOptions.sessionLogUpload: every SDK open turns dsh's DeepSeek session-log upload off. */
+    sessionLogUpload: 'off';
     /** OAR SessionOptions.appendSystemPrompt: one literal section after dsh's persona suffix, re-applied on every resume. */
     appendSystemPrompt?: string;
   },
