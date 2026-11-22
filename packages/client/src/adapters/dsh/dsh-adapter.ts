@@ -302,12 +302,12 @@ export class DshAdapter implements RuntimeAdapter {
     const modelSelection = { ...configured, model };
     return {
       kind: 'prepared',
-      operation: { start: (start) => this.start(start, command, modelSelection, modelId, effort) },
+      operation: { start: (start) => this.start(start, { command, version: token }, modelSelection, modelId, effort) },
       detected: { version: token, executableSource, ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, token) },
     };
   }
 
-  private async start(input: RuntimeOperationStartInput, command: string, selection: DshModelSelection & { model: string }, modelId: string | undefined, effort: string | undefined): Promise<Session> {
+  private async start(input: RuntimeOperationStartInput, installation: { command: string; version: string }, selection: DshModelSelection & { model: string }, modelId: string | undefined, effort: string | undefined): Promise<Session> {
     if (input.kind !== 'instruction' || typeof input.instruction !== 'string') throw authority('dsh requires a resolved instruction');
     const cwd = input.manifest.cwd;
     if (!cwd) throw authority('dsh manifest has no sealed cwd');
@@ -347,7 +347,8 @@ export class DshAdapter implements RuntimeAdapter {
           void child.exited.then(() => session.exited(), (error) => session.fail(redactor.redactValue(error)));
           return session.gate(child);
         },
-        { kind: 'available', via: 'executable', command },
+        // The version admits OAR's session-log switch, which it refuses on a DSH that predates the plugin.
+        { kind: 'available', via: 'executable', ...installation },
         {
           cwd: workspace,
           model,
@@ -355,6 +356,9 @@ export class DshAdapter implements RuntimeAdapter {
           // The process runs in the scratch directory, so dsh reads no workspace `.env`; the workspace stays the session cwd.
           launch: { directory: input.scratch.sdkDir, patches: [patch], env },
           retainedBytes: this.maxRetainedBytes,
+          // dsh's DeepSeek session-log plugin attaches the session's events to every official DeepSeek request (#2446).
+          // The bridge refuses the open before any model request unless dsh reports the plugin off.
+          sessionLogUpload: 'off',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
           ...(persona === undefined ? {} : { appendSystemPrompt: persona }),
           ...(resume === undefined ? {} : { resume }),

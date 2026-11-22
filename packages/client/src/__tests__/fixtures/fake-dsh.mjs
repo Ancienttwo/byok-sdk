@@ -11,6 +11,7 @@
 // FAKE_DSH_LOG receives one JSON line per observed fact.
 // FAKE_DSH_ROUTE overrides the model route the first request reports.
 // FAKE_DSH_NO_STEER=1: `open` reports no native steer.
+// FAKE_DSH_SESSION_LOG_UNMOUNTED=1: the bridge refuses the requested session-log check, as it does when dsh mounts no session-log plugin.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
@@ -156,7 +157,13 @@ const commands = {
   dispose() { return {}; },
 };
 
-write({ type: 'ready', protocol: 1, services: {} });
+const sessionLogPlugin = overlay[1]?.insert?.at(-1)?.config?.sessionLogPlugin;
+if (sessionLogPlugin !== undefined && process.env.FAKE_DSH_SESSION_LOG_UNMOUNTED === '1') {
+  const message = `DSH does not mount the ${sessionLogPlugin.id} plugin, so OAR cannot confirm session-log upload is off`;
+  write({ type: 'startup-error', error: { message, code: 'option_not_applied', capability: 'sessionLogUpload' }, code: 'option_not_applied', capability: 'sessionLogUpload' });
+} else {
+  write({ type: 'ready', protocol: 1, services: {} });
+}
 createInterface({ input: process.stdin }).on('line', (line) => {
   const { id, method, ...request } = JSON.parse(line);
   log({ kind: 'request', method, request });

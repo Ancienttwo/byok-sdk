@@ -10,6 +10,7 @@ import { DSH_RUNTIME_CAPABILITIES } from '../adapters/dsh/dsh-capabilities';
 import { QUALIFIED_DSH_VERSION } from '../adapters/dsh/dsh-version';
 import { PolicyUnsupportedError, type MessageDraftDelta, type RuntimeTaskInput, type Session } from '../types';
 import { RuntimeExecutionFailure } from '../runtime-failure';
+import { UnsupportedOptionError } from '../runtime/dsh-session-runtime';
 import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
@@ -181,7 +182,7 @@ describe('DshAdapter catalog', () => {
 });
 
 describe('DshAdapter sessions', () => {
-  it('uses the task model and effort on fresh and resumed DSH sessions', async () => {
+  it('uses the task model and effort, with session-log upload off, on fresh and resumed DSH sessions', async () => {
     const resolveKey = vi.fn().mockResolvedValueOnce('dsh-first-test-key-value').mockResolvedValueOnce('dsh-rotated-test-key-value');
     const box = await setup({ resolveKey });
     const request = { target: { ...DSH_TARGET, selection: { ...DSH_TARGET.selection, modelId: 'byok-custom/task-model' } }, instruction: 'hello', effort: 'high' };
@@ -196,6 +197,11 @@ describe('DshAdapter sessions', () => {
     const expected = { provider: 'byok-custom', model: 'task-model', reasoningEffort: 'high' };
     expect(log.filter(fact => ['open', 'resume'].includes(fact.method)).map(row => row.request.agentOptions)).toEqual([expected, expected]);
     expect(log.find(fact => fact.kind === 'start')?.patch).toEqual(JSON.parse(dshPatch({ ...MODEL, model: 'task-model' })));
+    const sessionLog = { id: 'session-log-deepseek', name: '@deepseek-ai/dsh-session-log-deepseek' };
+    for (const { overlay } of log.filter(row => row.kind === 'start')) {
+      expect(overlay.at(-1)).toEqual({ ...sessionLog, config: { enabled: false } });
+      expect(overlay[1].insert.at(-1).config.sessionLogPlugin).toEqual(sessionLog);
+    }
   });
 
   it.each([
@@ -637,6 +643,15 @@ describe('DshAdapter sessions', () => {
   it('refuses a dsh without steer as a non-retryable authority failure', async () => {
     const { open } = await setup({}, { FAKE_DSH_NO_STEER: '1' });
     await expect(open()).rejects.toMatchObject({ phase: 'start', retry: 'non-retryable', failure: { class: 'invalid_request' } });
+  });
+
+  it('refuses the open before any model request when dsh cannot confirm session-log upload is off', async () => {
+    const { open, facts } = await setup({}, { FAKE_DSH_SESSION_LOG_UNMOUNTED: '1' });
+    const error = await open().catch((caught: unknown) => caught);
+    expect(error).toMatchObject({ phase: 'start', retry: 'non-retryable' });
+    expect((error as Error).cause).toBeInstanceOf(UnsupportedOptionError);
+    expect((error as Error).cause).toMatchObject({ option: 'sessionLogUpload' });
+    expect((await facts()).filter(row => row.kind === 'request')).toEqual([]);
   });
 
   it('fails closed when a request does not run the configured route', async () => {

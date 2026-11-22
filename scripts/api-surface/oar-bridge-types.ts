@@ -249,7 +249,7 @@ import type { DshLineProcess } from '../../packages/client/vendor/oar/c0c8b28/ru
 
 type VendorDshArgs = Parameters<typeof vendorDshSession>;
 type DshBridgeArgs = Parameters<typeof DshBridge.dshSession>;
-type DshBridgeOptions = { cwd: string; model: string; effort?: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> }; retainedBytes: number; appendSystemPrompt?: string };
+type DshBridgeOptions = { cwd: string; model: string; effort?: string; resume?: string; mcpServers?: VendorDshArgs[2]['mcpServers']; launch: { directory: string; patches: readonly string[]; env: Readonly<Record<string, string>> }; retainedBytes: number; sessionLogUpload: 'off'; appendSystemPrompt?: string };
 type DshVendorSession = Awaited<ReturnType<typeof vendorDshSession>>;
 type DshBridgeSession = {
   readonly capabilities: Pick<AdapterSession['capabilities'], 'images'>;
