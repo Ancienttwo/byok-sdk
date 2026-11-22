@@ -4533,7 +4533,8 @@ a normal slow turn.
 
 Compatibility between releases is decided by
 `packages/protocol/src/__tests__/compat.test.ts`. It checks v8
-self-consistency and verifies that 0.44.1 rejects v8 bytes. The suite and
+self-consistency, verifies that the published 0.45.0 decoder reads the v8
+corpus, and verifies that 0.44.1 rejects v8 bytes. The suite and
 the behavioural tests exercise the following receiver policies.
 
 1. **Unknown additive fields on observability-class messages are tolerated**

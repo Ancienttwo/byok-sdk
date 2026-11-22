@@ -405,11 +405,13 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-The current aligned release is `0.45.0`, also the stable npm release,
-published on 2026-11-21 (UTC) with registry readback for all nine packages.
-The packed and published keys `@byok-sdk/core` edge must pin the corresponding
-release version. Verify the release edge at `0.45.0` in an isolated standard
-npm install.
+The current aligned release is `0.46.0` (candidate). The stable npm release is
+`0.45.0`, published on 2026-11-21 (UTC) with registry readback for all nine
+packages.
+The packed keys `@byok-sdk/core` edge must pin the corresponding release
+version. Verify the exact `0.46.0` edge in an isolated install of the accepted
+candidate tarballs. Publication requires separate authorization and registry
+readback.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
 0.28.2. Before that decision keys had its own version line, and its last
@@ -418,6 +420,15 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.46.0 is the MINOR candidate after 0.45.0. All nine public packages move
+together and keep wire v8, so 0.45.0 server databases, daemon journals,
+provider stores, and device pairings carry forward. The 0.45.0 → 0.46.0
+upgrade manifest has two breaking entries: `pi-160-closure` (re-prepare Pi
+inputs for Pi 1.6.0) and `dsh-session-log-upload-off` (SDK DSH sessions turn
+off session-log upload and need a DSH build that honors it).
+[0.46.0 candidate notes](releases/v0.46.0.md) ·
+[Host upgrade checklist](releases/host-upgrade-0.46.0.md)
 
 0.45.0 is the published MINOR after 0.44.1 and the first wire v8 release.
 All nine public packages move together. Upgrade both peers, provision fresh

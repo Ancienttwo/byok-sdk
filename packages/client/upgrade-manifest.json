@@ -6,8 +6,8 @@
     "snapshotSha256": "417350abb369f8a9ceb425d0ef04c5f4d0b6f5690c33f88f6f7d3cd0ca018411"
   },
   "to": {
-    "version": "0.45.0",
-    "snapshotSha256": "1a53fd719e254dc594fc29148704a4a011a1376f6cb16018164be22b1c30e5d0"
+    "version": "0.46.0",
+    "snapshotSha256": "36fc4ada3073f23b720259463ccf81fba8eca3f068ba1c95739fc72b4ee3bbb6"
   },
   "configFields": {
     "status": "tracked",
@@ -20,10 +20,19 @@
       "impact": "breaking",
       "acceptance": "accept",
       "summary": "Pi 1.6.0 changes closureDigest and requires new preparations. The keys catalog follows pi-ai 1.6.0 and removed entries return not_in_catalog. Replicas with pi.tool v4 or pi.generation v3 cannot resume on Pi 1.5.2. Pi now pins undici 8.12.4.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#pi-160-closure",
+      "migration": "docs/releases/host-upgrade-0.46.0.md#pi-160-closure",
       "items": [
         "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
         "store:pi-durable"
+      ]
+    },
+    {
+      "id": "dsh-session-log-upload-off",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client and @byok-sdk/client/adapters DshAdapter (DaemonConfig.runtimes.dsh) open every DSH session with sessionLogUpload 'off', so official DeepSeek requests no longer carry dsh_session_log. The dsh_plugin_packages request field is unchanged. If DSH cannot confirm the uploader is off, the open fails non-retryably with an UnsupportedOptionError (option 'sessionLogUpload') before any model request. Use a qualified DSH build that honors the setting, such as 0.2.2-rc.1, and do not rely on SDK tasks to upload DeepSeek session logs.",
+      "migration": "docs/releases/host-upgrade-0.46.0.md#dsh-session-log-upload-off",
+      "items": [
+        "behavior:dsh-session-log-upload-off"
       ]
     }
   ],
