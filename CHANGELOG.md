@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.46.0 — 2026-11-22 (prepared)
+## 0.46.0 — 2026-11-23 (published)
 
-[Candidate notes](docs/releases/v0.46.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.46.0.md)
+[Release notes](docs/releases/v0.46.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.46.0.md)
 
 0.46.0 keeps wire v8. Existing 0.45.0 and 0.45.1 server databases, daemon journals, provider stores, and device pairings carry forward in place.
 
