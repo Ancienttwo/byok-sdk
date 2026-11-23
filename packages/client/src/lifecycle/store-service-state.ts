@@ -5,7 +5,7 @@ import { queryLaunchdService, type LaunchdDeps } from './launchd.js';
 import { sanitizeServiceName, type ServiceManagerQuery } from './service-types.js';
 import { inspectServiceOwnerRecord, serviceLauncherPath, type ServiceRegistration } from './service-unit.js';
 import { querySystemdService, systemdLocalUserUid, type SystemdDeps } from './systemd.js';
-import { queryWindowsUserService } from './windows-user.js';
+import { queryWindowsUserService, resolveWindowsUserSid, type WindowsSidResolver } from './windows-user.js';
 import { queryWinswService, type WinswDeps } from './winsw.js';
 
 export interface StoreServiceState {
@@ -22,11 +22,13 @@ export function inspectStoreServiceState(storeDir: string): Promise<StoreService
   return inspectStoreServiceStateWith(storeDir, process.platform);
 }
 
+type StoreServiceDeps = LaunchdDeps & SystemdDeps & WinswDeps & { getWindowsSid?: WindowsSidResolver };
+
 /** @internal Inject the existing service-manager fakes without exposing them publicly. */
 export async function inspectStoreServiceStateWith(
   storeDir: string,
   platform: NodeJS.Platform,
-  deps: LaunchdDeps & SystemdDeps & WinswDeps = {},
+  deps: StoreServiceDeps = {},
 ): Promise<StoreServiceState> {
   const canonical = await resolvePathWithoutCreate(storeDir).catch(() => undefined);
   if (canonical === undefined) return { state: 'unknown' };
@@ -45,7 +47,7 @@ export async function inspectStoreServiceStateWith(
 
 async function queryRecordedService(
   storeDir: string, service: string, registration: ServiceRegistration | undefined, platform: NodeJS.Platform,
-  deps: LaunchdDeps & SystemdDeps & WinswDeps,
+  deps: StoreServiceDeps,
 ): Promise<Pick<ServiceManagerQuery, 'running' | 'determinate'> | undefined> {
   // Normalizing a corrupt name could redirect the query to a different service.
   if (sanitizeServiceName(service) !== service) return undefined;
@@ -64,7 +66,17 @@ async function queryRecordedService(
     }
     case 'win32': {
       if (registration?.manager === 'winsw') return queryWinswService(service, deps);
-      if (registration?.manager === 'windows-user') return queryWindowsUserService(registration.launcher, deps);
+      if (registration?.manager === 'windows-user') {
+        if (registration.sid === undefined) {
+          // A 0.45.0 record did not identify the user, and another user's
+          // launcher is invisible: absence cannot confirm the store stopped.
+          const current = await queryWindowsUserService(registration.launcher, deps);
+          return { running: current.running, determinate: current.running };
+        }
+        const currentSid = deps.getWindowsSid ? await deps.getWindowsSid() : await resolveWindowsUserSid();
+        if (currentSid === undefined || currentSid !== registration.sid) return undefined;
+        return queryWindowsUserService(registration.launcher, deps);
+      }
       if (registration !== undefined) return undefined;
       const results = await Promise.allSettled([
         queryWinswService(service, deps),

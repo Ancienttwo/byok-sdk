@@ -21,7 +21,7 @@ export type ManagedLifecycleFs = Pick<typeof fsp, 'mkdir' | 'writeFile' | 'readF
 /** The platform half of a lifecycle: where its files go and how its manager loads them. */
 export interface PlatformUnit {
   serviceName: string;
-  registration?(): ServiceRegistration | null;
+  registration?(): Promise<ServiceRegistration | null> | ServiceRegistration | null;
   unitPath: string;
   launcherPath: string;
   /** The unit first, then the launcher, with their exact expected content. */
@@ -78,7 +78,7 @@ export interface ManagedServiceLifecycle extends ServiceLifecycle {
  * it becomes public.
  */
 function publicTimeouts(platform: PlatformUnit): PlatformUnit {
-  const { prepare, preparedArtifactsExact } = platform;
+  const { registration, prepare, preparedArtifactsExact } = platform;
   return {
     ...platform,
     activate: () => platform.activate().catch(throwPublicCommandTimeout),
@@ -87,6 +87,7 @@ function publicTimeouts(platform: PlatformUnit): PlatformUnit {
     start: () => platform.start().catch(throwPublicCommandTimeout),
     stop: () => platform.stop().catch(throwPublicCommandTimeout),
     query: () => platform.query().catch(throwPublicCommandTimeout),
+    ...(registration && { registration: () => Promise.resolve().then(() => registration.call(platform)).catch(throwPublicCommandTimeout) }),
     ...(prepare && { prepare: () => prepare.call(platform).catch(throwPublicCommandTimeout) }),
     ...(preparedArtifactsExact && { preparedArtifactsExact: () => preparedArtifactsExact.call(platform).catch(throwPublicCommandTimeout) }),
   };
@@ -135,7 +136,7 @@ export function createManagedLifecycle(def: ServiceDefinition, platform: Platfor
     const { state } = await inspect();
     if (state === 'foreign' && opts.replaceUnmarked !== true) throw new ServiceUnitError('service_unit_unmarked');
     await requireOwner();
-    await claimHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner, service: unit.serviceName }, fs, unit.registration?.());
+    await claimHeldServiceLifecycleOwner({ storeDir: def.storeDir, owner, service: unit.serviceName }, fs, await unit.registration?.());
     await writeFiles();
     await unit.activate();
   }
