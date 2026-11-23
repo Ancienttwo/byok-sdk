@@ -12,7 +12,7 @@ as a wire v8 PATCH for all nine public packages. It fixes the Windows user-scope
 non-elevated desktops (#2452) with zero breaking and zero additive manifest
 entries. [0.45.1 release notes](docs/releases/v0.45.1.md)
 
-**0.45.0 is published** on npm `latest` on 2026-11-21 (UTC) for all nine public
+**0.45.0 is published** on 2026-11-21 (UTC) for all nine public
 packages. It introduces wire v8. Upgrade the Host and devices together with
 fresh stores and device enrollment. [0.45.0 release notes](docs/releases/v0.45.0.md) ·
 [Host upgrade checklist](docs/releases/host-upgrade-0.45.0.md)

@@ -20,8 +20,7 @@ the published snapshot.
 The [0.45.0 release](v0.45.0.md) carries the 0.44.1 → 0.45.0 manifest
 with 12 breaking and 14 additive entries. Follow its
 [Host upgrade checklist](host-upgrade-0.45.0.md). The cut manifest is archived
-at `packages/client/upgrade-history/0.44.1-0.45.0.json` and the baseline reflects
-the published snapshot.
+at `packages/client/upgrade-history/0.44.1-0.45.0.json`.
 Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
 
 The 0.44.0 → 0.44.1 manifest is archived at
