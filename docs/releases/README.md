@@ -12,15 +12,15 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
-The [0.45.1 candidate](v0.45.1.md) carries the 0.45.0 → 0.45.1 manifest
-with zero breaking and zero additive entries. The publication record archives
-the cut manifest and rebaselines to the published snapshot.
+The [0.45.1 release](v0.45.1.md) carries the 0.45.0 → 0.45.1 manifest
+with zero breaking and zero additive entries. The cut manifest is archived
+at `packages/client/upgrade-history/0.45.0-0.45.1.json` and the baseline reflects
+the published snapshot.
 
 The [0.45.0 release](v0.45.0.md) carries the 0.44.1 → 0.45.0 manifest
 with 12 breaking and 14 additive entries. Follow its
 [Host upgrade checklist](host-upgrade-0.45.0.md). The cut manifest is archived
-at `packages/client/upgrade-history/0.44.1-0.45.0.json` and the baseline reflects
-the published snapshot.
+at `packages/client/upgrade-history/0.44.1-0.45.0.json`.
 Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
 
 The 0.44.0 → 0.44.1 manifest is archived at
@@ -40,7 +40,7 @@ from evidence, not the author's judgment (see "Freeze rule" in
 `docs/protocol.md`). The wire is at major 8
 ([Wire v8](host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)).
 0.44.1 is the last v7 release. `golden/v8.releases.json` pins the first
-v8 release, 0.45.0, and the 0.45.1 candidate. The compatibility suite still needs a published v8 decoder
+v8 release, 0.45.0, and the 0.45.1 release. The compatibility suite still needs a published v8 decoder
 pinned as a baseline.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
