@@ -8,6 +8,8 @@ predecessors.
 provider stores, and device pairings carry forward in place. The breaking
 migrations are [`pi-160-closure`](#pi-160-closure) and
 [`dsh-session-log-upload-off`](#dsh-session-log-upload-off).
+The [archived upgrade manifest](../../packages/client/upgrade-history/0.45.1-0.46.0.json)
+records the Host-visible changes in this release.
 
 ## pi-160-closure
 
