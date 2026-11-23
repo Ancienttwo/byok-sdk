@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.45.1 — 2026-11-23 (prepared)
+## 0.45.1 — 2026-11-23 (published)
 
-[Candidate notes](docs/releases/v0.45.1.md)
+[Release notes](docs/releases/v0.45.1.md)
 
 0.45.1 is a PATCH on `release/0.45`. It keeps wire v8 and the public API; the upgrade manifest has zero breaking and zero additive entries.
 
