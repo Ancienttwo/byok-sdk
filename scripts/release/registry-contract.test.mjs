@@ -101,7 +101,7 @@ test('the reviewed plan enumerates all nine packages with their prior stable lat
   assert.ok(!names.includes('@byok-sdk/implementation-identity'));
   for (const name of names) {
     assert.deepEqual(reviewed.packages[name],
-      { priorPublication: 'existing', previousLatest: '0.45.0' });
+      { priorPublication: 'existing', previousLatest: '0.45.1' });
   }
 });
 
