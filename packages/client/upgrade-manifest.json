@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "package": "@byok-sdk/client",
   "from": {
-    "version": "0.45.0",
-    "snapshotSha256": "417350abb369f8a9ceb425d0ef04c5f4d0b6f5690c33f88f6f7d3cd0ca018411"
+    "version": "0.45.1",
+    "snapshotSha256": "30307e7a0fa53d21859f553108d46d3d11ae9480a4b834ae1f36452fd0d9d440"
   },
   "to": {
     "version": "0.46.0",

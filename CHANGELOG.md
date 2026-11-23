@@ -6,7 +6,7 @@
 
 [Candidate notes](docs/releases/v0.46.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.46.0.md)
 
-0.46.0 keeps wire v8. Existing 0.45.0 server databases, daemon journals, provider stores, and device pairings carry forward in place.
+0.46.0 keeps wire v8. Existing 0.45.0 and 0.45.1 server databases, daemon journals, provider stores, and device pairings carry forward in place.
 
 - **Breaking (client, keys, #2098 and #2442)** — Pi 1.6.0 requires re-preparing inputs compiled for 1.5.2. Removed model entries return `not_in_catalog`, and durable replicas with new task records cannot resume on 1.5.2. Pi pins undici 8.12.4, so Hosts can remove their override. [Host upgrade steps](docs/releases/host-upgrade-0.46.0.md#pi-160-closure)
 - **Breaking (client, #2446 and #2451)** — DSH sessions opened by the SDK run with `sessionLogUpload: 'off'`, so official DeepSeek requests no longer carry `dsh_session_log`. `dsh_plugin_packages` is unchanged. A DSH build that cannot confirm the uploader is off fails the open non-retryably with an `UnsupportedOptionError` (`option: 'sessionLogUpload'`). [Host upgrade steps](docs/releases/host-upgrade-0.46.0.md#dsh-session-log-upload-off)
@@ -15,6 +15,14 @@
 - **Fixed (client, #2437 and #2440)** — A restart on the same `Daemon` instance after a timed-out `stop()` restores the local control listener. [Fixed](docs/releases/v0.46.0.md#fixed)
 - **Fixed (client, #2435 and #2441)** — The best-effort zombie reap wait bounds its poll sleep and the macOS `ps` probe timeout by the remaining `reapGraceMs`; a synchronous Linux `procfs` read is not cut short, so this is not a hard deadline there. [Fixed](docs/releases/v0.46.0.md#fixed)
 - **Changed (protocol, #2443 and #2447)** — The published `@byok-sdk/protocol@0.45.0` decoder is pinned as the Wire v8 compatibility baseline. [Protocol compatibility](docs/releases/v0.46.0.md#protocol-compatibility)
+
+## 0.45.1 — 2026-11-23 (published)
+
+[Release notes](docs/releases/v0.45.1.md)
+
+0.45.1 is a PATCH on `release/0.45`. It keeps wire v8 and the public API; the upgrade manifest has zero breaking and zero additive entries.
+
+- **Fixed (client, #2452)** — A `windows-user` lifecycle no longer fails on a non-elevated desktop when another user's, a Session 0, or an elevated `cmd.exe` command line is unreadable. `install()` records the current user's SID, and `inspectStoreServiceState` reports `unknown` instead of `stopped` for a different user. Re-run `install()` to add the SID to a 0.45.0 record. [Fixed](docs/releases/v0.45.1.md#fixed)
 
 ## 0.45.0 — 2026-11-21 (published)
 

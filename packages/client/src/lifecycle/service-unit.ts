@@ -210,12 +210,13 @@ export async function classifyServiceUnit(fs: ServiceUnitFs, expected: readonly 
 }
 
 const OWNER_RECORD_FILENAME = 'lifecycle-owner.json';
+const WINDOWS_SID_RE = /^S-1-\d+(?:-\d+)+$/u;
 
 export type ServiceRegistration =
   | { readonly manager: 'launchd'; readonly uid: number }
   | { readonly manager: 'systemd'; readonly uid: number }
   | { readonly manager: 'winsw' }
-  | { readonly manager: 'windows-user'; readonly launcher: string };
+  | { readonly manager: 'windows-user'; readonly launcher: string; readonly sid?: string };
 
 interface OwnerRecord {
   version: 1;
@@ -272,7 +273,10 @@ function validRegistration(value: ServiceRegistration): boolean {
     case 'launchd':
     case 'systemd': return Number.isSafeInteger(value.uid) && value.uid >= 0;
     case 'winsw': return true;
-    case 'windows-user': return typeof value.launcher === 'string' && path.win32.isAbsolute(value.launcher) && !hasControlChar(value.launcher);
+    case 'windows-user':
+      // A 0.45.0 record has no `sid`; install records it from 0.45.1 on (#2452).
+      return typeof value.launcher === 'string' && path.win32.isAbsolute(value.launcher) && !hasControlChar(value.launcher)
+        && (value.sid === undefined || (typeof value.sid === 'string' && WINDOWS_SID_RE.test(value.sid)));
     default: return false;
   }
 }

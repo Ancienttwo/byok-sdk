@@ -406,7 +406,7 @@ store it owns: `inspectDaemonStores` in client (also
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
 The current aligned release is `0.46.0` (candidate). The stable npm release is
-`0.45.0`, published on 2026-11-21 (UTC) with registry readback for all nine
+`0.45.1`, published on 2026-11-23 (UTC) with registry readback for all nine
 packages.
 The packed keys `@byok-sdk/core` edge must pin the corresponding release
 version. Verify the exact `0.46.0` edge in an isolated install of the accepted
@@ -421,14 +421,22 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.46.0 is the MINOR candidate after 0.45.0. All nine public packages move
-together and keep wire v8, so 0.45.0 server databases, daemon journals,
-provider stores, and device pairings carry forward. The 0.45.0 → 0.46.0
+0.46.0 is the MINOR candidate after 0.45.1. All nine public packages move
+together and keep wire v8, so 0.45.0 and 0.45.1 server databases, daemon journals,
+provider stores, and device pairings carry forward. The 0.45.1 → 0.46.0
 upgrade manifest has two breaking entries: `pi-160-closure` (re-prepare Pi
 inputs for Pi 1.6.0) and `dsh-session-log-upload-off` (SDK DSH sessions turn
 off session-log upload and need a DSH build that honors it).
 [0.46.0 candidate notes](releases/v0.46.0.md) ·
 [Host upgrade checklist](releases/host-upgrade-0.46.0.md)
+
+0.45.1 is the published PATCH after 0.45.0 on `release/0.45`. All nine public
+packages move together and keep wire v8 and the public API, so 0.45.0 server
+databases, daemon journals, provider stores, and device pairings carry forward.
+The 0.45.0 → 0.45.1 upgrade manifest has zero breaking and zero additive
+entries. It fixes the Windows user-scope service on non-elevated desktops and
+scopes `inspectStoreServiceState` to the recorded Windows user (#2452).
+[0.45.1 release notes](releases/v0.45.1.md)
 
 0.45.0 is the published MINOR after 0.44.1 and the first wire v8 release.
 All nine public packages move together. Upgrade both peers, provision fresh
@@ -586,7 +594,7 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry read of 2026-11-21 (UTC) reports `latest` 0.45.0 for all nine
+The registry read of 2026-11-23 (UTC) reports `latest` 0.45.1 for all nine
 packages in the release train; cloud-do remains archived at 0.42.0. The earlier
 published versions include 0.42.0 (2026-11-13, UTC), 0.41.0, 0.40.0, 0.39.0, 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for
