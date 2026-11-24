@@ -377,6 +377,14 @@ test('a platform family is selected only by a path it owns', () => {
   for (const path of ['scripts/package/bundle-host.mjs', 'scripts/package/smoke-host.ts', 'scripts/package/entitlements-mac.plist', 'scripts/package/license-gate.test.mjs', 'electron-builder.config.mjs']) {
     assert.ok(selectImpact([`examples/desktop-bot-app/${path}`]).families.includes('desktop'), path);
   }
+  // #2457 / #2460 Slice 0: the reviewed Rust shell crate files select the desktop example; unmapped native paths still throw.
+  for (const path of ['native/byok-shell/Cargo.toml', 'native/byok-shell/Cargo.lock', 'native/byok-shell/rust-toolchain.toml', 'native/byok-shell/src/lib.rs', 'native/byok-shell/src/contract.rs', 'native/byok-shell/tests/contract.rs']) {
+    const impact = selectImpact([`examples/desktop-bot-app/${path}`]);
+    assert.ok(impact.families.includes('desktop') && impact.dirs.includes('examples/desktop-bot-app'), path);
+  }
+  for (const path of ['examples/desktop-bot-app/native/other/x.rs', 'examples/desktop-bot-app/native/byok-shell/build.rs']) {
+    assert.throws(() => selectImpact([path]), /mapping/i, path);
+  }
   for (const path of ['packages/client/src/bin/sdk-reserved-helper-runners.ts', 'packages/client/src/bin/byok-agent-result-mcp.ts', 'packages/client/src/lifecycle/sdk-reserved-helper-command.ts']) {
     for (const family of ['runtime-contract', 'credential-isolation-audit', 'npm-release-pack']) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
   }
@@ -591,6 +599,11 @@ test('family owners cover every test file and script their CI job runs', () => {
         const directory = /^ {8}working-directory: (\S+)$/m.exec(step);
         assert.ok(directory, `${family}: a go test step names no working-directory`);
         inputs.push(`${directory[1]}/suite-probe.go`);
+      }
+      if (/\bcargo test\b/.test(run)) {
+        const directory = /^ {8}working-directory: (\S+)$/m.exec(step);
+        assert.ok(directory, `${family}: a cargo test step names no working-directory`);
+        inputs.push(`${directory[1]}/src/suite-probe.rs`);
       }
       for (const [, path] of run.matchAll(new RegExp(repoPath, 'g'))) {
         if (!captured.has(path)) named.push(path);

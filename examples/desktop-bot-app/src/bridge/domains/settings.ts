@@ -28,4 +28,5 @@ export interface SettingsMethods {
 export const SETTINGS_DOMAIN = {
   renderer: ['settings.device', 'settings.get', 'settings.setDreaming', 'settings.exportDiagnostics'],
   main: ['settings.loginItem', 'settings.setLoginItem'],
+  shellToHost: [],
 } as const satisfies BridgeDomain<SettingsMethods>;

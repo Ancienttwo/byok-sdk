@@ -24,4 +24,5 @@ export interface K8Methods {
 export const K8_DOMAIN = {
   renderer: ['k8.view', 'k8.saveBot', 'k8.archiveBot', 'k8.send', 'k8.clear', 'k8.cancel', 'k8.answer'],
   main: [],
+  shellToHost: [],
 } as const satisfies BridgeDomain<K8Methods>;

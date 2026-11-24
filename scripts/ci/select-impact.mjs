@@ -969,6 +969,10 @@ export function selectImpact(paths, context = {}) {
     if (dir === 'packages/client' && /^native\/agent-memory-fs\/.+\.(?:go|mod|sum)$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;
     }
+    if (dir === 'examples/desktop-bot-app'
+      && /^native\/byok-shell\/(?:Cargo\.(?:toml|lock)|rust-toolchain\.toml|(?:src|tests)\/.+\.rs)$/.test(relative)) {
+      dirs.add(dir); continue;
+    }
     if (dir === 'packages/client' && /^scripts\/(?:(?:build|check|verify|copy)-agent-memory-helper[^/]*|agent-memory-helper-source)\.[cm]?[jt]s$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;
     }

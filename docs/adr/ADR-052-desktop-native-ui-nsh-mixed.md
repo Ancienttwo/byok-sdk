@@ -11,7 +11,7 @@ appliesTo:
 
 > **来源与追踪**：总 issue [#2457](https://github.com/Ancienttwo/byok-sdk/issues/2457)（子 issue [#2458](https://github.com/Ancienttwo/byok-sdk/issues/2458)、[#2459](https://github.com/Ancienttwo/byok-sdk/issues/2459)、[#2460](https://github.com/Ancienttwo/byok-sdk/issues/2460)、[#2461](https://github.com/Ancienttwo/byok-sdk/issues/2461)、[#2462](https://github.com/Ancienttwo/byok-sdk/issues/2462)），承接 [#1499](https://github.com/Ancienttwo/byok-sdk/issues/1499)。
 > **依据文档**：[可行性调研与 Council 记录](../researches/2026-11-23-desktop-native-ui-nsh-feasibility.md)、[NSH Mixed PoC 实测证据](../researches/2026-11-24-nsh-mixed-poc-evidence.md)。
-> **状态说明**：`proposed`。Owner 已否定 Electron（体积过大）与 Tauri（不走 WebView 路线），且 Gate P1、Rust `byok-shell` 与 Windows 150% DPI 核心门禁已实证通过。本 ADR 晋升为 `accepted` 须同时满足两项前提：(1) 人工 Gate P3-IME（[#2458](https://github.com/Ancienttwo/byok-sdk/issues/2458)：实体中文 Windows 11 150% DPI 物理微软拼音候选窗验签）通过；(2) Owner 单独书面确认 D2 的架构取舍（接受以「三进程 OS 隔离 + 进程内 QuickJS `Policy::harden` / 空 `capabilities: {}` / Bridge 白名单」替代原 Electron 独立 OS Renderer 沙箱进程）。若 `#2458` 暴露阻塞性且无法规避的 IME 错位缺陷，按 D1 切换至 `longbridge/gpui-kit`。**独立后续发布门禁**：D2 所要求的 release 打包产物隔离验收（证明打包后 `capabilities.json` 禁用 `process`/`fs`/`network`、`Policy::harden` 生效且 `byok-shell` native bridge 拒绝未在 `bridge-contract.json` 声明的方法）**不随 `#2458` 绿灯关闭**，而作为独立门禁阻塞 [#2461](https://github.com/Ancienttwo/byok-sdk/issues/2461) / [#2462](https://github.com/Ancienttwo/byok-sdk/issues/2462)（Gate P4 切流与发布）。
+> **状态说明**：`proposed`。Owner 已否定 Electron（体积过大）与 Tauri（不走 WebView 路线），并于 2026-11-24（[D2 书面签核评论](https://github.com/Ancienttwo/byok-sdk/issues/2457#issuecomment-7129367051)）单独书面确认了 D2 的架构取舍。现阶段 PoC 已实证：macOS 单机 Gate P1（30/30 hardened fixture）、macOS `stub-host`/假 custody `byok-shell` 原型（7/7）与 Windows TS-only 预编译运行时 150% DPI 探测；真实 SEA Host + 真实 custody 三端联调、Windows Mixed MSVC 编包、Linux 运行验证及更新交棒契约仍待并行前置冒烟与 [#2460](https://github.com/Ancienttwo/byok-sdk/issues/2460)–[#2462](https://github.com/Ancienttwo/byok-sdk/issues/2462) 闭环。本 ADR 晋升为 `accepted` 须待重打后的 [`#2458`](https://github.com/Ancienttwo/byok-sdk/issues/2458)（实体中文 Windows 11 150% DPI 物理微软拼音候选窗验签）通过（与上述已完成书面签核的 D2 并列为晋升双前提）。若重打后的 `#2458` 暴露阻塞性且无法规避的 IME 错位缺陷，或并行 Linux/Windows Mixed release 冒烟构包失败，按 D1 触发切换至 `longbridge/gpui-kit` 评审。**独立后续发布门禁**：D2 所要求的 release 打包产物隔离验收（证明打包后 `capabilities.json` 禁用 `process`/`fs`/`network`、`Policy::harden` 生效且 `byok-shell` native bridge 拒绝未在 `bridge-contract.json` 声明的方法）**不随 `#2458` 绿灯关闭**，而作为独立门禁阻塞 [#2461](https://github.com/Ancienttwo/byok-sdk/issues/2461) / [#2462](https://github.com/Ancienttwo/byok-sdk/issues/2462)（Gate P4 切流与发布）。
 
 ## 1. 背景
 
@@ -20,7 +20,7 @@ appliesTo:
 经 2026-11-24 隔离 PoC 实测：
 - 纯壳体积显著收敛：macOS NSH Mixed release `.app` 为 `53M`（`54,528 KiB`），Windows 为 `24.91–25.83 MiB` zip（解包 `64.85 MiB`）；
 - 硬化的 QuickJS release VM（`Policy::harden` + 空 capabilities `{}`）以 30/30 通过 `@byok-sdk/keys/model-route` + `zod@4.6.7` 全量 fixture 向量，但也暴露出 `hasStructuredClone === false` 以及 Windows `<Input>` 默认 `"Segoe UI"` 在英文 Win11 下将输入中文渲染为 `□□□□` 等平台约束；
-- 同时因上游 `longbridge/nsh` 尚无兼容性冻结发布（`docs/dev/compatibility.md`），本架构必须显式隔离 UI 框架与宿主进程监督底座，保留无返工回退到 `gpui-kit` 的工程接缝。
+- 同时因上游 `longbridge/nsh` 迭代较快（且其 `docs/dev/compatibility.md` 仅约束 JS 运行时与组件导出而不覆盖 Rust `#[native_module]` 嵌入 API），本架构通过 `Cargo.lock` 精确钉死 NSH rev 并显式隔离 UI 框架与宿主进程监督底座，保留向 `gpui-kit` 迁移时的 `byok-shell` 底座复用接缝。
 
 ## 2. 决定
 
@@ -28,12 +28,12 @@ appliesTo:
 
 - 私有桌面前端（仅限 `examples/desktop-bot-app`，不进入 `packages/*`）目标采用 **`longbridge/nsh` Mixed 模式（Rust 宿主 + QuickJS TSX UI）**。
 - 所有进程生命周期、协议读写、防休眠、恢复命令行调度与秘钥管道均抽离进 **UI 框架无关的独立 Rust crate `byok-shell`**（[#2460](https://github.com/Ancienttwo/byok-sdk/issues/2460)），严禁在 `byok-shell` 中依赖任何 `nsh-*` 或 UI crate。
-- **回退触发与切换路径**：若 [#2458](https://github.com/Ancienttwo/byok-sdk/issues/2458) 实体中文 IME 验签失败且无法在上游解决，或 [#2462](https://github.com/Ancienttwo/byok-sdk/issues/2462) 三端打包/兼容性冻结出现不可调和阻塞，保留 `byok-shell` 原封不动，仅替换 UI 接入层为 `longbridge/gpui-kit`。
+- **回退触发与切换路径**：若以下任一触发条件成立，保留 `byok-shell` 底座并将 UI 接入层评估/切换为 `longbridge/gpui-kit`（UI TSX 需重写，且需在 `BRIDGE_VERSION` 内补暴露无 secret 的 Host route view 方法）：(1) 包含上游修复重打后的 [#2458](https://github.com/Ancienttwo/byok-sdk/issues/2458) 实体中文 IME 验签失败且上游无解；(2) Linux x64 / Windows x64 并行 NSH Mixed release 冒烟编包或出窗失败且无合理成本修复方案；(3) [#2462](https://github.com/Ancienttwo/byok-sdk/issues/2462) 三端打包、签名或 `Cargo.lock` 钉版升级出现不可调和阻塞。（若 D2 被整体否定，则非 WebView 同进程原生路线整体重议，不仅 NSH。）
 
 ### D2. OS 进程隔离边界、进程内 VM 权限取舍与 Rust 监督权威
 
 - **保留的 OS 进程隔离（三进程形态）**：`Shell ↔ Host`（`BRIDGE_VERSION = 2` NDJSON stdio 子进程）与 `Shell ↔ Custody`（一次性 stdin 短生命周期子进程，secret 绝不进入 Host 内存或主管道）依然保持独立 OS 进程隔离。
-- **变更的边界（显式架构取舍，供 Owner 单独确认）**：原 Electron 的独立 OS Renderer 沙箱进程（`sandbox + contextIsolation`）**不再存在**。在 NSH Mixed 下，QuickJS-NG 与 Rust `byok-shell` 运行在**同一 OS 进程内**（见[可行性调研 §4.1](../researches/2026-11-23-desktop-native-ui-nsh-feasibility.md#L97-L105)）；原 OS 级 renderer 进程边界改为依赖「静态 release 字节码 + `Policy::harden` + 空 `"capabilities": {}` + Rust `byok-shell` 严格 Bridge 方法白名单」的进程内 VM 权限约束（一旦 QuickJS 原生桥接代码存在内存安全漏洞，VM 层面权限无法替代 OS 进程隔离）。
+- **变更的边界（显式架构取舍，已获 [Owner 2026-11-24 书面确认](https://github.com/Ancienttwo/byok-sdk/issues/2457#issuecomment-7129367051)）**：原 Electron 的独立 OS Renderer 沙箱进程（`sandbox + contextIsolation`）**不再存在**。在 NSH Mixed 下，QuickJS-NG 与 Rust `byok-shell` 运行在**同一 OS 进程内**（见[可行性调研 §4.1](../researches/2026-11-23-desktop-native-ui-nsh-feasibility.md#L97-L105)）；原 OS 级 renderer 进程边界改为依赖「静态 release 字节码 + `Policy::harden` + 空 `"capabilities": {}` + Rust `byok-shell` 严格 Bridge 方法白名单」的进程内 VM 权限约束。除 QuickJS 原生桥接代码本身的内存安全漏洞外，该取舍还明确承接**不可信的模型/工具输出文本由建仓约六周的 NSH 原生 Markdown / TextView 解析器引擎在持有 spawn Host 与 custody 权限的同一 OS 主进程内直接解析渲染**这一攻击面；VM 层面权限无法在 OS 进程内形成二次隔离缓解。
 - **禁止 TSX-only 与 Rust-only 模式**：TSX-only 会对子进程组强杀且破坏 custody 配置写锁语意，Rust-only 则失去直接执行 `@byok-sdk/keys/model-route` 的能力。
 - **Rust 持有进程权威**：Node Host 子进程与短生命周期 custody 子进程全部由 `byok-shell` 派生监督，继承并过滤 `FOREIGN_RUNTIME_VARIABLES`，保持 `1s..30s`（60s 重置）指数退避、`50ms` `state-changed` hint 聚合与 `10s` 优雅 `shutdown`。
 - **Custody 隔离不变式**：API key / secret 只经 `byok-shell` 临时内存写一次 stdin 到 custody 子进程并立即清零；`keys.submit` 超时（30s）后 UI 返回超时，**但绝不杀死正在持 OS 钥匙串或 SQLite 锁写入的 custody 子进程**（并安全忽略或排干超时后的尾随 `stdout` 以免引发子进程异常）；`keys.list` 超时则强杀。
@@ -42,7 +42,7 @@ appliesTo:
 ### D3. S1 / S2 单一权威接缝与共用包复用约束
 
 - **S1（收回 Host 布局与快照）**：`byok-desktop-snapshot` 与 `byok-desktop-restore` 全部收归 Host argv 重入命令（沿用 `START_FRESH_COMMAND` 单行 JSON receipt 协议，[#2459](https://github.com/Ancienttwo/byok-sdk/issues/2459)）；原生壳与现有壳不再 import `@byok-sdk/client/host-layout`。
-- **S2（生成式 Bridge 契约）**：由 `examples/desktop-bot-app/src/bridge/domains/*.ts`（唯一权威）在构建期生成只读 `bridge-contract.json`（含 `bridgeVersion`、`rendererMethods`、`mainMethods`、`hostMethods`）及防漂移测试；`byok-shell` 编译期或启动期以此为唯一白名单与版本比对源，严格 fail-closed，不做版本协商或兼容性别名。
+- **S2（生成式 Bridge 契约）**：由 `examples/desktop-bot-app/src/bridge/domains/*.ts`（唯一权威）生成只读 `bridge-contract.json`（`schemaVersion: 2`，含 `bridgeVersion`、`rendererMethods`、`mainMethods`、`hostMethods`、`shellToHostMethods` 及 `hostCommands`）与生成器防漂移测试，确保 `keys.profilesChanged` 等壳→Host 内部调用同时受白名单声明；`byok-shell` 编译期嵌入并 fail-closed 校验该契约，不做版本协商或兼容性别名。
 - **`@byok-sdk/keys` 与 `@byok-sdk/ui-runtime` 使用边界**：
   - QuickJS 仅直接运行纯函数状态机 `@byok-sdk/keys/model-route`（随 release `Policy::harden` 持续回归全部 30 个 fixture vectors）；不得要求 `packages/keys` 修改实现以迎合非标准 JS API，且 TSX 侧禁止依赖 `globalThis.structuredClone`。
   - `@byok-sdk/ui-runtime` 仅在 Node Host 侧运行（避免把 `@byok-sdk/cloud` 与 Hono 拉入 QuickJS），UI 仅消费 Host 投影后的序列化 JSON `ActivityCard`。

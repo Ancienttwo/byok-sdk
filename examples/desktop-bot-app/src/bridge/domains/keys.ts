@@ -17,4 +17,8 @@ export interface KeysMethods {
   'keys.profilesChanged': { params: undefined; result: null };
 }
 
-export const KEYS_DOMAIN = { renderer: [], main: ['keys.submit', 'keys.list'] } as const satisfies BridgeDomain<KeysMethods>;
+export const KEYS_DOMAIN = {
+  renderer: [],
+  main: ['keys.submit', 'keys.list'],
+  shellToHost: ['keys.profilesChanged'],
+} as const satisfies BridgeDomain<KeysMethods>;
