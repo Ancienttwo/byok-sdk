@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { app, dialog } from 'electron';
+import { app, autoUpdater as electronAutoUpdater, dialog } from 'electron';
 import electronUpdater from 'electron-updater';
 import brand from '../../brand.config.ts';
 import { SNAPSHOT_COMMAND, type SnapshotReceipt } from '../recovery/protocol.ts';
@@ -16,9 +16,73 @@ export interface UpdaterOptions {
   readonly maintenanceLock: MaintenanceLock;
   readonly currentVersion?: () => string;
   readonly confirmInstall?: (version: string, currentVersion: string) => Promise<boolean>;
-  readonly quitAndInstall?: () => void;
+  readonly quitAndInstall?: () => Promise<boolean> | boolean;
+  readonly installHandoverTimeoutMs?: number;
   readonly showError?: (title: string, message: string) => void;
   readonly relaunchAndQuit?: () => void;
+}
+
+export interface QuitAndInstallSources {
+  readonly autoUpdater: {
+    quitAndInstall(): void;
+    once(event: 'error', listener: (error: Error) => void): unknown;
+    removeListener(event: 'error', listener: (error: Error) => void): unknown;
+  };
+  readonly nativeUpdater: {
+    once(event: 'before-quit-for-update', listener: () => void): unknown;
+    removeListener(event: 'before-quit-for-update', listener: () => void): unknown;
+  };
+  readonly appEvents: {
+    once(event: 'before-quit', listener: () => void): unknown;
+    removeListener(event: 'before-quit', listener: () => void): unknown;
+  };
+  readonly timeoutMs: number;
+}
+
+/**
+ * Invokes `electron-updater`'s `quitAndInstall()` and resolves `true` only
+ * when Electron emits `before-quit-for-update` or `before-quit`. Resolves
+ * `false` if `quitAndInstall()` returns without scheduling quit within
+ * `timeoutMs`, and rejects if `autoUpdater` emits `error` or throws.
+ */
+export function requestQuitAndInstall(sources: QuitAndInstallSources): Promise<boolean> {
+  return new Promise<boolean>((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      clearTimeout(timer);
+      sources.autoUpdater.removeListener('error', onError);
+      sources.nativeUpdater.removeListener('before-quit-for-update', onConfirmed);
+      sources.appEvents.removeListener('before-quit', onConfirmed);
+    };
+    const onConfirmed = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(true);
+    };
+    const onError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(false);
+    }, sources.timeoutMs);
+    timer.unref?.();
+
+    sources.autoUpdater.once('error', onError);
+    sources.nativeUpdater.once('before-quit-for-update', onConfirmed);
+    sources.appEvents.once('before-quit', onConfirmed);
+    try {
+      sources.autoUpdater.quitAndInstall();
+    } catch (error) {
+      onError(error as Error);
+    }
+  });
 }
 
 /**
@@ -61,7 +125,12 @@ export async function offerInstall(version: string, options: UpdaterOptions): Pr
     app.relaunch();
     app.quit();
   });
-  const quitAndInstall = options.quitAndInstall ?? (() => electronUpdater.autoUpdater.quitAndInstall());
+  const quitAndInstall = options.quitAndInstall ?? (() => requestQuitAndInstall({
+    autoUpdater: electronUpdater.autoUpdater,
+    nativeUpdater: electronAutoUpdater,
+    appEvents: app,
+    timeoutMs: options.installHandoverTimeoutMs ?? (process.platform === 'darwin' ? 15_000 : 2_000),
+  }));
 
   if (!await confirm(version, current)) return false;
 
@@ -86,14 +155,35 @@ export async function offerInstall(version: string, options: UpdaterOptions): Pr
         const message = (error as Error).message;
         console.error(`Update not installed: ${message}`);
         showError('Update not installed', message);
-        handover();
-        relaunchAndQuit();
+        if (!options.maintenanceLock.isQuitting()) {
+          handover.confirm();
+          relaunchAndQuit();
+        }
         return false;
       }
 
-      handover();
-      quitAndInstall();
-      return true;
+      handover.beginPending();
+      let takenOver = false;
+      let handoverError: string | undefined;
+      try {
+        takenOver = await quitAndInstall();
+      } catch (error) {
+        handoverError = (error as Error).message;
+      }
+      if (takenOver) {
+        handover.confirm();
+        return true;
+      }
+
+      handover.cancelPending();
+      const message = handoverError ?? 'Updater did not start installing the update';
+      console.error(`Update not installed: ${message}`);
+      showError('Update not installed', message);
+      if (!options.maintenanceLock.isQuitting()) {
+        handover.confirm();
+        relaunchAndQuit();
+      }
+      return false;
     });
   } catch (error) {
     if (error instanceof MaintenanceBusyError) {

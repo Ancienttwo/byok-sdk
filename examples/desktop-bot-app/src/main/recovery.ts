@@ -17,7 +17,7 @@ import {
   type StartFreshReceipt,
 } from '../recovery/protocol.ts';
 import { askHostCommand, type CommandChild, type Receipt } from './host-command.ts';
-import type { MaintenanceLock } from './maintenance-lock.ts';
+import type { HandoverControls, MaintenanceLock } from './maintenance-lock.ts';
 
 export interface ShellDependencies {
   /** This app's version: restore offers the snapshot this version wrote before an update. */
@@ -43,17 +43,17 @@ const noParams = (method: string, params: unknown) => {
  * into `relaunch`. If `stopHost()` itself fails, S1 `action` is never started
  * and `relaunch` is not called so existing stores remain untouched.
  */
-async function withHostStopped<T>(deps: ShellDependencies, handover: () => void, action: () => Promise<T>): Promise<T> {
+async function withHostStopped<T>(deps: ShellDependencies, handover: HandoverControls, action: () => Promise<T>): Promise<T> {
   await deps.stopHost();
   let result: T;
   try {
     result = await action();
   } catch (error) {
-    handover();
+    handover.confirm();
     deps.relaunch(error as Error);
     throw error;
   }
-  handover();
+  handover.confirm();
   deps.relaunch();
   return result;
 }

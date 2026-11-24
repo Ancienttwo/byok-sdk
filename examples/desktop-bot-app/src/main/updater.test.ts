@@ -1,3 +1,4 @@
+import { EventEmitter } from 'node:events';
 import { cp, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -17,11 +18,11 @@ vi.mock('node:fs/promises', async importOriginal => {
     writeFile: vi.fn(fsRef.actual.writeFile),
   };
 });
-vi.mock('electron', () => ({ app: {}, dialog: {} }));
+vi.mock('electron', () => ({ app: {}, autoUpdater: {}, dialog: {} }));
 vi.mock('electron-updater', () => ({ default: {} }));
 
-const { createMaintenanceLock } = await import('./maintenance-lock.ts');
-const { offerInstall } = await import('./updater.ts');
+const { MaintenanceBusyError, createBeforeQuitHandler, createMaintenanceLock } = await import('./maintenance-lock.ts');
+const { offerInstall, requestQuitAndInstall } = await import('./updater.ts');
 const { completeSnapshot, restoreSnapshot, snapshotStores } = await import('../recovery/stores.ts');
 const layout = () => ({ storeDir: path.join(root, 'store'), scratchRoot: { path: path.join(root, 'store', 'tmp') }, hostStorageRoot: path.join(root, 'app') });
 
@@ -208,7 +209,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       },
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
-      quitAndInstall: () => { events.push('quitAndInstall'); },
+      quitAndInstall: () => { events.push('quitAndInstall'); return true; },
       maintenanceLock: createMaintenanceLock(),
     });
 
@@ -233,7 +234,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       spawnHostCommand,
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
-      quitAndInstall: () => { events.push('quitAndInstall'); },
+      quitAndInstall: () => { events.push('quitAndInstall'); return true; },
       maintenanceLock,
     });
 
@@ -255,7 +256,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       },
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
-      quitAndInstall: () => { events.push('quitAndInstall'); },
+      quitAndInstall: () => { events.push('quitAndInstall'); return true; },
       maintenanceLock: createMaintenanceLock(),
     });
 
@@ -266,5 +267,108 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       'error:Update not installed:Snapshot failed (snapshot_failed): disk full',
       'relaunchAndQuit',
     ]);
+  });
+
+  it('recovers via relaunchAndQuit when quitAndInstall returns void without scheduling quit or emits error', async () => {
+    const createSources = (quitAndInstall: () => void, timeoutMs: number) => {
+      const autoUpdater = new EventEmitter() as EventEmitter & { quitAndInstall(): void };
+      autoUpdater.quitAndInstall = quitAndInstall;
+      return { autoUpdater, nativeUpdater: new EventEmitter(), appEvents: new EventEmitter(), timeoutMs };
+    };
+
+    // Case 1: BaseUpdater.quitAndInstall() returns void without scheduling quit (install() === false).
+    const lock1 = createMaintenanceLock();
+    const events1: string[] = [];
+    let markQuitCalled!: () => void;
+    const quitStarted = new Promise<void>(resolve => { markQuitCalled = resolve; });
+    const sources1 = createSources(() => { markQuitCalled(); }, 40);
+    const pendingVoid = offerInstall('2.0.0', {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall: async () => { events1.push('stopped'); },
+      spawnHostCommand: () => receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0),
+      showError: (title, msg) => { events1.push(`error:${title}:${msg}`); },
+      relaunchAndQuit: () => { events1.push('relaunchAndQuit'); },
+      quitAndInstall: () => requestQuitAndInstall(sources1),
+      maintenanceLock: lock1,
+    });
+
+    await quitStarted;
+    // While pending handover, confirmation has not occurred yet, and concurrent maintenance stays rejected.
+    expect(lock1.isHandedOver()).toBe(false);
+    await expect(lock1.run(async () => 'overlap')).rejects.toBeInstanceOf(MaintenanceBusyError);
+
+    await expect(pendingVoid).resolves.toBe(false);
+    expect(events1).toEqual([
+      'stopped',
+      'error:Update not installed:Updater did not start installing the update',
+      'relaunchAndQuit',
+    ]);
+    expect(lock1.isHandedOver()).toBe(true);
+
+    // Case 2: autoUpdater emits 'error' synchronously -> fails promptly without waiting for timeout.
+    const lock2 = createMaintenanceLock();
+    const events2: string[] = [];
+    const sources2 = createSources(() => {
+      sources2.autoUpdater.emit('error', new Error('No update filepath provided'));
+    }, 5_000);
+    const installedErr = await offerInstall('2.0.0', {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall: async () => { events2.push('stopped'); },
+      spawnHostCommand: () => receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0),
+      showError: (title, msg) => { events2.push(`error:${title}:${msg}`); },
+      relaunchAndQuit: () => { events2.push('relaunchAndQuit'); },
+      quitAndInstall: () => requestQuitAndInstall(sources2),
+      maintenanceLock: lock2,
+    });
+
+    expect(installedErr).toBe(false);
+    expect(events2).toEqual([
+      'stopped',
+      'error:Update not installed:No update filepath provided',
+      'relaunchAndQuit',
+    ]);
+  });
+
+  it('confirms pending handover when quitAndInstall schedules before-quit-for-update / before-quit via setImmediate', async () => {
+    const maintenanceLock = createMaintenanceLock();
+    const autoUpdater = new EventEmitter() as EventEmitter & { quitAndInstall(): void };
+    const nativeUpdater = new EventEmitter();
+    const appEvents = new EventEmitter();
+    const quitEvent = { preventDefault: vi.fn() };
+    const showError = vi.fn();
+    const relaunchAndQuit = vi.fn();
+
+    appEvents.on('before-quit', createBeforeQuitHandler({
+      maintenanceLock,
+      stopHost: vi.fn(async () => {}),
+      exit: vi.fn(),
+      logError: vi.fn(),
+    }));
+
+    autoUpdater.quitAndInstall = () => {
+      setImmediate(() => {
+        nativeUpdater.emit('before-quit-for-update');
+        appEvents.emit('before-quit', quitEvent);
+      });
+    };
+
+    const installed = await offerInstall('2.0.0', {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall: async () => {},
+      spawnHostCommand: () => receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0),
+      showError,
+      relaunchAndQuit,
+      quitAndInstall: () => requestQuitAndInstall({ autoUpdater, nativeUpdater, appEvents, timeoutMs: 2_000 }),
+      maintenanceLock,
+    });
+
+    expect(installed).toBe(true);
+    expect(quitEvent.preventDefault).not.toHaveBeenCalled();
+    expect(showError).not.toHaveBeenCalled();
+    expect(relaunchAndQuit).not.toHaveBeenCalled();
+    expect(maintenanceLock.isHandedOver()).toBe(true);
   });
 });
