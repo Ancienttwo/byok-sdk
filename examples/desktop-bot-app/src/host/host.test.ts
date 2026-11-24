@@ -13,7 +13,8 @@ import { createByokServer } from '@byok-sdk/server';
 import { BRIDGE_VERSION, encodeMessage, type HostState } from '../bridge/protocol.ts';
 import { composeHost, lateServerConsumers, type HostCompositionOptions } from './compose.ts';
 import { precheckHostStores } from './precheck.ts';
-import { startFresh } from './recovery.ts';
+import { RESTORE_COMMAND, SNAPSHOT_COMMAND, SNAPSHOT_STATUS_COMMAND } from '../recovery/protocol.ts';
+import { runRestoreCommand, runSnapshotCommand, runSnapshotStatusCommand, startFresh } from './recovery.ts';
 import { superviseHost } from './supervise.ts';
 
 let root: string;
@@ -190,5 +191,47 @@ describe('desktop Host composition', () => {
     const layout = { storeDir: path.join(root, 'store'), scratchRoot: { path: path.join(root, 'store', 'tmp') }, hostStorageRoot: path.join(root, 'home') };
     const moved = await startFresh({ layout, productId: 'byok-desktop-test', stamp: 'c', deviceCredentials: new InMemoryDeviceCredentialBackend() });
     expect(moved.map(move => path.relative(root, move.to))).toEqual([path.join('home', 'host.aside-c')]);
+  });
+
+  it('runs S1 snapshot, snapshot-status, and restore commands via receipts and rejects path traversal', async () => {
+    await makeRoot();
+    await mkdir(path.join(root, 'store'), { recursive: true });
+    await mkdir(path.join(root, 'home', 'host'), { recursive: true });
+    await writeFile(path.join(root, 'store', 'device.json'), 'v1-store');
+    await writeFile(path.join(root, 'home', 'host', 'settings.json'), 'v1-host');
+    const layout = { storeDir: path.join(root, 'store'), scratchRoot: { path: path.join(root, 'store', 'tmp') }, hostStorageRoot: path.join(root, 'home') };
+
+    const lines: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown, cb?: unknown) => {
+      lines.push(String(chunk).trim());
+      if (typeof cb === 'function') (cb as () => void)();
+      return true;
+    }) as typeof process.stdout.write);
+
+    try {
+      expect(await runSnapshotStatusCommand([SNAPSHOT_STATUS_COMMAND, '1.0.0'], { layout })).toBe(0);
+      expect(JSON.parse(lines.at(-1)!)).toEqual({ ok: true, snapshot: null });
+
+      expect(await runSnapshotCommand([SNAPSHOT_COMMAND, '1.0.0'], { layout })).toBe(0);
+      const snapReceipt = JSON.parse(lines.at(-1)!) as { ok: true; target: string };
+      expect(snapReceipt.ok).toBe(true);
+
+      expect(await runSnapshotStatusCommand([SNAPSHOT_STATUS_COMMAND, '1.0.0'], { layout })).toBe(0);
+      expect(JSON.parse(lines.at(-1)!)).toEqual({ ok: true, snapshot: { version: '1.0.0', target: snapReceipt.target } });
+
+      await writeFile(path.join(root, 'store', 'device.json'), 'v2-store');
+      expect(await runRestoreCommand([RESTORE_COMMAND, '1.0.0', '2026-01-01T00-00-01.000Z'], { layout })).toBe(0);
+      const restoreReceipt = JSON.parse(lines.at(-1)!) as { ok: true; asidePath: string };
+      expect(restoreReceipt.ok).toBe(true);
+      expect(await readFile(path.join(root, 'store', 'device.json'), 'utf8')).toBe('v1-store');
+
+      expect(await runRestoreCommand([RESTORE_COMMAND, 'missing-ver', '2026-01-01T00-00-02.000Z'], { layout })).toBe(1);
+      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ ok: false, code: 'restore_failed', movedBack: true });
+
+      await expect(runSnapshotCommand([SNAPSHOT_COMMAND, '../escape'], { layout })).rejects.toThrow('single-segment version');
+      await expect(runRestoreCommand([RESTORE_COMMAND, '1.0.0', '../bad'], { layout })).rejects.toThrow('single-segment aside stamp');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });

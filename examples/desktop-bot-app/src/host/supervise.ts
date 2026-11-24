@@ -16,8 +16,8 @@ import { serveBridge, type BridgeHandlers } from '../bridge/server.ts';
 import { composeHost, HostStoppedError, stoppedDaemonConfig, type ComposedHost, type HostCompositionOptions } from './compose.ts';
 import { exportDiagnostics } from './settings/device.ts';
 import { runKeysCommand } from './keys/commands.ts';
-import { runStartFreshCommand } from './recovery.ts';
-import { START_FRESH_COMMAND } from '../recovery/protocol.ts';
+import { runRestoreCommand, runSnapshotCommand, runSnapshotStatusCommand, runStartFreshCommand } from './recovery.ts';
+import { RESTORE_COMMAND, SNAPSHOT_COMMAND, SNAPSHOT_STATUS_COMMAND, START_FRESH_COMMAND } from '../recovery/protocol.ts';
 import { HostStoreRefusedError } from './precheck.ts';
 
 /**
@@ -128,6 +128,18 @@ async function main(exit: (code: number) => void): Promise<void> {
   if (args[0] === START_FRESH_COMMAND) {
     const nativeAssetRoot = resolveSdkHosting(hostedBesideExecutable()).daemon.nativeAssetRoot;
     exit(await runStartFreshCommand(args, { layout, productId: brand.productId, ...(nativeAssetRoot === undefined ? {} : { nativeAssetRoot }) }));
+    return;
+  }
+  if (args[0] === SNAPSHOT_COMMAND) {
+    exit(await runSnapshotCommand(args, { layout }));
+    return;
+  }
+  if (args[0] === SNAPSHOT_STATUS_COMMAND) {
+    exit(await runSnapshotStatusCommand(args, { layout }));
+    return;
+  }
+  if (args[0] === RESTORE_COMMAND) {
+    exit(await runRestoreCommand(args, { layout }));
     return;
   }
   await superviseHost({

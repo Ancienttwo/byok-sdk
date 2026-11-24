@@ -7,6 +7,7 @@ import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMe
 import { createRendererRouter, isAppRefusal, settleCall } from '../bridge/route.ts';
 import { createMainHandlers } from './domains.ts';
 import { HostProcess, spawnDevHost, spawnDevHostCommand } from './host-process.ts';
+import { createBeforeQuitHandler, createMaintenanceLock } from './maintenance-lock.ts';
 import { spawnPackagedHost, spawnPackagedHostCommand } from './packaged-host.ts';
 import { coalesceStateHints } from './state-hint.ts';
 import { createAppTray } from './tray.ts';
@@ -65,6 +66,8 @@ const host = new HostProcess({
   },
 });
 
+// Chromium's own state lives under `<hostStorageRoot>/shell`; resolved once synchronously before ready so userData
+// is set before the single-instance lock (#1499). Host store and recovery paths are owned by Host commands (S1).
 const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
 
 /** After a recovery action the app restarts, so the new Host prechecks what the action left; a failure is shown first. */
@@ -74,12 +77,15 @@ function relaunch(failure?: Error): void {
   app.exit(0);
 }
 
+const maintenanceLock = createMaintenanceLock();
+
 const route = createRendererRouter<BridgeMethods, MainMethod>({
   allowed: RENDERER_METHODS,
   main: createMainHandlers({
     callHost: (method, params) => host.call(method, params),
     spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand,
-    layout, version: app.getVersion(), hostState: () => lastState, stopHost: () => host.stop(), relaunch, now: () => new Date(),
+    maintenanceLock,
+    version: app.getVersion(), hostState: () => lastState, stopHost: () => host.stop(), relaunch, now: () => new Date(),
   }),
   host: (method, params) => host.call(method, params as never),
 });
@@ -153,23 +159,23 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {});
   app.on('activate', () => { if (!window) createWindow(); });
 
-  let stopping = false;
-  app.on('before-quit', event => {
-    if (stopping) return;
-    event.preventDefault();
-    stopping = true;
-    host.stop().then(() => app.exit(0), (error: Error) => {
-      console.error(`Host shutdown failed: ${error.message}`);
-      app.exit(1);
-    });
-  });
+  app.on('before-quit', createBeforeQuitHandler({
+    maintenanceLock,
+    stopHost: () => host.stop(),
+    exit: code => app.exit(code),
+    logError: message => console.error(message),
+  }));
 
   void app.whenReady().then(() => {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
     protocol.handle(SCHEME, serveRenderer);
     ipcMain.handle(BRIDGE_IPC_CHANNEL, forward);
     host.start();
-    startUpdater({ beforeInstall: () => host.stop() });
+    startUpdater({
+      beforeInstall: () => host.stop(),
+      spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand,
+      maintenanceLock,
+    });
     createWindow();
     tray = createAppTray(TRAY_ICON, brand.productName, { showWindow, quit: () => app.quit() });
     tray.update(lastState);

@@ -5,6 +5,13 @@
  * there is no negotiation. Main sends requests; the Host sends replies and
  * `state` pushes, which carry no id.
  */
+import { CUSTODY_COMMAND } from '../custody/protocol.ts';
+import {
+  RESTORE_COMMAND,
+  SNAPSHOT_COMMAND,
+  SNAPSHOT_STATUS_COMMAND,
+  START_FRESH_COMMAND,
+} from '../recovery/protocol.ts';
 import type { Prefixed } from './domain.ts';
 import { ACTIVITY_DOMAIN, type ActivityMethods } from './domains/activity.ts';
 import { K8_DOMAIN, type K8Methods } from './domains/k8.ts';
@@ -43,7 +50,9 @@ export type SupervisedHostState =
 /** The one Host-to-main push: the Host's state after every change. */
 export interface HostStateEvent { readonly event: 'state'; readonly state: HostState }
 
-/** The bridge's own methods. `hello` and `shutdown` belong to main alone. */
+/** The bridge's own methods. `hello` and `shutdown` belong to main/shell alone. */
+export const CORE_METHODS = ['hello', 'status', 'shutdown'] as const;
+
 export interface CoreMethods {
   hello: { params: { bridgeVersion: number }; result: { bridgeVersion: number } };
   status: { params: undefined; result: HostState };
@@ -69,8 +78,50 @@ export type RendererMethod = 'status' | (typeof DOMAINS)[number]['renderer'][num
 export const MAIN_METHODS: readonly MainMethod[] = DOMAINS.flatMap(domain => domain.main);
 export type MainMethod = (typeof DOMAINS)[number]['main'][number];
 
+/** The domain methods served by the Host behind the bridge (excluding `status` and {@link MAIN_METHODS}). */
+export const HOST_METHODS: readonly (typeof DOMAINS)[number]['renderer'][number][] = DOMAINS.flatMap(domain => domain.renderer);
+
 /** The methods the Host answers behind the bridge, besides `hello` and `shutdown`. */
 export type HostMethods = Omit<BridgeMethods, 'hello' | 'shutdown' | MainMethod>;
+
+export interface BridgeContract {
+  readonly schemaVersion: 1;
+  readonly bridgeVersion: typeof BRIDGE_VERSION;
+  readonly ipcChannel: typeof BRIDGE_IPC_CHANNEL;
+  readonly stateHintChannel: typeof STATE_HINT_CHANNEL;
+  readonly coreMethods: readonly (typeof CORE_METHODS)[number][];
+  readonly rendererMethods: readonly BridgeMethod[];
+  readonly mainMethods: readonly MainMethod[];
+  readonly hostMethods: readonly (typeof DOMAINS)[number]['renderer'][number][];
+  readonly hostCommands: {
+    readonly custody: typeof CUSTODY_COMMAND;
+    readonly startFresh: typeof START_FRESH_COMMAND;
+    readonly snapshot: typeof SNAPSHOT_COMMAND;
+    readonly snapshotStatus: typeof SNAPSHOT_STATUS_COMMAND;
+    readonly restore: typeof RESTORE_COMMAND;
+  };
+}
+
+/** Deterministic machine-readable bridge contract (S2), projected from `src/bridge/protocol.ts` and `src/bridge/domains/*.ts`. */
+export function buildBridgeContract(): BridgeContract {
+  return {
+    schemaVersion: 1,
+    bridgeVersion: BRIDGE_VERSION,
+    ipcChannel: BRIDGE_IPC_CHANNEL,
+    stateHintChannel: STATE_HINT_CHANNEL,
+    coreMethods: [...CORE_METHODS],
+    rendererMethods: [...RENDERER_METHODS],
+    mainMethods: [...MAIN_METHODS],
+    hostMethods: [...HOST_METHODS],
+    hostCommands: {
+      custody: CUSTODY_COMMAND,
+      startFresh: START_FRESH_COMMAND,
+      snapshot: SNAPSHOT_COMMAND,
+      snapshotStatus: SNAPSHOT_STATUS_COMMAND,
+      restore: RESTORE_COMMAND,
+    },
+  };
+}
 
 /**
  * One renderer call's result across IPC. `ipcRenderer.invoke` keeps only a thrown error's message, and the context

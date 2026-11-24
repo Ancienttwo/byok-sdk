@@ -1,87 +1,232 @@
-import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { cp, mkdir, mkdtemp, readdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
-import { resolveHostLayout } from '@byok-sdk/client/host-layout';
-import { app, dialog } from 'electron';
+import { app, autoUpdater as electronAutoUpdater, dialog } from 'electron';
 import electronUpdater from 'electron-updater';
 import brand from '../../brand.config.ts';
-import { hostStoresDir, markSnapshotComplete, moveAll, moveBack, snapshotsDir } from '../recovery/stores.ts';
+import { SNAPSHOT_COMMAND, type SnapshotReceipt } from '../recovery/protocol.ts';
+import { askHostCommand, type CommandChild } from './host-command.ts';
+import { MaintenanceBusyError, type MaintenanceLock } from './maintenance-lock.ts';
+
+export type QuitAndInstallOutcome =
+  | { readonly status: 'confirmed' }
+  | { readonly status: 'failed'; readonly message: string }
+  | { readonly status: 'quit-requested' };
 
 export interface UpdaterOptions {
   /** Stops the Host; resolves once it has closed its stores. */
   readonly beforeInstall: () => Promise<void>;
+  /** Spawns the Host executable with these arguments (S1 snapshot). */
+  readonly spawnHostCommand: (args: readonly string[]) => CommandChild;
+  /** Shared process-wide lock held from Host stop through S1 helper completion and terminal handover. */
+  readonly maintenanceLock: MaintenanceLock;
+  readonly currentVersion?: () => string;
+  readonly confirmInstall?: (version: string, currentVersion: string) => Promise<boolean>;
+  readonly quitAndInstall?: (confirmTakeover: () => void) => Promise<QuitAndInstallOutcome> | QuitAndInstallOutcome;
+  readonly installHandoverTimeoutMs?: number;
+  readonly showError?: (title: string, message: string) => void;
+  readonly relaunchAndQuit?: () => void;
+}
+
+export interface QuitAndInstallSources {
+  readonly autoUpdater: {
+    quitAndInstall(): void;
+    once(event: 'error', listener: (error: Error) => void): unknown;
+    removeListener(event: 'error', listener: (error: Error) => void): unknown;
+  };
+  readonly nativeUpdater: {
+    once(event: 'before-quit-for-update', listener: () => void): unknown;
+    removeListener(event: 'before-quit-for-update', listener: () => void): unknown;
+  };
+  /** Invoked synchronously as soon as `before-quit-for-update` confirms takeover. */
+  readonly onConfirmed?: () => void;
+  /** Subscribes to normal app quit requests while installer takeover is pending. */
+  readonly onQuitRequested?: (listener: () => void) => () => void;
+  /**
+   * True where `quitAndInstall()` is synchronous (`BaseUpdater`: NSIS/AppImage) and a quiet
+   * timeout means it never scheduled quit; false on macOS (`MacUpdater`), where Squirrel's
+   * native download can finish after `timeoutMs` without an error and must stay pending.
+   */
+  readonly canInferFailureOnTimeout: boolean;
+  readonly timeoutMs: number;
+  readonly onPendingTimeout?: () => void;
 }
 
 /**
- * Copies the stores of the running version, after the Host stopped, so a user
- * can go back to this version with the data it wrote: the SDK store directory
- * (without its scratch root) and the Host's own stores (`<hostStorageRoot>/host`,
- * where src/host/compose.ts keeps them). Snapshots live in
- * `<hostStorageRoot>/host/snapshots/<version>`. Each snapshot is staged and
- * marked complete in a sibling temporary directory before swapping into
- * `<version>`, so a failed retry keeps any existing complete snapshot of the
- * same version intact; superseded entries in `snapshots/` are removed only
- * after `<version>` is in place. Returns the snapshot directory.
+ * Invokes `electron-updater`'s `quitAndInstall()` and confirms handover only on
+ * Electron's attributable `before-quit-for-update` signal (calling `onConfirmed`
+ * synchronously before `before-quit` fires). Never treats an ordinary tray
+ * `before-quit` as install confirmation. On macOS (`canInferFailureOnTimeout: false`),
+ * reaching `timeoutMs` leaves handover undetermined/pending rather than racing a
+ * still-running native Squirrel install with a competing relaunch.
  */
-export async function snapshotStores(version: string): Promise<string> {
-  const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
-  const hostDir = hostStoresDir(layout);
-  const snapshots = snapshotsDir(layout);
-  const target = path.join(snapshots, version);
-  await mkdir(snapshots, { recursive: true, mode: 0o700 });
-  const staging = await mkdtemp(path.join(snapshots, `.${version}.staging-`));
-  try {
-    await cp(layout.storeDir, path.join(staging, 'store'), { recursive: true, filter: source => source !== layout.scratchRoot.path });
-    // The snapshot directory is inside the directory it copies, so its entries are copied one by one, never `snapshots` itself.
-    await mkdir(path.join(staging, 'host'), { mode: 0o700 });
-    for (const entry of await readdir(hostDir)) {
-      if (entry !== 'snapshots') await cp(path.join(hostDir, entry), path.join(staging, 'host', entry), { recursive: true });
-    }
-    await markSnapshotComplete(staging, version);
-    const previous = path.join(snapshots, `.${version}.previous-${randomUUID()}`);
-    const done = await moveAll([{ from: target, to: previous }]);
+export function requestQuitAndInstall(sources: QuitAndInstallSources): Promise<QuitAndInstallOutcome> {
+  return new Promise<QuitAndInstallOutcome>(resolve => {
+    let settled = false;
+    let unsubQuit: (() => void) | undefined;
+    const cleanup = () => {
+      clearTimeout(timer);
+      sources.autoUpdater.removeListener('error', onError);
+      sources.nativeUpdater.removeListener('before-quit-for-update', onConfirmed);
+      unsubQuit?.();
+      unsubQuit = undefined;
+    };
+    const onConfirmed = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      sources.onConfirmed?.();
+      resolve({ status: 'confirmed' });
+    };
+    const onError = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({ status: 'failed', message: error.message });
+    };
+    const onQuitRequested = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve({ status: 'quit-requested' });
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      if (sources.canInferFailureOnTimeout) {
+        settled = true;
+        cleanup();
+        resolve({ status: 'failed', message: 'Updater did not start installing the update' });
+      } else {
+        sources.onPendingTimeout?.();
+      }
+    }, sources.timeoutMs);
+    timer.unref?.();
+
+    sources.autoUpdater.once('error', onError);
+    sources.nativeUpdater.once('before-quit-for-update', onConfirmed);
+    unsubQuit = sources.onQuitRequested?.(onQuitRequested);
+    if (settled) return;
     try {
-      await rename(staging, target);
+      sources.autoUpdater.quitAndInstall();
     } catch (error) {
-      await moveBack(done, error);
+      onError(error as Error);
     }
+  });
+}
+
+/**
+ * Invokes the Host executable's S1 snapshot command after the Host has stopped
+ * and returns the finalized snapshot directory.
+ */
+export async function requestHostSnapshot(
+  spawnHostCommand: (args: readonly string[]) => CommandChild,
+  version: string,
+): Promise<string> {
+  const unknown = (message: string) => new Error(`Snapshot did not report: ${message}`);
+  const { receipt, code } = await askHostCommand(spawnHostCommand([SNAPSHOT_COMMAND, version]), '', unknown);
+  const answer = receipt as unknown as SnapshotReceipt;
+  if (!answer.ok) throw new Error(`Snapshot failed (${answer.code}): ${answer.message}`);
+  if (code !== 0) throw unknown(`it exited with code ${code} after its receipt`);
+  return answer.target;
+}
+
+/**
+ * Installs `version` only after user confirmation, confirmed Host shutdown
+ * (`beforeInstall`), and successful S1 Host snapshot (`SNAPSHOT_COMMAND`).
+ * Aborts without snapshotting, installing, or relaunching when `beforeInstall`
+ * fails so original stores remain untouched.
+ */
+export async function offerInstall(version: string, options: UpdaterOptions): Promise<boolean> {
+  const current = (options.currentVersion ?? (() => app.getVersion()))();
+  const confirm = options.confirmInstall ?? (async (nextVersion, runningVersion) => {
+    const { response } = await dialog.showMessageBox({
+      type: 'info',
+      buttons: ['Restart and update', 'Later'],
+      defaultId: 0,
+      cancelId: 1,
+      message: `${brand.productName} ${nextVersion} is ready to install.`,
+      detail: `The app stops, keeps a copy of the data of version ${runningVersion}, and restarts on ${nextVersion}.`,
+    });
+    return response === 0;
+  });
+  const showError = options.showError ?? ((title, message) => dialog.showErrorBox(title, message));
+  const relaunchAndQuit = options.relaunchAndQuit ?? (() => {
+    app.relaunch();
+    app.quit();
+  });
+  const quitAndInstall = options.quitAndInstall ?? (confirmTakeover => requestQuitAndInstall({
+    autoUpdater: electronUpdater.autoUpdater,
+    nativeUpdater: electronAutoUpdater,
+    onConfirmed: confirmTakeover,
+    onQuitRequested: listener => options.maintenanceLock.onQuitRequested(listener),
+    canInferFailureOnTimeout: process.platform !== 'darwin',
+    timeoutMs: options.installHandoverTimeoutMs ?? (process.platform === 'darwin' ? 15_000 : 2_000),
+    onPendingTimeout: () => {
+      console.error('Update installer takeover is still pending; waiting for installer completion, error, or user quit');
+    },
+  }));
+
+  if (!await confirm(version, current)) return false;
+
+  try {
+    return await options.maintenanceLock.run(async handover => {
+      // Phase 1: Confirm Host stopped before invoking any S1 filesystem command.
+      try {
+        await options.beforeInstall();
+      } catch (error) {
+        const message = (error as Error).message;
+        console.error(`Host stop failed before update: ${message}`);
+        showError('Update not installed', message);
+        return false;
+      }
+
+      // Phase 2: Host is stopped; snapshot via S1 before quitAndInstall.
+      try {
+        const target = await requestHostSnapshot(options.spawnHostCommand, current);
+        console.error(`Stores of ${current} copied to ${target}`);
+      } catch (error) {
+        // Nothing is installed without the snapshot; the Host has stopped, so the app restarts on this version.
+        const message = (error as Error).message;
+        console.error(`Update not installed: ${message}`);
+        showError('Update not installed', message);
+        if (!options.maintenanceLock.isQuitting()) {
+          handover.confirm();
+          relaunchAndQuit();
+        }
+        return false;
+      }
+
+      if (options.maintenanceLock.isQuitting()) return false;
+
+      handover.beginPending();
+      let outcome: QuitAndInstallOutcome;
+      try {
+        outcome = await quitAndInstall(() => handover.confirm());
+      } catch (error) {
+        outcome = { status: 'failed', message: (error as Error).message };
+      }
+      if (outcome.status === 'confirmed') {
+        handover.confirm();
+        return true;
+      }
+
+      handover.cancelPending();
+      if (outcome.status === 'quit-requested' || options.maintenanceLock.isQuitting()) {
+        return false;
+      }
+      console.error(`Update not installed: ${outcome.message}`);
+      showError('Update not installed', outcome.message);
+      handover.confirm();
+      relaunchAndQuit();
+      return false;
+    });
   } catch (error) {
-    try {
-      await rm(staging, { recursive: true, force: true, maxRetries: 5 });
-    } catch (cleanup) {
-      throw new Error(`${(error as Error).message}; the staged snapshot could not be removed: ${(cleanup as Error).message}`, { cause: error });
+    if (error instanceof MaintenanceBusyError) {
+      console.error(`Update not installed: ${error.message}`);
+      showError('Update not installed', error.message);
+      return false;
     }
     throw error;
   }
-  for (const entry of await readdir(snapshots)) {
-    if (entry !== version) await rm(path.join(snapshots, entry), { recursive: true, force: true, maxRetries: 5 });
-  }
-  return target;
-}
-
-async function offerInstall(version: string, options: UpdaterOptions): Promise<void> {
-  const { response } = await dialog.showMessageBox({
-    type: 'info',
-    buttons: ['Restart and update', 'Later'],
-    defaultId: 0,
-    cancelId: 1,
-    message: `${brand.productName} ${version} is ready to install.`,
-    detail: `The app stops, keeps a copy of the data of version ${app.getVersion()}, and restarts on ${version}.`,
-  });
-  if (response !== 0) return;
-  try {
-    await options.beforeInstall();
-    console.error(`Stores of ${app.getVersion()} copied to ${await snapshotStores(app.getVersion())}`);
-  } catch (error) {
-    // Nothing is installed without the snapshot; the Host has stopped, so the app restarts on this version.
-    console.error(`Update not installed: ${(error as Error).message}`);
-    dialog.showErrorBox('Update not installed', (error as Error).message);
-    app.relaunch();
-    app.quit();
-    return;
-  }
-  electronUpdater.autoUpdater.quitAndInstall();
 }
 
 /**
@@ -89,7 +234,7 @@ async function offerInstall(version: string, options: UpdaterOptions): Promise<v
  * resources/app-update.yml only when BYOK_UPDATE_FEED_URL was set
  * (electron-builder.config.mjs). Dev runs and a build without a feed have no
  * updater. A downloaded update installs only when the user agrees, after the
- * Host stopped and its stores were copied (`snapshotStores`).
+ * Host stopped and its stores were copied via S1.
  */
 export function startUpdater(options: UpdaterOptions): void {
   if (!app.isPackaged) return;
@@ -106,10 +251,11 @@ export function startUpdater(options: UpdaterOptions): void {
     console.error(`Update failed: ${error.message}`);
   };
   autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.on('error', logFailure);
   autoUpdater.on('update-downloaded', ({ version }: { version: string }) => {
     // The user asked for this install, so a failure in it is shown, not only logged.
-    offerInstall(version, options).catch((error: Error) => {
+    void offerInstall(version, options).catch((error: Error) => {
       logFailure(error);
       dialog.showErrorBox('Update not installed', error.message);
     });

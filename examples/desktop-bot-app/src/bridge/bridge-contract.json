@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "bridgeVersion": 2,
+  "ipcChannel": "byok:bridge",
+  "stateHintChannel": "byok:state-changed",
+  "coreMethods": [
+    "hello",
+    "status",
+    "shutdown"
+  ],
+  "rendererMethods": [
+    "status",
+    "k8.view",
+    "k8.saveBot",
+    "k8.archiveBot",
+    "k8.send",
+    "k8.clear",
+    "k8.cancel",
+    "k8.answer",
+    "activity.cards",
+    "activity.card",
+    "activity.approve",
+    "activity.reject",
+    "settings.device",
+    "settings.get",
+    "settings.setDreaming",
+    "settings.exportDiagnostics",
+    "settings.loginItem",
+    "settings.setLoginItem",
+    "keys.submit",
+    "keys.list",
+    "shell.state",
+    "shell.restore",
+    "shell.startFresh"
+  ],
+  "mainMethods": [
+    "settings.loginItem",
+    "settings.setLoginItem",
+    "keys.submit",
+    "keys.list",
+    "shell.state",
+    "shell.restore",
+    "shell.startFresh"
+  ],
+  "hostMethods": [
+    "k8.view",
+    "k8.saveBot",
+    "k8.archiveBot",
+    "k8.send",
+    "k8.clear",
+    "k8.cancel",
+    "k8.answer",
+    "activity.cards",
+    "activity.card",
+    "activity.approve",
+    "activity.reject",
+    "settings.device",
+    "settings.get",
+    "settings.setDreaming",
+    "settings.exportDiagnostics"
+  ],
+  "hostCommands": {
+    "custody": "byok-desktop-custody",
+    "startFresh": "byok-desktop-start-fresh",
+    "snapshot": "byok-desktop-snapshot",
+    "snapshotStatus": "byok-desktop-snapshot-status",
+    "restore": "byok-desktop-restore"
+  }
+}
