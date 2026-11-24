@@ -233,16 +233,23 @@ describe('Codex persistent app-server adapter', () => {
     expect((await turn(await open(runtime, task, resources))).at(-1)).toEqual({ type: 'turn_end' });
     expect(commands).toEqual([probed]);
   });
-  it.each([
-    ['FAKE_CODEX_APP_SERVER_HELP_HANG', { appServerHelp: 200 }],
-    ['FAKE_CODEX_LOGIN_HANG', { authStatus: 200 }],
-  ] as const)('#2468: detect reports timeout, not a refusal or sign-out, when %s outlives its deadline', async (toggle, timeouts) => {
-    vi.stubEnv(toggle, '1');
+  const prepareInput = (runtime: CodexAdapter) => ({ offer: { target: CODEX_TARGET, instruction: 'hello' }, descriptor: runtime.descriptor, requiredToolsetIds: [] });
+  it('#2468: an `app-server --help` past its deadline is a timeout in detect and a retryable prepare refusal', async () => {
+    vi.stubEnv('FAKE_CODEX_APP_SERVER_HELP_HANG', '1');
     const runtime = adapter();
-    codexProbeTimeouts.override(runtime, timeouts);
+    codexProbeTimeouts.override(runtime, { appServerHelp: 200 });
     expect(await runtime.detect()).toEqual({ kind: 'timeout' });
-    expect(await runtime.prepare({ offer: { target: CODEX_TARGET, instruction: 'hello' }, descriptor: runtime.descriptor, requiredToolsetIds: [] }))
+    expect(await runtime.prepare(prepareInput(runtime)))
       .toEqual({ kind: 'reject', reason: 'codex installation refused: timeout', retryable: true });
+  });
+  it('#2468: a `login status` past its deadline is a timeout in detect, and prepare does not run it again', async () => {
+    vi.stubEnv('FAKE_CODEX_LOGIN_HANG', '1');
+    const runtime = adapter();
+    codexProbeTimeouts.override(runtime, { authStatus: 200 });
+    expect(await runtime.detect()).toEqual({ kind: 'timeout' });
+    // A 60 s hang would exceed the per-test timeout if prepare() ran `login status`.
+    codexProbeTimeouts.override(runtime, { authStatus: 60_000 });
+    expect(await runtime.prepare(prepareInput(runtime))).toMatchObject({ kind: 'prepared' });
   });
   it('detect refuses a missing app-server subcommand', async () => {
     vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');

@@ -111,7 +111,7 @@ describe('diagnostics/runtime-probe: probeRuntimes', () => {
     } finally { vi.useRealTimers(); }
   });
 
-  it('#2468: the default deadline exceeds the adapters\' probe budgets and aborts the signal detect() received', async () => {
+  it('#2468: the default deadline is 35 s (Claude\'s 10 s version + 25 s auth budgets) and aborts the signal detect() received', async () => {
     expect(RUNTIME_PROBE_TIMEOUT_MS).toBe(35_000);
     let received: AbortSignal | undefined;
     const adapter = Object.assign(new StubRuntimeAdapter('claude'), {

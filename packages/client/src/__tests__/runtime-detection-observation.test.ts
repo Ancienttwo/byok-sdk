@@ -211,15 +211,20 @@ describe.skipIf(process.platform === 'win32')('runDetectCommand', () => {
   it('resolves timeout at its deadline while a grandchild still holds both pipes', async () => {
     const receipt = path.join(await directory(), 'grandchild-pid');
     const command = await executable(`const { spawn } = require('node:child_process');
-const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
+const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
 require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(grandchild.pid));
 grandchild.unref();`);
+    const readPid = async () => Number(await fs.readFile(receipt, 'utf8').catch(() => '0'));
     const started = Date.now();
     try {
-      expect(await runDetectCommand(command, [], { timeoutMs: 300, env })).toEqual({ kind: 'timeout' });
+      // Long enough for the child to spawn its grandchild and write the pid first.
+      expect(await runDetectCommand(command, [], { timeoutMs: 600, env })).toEqual({ kind: 'timeout' });
       expect(Date.now() - started).toBeLessThan(3_000);
+      const pid = await readPid();
+      expect(pid).toBeGreaterThan(0);
+      expect(() => process.kill(pid, 0)).not.toThrow();
     } finally {
-      const pid = Number(await fs.readFile(receipt, 'utf8').catch(() => '0'));
+      const pid = await readPid();
       if (pid > 0) try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
     }
   });

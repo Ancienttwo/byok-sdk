@@ -236,16 +236,22 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
   it('#2468: detect() reports timeout at the auth deadline while a grandchild holds the status pipes', async () => {
     const adapter = fakeClaudeAdapter();
-    claudeProbeTimeouts.override(adapter, { authStatus: 300 });
+    // Long enough for the fixture to spawn its grandchild and write the pid first.
+    claudeProbeTimeouts.override(adapter, { authStatus: 600 });
     const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-grandchild-')), 'pid');
+    const readPid = async () => Number(await fs.readFile(pidFile, 'utf8').catch(() => '0'));
     vi.stubEnv('FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE', pidFile);
     const started = Date.now();
     try {
       expect(await adapter.detect()).toEqual({ kind: 'timeout' });
       expect(Date.now() - started).toBeLessThan(5_000);
+      const pid = await readPid();
+      expect(pid).toBeGreaterThan(0);
+      // The grandchild outlived the probe: the deadline, not its exit, ended the read.
+      expect(() => process.kill(pid, 0)).not.toThrow();
     } finally {
       vi.unstubAllEnvs();
-      const pid = Number(await fs.readFile(pidFile, 'utf8').catch(() => '0'));
+      const pid = await readPid();
       if (pid > 0) try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
       await fs.rm(path.dirname(pidFile), { recursive: true, force: true });
     }

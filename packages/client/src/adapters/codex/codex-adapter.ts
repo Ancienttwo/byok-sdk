@@ -232,10 +232,15 @@ export class CodexAdapter implements RuntimeAdapter {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
   async detect(): Promise<RuntimeDetectResult> {
-    return (await this.detectInstallation()).detected;
+    return (await this.detectInstallation({ checkAuth: true })).detected;
   }
 
-  private async detectInstallation(): Promise<CodexInstallation> {
+  /**
+   * `checkAuth: false` omits `authPresent` (unmeasured). prepare() never reads it, and a
+   * subscription launch confirms the account itself (`#readSubscription`), so a second
+   * `login status` after the offer's detect() would only spend the admission deadline.
+   */
+  private async detectInstallation(options: { readonly checkAuth: boolean }): Promise<CodexInstallation> {
     try {
       const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex'));
@@ -264,16 +269,19 @@ export class CodexAdapter implements RuntimeAdapter {
         // Refuses the whole runtime: the option is per adapter, and detection precedes every offer.
         if (!linksAvailable) return { detected: { kind: 'refused', reason: 'agent_user_context_unavailable' } };
       }
-      const login = await runDetectCommand(command, [...args, 'login', 'status'], { timeoutMs: timeouts.authStatus, env });
-      if (login.kind === 'timeout') return { detected: { kind: 'timeout' } };
-      // Codex reports configured credentials with exit 0; its display text is not a contract.
-      // Any other end, such as an unreadable credential store, leaves auth presence unconfirmed.
-      const authPresent = login.kind === 'ok';
+      let authPresent: boolean | undefined;
+      if (options.checkAuth) {
+        const login = await runDetectCommand(command, [...args, 'login', 'status'], { timeoutMs: timeouts.authStatus, env });
+        if (login.kind === 'timeout') return { detected: { kind: 'timeout' } };
+        // Codex reports configured credentials with exit 0; its display text is not a contract.
+        // Any other end, such as an unreadable credential store, leaves auth presence unconfirmed.
+        authPresent = login.kind === 'ok';
+      }
       return { invocation, detected: {
         kind: 'available',
         sessionCapabilities: codexRuntime.codexSessionCapabilities(),
         version: text,
-        authPresent,
+        ...(authPresent === undefined ? {} : { authPresent }),
         ...runtimeExecutableFields(resolved, host.platform === 'win32' ? executable : named),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
       } };
@@ -296,7 +304,7 @@ export class CodexAdapter implements RuntimeAdapter {
         retryable: false,
       };
     }
-    const installation = await this.detectInstallation();
+    const installation = await this.detectInstallation({ checkAuth: false });
     const { detected } = installation;
     if (!('invocation' in installation))
       return {

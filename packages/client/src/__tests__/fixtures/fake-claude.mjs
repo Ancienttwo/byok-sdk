@@ -388,7 +388,7 @@ function runProbeOrTurnFlow() {
     }
     const grandchildPidFile = process.env.FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE;
     if (grandchildPidFile) {
-      const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
+      const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
       writeFileSync(grandchildPidFile, String(grandchild.pid));
       grandchild.unref();
       process.exit(0);

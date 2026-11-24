@@ -101,11 +101,12 @@ A plist along these lines (see `packages/client/src/lifecycle/launchd.ts`'s
   environment and `status`/`doctor` report `environment: unavailable
   code=<code>`. Reinstall an existing service to pick the flag up.
 - **`ProcessType: Interactive`** (#2468) keeps the daemon and the runtime
-  CLIs it spawns at interactive scheduling priority. Without it launchd runs
-  the agent as a background job (`PRI = 20`, throttled CPU and I/O), and under
-  host load `claude auth status --json` was measured at 18 s instead of under
-  1 s. `service-status` reports an existing plist as `repairable`; reinstall
-  or repair it.
+  CLIs it spawns at interactive scheduling priority. Without it launchd uses
+  its default `Standard` tier (throttled CPU and I/O at `PRI = 20`, distinct
+  from launchd's `Background` tier), and under host load
+  `claude auth status --json` was measured at 18 s instead of under 1 s.
+  `service-status` reports an existing plist as `repairable`; reinstall or
+  repair it.
 - **`RunAtLoad`** starts it immediately on `launchctl bootstrap`, and again on
   every login.
 - Logs land under `~/.byok/<productId>/service-logs/`: the daemon writes and
