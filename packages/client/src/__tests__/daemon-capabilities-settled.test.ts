@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const wire = vi.hoisted(() => ({
   helperBin: '',
@@ -139,6 +139,7 @@ import { startRealServer, type RealServerHandle } from './fixtures/real-server';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testAgentHomeConfig } from './fixtures/test-agent';
 import { TestServer } from './fixtures/test-server';
+import { setPosixGateRootForTests } from '../util/path-mutation-gate';
 
 const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
 const archDescriptor = Object.getOwnPropertyDescriptor(process, 'arch')!;
@@ -166,12 +167,27 @@ function waitForBarrierStart(): Promise<void> {
 }
 
 function isPending<T>(promise: Promise<T>): Promise<boolean> {
-  const sentinel = Symbol('pending');
   return Promise.race([
     promise.then(() => false, () => false),
     new Promise<boolean>((resolve) => setTimeout(() => resolve(true), 40)),
-  ]).then((result) => (result === (sentinel as unknown) ? true : result));
+  ]);
 }
+
+// These tests stub process.platform to 'darwin', but setup-gate-root.ts only
+// redirects the darwin gate root on a real darwin host. Elsewhere, point it
+// under os.tmpdir() so the suite never creates /tmp/byok-pm-<uid>.
+let gateRoot: string | undefined;
+beforeAll(async () => {
+  if (platformDescriptor.value === 'darwin') return;
+  gateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-pm-'));
+  setPosixGateRootForTests(gateRoot);
+});
+
+afterAll(async () => {
+  if (gateRoot === undefined) return;
+  setPosixGateRootForTests(undefined);
+  await fs.rm(gateRoot, { recursive: true, force: true });
+});
 
 beforeEach(async () => {
   setPlatform('darwin', 'arm64');
@@ -663,17 +679,21 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
       deploymentDiscovery: 'failed',
     });
     await failedDiscovery.daemon.stop();
+  });
 
-    // Case C: GET /byok/capabilities stalls past discovery timeout -> settles with deploymentDiscovery: 'timeout'.
+  // Real timers: faking setTimeout under live undici fetch() disrupts its idle
+  // socket validation and aborts GET /byok/capabilities before it reaches the server.
+  it('settles with deploymentDiscovery timeout when GET /byok/capabilities stalls past the discovery timeout', async () => {
+    const server = await startTestServer();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     let releaseHungDiscovery!: () => void;
     server.setCapabilityResponseGate(new Promise<void>((resolve) => { releaseHungDiscovery = resolve; }));
     const timedOutDiscovery = await createPairedDaemon(server.url, 'code-disc-timeout');
     try {
-      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
       await timedOutDiscovery.daemon.start();
-      await timedOutDiscovery.daemon.whenOpen({ signal: new AbortController().signal });
-      const waitTimeout = timedOutDiscovery.daemon.whenCapabilitiesSettled({ signal: new AbortController().signal });
-      await vi.advanceTimersByTimeAsync(5_000);
+      const waitTimeout = timedOutDiscovery.daemon.whenCapabilitiesSettled({ signal: AbortSignal.timeout(10_000) });
+      await vi.waitFor(() => expect(server.capabilityRequests).toBeGreaterThan(0), { timeout: 5_000 });
+      expect(await isPending(waitTimeout)).toBe(true);
       const settledTimeout = await waitTimeout;
       expect(settledTimeout).toMatchObject({
         status: 'settled',
@@ -682,12 +702,11 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
         deploymentDiscovery: 'timeout',
       });
     } finally {
-      vi.useRealTimers();
       releaseHungDiscovery();
       server.setCapabilityResponseGate(undefined);
       await timedOutDiscovery.daemon.stop();
     }
-  });
+  }, 15_000);
 
   it('rejects on caller abort, halt, and stop (parity with whenOpen)', async () => {
     const server = await startTestServer();

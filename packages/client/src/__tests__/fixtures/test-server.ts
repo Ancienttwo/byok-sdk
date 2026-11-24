@@ -121,6 +121,8 @@ export class TestServer {
    * which is what every deployment looked like to this fixture before.
    */
   private capabilityResponseGate: Promise<void> | undefined;
+  /** `GET /byok/capabilities` requests that reached this server, counted before the response gate. */
+  capabilityRequests = 0;
 
   setCapabilityResponseGate(gate: Promise<void> | undefined): void {
     this.capabilityResponseGate = gate;
@@ -382,6 +384,9 @@ export class TestServer {
     this.waiters = [];
     // A held response keeps its connection open, and http.Server#close waits for it.
     for (const release of this.messagesHoldReleases) release();
+    // An idle keep-alive or a connected socket that never sent a request would
+    // otherwise hold close() until the server's headers timeout.
+    this.httpServer.closeAllConnections();
     await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
   }
 
@@ -418,6 +423,7 @@ export class TestServer {
         return void this.handleBlobUrl(req, res, url.pathname.split('/')[3] ?? '');
       }
       if (method === 'GET' && url.pathname === BYOK_CAPABILITIES_PATH) {
+        this.capabilityRequests += 1;
         await this.capabilityResponseGate;
         // Public by design (a client reads it before it holds a credential), so
         // no authorization check here — same as the real hosted route.
