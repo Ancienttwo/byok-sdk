@@ -15,7 +15,7 @@ appliesTo:
 
 ## 1. 背景
 
-[`examples/desktop-bot-app`](../../examples/desktop-bot-app/README.md) 现行实现基于 Electron 45 + React 19 + Node SEA Host（[`origin/main@b0930ea36`](https://github.com/Ancienttwo/byok-sdk/tree/b0930ea36)）。根据 A7 基线实测，其 Unpacked 整包达 `432.6–502.9 MiB`（其中 Electron + Renderer 占 60%–71%）。在 Owner 明确排除 Electron 与任何 WebView 方案（含 Tauri）的约束下，技术选型必须在非 WebView 原生桌面方案中兼顾体积收敛、[`examples/desktop-bot-app`](../../examples/desktop-bot-app/README.md) 既有四进程安全不变量，以及对 [`@byok-sdk/keys/model-route`](../../packages/keys/src/model-route.ts) 与 Bridge 契约的单一权威复用。
+[`examples/desktop-bot-app`](../../examples/desktop-bot-app/README.md) 现行实现基于 Electron 45 + React 19 + Node SEA Host（[`origin/main@b0930ea36`](https://github.com/Ancienttwo/byok-sdk/tree/b0930ea36)）。根据 A7 基线实测，其 Unpacked 整包达 `432.6–502.9 MiB`（其中 Electron + Renderer 占 60%–71%）。在 Owner 明确排除 Electron 与任何 WebView 方案（含 Tauri）的约束下，技术选型必须在非 WebView 原生桌面方案中兼顾体积收敛、保留原 Electron 四进程模型中的 Host 与 Custody 进程隔离不变量（同时明文界定 QuickJS UI 改为与 Shell 同进程后的权限取舍，见 D2），以及对 [`@byok-sdk/keys/model-route`](../../packages/keys/src/model-route.ts) 与 Bridge 契约的单一权威复用。
 
 经 2026-11-24 隔离 PoC 实测：
 - 纯壳体积显著收敛：macOS NSH Mixed release `.app` 为 `53M`（`54,528 KiB`），Windows 为 `24.91–25.83 MiB` zip（解包 `64.85 MiB`）；
@@ -30,12 +30,14 @@ appliesTo:
 - 所有进程生命周期、协议读写、防休眠、恢复命令行调度与秘钥管道均抽离进 **UI 框架无关的独立 Rust crate `byok-shell`**（[#2460](https://github.com/Ancienttwo/byok-sdk/issues/2460)），严禁在 `byok-shell` 中依赖任何 `nsh-*` 或 UI crate。
 - **回退触发与切换路径**：若 [#2458](https://github.com/Ancienttwo/byok-sdk/issues/2458) 实体中文 IME 验签失败且无法在上游解决，或 [#2462](https://github.com/Ancienttwo/byok-sdk/issues/2462) 三端打包/兼容性冻结出现不可调和阻塞，保留 `byok-shell` 原封不动，仅替换 UI 接入层为 `longbridge/gpui-kit`。
 
-### D2. TSX 沙箱最小权限与进程监督权威归 Rust
+### D2. OS 进程隔离边界、进程内 VM 权限取舍与 Rust 监督权威
 
+- **保留的 OS 进程隔离（三进程形态）**：`Shell ↔ Host`（`BRIDGE_VERSION = 2` NDJSON stdio 子进程）与 `Shell ↔ Custody`（一次性 stdin 短生命周期子进程，secret 绝不进入 Host 内存或主管道）依然保持独立 OS 进程隔离。
+- **变更的边界（显式架构取舍，供 Owner 单独确认）**：原 Electron 的独立 OS Renderer 沙箱进程（`sandbox + contextIsolation`）**不再存在**。在 NSH Mixed 下，QuickJS-NG 与 Rust `byok-shell` 运行在**同一 OS 进程内**（见[可行性调研 §4.1](../researches/2026-11-23-desktop-native-ui-nsh-feasibility.md#L97-L105)）；原 OS 级 renderer 进程边界改为依赖「静态 release 字节码 + `Policy::harden` + 空 `"capabilities": {}` + Rust `byok-shell` 严格 Bridge 方法白名单」的进程内 VM 权限约束（一旦 QuickJS 原生桥接代码存在内存安全漏洞，VM 层面权限无法替代 OS 进程隔离）。
 - **禁止 TSX-only 与 Rust-only 模式**：TSX-only 会对子进程组强杀且破坏 custody 配置写锁语意，Rust-only 则失去直接执行 `@byok-sdk/keys/model-route` 的能力。
 - **Rust 持有进程权威**：Node Host 子进程与短生命周期 custody 子进程全部由 `byok-shell` 派生监督，继承并过滤 `FOREIGN_RUNTIME_VARIABLES`，保持 `1s..30s`（60s 重置）指数退避、`50ms` `state-changed` hint 聚合与 `10s` 优雅 `shutdown`。
 - **Custody 隔离不变式**：API key / secret 只经 `byok-shell` 临时内存写一次 stdin 到 custody 子进程并立即清零；`keys.submit` 超时（30s）后 UI 返回超时，**但绝不杀死正在持 OS 钥匙串或 SQLite 锁写入的 custody 子进程**（并安全忽略或排干超时后的尾随 `stdout` 以免引发子进程异常）；`keys.list` 超时则强杀。
-- **TSX VM 权限边界**：`nsh.json` 的 `capabilities` 默认全空 `{}`（采用默认单窗 `mount(() => <App />)`）；若后续确需多窗，也仅允许显式声明最小必要 UI 权限（如 `windows: true`），**永久禁止授予 `process`、`fs`、`network` 与 TSX-only `nsh/updater` 热更新**，避免 TSX bundle 与 SEA Host 的 `BRIDGE_VERSION = 2` 脱节。
+- **TSX VM 权限边界与独立隔离验收**：`nsh.json` 的 `capabilities` 默认全空 `{}`（采用默认单窗 `mount(() => <App />)`）；若后续确需多窗，也仅允许显式声明最小必要 UI 权限（如 `windows: true`），**永久禁止授予 `process`、`fs`、`network` 与 TSX-only `nsh/updater` 热更新**，避免 TSX bundle 与 SEA Host 的 `BRIDGE_VERSION = 2` 脱节。**验收区分**：[#2458](https://github.com/Ancienttwo/byok-sdk/issues/2458) IME 验签仅验证输入体验，不替代隔离边界验收；隔离验收须在可运行的 release 打包产物中独立证明 `capabilities.json` 禁用 `process`/`fs`/`network`、`Policy::harden` 生效且 `byok-shell` native bridge 拒绝任何未在 `bridge-contract.json` 声明的方法。
 
 ### D3. S1 / S2 单一权威接缝与共用包复用约束
 
@@ -59,7 +61,7 @@ appliesTo:
 
 | 约束 | 保护的不变量 | 下游怎么在约束内做同一件事 |
 |---|---|---|
-| TSX VM 的 `capabilities` 禁止放行 `process` / `fs` / `network` 及 TSX OTA | 四进程最小权限边界、`BRIDGE_VERSION = 2` 前后端强一致、凭据不经 QuickJS 泄露 | 通过 `byok-shell` 暴露的受控 `#[native_module]` 方法转发已声明的 Bridge RPC 与 Host argv 命令；应用更新统一经整包原生安装器并先执行 S1 snapshot |
+| TSX VM 的 `capabilities` 禁止放行 `process` / `fs` / `network` 及 TSX OTA | Host / Custody 独立 OS 进程边界与 Shell 进程内 QuickJS VM 最小权限边界（不再具备原 Electron 独立 OS renderer 进程隔离，见 D2）、`BRIDGE_VERSION = 2` 前后端强一致、凭据不经 QuickJS 泄露 | 通过 `byok-shell` 暴露的受控 `#[native_module]` 方法转发在 `bridge-contract.json` 声明的 Bridge RPC 与 Host argv 命令，并以独立 release 产物检查验证 VM 默认拒绝权限与 Bridge 白名单拒止；应用更新统一经整包原生安装器并先执行 S1 snapshot |
 | QuickJS 侧禁止运行时 import `@byok-sdk/ui-runtime`，且禁止依赖 `globalThis.structuredClone` | QuickJS bundle 保持轻量零云端依赖，并在 `Policy::harden` 下稳定通过全部 fixture | 仅在 Node Host 侧引入 `@byok-sdk/ui-runtime` 计算时间线并发送纯 JSON；TSX 侧只引入 `packages/ui-runtime` 的纯 TypeScript 类型与 `@byok-sdk/keys/model-route` |
 | 不准改写 `packages/keys` 等公共包来绕过 `Policy::harden` 限制，也不得在 Rust 中复写 `model-route` 校验逻辑 | 单一校验权威（`packages/keys` 与 node runtime）；公共 npm 包发布图与 API surface 保持稳定 | 保留 `@byok-sdk/keys/model-route` 原样作为 TSX 与 Host 共享逻辑，并以 30 向量 hardened fixture parity 测试作为 release CI 门禁 |
 | Windows 下所有可编辑 `<Input>` 禁止裸调原始 NSH `<Input>`，必须经 `<ByokInput>` 统一设置 `"Microsoft YaHei UI"` | 杜绝英文或默认系统字体环境下用户输入中文出现 `□□□□` 豆腐块 | 通过统一 `<ByokInput>` 基础组件注入平台字体映射，并在新增或修改输入页时保留 `--target windows` 渲染检查 |
