@@ -20,6 +20,7 @@ vi.mock('node:fs/promises', async importOriginal => {
 vi.mock('electron', () => ({ app: {}, dialog: {} }));
 vi.mock('electron-updater', () => ({ default: {} }));
 
+const { createMaintenanceLock } = await import('./maintenance-lock.ts');
 const { offerInstall } = await import('./updater.ts');
 const { completeSnapshot, restoreSnapshot, snapshotStores } = await import('../recovery/stores.ts');
 const layout = () => ({ storeDir: path.join(root, 'store'), scratchRoot: { path: path.join(root, 'store', 'tmp') }, hostStorageRoot: path.join(root, 'app') });
@@ -208,6 +209,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
       quitAndInstall: () => { events.push('quitAndInstall'); },
+      maintenanceLock: createMaintenanceLock(),
     });
 
     expect(installed).toBe(true);
@@ -216,6 +218,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
 
   it('aborts without spawning S1 snapshot, installing, or relaunching when Host stop fails', async () => {
     const events: string[] = [];
+    const maintenanceLock = createMaintenanceLock();
     const spawnHostCommand = vi.fn(() => {
       events.push('spawn');
       return receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0);
@@ -231,11 +234,13 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
       quitAndInstall: () => { events.push('quitAndInstall'); },
+      maintenanceLock,
     });
 
     expect(installed).toBe(false);
     expect(spawnHostCommand).not.toHaveBeenCalled();
     expect(events).toEqual(['confirm', 'beforeInstall-fail', 'error:Update not installed:Host did not shut down within 10000 ms']);
+    await expect(maintenanceLock.run(async () => 'retry-ok')).resolves.toBe('retry-ok');
   });
 
   it('relaunches without installing when Host stopped cleanly but S1 snapshot fails', async () => {
@@ -251,6 +256,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
       quitAndInstall: () => { events.push('quitAndInstall'); },
+      maintenanceLock: createMaintenanceLock(),
     });
 
     expect(installed).toBe(false);

@@ -17,6 +17,7 @@ import {
   type StartFreshReceipt,
 } from '../recovery/protocol.ts';
 import { askHostCommand, type CommandChild, type Receipt } from './host-command.ts';
+import type { MaintenanceLock } from './maintenance-lock.ts';
 
 export interface ShellDependencies {
   /** This app's version: restore offers the snapshot this version wrote before an update. */
@@ -26,6 +27,8 @@ export interface ShellDependencies {
   readonly stopHost: () => Promise<void>;
   /** Spawns the Host executable with these arguments. */
   readonly spawnHostCommand: (args: readonly string[]) => CommandChild;
+  /** Shared process-wide lock held from Host stop through S1 helper completion and terminal handover. */
+  readonly maintenanceLock: MaintenanceLock;
   /** Restarts the app, after showing `failure` when the action failed. */
   readonly relaunch: (failure?: Error) => void;
   readonly now: () => Date;
@@ -36,19 +39,21 @@ const noParams = (method: string, params: unknown) => {
 };
 
 /**
- * Confirms the Host is stopped first, then runs S1 `action` and relaunches.
- * If `stopHost()` itself fails, S1 `action` is never started and `relaunch` is
- * not called so existing stores remain untouched.
+ * Confirms the Host is stopped first, then runs S1 `action` and seals the lock
+ * into `relaunch`. If `stopHost()` itself fails, S1 `action` is never started
+ * and `relaunch` is not called so existing stores remain untouched.
  */
-async function withHostStopped<T>(deps: ShellDependencies, action: () => Promise<T>): Promise<T> {
+async function withHostStopped<T>(deps: ShellDependencies, handover: () => void, action: () => Promise<T>): Promise<T> {
   await deps.stopHost();
   let result: T;
   try {
     result = await action();
   } catch (error) {
+    handover();
     deps.relaunch(error as Error);
     throw error;
   }
+  handover();
   deps.relaunch();
   return result;
 }
@@ -84,18 +89,6 @@ export function shellHandlers(deps: ShellDependencies): MethodHandlers<ShellMeth
     restoreOffer.catch(() => { restoreOffer = undefined; });
     return restoreOffer;
   };
-  // One recovery action at a time: a second one (or a second click) is refused while the first moves stores, so the
-  // relaunch after one never cuts the other between renames.
-  let busy = false;
-  const exclusive = async <T>(action: () => Promise<T>): Promise<T> => {
-    if (busy) throw new Error('Another recovery action is running');
-    busy = true;
-    try {
-      return await action();
-    } finally {
-      busy = false;
-    }
-  };
   return {
     'shell.state': async params => {
       noParams('shell.state', params);
@@ -110,13 +103,13 @@ export function shellHandlers(deps: ShellDependencies): MethodHandlers<ShellMeth
     // left by an update that never installed does not turn into a standing offer on the same version.
     'shell.restore': async params => {
       noParams('shell.restore', params);
-      return exclusive(async () => {
+      return deps.maintenanceLock.run(async handover => {
         if (!stoppedOnly(deps.hostState())) throw new Error('Restore is offered only while the Host is stopped');
         // Checked before stopping/relaunching, so a missing snapshot leaves the Host as it is.
         if (await querySnapshotStatus(deps.spawnHostCommand, deps.version) === null) {
           throw new Error(`No complete snapshot of version ${deps.version} to restore`);
         }
-        return withHostStopped(deps, async () => {
+        return withHostStopped(deps, handover, async () => {
           const unknown = (message: string) => new Error(`Restore did not report: ${message}`);
           const answer = await runHostReceipt<RestoreReceipt>(
             deps.spawnHostCommand,
@@ -133,10 +126,10 @@ export function shellHandlers(deps: ShellDependencies): MethodHandlers<ShellMeth
     },
     'shell.startFresh': async params => {
       noParams('shell.startFresh', params);
-      return exclusive(async () => {
+      return deps.maintenanceLock.run(async handover => {
         const state = deps.hostState();
         if (!stoppedOnly(state) || !state.storeRefused) throw new Error('Start fresh is offered only while the Host is stopped on a refused store');
-        return withHostStopped(deps, async () => {
+        return withHostStopped(deps, handover, async () => {
           // Without a receipt nobody knows how far the command got: the aside names show what moved.
           const unknown = (message: string) => new Error(`Start fresh did not report: ${message}. Look for *.aside-* beside the store directories`);
           const answer = await runHostReceipt<StartFreshReceipt>(

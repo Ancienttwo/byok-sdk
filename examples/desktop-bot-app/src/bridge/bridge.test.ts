@@ -6,15 +6,20 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { HostProcess } from '../main/host-process.ts';
+import { createMaintenanceLock } from '../main/maintenance-lock.ts';
 import { shellHandlers } from '../main/recovery.ts';
 import { coalesceStateHints } from '../main/state-hint.ts';
-import { RESTORE_COMMAND, SNAPSHOT_STATUS_COMMAND, START_FRESH_COMMAND } from '../recovery/protocol.ts';
+import { offerInstall } from '../main/updater.ts';
+import { RESTORE_COMMAND, SNAPSHOT_COMMAND, SNAPSHOT_STATUS_COMMAND, START_FRESH_COMMAND } from '../recovery/protocol.ts';
 import { BridgeClient, type HostChild } from './client.ts';
 import { rendererBridge } from '../renderer/bridge.ts';
 import { BRIDGE_VERSION, BridgeError, buildBridgeContract, encodeMessage, type BridgeIpc, type SupervisedHostState } from './protocol.ts';
 import { CustodyError } from '../custody/protocol.ts';
 import { createRendererRouter, isAppRefusal, settleCall } from './route.ts';
 import { serveBridge } from './server.ts';
+
+vi.mock('electron', () => ({ app: {}, dialog: {} }));
+vi.mock('electron-updater', () => ({ default: {} }));
 
 /** A domain as a `src/bridge/domains/` module declares one; `test.reset` is not on the renderer allowlist. */
 interface TestMethods {
@@ -201,6 +206,7 @@ describe('desktop bridge', () => {
     };
     const deps: Parameters<typeof shellHandlers>[0] = {
       version: '1.0.0', hostState: () => state, now: () => new Date(0),
+      maintenanceLock: createMaintenanceLock(),
       stopHost: async () => { calls.push('stop'); },
       spawnHostCommand: args => {
         calls.push(args.join(' '));
@@ -227,7 +233,7 @@ describe('desktop bridge', () => {
     // One recovery action at a time: a second one while the first still stops the Host is refused.
     calls.length = 0;
     let release: () => void = () => {};
-    const slow = shellHandlers({ ...deps, stopHost: () => new Promise<void>(resolve => { release = resolve; }) });
+    const slow = shellHandlers({ ...deps, maintenanceLock: createMaintenanceLock(), stopHost: () => new Promise<void>(resolve => { release = resolve; }) });
     const first = slow['shell.startFresh'](undefined);
     await expect(slow['shell.restore'](undefined)).rejects.toThrow('Another recovery action is running');
     await expect(slow['shell.startFresh'](undefined)).rejects.toThrow('Another recovery action is running');
@@ -249,6 +255,7 @@ describe('desktop bridge', () => {
       version: '1.0.0',
       hostState: () => ({ state: 'stopped', pid: 1, reason: 'halted', storeRefused: false }),
       now: () => new Date(0),
+      maintenanceLock: createMaintenanceLock(),
       stopHost: async () => {
         hostStopped = true;
         calls.push('stop');
@@ -275,6 +282,7 @@ describe('desktop bridge', () => {
       version: '1.0.0',
       hostState: () => ({ state: 'stopped', pid: 1, reason: 'halted', storeRefused: false }),
       now: () => new Date(0),
+      maintenanceLock: createMaintenanceLock(),
       stopHost: async () => { calls.push('stop-fail'); throw new Error('stop failed'); },
       spawnHostCommand: args => {
         calls.push(args.join(' '));
@@ -286,6 +294,169 @@ describe('desktop bridge', () => {
 
     await expect(failHandlers['shell.restore'](undefined)).rejects.toThrow('stop failed');
     expect(calls).toEqual([`${SNAPSHOT_STATUS_COMMAND} 1.0.0`, 'stop-fail']);
+  });
+
+  const delayedReceipt = () => {
+    const stdout = new PassThrough();
+    const events = new PassThrough();
+    let stdinFinished = false;
+    let pending: { line: string; code: number } | undefined;
+    const flush = () => {
+      if (!stdinFinished || !pending) return;
+      stdout.end(`${pending.line}\n`);
+      events.emit('exit', pending.code);
+      pending = undefined;
+    };
+    const child = { stdin: new PassThrough(), stdout, once: (event: string, listener: (...args: unknown[]) => void) => { events.once(event, listener); return child; } };
+    child.stdin.on('finish', () => { stdinFinished = true; flush(); });
+    return {
+      child: child as never,
+      resolveReceipt: (line: string, code = 0) => { pending = { line, code }; flush(); },
+    };
+  };
+
+  it('shares maintenanceLock across shell.restore and offerInstall: delayed restore blocks update and seals after relaunch', async () => {
+    const calls: string[] = [];
+    const maintenanceLock = createMaintenanceLock();
+    const immediateReceipt = (line: string, code = 0) => {
+      const delayed = delayedReceipt();
+      delayed.resolveReceipt(line, code);
+      return delayed.child;
+    };
+
+    let markRestoreStarted!: () => void;
+    const restoreStarted = new Promise<void>(resolve => { markRestoreStarted = resolve; });
+    const delayedRestore = delayedReceipt();
+
+    const handlers = shellHandlers({
+      version: '1.0.0',
+      hostState: () => ({ state: 'stopped', pid: 1, reason: 'halted', storeRefused: false }),
+      now: () => new Date(0),
+      maintenanceLock,
+      stopHost: async () => { calls.push('restore:stop'); },
+      spawnHostCommand: args => {
+        calls.push(`restore:${args[0]}`);
+        if (args[0] === SNAPSHOT_STATUS_COMMAND) return immediateReceipt(JSON.stringify({ ok: true, snapshot: { version: '1.0.0', target: '/snap/1.0.0' } }));
+        markRestoreStarted();
+        return delayedRestore.child;
+      },
+      relaunch: failure => { calls.push(`restore:relaunch:${failure?.message ?? 'ok'}`); },
+    });
+
+    const beforeInstall = vi.fn(async () => {});
+    const spawnUpdaterHost = vi.fn(() => immediateReceipt(JSON.stringify({ ok: true, target: '/snap/1.0.0' })));
+    const showError = vi.fn();
+    const relaunchAndQuit = vi.fn();
+    const quitAndInstall = vi.fn();
+    const updaterOptions = {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall,
+      spawnHostCommand: spawnUpdaterHost,
+      showError,
+      relaunchAndQuit,
+      quitAndInstall,
+      maintenanceLock,
+    };
+
+    const pendingRestore = handlers['shell.restore'](undefined);
+    await restoreStarted;
+
+    // While S1 restore helper has not emitted its receipt, updater cannot acquire lock or run S1 snapshot.
+    await expect(offerInstall('2.0.0', updaterOptions)).resolves.toBe(false);
+    expect(beforeInstall).not.toHaveBeenCalled();
+    expect(spawnUpdaterHost).not.toHaveBeenCalled();
+    expect(quitAndInstall).not.toHaveBeenCalled();
+    expect(relaunchAndQuit).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith('Update not installed', 'Another recovery action is running');
+    expect(calls).toEqual([`restore:${SNAPSHOT_STATUS_COMMAND}`, 'restore:stop', `restore:${RESTORE_COMMAND}`]);
+
+    delayedRestore.resolveReceipt(JSON.stringify({ ok: true, asidePath: '/home/host.aside-0' }), 0);
+    await expect(pendingRestore).resolves.toEqual({ asidePath: '/home/host.aside-0' });
+    expect(calls.at(-1)).toBe('restore:relaunch:ok');
+
+    // Once relaunch handover began, lock stays sealed so no late update runs while exiting.
+    showError.mockClear();
+    await expect(offerInstall('2.0.0', updaterOptions)).resolves.toBe(false);
+    expect(beforeInstall).not.toHaveBeenCalled();
+    expect(spawnUpdaterHost).not.toHaveBeenCalled();
+    expect(showError).toHaveBeenCalledWith('Update not installed', 'Another recovery action is running');
+  });
+
+  it('shares maintenanceLock across offerInstall and recovery callers: delayed snapshot blocks restore/startFresh/update and seals after quitAndInstall', async () => {
+    const updaterEvents: string[] = [];
+    const maintenanceLock = createMaintenanceLock();
+
+    let markSnapshotStarted!: () => void;
+    const snapshotStarted = new Promise<void>(resolve => { markSnapshotStarted = resolve; });
+    const delayedSnapshot = delayedReceipt();
+
+    const shellStop = vi.fn(async () => {});
+    const shellSpawn = vi.fn(() => { throw new Error('shell helper must not spawn while update holds lock'); });
+    const shellRelaunch = vi.fn();
+    const handlers = shellHandlers({
+      version: '1.0.0',
+      hostState: () => ({ state: 'stopped', pid: 1, reason: 'refused', storeRefused: true }),
+      now: () => new Date(0),
+      maintenanceLock,
+      stopHost: shellStop,
+      spawnHostCommand: shellSpawn,
+      relaunch: shellRelaunch,
+    });
+
+    const pendingInstall = offerInstall('2.0.0', {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall: async () => { updaterEvents.push('beforeInstall'); },
+      spawnHostCommand: args => {
+        updaterEvents.push(args.join(' '));
+        markSnapshotStarted();
+        return delayedSnapshot.child;
+      },
+      showError: (title, msg) => { updaterEvents.push(`error:${title}:${msg}`); },
+      relaunchAndQuit: () => { updaterEvents.push('relaunchAndQuit'); },
+      quitAndInstall: () => { updaterEvents.push('quitAndInstall'); },
+      maintenanceLock,
+    });
+
+    await snapshotStarted;
+
+    // While S1 snapshot helper has not emitted its receipt, recovery callers and concurrent updates are rejected.
+    await expect(handlers['shell.restore'](undefined)).rejects.toThrow('Another recovery action is running');
+    await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow('Another recovery action is running');
+    const secondBeforeInstall = vi.fn(async () => {});
+    const secondSpawn = vi.fn(() => delayedSnapshot.child);
+    const secondShowError = vi.fn();
+    const secondQuit = vi.fn();
+    await expect(offerInstall('2.0.1', {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall: secondBeforeInstall,
+      spawnHostCommand: secondSpawn,
+      showError: secondShowError,
+      relaunchAndQuit: vi.fn(),
+      quitAndInstall: secondQuit,
+      maintenanceLock,
+    })).resolves.toBe(false);
+
+    expect(shellStop).not.toHaveBeenCalled();
+    expect(shellSpawn).not.toHaveBeenCalled();
+    expect(shellRelaunch).not.toHaveBeenCalled();
+    expect(secondBeforeInstall).not.toHaveBeenCalled();
+    expect(secondSpawn).not.toHaveBeenCalled();
+    expect(secondQuit).not.toHaveBeenCalled();
+    expect(secondShowError).toHaveBeenCalledWith('Update not installed', 'Another recovery action is running');
+    expect(updaterEvents).toEqual(['beforeInstall', `${SNAPSHOT_COMMAND} 1.0.0`]);
+
+    delayedSnapshot.resolveReceipt(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0);
+    await expect(pendingInstall).resolves.toBe(true);
+    expect(updaterEvents).toEqual(['beforeInstall', `${SNAPSHOT_COMMAND} 1.0.0`, 'quitAndInstall']);
+
+    // Once quitAndInstall handover began, lock stays sealed so no late restore runs while exiting.
+    await expect(handlers['shell.restore'](undefined)).rejects.toThrow('Another recovery action is running');
+    expect(shellStop).not.toHaveBeenCalled();
+    expect(shellSpawn).not.toHaveBeenCalled();
+    expect(shellRelaunch).not.toHaveBeenCalled();
   });
 
   it('keeps committed bridge-contract.json aligned with buildBridgeContract() (S2)', () => {

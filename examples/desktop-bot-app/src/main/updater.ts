@@ -5,12 +5,15 @@ import electronUpdater from 'electron-updater';
 import brand from '../../brand.config.ts';
 import { SNAPSHOT_COMMAND, type SnapshotReceipt } from '../recovery/protocol.ts';
 import { askHostCommand, type CommandChild } from './host-command.ts';
+import { MaintenanceBusyError, type MaintenanceLock } from './maintenance-lock.ts';
 
 export interface UpdaterOptions {
   /** Stops the Host; resolves once it has closed its stores. */
   readonly beforeInstall: () => Promise<void>;
   /** Spawns the Host executable with these arguments (S1 snapshot). */
   readonly spawnHostCommand: (args: readonly string[]) => CommandChild;
+  /** Shared process-wide lock held from Host stop through S1 helper completion and terminal handover. */
+  readonly maintenanceLock: MaintenanceLock;
   readonly currentVersion?: () => string;
   readonly confirmInstall?: (version: string, currentVersion: string) => Promise<boolean>;
   readonly quitAndInstall?: () => void;
@@ -62,31 +65,44 @@ export async function offerInstall(version: string, options: UpdaterOptions): Pr
 
   if (!await confirm(version, current)) return false;
 
-  // Phase 1: Confirm Host stopped before invoking any S1 filesystem command.
   try {
-    await options.beforeInstall();
-  } catch (error) {
-    const message = (error as Error).message;
-    console.error(`Host stop failed before update: ${message}`);
-    showError('Update not installed', message);
-    return false;
-  }
+    return await options.maintenanceLock.run(async handover => {
+      // Phase 1: Confirm Host stopped before invoking any S1 filesystem command.
+      try {
+        await options.beforeInstall();
+      } catch (error) {
+        const message = (error as Error).message;
+        console.error(`Host stop failed before update: ${message}`);
+        showError('Update not installed', message);
+        return false;
+      }
 
-  // Phase 2: Host is stopped; snapshot via S1 before quitAndInstall.
-  try {
-    const target = await requestHostSnapshot(options.spawnHostCommand, current);
-    console.error(`Stores of ${current} copied to ${target}`);
-  } catch (error) {
-    // Nothing is installed without the snapshot; the Host has stopped, so the app restarts on this version.
-    const message = (error as Error).message;
-    console.error(`Update not installed: ${message}`);
-    showError('Update not installed', message);
-    relaunchAndQuit();
-    return false;
-  }
+      // Phase 2: Host is stopped; snapshot via S1 before quitAndInstall.
+      try {
+        const target = await requestHostSnapshot(options.spawnHostCommand, current);
+        console.error(`Stores of ${current} copied to ${target}`);
+      } catch (error) {
+        // Nothing is installed without the snapshot; the Host has stopped, so the app restarts on this version.
+        const message = (error as Error).message;
+        console.error(`Update not installed: ${message}`);
+        showError('Update not installed', message);
+        handover();
+        relaunchAndQuit();
+        return false;
+      }
 
-  quitAndInstall();
-  return true;
+      handover();
+      quitAndInstall();
+      return true;
+    });
+  } catch (error) {
+    if (error instanceof MaintenanceBusyError) {
+      console.error(`Update not installed: ${error.message}`);
+      showError('Update not installed', error.message);
+      return false;
+    }
+    throw error;
+  }
 }
 
 /**

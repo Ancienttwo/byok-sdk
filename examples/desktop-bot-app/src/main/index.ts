@@ -7,6 +7,7 @@ import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMe
 import { createRendererRouter, isAppRefusal, settleCall } from '../bridge/route.ts';
 import { createMainHandlers } from './domains.ts';
 import { HostProcess, spawnDevHost, spawnDevHostCommand } from './host-process.ts';
+import { createMaintenanceLock } from './maintenance-lock.ts';
 import { spawnPackagedHost, spawnPackagedHostCommand } from './packaged-host.ts';
 import { coalesceStateHints } from './state-hint.ts';
 import { createAppTray } from './tray.ts';
@@ -76,11 +77,14 @@ function relaunch(failure?: Error): void {
   app.exit(0);
 }
 
+const maintenanceLock = createMaintenanceLock();
+
 const route = createRendererRouter<BridgeMethods, MainMethod>({
   allowed: RENDERER_METHODS,
   main: createMainHandlers({
     callHost: (method, params) => host.call(method, params),
     spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand,
+    maintenanceLock,
     version: app.getVersion(), hostState: () => lastState, stopHost: () => host.stop(), relaunch, now: () => new Date(),
   }),
   host: (method, params) => host.call(method, params as never),
@@ -174,6 +178,7 @@ if (!app.requestSingleInstanceLock()) {
     startUpdater({
       beforeInstall: () => host.stop(),
       spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand,
+      maintenanceLock,
     });
     createWindow();
     tray = createAppTray(TRAY_ICON, brand.productName, { showWindow, quit: () => app.quit() });
