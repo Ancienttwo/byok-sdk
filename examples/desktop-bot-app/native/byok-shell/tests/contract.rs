@@ -28,7 +28,10 @@ fn embedded_bridge_contract_loads_and_matches_expected_versions() {
 
 #[test]
 fn contract_parser_fails_closed_on_version_schema_and_invariant_drift() {
-    let wrong_schema = VALID_CONTRACT_JSON.replace("\"schemaVersion\": 2", "\"schemaVersion\": 1");
+    let valid = VALID_CONTRACT_JSON.replace("\r\n", "\n");
+
+    let wrong_schema = valid.replace("\"schemaVersion\": 2", "\"schemaVersion\": 1");
+    assert_ne!(wrong_schema, valid);
     assert_eq!(
         BridgeContract::parse_str(&wrong_schema),
         Err(ContractError::UnsupportedSchemaVersion {
@@ -37,7 +40,8 @@ fn contract_parser_fails_closed_on_version_schema_and_invariant_drift() {
         })
     );
 
-    let wrong_bridge = VALID_CONTRACT_JSON.replace("\"bridgeVersion\": 2", "\"bridgeVersion\": 3");
+    let wrong_bridge = valid.replace("\"bridgeVersion\": 2", "\"bridgeVersion\": 3");
+    assert_ne!(wrong_bridge, valid);
     assert_eq!(
         BridgeContract::parse_str(&wrong_bridge),
         Err(ContractError::UnsupportedBridgeVersion {
@@ -46,16 +50,18 @@ fn contract_parser_fails_closed_on_version_schema_and_invariant_drift() {
         })
     );
 
-    let unknown_field = format!("{{\"unexpected\":true,{}}}", &VALID_CONTRACT_JSON.trim_start()[1..]);
+    let unknown_field = format!("{{\"unexpected\":true,{}}}", &valid.trim_start()[1..]);
     assert!(matches!(BridgeContract::parse_str(&unknown_field), Err(ContractError::Parse(_))));
 
-    let missing_field = VALID_CONTRACT_JSON.replace("\"shellToHostMethods\": [\n    \"keys.profilesChanged\"\n  ],\n", "");
+    let missing_field = valid.replace("\"shellToHostMethods\": [\n    \"keys.profilesChanged\"\n  ],\n", "");
+    assert_ne!(missing_field, valid);
     assert!(matches!(BridgeContract::parse_str(&missing_field), Err(ContractError::Parse(_))));
 
-    let exposed_shell_to_host = VALID_CONTRACT_JSON.replace(
+    let exposed_shell_to_host = valid.replace(
         "\"rendererMethods\": [\n    \"status\",",
         "\"rendererMethods\": [\n    \"status\",\n    \"keys.profilesChanged\",",
     );
+    assert_ne!(exposed_shell_to_host, valid);
     assert!(matches!(
         BridgeContract::parse_str(&exposed_shell_to_host),
         Err(ContractError::InvariantViolation(_))
