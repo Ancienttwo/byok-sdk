@@ -1,6 +1,6 @@
 //! NDJSON v2 bridge client framing, multiplexing, hello handshake, and graceful Host shutdown.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, ChildStdin};
@@ -163,11 +163,49 @@ impl fmt::Display for StopError {
 
 impl std::error::Error for StopError {}
 
-type PendingMap = Mutex<HashMap<u64, mpsc::Sender<Result<Value, BridgeError>>>>;
+const MAX_TIMED_OUT_IDS: usize = 1024;
+
+struct PendingRequests {
+    inflight: HashMap<u64, mpsc::Sender<Result<Value, BridgeError>>>,
+    timed_out: HashSet<u64>,
+    timed_out_order: VecDeque<u64>,
+}
+
+impl PendingRequests {
+    fn new() -> Self {
+        Self {
+            inflight: HashMap::new(),
+            timed_out: HashSet::new(),
+            timed_out_order: VecDeque::new(),
+        }
+    }
+
+    fn record_timed_out(&mut self, id: u64) {
+        while self.timed_out_order.len() >= MAX_TIMED_OUT_IDS {
+            if let Some(oldest) = self.timed_out_order.pop_front() {
+                self.timed_out.remove(&oldest);
+            }
+        }
+        if self.timed_out.insert(id) {
+            self.timed_out_order.push_back(id);
+        }
+    }
+
+    fn consume_timed_out(&mut self, id: u64) -> bool {
+        if self.timed_out.remove(&id) {
+            if let Some(pos) = self.timed_out_order.iter().position(|&x| x == id) {
+                self.timed_out_order.remove(pos);
+            }
+            true
+        } else {
+            false
+        }
+    }
+}
 
 struct ClientState {
     stdin: Mutex<Option<ChildStdin>>,
-    pending: PendingMap,
+    pending: Mutex<PendingRequests>,
     closed: Mutex<Option<BridgeError>>,
     shutdown_started: AtomicBool,
     latch: Arc<ProcessExitLatch>,
@@ -182,9 +220,11 @@ impl ClientState {
             }
         }
         let mut pending = self.pending.lock().expect("pending lock poisoned");
-        for (_, tx) in pending.drain() {
+        for (_, tx) in pending.inflight.drain() {
             let _ = tx.send(Err(error.clone()));
         }
+        pending.timed_out.clear();
+        pending.timed_out_order.clear();
         drop(pending);
         let mut stdin = self.stdin.lock().expect("stdin lock poisoned");
         *stdin = None;
@@ -230,7 +270,7 @@ impl BridgeClient {
 
         let shared = Arc::new(ClientState {
             stdin: Mutex::new(Some(stdin)),
-            pending: Mutex::new(HashMap::new()),
+            pending: Mutex::new(PendingRequests::new()),
             closed: Mutex::new(None),
             shutdown_started: AtomicBool::new(false),
             latch: Arc::clone(&latch),
@@ -353,7 +393,7 @@ impl BridgeClient {
             if let Some(closed) = self.shared.current_closed() {
                 return Err(closed);
             }
-            pending.insert(id, tx);
+            pending.inflight.insert(id, tx);
         }
 
         let wire = if params.is_null() {
@@ -364,7 +404,12 @@ impl BridgeClient {
         let encoded = match serde_json::to_string(&wire) {
             Ok(s) => format!("{s}\n"),
             Err(err) => {
-                self.shared.pending.lock().expect("pending lock poisoned").remove(&id);
+                self.shared
+                    .pending
+                    .lock()
+                    .expect("pending lock poisoned")
+                    .inflight
+                    .remove(&id);
                 return Err(BridgeError::new(BridgeErrorCode::InvalidParams, err.to_string()));
             }
         };
@@ -383,7 +428,12 @@ impl BridgeClient {
         };
 
         if let Err(err) = write_result {
-            self.shared.pending.lock().expect("pending lock poisoned").remove(&id);
+            self.shared
+                .pending
+                .lock()
+                .expect("pending lock poisoned")
+                .inflight
+                .remove(&id);
             let failure = BridgeError::new(
                 BridgeErrorCode::HostExited,
                 format!("Host pipe failed: {err}"),
@@ -396,14 +446,22 @@ impl BridgeClient {
             Some(limit) => match rx.recv_timeout(limit) {
                 Ok(res) => res,
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    self.shared.pending.lock().expect("pending lock poisoned").remove(&id);
+                    let mut pending = self.shared.pending.lock().expect("pending lock poisoned");
+                    if pending.inflight.remove(&id).is_some() {
+                        pending.record_timed_out(id);
+                    }
                     Err(BridgeError::new(
                         BridgeErrorCode::CallTimeout,
                         format!("Bridge call `{method}` timed out after {} ms", limit.as_millis()),
                     ))
                 }
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    self.shared.pending.lock().expect("pending lock poisoned").remove(&id);
+                    self.shared
+                        .pending
+                        .lock()
+                        .expect("pending lock poisoned")
+                        .inflight
+                        .remove(&id);
                     Err(BridgeError::new(
                         BridgeErrorCode::HostExited,
                         "Bridge response channel closed",
@@ -585,17 +643,32 @@ fn handle_host_line(
         Ok(obj.get("result").cloned().expect("checked has_result"))
     };
 
-    let sender = {
-        let mut pending = shared.pending.lock().expect("pending lock poisoned");
-        pending.remove(&id)
+    enum DispatchTarget {
+        Inflight(mpsc::Sender<Result<Value, BridgeError>>),
+        TimedOutLateReply,
+        Unknown,
     }
-    .ok_or_else(|| {
-        BridgeError::new(
+
+    let target = {
+        let mut pending = shared.pending.lock().expect("pending lock poisoned");
+        if let Some(sender) = pending.inflight.remove(&id) {
+            DispatchTarget::Inflight(sender)
+        } else if pending.consume_timed_out(id) {
+            DispatchTarget::TimedOutLateReply
+        } else {
+            DispatchTarget::Unknown
+        }
+    };
+
+    match target {
+        DispatchTarget::Inflight(sender) => {
+            let _ = sender.send(parsed_reply);
+            Ok(())
+        }
+        DispatchTarget::TimedOutLateReply => Ok(()),
+        DispatchTarget::Unknown => Err(BridgeError::new(
             BridgeErrorCode::InvalidMessage,
             format!("Bridge reply {id} has no matching request"),
-        )
-    })?;
-
-    let _ = sender.send(parsed_reply);
-    Ok(())
+        )),
+    }
 }

@@ -348,13 +348,23 @@ impl SupervisorInner {
             let guard = self.state.lock().expect("supervisor lock poisoned");
             guard.run_seq == run_id && guard.active_run && !guard.stopping && !guard.destroyed
         };
-        let want_busy = run_active
-            && matches!(
-                next,
-                SupervisedHostState::Running { active_work, .. } if active_work > 0
-            );
+        if !run_active {
+            return;
+        }
+        let want_busy = matches!(
+            next,
+            SupervisedHostState::Running { active_work, .. } if active_work > 0
+        );
         self.power.sync_for_run(run_id, want_busy);
-        self.publish_state(next);
+        {
+            let mut guard = self.state.lock().expect("supervisor lock poisoned");
+            if guard.run_seq != run_id || !guard.active_run || guard.stopping || guard.destroyed {
+                return;
+            }
+            guard.last_state = Some(next.clone());
+        }
+        (self.on_state)(next);
+        self.coalescer.trigger();
     }
 
     fn publish_state(&self, next: SupervisedHostState) {

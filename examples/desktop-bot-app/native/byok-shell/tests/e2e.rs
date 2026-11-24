@@ -1671,7 +1671,7 @@ rl.on('line', line => {{
         });
         let seen_errors = Arc::new(Mutex::new(Vec::new()));
         let seen_errors_ref = Arc::clone(&seen_errors);
-        let cfg = HostSupervisorConfig::new(spec, contract)
+        let cfg = HostSupervisorConfig::new(spec, contract.clone())
             .with_power_backend(backend)
             .with_on_power_error(move |err| {
                 seen_errors_ref.lock().expect("errors poisoned").push(err);
@@ -1707,4 +1707,223 @@ rl.on('line', line => {{
         assert_eq!(status.get("activeWork").and_then(Value::as_u64), Some(2));
         supervisor.stop().expect("clean stop succeeds");
     }
+
+    // 4. Stale Host exit during slow KeepAwake::acquire drops the stale guard and never overwrites newer state.
+    {
+        let tmp = TempDir::new("byok-power-stale-exit");
+        let dir = tmp.path();
+        let script = format!(
+            r#"
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline';
+
+const dir = {dir};
+const crashMarker = path.join(dir, 'crashed-once');
+let timer = null;
+
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => {{
+  if (timer) clearInterval(timer);
+  process.exit(0);
+}});
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    if (fs.existsSync(crashMarker)) {{
+      process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 0 }} }}) + '\n');
+    }} else {{
+      process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 1 }} }}) + '\n');
+      timer = setInterval(() => {{
+        if (fs.existsSync(path.join(dir, 'do-exit'))) {{
+          fs.unlinkSync(path.join(dir, 'do-exit'));
+          fs.writeFileSync(crashMarker, '1');
+          clearInterval(timer);
+          process.exit(1);
+        }}
+      }}, 10);
+    }}
+    return;
+  }}
+  if (msg.method === 'shutdown') {{
+    if (timer) clearInterval(timer);
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+            dir = serde_json::to_string(&dir.to_string_lossy().into_owned()).unwrap(),
+        );
+        let spec = write_node_script(dir, "power-stale-exit.mjs", &script);
+        let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+        let stats = Arc::new(PowerStats::default());
+        let backend = Arc::new(FakePowerBackend {
+            stats: Arc::clone(&stats),
+            mode: BackendMode::BlockOnce(Arc::clone(&gate)),
+        });
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let observed_ref = Arc::clone(&observed);
+        let mut cfg = HostSupervisorConfig::new(spec, contract).with_power_backend(backend);
+        cfg.initial_backoff = Duration::from_millis(50);
+        cfg.max_backoff = Duration::from_millis(100);
+        let supervisor = HostSupervisor::new(
+            cfg,
+            move |st| observed_ref.lock().expect("obs poisoned").push(st),
+            || {},
+        );
+        supervisor.start();
+
+        {
+            let (lock, cv) = &*gate;
+            let mut st = lock.lock().expect("block gate poisoned");
+            while !st.0 {
+                st = cv.wait(st).expect("block gate poisoned");
+            }
+        }
+
+        // Crash Run 1 while Run 1's dispatcher is still blocked inside backend.acquire().
+        fs::write(dir.join("do-exit"), b"1").unwrap();
+        assert!(wait_until(Duration::from_secs(5), || {
+            matches!(
+                supervisor.last_state(),
+                Some(SupervisedHostState::Running { active_work: 0, .. })
+            )
+        }));
+        let run2_state = supervisor.last_state().expect("Run 2 state present");
+        observed.lock().expect("obs poisoned").clear();
+
+        // Unblock Run 1's acquire(): stale guard must drop cleanly and Run 1's Running(1) must not overwrite Run 2.
+        {
+            let (lock, cv) = &*gate;
+            let mut st = lock.lock().expect("block gate poisoned");
+            st.1 = true;
+            cv.notify_all();
+        }
+        assert!(wait_until(Duration::from_secs(5), || {
+            stats.releases.load(Ordering::SeqCst) == 1 && stats.active.load(Ordering::SeqCst) == 0
+        }));
+        thread::sleep(Duration::from_millis(100));
+        assert_eq!(stats.active.load(Ordering::SeqCst), 0);
+        assert_eq!(supervisor.last_state(), Some(run2_state));
+        assert!(
+            !observed
+                .lock()
+                .expect("obs poisoned")
+                .iter()
+                .any(|s| matches!(s, SupervisedHostState::Running { active_work: 1, .. })),
+            "stale Run 1 state must not be emitted after exit"
+        );
+        supervisor.stop().expect("clean stop succeeds");
+    }
+}
+
+#[test]
+fn late_reply_after_call_timeout_does_not_kill_healthy_host() {
+    let tmp = TempDir::new("byok-late-reply-timeout");
+    let dir = tmp.path();
+    let script = format!(
+        r#"
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline';
+
+const dir = {dir};
+let lastRefreshId = null;
+const timer = setInterval(() => {{
+  if (fs.existsSync(path.join(dir, 'send-dup')) && lastRefreshId !== null) {{
+    fs.unlinkSync(path.join(dir, 'send-dup'));
+    process.stdout.write(JSON.stringify({{ id: lastRefreshId, result: null }}) + '\n');
+  }}
+}}, 10);
+
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => {{
+  clearInterval(timer);
+  process.exit(0);
+}});
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 0 }} }}) + '\n');
+    return;
+  }}
+  if (msg.method === 'status') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ state: 'running', pid: process.pid, activeWork: 0 }} }}) + '\n');
+    return;
+  }}
+  if (msg.method === 'keys.profilesChanged') {{
+    lastRefreshId = msg.id;
+    setTimeout(() => {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ ok: true }} }}) + '\n');
+    }}, 350);
+    return;
+  }}
+  if (msg.method === 'shutdown') {{
+    clearInterval(timer);
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+        dir = serde_json::to_string(&dir.to_string_lossy().into_owned()).unwrap(),
+    );
+    let spec = write_node_script(dir, "late-reply-host.mjs", &script);
+    let contract = BridgeContract::load().expect("contract loads");
+    let mut cfg = HostSupervisorConfig::new(spec, contract);
+    cfg.initial_backoff = Duration::from_millis(50);
+    cfg.max_backoff = Duration::from_millis(100);
+    let observed = Arc::new(Mutex::new(Vec::new()));
+    let observed_ref = Arc::clone(&observed);
+    let supervisor = HostSupervisor::new(
+        cfg,
+        move |st| observed_ref.lock().expect("obs poisoned").push(st),
+        || {},
+    );
+    supervisor.start();
+
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            supervisor.last_state(),
+            Some(SupervisedHostState::Running { .. })
+        )
+    }));
+    let initial_status = supervisor
+        .call_renderer_forwarded("status", Value::Null)
+        .expect("initial status succeeds");
+    let initial_pid = initial_status.get("pid").and_then(Value::as_u64).unwrap();
+
+    let timeout_err = supervisor
+        .call_shell_to_host_timeout("keys.profilesChanged", Value::Null, Duration::from_millis(40))
+        .expect_err("keys.profilesChanged must time out");
+    assert_eq!(timeout_err.code, BridgeErrorCode::CallTimeout);
+
+    // Wait past the Host's delayed reply (~350ms) and prove the same Host stayed alive.
+    thread::sleep(Duration::from_millis(550));
+    let after_late_reply = supervisor
+        .call_renderer_forwarded("status", Value::Null)
+        .expect("valid single late reply must keep healthy Host alive");
+    assert_eq!(
+        after_late_reply.get("pid").and_then(Value::as_u64),
+        Some(initial_pid)
+    );
+
+    // A duplicate reply after the timed-out tombstone is consumed must still fail closed.
+    observed.lock().expect("obs poisoned").clear();
+    fs::write(dir.join("send-dup"), b"1").unwrap();
+    assert!(wait_until(Duration::from_secs(5), || {
+        observed
+            .lock()
+            .expect("obs poisoned")
+            .iter()
+            .any(|s| matches!(s, SupervisedHostState::Restarting { .. }))
+    }));
+    let stop_err = supervisor
+        .stop()
+        .expect_err("duplicate late reply must kill Host fail-closed");
+    assert!(
+        stop_err.0.contains("Host exited"),
+        "unexpected stop error after duplicate reply kill: {stop_err}"
+    );
 }
