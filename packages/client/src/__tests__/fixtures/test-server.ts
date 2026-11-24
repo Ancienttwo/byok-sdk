@@ -384,10 +384,18 @@ export class TestServer {
     this.waiters = [];
     // A held response keeps its connection open, and http.Server#close waits for it.
     for (const release of this.messagesHoldReleases) release();
-    // An idle keep-alive or a connected socket that never sent a request would
-    // otherwise hold close() until the server's headers timeout.
-    this.httpServer.closeAllConnections();
-    await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
+    // Released handlers still need a turn to write their responses, so only idle
+    // sockets close now. A connected socket that never sent a request would hold
+    // close() until the server's headers timeout; the fallback force-closes it.
+    await new Promise<void>((resolve) => {
+      const forceTimer = setTimeout(() => this.httpServer.closeAllConnections(), 250);
+      forceTimer.unref();
+      this.httpServer.close(() => {
+        clearTimeout(forceTimer);
+        resolve();
+      });
+      this.httpServer.closeIdleConnections();
+    });
   }
 
   /** Per-connection monotonic counter for the redelivery `seq` (protocol §1.2) — shared across every server->daemon envelope type, matching the wire's single per-device sequence space. Tests constructing their own S->D envelopes (`task.offer`/`task.approve`/`task.reject`/`task.cancel`/`task.steer`) must call this too, so `seq` stays strictly increasing across the whole connection. */
