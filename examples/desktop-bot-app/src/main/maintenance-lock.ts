@@ -24,6 +24,9 @@ export interface HandoverControls {
 
 export interface MaintenanceLock {
   run<T>(action: (handover: HandoverControls) => Promise<T>): Promise<T>;
+  /** Atomically reserves custody write exclusion until the spawned custody child exits; returns undefined when busy. */
+  tryBeginCustody(): (() => void) | undefined;
+  isBusy(): boolean;
   isHandedOver(): boolean;
   isQuitting(): boolean;
   /** Subscribes to normal app quit requests; fires immediately if already quitting. */
@@ -43,6 +46,7 @@ type HandoverState = 'none' | 'pending' | 'confirmed';
 
 export function createMaintenanceLock(): MaintenanceLock {
   let busy = false;
+  let activeCustody = 0;
   let handover: HandoverState = 'none';
   let quitting = false;
   let inFlight: Promise<void> | undefined;
@@ -50,7 +54,7 @@ export function createMaintenanceLock(): MaintenanceLock {
   const currentHandover = (): HandoverState => handover;
   return {
     async run<T>(action: (controls: HandoverControls) => Promise<T>): Promise<T> {
-      if (busy || currentHandover() !== 'none' || quitting) throw new MaintenanceBusyError();
+      if (busy || activeCustody > 0 || currentHandover() !== 'none' || quitting) throw new MaintenanceBusyError();
       busy = true;
       let finish!: () => void;
       inFlight = new Promise<void>(resolve => {
@@ -76,6 +80,19 @@ export function createMaintenanceLock(): MaintenanceLock {
         }
         finish();
       }
+    },
+    tryBeginCustody(): (() => void) | undefined {
+      if (busy || currentHandover() !== 'none' || quitting) return undefined;
+      activeCustody += 1;
+      let released = false;
+      return () => {
+        if (released) return;
+        released = true;
+        activeCustody = Math.max(0, activeCustody - 1);
+      };
+    },
+    isBusy(): boolean {
+      return busy || activeCustody > 0 || currentHandover() !== 'none' || quitting;
     },
     isHandedOver(): boolean {
       return handover === 'confirmed';

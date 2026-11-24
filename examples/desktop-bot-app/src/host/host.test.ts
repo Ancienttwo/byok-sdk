@@ -13,8 +13,8 @@ import { createByokServer } from '@byok-sdk/server';
 import { BRIDGE_VERSION, encodeMessage, type HostState } from '../bridge/protocol.ts';
 import { composeHost, lateServerConsumers, type HostCompositionOptions } from './compose.ts';
 import { precheckHostStores } from './precheck.ts';
-import { RESTORE_COMMAND, SNAPSHOT_COMMAND, SNAPSHOT_STATUS_COMMAND } from '../recovery/protocol.ts';
-import { runRestoreCommand, runSnapshotCommand, runSnapshotStatusCommand, startFresh } from './recovery.ts';
+import { RESTORE_COMMAND, SNAPSHOT_COMMAND, SNAPSHOT_STATUS_COMMAND, START_FRESH_COMMAND } from '../recovery/protocol.ts';
+import { runRestoreCommand, runSnapshotCommand, runSnapshotStatusCommand, runStartFreshCommand, startFresh } from './recovery.ts';
 import { superviseHost } from './supervise.ts';
 
 let root: string;
@@ -231,6 +231,52 @@ describe('desktop Host composition', () => {
       await expect(runSnapshotCommand([SNAPSHOT_COMMAND, '../escape'], { layout })).rejects.toThrow('single-segment version');
       await expect(runRestoreCommand([RESTORE_COMMAND, '1.0.0', '../bad'], { layout })).rejects.toThrow('single-segment aside stamp');
     } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('refuses S1 write commands with PROVIDER_CONFIGURATION_BUSY while a custody configuration lock is held (P1-6)', async () => {
+    await makeRoot();
+    await mkdir(path.join(root, 'store'), { recursive: true });
+    await mkdir(path.join(root, 'home', 'host'), { recursive: true });
+    await writeFile(path.join(root, 'store', 'device.json'), 'v1-store');
+    await writeFile(path.join(root, 'home', 'host', 'settings.json'), 'v1-host');
+    const layout = { storeDir: path.join(root, 'store'), scratchRoot: { path: path.join(root, 'store', 'tmp') }, hostStorageRoot: path.join(root, 'home') };
+    const profileStore = new SqliteProviderProfileStore({ path: keysDb() });
+    await profileStore.close();
+
+    // First write an uncontended snapshot so restore also exercises its guard without missing-snapshot failure.
+    const lines: string[] = [];
+    const spy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown, cb?: unknown) => {
+      lines.push(String(chunk).trim());
+      if (typeof cb === 'function') (cb as () => void)();
+      return true;
+    }) as typeof process.stdout.write);
+
+    const lockStore = new SqliteProviderProfileStore({ path: keysDb(), configurationLockWaitMs: 0 });
+    let lock: Awaited<ReturnType<SqliteProviderProfileStore['acquireConfigurationLock']>> | undefined;
+    try {
+      expect(await runSnapshotCommand([SNAPSHOT_COMMAND, '1.0.0'], { layout })).toBe(0);
+      lock = await lockStore.acquireConfigurationLock();
+
+      expect(await runSnapshotCommand([SNAPSHOT_COMMAND, '2.0.0'], { layout })).toBe(1);
+      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ ok: false, code: 'PROVIDER_CONFIGURATION_BUSY' });
+
+      expect(await runRestoreCommand([RESTORE_COMMAND, '1.0.0', '2026-01-01T00-00-03.000Z'], { layout })).toBe(1);
+      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ ok: false, code: 'PROVIDER_CONFIGURATION_BUSY', movedBack: true });
+
+      expect(await runStartFreshCommand([START_FRESH_COMMAND, '2026-01-01T00-00-04.000Z'], { layout, productId: 'byok-desktop-test' })).toBe(1);
+      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ ok: false, code: 'PROVIDER_CONFIGURATION_BUSY', movedBack: true });
+
+      expect(await readFile(path.join(root, 'store', 'device.json'), 'utf8')).toBe('v1-store');
+
+      await lock.release();
+      lock = undefined;
+      expect(await runSnapshotCommand([SNAPSHOT_COMMAND, '2.0.0'], { layout })).toBe(0);
+      expect(JSON.parse(lines.at(-1)!)).toMatchObject({ ok: true });
+    } finally {
+      if (lock) await lock.release();
+      await lockStore.close();
       spy.mockRestore();
     }
   });

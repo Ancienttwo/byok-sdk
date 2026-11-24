@@ -151,6 +151,24 @@ impl BridgeContract {
                 return Err(ContractError::MissingCoreMethod { method: required });
             }
         }
+        if core.len() != REQUIRED_CORE_METHODS.len() {
+            return Err(ContractError::InvariantViolation(
+                "coreMethods must contain exactly hello, status, and shutdown",
+            ));
+        }
+        if !renderer.contains("status") {
+            return Err(ContractError::InvariantViolation(
+                "rendererMethods must include status",
+            ));
+        }
+
+        for method in &core {
+            if main.contains(method) || host.contains(method) || shell_to_host.contains(method) {
+                return Err(ContractError::InvariantViolation(
+                    "coreMethods must not overlap mainMethods, hostMethods, or shellToHostMethods",
+                ));
+            }
+        }
 
         for method in &main {
             if !renderer.contains(method) {
@@ -197,6 +215,11 @@ impl BridgeContract {
     /// Returns whether `method` is answered locally by main/shell rather than forwarded to the Host.
     pub fn is_main_method(&self, method: &str) -> bool {
         self.main_methods.iter().any(|entry| entry == method)
+    }
+
+    /// Returns whether `method` is a renderer-callable method forwarded to the Host (`status` or domain host method).
+    pub fn allows_renderer_forwarded_host_method(&self, method: &str) -> bool {
+        self.allows_renderer_method(method) && !self.is_main_method(method)
     }
 
     /// Returns whether `method` is a shell-only Host call excluded from renderer callers.

@@ -6,16 +6,9 @@
  * #1917, #2459).
  */
 import { clearDeviceEnrollment, DeviceEnrollmentClearError, type DeviceCredentialBackend } from '@byok-sdk/client';
-import {
-  RESTORE_COMMAND,
-  SNAPSHOT_COMMAND,
-  SNAPSHOT_STATUS_COMMAND,
-  START_FRESH_COMMAND,
-  type RestoreReceipt,
-  type SnapshotReceipt,
-  type SnapshotStatusReceipt,
-  type StartFreshReceipt,
-} from '../recovery/protocol.ts';
+import { ByokKeysError, inspectProviderProfileStore, SqliteProviderProfileStore } from '@byok-sdk/keys';
+import { RESTORE_COMMAND, SNAPSHOT_COMMAND, SNAPSHOT_STATUS_COMMAND, START_FRESH_COMMAND, type RestoreReceipt, type SnapshotReceipt, type SnapshotStatusReceipt, type StartFreshReceipt } from '../recovery/protocol.ts';
+import { keysDbPath } from './keys/launcher.ts';
 import {
   completeSnapshot,
   moveAll,
@@ -50,9 +43,38 @@ const requireStamp = (args: readonly string[], index: number, command: string): 
 const requireVersion = (args: readonly string[], index: number, command: string): string =>
   requireSegment(args[index], /^[0-9A-Za-z._+-]+$/, `${command} requires a single-segment version`);
 
-async function writeReceipt<T extends { readonly ok: boolean }>(receipt: T): Promise<number> {
+const writeReceipt = async <T extends { readonly ok: boolean }>(receipt: T): Promise<number> => {
   await new Promise<void>((resolve, reject) => process.stdout.write(`${JSON.stringify(receipt)}\n`, error => (error ? reject(error) : resolve())));
   return receipt.ok ? 0 : 1;
+};
+
+/**
+ * Ensures no custody child holds the keys configuration lock during S1 store
+ * work (P1-6). Snapshot holds the SQLite configuration lock across its entire
+ * copy, while restore/startFresh close the lock handle immediately before moving
+ * `host/` so Windows does not reject directory renames (`EBUSY`), relying on the
+ * shell `MaintenanceLock` custody exclusion against new custody spawns.
+ */
+async function withKeysConfigurationIdle<T>(hostStorageRoot: string, action: () => Promise<T>): Promise<T> {
+  const keysDb = keysDbPath(hostStorageRoot);
+  const inspection = await inspectProviderProfileStore(keysDb);
+  if (inspection.verdict !== 'accepted') return action();
+  const store = new SqliteProviderProfileStore({ path: keysDb, readOnly: true, configurationLockWaitMs: 0 });
+  let lock: Awaited<ReturnType<SqliteProviderProfileStore['acquireConfigurationLock']>> | undefined;
+  try {
+    lock = await store.acquireConfigurationLock();
+    return await action();
+  } finally {
+    try {
+      await lock?.release();
+    } finally {
+      await store.close();
+    }
+  }
+}
+
+async function assertKeysConfigurationIdle(hostStorageRoot: string): Promise<void> {
+  await withKeysConfigurationIdle(hostStorageRoot, async () => {});
 }
 
 /**
@@ -85,11 +107,12 @@ export async function runStartFreshCommand(args: readonly string[], options: Omi
   const stamp = requireStamp(args, 1, START_FRESH_COMMAND);
   let receipt: StartFreshReceipt;
   try {
+    await assertKeysConfigurationIdle(options.layout.hostStorageRoot);
     receipt = { ok: true, moved: await startFresh({ ...options, stamp }) };
   } catch (error) {
     const failure = error instanceof MoveBackError ? error.cause : error;
-    receipt = { ok: false, code: failure instanceof DeviceEnrollmentClearError ? failure.code : 'start_fresh_failed',
-      message: (error as Error).message, movedBack: !(error instanceof MoveBackError) };
+    const code = failure instanceof ByokKeysError || failure instanceof DeviceEnrollmentClearError ? failure.code : 'start_fresh_failed';
+    receipt = { ok: false, code, message: (error as Error).message, movedBack: !(error instanceof MoveBackError) };
   }
   return writeReceipt(receipt);
 }
@@ -100,9 +123,12 @@ export async function runSnapshotCommand(args: readonly string[], options: { rea
   const version = requireVersion(args, 1, SNAPSHOT_COMMAND);
   let receipt: SnapshotReceipt;
   try {
-    receipt = { ok: true, target: await snapshotStores(options.layout, version) };
+    receipt = await withKeysConfigurationIdle(options.layout.hostStorageRoot, async () => ({
+      ok: true,
+      target: await snapshotStores(options.layout, version),
+    }));
   } catch (error) {
-    receipt = { ok: false, code: 'snapshot_failed', message: (error as Error).message };
+    receipt = { ok: false, code: error instanceof ByokKeysError ? error.code : 'snapshot_failed', message: (error as Error).message };
   }
   return writeReceipt(receipt);
 }
@@ -128,11 +154,12 @@ export async function runRestoreCommand(args: readonly string[], options: { read
   const stamp = requireStamp(args, 2, RESTORE_COMMAND);
   let receipt: RestoreReceipt;
   try {
+    await assertKeysConfigurationIdle(options.layout.hostStorageRoot);
     receipt = { ok: true, asidePath: await restoreSnapshot(options.layout, version, stamp) };
   } catch (error) {
     receipt = {
       ok: false,
-      code: 'restore_failed',
+      code: error instanceof ByokKeysError ? error.code : 'restore_failed',
       message: (error as Error).message,
       movedBack: !(error instanceof MoveBackError),
     };
