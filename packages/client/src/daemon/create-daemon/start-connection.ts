@@ -18,8 +18,8 @@ import type { StartEnvelopes } from './start-envelopes.js';
 export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartRun & StartLanes & StartTerminals & StartEnvelopes, 'record' | 'capabilities' | 'harnesses' | 'runtimeUnavailable' | 'handleAgentHomeProjectionEnvelope' | 'handleAgentInputPreparationEnvelope' | 'handleProviderProvisioningEnvelope' | 'handleAgentMemoryIntentEnvelope' | 'handleE2eeKeyPackageEnvelope' | 'handleAgentEgressEnvelope' | 'handleAgentContentReadEnvelope' | 'activePressureEngine' | 'journalIdentity' | 'activeJournal' | 'refuseOverBoundEnvelope' | 'resultReplyRecoveryTasks' | 'sendEnvelope' | 'opened' | 'replayRecoveryTerminals' | 'replaceRefusedTerminal' | 'sealedRun' | 'settleClaim'>) {
   const {
     daemonState, config, localAgentRelease, toolsetRegistry, cursorStore, observer, terminalCommits,
-    overrides, outbound, setLifecycle, runPresenceDiscovery, halted, crashed, dispatchReliableRecord,
-    operationalHealth, taskSettlement,
+    overrides, outbound, setLifecycle, applyCapabilityDeclaration, runPresenceDiscovery, notifyCapabilitySettlement,
+    halted, crashed, dispatchReliableRecord, operationalHealth, taskSettlement,
   } = daemonScope;
   const {
     record, capabilities, harnesses, runtimeUnavailable, handleAgentHomeProjectionEnvelope,
@@ -34,6 +34,7 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
     deviceId: record.deviceId,
     productId: config.productId,
     capabilities,
+    getCapabilityRevision: () => daemonState.helloCapabilityRevision,
     clientVersion: localAgentRelease.version,
     harnesses,
     runtimeUnavailable,
@@ -219,18 +220,51 @@ export function createStartConnection(daemonScope: DaemonScope, run: Pick<StartR
         publishLocal(envelope, () => { observer.noteOutboundRejected(plain, rejection); settleTask(); });
       }
     },
-    onStateChange: (state) => {
-      setLifecycle({ phase: 'running', connection: state });
-      // Discovery is armed before the first connection can deliver offers.
-      // Every open replaces the read, so rollout/reconnect facts cannot be
-      // borrowed from a previous connection generation.
+    onHelloAccepted: (accepted) => {
+      if (daemonState.lifecycle.phase !== 'running' || daemonState.lifecycle.connection !== 'open') return;
+      const generation = daemonState.connectionGeneration;
+      if (
+        daemonState.acceptedHello !== undefined
+        && daemonState.acceptedHello.generation === generation
+        && accepted.revision < daemonState.acceptedHello.revision
+      ) {
+        return;
+      }
+      daemonState.acceptedHello = {
+        generation,
+        revision: accepted.revision,
+        capabilities: [...accepted.capabilities],
+      };
+      notifyCapabilitySettlement();
+    },
+    onStateChange: (state, acceptedHello) => {
       if (state === 'open') {
+        // Order invariant (#2471): increment generation, record handshake ACK,
+        // and start this generation's discovery pass BEFORE publishing `open`
+        // so callers waking from `whenOpen()` see a consistent generation state.
+        daemonState.connectionGeneration += 1;
+        const generation = daemonState.connectionGeneration;
+        daemonState.acceptedHello = acceptedHello === undefined
+          ? undefined
+          : { generation, revision: acceptedHello.revision, capabilities: [...acceptedHello.capabilities] };
+        runPresenceDiscovery(generation);
+        setLifecycle({ phase: 'running', connection: 'open' });
         daemonState.runner?.retryRecoveredAgentMessages();
         // Unacknowledged reliable records go out again on every open; the
         // outbox keeps one copy of an envelope that is still queued.
         for (const record of daemonState.agentEgress.reliableRecords()) dispatchReliableRecord(record);
-        runPresenceDiscovery();
+        notifyCapabilitySettlement();
+        return;
       }
+      // Disconnect cleanup (#2471): clear accepted hello, abort in-flight
+      // discovery, strip prior deployment flags before the next handshake,
+      // then publish `connecting` (which resolves waiters bound to the ended generation).
+      daemonState.acceptedHello = undefined;
+      daemonState.presenceDiscoveryPass?.controller.abort();
+      daemonState.presenceDiscoveryPass = undefined;
+      daemonState.presencePublisher?.stop();
+      applyCapabilityDeclaration(undefined, { refresh: false });
+      setLifecycle({ phase: 'running', connection: 'connecting' });
     },
     onHalted: (halt) => halted(halt),
     onCrashed: () => crashed(),

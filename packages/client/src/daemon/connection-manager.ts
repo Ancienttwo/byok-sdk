@@ -52,6 +52,12 @@ function isCursorEnvelopeType(type: Envelope['type']): boolean {
   return isServerToDaemonType(type) && !type.startsWith('conn.');
 }
 
+/** Exact capability revision and flag snapshot captured when constructing one `conn.hello`. */
+export interface AcceptedHelloSnapshot {
+  readonly revision: number;
+  readonly capabilities: readonly CapabilityFlag[];
+}
+
 function createConnectionHelloEnvelope(
   opts: Pick<
     ConnectionManagerOptions,
@@ -62,7 +68,7 @@ function createConnectionHelloEnvelope(
   const configuredToolsets = opts.getConfiguredToolsets?.();
   return createEnvelope('conn.hello', {
     protocolVersions: [PROTOCOL_VERSION],
-    capabilities: opts.capabilities,
+    capabilities: [...opts.capabilities],
     deviceId: opts.deviceId,
     productId: opts.productId,
     clientVersion: opts.clientVersion,
@@ -78,6 +84,8 @@ export interface ConnectionManagerOptions {
   deviceId: string;
   productId: string;
   capabilities: CapabilityFlag[];
+  /** Monotonic capability revision read alongside `capabilities` whenever building `conn.hello`. */
+  getCapabilityRevision?: () => number;
   /** U4a Local Agent release version, sent unchanged in `conn.hello`. */
   clientVersion?: string;
   harnesses: HarnessInfo[];
@@ -94,7 +102,9 @@ export interface ConnectionManagerOptions {
    */
   onEnvelope: (envelope: Envelope) => void | Promise<void>;
   /** Every transition between `connecting` and `open`, starting with `connecting` from {@link ConnectionManager.start}. */
-  onStateChange?: (state: ConnectionState) => void;
+  onStateChange?: (state: ConnectionState, acceptedHello?: AcceptedHelloSnapshot) => void;
+  /** Server HTTP-200 accepted a refreshed `conn.hello` on the currently open session generation. */
+  onHelloAccepted?: (accepted: AcceptedHelloSnapshot) => void;
   /** Await durable disposition before retiring the exact accepted/rejected bytes. */
   onOutboundSettled?: (settlements: readonly OutboundSettlement[]) => Promise<void>;
   onOutboundQueued?: (envelope: Envelope) => void;
@@ -166,6 +176,7 @@ export class ConnectionManager {
   /** Ends the current open session; set only while one is open. */
   private endSession: (() => void) | undefined;
   private acceptedHarnesses: readonly HarnessInfo[] = [];
+  private readonly helloSnapshots = new WeakMap<Envelope, AcceptedHelloSnapshot>();
   private refreshInventory = false;
   private inFlightHelloPost: Promise<unknown> | undefined;
   /** Counts open sessions, so a request from an ended session cannot end the next one. */
@@ -315,6 +326,14 @@ export class ConnectionManager {
     return true;
   }
 
+  private createHelloEnvelope(): Extract<Envelope, { type: 'conn.hello' }> {
+    const revision = this.opts.getCapabilityRevision?.() ?? 0;
+    const capabilities: CapabilityFlag[] = [...this.opts.capabilities];
+    const envelope = createConnectionHelloEnvelope({ ...this.opts, capabilities }, () => this.cursor);
+    this.helloSnapshots.set(envelope, { revision, capabilities });
+    return envelope;
+  }
+
   private async run(): Promise<void> {
     const signal = this.lifetime.signal;
     let hello: Extract<Envelope, { type: 'conn.hello' }> | undefined;
@@ -333,7 +352,7 @@ export class ConnectionManager {
           this.forget(envelope);
         }
         this.refreshInventory = false;
-        hello = createConnectionHelloEnvelope(this.opts, () => this.cursor);
+        hello = this.createHelloEnvelope();
       }
       const answer = await this.longPoll.postBatch([hello], signal);
       if (this.isEnded()) return;
@@ -363,10 +382,11 @@ export class ConnectionManager {
       if (answer === undefined) {
         this.notify(() => this.opts.onOperationalOutcome?.('failure', 'reconnect'));
       } else {
+        const acceptedHello = this.helloSnapshots.get(hello);
         this.acceptedHarnesses = hello.payload.harnesses;
         hello = undefined;
         if (this.refreshInventory) continue;
-        await this.serveSession(answer);
+        await this.serveSession(answer, acceptedHello);
         if (this.isEnded()) return;
         if (this.refreshInventory) continue;
       }
@@ -388,7 +408,7 @@ export class ConnectionManager {
   }
 
   /** One open session: from an accepted handshake until a route failure, stop, or halt ends it. */
-  private async serveSession(handshake: MessageBatchPostResult): Promise<void> {
+  private async serveSession(handshake: MessageBatchPostResult, acceptedHello: AcceptedHelloSnapshot | undefined): Promise<void> {
     const ended = new Promise<void>((resolve) => {
       this.endSession = resolve;
     });
@@ -396,7 +416,7 @@ export class ConnectionManager {
     // Ingress first: work an `open` observer queues sees it already.
     // `postBatch` refuses an accepted handshake answer without `ingress`.
     this.ingressBudget = handshake.ingress;
-    this.setState('open');
+    this.setState('open', acceptedHello);
     // An `open` observer that threw has already ended the session.
     if (!this.isEnded()) {
       this.longPoll.start();
@@ -436,10 +456,10 @@ export class ConnectionManager {
     this.halt({ reason: error.code, httpStatus: error.httpStatus });
   }
 
-  private setState(state: ConnectionState): void {
+  private setState(state: ConnectionState, acceptedHello?: AcceptedHelloSnapshot): void {
     if (this.state === state) return;
     this.state = state;
-    this.notify(() => this.opts.onStateChange?.(state));
+    this.notify(() => this.opts.onStateChange?.(state, acceptedHello));
   }
 
   /**
@@ -513,7 +533,7 @@ export class ConnectionManager {
   /** Publish a fresh local configuration snapshot while this daemon is running. */
   refreshHello(): void {
     if (!this.started || this.isEnded()) return;
-    this.send(createConnectionHelloEnvelope(this.opts, () => this.cursor));
+    this.send(this.createHelloEnvelope());
   }
 
   /**
@@ -579,6 +599,16 @@ export class ConnectionManager {
         if (refusedHello?.outcome === 'rejected') {
           if (refusedHello.reason === 'protocol_version_unsupported') this.haltOnNegotiation({ refusedStatus: 200 });
           else this.halt({ reason: 'handshake_rejected' });
+        } else if (!this.isEnded() && this.state === 'open' && generation === this.sessionGeneration) {
+          // Only acknowledge refreshed `conn.hello` snapshots for the still-open session generation
+          // that posted them; a late HTTP 200 from an ended generation cannot acknowledge the next.
+          for (const envelope of batch) {
+            if (envelope.type !== 'conn.hello') continue;
+            const outcome = byId.get(envelope.id);
+            if (outcome === undefined || outcome.outcome === 'rejected') continue;
+            const snapshot = this.helloSnapshots.get(envelope);
+            if (snapshot !== undefined) this.notify(() => this.opts.onHelloAccepted?.(snapshot));
+          }
         }
         return undefined;
       } catch (error) {

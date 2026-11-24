@@ -30,7 +30,7 @@ import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
 import { ApprovalRegistry, type LocalToolApprovalPolicy } from './approvals.js';
 import { AuthManager } from './auth-manager.js';
 import { resolveMachineId } from '../util/machine-id.js';
-import type { DaemonLifecycle } from './daemon-lifecycle.js';
+import type { DaemonCapabilitiesSettlement, DaemonLifecycle } from './daemon-lifecycle.js';
 import {
   type ControlStorageStatus,
 } from './control-protocol.js';
@@ -740,6 +740,18 @@ export interface Daemon {
    * `signal.reason` on abort (`AbortSignal.timeout(ms)` bounds the wait).
    */
   whenOpen(options: { readonly signal: AbortSignal }): Promise<void>;
+  /**
+   * Valid after `start()` resolved (#2471). Resolves once the current open
+   * connection generation has finished its initial local memory-backend proof
+   * attempt, its deployment capability discovery (`GET /byok/capabilities`),
+   * and received a server HTTP-200 acknowledgment for a `conn.hello` at or
+   * after the resulting capability revision. Returns `{ status: 'disconnected',
+   * connectionGeneration }` if the bound generation disconnects before
+   * settling. Rejects with {@link import('./daemon-lifecycle.js').DaemonHaltError}
+   * on a halt, {@link import('./daemon-lifecycle.js').DaemonNotOpenError} on
+   * `crashed` or `stopped`, and with `signal.reason` on abort.
+   */
+  whenCapabilitiesSettled(options: { readonly signal: AbortSignal }): Promise<DaemonCapabilitiesSettlement>;
   stop(): Promise<void>;
   /**
    * Resolves once the task's terminal had its first outbound settlement (no
@@ -1077,6 +1089,10 @@ function buildDaemon(
     environmentResolvedAt: undefined,
     presenceDiscovery: undefined,
     presenceDiscoveryPass: undefined,
+    connectionGeneration: 0,
+    helloCapabilityRevision: 0,
+    acceptedHello: undefined,
+    capabilitySettlementListeners: new Set(),
     deploymentDeclaration: undefined,
     helloCapabilities: [],
     shutdownPromise: undefined,
@@ -1108,7 +1124,7 @@ function buildDaemon(
   const reliableEnvelopes = new WeakMap<AgentReliableEgressRecord, Envelope>();
 
   const {
-    pair, pairEmbedded, start, whenOpen, stop, status, publishReliableAgentEgress, reloadMcpToolsets,
+    pair, pairEmbedded, start, whenOpen, whenCapabilitiesSettled, stop, status, publishReliableAgentEgress, reloadMcpToolsets,
     reportMcpToolsetObservation, subscribe, tasks, unpair, approve, reject,
   } = daemonScope;
   return {
@@ -1116,6 +1132,7 @@ function buildDaemon(
     pairEmbedded,
     start,
     whenOpen,
+    whenCapabilitiesSettled,
     stop,
     status,
     publishReliableAgentEgress,

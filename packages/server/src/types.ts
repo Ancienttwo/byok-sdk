@@ -1,4 +1,4 @@
-import type { HarnessInfo } from '@byok-sdk/protocol';
+import type { CapabilityFlag, HarnessInfo } from '@byok-sdk/protocol';
 import type {
   AgentContentReadPayload,
   AgentHomeProjectionPayload,
@@ -415,6 +415,8 @@ export interface MachineInfo {
   clientVersion?: string;
   harnesses?: readonly HarnessInfo[];
   configuredToolsets?: readonly string[];
+  /** Latest durable capability flags accepted from this device's `conn.hello`. Omitted before the first handshake. */
+  readonly capabilities?: readonly CapabilityFlag[];
 }
 
 /**

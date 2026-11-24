@@ -7,13 +7,53 @@
   },
   "to": {
     "version": "0.46.0",
-    "snapshotSha256": "36fc4ada3073f23b720259463ccf81fba8eca3f068ba1c95739fc72b4ee3bbb6"
+    "snapshotSha256": "289adee6214369904599631033ef5fbd56c3ce05bf7897b321ecaf535f0500c1"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "daemon-when-capabilities-settled",
+      "impact": "additive",
+      "summary": "Daemon.whenCapabilitiesSettled({ signal }) awaits initial local memory backend proof, deployment capability discovery, and server HTTP-200 conn.hello acknowledgment for an open connection generation, returning DaemonCapabilitiesSettlement (with DaemonMemoryBackendProofState and DaemonDeploymentDiscoveryState) or disconnected on mid-proof reconnect; @byok-sdk/server MachineInfo projects readonly capabilities?: readonly CapabilityFlag[] from accepted conn.hello handshakes. The Daemon member is required, so a Host test double typed as Daemon adds it (#2471).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#settled-device-capabilities-2471",
+      "items": [
+        "export:@byok-sdk/client#Daemon",
+        "export:@byok-sdk/client#DaemonCapabilitiesSettlement",
+        "export:@byok-sdk/client#DaemonDeploymentDiscoveryState",
+        "export:@byok-sdk/client#DaemonMemoryBackendProofState",
+        "export:@byok-sdk/server#MachineInfo"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/client#Daemon",
+      "change": "changed",
+      "entry": "daemon-when-capabilities-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonCapabilitiesSettlement",
+      "change": "added",
+      "entry": "daemon-when-capabilities-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonDeploymentDiscoveryState",
+      "change": "added",
+      "entry": "daemon-when-capabilities-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DaemonMemoryBackendProofState",
+      "change": "added",
+      "entry": "daemon-when-capabilities-settled"
+    },
+    {
+      "item": "export:@byok-sdk/server#MachineInfo",
+      "change": "changed",
+      "entry": "daemon-when-capabilities-settled"
+    }
+  ]
 }

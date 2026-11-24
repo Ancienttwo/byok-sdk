@@ -117,6 +117,7 @@
 //   DEFAULT_RETENTION_TTL_MS -> dist/daemon/retention/config.d.ts
 //   Daemon -> dist/daemon/create-daemon.d.ts
 //   DaemonBranding -> dist/daemon/create-daemon.d.ts
+//   DaemonCapabilitiesSettlement -> dist/daemon/daemon-lifecycle.d.ts
 //   DaemonConfig -> dist/daemon/create-daemon.d.ts
 //   DaemonConfigCheck -> dist/daemon/config-schema/check.d.ts
 //   DaemonConfigCheckOptions -> dist/daemon/config-schema/check.d.ts
@@ -125,6 +126,7 @@
 //   DaemonConfigIssueCode -> dist/daemon/config-schema/validate.d.ts
 //   DaemonConfigSource -> dist/daemon/config-schema/validate.d.ts
 //   DaemonConfigValidation -> dist/daemon/config-schema/validate.d.ts
+//   DaemonDeploymentDiscoveryState -> dist/daemon/daemon-lifecycle.d.ts
 //   DaemonEffectiveConfig -> dist/daemon/config-schema/effective.d.ts
 //   DaemonEffectiveMcpServer -> dist/daemon/config-schema/effective.d.ts
 //   DaemonEffectiveRuntime -> dist/daemon/config-schema/effective.d.ts
@@ -137,6 +139,7 @@
 //   DaemonJournalProtocolUnsupportedError -> dist/daemon/daemon-errors.d.ts
 //   DaemonLifecycle -> dist/daemon/daemon-lifecycle.d.ts
 //   DaemonLogOptions -> dist/lifecycle/service-log.d.ts
+//   DaemonMemoryBackendProofState -> dist/daemon/daemon-lifecycle.d.ts
 //   DaemonMemoryHelperResolution -> dist/daemon/config-schema/effective.d.ts
 //   DaemonNotOpenError -> dist/daemon/daemon-lifecycle.d.ts
 //   DaemonObserver -> dist/daemon/observer.d.ts
@@ -2323,7 +2326,7 @@ import { type LocalAgentReleaseIdentity } from '../release-identity.js';
 import { type CodexSandboxSetting } from '../adapters/codex/codex-adapter.js';
 import type { RuntimeEnvironmentPolicy } from '../runtime/environment.js';
 import { type LocalToolApprovalPolicy } from './approvals.js';
-import type { DaemonLifecycle } from './daemon-lifecycle.js';
+import type { DaemonCapabilitiesSettlement, DaemonLifecycle } from './daemon-lifecycle.js';
 import { type ControlStorageStatus } from './control-protocol.js';
 import { type InputPreparationAuthorityResolver, type InputPreparationCounterAdapter, type InputPreparationLimitsPolicyV1 } from '../input-preparation.js';
 import { type OperationalHealthSnapshot } from './operational-health.js';
@@ -2489,6 +2492,9 @@ export interface Daemon {
     whenOpen(options: {
         readonly signal: AbortSignal;
     }): Promise<void>;
+    whenCapabilitiesSettled(options: {
+        readonly signal: AbortSignal;
+    }): Promise<DaemonCapabilitiesSettlement>;
     stop(): Promise<void>;
     whenTaskSettled(taskId: string, options?: {
         readonly signal?: AbortSignal;
@@ -2576,6 +2582,7 @@ export declare class EmbeddedPairingError extends Error {
     });
 }
 // ==== @byok-sdk/client dist/daemon/daemon-lifecycle.d.ts ====
+import type { CapabilityFlag } from '@byok-sdk/protocol';
 export declare const DAEMON_HALT_REASONS: readonly [
 'unpaired',
 're_pair_required',
@@ -2620,6 +2627,18 @@ export declare class DaemonNotOpenError extends Error {
     readonly reason: 'stopped' | 'crashed';
     constructor(reason: 'stopped' | 'crashed');
 }
+export type DaemonMemoryBackendProofState = 'not-configured' | 'unsupported' | 'refused' | 'unproven' | 'proven';
+export type DaemonDeploymentDiscoveryState = 'read' | 'failed' | 'timeout';
+export type DaemonCapabilitiesSettlement = {
+    readonly status: 'settled';
+    readonly connectionGeneration: number;
+    readonly capabilities: readonly CapabilityFlag[];
+    readonly memoryBackend: DaemonMemoryBackendProofState;
+    readonly deploymentDiscovery: DaemonDeploymentDiscoveryState;
+} | {
+    readonly status: 'disconnected';
+    readonly connectionGeneration: number;
+};
 // ==== @byok-sdk/client dist/daemon/daemon-record.d.ts ====
 import type { ToolAuthorizationReason, ToolFileAccess, ToolRiskReason } from '../tool-authorization.js';
 import type { DaemonLifecycle } from './daemon-lifecycle.js';
@@ -4357,7 +4376,7 @@ export type { InstallSkillPacksOptions, InstalledSkillPack, ProjectedSkillPack, 
 export type { ConnectionState } from './daemon/connection-manager.js';
 export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
-export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
+export type { DaemonCapabilitiesSettlement, DaemonDeploymentDiscoveryState, DaemonHaltReason, DaemonLifecycle, DaemonMemoryBackendProofState, } from './daemon/daemon-lifecycle.js';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client.js';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client.js';

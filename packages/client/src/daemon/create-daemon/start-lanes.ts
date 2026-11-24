@@ -151,11 +151,14 @@ export function composeStartLanes(daemonScope: DaemonScope, run: Pick<StartRun, 
   // deployment it has not spoken to yet.
   daemonState.deploymentDeclaration = undefined;
   daemonState.helloCapabilities = capabilities;
+  daemonState.helloCapabilityRevision = (daemonState.helloCapabilityRevision ?? 0) + 1;
+  daemonState.acceptedHello = undefined;
   recoverAgentMemoryBackend(daemonScope, daemonState.blobLifecycleAbort!.signal, () => {
     const proven = agentMemoryBackendProof(daemonScope).status === 'proven';
     const commitChanged = daemonScope.setHelloCapability(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, proven);
     const intentChanged = daemonScope.setHelloCapability(AGENT_MEMORY_INTENT_CAPABILITY, proven && config.agentMemoryIntents !== undefined);
     if (commitChanged || intentChanged) daemonState.connection?.refreshHello();
+    daemonScope.notifyCapabilitySettlement?.();
   });
   return {
     capabilities, agentHomeProjectionCompletion, processProviderProvisioningNotice,

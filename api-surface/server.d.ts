@@ -1078,7 +1078,7 @@ export declare class SteerRejectedError extends Error {
     constructor(taskId: string, code: SteerRejectionCode, state: TaskState, executor: ClaimedExecutor | undefined);
 }
 // ==== @byok-sdk/server dist/types.d.ts ====
-import type { HarnessInfo } from '@byok-sdk/protocol';
+import type { CapabilityFlag, HarnessInfo } from '@byok-sdk/protocol';
 import type { AgentContentReadPayload, AgentHomeProjectionPayload, AgentHomeProjectionReadback, AgentEventOrUnknown, AgentEgressPolicy, AgentEgressReliablePayload, AgentMessageEgressRequirement, AgentMessageServerContext, AgentMessagePublishPlainPayload, AgentRef, BlobRef, ClaimedExecutor, ExecutionTarget, InputImageBlobRef, RuntimeCapabilities, SteerRefusalReasonReading, TaskApprovalResolvedPayload, TaskArtifactPayload, TaskDeclineCodeReading, TaskFailureReading, TaskState, ToolsetId, TerminalProjectionSelection, TerminalAgentHomeMemoryChange, AgentHomeAccess, AgentMemorySelection } from '@byok-sdk/protocol';
 import type { InboundRefusalReason, MaintenanceReport, RetentionPolicy, TaskAbandonCause, TenantId, TokenSigner } from '@byok-sdk/cloud';
 import type { WakeConsumer } from './wakes/types.js';
@@ -1239,6 +1239,7 @@ export interface MachineInfo {
     clientVersion?: string;
     harnesses?: readonly HarnessInfo[];
     configuredToolsets?: readonly string[];
+    readonly capabilities?: readonly CapabilityFlag[];
 }
 export interface TaskSnapshot {
     taskId: string;

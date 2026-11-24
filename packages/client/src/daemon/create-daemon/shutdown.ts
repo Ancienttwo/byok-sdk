@@ -78,6 +78,7 @@ export async function runShutdownSequence(daemonScope: DaemonScope, reason: stri
   daemonState.presenceDiscovery = undefined;
   // Detached reads cannot publish into a later daemon lifecycle.
   daemonState.presenceDiscoveryPass = undefined;
+  daemonState.acceptedHello = undefined;
   daemonState.presencePublisher?.stop();
   daemonState.presencePublisher = undefined;
   // B-P2: abort every counter call this daemon owns. Their outcomes stay

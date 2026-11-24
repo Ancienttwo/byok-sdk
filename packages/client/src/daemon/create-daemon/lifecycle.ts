@@ -1,12 +1,20 @@
 import { startControlServer, AnotherControlServerRunningError } from '../control-server.js';
 import { PROTOCOL_VERSION, ProtocolNegotiationError } from '@byok-sdk/protocol';
-import { type DaemonHalt, type DaemonLifecycle, type DaemonHaltReason, DaemonHaltError, DaemonNotOpenError } from '../daemon-lifecycle.js';
+import {
+  type DaemonCapabilitiesSettlement,
+  type DaemonHalt,
+  type DaemonLifecycle,
+  type DaemonHaltReason,
+  DaemonHaltError,
+  DaemonNotOpenError,
+} from '../daemon-lifecycle.js';
 import { InsecureServerUrlError } from '../url.js';
 import { DeviceRecordRePairRequiredError } from '../store.js';
 import { DeviceStoreBindingMismatchError } from '../daemon-errors.js';
 import { CursorUnreadableError } from '../cursor-store.js';
 import { AuthRequestAbortedError, DeviceRevokedError } from '../auth-manager.js';
 import { PrivateDirectoryRefusedError, PrivateSocketModeError, PrivateSocketPathError } from '../../util/private-unix-socket.js';
+import { agentMemoryBackendProofState } from './services.js';
 import { SHUTDOWN_TASK_TEARDOWN_DEADLINE_MS } from './support.js';
 import type { DaemonScope } from './scope.js';
 
@@ -74,12 +82,35 @@ function warnHealthPersistFailure(err: unknown): void {
   console.warn(`[byok/client] failed to persist operational health: ${err instanceof Error ? err.message : String(err)}`);
 }
 
+function terminalLifecycleError(lifecycle: Extract<DaemonLifecycle, { phase: 'halted' | 'crashed' | 'stopped' }>): Error {
+  switch (lifecycle.phase) {
+    case 'halted':
+      return lifecycle.reason === 'protocol_negotiation_failed'
+        ? new DaemonHaltError(lifecycle.reason, { cause: new ProtocolNegotiationError({ localVersion: PROTOCOL_VERSION, httpStatus: lifecycle.httpStatus }) })
+        : new DaemonHaltError(lifecycle.reason);
+    case 'crashed':
+    case 'stopped':
+      return new DaemonNotOpenError(lifecycle.phase);
+  }
+}
+
+/** Re-evaluates all pending `whenCapabilitiesSettled` waiters (#2471). */
+export function notifyCapabilitySettlement(daemonScope: DaemonScope): void {
+  const listeners = daemonScope.daemonState.capabilitySettlementListeners;
+  if (listeners === undefined || listeners.size === 0) return;
+  for (const listener of [...listeners]) {
+    if (listeners.has(listener)) listener();
+  }
+}
+
 /** One report path per lifecycle fact: `status().lifecycle` and the `lifecycle` event change together. */
 export function setLifecycle(daemonScope: DaemonScope, next: DaemonLifecycle): void {
   const { daemonState, observer } = daemonScope;
   if (JSON.stringify(next) === JSON.stringify(daemonState.lifecycle)) return;
+  if (next.phase !== 'running' || next.connection !== 'open') daemonState.acceptedHello = undefined;
   daemonState.lifecycle = next;
   observer.noteLifecycle(next);
+  notifyCapabilitySettlement(daemonScope);
 }
 
 /**
@@ -105,13 +136,9 @@ export function whenOpen(daemonScope: DaemonScope, options: { readonly signal: A
         case 'awaiting-enrollment':
           return false;
         case 'halted':
-          reject(lifecycle.reason === 'protocol_negotiation_failed'
-            ? new DaemonHaltError(lifecycle.reason, { cause: new ProtocolNegotiationError({ localVersion: PROTOCOL_VERSION, httpStatus: lifecycle.httpStatus }) })
-            : new DaemonHaltError(lifecycle.reason));
-          return true;
         case 'crashed':
         case 'stopped':
-          reject(new DaemonNotOpenError(lifecycle.phase));
+          reject(terminalLifecycleError(lifecycle));
           return true;
       }
     };
@@ -125,6 +152,83 @@ export function whenOpen(daemonScope: DaemonScope, options: { readonly signal: A
       unsubscribe();
       signal.removeEventListener('abort', onAbort);
     });
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Waits until this daemon's initial local memory proof, deployment capability
+ * discovery, and server HTTP-200 `conn.hello` acknowledgment have all settled
+ * for one open connection generation (#2471).
+ */
+export function whenCapabilitiesSettled(
+  daemonScope: DaemonScope,
+  options: { readonly signal: AbortSignal },
+): Promise<DaemonCapabilitiesSettlement> {
+  const { daemonState } = daemonScope;
+  const { signal } = options;
+  return new Promise<DaemonCapabilitiesSettlement>((resolve, reject) => {
+    if (signal.aborted) {
+      reject(signal.reason);
+      return;
+    }
+    let boundGeneration: number | undefined;
+    const evaluate = (): boolean => {
+      const { lifecycle } = daemonState;
+      switch (lifecycle.phase) {
+        case 'halted':
+        case 'crashed':
+        case 'stopped':
+          reject(terminalLifecycleError(lifecycle));
+          return true;
+        case 'awaiting-enrollment':
+          return false;
+        case 'running':
+          break;
+      }
+      if (lifecycle.connection !== 'open') {
+        if (boundGeneration !== undefined) {
+          resolve({ status: 'disconnected', connectionGeneration: boundGeneration });
+          return true;
+        }
+        return false;
+      }
+      const currentGeneration = daemonState.connectionGeneration;
+      if (boundGeneration === undefined) {
+        boundGeneration = currentGeneration;
+      } else if (boundGeneration !== currentGeneration) {
+        resolve({ status: 'disconnected', connectionGeneration: boundGeneration });
+        return true;
+      }
+      if (daemonState.shuttingDown) return false;
+      const memoryBackend = agentMemoryBackendProofState(daemonScope);
+      if (memoryBackend === 'verifying') return false;
+      const discovery = daemonState.presenceDiscoveryPass;
+      if (discovery === undefined || discovery.generation !== boundGeneration) return false;
+      if (discovery.outcome === 'pending' || discovery.outcome === 'aborted') return false;
+      const accepted = daemonState.acceptedHello;
+      if (accepted === undefined || accepted.generation !== boundGeneration) return false;
+      if (accepted.revision < daemonState.helloCapabilityRevision) return false;
+      resolve({
+        status: 'settled',
+        connectionGeneration: boundGeneration,
+        capabilities: [...accepted.capabilities],
+        memoryBackend,
+        deploymentDiscovery: discovery.outcome,
+      });
+      return true;
+    };
+    if (evaluate()) return;
+    const onAbort = (): void => {
+      daemonState.capabilitySettlementListeners.delete(onChange);
+      reject(signal.reason);
+    };
+    const onChange = (): void => {
+      if (!evaluate()) return;
+      daemonState.capabilitySettlementListeners.delete(onChange);
+      signal.removeEventListener('abort', onAbort);
+    };
+    daemonState.capabilitySettlementListeners.add(onChange);
     signal.addEventListener('abort', onAbort, { once: true });
   });
 }
