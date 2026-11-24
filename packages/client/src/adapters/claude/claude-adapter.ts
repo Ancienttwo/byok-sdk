@@ -7,7 +7,7 @@ import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
 import { claudeAgentUserContextSettings } from './agent-user-context.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
-import { classifyDetectError, probeRuntimeVersion, probeTimeouts, runDetectCommand } from '../detect-outcome.js';
+import { classifyDetectError, probeRuntimeVersion, probeTimeouts, registerAdmissionDetect, runDetectCommand } from '../detect-outcome.js';
 import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -259,6 +259,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
   private readonly maxRetainedBytes: number;
 
   constructor(private readonly options: ClaudeAdapterOptions = {}) {
+    registerAdmissionDetect(this, ClaudeAdapter.prototype.detect, signal => this.#detectInstallation({ checkAuth: false, signal }));
     this.interruptTimeoutMs = resolveInterruptTimeoutMs(options.interruptTimeoutMs, 'Claude');
     this.maxRetainedBytes = resolveMaxRetainedBytes(options.maxRetainedBytes, 'Claude');
     if (options.agentUserContext !== undefined && options.agentUserContext !== 'inherit' && options.agentUserContext !== 'excluded')
@@ -307,25 +308,39 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 
   async detect(): Promise<RuntimeDetectResult> {
+    return this.#detectInstallation({ checkAuth: true });
+  }
+
+  /**
+   * `checkAuth: false` (task admission) omits `authPresent` (unmeasured): a
+   * subscription launch reads the login itself, in its exact launch context.
+   * A caller abort rethrows its reason.
+   */
+  async #detectInstallation(options: { readonly checkAuth: boolean; readonly signal?: AbortSignal }): Promise<RuntimeDetectResult> {
+    const { checkAuth, signal } = options;
     try {
       const { env: rawEnv } = await this.runtimeEnvironment();
       claudeProviderCredentials(rawEnv);
       const env = claudeCredentialEnvironment(rawEnv);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude'));
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
-      const probe = await probeRuntimeVersion(invocation.command, claudeProbeTimeouts.of(this).version, env, invocation.args);
+      const probe = await probeRuntimeVersion(invocation.command, claudeProbeTimeouts.of(this).version, env, invocation.args, signal);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim();
-      const auth = await this.#readAuthStatus(invocation, env);
-      if (auth.kind === 'timeout') return { kind: 'timeout' };
-      const authPresent = auth.kind === 'ok' && auth.status.loggedIn === true;
+      let authPresent: boolean | undefined;
+      if (checkAuth) {
+        const auth = await this.#readAuthStatus(invocation, env);
+        if (auth.kind === 'timeout') return { kind: 'timeout' };
+        authPresent = auth.kind === 'ok' && auth.status.loggedIn === true;
+      }
       return {
-        kind: 'available', version, authPresent,
+        kind: 'available', version, ...(authPresent === undefined ? {} : { authPresent }),
         sessionCapabilities: { ...claudeSessionCapabilities(), steer: this.descriptor.capabilities.steer },
         ...runtimeExecutableFields(resolved, invocation.executable),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, claudeVersionToken(version)),
       };
     } catch (error) {
+      signal?.throwIfAborted();
       return classifyDetectError(error);
     }
   }
@@ -576,17 +591,6 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // The adapter, never the host callback, owns fatal process termination.
         onFatal: error => { closeBridges(); stream?.fail(error); },
       }, resumeSessionId);
-      if (selection.mode === 'subscription') {
-        let auth: ClaudeAuthStatusRead;
-        try {
-          auth = await this.#readAuthStatus(invocation, env, manifestCwd, signal);
-        } catch (abort) {
-          throwIfCancelled();
-          throw abort;
-        }
-        throwIfCancelled();
-        requireClaudeSubscription(auth);
-      }
       if (selection.mode === 'byok') {
         const key = await resolveRuntimeApiKey('claude', this.byok!.resolveKey, signal);
         throwIfCancelled();

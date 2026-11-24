@@ -30,6 +30,9 @@
 //   FAKE_CLAUDE_AUTH_STATUS_EXIT=<n>    -> `auth status --json` exit code after
 //                                          its stdout (the CLI exits 1 when
 //                                          logged out).
+//   FAKE_CLAUDE_AUTH_DELAY_MS=<ms>      -> `auth status --json` answers after <ms>.
+//   FAKE_CLAUDE_AUTH_LOG_FILE=<path>    -> `auth status --json` appends
+//                                          `{"cwd":...}` per run to <path>.
 //   FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE=<path>
 //                                       -> `auth status --json` leaves a
 //                                          detached grandchild holding stdout
@@ -382,6 +385,7 @@ function runProbeOrTurnFlow() {
   }
 
   if (argv[0] === 'auth' && argv[1] === 'status' && argv[2] === '--json') {
+    if (process.env.FAKE_CLAUDE_AUTH_LOG_FILE) appendFileSync(process.env.FAKE_CLAUDE_AUTH_LOG_FILE, JSON.stringify({ cwd: process.cwd() }) + '\n');
     if (process.env.FAKE_CLAUDE_AUTH_STATUS_FAIL === '1') {
       process.stderr.write('error: not logged in\n');
       process.exit(1);
@@ -404,7 +408,9 @@ function runProbeOrTurnFlow() {
         orgName: "fake's Organization",
         subscriptionType: 'max',
       });
-    process.stdout.write(`${body}\n`, () => process.exit(Number(process.env.FAKE_CLAUDE_AUTH_STATUS_EXIT ?? 0)));
+    setTimeout(() => {
+      process.stdout.write(`${body}\n`, () => process.exit(Number(process.env.FAKE_CLAUDE_AUTH_STATUS_EXIT ?? 0)));
+    }, Number(process.env.FAKE_CLAUDE_AUTH_DELAY_MS ?? 0));
     return;
   }
 

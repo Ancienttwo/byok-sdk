@@ -16,7 +16,7 @@ import { runDoctorCommand } from '../bin/commands/doctor';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { appendAuditRecord } from './fixtures/audit-records';
-import { projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
+import { observeAdmissionDetection, projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
 import type { RuntimeDetectResult } from '../types';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -252,6 +252,25 @@ grandchild.unref();`);
     const reason = new Error('already stopped');
     expect(await runDetectCommand(process.execPath, ['-e', ''], { timeoutMs: 5_000, env, signal: AbortSignal.abort(reason) })).toEqual({ kind: 'aborted', reason });
     expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('observeAdmissionDetection (#2468)', () => {
+  const authProbe = "if (process.argv[2] === '--version') console.log('fixture-v1'); else { require('node:fs').appendFileSync(process.env.AUTH_LOG, 'auth\\n'); console.log('{\"loggedIn\":true}'); }";
+
+  it('skips the built-in login probe, and still routes a replaced detect() through the replacement', async () => {
+    const log = path.join(await directory(), 'auth.log');
+    vi.stubEnv('AUTH_LOG', log);
+    const command = await executable(authProbe);
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command, source: 'env' }) });
+    const admitted = await observeAdmissionDetection(adapter);
+    expect(admitted).toMatchObject({ kind: 'available', version: 'fixture-v1' });
+    expect(admitted).not.toHaveProperty('authPresent');
+    await expect(fs.readFile(log, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    const replaced = vi.spyOn(adapter, 'detect');
+    expect(await observeAdmissionDetection(adapter)).toMatchObject({ kind: 'available', authPresent: true });
+    expect(replaced).toHaveBeenCalledOnce();
+    expect(await fs.readFile(log, 'utf8')).toBe('auth\n');
   });
 });
 

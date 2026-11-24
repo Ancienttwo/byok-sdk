@@ -39,7 +39,7 @@ import {
   isRuntimeExecutionFailure,
 } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
-import { classifyDetectError, probeRuntimeVersion, probeTimeouts, runDetectCommand } from '../detect-outcome.js';
+import { classifyDetectError, probeRuntimeVersion, probeTimeouts, registerAdmissionDetect, runDetectCommand } from '../detect-outcome.js';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { withoutProviderCredentials } from '../provider-credential-environment.js';
@@ -211,6 +211,7 @@ export class CodexAdapter implements RuntimeAdapter {
   private readonly interruptTimeoutMs: number;
   private readonly maxRetainedBytes: number;
   constructor(private readonly options: CodexAdapterOptions = {}) {
+    registerAdmissionDetect(this, CodexAdapter.prototype.detect, async signal => (await this.detectInstallation({ checkAuth: false, signal })).detected);
     if (options.sandbox !== undefined) assertCodexSandboxSetting(options.sandbox, 'CodexAdapterOptions.sandbox');
     this.environmentPolicy = assertRuntimeEnvironmentPolicy(options.runtimeEnvironment, 'CodexAdapterOptions.runtimeEnvironment');
     if (options.agentUserMcpServers !== undefined && options.agentUserMcpServers !== 'inherit' && options.agentUserMcpServers !== 'excluded')
@@ -236,11 +237,13 @@ export class CodexAdapter implements RuntimeAdapter {
   }
 
   /**
-   * `checkAuth: false` omits `authPresent` (unmeasured). prepare() never reads it, and a
-   * subscription launch confirms the account itself (`#readSubscription`), so a second
-   * `login status` after the offer's detect() would only spend the admission deadline.
+   * `checkAuth: false` (task admission and prepare()) omits `authPresent` (unmeasured):
+   * neither reads it, and a subscription launch confirms the account itself
+   * (`#readSubscription`), so `login status` would only spend the admission deadline.
+   * A caller abort rethrows its reason.
    */
-  private async detectInstallation(options: { readonly checkAuth: boolean }): Promise<CodexInstallation> {
+  private async detectInstallation(options: { readonly checkAuth: boolean; readonly signal?: AbortSignal }): Promise<CodexInstallation> {
+    const { checkAuth, signal } = options;
     try {
       const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex'));
@@ -253,10 +256,11 @@ export class CodexAdapter implements RuntimeAdapter {
       const invocation = { ...resolvedInvocation, command: path.resolve(resolvedInvocation.command) };
       const { command, args, executable } = invocation;
       const timeouts = codexProbeTimeouts.of(this);
-      const version = await probeRuntimeVersion(command, timeouts.version, env, args);
+      const version = await probeRuntimeVersion(command, timeouts.version, env, args, signal);
       if (version.kind !== 'available') return { detected: version };
       const text = version.stdout.trim() || version.stderr.trim();
-      const appServer = await runDetectCommand(command, [...args, 'app-server', '--help'], { timeoutMs: timeouts.appServerHelp, env });
+      const appServer = await runDetectCommand(command, [...args, 'app-server', '--help'], { timeoutMs: timeouts.appServerHelp, env, signal });
+      if (appServer.kind === 'aborted') throw appServer.reason;
       if (appServer.kind === 'timeout') return { detected: { kind: 'timeout' } };
       if (appServer.kind !== 'ok') return { detected: { kind: 'refused', reason: 'app_server_unavailable' } };
       if (this.options.agentUserContext === 'excluded') {
@@ -270,7 +274,7 @@ export class CodexAdapter implements RuntimeAdapter {
         if (!linksAvailable) return { detected: { kind: 'refused', reason: 'agent_user_context_unavailable' } };
       }
       let authPresent: boolean | undefined;
-      if (options.checkAuth) {
+      if (checkAuth) {
         const login = await runDetectCommand(command, [...args, 'login', 'status'], { timeoutMs: timeouts.authStatus, env });
         if (login.kind === 'timeout') return { detected: { kind: 'timeout' } };
         // Codex reports configured credentials with exit 0; its display text is not a contract.
@@ -286,6 +290,7 @@ export class CodexAdapter implements RuntimeAdapter {
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
       } };
     } catch (error) {
+      signal?.throwIfAborted();
       return { detected: classifyDetectError(error) };
     }
   }

@@ -4,6 +4,7 @@ import type { RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.j
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import type { ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
+import { admissionDetect } from './adapters/detect-outcome.js';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types.js';
 
 /** How one restart changed an installed runtime's version token (#1103 §2.6). */
@@ -305,11 +306,23 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
  * platform outside `descriptor.platforms` is refused before `detect()` runs.
  */
 export async function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult> {
+  return observeDetection(adapter, detectSignal => adapter.detect(detectSignal), signal);
+}
+
+/** {@link observeRuntimeDetection} for task admission: a built-in adapter may skip facts admission never reads (`registerAdmissionDetect`). */
+export async function observeAdmissionDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult> {
+  return observeDetection(adapter, detectSignal => {
+    const builtIn = admissionDetect(adapter);
+    return builtIn === undefined ? adapter.detect(detectSignal) : builtIn(detectSignal);
+  }, signal);
+}
+
+async function observeDetection(adapter: RuntimeAdapter, detect: (signal?: AbortSignal) => Promise<RuntimeDetectResult>, signal: AbortSignal | undefined): Promise<RuntimeDetectResult> {
   const platforms = adapter.descriptor.platforms;
   if (platforms !== undefined && !platforms.includes(process.platform)) {
     return validateRuntimeDetectResult({ kind: 'refused', reason: 'platform_unsupported' });
   }
-  return validateRuntimeDetectResult(await adapter.detect(signal));
+  return validateRuntimeDetectResult(await detect(signal));
 }
 
 /** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by a `harness` target. */
