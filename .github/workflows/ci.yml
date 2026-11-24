@@ -2319,10 +2319,6 @@ jobs:
         if: runner.os != 'Linux'
         shell: bash
         run: bun run --filter @byok-sdk/client build:agent-memory-helper
-      # #2457 / #2460 Slice 0: validate the UI-agnostic Rust shell crate on all three desktop OSes.
-      - name: Rust byok-shell tests (cargo test --locked)
-        working-directory: examples/desktop-bot-app/native/byok-shell
-        run: cargo test --locked
       - name: Download the Electron binary
         working-directory: examples/desktop-bot-app
         run: node -p "require('electron')"
@@ -2541,6 +2537,18 @@ jobs:
           pkill -f 'dist/src/main/index.js' || true
           echo '--- app log'; cat "$RUNNER_TEMP/renderer-app.log"
           exit $code
+      # #2457 / #2460: build dist/host/host.cjs on all three OSes and run the full UI-agnostic Rust shell E2E suite after packaging smokes.
+      - name: Build the desktop Host bundle (build:host)
+        run: bun run --filter @byok-sdk/example-desktop-bot-app build:host
+      - name: Rust byok-shell tests (cargo test --locked)
+        working-directory: examples/desktop-bot-app/native/byok-shell
+        shell: bash
+        env:
+          BYOK_SHELL_E2E_LIVE_HOST: '1'
+          RUSTFLAGS: '-D warnings'
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then export HOME="$RUNNER_TEMP/host-home"; fi
+          cargo test --locked
 
   ci-required:
     name: CI required

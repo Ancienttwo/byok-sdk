@@ -314,4 +314,14 @@ describe('custody child', () => {
       await later.close();
     }
   });
+
+  it('refuses keys.submit without spawning custody while maintenance lock is busy (P1-6)', async () => {
+    const spawnHostCommand = vi.fn(() => custodyChild(new InMemorySecretStore(), []));
+    const callHost = vi.fn(async () => null);
+    const handlers = keysMainHandlers({ spawnHostCommand, callHost, isMaintenanceBusy: () => true });
+    await expect(handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET }))
+      .rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_BUSY' });
+    expect(spawnHostCommand).not.toHaveBeenCalled();
+    expect(callHost).not.toHaveBeenCalled();
+  });
 });

@@ -24,6 +24,7 @@ export interface HandoverControls {
 
 export interface MaintenanceLock {
   run<T>(action: (handover: HandoverControls) => Promise<T>): Promise<T>;
+  isBusy(): boolean;
   isHandedOver(): boolean;
   isQuitting(): boolean;
   /** Subscribes to normal app quit requests; fires immediately if already quitting. */
@@ -76,6 +77,9 @@ export function createMaintenanceLock(): MaintenanceLock {
         }
         finish();
       }
+    },
+    isBusy(): boolean {
+      return busy || currentHandover() !== 'none' || quitting;
     },
     isHandedOver(): boolean {
       return handover === 'confirmed';

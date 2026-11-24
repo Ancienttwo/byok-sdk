@@ -13,7 +13,11 @@ export type MainDependencies = KeysMainDependencies & ShellDependencies;
  * domain that adds one fails to compile until its handler is connected here.
  */
 export function createMainHandlers(deps: MainDependencies): MethodHandlers<Pick<BridgeMethods, MainMethod>> {
-  return { ...keysMainHandlers(deps), ...loginItemHandlers(), ...shellHandlers(deps) };
+  return {
+    ...keysMainHandlers({ ...deps, isMaintenanceBusy: () => deps.maintenanceLock.isBusy() }),
+    ...loginItemHandlers(),
+    ...shellHandlers(deps),
+  };
 }
 
 /** The login item lives in the OS, so main answers it; the renderer's switch is the only writer. */

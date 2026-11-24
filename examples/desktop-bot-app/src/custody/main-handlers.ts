@@ -9,6 +9,8 @@ export interface KeysMainDependencies {
   /** Spawns the Host executable with these arguments: dev runs the Host bundle under Node, a package runs the SEA. */
   readonly spawnHostCommand: (args: readonly string[]) => CustodyChild;
   readonly callHost: (method: ShellToHostMethod, params: BridgeMethods[ShellToHostMethod]['params']) => Promise<BridgeMethods[ShellToHostMethod]['result']>;
+  /** Refuses new custody writes while S1 update/recovery maintenance owns the stores (P1-6). */
+  readonly isMaintenanceBusy?: () => boolean;
 }
 
 const HOST_NOT_SERVING: ReadonlySet<BridgeErrorCode> = new Set(['host_exited', 'unknown_method']);
@@ -45,6 +47,9 @@ export function keysMainHandlers(deps: KeysMainDependencies): MethodHandlers<Pic
     'keys.submit': async params => {
       // The one field main reads: a list is not a change, so it never reaches custody as one.
       if ((params as { op?: unknown } | null)?.op === 'list') throw new BridgeError('invalid_params', 'keys.submit takes configure or replace_secret; keys.list lists');
+      if (deps.isMaintenanceBusy?.()) {
+        throw new CustodyError('PROVIDER_CONFIGURATION_BUSY', 'Cannot change provider keys while an app update or recovery action is running');
+      }
       let status;
       try {
         status = await submitToCustody(deps.spawnHostCommand([CUSTODY_COMMAND]), params as CustodyChange);
