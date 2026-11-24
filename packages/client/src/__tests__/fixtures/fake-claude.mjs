@@ -36,7 +36,8 @@
 //   FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE=<path>
 //                                       -> `auth status --json` leaves a
 //                                          detached grandchild holding stdout
-//                                          and stderr open, writes its pid to
+//                                          and stderr open, writes
+//                                          `<own pid> <grandchild pid>` to
 //                                          <path>, and exits with no output.
 //   FAKE_CLAUDE_VERSION_HANG=1          -> `claude --version` never responds
 //                                          at all (no stdout, no exit) —
@@ -393,7 +394,7 @@ function runProbeOrTurnFlow() {
     const grandchildPidFile = process.env.FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE;
     if (grandchildPidFile) {
       const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
-      writeFileSync(grandchildPidFile, String(grandchild.pid));
+      writeFileSync(grandchildPidFile, `${process.pid} ${grandchild.pid}`);
       grandchild.unref();
       process.exit(0);
     }

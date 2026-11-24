@@ -215,15 +215,28 @@ const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'
 require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(grandchild.pid));
 grandchild.unref();`);
     const readPid = async () => Number(await fs.readFile(receipt, 'utf8').catch(() => '0'));
-    const started = Date.now();
+    // Freeze only the probe deadline; the child, its grandchild and the pipes stay real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const exec = vi.mocked(childProcess.execFile);
+    exec.mockClear();
     try {
-      // Long enough for the child to spawn its grandchild and write the pid first.
-      expect(await runDetectCommand(command, [], { timeoutMs: 600, env })).toEqual({ kind: 'timeout' });
-      expect(Date.now() - started).toBeLessThan(3_000);
+      const result = runDetectCommand(command, [], { timeoutMs: 1_000, env });
+      const settled = vi.fn();
+      void result.then(settled);
+      const child: childProcess.ChildProcess = exec.mock.results[0]!.value;
+      // The child exits after writing the receipt; the grandchild keeps both pipes open.
+      await once(child, 'exit');
       const pid = await readPid();
       expect(pid).toBeGreaterThan(0);
       expect(() => process.kill(pid, 0)).not.toThrow();
+      await new Promise(resolve => setImmediate(resolve));
+      expect(settled).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await result).toEqual({ kind: 'timeout' });
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
+      vi.useRealTimers();
       const pid = await readPid();
       if (pid > 0) try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
     }

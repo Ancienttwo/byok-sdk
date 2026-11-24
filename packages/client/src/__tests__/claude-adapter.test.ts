@@ -236,23 +236,42 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
 
   it('#2468: detect() reports timeout at the auth deadline while a grandchild holds the status pipes', async () => {
     const adapter = fakeClaudeAdapter();
-    // Long enough for the fixture to spawn its grandchild and write the pid first.
-    claudeProbeTimeouts.override(adapter, { authStatus: 600 });
+    claudeProbeTimeouts.override(adapter, { authStatus: 1_000 });
     const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-grandchild-')), 'pid');
-    const readPid = async () => Number(await fs.readFile(pidFile, 'utf8').catch(() => '0'));
+    /** The fixture writes `<auth status pid> <grandchild pid>`, then exits. */
+    const readPids = async (): Promise<[number, number] | undefined> => {
+      const [parent, grandchild] = (await fs.readFile(pidFile, 'utf8').catch(() => '')).split(' ').map(Number);
+      return parent! > 0 && grandchild! > 0 ? [parent!, grandchild!] : undefined;
+    };
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
     vi.stubEnv('FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE', pidFile);
-    const started = Date.now();
+    // Freeze only the probe deadlines; the CLI, its grandchild and the pipes stay real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     try {
-      expect(await adapter.detect()).toEqual({ kind: 'timeout' });
-      expect(Date.now() - started).toBeLessThan(5_000);
-      const pid = await readPid();
-      expect(pid).toBeGreaterThan(0);
+      const pending = adapter.detect();
+      const settled = vi.fn();
+      void pending.then(settled);
+      // setTimeout is faked: wait on real I/O turns, bounded by the real clock.
+      const until = Date.now() + 10_000;
+      let pids = await readPids();
+      while ((pids === undefined || alive(pids[0])) && Date.now() < until) {
+        await new Promise(resolve => setImmediate(resolve));
+        pids = await readPids();
+      }
+      expect(pids).toBeDefined();
+      const [parent, grandchild] = pids!;
+      expect(alive(parent)).toBe(false);
+      expect(alive(grandchild)).toBe(true);
+      expect(settled).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await pending).toEqual({ kind: 'timeout' });
       // The grandchild outlived the probe: the deadline, not its exit, ended the read.
-      expect(() => process.kill(pid, 0)).not.toThrow();
+      expect(alive(grandchild)).toBe(true);
     } finally {
+      vi.useRealTimers();
       vi.unstubAllEnvs();
-      const pid = await readPid();
-      if (pid > 0) try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+      const pids = await readPids();
+      if (pids !== undefined) try { process.kill(pids[1], 'SIGKILL'); } catch { /* already gone */ }
       await fs.rm(path.dirname(pidFile), { recursive: true, force: true });
     }
   });
