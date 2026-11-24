@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "bridgeVersion": 2,
   "ipcChannel": "byok:bridge",
   "stateHintChannel": "byok:state-changed",
@@ -57,7 +57,11 @@
     "settings.device",
     "settings.get",
     "settings.setDreaming",
-    "settings.exportDiagnostics"
+    "settings.exportDiagnostics",
+    "keys.profilesChanged"
+  ],
+  "shellToHostMethods": [
+    "keys.profilesChanged"
   ],
   "hostCommands": {
     "custody": "byok-desktop-custody",

@@ -18,4 +18,5 @@ export interface ActivityMethods {
 export const ACTIVITY_DOMAIN = {
   renderer: ['activity.cards', 'activity.card', 'activity.approve', 'activity.reject'],
   main: [],
+  shellToHost: [],
 } as const satisfies BridgeDomain<ActivityMethods>;

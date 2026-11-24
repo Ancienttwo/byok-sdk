@@ -1,14 +1,14 @@
 /** Main's answers to `keys.submit` (the one place the secret passes through main) and `keys.list`. */
 import type { MethodHandlers } from '../bridge/domain.ts';
 import type { KeysMethods } from '../bridge/domains/keys.ts';
-import { BridgeError, type BridgeErrorCode } from '../bridge/protocol.ts';
+import { BridgeError, type BridgeErrorCode, type BridgeMethods, type ShellToHostMethod } from '../bridge/protocol.ts';
 import { CUSTODY_COMMAND, CustodyError, type CustodyChange } from './protocol.ts';
 import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 
 export interface KeysMainDependencies {
   /** Spawns the Host executable with these arguments: dev runs the Host bundle under Node, a package runs the SEA. */
   readonly spawnHostCommand: (args: readonly string[]) => CustodyChild;
-  readonly callHost: (method: 'keys.profilesChanged', params: undefined) => Promise<null>;
+  readonly callHost: (method: ShellToHostMethod, params: BridgeMethods[ShellToHostMethod]['params']) => Promise<BridgeMethods[ShellToHostMethod]['result']>;
 }
 
 const HOST_NOT_SERVING: ReadonlySet<BridgeErrorCode> = new Set(['host_exited', 'unknown_method']);

@@ -38,4 +38,5 @@ export interface ShellMethods {
 export const SHELL_DOMAIN = {
   renderer: [],
   main: ['shell.state', 'shell.restore', 'shell.startFresh'],
+  shellToHost: [],
 } as const satisfies BridgeDomain<ShellMethods>;

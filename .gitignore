@@ -152,3 +152,6 @@ Thumbs.db
 **/evidence/
 *.evidence.json
 # END: internal agent/process state
+
+# Rust build output under desktop-bot-app native crates
+examples/desktop-bot-app/native/**/target/

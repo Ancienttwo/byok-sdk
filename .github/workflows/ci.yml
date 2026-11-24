@@ -2319,6 +2319,10 @@ jobs:
         if: runner.os != 'Linux'
         shell: bash
         run: bun run --filter @byok-sdk/client build:agent-memory-helper
+      # #2457 / #2460 Slice 0: validate the UI-agnostic Rust shell crate on all three desktop OSes.
+      - name: Rust byok-shell tests (cargo test --locked)
+        working-directory: examples/desktop-bot-app/native/byok-shell
+        run: cargo test --locked
       - name: Download the Electron binary
         working-directory: examples/desktop-bot-app
         run: node -p "require('electron')"

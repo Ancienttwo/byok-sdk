@@ -588,6 +588,12 @@ describe('desktop bridge', () => {
   it('keeps committed bridge-contract.json aligned with buildBridgeContract() (S2)', () => {
     const file = fileURLToPath(new URL('./bridge-contract.json', import.meta.url));
     const committed = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
-    expect(committed).toBe(`${JSON.stringify(buildBridgeContract(), null, 2)}\n`);
+    const contract = buildBridgeContract();
+    expect(committed).toBe(`${JSON.stringify(contract, null, 2)}\n`);
+    expect(contract.schemaVersion).toBe(2);
+    expect(contract.shellToHostMethods).toEqual(['keys.profilesChanged']);
+    expect(contract.hostMethods).toContain('keys.profilesChanged');
+    expect(contract.rendererMethods).not.toContain('keys.profilesChanged');
+    expect(contract.mainMethods).not.toContain('keys.profilesChanged');
   });
 });

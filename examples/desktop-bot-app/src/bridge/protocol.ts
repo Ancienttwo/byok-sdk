@@ -78,21 +78,35 @@ export type RendererMethod = 'status' | (typeof DOMAINS)[number]['renderer'][num
 export const MAIN_METHODS: readonly MainMethod[] = DOMAINS.flatMap(domain => domain.main);
 export type MainMethod = (typeof DOMAINS)[number]['main'][number];
 
-/** The domain methods served by the Host behind the bridge (excluding `status` and {@link MAIN_METHODS}). */
-export const HOST_METHODS: readonly (typeof DOMAINS)[number]['renderer'][number][] = DOMAINS.flatMap(domain => domain.renderer);
+/** The Host methods callable only by shell/main itself, never by the renderer. */
+export const SHELL_TO_HOST_METHODS: readonly ShellToHostMethod[] = DOMAINS.flatMap(domain => domain.shellToHost);
+export type ShellToHostMethod = (typeof DOMAINS)[number]['shellToHost'][number];
+
+/** Compile-time guard: every non-core domain method must be classified into renderer, main, or shellToHost. */
+type UndeclaredDomainMethod = Exclude<BridgeMethod, (typeof CORE_METHODS)[number] | RendererMethod | ShellToHostMethod>;
+const _allDomainMethodsClassified: UndeclaredDomainMethod extends never ? true : never = true;
+void _allDomainMethodsClassified;
+
+/** The domain methods served by the Host behind the bridge (both renderer-forwarded and shell-only methods). */
+export type HostDomainMethod = (typeof DOMAINS)[number]['renderer'][number] | ShellToHostMethod;
+export const HOST_METHODS: readonly HostDomainMethod[] = [
+  ...DOMAINS.flatMap(domain => domain.renderer),
+  ...SHELL_TO_HOST_METHODS,
+];
 
 /** The methods the Host answers behind the bridge, besides `hello` and `shutdown`. */
 export type HostMethods = Omit<BridgeMethods, 'hello' | 'shutdown' | MainMethod>;
 
 export interface BridgeContract {
-  readonly schemaVersion: 1;
+  readonly schemaVersion: 2;
   readonly bridgeVersion: typeof BRIDGE_VERSION;
   readonly ipcChannel: typeof BRIDGE_IPC_CHANNEL;
   readonly stateHintChannel: typeof STATE_HINT_CHANNEL;
   readonly coreMethods: readonly (typeof CORE_METHODS)[number][];
   readonly rendererMethods: readonly BridgeMethod[];
   readonly mainMethods: readonly MainMethod[];
-  readonly hostMethods: readonly (typeof DOMAINS)[number]['renderer'][number][];
+  readonly hostMethods: readonly HostDomainMethod[];
+  readonly shellToHostMethods: readonly ShellToHostMethod[];
   readonly hostCommands: {
     readonly custody: typeof CUSTODY_COMMAND;
     readonly startFresh: typeof START_FRESH_COMMAND;
@@ -105,7 +119,7 @@ export interface BridgeContract {
 /** Deterministic machine-readable bridge contract (S2), projected from `src/bridge/protocol.ts` and `src/bridge/domains/*.ts`. */
 export function buildBridgeContract(): BridgeContract {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     bridgeVersion: BRIDGE_VERSION,
     ipcChannel: BRIDGE_IPC_CHANNEL,
     stateHintChannel: STATE_HINT_CHANNEL,
@@ -113,6 +127,7 @@ export function buildBridgeContract(): BridgeContract {
     rendererMethods: [...RENDERER_METHODS],
     mainMethods: [...MAIN_METHODS],
     hostMethods: [...HOST_METHODS],
+    shellToHostMethods: [...SHELL_TO_HOST_METHODS],
     hostCommands: {
       custody: CUSTODY_COMMAND,
       startFresh: START_FRESH_COMMAND,

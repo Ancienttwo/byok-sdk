@@ -19,13 +19,15 @@ export type MethodTable<M> = { readonly [K in keyof M]: MethodSpec };
 export type Prefixed<M, P extends string> = keyof M extends `${P}.${string}` ? M : never;
 
 /**
- * The renderer allowlist of one domain. `renderer` methods are forwarded to the
- * Host; `main` methods are answered by main and never reach the Host. A method
- * in neither list is reachable only from main's own code.
+ * The allowlists of one domain: `renderer` methods are forwarded to the Host,
+ * `main` methods are answered by main/shell and never reach the Host, and
+ * `shellToHost` methods are Host methods callable only by shell/main itself
+ * (never exposed to the renderer).
  */
 export interface BridgeDomain<M extends MethodTable<M>> {
   readonly renderer: readonly (keyof M & string)[];
   readonly main: readonly (keyof M & string)[];
+  readonly shellToHost: readonly (keyof M & string)[];
 }
 
 /**
