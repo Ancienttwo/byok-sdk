@@ -7,7 +7,7 @@ import { BRIDGE_IPC_CHANNEL, RENDERER_METHODS, STATE_HINT_CHANNEL, type BridgeMe
 import { createRendererRouter, isAppRefusal, settleCall } from '../bridge/route.ts';
 import { createMainHandlers } from './domains.ts';
 import { HostProcess, spawnDevHost, spawnDevHostCommand } from './host-process.ts';
-import { createMaintenanceLock } from './maintenance-lock.ts';
+import { createBeforeQuitHandler, createMaintenanceLock } from './maintenance-lock.ts';
 import { spawnPackagedHost, spawnPackagedHostCommand } from './packaged-host.ts';
 import { coalesceStateHints } from './state-hint.ts';
 import { createAppTray } from './tray.ts';
@@ -159,16 +159,12 @@ if (!app.requestSingleInstanceLock()) {
   app.on('window-all-closed', () => {});
   app.on('activate', () => { if (!window) createWindow(); });
 
-  let stopping = false;
-  app.on('before-quit', event => {
-    if (stopping) return;
-    event.preventDefault();
-    stopping = true;
-    host.stop().then(() => app.exit(0), (error: Error) => {
-      console.error(`Host shutdown failed: ${error.message}`);
-      app.exit(1);
-    });
-  });
+  app.on('before-quit', createBeforeQuitHandler({
+    maintenanceLock,
+    stopHost: () => host.stop(),
+    exit: code => app.exit(code),
+    logError: message => console.error(message),
+  }));
 
   void app.whenReady().then(() => {
     session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));

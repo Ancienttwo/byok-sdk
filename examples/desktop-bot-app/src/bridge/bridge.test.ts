@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { HostProcess } from '../main/host-process.ts';
-import { createMaintenanceLock } from '../main/maintenance-lock.ts';
+import { createBeforeQuitHandler, createMaintenanceLock } from '../main/maintenance-lock.ts';
 import { shellHandlers } from '../main/recovery.ts';
 import { coalesceStateHints } from '../main/state-hint.ts';
 import { offerInstall } from '../main/updater.ts';
@@ -457,6 +457,132 @@ describe('desktop bridge', () => {
     expect(shellStop).not.toHaveBeenCalled();
     expect(shellSpawn).not.toHaveBeenCalled();
     expect(shellRelaunch).not.toHaveBeenCalled();
+  });
+
+  it('before-quit waits for an in-flight S1 restore helper without exiting early and allows intentional post-handover quit', async () => {
+    const maintenanceLock = createMaintenanceLock();
+    const immediateReceipt = (line: string, code = 0) => {
+      const delayed = delayedReceipt();
+      delayed.resolveReceipt(line, code);
+      return delayed.child;
+    };
+
+    let markRestoreStarted!: () => void;
+    const restoreStarted = new Promise<void>(resolve => { markRestoreStarted = resolve; });
+    const delayedRestore = delayedReceipt();
+    const calls: string[] = [];
+
+    const handlers = shellHandlers({
+      version: '1.0.0',
+      hostState: () => ({ state: 'stopped', pid: 1, reason: 'halted', storeRefused: false }),
+      now: () => new Date(0),
+      maintenanceLock,
+      stopHost: async () => { calls.push('restore:stop'); },
+      spawnHostCommand: args => {
+        calls.push(`restore:${args[0]}`);
+        if (args[0] === SNAPSHOT_STATUS_COMMAND) return immediateReceipt(JSON.stringify({ ok: true, snapshot: { version: '1.0.0', target: '/snap/1.0.0' } }));
+        markRestoreStarted();
+        return delayedRestore.child;
+      },
+      relaunch: () => { calls.push('restore:relaunch'); },
+    });
+
+    const quitStopHost = vi.fn(async () => {});
+    const exit = vi.fn();
+    const beforeQuit = createBeforeQuitHandler({
+      maintenanceLock,
+      stopHost: quitStopHost,
+      exit,
+      logError: vi.fn(),
+    });
+
+    const pendingRestore = handlers['shell.restore'](undefined);
+    await restoreStarted;
+
+    // Normal quit (and duplicate quit click) must prevent exit while S1 helper is still running.
+    const quitEvent1 = { preventDefault: vi.fn() };
+    const quitEvent2 = { preventDefault: vi.fn() };
+    beforeQuit(quitEvent1);
+    beforeQuit(quitEvent2);
+    expect(quitEvent1.preventDefault).toHaveBeenCalledTimes(1);
+    expect(quitEvent2.preventDefault).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    expect(quitStopHost).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+
+    // Release delayed S1 receipt -> handover completes relaunch; normal quit yields cleanly.
+    delayedRestore.resolveReceipt(JSON.stringify({ ok: true, asidePath: '/home/host.aside-0' }), 0);
+    await expect(pendingRestore).resolves.toEqual({ asidePath: '/home/host.aside-0' });
+    await Promise.resolve();
+    expect(calls).toEqual([`restore:${SNAPSHOT_STATUS_COMMAND}`, 'restore:stop', `restore:${RESTORE_COMMAND}`, 'restore:relaunch']);
+    expect(quitStopHost).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+
+    // Intentional quit triggered after handover (e.g. app.quit() in relaunchAndQuit/quitAndInstall) proceeds unblocked.
+    const postHandoverEvent = { preventDefault: vi.fn() };
+    beforeQuit(postHandoverEvent);
+    expect(postHandoverEvent.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it('before-quit waits for non-handover maintenance failure, blocks new S1 work, then stops Host and exits 0', async () => {
+    const maintenanceLock = createMaintenanceLock();
+    let markStopStarted!: () => void;
+    const stopStarted = new Promise<void>(resolve => { markStopStarted = resolve; });
+    let rejectBeforeInstall!: (error: Error) => void;
+
+    const quitStopHost = vi.fn(async () => {});
+    const exit = vi.fn();
+    const beforeQuit = createBeforeQuitHandler({
+      maintenanceLock,
+      stopHost: quitStopHost,
+      exit,
+      logError: vi.fn(),
+    });
+
+    const shellStop = vi.fn(async () => {});
+    const handlers = shellHandlers({
+      version: '1.0.0',
+      hostState: () => ({ state: 'stopped', pid: 1, reason: 'halted', storeRefused: false }),
+      now: () => new Date(0),
+      maintenanceLock,
+      stopHost: shellStop,
+      spawnHostCommand: vi.fn(),
+      relaunch: vi.fn(),
+    });
+
+    const pendingInstall = offerInstall('2.0.0', {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall: () => {
+        markStopStarted();
+        return new Promise<void>((_resolve, reject) => { rejectBeforeInstall = reject; });
+      },
+      spawnHostCommand: vi.fn(),
+      showError: vi.fn(),
+      relaunchAndQuit: vi.fn(),
+      quitAndInstall: vi.fn(),
+      maintenanceLock,
+    });
+
+    await stopStarted;
+
+    const quitEvent = { preventDefault: vi.fn() };
+    beforeQuit(quitEvent);
+    expect(quitEvent.preventDefault).toHaveBeenCalledTimes(1);
+    await Promise.resolve();
+    expect(quitStopHost).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+    await expect(handlers['shell.restore'](undefined)).rejects.toThrow('Another recovery action is running');
+
+    rejectBeforeInstall(new Error('Host did not shut down'));
+    await expect(pendingInstall).resolves.toBe(false);
+
+    await vi.waitFor(() => {
+      expect(quitStopHost).toHaveBeenCalledTimes(1);
+      expect(exit).toHaveBeenCalledWith(0);
+    });
+    await expect(handlers['shell.restore'](undefined)).rejects.toThrow('Another recovery action is running');
+    expect(shellStop).not.toHaveBeenCalled();
   });
 
   it('keeps committed bridge-contract.json aligned with buildBridgeContract() (S2)', () => {
