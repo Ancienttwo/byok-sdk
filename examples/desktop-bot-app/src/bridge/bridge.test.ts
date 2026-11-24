@@ -290,7 +290,7 @@ describe('desktop bridge', () => {
 
   it('keeps committed bridge-contract.json aligned with buildBridgeContract() (S2)', () => {
     const file = fileURLToPath(new URL('./bridge-contract.json', import.meta.url));
-    const committed = readFileSync(file, 'utf8');
+    const committed = readFileSync(file, 'utf8').replace(/\r\n/g, '\n');
     expect(committed).toBe(`${JSON.stringify(buildBridgeContract(), null, 2)}\n`);
   });
 });
