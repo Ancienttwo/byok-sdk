@@ -237,7 +237,41 @@ export function detectedRuntimeCapabilities(descriptor: RuntimeAdapterDescriptor
     : descriptor.capabilities;
 }
 
+/**
+ * Launch data an adapter verified while producing one `available` observation,
+ * keyed by that observation object. Only the adapter that bound it can read
+ * it, and only once, so a forged, copied or reused `detected` never skips a
+ * probe and one observation serves one `prepare()`.
+ */
+const verifiedDetections = new WeakMap<object, { readonly adapter: RuntimeAdapter; readonly payload: unknown }>();
+
+/** Binds `payload` (the exact command or invocation the probe ran) to an `available` observation. Returns `result`. */
+export function bindVerifiedDetection<R extends RuntimeDetectResult>(adapter: RuntimeAdapter, result: R, payload: unknown): R {
+  if (result.kind === 'available') verifiedDetections.set(result, { adapter, payload });
+  return result;
+}
+
+/** The payload `adapter` bound to this observation, consumed on read; `undefined` for any other observation. */
+export function takeVerifiedDetection<T>(adapter: RuntimeAdapter, result: RuntimeDetectResult | undefined): T | undefined {
+  if (result === undefined || result.kind !== 'available') return undefined;
+  const entry = verifiedDetections.get(result);
+  if (entry === undefined || entry.adapter !== adapter) return undefined;
+  verifiedDetections.delete(result);
+  return entry.payload as T;
+}
+
 export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult {
+  const result = validateRuntimeDetectResultShape(value);
+  // The validated copy carries the binding of the observation it copies.
+  const entry = verifiedDetections.get(value as object);
+  if (entry !== undefined && result !== value) {
+    verifiedDetections.delete(value as object);
+    verifiedDetections.set(result, entry);
+  }
+  return result;
+}
+
+function validateRuntimeDetectResultShape(value: unknown): RuntimeDetectResult {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('invalid runtime detection result');
   }

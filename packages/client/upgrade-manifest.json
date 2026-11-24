@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.46.0",
-    "snapshotSha256": "289adee6214369904599631033ef5fbd56c3ce05bf7897b321ecaf535f0500c1"
+    "snapshotSha256": "8313f9a340577a351eac4fc783b8aedac826d4828d08c81abd3fe939dd0f0757"
   },
   "configFields": {
     "status": "tracked",
@@ -31,7 +31,7 @@
     {
       "id": "detect-signal-prepare-detected",
       "impact": "additive",
-      "summary": "@byok-sdk/client built-in adapters declare detect(signal?: AbortSignal); an abort stops the probe child and rejects with the reason. RuntimeAdapterPrepareInput.detected carries the offer's admission observation, which built-in prepare() reuses for the same executable instead of probing again. No Host action required.",
+      "summary": "@byok-sdk/client built-in adapters declare detect(signal?: AbortSignal); an abort rejects with the reason and stops any probe child. RuntimeAdapterPrepareInput.detected carries the offer's admission observation; a built-in prepare() reuses one produced by the same adapter, once, and launches the command it probed. No Host action required.",
       "migration": "docs/releases/host-upgrade-next-minor.md#detect-signal-prepare-detected",
       "items": [
         "export:@byok-sdk/client#AgyAdapter",
@@ -55,6 +55,21 @@
   ],
   "changes": [
     {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
       "item": "export:@byok-sdk/client#Daemon",
       "change": "changed",
       "entry": "daemon-when-capabilities-settled"
@@ -73,26 +88,6 @@
       "item": "export:@byok-sdk/client#DaemonMemoryBackendProofState",
       "change": "added",
       "entry": "daemon-when-capabilities-settled"
-    },
-    {
-      "item": "export:@byok-sdk/server#MachineInfo",
-      "change": "changed",
-      "entry": "daemon-when-capabilities-settled"
-    },
-    {
-      "item": "export:@byok-sdk/client#AgyAdapter",
-      "change": "changed",
-      "entry": "detect-signal-prepare-detected"
-    },
-    {
-      "item": "export:@byok-sdk/client#ClaudeAdapter",
-      "change": "changed",
-      "entry": "detect-signal-prepare-detected"
-    },
-    {
-      "item": "export:@byok-sdk/client#CodexAdapter",
-      "change": "changed",
-      "entry": "detect-signal-prepare-detected"
     },
     {
       "item": "export:@byok-sdk/client#DshAdapter",
@@ -158,6 +153,11 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapterPrepareInput",
       "change": "changed",
       "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/server#MachineInfo",
+      "change": "changed",
+      "entry": "daemon-when-capabilities-settled"
     }
   ]
 }

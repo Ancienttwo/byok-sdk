@@ -40,7 +40,7 @@ import {
 } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion, probeTimeouts, runDetectCommand } from '../detect-outcome.js';
-import { registerAdmissionDetect } from '../../runtime-detection.js';
+import { bindVerifiedDetection, registerAdmissionDetect, takeVerifiedDetection } from '../../runtime-detection.js';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { withoutProviderCredentials } from '../provider-credential-environment.js';
@@ -51,7 +51,7 @@ import { AsyncQueue } from '../../util/async-queue.js';
 import { haltGate, SettleWaiters, raceDeadline, RetryableOnce } from '../session-kit.js';
 import { resolveCodexBin, type ResolvedBin } from './resolve-bin.js';
 import { findRuntimeCommandOnPath, resolveRuntimeInvocation, runtimeInvocationHost, type RuntimeInvocation } from '../runtime-invocation.js';
-import { resolveRuntimeCommand, runtimeExecutableFields, sameDetectedExecutable } from '../runtime-executable.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import { CODEX_RUNTIME_CAPABILITIES } from './codex-capabilities.js';
 import { CODEX_VERSION_POLICY, codexVersionToken } from './codex-version.js';
@@ -237,45 +237,28 @@ export class CodexAdapter implements RuntimeAdapter {
     return (await this.detectInstallation({ checkAuth: true, signal })).detected;
   }
 
-  /** The invocation a probe or launch runs now, resolved in-process without a subprocess; `undefined` when not on PATH. */
-  private async resolveInstallation() {
-    const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
-    const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex'));
-    const host = runtimeInvocationHost(env);
-    const named = resolved.bin.command;
-    const explicitlyPathed = named.includes('/') || (host.platform === 'win32' && named.includes('\\'));
-    const executableCommand = explicitlyPathed || path.isAbsolute(named) ? path.resolve(named) : findRuntimeCommandOnPath(named, host);
-    if (executableCommand === undefined) return undefined;
-    const resolvedInvocation = resolveRuntimeInvocation(executableCommand, host);
-    const invocation: RuntimeInvocation = { ...resolvedInvocation, command: path.resolve(resolvedInvocation.command) };
-    return { env, invocation, executableFields: runtimeExecutableFields(resolved, host.platform === 'win32' ? invocation.executable : named) };
-  }
-
-  /** Refuses the whole runtime: the option is per adapter, and detection precedes every offer. */
-  private async userContextRefusal(): Promise<Exclude<RuntimeDetectResult, { kind: 'available' }> | undefined> {
-    if (this.options.agentUserContext !== 'excluded') return undefined;
-    let linksAvailable: boolean;
-    try {
-      linksAvailable = await ownedRuntimeHomeLinksAvailable();
-    } catch {
-      return { kind: 'probe-failed' };
-    }
-    return linksAvailable ? undefined : { kind: 'refused', reason: 'agent_user_context_unavailable' };
-  }
-
   /**
    * `checkAuth: false` (task admission and prepare()) omits `authPresent` (unmeasured):
    * neither reads it, and a subscription launch confirms the account itself
    * (`#readSubscription`), so `login status` would only spend the admission deadline.
-   * A caller abort rethrows its reason.
+   * A caller abort rethrows its reason, also before PATH lookup. An
+   * `available` observation carries its verified invocation
+   * (`bindVerifiedDetection`) for this adapter's `prepare()`.
    */
   private async detectInstallation(options: { readonly checkAuth: boolean; readonly signal?: AbortSignal }): Promise<CodexInstallation> {
     const { checkAuth, signal } = options;
+    signal?.throwIfAborted();
     try {
-      const installation = await this.resolveInstallation();
-      if (installation === undefined) return { detected: { kind: 'not-found' } };
-      const { env, invocation, executableFields } = installation;
-      const { command, args } = invocation;
+      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex'));
+      const host = runtimeInvocationHost(env);
+      const named = resolved.bin.command;
+      const explicitlyPathed = named.includes('/') || (host.platform === 'win32' && named.includes('\\'));
+      const executableCommand = explicitlyPathed || path.isAbsolute(named) ? path.resolve(named) : findRuntimeCommandOnPath(named, host);
+      if (executableCommand === undefined) return { detected: { kind: 'not-found' } };
+      const resolvedInvocation = resolveRuntimeInvocation(executableCommand, host);
+      const invocation = { ...resolvedInvocation, command: path.resolve(resolvedInvocation.command) };
+      const { command, args, executable } = invocation;
       const timeouts = codexProbeTimeouts.of(this);
       const version = await probeRuntimeVersion(command, timeouts.version, env, args, signal);
       if (version.kind !== 'available') return { detected: version };
@@ -284,8 +267,16 @@ export class CodexAdapter implements RuntimeAdapter {
       if (appServer.kind === 'aborted') throw appServer.reason;
       if (appServer.kind === 'timeout') return { detected: { kind: 'timeout' } };
       if (appServer.kind !== 'ok') return { detected: { kind: 'refused', reason: 'app_server_unavailable' } };
-      const refusal = await this.userContextRefusal();
-      if (refusal !== undefined) return { detected: refusal };
+      if (this.options.agentUserContext === 'excluded') {
+        let linksAvailable: boolean;
+        try {
+          linksAvailable = await ownedRuntimeHomeLinksAvailable();
+        } catch {
+          return { detected: { kind: 'probe-failed' } };
+        }
+        // Refuses the whole runtime: the option is per adapter, and detection precedes every offer.
+        if (!linksAvailable) return { detected: { kind: 'refused', reason: 'agent_user_context_unavailable' } };
+      }
       let authPresent: boolean | undefined;
       if (checkAuth) {
         const login = await runDetectCommand(command, [...args, 'login', 'status'], { timeoutMs: timeouts.authStatus, env, signal });
@@ -295,42 +286,18 @@ export class CodexAdapter implements RuntimeAdapter {
         // Any other end, such as an unreadable credential store, leaves auth presence unconfirmed.
         authPresent = login.kind === 'ok';
       }
-      return { invocation, detected: {
-        kind: 'available',
+      return { invocation, detected: bindVerifiedDetection(this, {
+        kind: 'available' as const,
         sessionCapabilities: codexRuntime.codexSessionCapabilities(),
         version: text,
         ...(authPresent === undefined ? {} : { authPresent }),
-        ...executableFields,
+        ...runtimeExecutableFields(resolved, host.platform === 'win32' ? executable : named),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
-      } };
+      }, invocation) };
     } catch (error) {
       signal?.throwIfAborted();
       return { detected: classifyDetectError(error) };
     }
-  }
-
-  /**
-   * This offer's admission observation when it is of the executable resolved
-   * now: the invocation is resolved in-process and no `--version` or
-   * `app-server --help` runs again. Otherwise, or with no observation, a fresh
-   * `checkAuth: false` detection.
-   */
-  private async admittedInstallation(input: RuntimeAdapterPrepareInput): Promise<CodexInstallation> {
-    const admitted = input.detected;
-    if (admitted?.kind === 'available') {
-      input.signal?.throwIfAborted();
-      let installation: Awaited<ReturnType<CodexAdapter['resolveInstallation']>>;
-      try {
-        installation = await this.resolveInstallation();
-      } catch {
-        installation = undefined; // the fresh detection classifies the failure
-      }
-      if (installation !== undefined && sameDetectedExecutable(admitted, installation.executableFields)) {
-        const refusal = await this.userContextRefusal();
-        return refusal === undefined ? { invocation: installation.invocation, detected: admitted } : { detected: refusal };
-      }
-    }
-    return this.detectInstallation({ checkAuth: false, signal: input.signal });
   }
   async prepare(
     input: RuntimeAdapterPrepareInput,
@@ -347,7 +314,13 @@ export class CodexAdapter implements RuntimeAdapter {
         retryable: false,
       };
     }
-    const installation = await this.admittedInstallation(input);
+    input.signal?.throwIfAborted();
+    // This offer's admission observation, when this adapter verified it, carries
+    // the invocation its probes ran; otherwise probe now and launch what that probe ran.
+    const verified = takeVerifiedDetection<RuntimeInvocation>(this, input.detected);
+    const installation: CodexInstallation = verified === undefined
+      ? await this.detectInstallation({ checkAuth: false, signal: input.signal })
+      : { invocation: verified, detected: input.detected as Extract<RuntimeDetectResult, { kind: 'available' }> };
     const { detected } = installation;
     if (!('invocation' in installation))
       return {

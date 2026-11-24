@@ -274,6 +274,9 @@ describe('Codex persistent app-server adapter', () => {
   it('#2469: detect(signal) rethrows a pre-aborted reason and stops a hung `login status` on abort', async () => {
     const reason = new Error('doctor cancelled');
     await expect(adapter().detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+    // Even with no codex to find: the abort wins over `not-found`.
+    await expect(adapter({ resolveBin: () => ({ command: 'byok-no-such-codex', source: 'path' }) }).detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+    await expect(adapter().prepare({ ...prepareInput(adapter()), signal: AbortSignal.abort(reason) })).rejects.toBe(reason);
     const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-login-')), 'pid');
     dirs.push(path.dirname(pidFile));
     vi.stubEnv('FAKE_CODEX_LOGIN_HANG', '1');
@@ -290,7 +293,7 @@ describe('Codex persistent app-server adapter', () => {
     await expect(pending).rejects.toBe(reason);
     await vi.waitFor(() => expectProcessNotLive(child));
   });
-  it('#2469: prepare() reuses the admission observation of the same executable, opens that executable, and otherwise probes afresh', async () => {
+  it('#2469: prepare() reuses this adapter\'s admission observation once, opens its verified executable, and otherwise probes afresh', async () => {
     const log = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-probes-')), 'probes');
     dirs.push(path.dirname(log));
     vi.stubEnv('FAKE_CODEX_PROBE_LOG', log);
@@ -311,11 +314,26 @@ describe('Codex persistent app-server adapter', () => {
     expect(await runtime.prepare({ ...prepareInput(runtime), detected }))
       .toMatchObject({ kind: 'prepared', detected: { version: 'codex-cli 0.169.0' } });
     expect(await probes()).toEqual([]);
-    expect((await turn(await open(runtime, task, { ...await ctx(), detected }))).at(-1)).toEqual({ type: 'turn_end' });
+    // One observation serves one prepare(): the same object again probes afresh.
+    expect(await runtime.prepare({ ...prepareInput(runtime), detected })).toMatchObject({ kind: 'prepared' });
+    expect(await probes()).toEqual(['--version', 'app-server --help']);
+    const admitted = await observeAdmissionDetection(runtime);
+    await probes();
+    expect((await turn(await open(runtime, task, { ...await ctx(), detected: admitted }))).at(-1)).toEqual({ type: 'turn_end' });
     expect(commands).toEqual([fixture]);
     expect(await probes()).toEqual([]);
-    expect(await runtime.prepare({ ...prepareInput(runtime), detected: { ...detected, executablePath: '/elsewhere/codex' } })).toMatchObject({ kind: 'prepared' });
-    expect(await probes()).toEqual(['--version', 'app-server --help']);
+    // A copy, a plain object, or another adapter's observation carries no verified invocation.
+    for (const forged of [{ ...admitted }, { kind: 'available', executableSource: 'config' } as const, await observeAdmissionDetection(adapter())]) {
+      await probes();
+      expect(await runtime.prepare({ ...prepareInput(runtime), detected: forged })).toMatchObject({ kind: 'prepared' });
+      expect(await probes()).toEqual(['--version', 'app-server --help']);
+    }
+    // A forged observation cannot skip the version floor a fresh probe applies.
+    vi.stubEnv('FAKE_CODEX_VERSION', 'codex-cli 0.47.0');
+    expect(await runtime.prepare({ ...prepareInput(runtime), requiredToolsetIds: ['receipt'], detected: { kind: 'available', version: 'codex-cli 0.169.0' } }))
+      .toMatchObject({ kind: 'reject', reason: expect.stringContaining('codex_mcp_tool_allowlist_unsupported') });
+    vi.stubEnv('FAKE_CODEX_VERSION', 'codex-cli 0.169.0');
+    await probes();
     expect(await runtime.prepare(prepareInput(runtime))).toMatchObject({ kind: 'prepared' });
     expect(await probes()).toEqual(['--version', 'app-server --help']);
   });

@@ -7,7 +7,8 @@
 // FAKE_CODEX_STATUS_EXTRA: JSON array of more status entries, a source config/read does not show.
 // FAKE_CODEX_LOGIN_HANG=1 / FAKE_CODEX_APP_SERVER_HELP_HANG=1: `login status` / `app-server --help` never answer.
 // FAKE_CODEX_HANG_PID_FILE=<path>: a hanging probe first writes its pid to <path>.
-// FAKE_CODEX_PROBE_LOG=<path>: each `--version`, `--help` or `login` probe appends its argv line.
+// FAKE_CODEX_PROBE_LOG=<path>: each `--version`, `--help` or `login` probe appends its argv line,
+// prefixed with FAKE_CODEX_PROBE_TAG when set.
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -22,7 +23,7 @@ for (let i = 0; i < argv.length; i++)
     config[value.slice(0, eq)] = value.slice(eq + 1);
   }
 if (process.env.FAKE_CODEX_PROBE_LOG && (argv.includes('--version') || argv.includes('--help') || argv[0] === 'login'))
-  appendFileSync(process.env.FAKE_CODEX_PROBE_LOG, `${argv.join(' ')}\n`);
+  appendFileSync(process.env.FAKE_CODEX_PROBE_LOG, `${process.env.FAKE_CODEX_PROBE_TAG ? `${process.env.FAKE_CODEX_PROBE_TAG} ` : ''}${argv.join(' ')}\n`);
 if (argv.includes('--version')) {
   console.log(process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.169.0');
   process.exit(0);

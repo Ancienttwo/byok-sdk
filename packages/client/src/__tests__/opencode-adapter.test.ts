@@ -165,6 +165,10 @@ it('#2469: prepare() reuses the admission observation of the same executable and
   expect(probes()).toEqual(['--version']);
   expect(await box.adapter.prepare(input)).toMatchObject({ kind: 'prepared' });
   expect(probes()).toEqual(['--version']);
+  // A plain object never skips the version floor.
+  vi.stubEnv('FAKE_ACP_VERSION', '1.18.34');
+  expect(await box.adapter.prepare({ ...input, detected: { kind: 'available', version: '1.18.35', executableSource: 'config' } }))
+    .toEqual({ kind: 'reject', reason: 'opencode installation refused: refused', retryable: false });
 });
 
 for (const version of ['1.18.35', 'opencode v2.0.26']) {

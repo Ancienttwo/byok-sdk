@@ -29,6 +29,7 @@ import {
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion, runDetectCommand } from '../detect-outcome.js';
+import { bindVerifiedDetection, takeVerifiedDetection } from '../../runtime-detection.js';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
@@ -42,7 +43,7 @@ import { GROK_USER_CONTEXT_INSPECT_FAILED, createGrokAgentHome, grokUserInstruct
 import { runGrokInspect } from './inspect.js';
 import { GrokProjection, type GrokTurnOutcome } from './projection.js';
 import { resolveGrokBin } from './resolve-bin.js';
-import { resolveRuntimeCommand, runtimeExecutableFields, sameDetectedExecutable } from '../runtime-executable.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { GROK_RUNTIME_CAPABILITIES } from './grok-capabilities.js';
 import { GROK_VERSION_POLICY, grokVersionToken } from './grok-version.js';
@@ -198,8 +199,13 @@ export class GrokAdapter implements RuntimeAdapter {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
 
-  /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
+  /**
+   * Reads the version, probes ACP mode and looks for a login signal. It never
+   * opens a session or writes Grok's home. A caller abort rethrows its reason.
+   * An `available` observation carries the probed command for this adapter's `prepare()`.
+   */
   async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
+    signal?.throwIfAborted();
     try {
       const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin);
@@ -210,30 +216,18 @@ export class GrokAdapter implements RuntimeAdapter {
       const help = await runDetectCommand(command, ['agent', 'stdio', '--help'], { timeoutMs: DETECT_TIMEOUT_MS, env, signal });
       if (help.kind === 'aborted') throw help.reason;
       if (help.kind !== 'ok') return { kind: 'refused', reason: 'acp_unavailable' };
-      return {
-        kind: 'available',
+      return bindVerifiedDetection(this, {
+        kind: 'available' as const,
         sessionCapabilities: { ...(await import('#byok-acp-runtime')).grokSessionCapabilities(), steer: this.descriptor.capabilities.steer },
         version: text,
         authPresent: grokAuthPresent(env),
         ...runtimeExecutableFields(resolved, command),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, grokVersionToken(text)),
-      };
+      }, command);
     } catch (error) {
       signal?.throwIfAborted();
       return classifyDetectError(error);
     }
-  }
-
-  /** The admission observation when it is of the executable resolved now; otherwise a fresh probe. */
-  private async admittedDetect(input: RuntimeAdapterPrepareInput): Promise<RuntimeDetectResult> {
-    const detected = input.detected;
-    if (detected?.kind === 'available') {
-      try {
-        const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin);
-        if (sameDetectedExecutable(detected, runtimeExecutableFields(resolved, resolved.bin.command))) return detected;
-      } catch { /* resolution failed: the fresh probe classifies it */ }
-    }
-    return this.detect(input.signal);
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
@@ -247,14 +241,21 @@ export class GrokAdapter implements RuntimeAdapter {
     if (selection?.mode === 'adapter-model' && (modelId === undefined || modelId.trim() === '')) {
       return { kind: 'reject', code: 'invalid_request', reason: 'Grok requires a model ID when no default is configured', retryable: false };
     }
-    const detected = await this.admittedDetect(input);
-    if (detected.kind !== 'available')
-      return {
-        kind: 'reject',
-        reason: `grok installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`,
-        retryable: false,
-      };
-    const command = (this.options.resolveBin ?? resolveGrokBin)().command;
+    input.signal?.throwIfAborted();
+    // Launch the command an observation of this adapter probed: this offer's
+    // admission observation when this adapter made it, else a fresh one.
+    let command = takeVerifiedDetection<string>(this, input.detected);
+    if (command === undefined) {
+      const detected = await this.detect(input.signal);
+      if (detected.kind !== 'available')
+        return {
+          kind: 'reject',
+          reason: `grok installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`,
+          retryable: false,
+        };
+      command = takeVerifiedDetection<string>(this, detected);
+      if (command === undefined) return { kind: 'reject', reason: 'grok installation refused: unverified detection', retryable: false };
+    }
     return { kind: 'prepared', operation: { start: start => {
       const actual = start.manifest.selection;
       if (actual?.mode !== selection?.mode || (actual?.mode === 'adapter-model' && actual.modelId !== offeredModel) || start.manifest.effort !== effort) {

@@ -7,7 +7,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { requireImageInput } from '../input-images.js';
-import type { RuntimeInputOptions } from '../../types.js';
+import type { RuntimeExecutableSource, RuntimeInputOptions } from '../../types.js';
 import * as dshRuntime from '../../runtime/dsh-session-runtime.js';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
@@ -33,7 +33,8 @@ import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../.
 import { AsyncQueue } from '../../util/async-queue.js';
 import { comparablePath } from '../../util/comparable-path.js';
 import { classifyDetectError, probeRuntimeVersion, runDetectCommand } from '../detect-outcome.js';
-import { resolveRuntimeCommand, runtimeExecutableFields, sameDetectedExecutable } from '../runtime-executable.js';
+import { bindVerifiedDetection, takeVerifiedDetection } from '../../runtime-detection.js';
+import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
 import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { agentPersona } from '../agent-persona.js';
@@ -111,6 +112,9 @@ export interface DshAdapterOptions {
   /** Deadline for a cancelled turn to settle before the session fails. Default 1 s. */
   interruptTimeoutMs?: number;
 }
+
+/** The command a version probe ran, its version token, and who chose the command. */
+type DshInstallation = { readonly command: string; readonly version: string; readonly executableSource: RuntimeExecutableSource };
 
 const authority = (reason: string) =>
   new RuntimeExecutionFailure({ phase: 'start', retry: 'non-retryable', reason });
@@ -229,9 +233,12 @@ export class DshAdapter implements RuntimeAdapter {
   /**
    * Prepares the SDK root, reads `dsh --version`, then resolves the acp
    * profile, which writes it into a new root. Detection leaves key resolution
-   * to authenticated spawns.
+   * to authenticated spawns. A caller abort rethrows its reason, before the
+   * root is written. An `available` observation carries the probed command
+   * and version for this adapter's `prepare()`.
    */
   async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
+    signal?.throwIfAborted();
     try {
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'dsh'));
       const command = resolved.bin.command;
@@ -247,13 +254,15 @@ export class DshAdapter implements RuntimeAdapter {
         return { kind: 'refused', reason: 'acp_unavailable', unsupportedVersion: { installedVersion, requiredVersion } };
       }
       if (!await probeAcpProfile(command, this.root, env, signal)) return { kind: 'refused', reason: 'acp_unavailable' };
-      return {
-        kind: 'available',
+      const fields = runtimeExecutableFields(resolved, command);
+      const installation: DshInstallation = { command, version: token, executableSource: fields.executableSource };
+      return bindVerifiedDetection(this, {
+        kind: 'available' as const,
         sessionCapabilities: dshRuntime.dshSessionCapabilities(),
         version: token,
-        ...runtimeExecutableFields(resolved, command),
+        ...fields,
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, token),
-      };
+      }, installation);
     } catch (error) {
       signal?.throwIfAborted();
       return classifyDetectError(error);
@@ -262,8 +271,8 @@ export class DshAdapter implements RuntimeAdapter {
 
   /**
    * Cheap admission: the version probe only, or none when this offer's
-   * admission observation is of the executable resolved now. The acp profile
-   * probe belongs to `detect()`.
+   * admission observation was made by this adapter. The acp profile probe
+   * belongs to `detect()`.
    */
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     const { effort, target } = input.offer;
@@ -286,25 +295,23 @@ export class DshAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: `dsh cannot attach the task MCP servers: ${(error as Error).message}`, retryable: false };
     }
-    const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'dsh'));
-    const command = resolved.bin.command;
-    const admitted = input.detected;
-    let token: string;
-    if (admitted?.kind === 'available' && admitted.version !== undefined && sameDetectedExecutable(admitted, runtimeExecutableFields(resolved, command))) {
-      token = admitted.version;
-    } else {
+    input.signal?.throwIfAborted();
+    let installation = takeVerifiedDetection<DshInstallation>(this, input.detected);
+    if (installation === undefined) {
+      const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveDshBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'dsh'));
+      const command = resolved.bin.command;
       const { env: base } = await this.runtimeEnvironment();
       const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, dshEnvironment(base, this.root, this.sandbox), [], input.signal);
       if (version.kind !== 'available') {
         return { kind: 'reject', reason: `dsh installation refused: ${version.kind === 'refused' ? version.reason : version.kind}`, retryable: false };
       }
-      token = dshVersionToken(version.stdout);
+      installation = { command, version: dshVersionToken(version.stdout), executableSource: runtimeExecutableFields(resolved, command).executableSource };
     }
+    const { command, version: token, executableSource } = installation;
     const unsupported = dshVersionUnsupported(token);
     if (unsupported !== null) {
       return { kind: 'reject', reason: `dsh installation refused: ${unsupported.reason}`, retryable: false };
     }
-    const { executableSource } = runtimeExecutableFields(resolved, command);
     const modelSelection = { ...configured, model };
     return {
       kind: 'prepared',

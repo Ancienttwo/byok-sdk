@@ -812,7 +812,6 @@ export declare class AgyAdapter implements RuntimeAdapter {
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     private authenticatedEnvironment;
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
-    private admittedDetect;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -909,10 +908,7 @@ export declare class CodexAdapter implements RuntimeAdapter {
     constructor(options?: CodexAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
-    private resolveInstallation;
-    private userContextRefusal;
     private detectInstallation;
-    private admittedInstallation;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -1002,7 +998,6 @@ export declare class GrokAdapter implements RuntimeAdapter {
     constructor(options?: GrokAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
-    private admittedDetect;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -1068,9 +1063,7 @@ export declare class OpenCodeAdapter implements RuntimeAdapter {
     constructor(options?: OpenCodeAdapterOptions);
     get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     runtimeEnvironment(): Promise<import("../index.js").RuntimeEnvironment>;
-    private resolveInvocation;
     private probe;
-    private admittedProbe;
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;

@@ -265,6 +265,48 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     expect(server.received.some(e => (e.type === 'task.decline' || e.type === 'task.fail') && e.task_id === taskId)).toBe(false);
   }, 15_000);
 
+  it.skipIf(process.platform === 'win32')('#2469: a Codex offer probes once and spawns the binary it verified; the next offer probes again', async () => {
+    const dir = await tmpDir('byok-codex-rotating-');
+    const fixture = fileURLToPath(new URL('./fixtures/fake-codex.mjs', import.meta.url));
+    const bins = await Promise.all(['A', 'B'].map(async tag => {
+      const file = path.join(dir, `codex-${tag}`);
+      await fs.writeFile(file, `#!/bin/sh\nFAKE_CODEX_PROBE_TAG=${tag} exec '${process.execPath}' '${fixture}' "$@"\n`, { mode: 0o755 });
+      return file;
+    }));
+    // After startup each resolution rotates A, B, A, …: a second resolution in one offer would launch the other binary.
+    let rotating = false;
+    let resolutions = 0;
+    const resolveBin = () => ({ command: rotating ? bins[resolutions++ % 2]! : bins[0]!, source: 'env' as const });
+    const spawned: string[] = [];
+    const spawnFn = ((command: string, args: string[], options: Parameters<typeof realSpawn>[2]) => {
+      spawned.push(command);
+      return realSpawn(command, args, options);
+    }) as typeof realSpawn;
+    const log = path.join(dir, 'probes');
+    const environment: Record<string, string> = {};
+    const adapter = fakeRuntime(new CodexAdapter({ resolveBin, spawnFn }), environment);
+    await setup([adapter], { startupTimeoutMs: 8_000 });
+    environment.FAKE_CODEX_PROBE_LOG = log;
+    rotating = true;
+    const probes = async () => {
+      const lines = (await fs.readFile(log, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean);
+      await fs.rm(log, { force: true });
+      return lines;
+    };
+    for (const [index, tag] of (['A', 'B'] as const).entries()) {
+      const taskId = `codex-verified-spawn-${index}`;
+      server.send(subscriptionOffer('codex', taskId));
+      await server.waitFor(e => e.type === 'task.complete' && e.task_id === taskId);
+      expect(server.received.some(e => (e.type === 'task.decline' || e.type === 'task.fail') && e.task_id === taskId)).toBe(false);
+      expect(await probes()).toEqual([`${tag} --version`, `${tag} app-server --help`]);
+      // The subscription launch spawns the app-server for its account check and its session: each is the verified binary.
+      expect(spawned.length).toBeGreaterThan(0);
+      expect(new Set(spawned)).toEqual(new Set([bins[index]]));
+      expect(resolutions).toBe(index + 1);
+      spawned.length = 0;
+    }
+  }, 20_000);
+
   it('declines an undeclared dispatch selection before preparing or claiming', async () => {
     const base = new StubRuntimeAdapter('claude');
     let supportsSelection = true;

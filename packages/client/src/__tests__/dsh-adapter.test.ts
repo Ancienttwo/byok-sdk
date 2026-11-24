@@ -14,7 +14,7 @@ import { UnsupportedOptionError } from '../runtime/dsh-session-runtime';
 import * as processTree from '../adapters/process-tree';
 import { startPreparedOperation } from './fixtures/prepared-operation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
-import { expectProcessNotLive } from './support/process-liveness';
+import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { acquireDshProfile } from '../../vendor/oar/c0c8b28/runtimes/dsh/profile-startup.js';
@@ -160,10 +160,24 @@ describe('DshAdapter detect and prepare', () => {
     expect((await prepare('x'.repeat(32))).kind).toBe('prepared');
   });
 
-  it('#2469: detect(signal) rethrows a pre-aborted reason', async () => {
-    const { adapter } = await setup();
+  it('#2469: detect(signal) rethrows a pre-aborted reason before writing the root, and stops a hung acp profile probe on abort', async () => {
+    const { adapter, root } = await setup();
     const reason = new Error('offer cancelled');
     await expect(adapter.detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+    await expect(fs.readdir(root)).resolves.toEqual([]);
+    const pidFile = path.join(await tempDir('bdh-'), 'pid');
+    setAmbient('FAKE_DSH_HELP_HANG_PID_FILE', pidFile);
+    const controller = new AbortController();
+    const pending = adapter.detect(controller.signal);
+    const pid = await vi.waitFor(async () => {
+      const value = Number(await fs.readFile(pidFile, 'utf8'));
+      expect(value).toBeGreaterThan(0);
+      return value;
+    }, { timeout: 5_000 });
+    const child = captureProcessIdentity(pid);
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    await vi.waitFor(() => expectProcessNotLive(child));
   });
 
   it('#2469: prepare() reuses the admission observation of the same executable and otherwise probes the version afresh', async () => {
@@ -183,6 +197,11 @@ describe('DshAdapter detect and prepare', () => {
     expect(await probes()).toEqual([]);
     expect(await adapter.prepare(input)).toMatchObject({ kind: 'prepared', detected: { version: QUALIFIED_DSH_VERSION } });
     expect(await probes()).toEqual(['--version']);
+    // A copy or a plain object carries no verified installation.
+    for (const forged of [{ ...detected }, { kind: 'available', version: QUALIFIED_DSH_VERSION } as const]) {
+      expect(await adapter.prepare({ ...input, detected: forged })).toMatchObject({ kind: 'prepared' });
+      expect(await probes()).toEqual(['--version']);
+    }
   });
 
   it('rejects a missing binary', async () => {

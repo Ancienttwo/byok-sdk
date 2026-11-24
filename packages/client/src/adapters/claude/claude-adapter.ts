@@ -319,6 +319,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
    */
   async #detectInstallation(options: { readonly checkAuth: boolean; readonly signal?: AbortSignal }): Promise<RuntimeDetectResult> {
     const { checkAuth, signal } = options;
+    signal?.throwIfAborted();
     try {
       const { env: rawEnv } = await this.runtimeEnvironment();
       claudeProviderCredentials(rawEnv);
