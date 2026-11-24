@@ -7,7 +7,7 @@ import { inspect } from 'node:util';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { ClaudeAdapter, type SpawnFn } from '../adapters/claude/claude-adapter';
+import { ClaudeAdapter, claudeProbeTimeouts, type SpawnFn } from '../adapters/claude/claude-adapter';
 import { SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, projectRuntimeBoundaryFailure } from '../runtime-failure';
 import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
@@ -212,33 +212,66 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
-  it('cross-model review (Fix 4): detect() reports timeout within the deadline when the fake `--version` hangs', async () => {
+  it('detect() reports timeout at its own deadline when the fake `--version` hangs', async () => {
     const adapter = fakeClaudeAdapter();
-    const original = process.env.FAKE_CLAUDE_VERSION_HANG;
-    process.env.FAKE_CLAUDE_VERSION_HANG = '1';
+    claudeProbeTimeouts.override(adapter, { version: 200 });
+    vi.stubEnv('FAKE_CLAUDE_VERSION_HANG', '1');
     try {
-      const result = await adapter.detect();
-      expect(result.kind).toBe('timeout');
+      expect(await adapter.detect()).toEqual({ kind: 'timeout' });
     } finally {
-      if (original === undefined) delete process.env.FAKE_CLAUDE_VERSION_HANG;
-      else process.env.FAKE_CLAUDE_VERSION_HANG = original;
+      vi.unstubAllEnvs();
     }
-  }, 8000);
+  });
 
-  it('cross-model review (Fix 4): detect() fails closed (authPresent:false, present still true) within the timeout when the fake `auth status` hangs', async () => {
+  it('#2468: detect() reports timeout, not a sign-out, when `auth status --json` hangs past its deadline', async () => {
     const adapter = fakeClaudeAdapter();
-    const original = process.env.FAKE_CLAUDE_AUTH_HANG;
-    process.env.FAKE_CLAUDE_AUTH_HANG = '1';
+    claudeProbeTimeouts.override(adapter, { authStatus: 200 });
+    vi.stubEnv('FAKE_CLAUDE_AUTH_HANG', '1');
     try {
-      const result = await adapter.detect();
-      expect(result.kind).toBe('available');
-      if (result.kind !== 'available') throw new Error('expected available runtime');
-      expect(result.authPresent).toBe(false);
+      expect(await adapter.detect()).toEqual({ kind: 'timeout' });
     } finally {
-      if (original === undefined) delete process.env.FAKE_CLAUDE_AUTH_HANG;
-      else process.env.FAKE_CLAUDE_AUTH_HANG = original;
+      vi.unstubAllEnvs();
     }
-  }, 8000);
+  });
+
+  it('#2468: detect() reports timeout at the auth deadline while a grandchild holds the status pipes', async () => {
+    const adapter = fakeClaudeAdapter();
+    claudeProbeTimeouts.override(adapter, { authStatus: 300 });
+    const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-grandchild-')), 'pid');
+    vi.stubEnv('FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE', pidFile);
+    const started = Date.now();
+    try {
+      expect(await adapter.detect()).toEqual({ kind: 'timeout' });
+      expect(Date.now() - started).toBeLessThan(5_000);
+    } finally {
+      vi.unstubAllEnvs();
+      const pid = Number(await fs.readFile(pidFile, 'utf8').catch(() => '0'));
+      if (pid > 0) try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+      await fs.rm(path.dirname(pidFile), { recursive: true, force: true });
+    }
+  });
+
+  it('#2468: detect() reads the logged-out answer `auth status --json` gives with exit 1', async () => {
+    vi.stubEnv('FAKE_CLAUDE_AUTH_STATUS', JSON.stringify({ loggedIn: false }));
+    vi.stubEnv('FAKE_CLAUDE_AUTH_STATUS_EXIT', '1');
+    try {
+      expect(await fakeClaudeAdapter().detect()).toMatchObject({ kind: 'available', authPresent: false });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('#2468: a subscription launch whose login read times out is retryable, not SUBSCRIPTION_REQUIRED', async () => {
+    const spawnFn = vi.fn(() => { throw new Error('unexpected Claude session spawn'); });
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn });
+    claudeProbeTimeouts.override(adapter, { authStatus: 200 });
+    const target = { lane: 'harness', harnessId: 'claude', selection: { mode: 'subscription', modelId: 'opus' } } as const;
+    const resources = await makeCtx({ ...process.env, FAKE_CLAUDE_AUTH_HANG: '1' });
+    await expect(startAdapter(adapter, { ...baseTask, target }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'retryable', message: 'Claude login status did not answer before its deadline',
+    });
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
 
   it('descriptor advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm rejected)', () => {
     const adapter = fakeClaudeAdapter();

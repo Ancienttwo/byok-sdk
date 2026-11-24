@@ -27,13 +27,18 @@
 //   FAKE_CLAUDE_VERSION=<text>          -> overrides `--version` output.
 //   FAKE_CLAUDE_AUTH_STATUS=<json>      -> overrides `auth status --json` output.
 //   FAKE_CLAUDE_AUTH_STATUS_FAIL=1      -> `auth status --json` exits 1 with no stdout.
+//   FAKE_CLAUDE_AUTH_STATUS_EXIT=<n>    -> `auth status --json` exit code after
+//                                          its stdout (the CLI exits 1 when
+//                                          logged out).
+//   FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE=<path>
+//                                       -> `auth status --json` leaves a
+//                                          detached grandchild holding stdout
+//                                          and stderr open, writes its pid to
+//                                          <path>, and exits with no output.
 //   FAKE_CLAUDE_VERSION_HANG=1          -> `claude --version` never responds
 //                                          at all (no stdout, no exit) —
-//                                          cross-model review finding (Fix
-//                                          4): proves claude-adapter.ts's
-//                                          own DETECT_TIMEOUT_MS actually
-//                                          bounds detect() instead of
-//                                          hanging it forever.
+//                                          proves claude-adapter.ts's own
+//                                          version deadline bounds detect().
 //   FAKE_CLAUDE_AUTH_HANG=1             -> `claude auth status --json` never
 //                                          responds at all — same Fix 4
 //                                          rationale as FAKE_CLAUDE_VERSION_HANG.
@@ -381,6 +386,13 @@ function runProbeOrTurnFlow() {
       process.stderr.write('error: not logged in\n');
       process.exit(1);
     }
+    const grandchildPidFile = process.env.FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE;
+    if (grandchildPidFile) {
+      const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
+      writeFileSync(grandchildPidFile, String(grandchild.pid));
+      grandchild.unref();
+      process.exit(0);
+    }
     const body =
       process.env.FAKE_CLAUDE_AUTH_STATUS ??
       JSON.stringify({
@@ -392,8 +404,8 @@ function runProbeOrTurnFlow() {
         orgName: "fake's Organization",
         subscriptionType: 'max',
       });
-    process.stdout.write(`${body}\n`);
-    process.exit(0);
+    process.stdout.write(`${body}\n`, () => process.exit(Number(process.env.FAKE_CLAUDE_AUTH_STATUS_EXIT ?? 0)));
+    return;
   }
 
   if (argv.includes('--version')) {

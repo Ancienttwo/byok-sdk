@@ -38,6 +38,8 @@ describe('lifecycle/launchd: generateLaunchdPlist', () => {
     // Exit-code contract: only exit 0 stops (see exit-codes.ts).
     expect(xml).toContain('<key>KeepAlive</key>\n  <dict>\n    <key>SuccessfulExit</key>\n    <false/>\n  </dict>');
     expect(xml).toContain('<key>ThrottleInterval</key>\n  <integer>10</integer>');
+    // #2468: launchd otherwise runs the agent and its runtime CLIs at background QoS.
+    expect(xml).toContain('<key>ProcessType</key>\n  <string>Interactive</string>');
     expect(xml).toContain('<key>StandardOutPath</key>\n  <string>/var/log/acme/service-stdout.log</string>');
     expect(xml).toContain('<key>StandardErrorPath</key>\n  <string>/var/log/acme/service-stderr.log</string>');
   });
@@ -101,6 +103,7 @@ describe('lifecycle/launchd: createLaunchdLifecycle', () => {
 
     const plist = fs.files.get('/tmp/scratch-home/Library/LaunchAgents/Acme-Agent-.plist');
     expect(plist).toContain('<key>EnvironmentVariables</key>\n  <dict>\n    <key>HOME</key>\n    <string>/tmp/scratch-home</string>\n  </dict>');
+    expect(plist).toContain('<key>ProcessType</key>\n  <string>Interactive</string>');
   });
 
   it('install() writes the plist, then bootout(best-effort)+bootstrap+enable+kickstart in order', async () => {

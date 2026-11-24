@@ -19,40 +19,99 @@ export function classifyDetectError(error: unknown): ProbeFailure {
   return { kind: 'probe-failed' };
 }
 
+/** The end of one bounded detect sub-command. `nonzero` keeps the streams: some CLIs answer on exit 1 (`claude auth status --json` when logged out). */
+export type DetectCommandOutcome =
+  | { readonly kind: 'ok'; readonly stdout: string; readonly stderr: string }
+  | { readonly kind: 'nonzero'; readonly exitCode: number; readonly stdout: string; readonly stderr: string }
+  | { readonly kind: 'timeout' }
+  | { readonly kind: 'aborted'; readonly reason: unknown }
+  | { readonly kind: 'failed'; readonly error: unknown };
+
+export interface DetectCommandOptions {
+  readonly timeoutMs: number;
+  readonly env: Readonly<Record<string, string>>;
+  readonly cwd?: string;
+  readonly signal?: AbortSignal;
+}
+
 /**
- * This probe owns both the deadline and the version child. A killed child is
- * not by itself timeout evidence (execFile also kills on output overflow).
- * Resolve only at execFile completion; SIGKILL bounds a TERM-ignoring probe.
+ * Runs one detect sub-command under a deadline this probe owns. A killed child
+ * is not by itself timeout evidence (execFile also kills on output overflow),
+ * so the deadline and the caller's abort each record why they stopped it.
+ * Resolve only at execFile completion; SIGKILL bounds a TERM-ignoring child.
+ */
+export function runDetectCommand(command: string, args: readonly string[], options: DetectCommandOptions): Promise<DetectCommandOutcome> {
+  const { timeoutMs, env, cwd, signal } = options;
+  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('invalid runtime probe timeout');
+  if (signal?.aborted) return Promise.resolve({ kind: 'aborted', reason: signal.reason });
+  return new Promise((resolve) => {
+    let timer: NodeJS.Timeout | undefined;
+    let stopped: 'timeout' | 'aborted' | undefined;
+    let onAbort: (() => void) | undefined;
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    };
+    try {
+      const child = execFile(command, [...args], { encoding: 'utf8', env, cwd }, (error, stdout, stderr) => {
+        cleanup();
+        // Output overflow is already a known failure even if the deadline's
+        // SIGKILL had to finish the child's cleanup.
+        if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') resolve({ kind: 'failed', error });
+        else if (stopped === 'timeout') resolve({ kind: 'timeout' });
+        else if (stopped === 'aborted') resolve({ kind: 'aborted', reason: signal?.reason });
+        else if (!error) resolve({ kind: 'ok', stdout, stderr });
+        else if (typeof error.code === 'number') resolve({ kind: 'nonzero', exitCode: error.code, stdout, stderr });
+        else resolve({ kind: 'failed', error });
+      });
+      const stop = (why: 'timeout' | 'aborted') => {
+        if (stopped !== undefined) return;
+        stopped = why;
+        // A wrapper's descendant may still hold a pipe after the child exits.
+        // Stop consuming those pipes so completion does not wait on it.
+        child.stdout?.destroy();
+        child.stderr?.destroy();
+        child.kill('SIGKILL');
+      };
+      timer = setTimeout(() => stop('timeout'), timeoutMs);
+      timer.unref?.();
+      if (signal) {
+        onAbort = () => stop('aborted');
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    } catch (error) {
+      cleanup();
+      resolve({ kind: 'failed', error });
+    }
+  });
+}
+
+/**
  * The probe gets `env`: the environment a task child gets
  * (`RuntimeAdapter.runtimeEnvironment`).
  */
 export async function probeRuntimeVersion(command: string, timeoutMs: number, env: Readonly<Record<string, string>>, prefixArgs: readonly string[] = []): Promise<VersionProbeResult> {
-  if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) throw new TypeError('invalid runtime probe timeout');
-  return new Promise((resolve) => {
-    let timer: NodeJS.Timeout | undefined;
-    let timedOut = false;
-    try {
-      const child = execFile(command, [...prefixArgs, '--version'], { encoding: 'utf8', env }, (error, stdout, stderr) => {
-        if (timer) clearTimeout(timer);
-        // Output overflow is already a known failure even if a TERM-ignoring
-        // child requires the deadline's SIGKILL to finish cleanup.
-        if (error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') resolve({ kind: 'probe-failed' });
-        else if (timedOut) resolve({ kind: 'timeout' });
-        else if (error) resolve(classifyDetectError(error));
-        else resolve({ kind: 'available', stdout, stderr });
-      });
-      timer = setTimeout(() => {
-        timedOut = true;
-        // A wrapper's descendant may still hold a pipe after the version child
-        // exits. Stop consuming those pipes at this probe's own deadline.
-        child.stdout?.destroy();
-        child.stderr?.destroy();
-        child.kill('SIGKILL');
-      }, timeoutMs);
-      timer.unref?.();
-    } catch (error) {
-      if (timer) clearTimeout(timer);
-      resolve(classifyDetectError(error));
-    }
-  });
+  const outcome = await runDetectCommand(command, [...prefixArgs, '--version'], { timeoutMs, env });
+  switch (outcome.kind) {
+    case 'ok': return { kind: 'available', stdout: outcome.stdout, stderr: outcome.stderr };
+    case 'timeout': return { kind: 'timeout' };
+    case 'failed': return classifyDetectError(outcome.error);
+    case 'nonzero':
+    case 'aborted': return { kind: 'probe-failed' };
+  }
+}
+
+/**
+ * Per-adapter probe deadlines. `override` is a test seam for one adapter
+ * instance; no package entry exports it.
+ */
+export function probeTimeouts<T extends Readonly<Record<string, number>>>(defaults: T): {
+  of(owner: object): T;
+  override(owner: object, timeouts: Partial<T>): void;
+} {
+  const overrides = new WeakMap<object, Partial<T>>();
+  return {
+    of: owner => ({ ...defaults, ...overrides.get(owner) }),
+    override: (owner, timeouts) => { overrides.set(owner, timeouts); },
+  };
 }

@@ -7,12 +7,10 @@ import { createClaudeMcpIdentityResolver } from './mcp-identity.js';
 import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
 import { claudeAgentUserContextSettings } from './agent-user-context.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
-import { execFile } from 'node:child_process';
+import { classifyDetectError, probeRuntimeVersion, probeTimeouts, runDetectCommand } from '../detect-outcome.js';
 import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import type { AgentEvent, HarnessSelection } from '@byok-sdk/protocol';
 import {
   PolicyUnsupportedError,
@@ -53,12 +51,20 @@ import { CLAUDE_VERSION_POLICY, claudeVersionToken } from './claude-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 
 
-const execFileAsync = promisify(execFile);
-
-/** Applied to both `detect()` probe calls (`--version`, `auth status --json`) — mirrors codex-adapter.ts's identical `DETECT_TIMEOUT_MS`/rationale exactly (cross-model review finding: these two claude probes previously had NO timeout at all, unlike codex's, so a hung claude CLI could block daemon startup and every `detect()` call indefinitely). `detect()` runs on every allowlist-narrowed task offer, so a small ceiling is cheap insurance against either probe ever unexpectedly hanging. */
-const DETECT_TIMEOUT_MS = 5000;
+/** Bounds a hung `claude --version` so it cannot block daemon startup or a task offer. */
+const DETECT_VERSION_TIMEOUT_MS = 10_000;
+/**
+ * `claude auth status --json` reads the macOS keychain through `/usr/bin/security`;
+ * under host load a background service measured 18 s (#2468). The vendored OAR
+ * reader allows 20 s. A deadline is no answer, never a confirmed sign-out.
+ */
+const AUTH_STATUS_TIMEOUT_MS = 25_000;
+/** Test seam only: no package entry exports it. */
+export const claudeProbeTimeouts = probeTimeouts({ version: DETECT_VERSION_TIMEOUT_MS, authStatus: AUTH_STATUS_TIMEOUT_MS });
+const AUTH_STATUS_TIMEOUT_REASON = 'Claude login status did not answer before its deadline';
 const SUBSCRIPTION_REQUIRED = 'Claude subscription selection requires a Claude.ai login';
 type ClaudeAuthStatus = { loggedIn?: unknown; authMethod?: unknown; apiProvider?: unknown; apiKeySource?: unknown };
+type ClaudeAuthStatusRead = { readonly kind: 'ok'; readonly status: ClaudeAuthStatus } | { readonly kind: 'timeout' } | { readonly kind: 'failed' };
 interface ClaudeSubscriptionLaunch extends RuntimeLaunchResources {
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
@@ -307,10 +313,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const env = claudeCredentialEnvironment(rawEnv);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveClaudeBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'claude'));
       const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
-      const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env, invocation.args);
+      const probe = await probeRuntimeVersion(invocation.command, claudeProbeTimeouts.of(this).version, env, invocation.args);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim();
-      const authPresent = (await this.#readAuthStatus(invocation, env))?.loggedIn === true;
+      const auth = await this.#readAuthStatus(invocation, env);
+      if (auth.kind === 'timeout') return { kind: 'timeout' };
+      const authPresent = auth.kind === 'ok' && auth.status.loggedIn === true;
       return {
         kind: 'available', version, authPresent,
         sessionCapabilities: { ...claudeSessionCapabilities(), steer: this.descriptor.capabilities.steer },
@@ -355,9 +363,9 @@ export class ClaudeAdapter implements RuntimeAdapter {
       operation.resolveRuntimeLaunch = async ({ cwd, env, scratch, signal = input.signal }) => {
         if (admittedLaunch !== undefined) throw invalidClaudeRequest('Claude subscription launch was already resolved');
         const launchEnv = Object.freeze(claudeCredentialEnvironment({ ...env, ...scratch.env }));
-        const status = await this.#readAuthStatus(invocation, launchEnv, cwd, signal);
+        const auth = await this.#readAuthStatus(invocation, launchEnv, cwd, signal);
         signal?.throwIfAborted();
-        if (!claudeHasSubscription(status)) throw invalidClaudeRequest(SUBSCRIPTION_REQUIRED);
+        requireClaudeSubscription(auth);
         admittedLaunch = Object.freeze({ cwd, env: launchEnv, scratch, release: () => scratch.release() });
         return admittedLaunch;
       };
@@ -568,9 +576,16 @@ export class ClaudeAdapter implements RuntimeAdapter {
         // The adapter, never the host callback, owns fatal process termination.
         onFatal: error => { closeBridges(); stream?.fail(error); },
       }, resumeSessionId);
-      if (selection.mode === 'subscription' && !claudeHasSubscription(await this.#readAuthStatus(invocation, env, manifestCwd, signal))) {
+      if (selection.mode === 'subscription') {
+        let auth: ClaudeAuthStatusRead;
+        try {
+          auth = await this.#readAuthStatus(invocation, env, manifestCwd, signal);
+        } catch (abort) {
+          throwIfCancelled();
+          throw abort;
+        }
         throwIfCancelled();
-        throw invalidClaudeRequest(SUBSCRIPTION_REQUIRED);
+        requireClaudeSubscription(auth);
       }
       if (selection.mode === 'byok') {
         const key = await resolveRuntimeApiKey('claude', this.byok!.resolveKey, signal);
@@ -676,19 +691,27 @@ export class ClaudeAdapter implements RuntimeAdapter {
     }
   }
 
-  /** Read only the CLI's native login status. Admission supplies the task cwd and launch environment. */
-  async #readAuthStatus(invocation: RuntimeInvocation, env: Readonly<Record<string, string>>, cwd?: string, signal?: AbortSignal): Promise<ClaudeAuthStatus | undefined> {
+  /**
+   * Read only the CLI's native login status. Admission supplies the task cwd and launch environment.
+   * The CLI answers with exit 0 when logged in and 1 when logged out (as OAR's `auth-status.ts`);
+   * a caller abort rethrows its reason.
+   */
+  async #readAuthStatus(invocation: RuntimeInvocation, env: Readonly<Record<string, string>>, cwd?: string, signal?: AbortSignal): Promise<ClaudeAuthStatusRead> {
+    const outcome = await runDetectCommand(invocation.command, [...invocation.args, 'auth', 'status', '--json'], {
+      timeoutMs: claudeProbeTimeouts.of(this).authStatus, env, cwd, signal,
+    });
+    if (outcome.kind === 'aborted') throw outcome.reason;
+    if (outcome.kind === 'timeout') return { kind: 'timeout' };
+    if (outcome.kind === 'failed' || (outcome.kind === 'nonzero' && outcome.exitCode !== 1)) return { kind: 'failed' };
+    let status: unknown;
     try {
-      const { stdout } = await execFileAsync(invocation.command, [...invocation.args, 'auth', 'status', '--json'], {
-        timeout: DETECT_TIMEOUT_MS, killSignal: 'SIGKILL', env, cwd, signal,
-      });
-      const status: unknown = JSON.parse(stdout);
-      if (status === null || typeof status !== 'object' || Array.isArray(status)) return undefined;
-      const { loggedIn, authMethod, apiProvider, apiKeySource } = status as ClaudeAuthStatus;
-      return { loggedIn, authMethod, apiProvider, apiKeySource };
+      status = JSON.parse(outcome.stdout);
     } catch {
-      return undefined;
+      return { kind: 'failed' };
     }
+    if (status === null || typeof status !== 'object' || Array.isArray(status)) return { kind: 'failed' };
+    const { loggedIn, authMethod, apiProvider, apiKeySource } = status as ClaudeAuthStatus;
+    return { kind: 'ok', status: { loggedIn, authMethod, apiProvider, apiKeySource } };
   }
 
   private resolveBin(): { command: string } {
@@ -696,8 +719,14 @@ export class ClaudeAdapter implements RuntimeAdapter {
   }
 }
 
-function claudeHasSubscription(status: ClaudeAuthStatus | undefined): boolean {
-  return status?.loggedIn === true && status.authMethod === 'claude.ai'
+/** A deadline is retryable: the login is unconfirmed, not refused. */
+function requireClaudeSubscription(auth: ClaudeAuthStatusRead): void {
+  if (auth.kind === 'timeout') throw new RuntimeExecutionFailure({ phase: 'start', retry: 'retryable', reason: AUTH_STATUS_TIMEOUT_REASON });
+  if (auth.kind !== 'ok' || !claudeHasSubscription(auth.status)) throw invalidClaudeRequest(SUBSCRIPTION_REQUIRED);
+}
+
+function claudeHasSubscription(status: ClaudeAuthStatus): boolean {
+  return status.loggedIn === true && status.authMethod === 'claude.ai'
     && (status.apiProvider === undefined || status.apiProvider === 'firstParty')
     && (status.apiKeySource === undefined || status.apiKeySource === null || status.apiKeySource === '');
 }

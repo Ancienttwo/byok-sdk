@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { CodexAdapter, codexProbeTimeouts } from '../adapters/codex/codex-adapter';
 import { createCodexAgentHome } from '../adapters/codex/agent-user-context';
 import * as ownedRuntimeHome from '../adapters/owned-runtime-home';
 import type { Session, MessageDraftDelta } from '../types';
@@ -232,6 +232,17 @@ describe('Codex persistent app-server adapter', () => {
     resources.mcpServers = { host: { command: '/fixture/server' } };
     expect((await turn(await open(runtime, task, resources))).at(-1)).toEqual({ type: 'turn_end' });
     expect(commands).toEqual([probed]);
+  });
+  it.each([
+    ['FAKE_CODEX_APP_SERVER_HELP_HANG', { appServerHelp: 200 }],
+    ['FAKE_CODEX_LOGIN_HANG', { authStatus: 200 }],
+  ] as const)('#2468: detect reports timeout, not a refusal or sign-out, when %s outlives its deadline', async (toggle, timeouts) => {
+    vi.stubEnv(toggle, '1');
+    const runtime = adapter();
+    codexProbeTimeouts.override(runtime, timeouts);
+    expect(await runtime.detect()).toEqual({ kind: 'timeout' });
+    expect(await runtime.prepare({ offer: { target: CODEX_TARGET, instruction: 'hello' }, descriptor: runtime.descriptor, requiredToolsetIds: [] }))
+      .toEqual({ kind: 'reject', reason: 'codex installation refused: timeout', retryable: true });
   });
   it('detect refuses a missing app-server subcommand', async () => {
     vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');

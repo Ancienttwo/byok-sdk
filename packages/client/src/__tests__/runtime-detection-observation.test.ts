@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { classifyDetectError, probeRuntimeVersion } from '../adapters/detect-outcome';
+import { classifyDetectError, probeRuntimeVersion, runDetectCommand } from '../adapters/detect-outcome';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -189,6 +189,64 @@ else if (arg === 'login') console.log('Logged in using ChatGPT');`);
     expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
     expect(() => process.kill(pid, 0)).toThrow();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('runDetectCommand', () => {
+  const env = testRuntimeEnv();
+
+  it('keeps the streams of a non-zero exit and reports a clean exit as ok', async () => {
+    const command = await executable("console.log(JSON.stringify({ loggedIn: process.argv[2] === 'in' })); process.exit(process.argv[2] === 'in' ? 0 : 1);");
+    expect(await runDetectCommand(command, ['in'], { timeoutMs: 5_000, env })).toEqual({ kind: 'ok', stdout: '{"loggedIn":true}\n', stderr: '' });
+    expect(await runDetectCommand(command, ['out'], { timeoutMs: 5_000, env })).toEqual({ kind: 'nonzero', exitCode: 1, stdout: '{"loggedIn":false}\n', stderr: '' });
+  });
+
+  it('reports output overflow and spawn errors as failed, never timeout', async () => {
+    const overflow = await executable("process.stdout.on('error', () => {}); process.stdout.write('x'.repeat(2 * 1024 * 1024));");
+    expect(await runDetectCommand(overflow, [], { timeoutMs: 5_000, env })).toMatchObject({ kind: 'failed', error: { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' } });
+    const missing = path.join(await directory(), 'missing');
+    expect(await runDetectCommand(missing, [], { timeoutMs: 5_000, env })).toMatchObject({ kind: 'failed', error: { code: 'ENOENT' } });
+  });
+
+  it('resolves timeout at its deadline while a grandchild still holds both pipes', async () => {
+    const receipt = path.join(await directory(), 'grandchild-pid');
+    const command = await executable(`const { spawn } = require('node:child_process');
+const grandchild = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
+require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(grandchild.pid));
+grandchild.unref();`);
+    const started = Date.now();
+    try {
+      expect(await runDetectCommand(command, [], { timeoutMs: 300, env })).toEqual({ kind: 'timeout' });
+      expect(Date.now() - started).toBeLessThan(3_000);
+    } finally {
+      const pid = Number(await fs.readFile(receipt, 'utf8').catch(() => '0'));
+      if (pid > 0) try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+  });
+
+  it('stops the child on caller abort, reports the reason and removes its listener', async () => {
+    const command = await executable("console.log('ready'); setInterval(() => {}, 1000);");
+    const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    const exec = vi.mocked(childProcess.execFile);
+    exec.mockClear();
+    const pending = runDetectCommand(command, [], { timeoutMs: 60_000, env, signal: controller.signal });
+    const child: childProcess.ChildProcess = exec.mock.results[0]!.value;
+    children.push(child);
+    await once(child.stdout!, 'data');
+    const reason = new Error('caller stopped');
+    controller.abort(reason);
+    expect(await pending).toEqual({ kind: 'aborted', reason });
+    expect(child.signalCode).toBe('SIGKILL');
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+  });
+
+  it('does not spawn for an already aborted signal', async () => {
+    const exec = vi.mocked(childProcess.execFile);
+    exec.mockClear();
+    const reason = new Error('already stopped');
+    expect(await runDetectCommand(process.execPath, ['-e', ''], { timeoutMs: 5_000, env, signal: AbortSignal.abort(reason) })).toEqual({ kind: 'aborted', reason });
+    expect(exec).not.toHaveBeenCalled();
   });
 });
 
