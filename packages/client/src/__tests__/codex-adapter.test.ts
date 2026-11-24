@@ -242,6 +242,25 @@ describe('Codex persistent app-server adapter', () => {
     expect(await runtime.prepare(prepareInput(runtime)))
       .toEqual({ kind: 'reject', reason: 'codex installation refused: timeout', retryable: true });
   });
+  it('#2468: aborting prepare() stops its hung installation probe with the abort reason', async () => {
+    const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-probe-')), 'pid');
+    dirs.push(path.dirname(pidFile));
+    vi.stubEnv('FAKE_CODEX_APP_SERVER_HELP_HANG', '1');
+    vi.stubEnv('FAKE_CODEX_HANG_PID_FILE', pidFile);
+    const runtime = adapter();
+    const controller = new AbortController();
+    const pending = runtime.prepare({ ...prepareInput(runtime), signal: controller.signal });
+    const pid = await vi.waitFor(async () => {
+      const value = Number(await fs.readFile(pidFile, 'utf8'));
+      expect(value).toBeGreaterThan(0);
+      return value;
+    }, { timeout: 5_000 });
+    const child = captureProcessIdentity(pid);
+    const reason = new Error('offer cancelled');
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    await vi.waitFor(() => expectProcessNotLive(child));
+  });
   it('#2468: a `login status` past its deadline is a timeout in detect, and prepare does not run it again', async () => {
     vi.stubEnv('FAKE_CODEX_LOGIN_HANG', '1');
     const runtime = adapter();

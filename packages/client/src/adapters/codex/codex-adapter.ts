@@ -310,7 +310,7 @@ export class CodexAdapter implements RuntimeAdapter {
         retryable: false,
       };
     }
-    const installation = await this.detectInstallation({ checkAuth: false });
+    const installation = await this.detectInstallation({ checkAuth: false, signal: input.signal });
     const { detected } = installation;
     if (!('invocation' in installation))
       return {
