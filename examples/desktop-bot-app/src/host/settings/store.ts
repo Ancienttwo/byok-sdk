@@ -1,14 +1,8 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { DreamingSetting, HostSettings } from './types.ts';
 
-/** The global dreaming switch and the `models` list K8's `dreaming` option takes (#1499 D6: on by default). */
-export interface DreamingSetting {
-  readonly enabled: boolean;
-  /** Host model template names, preferred first. */
-  readonly models: readonly string[];
-}
-
-export interface HostSettings { readonly dreaming: DreamingSetting }
+export type { DreamingSetting, HostSettings };
 
 /** The settings file beside the Host stores: the settings domain writes it, the k8 domain reads dreaming from it at start. */
 export const settingsFile = (hostStorageRoot: string): string => path.join(hostStorageRoot, 'host', 'settings.json');

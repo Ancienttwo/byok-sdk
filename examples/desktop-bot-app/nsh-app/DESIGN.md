@@ -1,0 +1,109 @@
+# BYOK Bots Desktop UI — Design Standards (`nsh-app`)
+
+This document defines the design system for the NSH Mixed desktop frontend of `examples/desktop-bot-app` (`macOS`, `Windows`, `Linux`). It follows the NSH Design and Coding Guides (`nsh-design-guides`, `nsh`). Every feature screen and `src/ui/` primitive reads from these tokens and rules.
+
+---
+
+## 1. Target Platforms & Interaction Posture
+
+- **Supported targets**: Desktop only — **macOS** (AppKit), **Windows**, **Linux** (GTK4). Mobile and TUI targets are out of scope for this app.
+- **Window constraints**: Minimum comfortable content baseline `840 × 560` pt (`default` sidebar width `224` pt / `w-56`, main content workspace absorbs surplus).
+- **Input & focus**: Pointer and keyboard first.
+  - Every clickable control shows an intentional hover wash and pressed response without layout shift.
+  - Every focusable control exposes a clear `focus-visible:` ring using `ring-ring` / `ring-offset-background`.
+  - Default cursor on buttons (never `cursor-pointer` on application action buttons); `cursor-pointer` is reserved strictly for URL links.
+  - Dialogs, alert dialogs, sheets, menus, and popovers dismiss on `Escape` and manage focus cleanly.
+- **Desktop density scale**:
+  - `sm` (compact toolbars / inline badges): `24` pt height (`h-6`), compact horizontal padding (`px-2.5`), `12` pt text (`text-xs`), `14` pt icons.
+  - `md` (default desktop controls): `32` pt height (`h-8`), `px-3`, `14` pt body text (`text-sm`), `16` pt icons.
+  - `lg` (prominent actions / primary composers): `36` pt height (`h-9`), `px-4`, `14`–`16` pt text, `16` pt icons.
+  - List rows: `28`–`36` pt comfortable desktop rhythm.
+
+---
+
+## 2. Visual Language, Alignment & Geometry
+
+- **Flat native hierarchy**: Base application surfaces stay flat (`bg-background`, `bg-card`, `bg-sidebar`), separated by hairline `border-border` borders and tonal contrast. Do not stack cards with drop shadows inside panels.
+- **Concentric radii**: Base `--radius` is `0.375rem` (`6` pt). Nested inset controls use tighter radii (`rounded-sm`, `4` pt) so concentric corners remain visually even. Circular badges/status dots/avatars use `rounded-full`.
+- **Semantic spacing scale**: Use Tailwind spacing steps exclusively (`gap-0.5` = `2` pt, `gap-1` = `4` pt, `gap-2` = `8` pt, `gap-3` = `12` pt, `gap-4` = `16` pt, `gap-6` = `24` pt, `gap-8` = `32` pt). No arbitrary point classes (`p-[13px]`, `text-[15px]`) in components or pages.
+- **Alignment spines**: Sibling sections share leading content insets (`p-6` page canvas, `p-4` card/panel padding). Form fields align along a consistent label -> control -> helper/error vertical spine.
+- **UI layer isolation**: Feature screens and `App.tsx` compose exclusively from `src/ui/` plus layout primitives (`View`, `Text`, `Scroll`, `List`) from `"nsh"`. Pages never import `"nsh/base"` controls directly, never embed raw hex/RGB/HSL literals or palette classes (`bg-zinc-*`, `bg-blue-*`), and never invent one-off control heights or radii.
+
+---
+
+## 3. Semantic Theme Tokens (`nsh.json` `"theme"`)
+
+All colors below are declared once in `nsh.json` (`theme.cssVars`) for `light` and `dark` appearances and consumed strictly via semantic tokens (`bg-*`, `text-*`, `border-*`, `ring-*`, `token(...)`). State never relies on color alone — every status indicator pairs color with an explicit text label and distinct symbol/glyph.
+
+| Token Role | Usage | Light | Dark |
+| --- | --- | --- | --- |
+| `background` / `foreground` | Primary app canvas & text | `#ffffff` / `#18181b` | `#18181b` / `#fafafa` |
+| `card` / `card-foreground` | Contained regions & surfaces | `#ffffff` / `#18181b` | `#1f1f23` / `#fafafa` |
+| `popover` / `popover-foreground` | Elevated menus, popovers, dialogs, tooltips | `#ffffff` / `#18181b` | `#27272a` / `#fafafa` |
+| `primary` / `primary-foreground` | Primary CTAs, active selection emphasis | `#2563eb` / `#ffffff` | `#2563eb` / `#ffffff` |
+| `secondary` / `secondary-foreground` | Quiet actions, secondary pills | `#f4f4f5` / `#18181b` | `#27272a` / `#fafafa` |
+| `muted` / `muted-foreground` | Subtle wells, captions, metadata | `#f4f4f5` / `#52525b` | `#27272a` / `#a1a1aa` |
+| `accent` / `accent-foreground` | Hovered / focused rows & menu items | `#f4f4f5` / `#18181b` | `#27272a` / `#fafafa` |
+| `destructive` / `destructive-foreground` | Destructive actions & validation errors | `#dc2626` / `#ffffff` | `#dc2626` / `#ffffff` |
+| `success` / `success-foreground` | Verified / approved confirmations | `#15803d` / `#ffffff` | `#15803d` / `#ffffff` |
+| `warning` / `warning-foreground` | Cautions & degraded states | `#b45309` / `#ffffff` | `#b45309` / `#ffffff` |
+| `border` / `input` / `ring` | Hairline dividers, control frames, focus ring | `#e4e4e7` / `#d4d4d8` / `#2563eb` | `#3f3f46` / `#52525b` / `#60a5fa` |
+| `sidebar*` | Persistent sidebar chrome & active item | `#fafafa` / `#18181b` / `#e4e4e7` | `#141417` / `#fafafa` / `#27272a` |
+| `host-starting` / `-foreground` | Host `starting` state (`◐ Starting`) | `#dbeafe` / `#1e40af` | `#1e3a8a` / `#dbeafe` |
+| `host-running` / `-foreground` | Host `running` state (`● Running`) | `#dcfce7` / `#166534` | `#14532d` / `#dcfce7` |
+| `host-restarting` / `-foreground` | Host `restarting` state (`↻ Restarting`) | `#fef3c7` / `#92400e` | `#78350f` / `#fef3c7` |
+| `host-stopped` / `-foreground` | Host `stopped` state (`■ Stopped`) | `#f4f4f5` / `#3f3f46` | `#27272a` / `#d4d4d8` |
+| `host-failed` / `-foreground` | Host `failed` state (`▲ Failed`) | `#fee2e2` / `#991b1b` | `#7f1d1d` / `#fee2e2` |
+
+---
+
+## 4. Platform Typography & CJK Invariant (ADR-052 D4)
+
+- **Default UI font**: Platform native sans (`font-sans` omitted/default).
+- **Monospace**: Used only for identifiers, bridge method names, shortcuts, and `tabular-nums` aligned numbers (`font-mono`).
+- **Windows CJK `<Input>` / `<Textarea>` invariant**:
+  - `nsh.json` defines `"tailwind": { "fontFamily": { "cjk": "Microsoft YaHei UI" } }`.
+  - Both `Input` and `Textarea` in `src/ui/Input.tsx` apply `font-cjk` whenever `platform.os === "windows"` so Chinese characters never fall back to Windows `"Segoe UI"` tofu (`□□□□`). Feature screens never import raw `"nsh/base"` `Input` and never specify font families individually.
+- **No uppercase or expanded tracking on CJK labels**.
+
+---
+
+## 5. Motion Tokens & Policy
+
+Motion explains state transitions without delaying immediate desktop actions:
+
+| Token | Value | Use |
+| --- | --- | --- |
+| `instant` | `duration-100` (`~100–120ms`) | Hover wash, border/color state transition (`ease-out`) |
+| `fast` | `duration-150` (`~150–180ms`) | Button press scale (`0.97`), icon button press (`0.95`), popup exit (`ease-in`) |
+| `base` | `duration-200` (`~200–240ms`) | Toggle switch thumb slide, collapsible height reveal, overlay enter (`ease-out` / `ease-in-out`) |
+| `slow` | `duration-300` (`~300–360ms`) | Dialog / Sheet presentation (`fade` + subtle scale/slide) |
+| **Reduced motion** | `motion-reduce:*` & `reduceMotion()` | Transitions become instant; press scale clamps to `1.0`; collapsible `reveal` and continuous spinner animations pause or simplify cleanly. |
+
+---
+
+## 6. Motion Inventory — Foundations & Gallery Screen
+
+Written before `src/ui/` implementation. Every state change on the Gallery screen accounts for tool, tokens, and `reduceMotion`:
+
+| State Change | Tool & Tokens | Reduced Motion Behavior |
+| --- | --- | --- |
+| Hover & press on `Button`, `IconButton`, `MenuItem` | Transition colors (`duration-100 ease-out`), press scale `active:scale-[0.97]` (`active:scale-[0.95]` on `IconButton`) with `duration-150 ease-out` | `motion-reduce:transition-none motion-reduce:active:scale-100` |
+| Glyph / label swap (Disclosure chevron, Copy/Submitted status, Spinner active) | Disclosure chevron & expand state swap cleanly; interactive state color fade `duration-150` | `motion-reduce:transition-none`; state remains explicit via label & symbol |
+| Selection movement (`Tabs` Gallery appearance switcher, `Switch` thumb, `Checkbox` tick) | Switch thumb `transition-transform duration-200 ease-in-out`; Tab/Checkbox state wash `duration-150` | `motion-reduce:transition-none` (thumb jumps cleanly to end state) |
+| Content arriving or leaving (`Toast` banner, Host-state preview swap) | `Toast` enters/exits natively; Gallery list sections are static so no staggered wave needed (`none`) | Instant appearance/disappearance; state remains legible via text + glyph |
+| Surface opening or closing (`Dialog`, `Sheet`, `Popover`, `Menu`, `Tooltip`) | `Dialog` (`animation="slide"` or `"fade"` when `reduceMotion()`); Popover/Menu/Tooltip share `duration-150` fade/scale popup chrome | `reduceMotion()` forces `animation="none"` on `Dialog`/`Sheet`; popups appear immediately |
+| User-triggered layout change (`Disclosure` / `Collapsible` expand/collapse) | `Collapsible reveal={!reduceMotion()}` native clipped height spring | `reveal={false}` — expands/collapses immediately without height animation |
+| Drag / swipe / throw | None (Foundations Gallery contains no draggable sliders/splitters/drawers) | N/A |
+| Loading & progress (`Button loading`, `Spinner`, `Skeleton`) | Spinner shows visual + accessible loading status (`accessibilityState={{ busy: true }}`), `Skeleton` subtle muted bar | Continuous spin omitted/static indicator shown under `reduceMotion()`, busy state label preserved |
+| Live / continuous updates | None in Gallery (live Host stream belongs to Shell/Conversation feature slices) | N/A |
+
+---
+
+## 7. Upcoming Screen Motion Inventory Sections (Reserved)
+
+Feature slices landing after this Foundations PR will append their motion inventories here before implementation:
+- **Keys screen** (Slice 2 — provider profile save/secret clear transitions)
+- **Shell & Recovery screen** (Slice 3 — Host state transitions, S1 snapshot/restore progress & restart confirmation)
+- **Conversation workspace** (Slice 4 — sidebar selection, streaming `TextView`, Send/Cancel swap, timeline `List`)
+- **Activity & Settings** (Slice 5 — card disclosure, approval confirmation, login-item toggle feedback)

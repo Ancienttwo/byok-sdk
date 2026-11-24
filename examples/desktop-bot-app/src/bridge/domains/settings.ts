@@ -3,8 +3,7 @@
  * Methods are named `settings.<verb>`; the Host handlers live in `src/host/settings/domain.ts`.
  */
 import type { BridgeDomain } from '../domain.ts';
-import type { DeviceView } from '../../host/settings/device.ts';
-import type { DreamingSetting, HostSettings } from '../../host/settings/store.ts';
+import type { DeviceView, DreamingSetting, HostSettings } from '../../host/settings/types.ts';
 
 /** Whether the app opens at login, as the OS reports it. Linux has no login item: `supported` is false there. */
 export interface LoginItemView {

@@ -1,0 +1,126 @@
+{
+  "name": "BYOK Bots",
+  "id": "io.byok-sdk.byok-desktop-bots",
+  "version": "0.1.0",
+  "build": 1,
+  "singleInstance": true,
+  "capabilities": {
+    "application": true,
+    "openUrl": {
+      "schemes": ["https"]
+    }
+  },
+  "tailwind": {
+    "fontFamily": {
+      "cjk": "Microsoft YaHei UI"
+    }
+  },
+  "theme": {
+    "cssVars": {
+      "theme": {
+        "radius": "0.375rem"
+      },
+      "light": {
+        "background": "#ffffff",
+        "foreground": "#18181b",
+        "card": "#ffffff",
+        "card-foreground": "#18181b",
+        "popover": "#ffffff",
+        "popover-foreground": "#18181b",
+        "primary": "#2563eb",
+        "primary-foreground": "#ffffff",
+        "secondary": "#f4f4f5",
+        "secondary-foreground": "#18181b",
+        "muted": "#f4f4f5",
+        "muted-foreground": "#52525b",
+        "accent": "#f4f4f5",
+        "accent-foreground": "#18181b",
+        "destructive": "#dc2626",
+        "destructive-foreground": "#ffffff",
+        "success": "#15803d",
+        "success-foreground": "#ffffff",
+        "warning": "#b45309",
+        "warning-foreground": "#ffffff",
+        "border": "#e4e4e7",
+        "input": "#d4d4d8",
+        "ring": "#2563eb",
+        "chart-1": "#2563eb",
+        "chart-2": "#0d9488",
+        "chart-3": "#d97706",
+        "chart-4": "#7c3aed",
+        "chart-5": "#dc2626",
+        "sidebar": "#fafafa",
+        "sidebar-foreground": "#18181b",
+        "sidebar-primary": "#2563eb",
+        "sidebar-primary-foreground": "#ffffff",
+        "sidebar-accent": "#f4f4f5",
+        "sidebar-accent-foreground": "#18181b",
+        "sidebar-border": "#e4e4e7",
+        "sidebar-ring": "#2563eb",
+        "host-starting": "#dbeafe",
+        "host-starting-foreground": "#1e40af",
+        "host-running": "#dcfce7",
+        "host-running-foreground": "#166534",
+        "host-restarting": "#fef3c7",
+        "host-restarting-foreground": "#92400e",
+        "host-stopped": "#f4f4f5",
+        "host-stopped-foreground": "#3f3f46",
+        "host-failed": "#fee2e2",
+        "host-failed-foreground": "#991b1b"
+      },
+      "dark": {
+        "background": "#18181b",
+        "foreground": "#fafafa",
+        "card": "#1f1f23",
+        "card-foreground": "#fafafa",
+        "popover": "#27272a",
+        "popover-foreground": "#fafafa",
+        "primary": "#2563eb",
+        "primary-foreground": "#ffffff",
+        "secondary": "#27272a",
+        "secondary-foreground": "#fafafa",
+        "muted": "#27272a",
+        "muted-foreground": "#a1a1aa",
+        "accent": "#27272a",
+        "accent-foreground": "#fafafa",
+        "destructive": "#dc2626",
+        "destructive-foreground": "#ffffff",
+        "success": "#15803d",
+        "success-foreground": "#ffffff",
+        "warning": "#b45309",
+        "warning-foreground": "#ffffff",
+        "border": "#3f3f46",
+        "input": "#52525b",
+        "ring": "#60a5fa",
+        "chart-1": "#60a5fa",
+        "chart-2": "#2dd4bf",
+        "chart-3": "#fbbf24",
+        "chart-4": "#a78bfa",
+        "chart-5": "#f87171",
+        "sidebar": "#141417",
+        "sidebar-foreground": "#fafafa",
+        "sidebar-primary": "#2563eb",
+        "sidebar-primary-foreground": "#ffffff",
+        "sidebar-accent": "#27272a",
+        "sidebar-accent-foreground": "#fafafa",
+        "sidebar-border": "#27272a",
+        "sidebar-ring": "#60a5fa",
+        "host-starting": "#1e3a8a",
+        "host-starting-foreground": "#dbeafe",
+        "host-running": "#14532d",
+        "host-running-foreground": "#dcfce7",
+        "host-restarting": "#78350f",
+        "host-restarting-foreground": "#fef3c7",
+        "host-stopped": "#27272a",
+        "host-stopped-foreground": "#d4d4d8",
+        "host-failed": "#7f1d1d",
+        "host-failed-foreground": "#fee2e2"
+      }
+    }
+  },
+  "dependencies": {
+    "byok-nsh-adapter": {
+      "path": "ext/byok-nsh-adapter"
+    }
+  }
+}

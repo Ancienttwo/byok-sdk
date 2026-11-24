@@ -9,8 +9,9 @@ import { randomUUID } from 'node:crypto';
 import { cp, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { stampOf } from './protocol.ts';
+import type { Move } from './types.ts';
 
-export { stampOf };
+export { stampOf, type Move };
 
 /** The `resolveHostLayout` paths the stores live under. */
 export interface StoreLayout {
@@ -43,9 +44,6 @@ export async function completeSnapshot(layout: StoreLayout, version: string): Pr
   }
   return (JSON.parse(text) as { version?: unknown }).version === version ? directory : undefined;
 }
-
-/** One rename an action did, so a failure can undo it. */
-export interface Move { readonly from: string; readonly to: string }
 
 /** Only ENOENT means absent; access and other inspection errors must refuse recovery. */
 async function present(file: string): Promise<boolean> {

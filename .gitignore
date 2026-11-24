@@ -155,3 +155,8 @@ Thumbs.db
 
 # Rust build output under desktop-bot-app native crates
 examples/desktop-bot-app/native/**/target/
+
+# NSH Mixed build cache and adapter target output
+examples/desktop-bot-app/nsh-app/.nsh/
+examples/desktop-bot-app/nsh-app/target/
+examples/desktop-bot-app/nsh-app/ext/**/target/

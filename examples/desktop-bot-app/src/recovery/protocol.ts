@@ -3,7 +3,7 @@
  * command-specific arguments and reads one receipt line from stdout.
  * Types and constants only, so main loads no SDK or store code through it.
  */
-import type { Move } from './stores.ts';
+import type { Move } from './types.ts';
 
 export const START_FRESH_COMMAND = 'byok-desktop-start-fresh';
 export const SNAPSHOT_COMMAND = 'byok-desktop-snapshot';
