@@ -619,10 +619,13 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(refreshedAcks).toEqual([]);
 
-      // Reconnect gen 2: its own handshake opens with revision 2.
+      // Reconnect: its own handshake opens with revision 2. While polls fail the
+      // manager may already cycle through open again (hello succeeds, poll 500s),
+      // so wait for an open after the failure lifts rather than counting opens.
+      const opensBeforeReconnect = states.filter((entry) => entry.state === 'open').length;
       server.setFailEventsPolls(false);
-      await vi.waitFor(() => expect(states.filter((entry) => entry.state === 'open')).toHaveLength(2), { timeout: 5_000 });
-      expect(states.filter((entry) => entry.state === 'open')[1]?.accepted).toEqual({
+      await vi.waitFor(() => expect(states.filter((entry) => entry.state === 'open').length).toBeGreaterThan(opensBeforeReconnect), { timeout: 5_000 });
+      expect(states.filter((entry) => entry.state === 'open').at(-1)?.accepted).toEqual({
         revision: 2,
         capabilities: ['agent-home-contract', AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY],
       });
