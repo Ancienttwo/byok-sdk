@@ -347,7 +347,7 @@ describe('desktop bridge', () => {
     const spawnUpdaterHost = vi.fn(() => immediateReceipt(JSON.stringify({ ok: true, target: '/snap/1.0.0' })));
     const showError = vi.fn();
     const relaunchAndQuit = vi.fn();
-    const quitAndInstall = vi.fn(() => true);
+    const quitAndInstall = vi.fn(() => ({ status: 'confirmed' as const }));
     const updaterOptions = {
       currentVersion: () => '1.0.0',
       confirmInstall: async () => true,
@@ -415,7 +415,7 @@ describe('desktop bridge', () => {
       },
       showError: (title, msg) => { updaterEvents.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { updaterEvents.push('relaunchAndQuit'); },
-      quitAndInstall: () => { updaterEvents.push('quitAndInstall'); return true; },
+      quitAndInstall: () => { updaterEvents.push('quitAndInstall'); return { status: 'confirmed' as const }; },
       maintenanceLock,
     });
 
@@ -427,7 +427,7 @@ describe('desktop bridge', () => {
     const secondBeforeInstall = vi.fn(async () => {});
     const secondSpawn = vi.fn(() => delayedSnapshot.child);
     const secondShowError = vi.fn();
-    const secondQuit = vi.fn(() => true);
+    const secondQuit = vi.fn(() => ({ status: 'confirmed' as const }));
     await expect(offerInstall('2.0.1', {
       currentVersion: () => '1.0.0',
       confirmInstall: async () => true,
@@ -560,7 +560,7 @@ describe('desktop bridge', () => {
       spawnHostCommand: vi.fn(),
       showError: vi.fn(),
       relaunchAndQuit: vi.fn(),
-      quitAndInstall: vi.fn(() => true),
+      quitAndInstall: vi.fn(() => ({ status: 'confirmed' as const })),
       maintenanceLock,
     });
 

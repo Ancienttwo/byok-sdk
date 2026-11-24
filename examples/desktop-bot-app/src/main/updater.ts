@@ -7,6 +7,11 @@ import { SNAPSHOT_COMMAND, type SnapshotReceipt } from '../recovery/protocol.ts'
 import { askHostCommand, type CommandChild } from './host-command.ts';
 import { MaintenanceBusyError, type MaintenanceLock } from './maintenance-lock.ts';
 
+export type QuitAndInstallOutcome =
+  | { readonly status: 'confirmed' }
+  | { readonly status: 'failed'; readonly message: string }
+  | { readonly status: 'quit-requested' };
+
 export interface UpdaterOptions {
   /** Stops the Host; resolves once it has closed its stores. */
   readonly beforeInstall: () => Promise<void>;
@@ -16,7 +21,7 @@ export interface UpdaterOptions {
   readonly maintenanceLock: MaintenanceLock;
   readonly currentVersion?: () => string;
   readonly confirmInstall?: (version: string, currentVersion: string) => Promise<boolean>;
-  readonly quitAndInstall?: () => Promise<boolean> | boolean;
+  readonly quitAndInstall?: (confirmTakeover: () => void) => Promise<QuitAndInstallOutcome> | QuitAndInstallOutcome;
   readonly installHandoverTimeoutMs?: number;
   readonly showError?: (title: string, message: string) => void;
   readonly relaunchAndQuit?: () => void;
@@ -32,51 +37,74 @@ export interface QuitAndInstallSources {
     once(event: 'before-quit-for-update', listener: () => void): unknown;
     removeListener(event: 'before-quit-for-update', listener: () => void): unknown;
   };
-  readonly appEvents: {
-    once(event: 'before-quit', listener: () => void): unknown;
-    removeListener(event: 'before-quit', listener: () => void): unknown;
-  };
+  /** Invoked synchronously as soon as `before-quit-for-update` confirms takeover. */
+  readonly onConfirmed?: () => void;
+  /** Subscribes to normal app quit requests while installer takeover is pending. */
+  readonly onQuitRequested?: (listener: () => void) => () => void;
+  /**
+   * True where `quitAndInstall()` is synchronous (`BaseUpdater`: NSIS/AppImage) and a quiet
+   * timeout means it never scheduled quit; false on macOS (`MacUpdater`), where Squirrel's
+   * native download can finish after `timeoutMs` without an error and must stay pending.
+   */
+  readonly canInferFailureOnTimeout: boolean;
   readonly timeoutMs: number;
+  readonly onPendingTimeout?: () => void;
 }
 
 /**
- * Invokes `electron-updater`'s `quitAndInstall()` and resolves `true` only
- * when Electron emits `before-quit-for-update` or `before-quit`. Resolves
- * `false` if `quitAndInstall()` returns without scheduling quit within
- * `timeoutMs`, and rejects if `autoUpdater` emits `error` or throws.
+ * Invokes `electron-updater`'s `quitAndInstall()` and confirms handover only on
+ * Electron's attributable `before-quit-for-update` signal (calling `onConfirmed`
+ * synchronously before `before-quit` fires). Never treats an ordinary tray
+ * `before-quit` as install confirmation. On macOS (`canInferFailureOnTimeout: false`),
+ * reaching `timeoutMs` leaves handover undetermined/pending rather than racing a
+ * still-running native Squirrel install with a competing relaunch.
  */
-export function requestQuitAndInstall(sources: QuitAndInstallSources): Promise<boolean> {
-  return new Promise<boolean>((resolve, reject) => {
+export function requestQuitAndInstall(sources: QuitAndInstallSources): Promise<QuitAndInstallOutcome> {
+  return new Promise<QuitAndInstallOutcome>(resolve => {
     let settled = false;
+    let unsubQuit: (() => void) | undefined;
     const cleanup = () => {
       clearTimeout(timer);
       sources.autoUpdater.removeListener('error', onError);
       sources.nativeUpdater.removeListener('before-quit-for-update', onConfirmed);
-      sources.appEvents.removeListener('before-quit', onConfirmed);
+      unsubQuit?.();
+      unsubQuit = undefined;
     };
     const onConfirmed = () => {
       if (settled) return;
       settled = true;
       cleanup();
-      resolve(true);
+      sources.onConfirmed?.();
+      resolve({ status: 'confirmed' });
     };
     const onError = (error: Error) => {
       if (settled) return;
       settled = true;
       cleanup();
-      reject(error);
+      resolve({ status: 'failed', message: error.message });
     };
-    const timer = setTimeout(() => {
+    const onQuitRequested = () => {
       if (settled) return;
       settled = true;
       cleanup();
-      resolve(false);
+      resolve({ status: 'quit-requested' });
+    };
+    const timer = setTimeout(() => {
+      if (settled) return;
+      if (sources.canInferFailureOnTimeout) {
+        settled = true;
+        cleanup();
+        resolve({ status: 'failed', message: 'Updater did not start installing the update' });
+      } else {
+        sources.onPendingTimeout?.();
+      }
     }, sources.timeoutMs);
     timer.unref?.();
 
     sources.autoUpdater.once('error', onError);
     sources.nativeUpdater.once('before-quit-for-update', onConfirmed);
-    sources.appEvents.once('before-quit', onConfirmed);
+    unsubQuit = sources.onQuitRequested?.(onQuitRequested);
+    if (settled) return;
     try {
       sources.autoUpdater.quitAndInstall();
     } catch (error) {
@@ -125,11 +153,16 @@ export async function offerInstall(version: string, options: UpdaterOptions): Pr
     app.relaunch();
     app.quit();
   });
-  const quitAndInstall = options.quitAndInstall ?? (() => requestQuitAndInstall({
+  const quitAndInstall = options.quitAndInstall ?? (confirmTakeover => requestQuitAndInstall({
     autoUpdater: electronUpdater.autoUpdater,
     nativeUpdater: electronAutoUpdater,
-    appEvents: app,
+    onConfirmed: confirmTakeover,
+    onQuitRequested: listener => options.maintenanceLock.onQuitRequested(listener),
+    canInferFailureOnTimeout: process.platform !== 'darwin',
     timeoutMs: options.installHandoverTimeoutMs ?? (process.platform === 'darwin' ? 15_000 : 2_000),
+    onPendingTimeout: () => {
+      console.error('Update installer takeover is still pending; waiting for installer completion, error, or user quit');
+    },
   }));
 
   if (!await confirm(version, current)) return false;
@@ -162,27 +195,28 @@ export async function offerInstall(version: string, options: UpdaterOptions): Pr
         return false;
       }
 
+      if (options.maintenanceLock.isQuitting()) return false;
+
       handover.beginPending();
-      let takenOver = false;
-      let handoverError: string | undefined;
+      let outcome: QuitAndInstallOutcome;
       try {
-        takenOver = await quitAndInstall();
+        outcome = await quitAndInstall(() => handover.confirm());
       } catch (error) {
-        handoverError = (error as Error).message;
+        outcome = { status: 'failed', message: (error as Error).message };
       }
-      if (takenOver) {
+      if (outcome.status === 'confirmed') {
         handover.confirm();
         return true;
       }
 
       handover.cancelPending();
-      const message = handoverError ?? 'Updater did not start installing the update';
-      console.error(`Update not installed: ${message}`);
-      showError('Update not installed', message);
-      if (!options.maintenanceLock.isQuitting()) {
-        handover.confirm();
-        relaunchAndQuit();
+      if (outcome.status === 'quit-requested' || options.maintenanceLock.isQuitting()) {
+        return false;
       }
+      console.error(`Update not installed: ${outcome.message}`);
+      showError('Update not installed', outcome.message);
+      handover.confirm();
+      relaunchAndQuit();
       return false;
     });
   } catch (error) {
@@ -217,6 +251,7 @@ export function startUpdater(options: UpdaterOptions): void {
     console.error(`Update failed: ${error.message}`);
   };
   autoUpdater.autoInstallOnAppQuit = false;
+  autoUpdater.autoRunAppAfterInstall = true;
   autoUpdater.on('error', logFailure);
   autoUpdater.on('update-downloaded', ({ version }: { version: string }) => {
     // The user asked for this install, so a failure in it is shown, not only logged.

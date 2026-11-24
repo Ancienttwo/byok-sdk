@@ -209,7 +209,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       },
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
-      quitAndInstall: () => { events.push('quitAndInstall'); return true; },
+      quitAndInstall: () => { events.push('quitAndInstall'); return { status: 'confirmed' as const }; },
       maintenanceLock: createMaintenanceLock(),
     });
 
@@ -234,7 +234,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       spawnHostCommand,
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
-      quitAndInstall: () => { events.push('quitAndInstall'); return true; },
+      quitAndInstall: () => { events.push('quitAndInstall'); return { status: 'confirmed' as const }; },
       maintenanceLock,
     });
 
@@ -256,7 +256,7 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       },
       showError: (title, msg) => { events.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events.push('relaunchAndQuit'); },
-      quitAndInstall: () => { events.push('quitAndInstall'); return true; },
+      quitAndInstall: () => { events.push('quitAndInstall'); return { status: 'confirmed' as const }; },
       maintenanceLock: createMaintenanceLock(),
     });
 
@@ -270,18 +270,15 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
   });
 
   it('recovers via relaunchAndQuit when quitAndInstall returns void without scheduling quit or emits error', async () => {
-    const createSources = (quitAndInstall: () => void, timeoutMs: number) => {
-      const autoUpdater = new EventEmitter() as EventEmitter & { quitAndInstall(): void };
-      autoUpdater.quitAndInstall = quitAndInstall;
-      return { autoUpdater, nativeUpdater: new EventEmitter(), appEvents: new EventEmitter(), timeoutMs };
-    };
-
     // Case 1: BaseUpdater.quitAndInstall() returns void without scheduling quit (install() === false).
     const lock1 = createMaintenanceLock();
     const events1: string[] = [];
     let markQuitCalled!: () => void;
     const quitStarted = new Promise<void>(resolve => { markQuitCalled = resolve; });
-    const sources1 = createSources(() => { markQuitCalled(); }, 40);
+    const autoUpdater1 = new EventEmitter() as EventEmitter & { quitAndInstall(): void };
+    autoUpdater1.quitAndInstall = () => { markQuitCalled(); };
+    const nativeUpdater1 = new EventEmitter();
+
     const pendingVoid = offerInstall('2.0.0', {
       currentVersion: () => '1.0.0',
       confirmInstall: async () => true,
@@ -289,7 +286,14 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       spawnHostCommand: () => receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0),
       showError: (title, msg) => { events1.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events1.push('relaunchAndQuit'); },
-      quitAndInstall: () => requestQuitAndInstall(sources1),
+      quitAndInstall: onConfirmed => requestQuitAndInstall({
+        autoUpdater: autoUpdater1,
+        nativeUpdater: nativeUpdater1,
+        onConfirmed,
+        onQuitRequested: l => lock1.onQuitRequested(l),
+        canInferFailureOnTimeout: true,
+        timeoutMs: 40,
+      }),
       maintenanceLock: lock1,
     });
 
@@ -309,9 +313,10 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
     // Case 2: autoUpdater emits 'error' synchronously -> fails promptly without waiting for timeout.
     const lock2 = createMaintenanceLock();
     const events2: string[] = [];
-    const sources2 = createSources(() => {
-      sources2.autoUpdater.emit('error', new Error('No update filepath provided'));
-    }, 5_000);
+    const autoUpdater2 = new EventEmitter() as EventEmitter & { quitAndInstall(): void };
+    autoUpdater2.quitAndInstall = () => {
+      autoUpdater2.emit('error', new Error('No update filepath provided'));
+    };
     const installedErr = await offerInstall('2.0.0', {
       currentVersion: () => '1.0.0',
       confirmInstall: async () => true,
@@ -319,7 +324,14 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       spawnHostCommand: () => receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0),
       showError: (title, msg) => { events2.push(`error:${title}:${msg}`); },
       relaunchAndQuit: () => { events2.push('relaunchAndQuit'); },
-      quitAndInstall: () => requestQuitAndInstall(sources2),
+      quitAndInstall: onConfirmed => requestQuitAndInstall({
+        autoUpdater: autoUpdater2,
+        nativeUpdater: new EventEmitter(),
+        onConfirmed,
+        onQuitRequested: l => lock2.onQuitRequested(l),
+        canInferFailureOnTimeout: true,
+        timeoutMs: 5_000,
+      }),
       maintenanceLock: lock2,
     });
 
@@ -361,7 +373,14 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
       spawnHostCommand: () => receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0),
       showError,
       relaunchAndQuit,
-      quitAndInstall: () => requestQuitAndInstall({ autoUpdater, nativeUpdater, appEvents, timeoutMs: 2_000 }),
+      quitAndInstall: onConfirmed => requestQuitAndInstall({
+        autoUpdater,
+        nativeUpdater,
+        onConfirmed,
+        onQuitRequested: l => maintenanceLock.onQuitRequested(l),
+        canInferFailureOnTimeout: true,
+        timeoutMs: 2_000,
+      }),
       maintenanceLock,
     });
 
@@ -370,5 +389,120 @@ describe('offerInstall orchestration (#2459 S1 Host-stopped ordering)', () => {
     expect(showError).not.toHaveBeenCalled();
     expect(relaunchAndQuit).not.toHaveBeenCalled();
     expect(maintenanceLock.isHandedOver()).toBe(true);
+  });
+
+  it('keeps macOS updater handover pending past timeout without competing relaunch until native update finishes', async () => {
+    const maintenanceLock = createMaintenanceLock();
+    const autoUpdater = new EventEmitter() as EventEmitter & { quitAndInstall(): void };
+    const nativeUpdater = new EventEmitter();
+    const appEvents = new EventEmitter();
+    const quitEvent = { preventDefault: vi.fn() };
+    const showError = vi.fn();
+    const relaunchAndQuit = vi.fn();
+    let markTimeout!: () => void;
+    const timeoutFired = new Promise<void>(resolve => { markTimeout = resolve; });
+
+    appEvents.on('before-quit', createBeforeQuitHandler({
+      maintenanceLock,
+      stopHost: vi.fn(async () => {}),
+      exit: vi.fn(),
+      logError: vi.fn(),
+    }));
+
+    // MacUpdater.quitAndInstall() registers update-downloaded and returns while Squirrel still downloads.
+    autoUpdater.quitAndInstall = () => {};
+
+    const pendingInstall = offerInstall('2.0.0', {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall: async () => {},
+      spawnHostCommand: () => receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0),
+      showError,
+      relaunchAndQuit,
+      quitAndInstall: onConfirmed => requestQuitAndInstall({
+        autoUpdater,
+        nativeUpdater,
+        onConfirmed,
+        onQuitRequested: l => maintenanceLock.onQuitRequested(l),
+        canInferFailureOnTimeout: false,
+        timeoutMs: 20,
+        onPendingTimeout: () => { markTimeout(); },
+      }),
+      maintenanceLock,
+    });
+
+    // Even after timeoutMs fires, macOS leaves handover pending (no competing relaunchAndQuit).
+    await timeoutFired;
+    expect(relaunchAndQuit).not.toHaveBeenCalled();
+    expect(showError).not.toHaveBeenCalled();
+    expect(maintenanceLock.isHandedOver()).toBe(false);
+    await expect(maintenanceLock.run(async () => 'overlap')).rejects.toBeInstanceOf(MaintenanceBusyError);
+
+    // Late Squirrel completion emits before-quit-for-update then before-quit -> confirmed cleanly.
+    nativeUpdater.emit('before-quit-for-update');
+    appEvents.emit('before-quit', quitEvent);
+
+    await expect(pendingInstall).resolves.toBe(true);
+    expect(quitEvent.preventDefault).not.toHaveBeenCalled();
+    expect(relaunchAndQuit).not.toHaveBeenCalled();
+    expect(showError).not.toHaveBeenCalled();
+    expect(maintenanceLock.isHandedOver()).toBe(true);
+  });
+
+  it('does not treat ordinary tray before-quit during pending handover as install success', async () => {
+    const maintenanceLock = createMaintenanceLock();
+    const autoUpdater = new EventEmitter() as EventEmitter & { quitAndInstall(): void };
+    const nativeUpdater = new EventEmitter();
+    const appEvents = new EventEmitter();
+    const trayQuitEvent = { preventDefault: vi.fn() };
+    const showError = vi.fn();
+    const relaunchAndQuit = vi.fn();
+    const quitStopHost = vi.fn(async () => {});
+    const exit = vi.fn();
+    let markQuitStarted!: () => void;
+    const quitStarted = new Promise<void>(resolve => { markQuitStarted = resolve; });
+
+    appEvents.on('before-quit', createBeforeQuitHandler({
+      maintenanceLock,
+      stopHost: quitStopHost,
+      exit,
+      logError: vi.fn(),
+    }));
+
+    autoUpdater.quitAndInstall = () => { markQuitStarted(); };
+
+    const pendingInstall = offerInstall('2.0.0', {
+      currentVersion: () => '1.0.0',
+      confirmInstall: async () => true,
+      beforeInstall: async () => {},
+      spawnHostCommand: () => receiptChild(JSON.stringify({ ok: true, target: '/snap/1.0.0' }), 0),
+      showError,
+      relaunchAndQuit,
+      quitAndInstall: onConfirmed => requestQuitAndInstall({
+        autoUpdater,
+        nativeUpdater,
+        onConfirmed,
+        onQuitRequested: l => maintenanceLock.onQuitRequested(l),
+        canInferFailureOnTimeout: false,
+        timeoutMs: 5_000,
+      }),
+      maintenanceLock,
+    });
+
+    await quitStarted;
+
+    // User chooses Quit from tray/window before before-quit-for-update ever fires.
+    appEvents.emit('before-quit', trayQuitEvent);
+    expect(trayQuitEvent.preventDefault).toHaveBeenCalledTimes(1);
+
+    await expect(pendingInstall).resolves.toBe(false);
+    expect(relaunchAndQuit).not.toHaveBeenCalled();
+    expect(showError).not.toHaveBeenCalled();
+    expect(maintenanceLock.isHandedOver()).toBe(false);
+
+    await vi.waitFor(() => {
+      expect(quitStopHost).toHaveBeenCalledTimes(1);
+      expect(exit).toHaveBeenCalledWith(0);
+    });
   });
 });

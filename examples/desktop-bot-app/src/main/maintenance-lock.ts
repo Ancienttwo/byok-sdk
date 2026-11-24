@@ -26,12 +26,8 @@ export interface MaintenanceLock {
   run<T>(action: (handover: HandoverControls) => Promise<T>): Promise<T>;
   isHandedOver(): boolean;
   isQuitting(): boolean;
-  /**
-   * Called by `before-quit`: returns true if handover is already confirmed,
-   * or promotes a `pending` installer handover to `confirmed`, allowing
-   * intentional quit/install to proceed without `preventDefault()`.
-   */
-  allowQuitHandover(): boolean;
+  /** Subscribes to normal app quit requests; fires immediately if already quitting. */
+  onQuitRequested(listener: () => void): () => void;
   /** Enters app quit, waiting for any in-flight maintenance work to finish before quitting. */
   beginQuit(): Promise<'quit' | 'handed-over'>;
 }
@@ -50,6 +46,7 @@ export function createMaintenanceLock(): MaintenanceLock {
   let handover: HandoverState = 'none';
   let quitting = false;
   let inFlight: Promise<void> | undefined;
+  const quitListeners = new Set<() => void>();
   const currentHandover = (): HandoverState => handover;
   return {
     async run<T>(action: (controls: HandoverControls) => Promise<T>): Promise<T> {
@@ -86,16 +83,21 @@ export function createMaintenanceLock(): MaintenanceLock {
     isQuitting(): boolean {
       return quitting;
     },
-    allowQuitHandover(): boolean {
-      if (handover === 'confirmed') return true;
-      if (handover === 'pending') {
-        handover = 'confirmed';
-        return true;
+    onQuitRequested(listener: () => void): () => void {
+      if (quitting) {
+        listener();
+        return () => {};
       }
-      return false;
+      quitListeners.add(listener);
+      return () => {
+        quitListeners.delete(listener);
+      };
     },
     async beginQuit(): Promise<'quit' | 'handed-over'> {
-      quitting = true;
+      if (!quitting) {
+        quitting = true;
+        for (const listener of [...quitListeners]) listener();
+      }
       await inFlight;
       return currentHandover() === 'confirmed' ? 'handed-over' : 'quit';
     },
@@ -103,15 +105,15 @@ export function createMaintenanceLock(): MaintenanceLock {
 }
 
 /**
- * Coordinates Electron `before-quit` with {@link MaintenanceLock}: intentional
- * post-handover quits (`quitAndInstall` / `relaunchAndQuit`) pass straight
- * through, while normal quits wait for any in-flight S1 helper before stopping
- * the Host and exiting.
+ * Coordinates Electron `before-quit` with {@link MaintenanceLock}: only a
+ * confirmed handover (`before-quit-for-update` or intentional `relaunch`)
+ * passes straight through; normal tray/window quits notify in-flight waiters
+ * and wait for any active S1 helper before stopping the Host and exiting.
  */
 export function createBeforeQuitHandler(options: BeforeQuitOptions): (event: { preventDefault(): void }) => void {
   let stopping = false;
   return event => {
-    if (options.maintenanceLock.allowQuitHandover()) return;
+    if (options.maintenanceLock.isHandedOver()) return;
     event.preventDefault();
     if (stopping) return;
     stopping = true;
