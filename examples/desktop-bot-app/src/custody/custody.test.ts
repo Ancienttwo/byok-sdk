@@ -17,6 +17,7 @@ import { catalogEntryFor, ProviderProfiles } from '../host/keys/catalog.ts';
 import { refusalReceipt, runCustody } from './child.ts';
 import { keysMainHandlers } from './main-handlers.ts';
 import { BridgeError } from '../bridge/protocol.ts';
+import { createMaintenanceLock, MaintenanceBusyError } from '../main/maintenance-lock.ts';
 import { CustodyError } from './protocol.ts';
 import { CUSTODY_DEADLINE_MS, listFromCustody, submitToCustody, type CustodyChild } from './submit.ts';
 import type { CommandChild } from '../main/host-command.ts';
@@ -315,13 +316,40 @@ describe('custody child', () => {
     }
   });
 
-  it('refuses keys.submit without spawning custody while maintenance lock is busy (P1-6)', async () => {
+  it('refuses keys.submit without spawning custody while maintenance lock is busy, and holds maintenance off until a timed-out custody child exits (P1-6)', async () => {
     const spawnHostCommand = vi.fn(() => custodyChild(new InMemorySecretStore(), []));
     const callHost = vi.fn(async () => null);
-    const handlers = keysMainHandlers({ spawnHostCommand, callHost, isMaintenanceBusy: () => true });
+    const handlers = keysMainHandlers({ spawnHostCommand, callHost, tryBeginCustody: () => undefined });
     await expect(handlers['keys.submit']({ op: 'configure', configuration: CONFIGURATION, secret: SECRET }))
       .rejects.toMatchObject({ code: 'PROVIDER_CONFIGURATION_BUSY' });
     expect(spawnHostCommand).not.toHaveBeenCalled();
     expect(callHost).not.toHaveBeenCalled();
+
+    // Atomic custody reservation holds S1 maintenance off even after keys.submit times out until the child exits.
+    vi.useFakeTimers();
+    const lock = createMaintenanceLock();
+    const events = new EventEmitter();
+    const child: CustodyChild = {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      kill: vi.fn(() => true),
+      once: (event, listener) => { events.once(event, listener); return child; },
+    };
+    const coordinated = keysMainHandlers({
+      spawnHostCommand: () => child,
+      callHost: async () => null,
+      tryBeginCustody: () => lock.tryBeginCustody(),
+    });
+    const pendingSubmit = coordinated['keys.submit']({ op: 'replace_secret', profileRef: 'writer', secret: SECRET });
+    const rejectedSubmit = expect(pendingSubmit).rejects.toMatchObject({ code: 'custody_timeout' });
+
+    await expect(lock.run(async () => 's1')).rejects.toBeInstanceOf(MaintenanceBusyError);
+    await vi.advanceTimersByTimeAsync(CUSTODY_DEADLINE_MS);
+    await rejectedSubmit;
+
+    // Custody child is still running past timeout: S1 maintenance must remain blocked until child emits exit.
+    await expect(lock.run(async () => 's1')).rejects.toBeInstanceOf(MaintenanceBusyError);
+    events.emit('exit', 0);
+    await expect(lock.run(async () => 's1-after-exit')).resolves.toBe('s1-after-exit');
   });
 });

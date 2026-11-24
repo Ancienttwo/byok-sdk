@@ -6,9 +6,10 @@ use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::Value;
+use zeroize::Zeroizing;
 
 use crate::env::filtered_host_env;
 
@@ -322,37 +323,56 @@ pub fn run_host_command(
     deadline: Option<Duration>,
     kill_on_timeout: bool,
 ) -> Result<CommandOutcome, CommandError> {
-    run_host_command_with_stdin(
+    let owned = Zeroizing::new(stdin_bytes.to_vec());
+    run_host_command_with_stdin::<_, ()>(
         spec,
         args,
-        |stdin| {
-            if stdin_bytes.is_empty() {
+        move |stdin| {
+            if owned.is_empty() {
                 Ok(())
             } else {
-                stdin.write_all(stdin_bytes).and_then(|_| stdin.flush())
+                stdin.write_all(&owned).and_then(|_| stdin.flush())
             }
         },
         deadline,
         kill_on_timeout,
+        None,
     )
 }
 
-pub(crate) fn run_host_command_with_stdin<F>(
+fn recv_until_deadline<T>(
+    rx: &mpsc::Receiver<T>,
+    deadline_at: Option<Instant>,
+) -> Result<T, mpsc::RecvTimeoutError> {
+    match deadline_at {
+        Some(at) => match rx.try_recv() {
+            Ok(v) => Ok(v),
+            Err(mpsc::TryRecvError::Disconnected) => Err(mpsc::RecvTimeoutError::Disconnected),
+            Err(mpsc::TryRecvError::Empty) => {
+                let remaining = at.checked_duration_since(Instant::now()).unwrap_or(Duration::ZERO);
+                rx.recv_timeout(remaining)
+            }
+        },
+        None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
+    }
+}
+
+pub(crate) fn run_host_command_with_stdin<F, G>(
     spec: &HostCommandSpec,
     args: &[&str],
     write_stdin: F,
     deadline: Option<Duration>,
     kill_on_timeout: bool,
+    on_exit: Option<G>,
 ) -> Result<CommandOutcome, CommandError>
 where
-    F: FnOnce(&mut std::process::ChildStdin) -> std::io::Result<()>,
+    F: FnOnce(&mut std::process::ChildStdin) -> std::io::Result<()> + Send + 'static,
+    G: Send + 'static,
 {
+    let deadline_at = deadline.map(|d| Instant::now() + d);
     let mut child = spawn_host_child(spec, args).map_err(|err| CommandError::Spawn(err.to_string()))?;
     let mut stdin = child.stdin.take().expect("stdin is piped");
     let mut stdout = child.stdout.take().expect("stdout is piped");
-
-    let write_res = write_stdin(&mut stdin);
-    drop(stdin);
 
     let latch = ProcessExitLatch::spawn(child);
     let latch_waiter = Arc::clone(&latch);
@@ -361,6 +381,7 @@ where
     let _ = thread::Builder::new()
         .name("byok-cmd-drain".to_owned())
         .spawn(move || {
+            let exit_guard = on_exit;
             let mut buf = Vec::new();
             let read_res = stdout.read_to_end(&mut buf);
             drop(stdout);
@@ -370,11 +391,38 @@ where
                     break exit;
                 }
             };
+            // Release exit guard only after child exits and before notifying waiter.
+            drop(exit_guard);
             let payload = read_res
                 .map(|_| (buf, code))
                 .map_err(|err| err.to_string());
             let _ = tx.send(payload);
         });
+
+    let (write_tx, write_rx) = mpsc::channel::<std::io::Result<()>>();
+    let _ = thread::Builder::new()
+        .name("byok-cmd-stdin".to_owned())
+        .spawn(move || {
+            let write_res = write_stdin(&mut stdin);
+            drop(stdin);
+            let _ = write_tx.send(write_res);
+        });
+
+    let write_res = match recv_until_deadline(&write_rx, deadline_at) {
+        Ok(res) => res,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            if kill_on_timeout {
+                latch.force_kill_and_reap(Duration::from_secs(2));
+                return Err(CommandError::Timeout { killed: true });
+            }
+            return Err(CommandError::Timeout { killed: false });
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            return Err(CommandError::WriteStdin(
+                "command stdin writer disconnected unexpectedly".to_owned(),
+            ));
+        }
+    };
 
     if let Err(ref err) = write_res
         && err.kind() != ErrorKind::BrokenPipe
@@ -385,12 +433,7 @@ where
         return Err(CommandError::WriteStdin(err.to_string()));
     }
 
-    let waited = match deadline {
-        Some(limit) => rx.recv_timeout(limit),
-        None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
-    };
-
-    match waited {
+    match recv_until_deadline(&rx, deadline_at) {
         Ok(Ok((bytes, exit_code))) => {
             if let Err(err) = write_res {
                 // BrokenPipe: if the child still emitted an explicit JSON refusal receipt, surface it!

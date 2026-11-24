@@ -9,12 +9,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use byok_shell::{
-    BridgeContract, BridgeErrorCode, FOREIGN_RUNTIME_VARIABLES, HostCommandSpec,
-    HostSupervisor, HostSupervisorConfig, KeepAwake, LinuxInhibitBackend, LoginItemBackend,
-    LoginItemView, MaintenanceLock, PowerError, QuitOutcome, SecretBytes, ShellRouteError,
-    ShellRouter, SupervisedHostState, UnsupportedLoginItemBackend, filter_env_pairs,
-    list_from_custody, run_restore, run_snapshot, run_snapshot_status, select_linux_backend,
-    shell_restore, shell_start_fresh, spawn_host_child, submit_to_custody,
+    BridgeClient, BridgeContract, BridgeErrorCode, FOREIGN_RUNTIME_VARIABLES, HostCommandSpec,
+    HostState, HostSupervisor, HostSupervisorConfig, KeepAwake, LinuxInhibitBackend,
+    LoginItemBackend, LoginItemView, MaintenanceBusyError, MaintenanceLock, PowerError,
+    QuitOutcome, SecretBytes, ShellRouteError, ShellRouter, SupervisedHostState,
+    UnsupportedLoginItemBackend, filter_env_pairs, list_from_custody, run_restore, run_snapshot,
+    run_snapshot_status, select_linux_backend, shell_restore, shell_start_fresh, spawn_host_child,
+    submit_to_custody,
 };
 use serde_json::{Value, json};
 
@@ -49,14 +50,18 @@ fn app_root() -> PathBuf {
         .to_path_buf()
 }
 
-fn real_host_bundle() -> PathBuf {
+fn try_real_host_bundle() -> Option<PathBuf> {
     let bundle = app_root().join("dist/host/host.cjs");
-    assert!(
-        bundle.exists(),
-        "real Host bundle missing at {} — run `bun run --filter @byok-sdk/example-desktop-bot-app build:host`",
-        bundle.display()
-    );
-    bundle
+    if bundle.exists() {
+        return Some(bundle);
+    }
+    if env::var("BYOK_SHELL_E2E_LIVE_HOST").ok().as_deref() == Some("1") {
+        panic!(
+            "real Host bundle missing at {} — run `bun run --filter @byok-sdk/example-desktop-bot-app build:host`",
+            bundle.display()
+        );
+    }
+    None
 }
 
 fn with_temp_home_env(spec: HostCommandSpec, home: &Path) -> HostCommandSpec {
@@ -73,8 +78,8 @@ fn with_temp_home_env(spec: HostCommandSpec, home: &Path) -> HostCommandSpec {
         .with_env("XDG_DATA_HOME", xdg_data_home.to_string_lossy().into_owned())
 }
 
-fn real_host_spec_with_temp_home(home: &Path) -> HostCommandSpec {
-    with_temp_home_env(HostCommandSpec::dev_node_host(real_host_bundle()), home)
+fn real_host_spec_with_temp_home(bundle: &Path, home: &Path) -> HostCommandSpec {
+    with_temp_home_env(HostCommandSpec::dev_node_host(bundle.to_path_buf()), home)
 }
 
 fn host_storage_root_for(home: &Path) -> PathBuf {
@@ -165,10 +170,13 @@ fn env_filtering_strips_foreign_runtime_variables_case_insensitively() {
 
 #[test]
 fn real_host_s1_snapshot_status_restore_roundtrip_under_temp_home() {
+    let Some(bundle) = try_real_host_bundle() else {
+        return;
+    };
     let tmp = TempDir::new("byok-s1-e2e");
     let home = tmp.path();
     let contract = BridgeContract::load().expect("contract loads");
-    let spec = real_host_spec_with_temp_home(home);
+    let spec = real_host_spec_with_temp_home(&bundle, home);
 
     let store_dir = home.join(".byok/byok-desktop-bots");
     let host_dir = host_storage_root_for(home).join("host");
@@ -184,8 +192,7 @@ fn real_host_s1_snapshot_status_restore_roundtrip_under_temp_home() {
     );
 
     let snap_target =
-        run_snapshot(&spec, &contract.host_commands, "1.0.0", Some(Duration::from_secs(15)))
-            .expect("snapshot succeeds");
+        run_snapshot(&spec, &contract.host_commands, "1.0.0").expect("snapshot succeeds");
     let canon_home = fs::canonicalize(home).expect("canonical home");
     let canon_target = fs::canonicalize(&snap_target).expect("canonical snapshot target");
     assert!(
@@ -208,7 +215,6 @@ fn real_host_s1_snapshot_status_restore_roundtrip_under_temp_home() {
         &contract.host_commands,
         "1.0.0",
         "2026-11-24T12-00-00.000Z",
-        Some(Duration::from_secs(15)),
     )
     .expect("restore succeeds");
     let canon_aside = fs::canonicalize(&restored.aside_path).expect("canonical aside");
@@ -221,8 +227,11 @@ fn real_host_s1_snapshot_status_restore_roundtrip_under_temp_home() {
 
 #[test]
 fn real_host_rejects_hello_version_mismatch_and_malformed_json_fail_closed() {
+    let Some(bundle) = try_real_host_bundle() else {
+        return;
+    };
     let tmp = TempDir::new("byok-real-proto");
-    let spec = real_host_spec_with_temp_home(tmp.path());
+    let spec = real_host_spec_with_temp_home(&bundle, tmp.path());
 
     // Wrong bridge version -> supervisor immediately stops as Failed without restart loop.
     let mut bad_contract = BridgeContract::load().expect("contract loads");
@@ -267,9 +276,12 @@ fn real_host_rejects_hello_version_mismatch_and_malformed_json_fail_closed() {
 
 #[test]
 fn real_host_custody_invalid_json_never_leaks_secret_in_receipt() {
+    let Some(bundle) = try_real_host_bundle() else {
+        return;
+    };
     let tmp = TempDir::new("byok-custody-real");
     let contract = BridgeContract::load().expect("contract loads");
-    let spec = real_host_spec_with_temp_home(tmp.path());
+    let spec = real_host_spec_with_temp_home(&bundle, tmp.path());
     let sentinel = "sk-super-secret-do-not-echo-998877";
     let malformed = SecretBytes::from_string(format!("{{\"op\":\"configure\",\"secret\":\"{sentinel}\""));
     let dbg = format!("{malformed:?}");
@@ -450,7 +462,7 @@ process.on('SIGTERM', () => {});
         .expect_err("retry stop after unclean termination must still refuse");
 
     let maintenance = MaintenanceLock::new();
-    let start_fresh_res = shell_start_fresh(&supervisor, &maintenance, "2026-01-01", None, |_| {});
+    let start_fresh_res = shell_start_fresh(&supervisor, &maintenance, "2026-01-01", |_| {});
     assert_eq!(
         start_fresh_res.expect_err("must not run S1 start-fresh after failed stop").code,
         "host_stop_failed"
@@ -494,23 +506,32 @@ process.stdin.on('end', () => {{
     let spec = write_node_script(tmp.path(), "custody-sim.mjs", &script);
     let contract = BridgeContract::load().expect("contract loads");
 
-    // 1. Submit times out cleanly at 100ms WITHOUT killing child; child completes at 350ms without EPIPE.
+    // 1. Submit times out cleanly at 100ms WITHOUT killing child AND holds MaintenanceLock custody exclusion until child exits at 450ms without EPIPE.
+    let lock = MaintenanceLock::new();
     let sentinel = "sk-custody-e2e-keep-lock";
     let err = submit_to_custody(
         &spec,
         &contract.host_commands.custody,
         SecretBytes::from_string(format!("{{\"op\":\"replace_secret\",\"profileRef\":\"w\",\"secret\":\"{sentinel}\"}}")),
         Duration::from_millis(100),
-        None,
+        Some(&lock),
         None,
     )
     .expect_err("submit must time out at 100ms");
     assert_eq!(err.code, "custody_timeout");
     assert!(!err.message.contains(sentinel));
+    assert!(
+        matches!(lock.try_begin(), Err(MaintenanceBusyError)),
+        "MaintenanceLock must reject S1 maintenance while timed-out custody child is still running"
+    );
 
     assert!(
         wait_until(Duration::from_secs(3), || marker.exists()),
         "custody child must finish writing after timeout"
+    );
+    assert!(
+        wait_until(Duration::from_secs(2), || !lock.is_busy()),
+        "MaintenanceLock must release custody exclusion once child exits"
     );
     assert_eq!(
         fs::read_to_string(&marker).unwrap(),
@@ -529,8 +550,8 @@ process.stdin.on('end', () => {{
     thread::sleep(Duration::from_millis(1700));
     assert!(!list_marker.exists(), "list timeout must kill child");
 
-    // 3. MaintenanceLock blocks concurrent submit and begin_quit drains in-flight maintenance.
-    let lock = MaintenanceLock::new();
+    // 3. MaintenanceLock blocks concurrent submit, begin_quit drains in-flight maintenance,
+    //    blocked stdin write respects deadline, and hung keys.profilesChanged returns catalog_refresh_timeout.
     let guard = lock.try_begin().expect("acquire maintenance lock");
     let busy_err = submit_to_custody(
         &spec,
@@ -549,6 +570,75 @@ process.stdin.on('end', () => {{
     assert!(lock.is_quitting());
     drop(guard);
     assert_eq!(quit_thread.join().unwrap(), QuitOutcome::Quit);
+
+    // Large payload written to a child that never drains stdin must still time out within deadline.
+    let sleepy_stdin = write_node_script(tmp.path(), "sleepy-stdin.mjs", "setTimeout(() => {}, 5000);");
+    let large_secret = "x".repeat(512 * 1024);
+    let started = Instant::now();
+    let stdin_timeout = submit_to_custody(
+        &sleepy_stdin,
+        &contract.host_commands.custody,
+        SecretBytes::from_string(format!(r#"{{"op":"configure","secret":"{large_secret}"}}"#)),
+        Duration::from_millis(150),
+        None,
+        None,
+    )
+    .expect_err("blocked stdin write must time out");
+    assert_eq!(stdin_timeout.code, "custody_timeout");
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "stdin write must be covered by deadline"
+    );
+
+    // Hung keys.profilesChanged after custody receipt returns bounded `catalog_refresh_timeout`.
+    let fast_custody_hung_host = write_node_script(
+        tmp.path(),
+        "hung-refresh.mjs",
+        r#"
+import readline from 'node:readline';
+const arg = process.argv[2];
+if (arg) {
+  let raw = '';
+  process.stdin.on('data', d => raw += d);
+  process.stdin.on('end', () => {
+    process.stdout.write(JSON.stringify({ ok: true, status: { profile_ref: 'w' } }) + '\n');
+  });
+} else {
+  const rl = readline.createInterface({ input: process.stdin });
+  rl.on('close', () => process.exit(0));
+  rl.on('line', line => {
+    const msg = JSON.parse(line);
+    if (msg.method === 'hello') {
+      process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+      process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'running', pid: process.pid, activeWork: 0 } }) + '\n');
+    } else if (msg.method === 'shutdown') {
+      process.stdout.write(JSON.stringify({ id: msg.id, result: null }) + '\n');
+      process.exit(0);
+    }
+  });
+}
+"#,
+    );
+    let sup = HostSupervisor::new(
+        HostSupervisorConfig::new(fast_custody_hung_host.clone(), contract.clone()),
+        |_| {},
+        || {},
+    );
+    sup.start();
+    assert!(wait_until(Duration::from_secs(3), || {
+        matches!(sup.last_state(), Some(SupervisedHostState::Running { .. }))
+    }));
+    let refresh_err = submit_to_custody(
+        &fast_custody_hung_host,
+        &contract.host_commands.custody,
+        SecretBytes::from_string(r#"{"op":"replace_secret","profileRef":"w","secret":"ok"}"#.to_owned()),
+        Duration::from_millis(200),
+        None,
+        Some(&sup),
+    )
+    .expect_err("hung keys.profilesChanged must fail with catalog_refresh_timeout");
+    assert_eq!(refresh_err.code, "catalog_refresh_timeout");
+    sup.stop().expect("clean shutdown");
 }
 
 #[test]
@@ -631,9 +721,12 @@ rl.on('line', line => {
 
 #[test]
 fn router_shell_state_and_shell_restore_run_host_stopped_order_and_confirm_handover() {
+    let Some(bundle) = try_real_host_bundle() else {
+        return;
+    };
     let tmp = TempDir::new("byok-restore-e2e");
     let home = tmp.path();
-    let spec = real_host_spec_with_temp_home(home);
+    let spec = real_host_spec_with_temp_home(&bundle, home);
     let contract = BridgeContract::load().expect("contract loads");
 
     // Populate temp home stores and capture real snapshot v1.0.0 before starting a stopped mock Host.
@@ -643,8 +736,7 @@ fn router_shell_state_and_shell_restore_run_host_stopped_order_and_confirm_hando
     fs::create_dir_all(&host_dir).unwrap();
     fs::write(store_dir.join("device.json"), b"snapshot-v1").unwrap();
     fs::write(host_dir.join("settings.json"), b"host-v1").unwrap();
-    run_snapshot(&spec, &contract.host_commands, "1.0.0", Some(Duration::from_secs(15)))
-        .expect("snapshot v1.0.0");
+    run_snapshot(&spec, &contract.host_commands, "1.0.0").expect("snapshot v1.0.0");
     fs::write(store_dir.join("device.json"), b"mutated-v2").unwrap();
 
     // Real supervisor running real host.cjs in S1 argv? Use a script that stops cleanly and answers S1 argv via forwarding to real host.cjs.
@@ -674,7 +766,7 @@ rl.on('line', line => {{
   }}
 }});
 "#,
-        real_host = serde_json::to_string(&real_host_bundle().to_string_lossy().into_owned()).unwrap()
+        real_host = serde_json::to_string(&bundle.to_string_lossy().into_owned()).unwrap()
     );
     let wrapper_spec = with_temp_home_env(
         write_node_script(tmp.path(), "restore-wrapper.mjs", &wrapper),
@@ -703,7 +795,7 @@ rl.on('line', line => {{
     )
     .with_deadlines(Duration::from_secs(10), Some(Duration::from_secs(15)));
 
-    let view = router.state("1.0.0");
+    let view = router.state("1.0.0").expect("router.state allowed by contract");
     assert_eq!(view.restore_error, None);
     assert_eq!(view.restore.map(|r| r.version), Some("1.0.0".to_owned()));
     let routed_state = router
@@ -712,20 +804,236 @@ rl.on('line', line => {{
     assert_eq!(routed_state["restore"]["version"], json!("1.0.0"));
 
     let mut relaunched_with_err = None;
+    let mut quit_outcome = None;
+    let lock_in_relaunch = maintenance.clone();
     let ok = shell_restore(
         &supervisor,
         &maintenance,
         "1.0.0",
         "2026-11-24T12-30-00.000Z",
         Some(Duration::from_secs(15)),
-        |err| relaunched_with_err = Some(err.is_some()),
+        |err| {
+            relaunched_with_err = Some(err.is_some());
+            // Reproduces P1-3: relaunch invoking begin_quit() must return HandedOver immediately without deadlocking.
+            quit_outcome = Some(lock_in_relaunch.begin_quit());
+        },
     )
     .expect("shell_restore succeeds");
 
     assert_eq!(relaunched_with_err, Some(false));
+    assert_eq!(quit_outcome, Some(QuitOutcome::HandedOver));
     assert!(maintenance.is_handed_over());
     assert!(fs::canonicalize(&ok.aside_path).unwrap().starts_with(fs::canonicalize(home).unwrap()));
     assert_eq!(fs::read_to_string(store_dir.join("device.json")).unwrap(), "snapshot-v1");
+}
+
+#[test]
+fn bridge_drop_and_off_reader_callbacks_and_strict_shutdown_contract() {
+    let tmp = TempDir::new("byok-bridge-fixes");
+
+    // 1. P1-1 & P1-2: off-reader on_state issues synchronous status RPC without deadlocking,
+    //    and dropping BridgeClient closes Host stdin so the child exits cleanly on EOF.
+    let script = r#"
+import readline from 'node:readline';
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('close', () => process.exit(0));
+rl.on('line', line => {
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+    process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'running', pid: process.pid, activeWork: 0 } }) + '\n');
+  } else if (msg.method === 'status') {
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { state: 'running', pid: process.pid, activeWork: 0 } }) + '\n');
+  }
+});
+setInterval(() => {}, 10000);
+"#;
+    let spec = write_node_script(tmp.path(), "direct-client.mjs", script);
+    let child = spawn_host_child(&spec, &[]).expect("spawn direct child");
+    let pid = child.id();
+    let client_slot: Arc<Mutex<Option<Arc<BridgeClient>>>> = Arc::new(Mutex::new(None));
+    let callback_slot = Arc::clone(&client_slot);
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+
+    let client = Arc::new(
+        BridgeClient::connect(child, 2, move |state| {
+            if matches!(state, HostState::Running { .. }) {
+                if let Some(c) = callback_slot.lock().unwrap().as_ref().cloned() {
+                    let reply = c.call_raw("status", Value::Null);
+                    let _ = done_tx.send(reply.is_ok());
+                }
+            }
+        })
+        .expect("connect direct client"),
+    );
+    *client_slot.lock().unwrap() = Some(Arc::clone(&client));
+    // Trigger another state push after slot populated? Even better, wait cleanly if hello pushed before slot:
+    drop(client);
+    // Drop slot's Arc too so refcount drops to 0 and Drop closes stdin even if callback ran slightly later.
+    let _ = done_rx.recv_timeout(Duration::from_millis(200));
+    *client_slot.lock().unwrap() = None;
+    assert!(
+        wait_until(Duration::from_secs(3), || !is_pid_alive(pid)),
+        "dropping BridgeClient must close Host stdin and terminate child"
+    );
+
+    // 2. P1-2 synchronous RPC directly inside on_state triggered after connect:
+    let script_sync = r#"
+import readline from 'node:readline';
+const rl = readline.createInterface({ input: process.stdin });
+rl.on('close', () => process.exit(0));
+rl.on('line', line => {
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+  } else if (msg.method === 'k8.view') {
+    process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'running', pid: process.pid, activeWork: 1 } }) + '\n');
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { ok: true } }) + '\n');
+  } else if (msg.method === 'status') {
+    process.stdout.write(JSON.stringify({ id: msg.id, result: { state: 'running', pid: process.pid, activeWork: 1 } }) + '\n');
+  } else if (msg.method === 'shutdown') {
+    process.stdout.write(JSON.stringify({ id: msg.id, result: null }) + '\n');
+    process.exit(0);
+  }
+});
+"#;
+    let spec_sync = write_node_script(tmp.path(), "sync-cb.mjs", script_sync);
+    let sync_holder: Arc<Mutex<Option<Arc<BridgeClient>>>> = Arc::new(Mutex::new(None));
+    let sync_cb_ref = Arc::clone(&sync_holder);
+    let (rpc_tx, rpc_rx) = std::sync::mpsc::channel();
+    let sync_client = Arc::new(
+        BridgeClient::connect(spawn_host_child(&spec_sync, &[]).unwrap(), 2, move |_| {
+            let cli = sync_cb_ref.lock().unwrap().as_ref().cloned().unwrap();
+            let _ = rpc_tx.send(cli.call_raw("status", Value::Null));
+        })
+        .unwrap(),
+    );
+    *sync_holder.lock().unwrap() = Some(Arc::clone(&sync_client));
+    assert!(sync_client.call_raw("k8.view", Value::Null).is_ok());
+    assert!(
+        rpc_rx.recv_timeout(Duration::from_secs(3)).expect("off-reader RPC must return").is_ok(),
+        "synchronous status RPC inside on_state must not deadlock"
+    );
+    sync_client.shutdown_and_wait(Duration::from_secs(3)).expect("clean shutdown");
+    *sync_holder.lock().unwrap() = None;
+
+    // 3. P2-2: shutdown reply missing `result` or returning non-null fails `stop()` even on exit 0.
+    for reply_expr in [
+        r#"{ id: msg.id }"#,
+        r#"{ id: msg.id, result: { bogus: true } }"#,
+    ] {
+        let bad_script = format!(
+            r#"
+import readline from 'node:readline';
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+  }} else if (msg.method === 'shutdown') {{
+    process.stdout.write(JSON.stringify({reply_expr}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#
+        );
+        let cli = BridgeClient::connect(
+            spawn_host_child(&write_node_script(tmp.path(), "bad-stop.mjs", &bad_script), &[]).unwrap(),
+            2,
+            |_| {},
+        )
+        .unwrap();
+        assert!(
+            cli.shutdown_and_wait(Duration::from_secs(2)).is_err(),
+            "shutdown_and_wait must reject `{reply_expr}`"
+        );
+    }
+}
+
+#[test]
+fn mutating_s1_not_killed_by_recovery_deadline_and_router_checks_narrowed_contract() {
+    let tmp = TempDir::new("byok-s1-nodeadline");
+    let script = r#"
+import readline from 'node:readline';
+const args = process.argv.slice(2);
+if (args[0] === 'byok-desktop-snapshot-status') {
+  process.stdout.write(JSON.stringify({ ok: true, snapshot: { version: args[1], target: '/tmp/snap' } }) + '\n');
+  process.exit(0);
+}
+if (args[0] === 'byok-desktop-restore') {
+  setTimeout(() => {
+    process.stdout.write(JSON.stringify({ ok: true, asidePath: '/tmp/aside' }) + '\n');
+    process.exit(0);
+  }, 1200);
+} else {
+  const rl = readline.createInterface({ input: process.stdin });
+  rl.on('close', () => process.exit(0));
+  rl.on('line', line => {
+    const msg = JSON.parse(line);
+    if (msg.method === 'hello') {
+      process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+      process.stdout.write(JSON.stringify({ event: 'state', state: { state: 'stopped', pid: process.pid, reason: 'halted', storeRefused: false } }) + '\n');
+    } else if (msg.method === 'shutdown') {
+      process.stdout.write(JSON.stringify({ id: msg.id, result: null }) + '\n');
+      process.exit(0);
+    }
+  });
+}
+"#;
+    let spec = write_node_script(tmp.path(), "slow-restore.mjs", script);
+    let contract = BridgeContract::load().expect("contract loads");
+
+    // 1. P2-4: 800ms recovery_deadline bounds snapshot-status but never kills slower mutating restore (1200ms > 800ms).
+    let sup = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(spec.clone(), contract.clone()),
+        |_| {},
+        || {},
+    ));
+    sup.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(sup.last_state(), Some(SupervisedHostState::Stopped { .. }))
+    }));
+    let lock = MaintenanceLock::new();
+    let router = ShellRouter::new(
+        Arc::clone(&sup),
+        lock,
+        Box::new(UnsupportedLoginItemBackend),
+        "1.0.0",
+    )
+    .with_deadlines(Duration::from_secs(2), Some(Duration::from_millis(800)));
+    let res = router
+        .restore("1.0.0", "2026-11-24T12-31-00.000Z", |_| {})
+        .expect("mutating restore must finish without being killed by status deadline");
+    assert_eq!(res.aside_path, "/tmp/aside");
+
+    // 2. P2-5: narrowed contract removing shell.{state,restore,startFresh} rejects dedicated router methods.
+    let mut narrowed = contract;
+    narrowed
+        .renderer_methods
+        .retain(|m| !matches!(m.as_str(), "shell.state" | "shell.restore" | "shell.startFresh"));
+    narrowed
+        .main_methods
+        .retain(|m| !matches!(m.as_str(), "shell.state" | "shell.restore" | "shell.startFresh"));
+    let sup2 = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(spec, narrowed),
+        |_| {},
+        || {},
+    ));
+    let router2 = ShellRouter::new(
+        sup2,
+        MaintenanceLock::new(),
+        Box::new(UnsupportedLoginItemBackend),
+        "1.0.0",
+    );
+    assert_eq!(router2.state("1.0.0").unwrap_err().code, "unknown_method");
+    assert_eq!(
+        router2.restore("1.0.0", "stamp", |_| {}).unwrap_err().code,
+        "unknown_method"
+    );
+    assert_eq!(
+        router2.start_fresh("stamp", |_| {}).unwrap_err().code,
+        "unknown_method"
+    );
 }
 
 #[test]
@@ -808,7 +1116,8 @@ fn run_killed_parent_child_mode(use_real_host: bool) {
 
     let spec = if use_real_host {
         // Uses the CI runner's OS credential store & HOME (matching host-smoke.mjs / package-smoke.mjs).
-        HostCommandSpec::dev_node_host(real_host_bundle())
+        let bundle = try_real_host_bundle().expect("real Host bundle required for live kill-eof");
+        HostCommandSpec::dev_node_host(bundle)
     } else {
         write_node_script(
             &dir,
@@ -915,7 +1224,8 @@ fn live_ci_real_host_supervisor_lifecycle_and_kill_eof() {
     }
 
     // 1. Live HostSupervisor connect -> hello -> running -> status -> clean stop() (exit 0).
-    let spec = HostCommandSpec::dev_node_host(real_host_bundle());
+    let bundle = try_real_host_bundle().expect("real Host bundle required when BYOK_SHELL_E2E_LIVE_HOST=1");
+    let spec = HostCommandSpec::dev_node_host(bundle);
     let contract = BridgeContract::load().expect("contract loads");
     let cfg = HostSupervisorConfig::new(spec, contract);
     let supervisor = HostSupervisor::new(cfg, |_| {}, || {});

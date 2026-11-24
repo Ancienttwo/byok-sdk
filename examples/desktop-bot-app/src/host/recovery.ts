@@ -49,21 +49,32 @@ const writeReceipt = async <T extends { readonly ok: boolean }>(receipt: T): Pro
 };
 
 /**
- * Ensures no custody child still holds the keys configuration lock before S1
- * copies or renames Host stores (P1-6). Absent or refused/stale stores cannot
- * hold an active custody writer lock and are skipped so startFresh can recover them.
+ * Ensures no custody child holds the keys configuration lock during S1 store
+ * work (P1-6). Snapshot holds the SQLite configuration lock across its entire
+ * copy, while restore/startFresh close the lock handle immediately before moving
+ * `host/` so Windows does not reject directory renames (`EBUSY`), relying on the
+ * shell `MaintenanceLock` custody exclusion against new custody spawns.
  */
-async function assertKeysConfigurationIdle(hostStorageRoot: string): Promise<void> {
+async function withKeysConfigurationIdle<T>(hostStorageRoot: string, action: () => Promise<T>): Promise<T> {
   const keysDb = keysDbPath(hostStorageRoot);
   const inspection = await inspectProviderProfileStore(keysDb);
-  if (inspection.verdict !== 'accepted') return;
+  if (inspection.verdict !== 'accepted') return action();
   const store = new SqliteProviderProfileStore({ path: keysDb, readOnly: true, configurationLockWaitMs: 0 });
+  let lock: Awaited<ReturnType<SqliteProviderProfileStore['acquireConfigurationLock']>> | undefined;
   try {
-    const lock = await store.acquireConfigurationLock();
-    await lock.release();
+    lock = await store.acquireConfigurationLock();
+    return await action();
   } finally {
-    await store.close();
+    try {
+      await lock?.release();
+    } finally {
+      await store.close();
+    }
   }
+}
+
+async function assertKeysConfigurationIdle(hostStorageRoot: string): Promise<void> {
+  await withKeysConfigurationIdle(hostStorageRoot, async () => {});
 }
 
 /**
@@ -112,8 +123,10 @@ export async function runSnapshotCommand(args: readonly string[], options: { rea
   const version = requireVersion(args, 1, SNAPSHOT_COMMAND);
   let receipt: SnapshotReceipt;
   try {
-    await assertKeysConfigurationIdle(options.layout.hostStorageRoot);
-    receipt = { ok: true, target: await snapshotStores(options.layout, version) };
+    receipt = await withKeysConfigurationIdle(options.layout.hostStorageRoot, async () => ({
+      ok: true,
+      target: await snapshotStores(options.layout, version),
+    }));
   } catch (error) {
     receipt = { ok: false, code: error instanceof ByokKeysError ? error.code : 'snapshot_failed', message: (error as Error).message };
   }

@@ -283,7 +283,7 @@ impl HostSupervisor {
                 format!("Method `{method}` is not an allowed renderer-to-Host call"),
             ));
         }
-        self.call_active_client(method, params)
+        self.call_active_client(method, params, None)
     }
 
     /// Calls a shell-only Host method (e.g., `keys.profilesChanged`) permitted by `shellToHostMethods`.
@@ -294,10 +294,31 @@ impl HostSupervisor {
                 format!("Method `{method}` is not an allowed shell-to-Host call"),
             ));
         }
-        self.call_active_client(method, params)
+        self.call_active_client(method, params, None)
     }
 
-    fn call_active_client(&self, method: &str, params: Value) -> Result<Value, BridgeError> {
+    /// Calls a shell-only Host method with an explicit RPC timeout (`catalog_refresh_timeout`).
+    pub fn call_shell_to_host_timeout(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, BridgeError> {
+        if !self.inner.config.contract.allows_shell_to_host_method(method) {
+            return Err(BridgeError::new(
+                BridgeErrorCode::UnauthorizedMethod,
+                format!("Method `{method}` is not an allowed shell-to-Host call"),
+            ));
+        }
+        self.call_active_client(method, params, Some(timeout))
+    }
+
+    fn call_active_client(
+        &self,
+        method: &str,
+        params: Value,
+        timeout: Option<Duration>,
+    ) -> Result<Value, BridgeError> {
         let client = {
             let guard = self.inner.state.lock().expect("supervisor lock poisoned");
             guard.client.clone()
@@ -308,7 +329,7 @@ impl HostSupervisor {
                 "No Host is running",
             ));
         };
-        client.call_raw(method, params)
+        client.call_raw_timeout(method, params, timeout)
     }
 
     /// Stops the Host cleanly (`shutdown` RPC + exit `0`). Fails closed if stop fails OR if no clean exit occurred.

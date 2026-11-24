@@ -163,9 +163,10 @@ fn run_receipt(
     command: &HostCommandSpec,
     args: &[&str],
     deadline: Option<Duration>,
+    kill_on_timeout: bool,
     what: &str,
 ) -> Result<(Value, Option<i32>), RecoveryError> {
-    let outcome = run_host_command(command, args, b"", deadline, true).map_err(|err| match err {
+    let outcome = run_host_command(command, args, b"", deadline, kill_on_timeout).map_err(|err| match err {
         CommandError::InvalidReceipt(detail) => {
             RecoveryError::new("invalid_receipt", format!("{what} did not report: {detail}"))
         }
@@ -175,16 +176,17 @@ fn run_receipt(
 }
 
 /// Runs S1 `byok-desktop-snapshot` (`snapshotStores`) after callers confirmed the Host is stopped.
+/// Never kills mid-mutation so copy/atomic publish completes without leaving partial state.
 pub fn run_snapshot(
     command: &HostCommandSpec,
     commands: &HostCommands,
     version: &str,
-    deadline: Option<Duration>,
 ) -> Result<String, RecoveryError> {
     let (receipt, exit_code) = run_receipt(
         command,
         &[commands.snapshot.as_str(), version],
-        deadline,
+        None,
+        false,
         "Snapshot",
     )?;
     let parsed: SnapshotWireReceipt = serde_json::from_value(receipt).map_err(|err| {
@@ -223,6 +225,7 @@ pub fn run_snapshot_status(
         command,
         &[commands.snapshot_status.as_str(), version],
         deadline,
+        true,
         "Snapshot status",
     )?;
     let parsed: SnapshotStatusWireReceipt = serde_json::from_value(receipt).map_err(|err| {
@@ -254,17 +257,18 @@ pub fn run_snapshot_status(
 }
 
 /// Runs S1 `byok-desktop-restore` directly once Host stop and maintenance lock preconditions are met.
+/// Waits for completion without killing mid-rename so Host rollback remains intact.
 pub fn run_restore(
     command: &HostCommandSpec,
     commands: &HostCommands,
     version: &str,
     stamp: &str,
-    deadline: Option<Duration>,
 ) -> Result<RestoreSuccess, RecoveryError> {
     let (receipt, exit_code) = run_receipt(
         command,
         &[commands.restore.as_str(), version, stamp],
-        deadline,
+        None,
+        false,
         "Restore",
     )?;
     let parsed: RestoreWireReceipt = serde_json::from_value(receipt).map_err(|err| {
@@ -307,16 +311,17 @@ pub fn run_restore(
 }
 
 /// Runs S1 `byok-desktop-start-fresh` directly once Host stop and maintenance lock preconditions are met.
+/// Waits for completion without killing mid-rename so Host rollback remains intact.
 pub fn run_start_fresh(
     command: &HostCommandSpec,
     commands: &HostCommands,
     stamp: &str,
-    deadline: Option<Duration>,
 ) -> Result<StartFreshSuccess, RecoveryError> {
     let (receipt, exit_code) = run_receipt(
         command,
         &[commands.start_fresh.as_str(), stamp],
-        deadline,
+        None,
+        false,
         "Start fresh",
     )?;
     let parsed: StartFreshWireReceipt = serde_json::from_value(receipt).map_err(|err| {
@@ -406,7 +411,7 @@ pub fn shell_restore<R>(
     maintenance: &MaintenanceLock,
     version: &str,
     stamp: &str,
-    deadline: Option<Duration>,
+    status_deadline: Option<Duration>,
     relaunch: R,
 ) -> Result<RestoreSuccess, RecoveryError>
 where
@@ -420,7 +425,7 @@ where
         ));
     }
     let commands = &supervisor.contract().host_commands;
-    if run_snapshot_status(supervisor.command_spec(), commands, version, deadline)?.is_none() {
+    if run_snapshot_status(supervisor.command_spec(), commands, version, status_deadline)?.is_none() {
         return Err(RecoveryError::new(
             "missing_snapshot",
             format!("No complete snapshot of version {version} to restore"),
@@ -430,8 +435,10 @@ where
         .stop()
         .map_err(|err| RecoveryError::new("host_stop_failed", err.0))?;
 
-    let result = run_restore(supervisor.command_spec(), commands, version, stamp, deadline);
+    let result = run_restore(supervisor.command_spec(), commands, version, stamp);
     guard.confirm();
+    // Release `busy` while preserving confirmed handover before `relaunch` can call `begin_quit()`.
+    drop(guard);
     relaunch(result.as_ref().err());
     result
 }
@@ -442,7 +449,6 @@ pub fn shell_start_fresh<R>(
     supervisor: &HostSupervisor,
     maintenance: &MaintenanceLock,
     stamp: &str,
-    deadline: Option<Duration>,
     relaunch: R,
 ) -> Result<StartFreshSuccess, RecoveryError>
 where
@@ -460,8 +466,10 @@ where
         .map_err(|err| RecoveryError::new("host_stop_failed", err.0))?;
 
     let commands = &supervisor.contract().host_commands;
-    let result = run_start_fresh(supervisor.command_spec(), commands, stamp, deadline);
+    let result = run_start_fresh(supervisor.command_spec(), commands, stamp);
     guard.confirm();
+    // Release `busy` while preserving confirmed handover before `relaunch` can call `begin_quit()`.
+    drop(guard);
     relaunch(result.as_ref().err());
     result
 }

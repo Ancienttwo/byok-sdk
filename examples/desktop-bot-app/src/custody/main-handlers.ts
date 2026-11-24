@@ -9,8 +9,8 @@ export interface KeysMainDependencies {
   /** Spawns the Host executable with these arguments: dev runs the Host bundle under Node, a package runs the SEA. */
   readonly spawnHostCommand: (args: readonly string[]) => CustodyChild;
   readonly callHost: (method: ShellToHostMethod, params: BridgeMethods[ShellToHostMethod]['params']) => Promise<BridgeMethods[ShellToHostMethod]['result']>;
-  /** Refuses new custody writes while S1 update/recovery maintenance owns the stores (P1-6). */
-  readonly isMaintenanceBusy?: () => boolean;
+  /** Atomically reserves custody exclusion while S1 update/recovery maintenance is idle, releasing when the child exits (P1-6). */
+  readonly tryBeginCustody?: () => (() => void) | undefined;
 }
 
 const HOST_NOT_SERVING: ReadonlySet<BridgeErrorCode> = new Set(['host_exited', 'unknown_method']);
@@ -47,12 +47,31 @@ export function keysMainHandlers(deps: KeysMainDependencies): MethodHandlers<Pic
     'keys.submit': async params => {
       // The one field main reads: a list is not a change, so it never reaches custody as one.
       if ((params as { op?: unknown } | null)?.op === 'list') throw new BridgeError('invalid_params', 'keys.submit takes configure or replace_secret; keys.list lists');
-      if (deps.isMaintenanceBusy?.()) {
-        throw new CustodyError('PROVIDER_CONFIGURATION_BUSY', 'Cannot change provider keys while an app update or recovery action is running');
+      let releaseCustody: (() => void) | undefined;
+      if (deps.tryBeginCustody !== undefined) {
+        releaseCustody = deps.tryBeginCustody();
+        if (releaseCustody === undefined) {
+          throw new CustodyError('PROVIDER_CONFIGURATION_BUSY', 'Cannot change provider keys while an app update or recovery action is running');
+        }
       }
+      let child: CustodyChild;
+      try {
+        child = deps.spawnHostCommand([CUSTODY_COMMAND]);
+      } catch (error) {
+        releaseCustody?.();
+        throw error;
+      }
+      let custodyReleased = false;
+      const finishCustody = () => {
+        if (custodyReleased) return;
+        custodyReleased = true;
+        releaseCustody?.();
+      };
+      child.once('exit', finishCustody);
+      child.once('error', finishCustody);
       let status;
       try {
-        status = await submitToCustody(deps.spawnHostCommand([CUSTODY_COMMAND]), params as CustodyChange);
+        status = await submitToCustody(child, params as CustodyChange);
       } catch (error) {
         if (error instanceof CustodyError && error.code === 'custody_request_invalid') throw new BridgeError('invalid_params', error.message);
         if (error instanceof CustodyError && error.code === 'PROVIDER_CONFIGURATION_BUSY') {

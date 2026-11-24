@@ -26,7 +26,8 @@ pub use custody::{CustodyError, DEFAULT_CUSTODY_DEADLINE, SecretBytes, list_from
 pub use env::{FOREIGN_RUNTIME_VARIABLES, filter_env_pairs, filtered_host_env};
 pub use host::{HostSupervisor, HostSupervisorConfig, StateHintCoalescer};
 pub use maintenance::{
-    HandoverState, MaintenanceBusyError, MaintenanceGuard, MaintenanceLock, QuitOutcome,
+    CustodyGuard, HandoverState, MaintenanceBusyError, MaintenanceGuard, MaintenanceLock,
+    QuitOutcome,
 };
 pub use power::{KeepAwake, LinuxInhibitBackend, PowerError, select_linux_backend};
 pub use recovery::{

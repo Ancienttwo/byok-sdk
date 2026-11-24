@@ -14,7 +14,7 @@ export type MainDependencies = KeysMainDependencies & ShellDependencies;
  */
 export function createMainHandlers(deps: MainDependencies): MethodHandlers<Pick<BridgeMethods, MainMethod>> {
   return {
-    ...keysMainHandlers({ ...deps, isMaintenanceBusy: () => deps.maintenanceLock.isBusy() }),
+    ...keysMainHandlers({ ...deps, tryBeginCustody: () => deps.maintenanceLock.tryBeginCustody() }),
     ...loginItemHandlers(),
     ...shellHandlers(deps),
   };

@@ -39,6 +39,7 @@ struct Inner {
 
 struct LockState {
     busy: bool,
+    active_custody: usize,
     handover: HandoverState,
     quitting: bool,
     listeners: Vec<QuitListener>,
@@ -63,6 +64,7 @@ impl MaintenanceLock {
             inner: Arc::new(Inner {
                 state: Mutex::new(LockState {
                     busy: false,
+                    active_custody: 0,
                     handover: HandoverState::None,
                     quitting: false,
                     listeners: Vec::new(),
@@ -75,7 +77,7 @@ impl MaintenanceLock {
     /// Enters an exclusive maintenance window, returning an RAII guard that releases or seals on drop.
     pub fn try_begin(&self) -> Result<MaintenanceGuard, MaintenanceBusyError> {
         let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
-        if guard.busy || guard.handover != HandoverState::None || guard.quitting {
+        if guard.busy || guard.active_custody > 0 || guard.handover != HandoverState::None || guard.quitting {
             return Err(MaintenanceBusyError);
         }
         guard.busy = true;
@@ -85,10 +87,23 @@ impl MaintenanceLock {
         })
     }
 
-    /// Returns whether maintenance is currently active, handed over, or quitting (blocks new `keys.submit`).
+    /// Atomically reserves custody write exclusion against S1 maintenance until child exit.
+    pub fn try_begin_custody(&self) -> Result<CustodyGuard, MaintenanceBusyError> {
+        let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
+        if guard.busy || guard.handover != HandoverState::None || guard.quitting {
+            return Err(MaintenanceBusyError);
+        }
+        guard.active_custody = guard.active_custody.saturating_add(1);
+        Ok(CustodyGuard {
+            inner: Arc::clone(&self.inner),
+            released: false,
+        })
+    }
+
+    /// Returns whether maintenance or custody write is currently active, handed over, or quitting.
     pub fn is_busy(&self) -> bool {
         let guard = self.inner.state.lock().expect("maintenance lock poisoned");
-        guard.busy || guard.handover != HandoverState::None || guard.quitting
+        guard.busy || guard.active_custody > 0 || guard.handover != HandoverState::None || guard.quitting
     }
 
     /// Returns whether terminal handover (`Confirmed`) has permanently sealed the lock.
@@ -196,5 +211,23 @@ impl MaintenanceGuard {
 impl Drop for MaintenanceGuard {
     fn drop(&mut self) {
         self.release_inner();
+    }
+}
+
+/// Active custody write exclusion guard held until the custody child process exits.
+pub struct CustodyGuard {
+    inner: Arc<Inner>,
+    released: bool,
+}
+
+impl Drop for CustodyGuard {
+    fn drop(&mut self) {
+        if self.released {
+            return;
+        }
+        self.released = true;
+        let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
+        guard.active_custody = guard.active_custody.saturating_sub(1);
+        self.inner.cv.notify_all();
     }
 }

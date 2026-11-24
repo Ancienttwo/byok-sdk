@@ -91,6 +91,7 @@ pub enum BridgeErrorCode {
     InvalidParams,
     MethodFailed,
     UnauthorizedMethod,
+    CallTimeout,
     Other(String),
 }
 
@@ -105,6 +106,7 @@ impl BridgeErrorCode {
             "invalid_params" => Self::InvalidParams,
             "method_failed" => Self::MethodFailed,
             "unauthorized_method" => Self::UnauthorizedMethod,
+            "call_timeout" => Self::CallTimeout,
             other => Self::Other(other.to_owned()),
         }
     }
@@ -119,6 +121,7 @@ impl BridgeErrorCode {
             Self::InvalidParams => "invalid_params",
             Self::MethodFailed => "method_failed",
             Self::UnauthorizedMethod => "unauthorized_method",
+            Self::CallTimeout => "call_timeout",
             Self::Other(other) => other.as_str(),
         }
     }
@@ -233,6 +236,16 @@ impl BridgeClient {
             latch: Arc::clone(&latch),
         });
 
+        let (state_tx, state_rx) = mpsc::channel::<HostState>();
+        let _ = thread::Builder::new()
+            .name("byok-bridge-state-dispatch".to_owned())
+            .spawn(move || {
+                // Deliver state events off the reader thread so synchronous RPCs inside on_state never deadlock.
+                while let Ok(state) = state_rx.recv() {
+                    on_state(state);
+                }
+            });
+
         // Reader thread decodes NDJSON lines until EOF or framing failure.
         let reader_shared = Arc::clone(&shared);
         let _ = thread::Builder::new()
@@ -244,6 +257,7 @@ impl BridgeClient {
                     line.clear();
                     match reader.read_line(&mut line) {
                         Ok(0) => {
+                            drop(state_tx);
                             let exit_code = reader_shared
                                 .latch
                                 .wait_timeout(Duration::from_secs(2))
@@ -259,7 +273,8 @@ impl BridgeClient {
                             if trimmed.is_empty() {
                                 continue;
                             }
-                            if let Err(err) = handle_host_line(trimmed, &reader_shared, &on_state) {
+                            if let Err(err) = handle_host_line(trimmed, &reader_shared, &state_tx) {
+                                drop(state_tx);
                                 reader_shared.fail_all(err);
                                 reader_shared
                                     .latch
@@ -268,6 +283,7 @@ impl BridgeClient {
                             }
                         }
                         Err(err) => {
+                            drop(state_tx);
                             reader_shared.fail_all(BridgeError::new(
                                 BridgeErrorCode::HostExited,
                                 format!("Host stdout read failed: {err}"),
@@ -379,11 +395,18 @@ impl BridgeClient {
         match timeout {
             Some(limit) => match rx.recv_timeout(limit) {
                 Ok(res) => res,
-                Err(_) => {
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    self.shared.pending.lock().expect("pending lock poisoned").remove(&id);
+                    Err(BridgeError::new(
+                        BridgeErrorCode::CallTimeout,
+                        format!("Bridge call `{method}` timed out after {} ms", limit.as_millis()),
+                    ))
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
                     self.shared.pending.lock().expect("pending lock poisoned").remove(&id);
                     Err(BridgeError::new(
                         BridgeErrorCode::HostExited,
-                        format!("Bridge call `{method}` timed out after {} ms", limit.as_millis()),
+                        "Bridge response channel closed",
                     ))
                 }
             },
@@ -406,15 +429,23 @@ impl BridgeClient {
         self.shared.latch.wait_timeout(timeout)
     }
 
-    /// Requests an acknowledged `shutdown` RPC and requires the child to exit `0` within `grace`.
+    /// Requests an acknowledged `shutdown` RPC (`result: null`) and requires exit `0` within `grace`.
     pub fn shutdown_and_wait(&self, grace: Duration) -> Result<(), StopError> {
         let deadline = Instant::now() + grace;
         self.shared.shutdown_started.store(true, Ordering::Release);
 
-        let rpc_res = self.call_raw_timeout("shutdown", Value::Null, Some(grace));
-        if let Err(err) = rpc_res {
-            self.shared.latch.terminate_gracefully(Duration::from_secs(2));
-            return Err(StopError(format!("Host shutdown RPC failed: {err}")));
+        match self.call_raw_timeout("shutdown", Value::Null, Some(grace)) {
+            Ok(Value::Null) => {}
+            Ok(other) => {
+                self.shared.latch.terminate_gracefully(Duration::from_secs(2));
+                return Err(StopError(format!(
+                    "Host shutdown RPC returned non-null result: {other}"
+                )));
+            }
+            Err(err) => {
+                self.shared.latch.terminate_gracefully(Duration::from_secs(2));
+                return Err(StopError(format!("Host shutdown RPC failed: {err}")));
+            }
         }
 
         let remaining = deadline
@@ -445,14 +476,18 @@ impl BridgeClient {
     }
 }
 
-fn handle_host_line<F>(
+impl Drop for BridgeClient {
+    fn drop(&mut self) {
+        // Close Host stdin immediately so dropping a direct client triggers EOF shutdown even while the reader holds Arc<ClientState>.
+        let _ = self.shared.stdin.lock().expect("stdin lock poisoned").take();
+    }
+}
+
+fn handle_host_line(
     line: &str,
     shared: &Arc<ClientState>,
-    on_state: &F,
-) -> Result<(), BridgeError>
-where
-    F: Fn(HostState),
-{
+    state_tx: &mpsc::Sender<HostState>,
+) -> Result<(), BridgeError> {
     let value: Value = serde_json::from_str(line)
         .map_err(|_| BridgeError::new(BridgeErrorCode::InvalidMessage, "Bridge line is not JSON"))?;
     let obj = value
@@ -475,7 +510,7 @@ where
                 format!("Invalid Host state event: {err}"),
             )
         })?;
-        on_state(state);
+        let _ = state_tx.send(state);
         return Ok(());
     }
 
@@ -504,6 +539,52 @@ where
         return Err(BridgeError::new(code, detail));
     }
 
+    let has_result = obj.contains_key("result");
+    let has_error = obj.contains_key("error");
+    if has_result == has_error {
+        return Err(BridgeError::new(
+            BridgeErrorCode::InvalidMessage,
+            "Bridge reply must carry exactly one of `result` or `error`",
+        ));
+    }
+
+    let parsed_reply = if has_error {
+        let err_obj = obj
+            .get("error")
+            .and_then(Value::as_object)
+            .ok_or_else(|| {
+                BridgeError::new(
+                    BridgeErrorCode::InvalidMessage,
+                    "Bridge error reply must be an object",
+                )
+            })?;
+        let code = err_obj
+            .get("code")
+            .and_then(Value::as_str)
+            .map(BridgeErrorCode::parse)
+            .ok_or_else(|| {
+                BridgeError::new(
+                    BridgeErrorCode::InvalidMessage,
+                    "Bridge error reply missing code",
+                )
+            })?;
+        let message = match err_obj.get("message") {
+            Some(val) => val
+                .as_str()
+                .ok_or_else(|| {
+                    BridgeError::new(
+                        BridgeErrorCode::InvalidMessage,
+                        "Bridge error reply message must be a string",
+                    )
+                })?
+                .to_owned(),
+            None => "Bridge error".to_owned(),
+        };
+        Err(BridgeError::new(code, message))
+    } else {
+        Ok(obj.get("result").cloned().expect("checked has_result"))
+    };
+
     let sender = {
         let mut pending = shared.pending.lock().expect("pending lock poisoned");
         pending.remove(&id)
@@ -515,26 +596,6 @@ where
         )
     })?;
 
-    if let Some(err_obj) = obj.get("error") {
-        let code = err_obj
-            .get("code")
-            .and_then(Value::as_str)
-            .map(BridgeErrorCode::parse)
-            .ok_or_else(|| {
-                BridgeError::new(
-                    BridgeErrorCode::InvalidMessage,
-                    "Bridge error reply missing code",
-                )
-            })?;
-        let message = err_obj
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("Bridge error")
-            .to_owned();
-        let _ = sender.send(Err(BridgeError::new(code, message)));
-    } else {
-        let result = obj.get("result").cloned().unwrap_or(Value::Null);
-        let _ = sender.send(Ok(result));
-    }
+    let _ = sender.send(parsed_reply);
     Ok(())
 }

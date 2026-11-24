@@ -5,6 +5,7 @@ use std::io::Write;
 use std::time::Duration;
 
 use serde::Deserialize;
+use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
 use serde_json::Value;
 use zeroize::Zeroizing;
 
@@ -89,10 +90,100 @@ enum CustodyWireReceipt {
     },
 }
 
+enum ProbeKey {
+    Op,
+    Ignore,
+}
+
+impl<'de> Deserialize<'de> for ProbeKey {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct KeyVisitor;
+        impl<'de> Visitor<'de> for KeyVisitor {
+            type Value = ProbeKey;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("JSON object key")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(if v == "op" { ProbeKey::Op } else { ProbeKey::Ignore })
+            }
+        }
+        deserializer.deserialize_str(KeyVisitor)
+    }
+}
+
+struct IsListOp(bool);
+
+impl<'de> Deserialize<'de> for IsListOp {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct OpVisitor;
+        impl<'de> Visitor<'de> for OpVisitor {
+            type Value = IsListOp;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("custody op value")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Self::Value, E> {
+                Ok(IsListOp(v == "list"))
+            }
+            fn visit_bool<E: serde::de::Error>(self, _: bool) -> Result<Self::Value, E> {
+                Ok(IsListOp(false))
+            }
+            fn visit_i64<E: serde::de::Error>(self, _: i64) -> Result<Self::Value, E> {
+                Ok(IsListOp(false))
+            }
+            fn visit_u64<E: serde::de::Error>(self, _: u64) -> Result<Self::Value, E> {
+                Ok(IsListOp(false))
+            }
+            fn visit_f64<E: serde::de::Error>(self, _: f64) -> Result<Self::Value, E> {
+                Ok(IsListOp(false))
+            }
+            fn visit_unit<E: serde::de::Error>(self) -> Result<Self::Value, E> {
+                Ok(IsListOp(false))
+            }
+            fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+                while seq.next_element::<IgnoredAny>()?.is_some() {}
+                Ok(IsListOp(false))
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                while map.next_entry::<IgnoredAny, IgnoredAny>()?.is_some() {}
+                Ok(IsListOp(false))
+            }
+        }
+        deserializer.deserialize_any(OpVisitor)
+    }
+}
+
+struct TopLevelListCheck(bool);
+
+impl<'de> Deserialize<'de> for TopLevelListCheck {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct TopVisitor;
+        impl<'de> Visitor<'de> for TopVisitor {
+            type Value = TopLevelListCheck;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("custody request object")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+                let mut is_list = false;
+                while let Some(key) = map.next_key::<ProbeKey>()? {
+                    match key {
+                        ProbeKey::Op => {
+                            is_list = map.next_value::<IsListOp>()?.0;
+                        }
+                        ProbeKey::Ignore => {
+                            let _ = map.next_value::<IgnoredAny>()?;
+                        }
+                    }
+                }
+                Ok(TopLevelListCheck(is_list))
+            }
+        }
+        deserializer.deserialize_map(TopVisitor)
+    }
+}
+
+/// Checks `op == "list"` streaming over raw bytes without materializing or copying secret fields on the heap.
 fn validate_submit_payload_is_not_list(bytes: &[u8]) -> Result<(), CustodyError> {
-    if let Ok(Value::Object(obj)) = serde_json::from_slice::<Value>(bytes)
-        && obj.get("op").and_then(Value::as_str) == Some("list")
-    {
+    if let Ok(TopLevelListCheck(true)) = serde_json::from_slice::<TopLevelListCheck>(bytes) {
         return Err(CustodyError::new(
             "invalid_params",
             "keys.submit takes configure or replace_secret; keys.list lists",
@@ -101,11 +192,15 @@ fn validate_submit_payload_is_not_list(bytes: &[u8]) -> Result<(), CustodyError>
     Ok(())
 }
 
-fn refresh_profiles(supervisor: Option<&HostSupervisor>, saved: bool) -> Result<(), CustodyError> {
+fn refresh_profiles(
+    supervisor: Option<&HostSupervisor>,
+    saved: bool,
+    deadline: Duration,
+) -> Result<(), CustodyError> {
     let Some(supervisor) = supervisor else {
         return Ok(());
     };
-    match supervisor.call_shell_to_host("keys.profilesChanged", Value::Null) {
+    match supervisor.call_shell_to_host_timeout("keys.profilesChanged", Value::Null, deadline) {
         Ok(_) => Ok(()),
         Err(err)
             if matches!(
@@ -115,16 +210,26 @@ fn refresh_profiles(supervisor: Option<&HostSupervisor>, saved: bool) -> Result<
         {
             Ok(())
         }
+        Err(err) if err.code == BridgeErrorCode::CallTimeout => Err(CustodyError::new(
+            "catalog_refresh_timeout",
+            format!(
+                "{} Reload stored providers; do not repeat the save.",
+                if saved {
+                    "The key change was saved, but the Host has not confirmed its catalog update."
+                } else {
+                    "Stored providers were read, but the Host has not confirmed its catalog update."
+                }
+            ),
+        )),
         Err(err) => Err(CustodyError::new(
             "catalog_refresh_failed",
             format!(
-                "{} (refresh failed: {})",
+                "{} ({err})",
                 if saved {
-                    "The key change was saved"
+                    "The key change was saved, but the Host could not reload stored providers."
                 } else {
-                    "Stored providers were read"
-                },
-                err.message
+                    "Stored providers were read, but the Host could not reload them."
+                }
             ),
         )),
     }
@@ -169,14 +274,18 @@ pub fn submit_to_custody(
     maintenance_lock: Option<&MaintenanceLock>,
     supervisor: Option<&HostSupervisor>,
 ) -> Result<Value, CustodyError> {
-    if maintenance_lock.is_some_and(MaintenanceLock::is_busy) {
-        return Err(CustodyError::new(
-            "PROVIDER_CONFIGURATION_BUSY",
-            "Cannot change provider keys while an app update or recovery action is running",
-        ));
-    }
-
     validate_submit_payload_is_not_list(payload.as_bytes())?;
+
+    // Reserve custody exclusion atomically before spawning child and hold it until the child exits (even past timeout).
+    let custody_guard = match maintenance_lock {
+        Some(lock) => Some(lock.try_begin_custody().map_err(|_| {
+            CustodyError::new(
+                "PROVIDER_CONFIGURATION_BUSY",
+                "Cannot change provider keys while an app update or recovery action is running",
+            )
+        })?),
+        None => None,
+    };
 
     let outcome = run_host_command_with_stdin(
         command,
@@ -189,6 +298,7 @@ pub fn submit_to_custody(
         },
         Some(deadline),
         false,
+        custody_guard,
     );
 
     let outcome = match outcome {
@@ -215,7 +325,7 @@ pub fn submit_to_custody(
 
     match parse_refusal_or_invalid(outcome.receipt, outcome.exit_code, "submit")? {
         CustodyWireReceipt::SubmitOk { ok: true, status } => {
-            refresh_profiles(supervisor, true)?;
+            refresh_profiles(supervisor, true, deadline)?;
             Ok(status)
         }
         CustodyWireReceipt::SubmitOk { ok: false, .. } => Err(CustodyError::new(
@@ -257,7 +367,7 @@ pub fn list_from_custody(
 
     match parse_refusal_or_invalid(outcome.receipt, outcome.exit_code, "list")? {
         CustodyWireReceipt::ListOk { ok: true, statuses } => {
-            refresh_profiles(supervisor, false)?;
+            refresh_profiles(supervisor, false, deadline)?;
             Ok(statuses)
         }
         CustodyWireReceipt::ListOk { ok: false, .. } => Err(CustodyError::new(

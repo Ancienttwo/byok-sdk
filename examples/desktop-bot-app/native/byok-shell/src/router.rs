@@ -210,15 +210,21 @@ impl ShellRouter {
             .map_err(|err| ShellRouteError::new(err.code.as_str(), err.message))
     }
 
-    /// Dedicated secret-bearing `keys.submit` entry consuming and immediately zeroizing `SecretBytes`.
-    pub fn dispatch_keys_submit(&self, payload: SecretBytes) -> Result<Value, ShellRouteError> {
+    fn ensure_main_method(&self, method: &str) -> Result<(), ShellRouteError> {
         let contract = self.supervisor.contract();
-        if !contract.allows_renderer_method("keys.submit") || !contract.is_main_method("keys.submit") {
+        if !contract.allows_renderer_method(method) || !contract.is_main_method(method) {
             return Err(ShellRouteError::new(
                 BridgeErrorCode::UnknownMethod.as_str(),
-                "keys.submit is not authorized in bridge-contract.json",
+                format!("{method} is not authorized in bridge-contract.json"),
             ));
         }
+        Ok(())
+    }
+
+    /// Dedicated secret-bearing `keys.submit` entry consuming and immediately zeroizing `SecretBytes`.
+    pub fn dispatch_keys_submit(&self, payload: SecretBytes) -> Result<Value, ShellRouteError> {
+        self.ensure_main_method("keys.submit")?;
+        let contract = self.supervisor.contract();
         submit_to_custody(
             self.supervisor.command_spec(),
             contract.host_commands.custody.as_str(),
@@ -230,9 +236,10 @@ impl ShellRouter {
         .map_err(|err| ShellRouteError::new(err.code, err.message))
     }
 
-    /// Executes `shell.state` with explicit app version.
-    pub fn state(&self, app_version: &str) -> crate::recovery::ShellView {
-        shell_state(&self.supervisor, app_version, self.recovery_deadline)
+    /// Executes `shell.state` with explicit app version (contract-checked).
+    pub fn state(&self, app_version: &str) -> Result<crate::recovery::ShellView, ShellRouteError> {
+        self.ensure_main_method("shell.state")?;
+        Ok(shell_state(&self.supervisor, app_version, self.recovery_deadline))
     }
 
     /// Executes `shell.restore` under `MaintenanceLock` and `supervisor.stop()`.
@@ -245,6 +252,7 @@ impl ShellRouter {
     where
         R: FnOnce(Option<&crate::recovery::RecoveryError>),
     {
+        self.ensure_main_method("shell.restore")?;
         shell_restore(
             &self.supervisor,
             &self.maintenance,
@@ -265,13 +273,8 @@ impl ShellRouter {
     where
         R: FnOnce(Option<&crate::recovery::RecoveryError>),
     {
-        shell_start_fresh(
-            &self.supervisor,
-            &self.maintenance,
-            stamp,
-            self.recovery_deadline,
-            relaunch,
-        )
-        .map_err(|err| ShellRouteError::new(err.code, err.message))
+        self.ensure_main_method("shell.startFresh")?;
+        shell_start_fresh(&self.supervisor, &self.maintenance, stamp, relaunch)
+            .map_err(|err| ShellRouteError::new(err.code, err.message))
     }
 }
