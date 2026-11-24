@@ -36,3 +36,15 @@ export function runtimeExecutableFields(
 ): { readonly executablePath?: string; readonly executableSource: RuntimeExecutableSource } {
   return { executableSource: resolved.source, ...(path.isAbsolute(executable) ? { executablePath: executable } : {}) };
 }
+
+/**
+ * Whether an executable resolved again in-process is the one a detection
+ * observation reports, so `prepare()` may reuse that observation instead of
+ * probing again. Any difference means the observation is not of this binary.
+ */
+export function sameDetectedExecutable(
+  detected: { readonly executablePath?: string; readonly executableSource?: RuntimeExecutableSource },
+  fields: { readonly executablePath?: string; readonly executableSource: RuntimeExecutableSource },
+): boolean {
+  return detected.executableSource === fields.executableSource && detected.executablePath === fields.executablePath;
+}

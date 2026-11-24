@@ -21,17 +21,25 @@
 // The `orphan-tool` prompt starts a tool parent in this group whose own child
 // left it (setsid) and writes their pids to FAKE_ACP_TOOL_TREE; the native
 // cancel then SIGKILLs the parent, orphaning the tool, as a real cancel can.
+// FAKE_ACP_PROBE_LOG=<path>: each `--version` / `--help` probe appends its argv line.
+// FAKE_ACP_HELP_HANG_PID_FILE=<path>: a `--help` probe writes its pid to <path> and never answers.
 import { spawn } from 'node:child_process';
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
+if (process.env.FAKE_ACP_PROBE_LOG && (args[0] === '--version' || args.includes('--help'))) appendFileSync(process.env.FAKE_ACP_PROBE_LOG, `${args.join(' ')}\n`);
 if (args[0] === '--version') {
   process.stdout.write(`${process.env.FAKE_ACP_VERSION ?? 'grok 1.0.62 (fixture)'}\n`);
   process.exit(0);
 }
 if (args.includes('--help')) {
+  if (process.env.FAKE_ACP_HELP_HANG_PID_FILE) {
+    writeFileSync(process.env.FAKE_ACP_HELP_HANG_PID_FILE, String(process.pid));
+    setInterval(() => {}, 60_000);
+    await new Promise(() => {});
+  }
   if (process.env.FAKE_ACP_NO_STDIO === '1') { process.stderr.write("error: unrecognized subcommand 'stdio'\n"); process.exit(2); }
   process.stdout.write('Run the agent over stdio\n');
   process.exit(0);

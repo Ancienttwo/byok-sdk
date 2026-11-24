@@ -40,7 +40,7 @@ import { startAgyGeminiProxy, type AgyGeminiProxy } from './agy-gemini-proxy.js'
 import { agyPermissionDecision, type AgyReaderScope } from './permissions.js';
 import { acquireAgySessionRetention, brandAgySessionStore } from '../../util/agy-session-retention.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveRuntimeCommand, runtimeExecutableFields, sameDetectedExecutable } from '../runtime-executable.js';
 import type { ResolvedBin } from '../codex/resolve-bin.js';
 import { AGY_RUNTIME_CAPABILITIES } from './agy-capabilities.js';
 import { agyEnvironment, agyNativeHome, agyStoreDir, ensureAgyHome } from './agy-profile.js';
@@ -176,13 +176,13 @@ export class AgyAdapter implements RuntimeAdapter {
   }
 
   /** Reads the installation version without resolving credentials. */
-  async detect(): Promise<RuntimeDetectResult> {
+  async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
     try {
       const { env: base } = await this.runtimeEnvironment();
       const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(base));
       const command = resolved.bin.command;
       await ensureAgyHome(this.root);
-      const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, agyEnvironment(base, this.root));
+      const version = await probeRuntimeVersion(command, VERSION_TIMEOUT_MS, agyEnvironment(base, this.root), [], signal);
       if (version.kind !== 'available') return version;
       const token = agyVersionToken(version.stdout);
       const unsupported = antigravityVersionRefusal(token);
@@ -198,8 +198,22 @@ export class AgyAdapter implements RuntimeAdapter {
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, token),
       };
     } catch (error) {
+      signal?.throwIfAborted();
       return classifyDetectError(error);
     }
+  }
+
+  /** The admission observation when it is of the executable resolved now; otherwise a fresh probe. */
+  private async admittedDetect(input: RuntimeAdapterPrepareInput): Promise<RuntimeDetectResult> {
+    const detected = input.detected;
+    if (detected?.kind === 'available') {
+      try {
+        const { env: base } = await this.runtimeEnvironment();
+        const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveAgyBin(base));
+        if (sameDetectedExecutable(detected, runtimeExecutableFields(resolved, resolved.bin.command))) return detected;
+      } catch { /* resolution failed: the fresh probe classifies it */ }
+    }
+    return this.detect(input.signal);
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
@@ -211,7 +225,7 @@ export class AgyAdapter implements RuntimeAdapter {
     if (modelId === undefined || modelId.trim() === '') {
       return { kind: 'reject', code: 'invalid_request', reason: 'AGY requires an explicit BYOK model ID', retryable: false };
     }
-    const detected = await this.detect();
+    const detected = await this.admittedDetect(input);
     if (detected.kind !== 'available') {
       return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };
     }

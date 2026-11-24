@@ -234,6 +234,31 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
+  it('#2469: detect(signal) rethrows a pre-aborted reason and stops a hung `auth status --json` on abort', async () => {
+    const adapter = fakeClaudeAdapter();
+    const reason = new Error('doctor cancelled');
+    await expect(adapter.detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+    const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-auth-')), 'pid');
+    vi.stubEnv('FAKE_CLAUDE_AUTH_HANG', '1');
+    vi.stubEnv('FAKE_CLAUDE_HANG_PID_FILE', pidFile);
+    try {
+      const controller = new AbortController();
+      const pending = adapter.detect(controller.signal);
+      const pid = await vi.waitFor(async () => {
+        const value = Number(await fs.readFile(pidFile, 'utf8'));
+        expect(value).toBeGreaterThan(0);
+        return value;
+      }, { timeout: 5_000 });
+      const child = captureProcessIdentity(pid);
+      controller.abort(reason);
+      await expect(pending).rejects.toBe(reason);
+      await vi.waitFor(() => expectProcessNotLive(child));
+    } finally {
+      vi.unstubAllEnvs();
+      await fs.rm(path.dirname(pidFile), { recursive: true, force: true });
+    }
+  });
+
   it('#2468: detect() reports timeout at the auth deadline while a grandchild holds the status pipes', async () => {
     const adapter = fakeClaudeAdapter();
     claudeProbeTimeouts.override(adapter, { authStatus: 1_000 });

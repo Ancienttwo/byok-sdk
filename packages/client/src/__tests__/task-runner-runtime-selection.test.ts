@@ -153,6 +153,30 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     expect(server.received.some(envelope => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
   });
 
+  it('#2469: hands each offer its own fresh admission observation in prepare(), on auto and explicit targets', async () => {
+    const adapter = new StubRuntimeAdapter('pi');
+    // Startup reporting observes too; each observation gets its own version.
+    const observed: string[] = [];
+    vi.spyOn(adapter, 'detect').mockImplementation(async () => {
+      const version = `1.0.${observed.length}`;
+      observed.push(version);
+      return { kind: 'available', version };
+    });
+    const prepare = vi.spyOn(adapter, 'prepare').mockResolvedValue({ kind: 'reject', reason: 'observed', retryable: false });
+    await setup([adapter]);
+    const targets = [{ lane: 'auto' }, { lane: 'harness', harnessId: 'pi', selection: { mode: 'device-default' } }] as const;
+    for (const [index, target] of targets.entries()) {
+      const taskId = `fresh-detect-${index}`;
+      server.send(createEnvelope('task.offer', { target, agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER }, { taskId, seq: server.nextSeq() }));
+      await server.waitFor(envelope => envelope.type === 'task.decline' && envelope.task_id === taskId);
+    }
+    const handed = prepare.mock.calls.map(([input]) => input.detected?.kind === 'available' ? input.detected.version : undefined);
+    expect(handed).toHaveLength(2);
+    // Each prepare() got an observation taken for its own offer: distinct, in order.
+    expect(observed.indexOf(handed[1]!)).toBeGreaterThan(observed.indexOf(handed[0]!));
+    expect(observed.indexOf(handed[0]!)).toBeGreaterThanOrEqual(0);
+  });
+
   it.each(['claude', 'codex'] as const)('declines %s API-key login before claiming a subscription offer', async id => {
     const fake = fileURLToPath(new URL(`./fixtures/fake-${id}.mjs`, import.meta.url));
     const resolveBin = () => ({ command: fake, source: 'env' as const });

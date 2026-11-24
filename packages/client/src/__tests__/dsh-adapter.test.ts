@@ -160,6 +160,31 @@ describe('DshAdapter detect and prepare', () => {
     expect((await prepare('x'.repeat(32))).kind).toBe('prepared');
   });
 
+  it('#2469: detect(signal) rethrows a pre-aborted reason', async () => {
+    const { adapter } = await setup();
+    const reason = new Error('offer cancelled');
+    await expect(adapter.detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+  });
+
+  it('#2469: prepare() reuses the admission observation of the same executable and otherwise probes the version afresh', async () => {
+    const { adapter } = await setup();
+    const log = path.join(await tempDir('bdp-'), 'probes');
+    setAmbient('FAKE_DSH_PROBE_LOG', log);
+    const probes = async () => {
+      const lines = (await fs.readFile(log, 'utf8').catch(() => '')).split('\n').filter(Boolean);
+      await fs.rm(log, { force: true });
+      return lines;
+    };
+    const detected = await adapter.detect();
+    if (detected.kind !== 'available') throw new Error('fixture dsh is unavailable');
+    expect(await probes()).toEqual(['--version', '--profile acp --help']);
+    const input = { offer: { target: DSH_TARGET, instruction: 'x' }, descriptor: adapter.descriptor, requiredToolsetIds: [] };
+    expect(await adapter.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared', detected: { version: QUALIFIED_DSH_VERSION } });
+    expect(await probes()).toEqual([]);
+    expect(await adapter.prepare(input)).toMatchObject({ kind: 'prepared', detected: { version: QUALIFIED_DSH_VERSION } });
+    expect(await probes()).toEqual(['--version']);
+  });
+
   it('rejects a missing binary', async () => {
     const missing = new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: await tempDir('bd-'), model: MODEL, resolveBin: () => ({ command: path.join(os.tmpdir(), 'no-such-dsh'), source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
     await expect(missing.prepare({ offer: { target: DSH_TARGET, instruction: 'x' }, descriptor: missing.descriptor, requiredToolsetIds: [] })).resolves.toEqual({ kind: 'reject', reason: 'dsh installation refused: not-found', retryable: false });

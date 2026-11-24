@@ -1,7 +1,7 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
 import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
-import { execFile, spawn, type spawn as nodeSpawn } from 'node:child_process';
+import { spawn, type spawn as nodeSpawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { requireImageInput } from '../input-images.js';
 import type { RuntimeInputImage, RuntimeInputOptions } from '../../types.js';
@@ -9,7 +9,6 @@ import { offerSelection, type RuntimeTaskInput } from '../../types.js';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import { promisify } from 'node:util';
 import { oarStartClassifier, runtimeStartFailure } from '../runtime-start-failure.js';
 import type { AgentEvent, TaskFailure } from '@byok-sdk/protocol';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
@@ -29,7 +28,7 @@ import {
 } from '../../types.js';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
-import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
+import { classifyDetectError, probeRuntimeVersion, runDetectCommand } from '../detect-outcome.js';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
@@ -43,13 +42,12 @@ import { GROK_USER_CONTEXT_INSPECT_FAILED, createGrokAgentHome, grokUserInstruct
 import { runGrokInspect } from './inspect.js';
 import { GrokProjection, type GrokTurnOutcome } from './projection.js';
 import { resolveGrokBin } from './resolve-bin.js';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveRuntimeCommand, runtimeExecutableFields, sameDetectedExecutable } from '../runtime-executable.js';
 import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { GROK_RUNTIME_CAPABILITIES } from './grok-capabilities.js';
 import { GROK_VERSION_POLICY, grokVersionToken } from './grok-version.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 
-const execFileAsync = promisify(execFile);
 const DETECT_TIMEOUT_MS = 5000;
 const PERMISSION_STOP_REASON = 'grok ended the turn as cancelled without an SDK cancel (a permission request answered cancelled)';
 /** Grok's per-process switches for the Claude and Cursor `agents` and `rules` compatibility cells. */
@@ -201,23 +199,17 @@ export class GrokAdapter implements RuntimeAdapter {
   }
 
   /** Reads the version, probes ACP mode and looks for a login signal. It never opens a session or writes Grok's home. */
-  async detect(): Promise<RuntimeDetectResult> {
+  async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
     try {
       const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin);
       const command = resolved.bin.command;
-      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env);
+      const version = await probeRuntimeVersion(command, DETECT_TIMEOUT_MS, env, [], signal);
       if (version.kind !== 'available') return version;
       const text = version.stdout.trim() || version.stderr.trim();
-      try {
-        await execFileAsync(command, ['agent', 'stdio', '--help'], {
-          timeout: DETECT_TIMEOUT_MS,
-          killSignal: 'SIGKILL',
-          env,
-        });
-      } catch {
-        return { kind: 'refused', reason: 'acp_unavailable' };
-      }
+      const help = await runDetectCommand(command, ['agent', 'stdio', '--help'], { timeoutMs: DETECT_TIMEOUT_MS, env, signal });
+      if (help.kind === 'aborted') throw help.reason;
+      if (help.kind !== 'ok') return { kind: 'refused', reason: 'acp_unavailable' };
       return {
         kind: 'available',
         sessionCapabilities: { ...(await import('#byok-acp-runtime')).grokSessionCapabilities(), steer: this.descriptor.capabilities.steer },
@@ -227,8 +219,21 @@ export class GrokAdapter implements RuntimeAdapter {
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, grokVersionToken(text)),
       };
     } catch (error) {
+      signal?.throwIfAborted();
       return classifyDetectError(error);
     }
+  }
+
+  /** The admission observation when it is of the executable resolved now; otherwise a fresh probe. */
+  private async admittedDetect(input: RuntimeAdapterPrepareInput): Promise<RuntimeDetectResult> {
+    const detected = input.detected;
+    if (detected?.kind === 'available') {
+      try {
+        const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveGrokBin);
+        if (sameDetectedExecutable(detected, runtimeExecutableFields(resolved, resolved.bin.command))) return detected;
+      } catch { /* resolution failed: the fresh probe classifies it */ }
+    }
+    return this.detect(input.signal);
   }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
@@ -242,7 +247,7 @@ export class GrokAdapter implements RuntimeAdapter {
     if (selection?.mode === 'adapter-model' && (modelId === undefined || modelId.trim() === '')) {
       return { kind: 'reject', code: 'invalid_request', reason: 'Grok requires a model ID when no default is configured', retryable: false };
     }
-    const detected = await this.detect();
+    const detected = await this.admittedDetect(input);
     if (detected.kind !== 'available')
       return {
         kind: 'reject',

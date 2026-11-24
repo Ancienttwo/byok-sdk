@@ -364,6 +364,7 @@ if (
   (process.env.FAKE_CLAUDE_VERSION_HANG === '1' && isVersionInvocation) ||
   (process.env.FAKE_CLAUDE_AUTH_HANG === '1' && isAuthStatusInvocation)
 ) {
+  if (process.env.FAKE_CLAUDE_HANG_PID_FILE) writeFileSync(process.env.FAKE_CLAUDE_HANG_PID_FILE, String(process.pid));
   setInterval(() => {}, 60000); // keep the process alive until killed (SIGTERM) — see FAKE_CLAUDE_VERSION_HANG/FAKE_CLAUDE_AUTH_HANG above
 } else {
   runProbeOrTurnFlow();

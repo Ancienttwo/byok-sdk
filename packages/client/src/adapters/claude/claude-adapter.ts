@@ -308,8 +308,8 @@ export class ClaudeAdapter implements RuntimeAdapter {
     return buildRuntimeEnvironment(this.environmentPolicy, claudeEnvironmentConflicts);
   }
 
-  async detect(): Promise<RuntimeDetectResult> {
-    return this.#detectInstallation({ checkAuth: true });
+  async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
+    return this.#detectInstallation({ checkAuth: true, signal });
   }
 
   /**
@@ -330,7 +330,7 @@ export class ClaudeAdapter implements RuntimeAdapter {
       const version = probe.stdout.trim();
       let authPresent: boolean | undefined;
       if (checkAuth) {
-        const auth = await this.#readAuthStatus(invocation, env);
+        const auth = await this.#readAuthStatus(invocation, env, undefined, signal);
         if (auth.kind === 'timeout') return { kind: 'timeout' };
         authPresent = auth.kind === 'ok' && auth.status.loggedIn === true;
       }

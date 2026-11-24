@@ -16,7 +16,7 @@ import { freezeRuntimeAdapterDescriptor, PolicyUnsupportedError, type RuntimeAda
   type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeOperationStartInput, type RuntimeVersionPolicy, type Session } from '../../types.js';
 import { resolveRuntimeVersionPolicy, runtimeVersionDetectionFields } from '../../runtime-version-policy.js';
 import { classifyDetectError, probeRuntimeVersion } from '../detect-outcome.js';
-import { resolveRuntimeCommand, runtimeExecutableFields } from '../runtime-executable.js';
+import { resolveRuntimeCommand, runtimeExecutableFields, sameDetectedExecutable } from '../runtime-executable.js';
 import { resolveManagedRuntime } from '../managed-runtime-path.js';
 import { withoutProviderCredentials } from '../provider-credential-environment.js';
 import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invocation.js';
@@ -99,12 +99,17 @@ export class OpenCodeAdapter implements RuntimeAdapter {
   }
   runtimeEnvironment() { return buildRuntimeEnvironment(this.environment); }
 
-  private async probe(): Promise<{ detected: RuntimeDetectResult; command?: string; version?: string }> {
+  private async resolveInvocation() {
+    const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
+    const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env), () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'opencode'));
+    const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
+    return { env, resolved, invocation };
+  }
+
+  private async probe(signal?: AbortSignal): Promise<{ detected: RuntimeDetectResult; command?: string; version?: string }> {
     try {
-      const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
-      const resolved = resolveRuntimeCommand(this.options.resolveBin, () => resolveOpenCodeBin(env), () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'opencode'));
-      const invocation = resolveRuntimeInvocation(resolved.bin.command, runtimeInvocationHost(env));
-      const version = await probeRuntimeVersion(invocation.command, 15_000, env, invocation.args);
+      const { env, resolved, invocation } = await this.resolveInvocation();
+      const version = await probeRuntimeVersion(invocation.command, 15_000, env, invocation.args, signal);
       if (version.kind !== 'available') return { detected: version };
       const token = opencodeVersionToken(version.stdout.trim() || version.stderr);
       if (token === undefined) return { detected: { kind: 'refused', reason: 'acp_unavailable' } };
@@ -115,9 +120,27 @@ export class OpenCodeAdapter implements RuntimeAdapter {
         sessionCapabilities: (await import('#byok-acp-runtime')).opencodeSessionCapabilities({ kind: 'available', via: 'executable', command: resolved.bin.command, version: token }),
         ...runtimeExecutableFields(resolved, invocation.executable), ...runtimeVersionDetectionFields(this.policy, token),
       } };
-    } catch (error) { return { detected: classifyDetectError(error) }; }
+    } catch (error) {
+      signal?.throwIfAborted();
+      return { detected: classifyDetectError(error) };
+    }
   }
-  async detect(): Promise<RuntimeDetectResult> { return (await this.probe()).detected; }
+
+  /** The admission observation when it is of the executable resolved now; otherwise a fresh probe. */
+  private async admittedProbe(input: RuntimeAdapterPrepareInput): Promise<{ detected: RuntimeDetectResult; command?: string; version?: string }> {
+    const detected = input.detected;
+    if (detected?.kind === 'available' && detected.version !== undefined) {
+      let reused: { command: string } | undefined;
+      try {
+        const { resolved, invocation } = await this.resolveInvocation();
+        if (sameDetectedExecutable(detected, runtimeExecutableFields(resolved, invocation.executable))) reused = { command: resolved.bin.command };
+      } catch { /* resolution failed: the fresh probe classifies it */ }
+      if (reused !== undefined) return { detected, command: reused.command, version: detected.version };
+    }
+    return this.probe(input.signal);
+  }
+
+  async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> { return (await this.probe(signal)).detected; }
 
   async prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult> {
     const { target, effort } = input.offer;
@@ -141,7 +164,7 @@ export class OpenCodeAdapter implements RuntimeAdapter {
     if (mcpServers.some(server => !server.name || typeof server.command !== 'string' || !server.command.trim() ||
       server.args?.some(arg => typeof arg !== 'string') || Object.values(server.env ?? {}).some(value => typeof value !== 'string')))
       return { kind: 'reject', reason: 'invalid opencode Host MCP server', retryable: false };
-    const probe = await this.probe();
+    const probe = await this.admittedProbe(input);
     if (probe.detected.kind !== 'available' || probe.command === undefined || probe.version === undefined)
       return { kind: 'reject', reason: `opencode installation refused: ${probe.detected.kind}`, retryable: false };
     const { command, version, detected: { executableSource, versionVerdict } } = probe;

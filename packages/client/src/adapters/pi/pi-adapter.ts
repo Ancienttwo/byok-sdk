@@ -360,7 +360,7 @@ export class PiAdapter implements RuntimeAdapter {
     return projectPiMcpEnvironment(env);
   }
 
-  async detect(): Promise<RuntimeDetectResult> {
+  async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
     try {
       const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const host = this.options.sdkHelperHost;
@@ -384,7 +384,7 @@ export class PiAdapter implements RuntimeAdapter {
       const bin = this.resolveBin();
       const invocation = piInvocation(bin);
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env,
-        invocation.entry === undefined ? [] : [invocation.entry]);
+        invocation.entry === undefined ? [] : [invocation.entry], signal);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim() || probe.stderr.trim();
       const authPresent = await probePiAuthPresent(env);
@@ -398,6 +398,7 @@ export class PiAdapter implements RuntimeAdapter {
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
       };
     } catch (error) {
+      signal?.throwIfAborted();
       return classifyDetectError(error);
     }
   }

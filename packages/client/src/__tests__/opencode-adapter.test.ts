@@ -140,6 +140,33 @@ it.each(['1.18.35', '2.0.26'])('detects %s at its ACP floor', async version => {
   await expect(adapter.detect()).resolves.toMatchObject({ kind: 'available', version });
 });
 
+it('#2469: detect(signal) rethrows a pre-aborted reason', async () => {
+  const { adapter } = setup();
+  const reason = new Error('offer cancelled');
+  await expect(adapter.detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+});
+
+it('#2469: prepare() reuses the admission observation of the same executable and otherwise probes afresh', async () => {
+  const box = setup();
+  const log = path.join(box.cwd, 'probes');
+  vi.stubEnv('FAKE_ACP_PROBE_LOG', log);
+  const probes = () => {
+    const lines = existsSync(log) ? readFileSync(log, 'utf8').split('\n').filter(Boolean) : [];
+    rmSync(log, { force: true });
+    return lines;
+  };
+  const detected = await box.adapter.detect();
+  if (detected.kind !== 'available') throw new Error('fixture opencode is unavailable');
+  expect(probes()).toEqual(['--version']);
+  const input = { offer: { target: OPENCODE_TARGET, instruction: 'x' }, descriptor: box.adapter.descriptor, requiredToolsetIds: [] };
+  expect(await box.adapter.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared', detected: { version: '1.18.35' } });
+  expect(probes()).toEqual([]);
+  expect(await box.adapter.prepare({ ...input, detected: { ...detected, executableSource: 'path' } })).toMatchObject({ kind: 'prepared' });
+  expect(probes()).toEqual(['--version']);
+  expect(await box.adapter.prepare(input)).toMatchObject({ kind: 'prepared' });
+  expect(probes()).toEqual(['--version']);
+});
+
 for (const version of ['1.18.35', 'opencode v2.0.26']) {
   defineRuntimeCases(`OpenCode ${version} replay contract`, {
     'open.model.resume': ['passes the Host model, checks readback and resumes only in the original cwd', check(async () => {

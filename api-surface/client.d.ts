@@ -811,7 +811,8 @@ export declare class AgyAdapter implements RuntimeAdapter {
     constructor(options: AgyAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     private authenticatedEnvironment;
-    detect(): Promise<RuntimeDetectResult>;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+    private admittedDetect;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -859,7 +860,7 @@ export declare class ClaudeAdapter implements RuntimeAdapter {
     private readonly maxRetainedBytes;
     constructor(options?: ClaudeAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
-    detect(): Promise<RuntimeDetectResult>;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private executionSelection;
     private startPrepared;
@@ -907,8 +908,11 @@ export declare class CodexAdapter implements RuntimeAdapter {
     private readonly maxRetainedBytes;
     constructor(options?: CodexAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
-    detect(): Promise<RuntimeDetectResult>;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+    private resolveInstallation;
+    private userContextRefusal;
     private detectInstallation;
+    private admittedInstallation;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -961,7 +965,7 @@ export declare class DshAdapter implements RuntimeAdapter {
     constructor(options: DshAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     private ensureRoot;
-    detect(): Promise<RuntimeDetectResult>;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -997,7 +1001,8 @@ export declare class GrokAdapter implements RuntimeAdapter {
     private readonly maxRetainedBytes;
     constructor(options?: GrokAdapterOptions);
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
-    detect(): Promise<RuntimeDetectResult>;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
+    private admittedDetect;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -1063,8 +1068,10 @@ export declare class OpenCodeAdapter implements RuntimeAdapter {
     constructor(options?: OpenCodeAdapterOptions);
     get descriptor(): import("../index.js").RuntimeAdapterDescriptor;
     runtimeEnvironment(): Promise<import("../index.js").RuntimeEnvironment>;
+    private resolveInvocation;
     private probe;
-    detect(): Promise<RuntimeDetectResult>;
+    private admittedProbe;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private start;
 }
@@ -1176,7 +1183,7 @@ export declare class PiAdapter implements RuntimeAdapter {
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     listModels(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
     projectMcpEnvironment(env: Readonly<Record<string, string>>): Readonly<Record<string, string>>;
-    detect(): Promise<RuntimeDetectResult>;
+    detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     private resolveBin;
 }
@@ -6264,6 +6271,7 @@ export interface RuntimeAdapterPrepareInput {
     requiredToolsetIds: readonly string[];
     mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
     mcpToolsetTools?: McpToolsetToolObservation;
+    readonly detected?: RuntimeDetectResult;
 }
 // support
 export type McpToolsetToolObservation = Readonly<Record<string, McpToolsetServerObservation>>;
