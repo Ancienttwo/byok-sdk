@@ -65,6 +65,8 @@ const host = new HostProcess({
   },
 });
 
+// Chromium's own state lives under `<hostStorageRoot>/shell`; resolved once synchronously before ready so userData
+// is set before the single-instance lock (#1499). Host store and recovery paths are owned by Host commands (S1).
 const layout = resolveHostLayout({ productId: brand.productId, productName: brand.productName });
 
 /** After a recovery action the app restarts, so the new Host prechecks what the action left; a failure is shown first. */
@@ -79,7 +81,7 @@ const route = createRendererRouter<BridgeMethods, MainMethod>({
   main: createMainHandlers({
     callHost: (method, params) => host.call(method, params),
     spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand,
-    layout, version: app.getVersion(), hostState: () => lastState, stopHost: () => host.stop(), relaunch, now: () => new Date(),
+    version: app.getVersion(), hostState: () => lastState, stopHost: () => host.stop(), relaunch, now: () => new Date(),
   }),
   host: (method, params) => host.call(method, params as never),
 });
@@ -169,7 +171,10 @@ if (!app.requestSingleInstanceLock()) {
     protocol.handle(SCHEME, serveRenderer);
     ipcMain.handle(BRIDGE_IPC_CHANNEL, forward);
     host.start();
-    startUpdater({ beforeInstall: () => host.stop() });
+    startUpdater({
+      beforeInstall: () => host.stop(),
+      spawnHostCommand: app.isPackaged ? spawnPackagedHostCommand : spawnDevHostCommand,
+    });
     createWindow();
     tray = createAppTray(TRAY_ICON, brand.productName, { showWindow, quit: () => app.quit() });
     tray.update(lastState);

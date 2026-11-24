@@ -12,7 +12,9 @@
     "package": "bun run build && node scripts/package/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:keys-browser": "node --test scripts/keys-submit.browser.mjs"
+    "test:keys-browser": "node --test scripts/keys-submit.browser.mjs",
+    "generate:bridge-contract": "node scripts/generate-bridge-contract.mjs --write",
+    "check:bridge-contract": "node scripts/generate-bridge-contract.mjs"
   },
   "dependencies": {
     "@byok-sdk/client": "workspace:*",

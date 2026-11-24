@@ -1,12 +1,32 @@
 /**
- * Start fresh (#1499 D4, #1917), run by the Host executable re-entered under
- * {@link START_FRESH_COMMAND} after main stopped the Host. It runs here, not in
- * main, because clearing the device enrollment needs the Host's SDK assets (the
- * koffi addon on Windows).
+ * Recovery commands run by the Host executable re-entered after the shell
+ * stopped the Host (`byok-desktop-start-fresh`, `byok-desktop-snapshot`,
+ * `byok-desktop-snapshot-status`, `byok-desktop-restore`). Running here keeps
+ * store layout resolution and file manipulation solely in the Host (#1499 D4,
+ * #1917, #2459).
  */
 import { clearDeviceEnrollment, DeviceEnrollmentClearError, type DeviceCredentialBackend } from '@byok-sdk/client';
-import { START_FRESH_COMMAND, type StartFreshReceipt } from '../recovery/protocol.ts';
-import { moveAll, moveBack, MoveBackError, startFreshMoves, type Move, type StoreLayout } from '../recovery/stores.ts';
+import {
+  RESTORE_COMMAND,
+  SNAPSHOT_COMMAND,
+  SNAPSHOT_STATUS_COMMAND,
+  START_FRESH_COMMAND,
+  type RestoreReceipt,
+  type SnapshotReceipt,
+  type SnapshotStatusReceipt,
+  type StartFreshReceipt,
+} from '../recovery/protocol.ts';
+import {
+  completeSnapshot,
+  moveAll,
+  moveBack,
+  MoveBackError,
+  restoreSnapshot,
+  snapshotStores,
+  startFreshMoves,
+  type Move,
+  type StoreLayout,
+} from '../recovery/stores.ts';
 
 export interface StartFreshOptions {
   readonly layout: StoreLayout;
@@ -16,6 +36,23 @@ export interface StartFreshOptions {
   readonly nativeAssetRoot?: string;
   /** Tests inject the device credential backend, as the daemon takes one. */
   readonly deviceCredentials?: DeviceCredentialBackend;
+}
+
+/** Single-segment validation for stamps and snapshot version directory names (rejects traversal and separators). */
+function requireSegment(value: string | undefined, pattern: RegExp, errorMessage: string): string {
+  if (!value || value === '.' || value === '..' || !pattern.test(value)) throw new Error(errorMessage);
+  return value;
+}
+
+const requireStamp = (args: readonly string[], index: number, command: string): string =>
+  requireSegment(args[index], /^[0-9TZ.-]+$/, `${command} requires a single-segment aside stamp`);
+
+const requireVersion = (args: readonly string[], index: number, command: string): string =>
+  requireSegment(args[index], /^[0-9A-Za-z._+-]+$/, `${command} requires a single-segment version`);
+
+async function writeReceipt<T extends { readonly ok: boolean }>(receipt: T): Promise<number> {
+  await new Promise<void>((resolve, reject) => process.stdout.write(`${JSON.stringify(receipt)}\n`, error => (error ? reject(error) : resolve())));
+  return receipt.ok ? 0 : 1;
 }
 
 /**
@@ -44,16 +81,61 @@ export async function startFresh(options: StartFreshOptions): Promise<readonly M
 
 /** The re-entered command: one receipt line on stdout; exit 0 only when the stores moved and the enrollment cleared. */
 export async function runStartFreshCommand(args: readonly string[], options: Omit<StartFreshOptions, 'stamp'>): Promise<number> {
-  // The stamp names the aside directories, so it must stay one plain path segment.
-  if (args.length !== 2 || !/^[0-9TZ.-]+$/.test(args[1]!)) throw new Error(`${START_FRESH_COMMAND} takes one argument: the aside stamp`);
+  if (args.length !== 2) throw new Error(`${START_FRESH_COMMAND} takes one argument: the aside stamp`);
+  const stamp = requireStamp(args, 1, START_FRESH_COMMAND);
   let receipt: StartFreshReceipt;
   try {
-    receipt = { ok: true, moved: await startFresh({ ...options, stamp: args[1]! }) };
+    receipt = { ok: true, moved: await startFresh({ ...options, stamp }) };
   } catch (error) {
     const failure = error instanceof MoveBackError ? error.cause : error;
     receipt = { ok: false, code: failure instanceof DeviceEnrollmentClearError ? failure.code : 'start_fresh_failed',
       message: (error as Error).message, movedBack: !(error instanceof MoveBackError) };
   }
-  await new Promise<void>((resolve, reject) => process.stdout.write(`${JSON.stringify(receipt)}\n`, error => (error ? reject(error) : resolve())));
-  return receipt.ok ? 0 : 1;
+  return writeReceipt(receipt);
+}
+
+/** Re-entered S1 command: atomically copies current stores into `<hostStorageRoot>/host/snapshots/<version>`. */
+export async function runSnapshotCommand(args: readonly string[], options: { readonly layout: StoreLayout }): Promise<number> {
+  if (args.length !== 2) throw new Error(`${SNAPSHOT_COMMAND} takes one argument: the app version`);
+  const version = requireVersion(args, 1, SNAPSHOT_COMMAND);
+  let receipt: SnapshotReceipt;
+  try {
+    receipt = { ok: true, target: await snapshotStores(options.layout, version) };
+  } catch (error) {
+    receipt = { ok: false, code: 'snapshot_failed', message: (error as Error).message };
+  }
+  return writeReceipt(receipt);
+}
+
+/** Re-entered S1 command: reports whether a complete snapshot of `<version>` exists on disk. */
+export async function runSnapshotStatusCommand(args: readonly string[], options: { readonly layout: StoreLayout }): Promise<number> {
+  if (args.length !== 2) throw new Error(`${SNAPSHOT_STATUS_COMMAND} takes one argument: the app version`);
+  const version = requireVersion(args, 1, SNAPSHOT_STATUS_COMMAND);
+  let receipt: SnapshotStatusReceipt;
+  try {
+    const target = await completeSnapshot(options.layout, version);
+    receipt = { ok: true, snapshot: target === undefined ? null : { version, target } };
+  } catch (error) {
+    receipt = { ok: false, code: 'snapshot_status_failed', message: (error as Error).message };
+  }
+  return writeReceipt(receipt);
+}
+
+/** Re-entered S1 command: atomically restores `<version>`'s complete snapshot after moving current stores aside with `<stamp>`. */
+export async function runRestoreCommand(args: readonly string[], options: { readonly layout: StoreLayout }): Promise<number> {
+  if (args.length !== 3) throw new Error(`${RESTORE_COMMAND} takes two arguments: the app version and aside stamp`);
+  const version = requireVersion(args, 1, RESTORE_COMMAND);
+  const stamp = requireStamp(args, 2, RESTORE_COMMAND);
+  let receipt: RestoreReceipt;
+  try {
+    receipt = { ok: true, asidePath: await restoreSnapshot(options.layout, version, stamp) };
+  } catch (error) {
+    receipt = {
+      ok: false,
+      code: 'restore_failed',
+      message: (error as Error).message,
+      movedBack: !(error instanceof MoveBackError),
+    };
+  }
+  return writeReceipt(receipt);
 }

@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { readFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
@@ -7,9 +8,10 @@ import { describe, expect, it, vi } from 'vitest';
 import { HostProcess } from '../main/host-process.ts';
 import { shellHandlers } from '../main/recovery.ts';
 import { coalesceStateHints } from '../main/state-hint.ts';
+import { RESTORE_COMMAND, SNAPSHOT_STATUS_COMMAND, START_FRESH_COMMAND } from '../recovery/protocol.ts';
 import { BridgeClient, type HostChild } from './client.ts';
 import { rendererBridge } from '../renderer/bridge.ts';
-import { BRIDGE_VERSION, BridgeError, encodeMessage, type BridgeIpc, type SupervisedHostState } from './protocol.ts';
+import { BRIDGE_VERSION, BridgeError, buildBridgeContract, encodeMessage, type BridgeIpc, type SupervisedHostState } from './protocol.ts';
 import { CustodyError } from '../custody/protocol.ts';
 import { createRendererRouter, isAppRefusal, settleCall } from './route.ts';
 import { serveBridge } from './server.ts';
@@ -190,18 +192,21 @@ describe('desktop bridge', () => {
   it('offers start fresh only on a refused store, and relaunches after a refused clear with the stores back', async () => {
     const calls: string[] = [];
     let state: SupervisedHostState = { state: 'running', pid: 1, activeWork: 0 };
-    const receipt = (line: string) => {
+    const receipt = (line: string, code = 1) => {
       const stdout = new PassThrough();
       const events = new PassThrough();
       const child = { stdin: new PassThrough(), stdout, once: (event: string, listener: (...args: unknown[]) => void) => { events.once(event, listener); return child; } };
-      child.stdin.on('finish', () => { stdout.end(`${line}\n`); events.emit('exit', 1); });
+      child.stdin.on('finish', () => { stdout.end(`${line}\n`); events.emit('exit', code); });
       return child as never;
     };
     const deps: Parameters<typeof shellHandlers>[0] = {
-      layout: { storeDir: '/nowhere/store', scratchRoot: { path: '/nowhere/store/tmp' }, hostStorageRoot: '/nowhere/home' },
       version: '1.0.0', hostState: () => state, now: () => new Date(0),
       stopHost: async () => { calls.push('stop'); },
-      spawnHostCommand: args => { calls.push(args.join(' ')); return receipt(JSON.stringify({ ok: false, code: 'store_not_bound', message: 'not bound', movedBack: true })); },
+      spawnHostCommand: args => {
+        calls.push(args.join(' '));
+        if (args[0] === SNAPSHOT_STATUS_COMMAND) return receipt(JSON.stringify({ ok: true, snapshot: null }), 0);
+        return receipt(JSON.stringify({ ok: false, code: 'store_not_bound', message: 'not bound', movedBack: true }), 1);
+      },
       relaunch: failure => { calls.push(`relaunch ${failure?.message ?? ''}`); },
     };
     const handlers = shellHandlers(deps);
@@ -210,12 +215,13 @@ describe('desktop bridge', () => {
     await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow('only while the Host is stopped on a refused store');
     state = { state: 'stopped', pid: 1, reason: 'halted', storeRefused: false };
     await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow('only while the Host is stopped on a refused store');
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([`${SNAPSHOT_STATUS_COMMAND} 1.0.0`]);
+    calls.length = 0;
 
     state = { state: 'stopped', pid: 1, reason: 'refused', storeRefused: true };
     await expect(handlers['shell.startFresh'](undefined)).rejects.toThrow(/store_not_bound.*back where they were.*byok-agent doctor/);
     expect(calls[0]).toBe('stop');
-    expect(calls[1]).toBe('byok-desktop-start-fresh 1970-01-01T00-00-00.000Z');
+    expect(calls[1]).toBe(`${START_FRESH_COMMAND} 1970-01-01T00-00-00.000Z`);
     expect(calls[2]).toMatch(/^relaunch Start fresh refused \(store_not_bound\)/);
 
     // One recovery action at a time: a second one while the first still stops the Host is refused.
@@ -227,5 +233,64 @@ describe('desktop bridge', () => {
     await expect(slow['shell.startFresh'](undefined)).rejects.toThrow('Another recovery action is running');
     release();
     await expect(first).rejects.toThrow('store_not_bound');
+  });
+
+  it('shell.restore confirms Host stopped before spawning S1 restore and aborts cleanly if stopHost fails', async () => {
+    const calls: string[] = [];
+    let hostStopped = false;
+    const okReceipt = (line: string) => {
+      const stdout = new PassThrough();
+      const events = new PassThrough();
+      const child = { stdin: new PassThrough(), stdout, once: (event: string, listener: (...args: unknown[]) => void) => { events.once(event, listener); return child; } };
+      child.stdin.on('finish', () => { stdout.end(`${line}\n`); events.emit('exit', 0); });
+      return child as never;
+    };
+    const handlers = shellHandlers({
+      version: '1.0.0',
+      hostState: () => ({ state: 'stopped', pid: 1, reason: 'halted', storeRefused: false }),
+      now: () => new Date(0),
+      stopHost: async () => {
+        hostStopped = true;
+        calls.push('stop');
+      },
+      spawnHostCommand: args => {
+        calls.push(args.join(' '));
+        if (args[0] === SNAPSHOT_STATUS_COMMAND) return okReceipt(JSON.stringify({ ok: true, snapshot: { version: '1.0.0', target: '/snap/1.0.0' } }));
+        expect(hostStopped).toBe(true);
+        return okReceipt(JSON.stringify({ ok: true, asidePath: '/home/host.aside-0' }));
+      },
+      relaunch: failure => { calls.push(`relaunch:${failure?.message ?? 'ok'}`); },
+    });
+
+    await expect(handlers['shell.restore'](undefined)).resolves.toEqual({ asidePath: '/home/host.aside-0' });
+    expect(calls).toEqual([
+      `${SNAPSHOT_STATUS_COMMAND} 1.0.0`,
+      'stop',
+      `${RESTORE_COMMAND} 1.0.0 1970-01-01T00-00-00.000Z`,
+      'relaunch:ok',
+    ]);
+
+    calls.length = 0;
+    const failHandlers = shellHandlers({
+      version: '1.0.0',
+      hostState: () => ({ state: 'stopped', pid: 1, reason: 'halted', storeRefused: false }),
+      now: () => new Date(0),
+      stopHost: async () => { calls.push('stop-fail'); throw new Error('stop failed'); },
+      spawnHostCommand: args => {
+        calls.push(args.join(' '));
+        if (args[0] === SNAPSHOT_STATUS_COMMAND) return okReceipt(JSON.stringify({ ok: true, snapshot: { version: '1.0.0', target: '/snap/1.0.0' } }));
+        throw new Error('restore must not run when stopHost fails');
+      },
+      relaunch: failure => { calls.push(`relaunch:${failure?.message ?? 'ok'}`); },
+    });
+
+    await expect(failHandlers['shell.restore'](undefined)).rejects.toThrow('stop failed');
+    expect(calls).toEqual([`${SNAPSHOT_STATUS_COMMAND} 1.0.0`, 'stop-fail']);
+  });
+
+  it('keeps committed bridge-contract.json aligned with buildBridgeContract() (S2)', () => {
+    const file = fileURLToPath(new URL('./bridge-contract.json', import.meta.url));
+    const committed = readFileSync(file, 'utf8');
+    expect(committed).toBe(`${JSON.stringify(buildBridgeContract(), null, 2)}\n`);
   });
 });

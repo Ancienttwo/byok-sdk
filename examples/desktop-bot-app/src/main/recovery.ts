@@ -1,18 +1,24 @@
 /**
  * Main's answers to the shell domain (`src/bridge/domains/shell.ts`): what the
- * window shows about the Host, and the recovery actions (#1499 D3, D4; #1917).
- * Each action stops the Host first, and the app relaunches after it, so the new
- * Host prechecks whatever the action left.
+ * window shows about the Host, and the recovery actions (#1499 D3, D4; #1917;
+ * #2459). Recovery actions stop the Host first and delegate store inspection
+ * and file moves to the Host executable (S1) before relaunching.
  */
 import type { MethodHandlers } from '../bridge/domain.ts';
 import type { ShellMethods } from '../bridge/domains/shell.ts';
 import { BridgeError, type SupervisedHostState } from '../bridge/protocol.ts';
-import { START_FRESH_COMMAND, type StartFreshReceipt } from '../recovery/protocol.ts';
-import { completeSnapshot, restoreSnapshot, stampOf, type StoreLayout } from '../recovery/stores.ts';
-import { askHostCommand, type CommandChild } from './host-command.ts';
+import {
+  RESTORE_COMMAND,
+  SNAPSHOT_STATUS_COMMAND,
+  START_FRESH_COMMAND,
+  stampOf,
+  type RestoreReceipt,
+  type SnapshotStatusReceipt,
+  type StartFreshReceipt,
+} from '../recovery/protocol.ts';
+import { askHostCommand, type CommandChild, type Receipt } from './host-command.ts';
 
 export interface ShellDependencies {
-  readonly layout: StoreLayout;
   /** This app's version: restore offers the snapshot this version wrote before an update. */
   readonly version: string;
   readonly hostState: () => SupervisedHostState | undefined;
@@ -30,13 +36,14 @@ const noParams = (method: string, params: unknown) => {
 };
 
 /**
- * Runs `action` with the Host stopped, then relaunches the app, showing a failure first. A Host that failed to stop
- * relaunches too: main's supervisor has stopped supervising, and the next launch shows what the stores are.
+ * Confirms the Host is stopped first, then runs S1 `action` and relaunches.
+ * If `stopHost()` itself fails, S1 `action` is never started and `relaunch` is
+ * not called so existing stores remain untouched.
  */
 async function withHostStopped<T>(deps: ShellDependencies, action: () => Promise<T>): Promise<T> {
+  await deps.stopHost();
   let result: T;
   try {
-    await deps.stopHost();
     result = await action();
   } catch (error) {
     deps.relaunch(error as Error);
@@ -46,6 +53,26 @@ async function withHostStopped<T>(deps: ShellDependencies, action: () => Promise
   return result;
 }
 
+async function runHostReceipt<T extends Receipt>(
+  spawnHostCommand: (args: readonly string[]) => CommandChild,
+  args: readonly string[],
+  unknown: (message: string) => Error,
+): Promise<T> {
+  const { receipt, code } = await askHostCommand(spawnHostCommand(args), '', unknown);
+  if (receipt.ok && code !== 0) throw unknown(`it exited with code ${code} after its receipt`);
+  return receipt as unknown as T;
+}
+
+async function querySnapshotStatus(
+  spawnHostCommand: (args: readonly string[]) => CommandChild,
+  version: string,
+): Promise<{ readonly version: string; readonly target: string } | null> {
+  const unknown = (message: string) => new Error(`Snapshot status did not report: ${message}`);
+  const answer = await runHostReceipt<SnapshotStatusReceipt>(spawnHostCommand, [SNAPSHOT_STATUS_COMMAND, version], unknown);
+  if (!answer.ok) throw new Error(answer.message);
+  return answer.snapshot;
+}
+
 const stoppedOnly = (state: SupervisedHostState | undefined): state is Extract<SupervisedHostState, { state: 'stopped' }> => state?.state === 'stopped';
 
 export function shellHandlers(deps: ShellDependencies): MethodHandlers<ShellMethods> {
@@ -53,7 +80,7 @@ export function shellHandlers(deps: ShellDependencies): MethodHandlers<ShellMeth
   // quits the app. A failed read is not kept, so the next hint reads again.
   let restoreOffer: Promise<{ version: string } | null> | undefined;
   const offer = () => {
-    restoreOffer ??= completeSnapshot(deps.layout, deps.version).then(snapshot => (snapshot === undefined ? null : { version: deps.version }));
+    restoreOffer ??= querySnapshotStatus(deps.spawnHostCommand, deps.version).then(snapshot => (snapshot === null ? null : { version: snapshot.version }));
     restoreOffer.catch(() => { restoreOffer = undefined; });
     return restoreOffer;
   };
@@ -85,9 +112,23 @@ export function shellHandlers(deps: ShellDependencies): MethodHandlers<ShellMeth
       noParams('shell.restore', params);
       return exclusive(async () => {
         if (!stoppedOnly(deps.hostState())) throw new Error('Restore is offered only while the Host is stopped');
-        // Checked before the Host stops, so a missing snapshot leaves the Host as it is.
-        if (await completeSnapshot(deps.layout, deps.version) === undefined) throw new Error(`No complete snapshot of version ${deps.version} to restore`);
-        return withHostStopped(deps, async () => ({ asidePath: await restoreSnapshot(deps.layout, deps.version, stampOf(deps.now())) }));
+        // Checked before stopping/relaunching, so a missing snapshot leaves the Host as it is.
+        if (await querySnapshotStatus(deps.spawnHostCommand, deps.version) === null) {
+          throw new Error(`No complete snapshot of version ${deps.version} to restore`);
+        }
+        return withHostStopped(deps, async () => {
+          const unknown = (message: string) => new Error(`Restore did not report: ${message}`);
+          const answer = await runHostReceipt<RestoreReceipt>(
+            deps.spawnHostCommand,
+            [RESTORE_COMMAND, deps.version, stampOf(deps.now())],
+            unknown,
+          );
+          if (!answer.ok) {
+            throw new Error(`Restore refused (${answer.code}): ${answer.message}. ${answer.movedBack
+              ? 'The stores are back where they were.' : 'Some stores remain aside.'}`);
+          }
+          return { asidePath: answer.asidePath };
+        });
       });
     },
     'shell.startFresh': async params => {
@@ -98,8 +139,11 @@ export function shellHandlers(deps: ShellDependencies): MethodHandlers<ShellMeth
         return withHostStopped(deps, async () => {
           // Without a receipt nobody knows how far the command got: the aside names show what moved.
           const unknown = (message: string) => new Error(`Start fresh did not report: ${message}. Look for *.aside-* beside the store directories`);
-          const { receipt, code } = await askHostCommand(deps.spawnHostCommand([START_FRESH_COMMAND, stampOf(deps.now())]), '', unknown);
-          const answer = receipt as unknown as StartFreshReceipt;
+          const answer = await runHostReceipt<StartFreshReceipt>(
+            deps.spawnHostCommand,
+            [START_FRESH_COMMAND, stampOf(deps.now())],
+            unknown,
+          );
           // The app never deletes the OS enrollment entry itself: a refused clear points to the SDK's doctor.
           if (!answer.ok) {
             // The SDK can delete the credential and then fail to remove device.json; a second start fresh finishes that clear.
@@ -107,7 +151,6 @@ export function shellHandlers(deps: ShellDependencies): MethodHandlers<ShellMeth
             throw new Error(`Start fresh refused (${answer.code}): ${answer.message}. ${answer.movedBack
               ? 'The stores are back where they were.' : 'Some stores are still aside, as listed.'}${partial} byok-agent doctor shows the device enrollment.`);
           }
-          if (code !== 0) throw unknown(`it exited with code ${code} after its receipt`);
           return { moved: answer.moved };
         });
       });

@@ -5,8 +5,12 @@
  * store that gives way is renamed beside itself, and a failed action renames
  * every store it moved back.
  */
-import { cp, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { stampOf } from './protocol.ts';
+
+export { stampOf };
 
 /** The `resolveHostLayout` paths the stores live under. */
 export interface StoreLayout {
@@ -21,9 +25,6 @@ const COMPLETE_MARKER = 'complete.json';
 export const hostStoresDir = (layout: StoreLayout): string => path.join(layout.hostStorageRoot, 'host');
 export const agentHomesDir = (layout: StoreLayout): string => path.join(layout.hostStorageRoot, 'agents');
 export const snapshotsDir = (layout: StoreLayout): string => path.join(hostStoresDir(layout), 'snapshots');
-
-/** A file-name-safe timestamp for aside and staging names. */
-export const stampOf = (date: Date): string => date.toISOString().replaceAll(':', '-');
 
 /** Marks the snapshot in `target` complete, after every store in it was copied. */
 export async function markSnapshotComplete(target: string, version: string): Promise<void> {
@@ -97,6 +98,51 @@ export async function moveBack(done: readonly Move[], cause: unknown): Promise<n
   }
   if (stillAside.length > 0) throw new MoveBackError(stillAside, cause);
   throw cause;
+}
+
+/**
+ * Copies the stores of `version`, after the Host stopped, so a user can go back
+ * to this version with the data it wrote: the SDK store directory (without its
+ * scratch root) and the Host's own stores (`<hostStorageRoot>/host`). Snapshots
+ * live in `<hostStorageRoot>/host/snapshots/<version>`. Each snapshot is staged
+ * and marked complete in a sibling temporary directory before swapping into
+ * `<version>`, so a failed retry keeps any existing complete snapshot of the
+ * same version intact; superseded entries in `snapshots/` are removed only
+ * after `<version>` is in place. Returns the snapshot directory.
+ */
+export async function snapshotStores(layout: StoreLayout, version: string): Promise<string> {
+  const hostDir = hostStoresDir(layout);
+  const snapshots = snapshotsDir(layout);
+  const target = path.join(snapshots, version);
+  await mkdir(snapshots, { recursive: true, mode: 0o700 });
+  const staging = await mkdtemp(path.join(snapshots, `.${version}.staging-`));
+  try {
+    await cp(layout.storeDir, path.join(staging, 'store'), { recursive: true, filter: source => source !== layout.scratchRoot.path });
+    // The snapshot directory is inside the directory it copies, so its entries are copied one by one, never `snapshots` itself.
+    await mkdir(path.join(staging, 'host'), { mode: 0o700 });
+    for (const entry of await readdir(hostDir)) {
+      if (entry !== 'snapshots') await cp(path.join(hostDir, entry), path.join(staging, 'host', entry), { recursive: true });
+    }
+    await markSnapshotComplete(staging, version);
+    const previous = path.join(snapshots, `.${version}.previous-${randomUUID()}`);
+    const done = await moveAll([{ from: target, to: previous }]);
+    try {
+      await rename(staging, target);
+    } catch (error) {
+      await moveBack(done, error);
+    }
+  } catch (error) {
+    try {
+      await rm(staging, { recursive: true, force: true, maxRetries: 5 });
+    } catch (cleanup) {
+      throw new Error(`${(error as Error).message}; the staged snapshot could not be removed: ${(cleanup as Error).message}`, { cause: error });
+    }
+    throw error;
+  }
+  for (const entry of await readdir(snapshots)) {
+    if (entry !== version) await rm(path.join(snapshots, entry), { recursive: true, force: true, maxRetries: 5 });
+  }
+  return target;
 }
 
 /**
