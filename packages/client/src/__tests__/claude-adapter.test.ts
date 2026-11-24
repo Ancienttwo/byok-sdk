@@ -7,7 +7,7 @@ import { inspect } from 'node:util';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { ClaudeAdapter, type SpawnFn } from '../adapters/claude/claude-adapter';
+import { ClaudeAdapter, claudeProbeTimeouts, type SpawnFn } from '../adapters/claude/claude-adapter';
 import { SteerUnsupportedError, type Session, type MessageDraftDelta } from '../types';
 import { RuntimeDisposalFailure, RuntimeExecutionFailure, projectRuntimeBoundaryFailure } from '../runtime-failure';
 import { createEnvelope, decodeEnvelope, encodeEnvelope } from '@byok-sdk/protocol';
@@ -212,33 +212,91 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
     }
   });
 
-  it('cross-model review (Fix 4): detect() reports timeout within the deadline when the fake `--version` hangs', async () => {
+  it('detect() reports timeout at its own deadline when the fake `--version` hangs', async () => {
     const adapter = fakeClaudeAdapter();
-    const original = process.env.FAKE_CLAUDE_VERSION_HANG;
-    process.env.FAKE_CLAUDE_VERSION_HANG = '1';
+    claudeProbeTimeouts.override(adapter, { version: 200 });
+    vi.stubEnv('FAKE_CLAUDE_VERSION_HANG', '1');
     try {
-      const result = await adapter.detect();
-      expect(result.kind).toBe('timeout');
+      expect(await adapter.detect()).toEqual({ kind: 'timeout' });
     } finally {
-      if (original === undefined) delete process.env.FAKE_CLAUDE_VERSION_HANG;
-      else process.env.FAKE_CLAUDE_VERSION_HANG = original;
+      vi.unstubAllEnvs();
     }
-  }, 8000);
+  });
 
-  it('cross-model review (Fix 4): detect() fails closed (authPresent:false, present still true) within the timeout when the fake `auth status` hangs', async () => {
+  it('#2468: detect() reports timeout, not a sign-out, when `auth status --json` hangs past its deadline', async () => {
     const adapter = fakeClaudeAdapter();
-    const original = process.env.FAKE_CLAUDE_AUTH_HANG;
-    process.env.FAKE_CLAUDE_AUTH_HANG = '1';
+    claudeProbeTimeouts.override(adapter, { authStatus: 200 });
+    vi.stubEnv('FAKE_CLAUDE_AUTH_HANG', '1');
     try {
-      const result = await adapter.detect();
-      expect(result.kind).toBe('available');
-      if (result.kind !== 'available') throw new Error('expected available runtime');
-      expect(result.authPresent).toBe(false);
+      expect(await adapter.detect()).toEqual({ kind: 'timeout' });
     } finally {
-      if (original === undefined) delete process.env.FAKE_CLAUDE_AUTH_HANG;
-      else process.env.FAKE_CLAUDE_AUTH_HANG = original;
+      vi.unstubAllEnvs();
     }
-  }, 8000);
+  });
+
+  it('#2468: detect() reports timeout at the auth deadline while a grandchild holds the status pipes', async () => {
+    const adapter = fakeClaudeAdapter();
+    claudeProbeTimeouts.override(adapter, { authStatus: 1_000 });
+    const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-claude-grandchild-')), 'pid');
+    /** The fixture writes `<auth status pid> <grandchild pid>`, then exits. */
+    const readPids = async (): Promise<[number, number] | undefined> => {
+      const [parent, grandchild] = (await fs.readFile(pidFile, 'utf8').catch(() => '')).split(' ').map(Number);
+      return parent! > 0 && grandchild! > 0 ? [parent!, grandchild!] : undefined;
+    };
+    const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+    vi.stubEnv('FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE', pidFile);
+    // Freeze only the probe deadlines; the CLI, its grandchild and the pipes stay real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const pending = adapter.detect();
+      const settled = vi.fn();
+      void pending.then(settled);
+      // setTimeout is faked: wait on real I/O turns, bounded by the real clock.
+      const until = Date.now() + 10_000;
+      let pids = await readPids();
+      while ((pids === undefined || alive(pids[0])) && Date.now() < until) {
+        await new Promise(resolve => setImmediate(resolve));
+        pids = await readPids();
+      }
+      expect(pids).toBeDefined();
+      const [parent, grandchild] = pids!;
+      expect(alive(parent)).toBe(false);
+      expect(alive(grandchild)).toBe(true);
+      expect(settled).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await pending).toEqual({ kind: 'timeout' });
+      // The grandchild outlived the probe: the deadline, not its exit, ended the read.
+      expect(alive(grandchild)).toBe(true);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllEnvs();
+      const pids = await readPids();
+      if (pids !== undefined) try { process.kill(pids[1], 'SIGKILL'); } catch { /* already gone */ }
+      await fs.rm(path.dirname(pidFile), { recursive: true, force: true });
+    }
+  });
+
+  it('#2468: detect() reads the logged-out answer `auth status --json` gives with exit 1', async () => {
+    vi.stubEnv('FAKE_CLAUDE_AUTH_STATUS', JSON.stringify({ loggedIn: false }));
+    vi.stubEnv('FAKE_CLAUDE_AUTH_STATUS_EXIT', '1');
+    try {
+      expect(await fakeClaudeAdapter().detect()).toMatchObject({ kind: 'available', authPresent: false });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('#2468: a subscription launch whose login read times out is retryable, not SUBSCRIPTION_REQUIRED', async () => {
+    const spawnFn = vi.fn(() => { throw new Error('unexpected Claude session spawn'); });
+    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command: FIXTURE_PATH, source: 'path' }), spawnFn });
+    claudeProbeTimeouts.override(adapter, { authStatus: 200 });
+    const target = { lane: 'harness', harnessId: 'claude', selection: { mode: 'subscription', modelId: 'opus' } } as const;
+    const resources = await makeCtx({ ...process.env, FAKE_CLAUDE_AUTH_HANG: '1' });
+    await expect(startAdapter(adapter, { ...baseTask, target }, resources)).rejects.toMatchObject({
+      phase: 'start', retry: 'retryable', message: 'Claude login status did not answer before its deadline',
+    });
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
 
   it('descriptor advertises exactly what was empirically confirmed (no mid-turn steer, resume yes, confirm rejected)', () => {
     const adapter = fakeClaudeAdapter();

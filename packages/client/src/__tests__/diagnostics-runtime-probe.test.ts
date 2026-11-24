@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { probeRuntimes } from '../diagnostics/runtime-probe';
+import { RUNTIME_PROBE_TIMEOUT_MS, probeRuntimes } from '../diagnostics/runtime-probe';
 import { createRuntimeAdapters } from '../adapters/runtime-adapters';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import type { DaemonConfig } from '../daemon/create-daemon';
@@ -109,6 +109,17 @@ describe('diagnostics/runtime-probe: probeRuntimes', () => {
       expect(result[0]).not.toHaveProperty('reason');
       expect(adapter.detect).toHaveBeenCalledOnce();
     } finally { vi.useRealTimers(); }
+  });
+
+  it('#2468: the default deadline is 35 s (Claude\'s 10 s version + 25 s auth budgets) and aborts the signal detect() received', async () => {
+    expect(RUNTIME_PROBE_TIMEOUT_MS).toBe(35_000);
+    let received: AbortSignal | undefined;
+    const adapter = Object.assign(new StubRuntimeAdapter('claude'), {
+      detect: (signal?: AbortSignal) => { received = signal; return new Promise<never>(() => {}); },
+    });
+    const [result] = await probeRuntimes([adapter], { timeoutMs: 25 });
+    expect(result).toMatchObject({ outcome: 'timeout', present: false });
+    expect(received?.aborted).toBe(true);
   });
 
   it('does not parse a custom error message into a trusted reason or expose it', async () => {

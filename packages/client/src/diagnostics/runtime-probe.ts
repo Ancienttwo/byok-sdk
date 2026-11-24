@@ -2,7 +2,8 @@ import { observeRuntimeDetection, type RuntimeObservation } from '../runtime-det
 import { projectRuntimeObservationWithUpgrade } from '../runtime/runtime-releases.js';
 import type { RuntimeAdapter } from '../types.js';
 
-export const RUNTIME_PROBE_TIMEOUT_MS = 5_000;
+/** Covers Claude's worst case (10 s version + 25 s auth status, #2468), so a slow login read reports the adapter's own outcome. */
+export const RUNTIME_PROBE_TIMEOUT_MS = 35_000;
 const MAX_RUNTIME_ID_CHARS = 128;
 
 function boundedSingleLine(value: string, maxChars: number): string {
@@ -13,11 +14,15 @@ class RuntimeProbeTimeout extends Error {}
 
 async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number): ReturnType<RuntimeAdapter['detect']> {
   let timer: NodeJS.Timeout | undefined;
+  const controller = new AbortController();
   try {
     return await Promise.race([
-      observeRuntimeDetection(adapter),
+      observeRuntimeDetection(adapter, controller.signal),
       new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => reject(new RuntimeProbeTimeout()), timeoutMs);
+        timer = setTimeout(() => {
+          controller.abort();
+          reject(new RuntimeProbeTimeout());
+        }, timeoutMs);
         timer.unref?.();
       }),
     ]);
@@ -27,9 +32,10 @@ async function detectWithTimeout(adapter: RuntimeAdapter, timeoutMs: number): Re
 }
 
 /**
- * Fresh, parallel local observations. A custom adapter timeout is an observation
- * deadline only: detect() has no cancellation contract. Never expose arbitrary
- * adapter errors or interpret an old/malformed result as available.
+ * Fresh, parallel local observations. The deadline aborts the `AbortSignal`
+ * passed to `detect(signal)`; an adapter that ignores it is still observed as
+ * `timeout` at the deadline. Never expose arbitrary adapter errors or interpret
+ * an old/malformed result as available.
  */
 export async function probeRuntimes(
   adapters: readonly RuntimeAdapter[],
