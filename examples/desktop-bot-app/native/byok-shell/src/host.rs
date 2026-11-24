@@ -1,17 +1,25 @@
 //! Host child process supervisor, exponential backoff, clean stop authority, and 50 ms hint coalescing.
 
+use std::fmt;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use serde_json::Value;
 
-use crate::bridge::{BridgeClient, BridgeError, BridgeErrorCode, StopError, SupervisedHostState};
+use crate::bridge::{
+    BridgeClient, BridgeError, BridgeErrorCode, HostState, StopError, SupervisedHostState,
+};
 use crate::command::{HostCommandSpec, spawn_host_child};
 use crate::contract::BridgeContract;
+use crate::power::{
+    DEFAULT_KEEP_AWAKE_REASON, DEFAULT_KEEP_AWAKE_WHO, KeepAwakeBackend, KeepAwakeGuard,
+    PowerError, SystemKeepAwakeBackend,
+};
 
 type HintCallback = Box<dyn Fn() + Send + Sync>;
 type StateCallback = Arc<dyn Fn(SupervisedHostState) + Send + Sync>;
+type PowerErrorCallback = Arc<dyn Fn(PowerError) + Send + Sync>;
 
 /// Coalesces bursts of Host state pushes into a single trailing notification (`50ms` default).
 pub struct StateHintCoalescer {
@@ -112,7 +120,7 @@ impl Drop for StateHintCoalescer {
 }
 
 /// Configuration for [`HostSupervisor`].
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct HostSupervisorConfig {
     pub command: HostCommandSpec,
     pub contract: BridgeContract,
@@ -121,6 +129,28 @@ pub struct HostSupervisorConfig {
     pub backoff_reset: Duration,
     pub shutdown_grace: Duration,
     pub hint_window: Duration,
+    power_backend: Arc<dyn KeepAwakeBackend>,
+    on_power_error: PowerErrorCallback,
+    keep_awake_who: String,
+    keep_awake_reason: String,
+}
+
+impl fmt::Debug for HostSupervisorConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("HostSupervisorConfig")
+            .field("command", &self.command)
+            .field("contract", &self.contract)
+            .field("initial_backoff", &self.initial_backoff)
+            .field("max_backoff", &self.max_backoff)
+            .field("backoff_reset", &self.backoff_reset)
+            .field("shutdown_grace", &self.shutdown_grace)
+            .field("hint_window", &self.hint_window)
+            .field("power_backend", &"<power_backend>")
+            .field("on_power_error", &"<on_power_error>")
+            .field("keep_awake_who", &self.keep_awake_who)
+            .field("keep_awake_reason", &self.keep_awake_reason)
+            .finish()
+    }
 }
 
 impl HostSupervisorConfig {
@@ -134,7 +164,150 @@ impl HostSupervisorConfig {
             backoff_reset: Duration::from_secs(60),
             shutdown_grace: Duration::from_secs(10),
             hint_window: Duration::from_millis(50),
+            power_backend: Arc::new(SystemKeepAwakeBackend),
+            on_power_error: Arc::new(|_| {}),
+            keep_awake_who: DEFAULT_KEEP_AWAKE_WHO.to_owned(),
+            keep_awake_reason: DEFAULT_KEEP_AWAKE_REASON.to_owned(),
         }
+    }
+
+    /// Overrides the sleep-inhibition backend (defaults to [`SystemKeepAwakeBackend`]).
+    pub fn with_power_backend(mut self, backend: Arc<dyn KeepAwakeBackend>) -> Self {
+        self.power_backend = backend;
+        self
+    }
+
+    /// Registers an error observer invoked off-lock when acquiring OS sleep inhibition fails.
+    pub fn with_on_power_error<F>(mut self, on_error: F) -> Self
+    where
+        F: Fn(PowerError) + Send + Sync + 'static,
+    {
+        self.on_power_error = Arc::new(on_error);
+        self
+    }
+
+    /// Overrides the `who` and `reason` strings passed to the sleep-inhibition backend.
+    pub fn with_keep_awake_identity(
+        mut self,
+        who: impl Into<String>,
+        reason: impl Into<String>,
+    ) -> Self {
+        self.keep_awake_who = who.into();
+        self.keep_awake_reason = reason.into();
+        self
+    }
+}
+
+struct PowerControllerState {
+    closed_through: u64,
+    busy: bool,
+    transition_seq: u64,
+    guard: Option<Box<dyn KeepAwakeGuard>>,
+    last_error: Option<PowerError>,
+}
+
+struct KeepAwakeController {
+    backend: Arc<dyn KeepAwakeBackend>,
+    on_error: PowerErrorCallback,
+    who: String,
+    reason: String,
+    state: Mutex<PowerControllerState>,
+}
+
+impl KeepAwakeController {
+    fn new(
+        backend: Arc<dyn KeepAwakeBackend>,
+        on_error: PowerErrorCallback,
+        who: String,
+        reason: String,
+    ) -> Self {
+        Self {
+            backend,
+            on_error,
+            who,
+            reason,
+            state: Mutex::new(PowerControllerState {
+                closed_through: 0,
+                busy: false,
+                transition_seq: 0,
+                guard: None,
+                last_error: None,
+            }),
+        }
+    }
+
+    fn sync_for_run(&self, run_id: u64, want_busy: bool) {
+        let seq = {
+            let mut st = self.state.lock().expect("power controller lock poisoned");
+            if run_id <= st.closed_through {
+                return;
+            }
+            if want_busy {
+                if st.busy {
+                    return;
+                }
+                st.busy = true;
+                st.transition_seq = st.transition_seq.saturating_add(1);
+                st.transition_seq
+            } else {
+                if !st.busy && st.guard.is_none() {
+                    return;
+                }
+                st.busy = false;
+                st.transition_seq = st.transition_seq.saturating_add(1);
+                let old = st.guard.take();
+                drop(st);
+                drop(old);
+                return;
+            }
+        };
+
+        let result = self.backend.acquire(&self.who, &self.reason);
+        let mut drop_stale: Option<Box<dyn KeepAwakeGuard>> = None;
+        let mut notify_err: Option<PowerError> = None;
+        {
+            let mut st = self.state.lock().expect("power controller lock poisoned");
+            let still_current = run_id > st.closed_through && st.busy && st.transition_seq == seq;
+            match result {
+                Ok(guard) => {
+                    if still_current {
+                        drop_stale = st.guard.replace(guard);
+                        st.last_error = None;
+                    } else {
+                        drop_stale = Some(guard);
+                    }
+                }
+                Err(err) => {
+                    if still_current {
+                        st.last_error = Some(err.clone());
+                        notify_err = Some(err);
+                    }
+                }
+            }
+        }
+        drop(drop_stale);
+        if let Some(err) = notify_err {
+            (self.on_error)(err);
+        }
+    }
+
+    fn release_through(&self, epoch: u64) {
+        let old = {
+            let mut st = self.state.lock().expect("power controller lock poisoned");
+            st.closed_through = st.closed_through.max(epoch);
+            st.busy = false;
+            st.transition_seq = st.transition_seq.saturating_add(1);
+            st.guard.take()
+        };
+        drop(old);
+    }
+
+    fn last_error(&self) -> Option<PowerError> {
+        self.state
+            .lock()
+            .expect("power controller lock poisoned")
+            .last_error
+            .clone()
     }
 }
 
@@ -147,6 +320,7 @@ enum StopAuthority {
 }
 
 struct SupervisorState {
+    run_seq: u64,
     active_run: bool,
     paused: bool,
     stopping: bool,
@@ -164,9 +338,25 @@ struct SupervisorInner {
     cv: Condvar,
     on_state: StateCallback,
     coalescer: StateHintCoalescer,
+    power: KeepAwakeController,
 }
 
 impl SupervisorInner {
+    fn publish_host_state(&self, run_id: u64, host_state: HostState) {
+        let next: SupervisedHostState = host_state.into();
+        let run_active = {
+            let guard = self.state.lock().expect("supervisor lock poisoned");
+            guard.run_seq == run_id && guard.active_run && !guard.stopping && !guard.destroyed
+        };
+        let want_busy = run_active
+            && matches!(
+                next,
+                SupervisedHostState::Running { active_work, .. } if active_work > 0
+            );
+        self.power.sync_for_run(run_id, want_busy);
+        self.publish_state(next);
+    }
+
     fn publish_state(&self, next: SupervisedHostState) {
         {
             let mut guard = self.state.lock().expect("supervisor lock poisoned");
@@ -191,9 +381,16 @@ impl HostSupervisor {
         H: Fn() + Send + Sync + 'static,
     {
         let hint_window = config.hint_window;
+        let power = KeepAwakeController::new(
+            Arc::clone(&config.power_backend),
+            Arc::clone(&config.on_power_error),
+            config.keep_awake_who.clone(),
+            config.keep_awake_reason.clone(),
+        );
         let inner = Arc::new(SupervisorInner {
             config,
             state: Mutex::new(SupervisorState {
+                run_seq: 0,
                 active_run: false,
                 paused: true,
                 stopping: false,
@@ -207,6 +404,7 @@ impl HostSupervisor {
             cv: Condvar::new(),
             on_state: Arc::new(on_state),
             coalescer: StateHintCoalescer::new(hint_window, on_hint),
+            power,
         });
 
         let loop_inner = Arc::clone(&inner);
@@ -241,15 +439,16 @@ impl HostSupervisor {
 
     /// Restarts supervision after a failed stop or crash so the shell does not stay permanently stranded.
     pub fn restart(&self) {
-        let existing_client = {
+        let (existing_client, release_epoch) = {
             let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
             guard.stopping = true;
             guard.paused = true;
-            guard.client.take()
+            (guard.client.take(), guard.run_seq)
         };
         if let Some(client) = existing_client {
             let _ = client.shutdown_and_wait(self.inner.config.shutdown_grace);
         }
+        self.inner.power.release_through(release_epoch);
         let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
         guard.attempt = 0;
         guard.stopping = false;
@@ -266,6 +465,11 @@ impl HostSupervisor {
             .expect("supervisor lock poisoned")
             .last_state
             .clone()
+    }
+
+    /// Returns the most recent OS sleep-inhibition acquire failure recorded while active, if any.
+    pub fn last_power_error(&self) -> Option<PowerError> {
+        self.inner.power.last_error()
     }
 
     /// Forwards one renderer-allowlisted method (`status` or domain Host method) to the running Host.
@@ -337,7 +541,7 @@ impl HostSupervisor {
         let shutdown_grace = self.inner.config.shutdown_grace;
         let deadline = Instant::now() + shutdown_grace;
 
-        let client = {
+        let (client, mut release_epoch) = {
             let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
             guard.stopping = true;
             guard.paused = true;
@@ -347,6 +551,9 @@ impl HostSupervisor {
                 let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
                     let msg = "Host never finished hello before shutdown grace elapsed".to_owned();
                     guard.stop_authority = StopAuthority::Unclean(msg.clone());
+                    let release_epoch = guard.run_seq;
+                    drop(guard);
+                    self.inner.power.release_through(release_epoch);
                     return Err(StopError(msg));
                 };
                 let (next, _) = self
@@ -358,7 +565,7 @@ impl HostSupervisor {
             }
 
             if let Some(client) = guard.client.take() {
-                Some(client)
+                (client, guard.run_seq)
             } else {
                 // Wait briefly if supervisor loop is settling exit authority.
                 while guard.active_run {
@@ -372,23 +579,27 @@ impl HostSupervisor {
                         .expect("supervisor lock poisoned");
                     guard = next;
                 }
-                match &guard.stop_authority {
-                    StopAuthority::NeverStarted | StopAuthority::CleanExit => return Ok(()),
-                    StopAuthority::Unclean(reason) => return Err(StopError(reason.clone())),
+                let release_epoch = guard.run_seq;
+                let res = match &guard.stop_authority {
+                    StopAuthority::NeverStarted | StopAuthority::CleanExit => Ok(()),
+                    StopAuthority::Unclean(reason) => Err(StopError(reason.clone())),
                     StopAuthority::Running => {
                         let msg = "Host process exited without clean stop confirmation".to_owned();
                         guard.stop_authority = StopAuthority::Unclean(msg.clone());
-                        return Err(StopError(msg));
+                        Err(StopError(msg))
                     }
-                }
+                };
+                drop(guard);
+                self.inner.power.release_through(release_epoch);
+                return res;
             }
         };
 
-        let result = if let Some(client) = client {
-            let remaining = deadline
-                .checked_duration_since(Instant::now())
-                .unwrap_or(Duration::ZERO);
-            let res = client.shutdown_and_wait(remaining);
+        let remaining = deadline
+            .checked_duration_since(Instant::now())
+            .unwrap_or(Duration::ZERO);
+        let res = client.shutdown_and_wait(remaining);
+        let res = {
             let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
             while guard.active_run {
                 let (next, _) = self
@@ -398,6 +609,7 @@ impl HostSupervisor {
                     .expect("supervisor lock poisoned");
                 guard = next;
             }
+            release_epoch = release_epoch.max(guard.run_seq);
             match &res {
                 Ok(()) => {
                     guard.stop_authority = StopAuthority::CleanExit;
@@ -409,30 +621,36 @@ impl HostSupervisor {
                 }
             }
             res
-        } else {
-            Ok(())
         };
-
-        result
+        self.inner.power.release_through(release_epoch);
+        res
     }
 }
 
 impl Drop for HostSupervisor {
     fn drop(&mut self) {
-        let client = {
+        let (client, release_epoch) = {
             let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
             guard.destroyed = true;
             guard.stopping = true;
             guard.paused = true;
             self.inner.cv.notify_all();
-            guard.client.take()
+            (guard.client.take(), guard.run_seq)
         };
         if let Some(client) = client {
             let _ = client.shutdown_and_wait(Duration::from_millis(500));
         }
+        self.inner.power.release_through(release_epoch);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
+        let final_epoch = self
+            .inner
+            .state
+            .lock()
+            .expect("supervisor lock poisoned")
+            .run_seq;
+        self.inner.power.release_through(final_epoch);
     }
 }
 
@@ -451,6 +669,8 @@ fn supervisor_loop(inner: Arc<SupervisorInner>) {
         if guard.destroyed {
             return;
         }
+        guard.run_seq = guard.run_seq.saturating_add(1);
+        let run_id = guard.run_seq;
         guard.active_run = true;
         guard.connecting = true;
         guard.stop_authority = StopAuthority::Running;
@@ -474,7 +694,7 @@ fn supervisor_loop(inner: Arc<SupervisorInner>) {
                     expected_version,
                     Some(hello_timeout),
                     move |host_state| {
-                        state_inner.publish_state(host_state.into());
+                        state_inner.publish_host_state(run_id, host_state);
                     },
                 )
             });
@@ -496,6 +716,7 @@ fn supervisor_loop(inner: Arc<SupervisorInner>) {
 
                 if should_shutdown_immediately {
                     let res = client.shutdown_and_wait(inner.config.shutdown_grace);
+                    inner.power.release_through(run_id);
                     let mut guard = inner.state.lock().expect("supervisor lock poisoned");
                     guard.active_run = false;
                     guard.stop_authority = match res {
@@ -516,6 +737,7 @@ fn supervisor_loop(inner: Arc<SupervisorInner>) {
                     }
                 };
 
+                inner.power.release_through(run_id);
                 let was_stopping = {
                     let mut guard = inner.state.lock().expect("supervisor lock poisoned");
                     guard.client = None;
@@ -535,6 +757,7 @@ fn supervisor_loop(inner: Arc<SupervisorInner>) {
                 }
             }
             Err(err) => {
+                inner.power.release_through(run_id);
                 let is_mismatch = err.code == BridgeErrorCode::BridgeVersionMismatch;
                 let was_stopping = {
                     let mut guard = inner.state.lock().expect("supervisor lock poisoned");

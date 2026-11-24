@@ -29,7 +29,11 @@ pub use maintenance::{
     CustodyGuard, HandoverState, MaintenanceBusyError, MaintenanceGuard, MaintenanceLock,
     QuitOutcome,
 };
-pub use power::{KeepAwake, LinuxInhibitBackend, PowerError, select_linux_backend};
+pub use power::{
+    DEFAULT_KEEP_AWAKE_REASON, DEFAULT_KEEP_AWAKE_WHO, KeepAwake, KeepAwakeBackend,
+    KeepAwakeGuard, LinuxInhibitBackend, PowerError, SystemKeepAwakeBackend,
+    select_linux_backend,
+};
 pub use recovery::{
     MovedEntry, RecoveryError, RestoreSuccess, ShellView, SnapshotInfo, SnapshotVersionView,
     StartFreshSuccess, host_is_stopped, run_restore, run_snapshot, run_snapshot_status,

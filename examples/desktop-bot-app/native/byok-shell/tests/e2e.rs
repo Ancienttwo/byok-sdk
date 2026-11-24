@@ -4,15 +4,15 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
 use byok_shell::{
     BridgeClient, BridgeContract, BridgeErrorCode, FOREIGN_RUNTIME_VARIABLES, HostCommandSpec,
-    HostState, HostSupervisor, HostSupervisorConfig, KeepAwake, LinuxInhibitBackend,
-    LoginItemBackend, LoginItemView, MaintenanceBusyError, MaintenanceLock, PowerError,
-    QuitOutcome, SecretBytes, ShellRouteError, ShellRouter, SupervisedHostState,
+    HostState, HostSupervisor, HostSupervisorConfig, KeepAwake, KeepAwakeBackend, KeepAwakeGuard,
+    LinuxInhibitBackend, LoginItemBackend, LoginItemView, MaintenanceBusyError, MaintenanceLock,
+    PowerError, QuitOutcome, SecretBytes, ShellRouteError, ShellRouter, SupervisedHostState,
     UnsupportedLoginItemBackend, filter_env_pairs, list_from_custody, run_restore, run_snapshot,
     run_snapshot_status, select_linux_backend, shell_restore, shell_start_fresh, spawn_host_child,
     submit_to_custody,
@@ -1275,4 +1275,436 @@ fn live_ci_real_host_supervisor_lifecycle_and_kill_eof() {
         wait_until(Duration::from_secs(15), || !is_pid_alive(host_pid)),
         "real Host pid {host_pid} did not self-exit on stdin EOF after shell kill"
     );
+}
+
+#[test]
+fn supervisor_keep_awake_lifecycle_off_lock_and_typed_errors() {
+    #[derive(Default)]
+    struct PowerStats {
+        acquires: AtomicUsize,
+        releases: AtomicUsize,
+        active: AtomicUsize,
+    }
+
+    struct FakeGuard {
+        stats: Arc<PowerStats>,
+    }
+
+    impl Drop for FakeGuard {
+        fn drop(&mut self) {
+            self.stats.active.fetch_sub(1, Ordering::SeqCst);
+            self.stats.releases.fetch_add(1, Ordering::SeqCst);
+        }
+    }
+
+    impl KeepAwakeGuard for FakeGuard {}
+
+    enum BackendMode {
+        Allow,
+        BlockOnce(Arc<(Mutex<(bool, bool)>, Condvar)>),
+        Fail(PowerError),
+    }
+
+    struct FakePowerBackend {
+        stats: Arc<PowerStats>,
+        mode: BackendMode,
+    }
+
+    impl KeepAwakeBackend for FakePowerBackend {
+        fn acquire(&self, who: &str, reason: &str) -> Result<Box<dyn KeepAwakeGuard>, PowerError> {
+            assert!(!who.is_empty());
+            assert!(!reason.is_empty());
+            self.stats.acquires.fetch_add(1, Ordering::SeqCst);
+            match &self.mode {
+                BackendMode::Allow => {
+                    self.stats.active.fetch_add(1, Ordering::SeqCst);
+                    Ok(Box::new(FakeGuard {
+                        stats: Arc::clone(&self.stats),
+                    }))
+                }
+                BackendMode::BlockOnce(gate) => {
+                    let (lock, cv) = &**gate;
+                    let mut st = lock.lock().expect("block gate poisoned");
+                    st.0 = true;
+                    cv.notify_all();
+                    while !st.1 {
+                        st = cv.wait(st).expect("block gate poisoned");
+                    }
+                    drop(st);
+                    self.stats.active.fetch_add(1, Ordering::SeqCst);
+                    Ok(Box::new(FakeGuard {
+                        stats: Arc::clone(&self.stats),
+                    }))
+                }
+                BackendMode::Fail(err) => Err(err.clone()),
+            }
+        }
+    }
+
+    let contract = BridgeContract::load().expect("contract loads");
+
+    // 1. 0 -> 1 -> 2 -> 0 -> 1 -> crash release -> restarted 0 -> 1 -> stop() release.
+    {
+        let tmp = TempDir::new("byok-power-lifecycle");
+        let dir = tmp.path();
+        let script = format!(
+            r#"
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline';
+
+const dir = {dir};
+const crashMarker = path.join(dir, 'crashed-once');
+let currentWork = 0;
+let timer = null;
+
+function pushState(activeWork) {{
+  currentWork = activeWork;
+  process.stdout.write(JSON.stringify({{
+    event: 'state',
+    state: {{ state: 'running', pid: process.pid, activeWork }},
+  }}) + '\n');
+}}
+
+function pollSteps() {{
+  if (fs.existsSync(path.join(dir, 'step-busy1'))) {{
+    fs.unlinkSync(path.join(dir, 'step-busy1'));
+    pushState(1);
+  }} else if (fs.existsSync(path.join(dir, 'step-busy2'))) {{
+    fs.unlinkSync(path.join(dir, 'step-busy2'));
+    pushState(2);
+  }} else if (fs.existsSync(path.join(dir, 'step-idle0'))) {{
+    fs.unlinkSync(path.join(dir, 'step-idle0'));
+    pushState(0);
+  }} else if (fs.existsSync(path.join(dir, 'step-crash'))) {{
+    fs.unlinkSync(path.join(dir, 'step-crash'));
+    pushState(1);
+  }} else if (fs.existsSync(path.join(dir, 'do-exit'))) {{
+    fs.unlinkSync(path.join(dir, 'do-exit'));
+    fs.writeFileSync(crashMarker, '1');
+    if (timer) clearInterval(timer);
+    process.exit(1);
+  }}
+}}
+
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => {{
+  if (timer) clearInterval(timer);
+  process.exit(0);
+}});
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    if (fs.existsSync(crashMarker)) {{
+      pushState(1);
+    }} else {{
+      pushState(0);
+      timer = setInterval(pollSteps, 10);
+    }}
+    return;
+  }}
+  if (msg.method === 'status') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ state: 'running', pid: process.pid, activeWork: currentWork }} }}) + '\n');
+    return;
+  }}
+  if (msg.method === 'shutdown') {{
+    if (timer) clearInterval(timer);
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+            dir = serde_json::to_string(&dir.to_string_lossy().into_owned()).unwrap(),
+        );
+        let spec = write_node_script(dir, "power-lifecycle.mjs", &script);
+        let stats = Arc::new(PowerStats::default());
+        let backend = Arc::new(FakePowerBackend {
+            stats: Arc::clone(&stats),
+            mode: BackendMode::Allow,
+        });
+        let mut cfg = HostSupervisorConfig::new(spec, contract.clone()).with_power_backend(backend);
+        cfg.initial_backoff = Duration::from_millis(50);
+        cfg.max_backoff = Duration::from_millis(100);
+        let observed = Arc::new(Mutex::new(Vec::new()));
+        let observed_ref = Arc::clone(&observed);
+        let supervisor = HostSupervisor::new(
+            cfg,
+            move |st| observed_ref.lock().expect("obs poisoned").push(st),
+            || {},
+        );
+        supervisor.start();
+
+        assert!(wait_until(Duration::from_secs(5), || {
+            matches!(
+                supervisor.last_state(),
+                Some(SupervisedHostState::Running { active_work: 0, .. })
+            )
+        }));
+        assert_eq!(stats.acquires.load(Ordering::SeqCst), 0);
+        assert_eq!(stats.active.load(Ordering::SeqCst), 0);
+
+        fs::write(dir.join("step-busy1"), b"1").unwrap();
+        assert!(wait_until(Duration::from_secs(5), || {
+            matches!(
+                supervisor.last_state(),
+                Some(SupervisedHostState::Running { active_work: 1, .. })
+            )
+        }));
+        assert_eq!(stats.acquires.load(Ordering::SeqCst), 1);
+        assert_eq!(stats.active.load(Ordering::SeqCst), 1);
+
+        fs::write(dir.join("step-busy2"), b"1").unwrap();
+        assert!(wait_until(Duration::from_secs(5), || {
+            matches!(
+                supervisor.last_state(),
+                Some(SupervisedHostState::Running { active_work: 2, .. })
+            )
+        }));
+        assert_eq!(
+            stats.acquires.load(Ordering::SeqCst),
+            1,
+            "1 -> 2 must not re-acquire KeepAwake"
+        );
+        assert_eq!(stats.active.load(Ordering::SeqCst), 1);
+
+        fs::write(dir.join("step-idle0"), b"1").unwrap();
+        assert!(wait_until(Duration::from_secs(5), || {
+            matches!(
+                supervisor.last_state(),
+                Some(SupervisedHostState::Running { active_work: 0, .. })
+            )
+        }));
+        assert_eq!(stats.releases.load(Ordering::SeqCst), 1);
+        assert_eq!(stats.active.load(Ordering::SeqCst), 0);
+
+        // 0 -> 1 then crash without activeWork: 0 -> guard must release before Restarting.
+        fs::write(dir.join("step-crash"), b"1").unwrap();
+        assert!(wait_until(Duration::from_secs(5), || {
+            stats.acquires.load(Ordering::SeqCst) == 2 && stats.active.load(Ordering::SeqCst) == 1
+        }));
+        observed.lock().expect("obs poisoned").clear();
+        fs::write(dir.join("do-exit"), b"1").unwrap();
+
+        assert!(wait_until(Duration::from_secs(5), || {
+            observed
+                .lock()
+                .expect("obs poisoned")
+                .iter()
+                .any(|s| matches!(s, SupervisedHostState::Restarting { .. }))
+        }));
+        assert!(wait_until(Duration::from_secs(5), || {
+            stats.acquires.load(Ordering::SeqCst) == 3 && stats.active.load(Ordering::SeqCst) == 1
+        }));
+        assert!(
+            stats.releases.load(Ordering::SeqCst) >= 2,
+            "crash release must happen before Restarting re-acquire"
+        );
+
+        supervisor.stop().expect("clean stop releases active KeepAwake");
+        assert_eq!(stats.releases.load(Ordering::SeqCst), 3);
+        assert_eq!(stats.active.load(Ordering::SeqCst), 0);
+        assert_eq!(supervisor.last_power_error(), None);
+    }
+
+    // 2. Off-lock proof: slow/blocking OS acquire must never block last_state() or bridge RPCs.
+    {
+        let tmp = TempDir::new("byok-power-offlock");
+        let dir = tmp.path();
+        let script = format!(
+            r#"
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline';
+
+const dir = {dir};
+let currentWork = 0;
+const timer = setInterval(() => {{
+  if (fs.existsSync(path.join(dir, 'go-busy'))) {{
+    fs.unlinkSync(path.join(dir, 'go-busy'));
+    currentWork = 1;
+    process.stdout.write(JSON.stringify({{
+      event: 'state',
+      state: {{ state: 'running', pid: process.pid, activeWork: 1 }},
+    }}) + '\n');
+  }}
+}}, 10);
+
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => {{
+  clearInterval(timer);
+  process.exit(0);
+}});
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 0 }} }}) + '\n');
+    return;
+  }}
+  if (msg.method === 'status') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ state: 'running', pid: process.pid, activeWork: currentWork }} }}) + '\n');
+    return;
+  }}
+  if (msg.method === 'shutdown') {{
+    clearInterval(timer);
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+            dir = serde_json::to_string(&dir.to_string_lossy().into_owned()).unwrap(),
+        );
+        let spec = write_node_script(dir, "power-offlock.mjs", &script);
+        let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+        let stats = Arc::new(PowerStats::default());
+        let backend = Arc::new(FakePowerBackend {
+            stats: Arc::clone(&stats),
+            mode: BackendMode::BlockOnce(Arc::clone(&gate)),
+        });
+        let cfg = HostSupervisorConfig::new(spec, contract.clone()).with_power_backend(backend);
+        let supervisor = HostSupervisor::new(cfg, |_| {}, || {});
+        supervisor.start();
+
+        assert!(wait_until(Duration::from_secs(5), || {
+            matches!(
+                supervisor.last_state(),
+                Some(SupervisedHostState::Running { active_work: 0, .. })
+            )
+        }));
+
+        fs::write(dir.join("go-busy"), b"1").unwrap();
+        {
+            let (lock, cv) = &*gate;
+            let mut st = lock.lock().expect("block gate poisoned");
+            while !st.0 {
+                st = cv.wait(st).expect("block gate poisoned");
+            }
+        }
+
+        // While backend.acquire() is blocked, last_state() and bridge RPCs must not stall.
+        let prev = supervisor.last_state();
+        assert!(matches!(
+            prev,
+            Some(SupervisedHostState::Running { active_work: 0, .. })
+        ));
+        let status = supervisor
+            .call_renderer_forwarded("status", Value::Null)
+            .expect("bridge status RPC must proceed while acquire() is blocked");
+        assert_eq!(status.get("activeWork").and_then(Value::as_u64), Some(1));
+
+        {
+            let (lock, cv) = &*gate;
+            let mut st = lock.lock().expect("block gate poisoned");
+            st.1 = true;
+            cv.notify_all();
+        }
+        assert!(wait_until(Duration::from_secs(5), || {
+            stats.active.load(Ordering::SeqCst) == 1
+                && matches!(
+                    supervisor.last_state(),
+                    Some(SupervisedHostState::Running { active_work: 1, .. })
+                )
+        }));
+        drop(supervisor);
+        assert_eq!(stats.releases.load(Ordering::SeqCst), 1);
+        assert_eq!(stats.active.load(Ordering::SeqCst), 0);
+    }
+
+    // 3. Typed acquire failure delivers exact PowerError without disrupting Host supervision or repeating on 1 -> 2.
+    {
+        let tmp = TempDir::new("byok-power-error");
+        let dir = tmp.path();
+        let script = format!(
+            r#"
+import fs from 'node:fs';
+import path from 'node:path';
+import readline from 'node:readline';
+
+const dir = {dir};
+let currentWork = 1;
+const timer = setInterval(() => {{
+  if (fs.existsSync(path.join(dir, 'step-busy2'))) {{
+    fs.unlinkSync(path.join(dir, 'step-busy2'));
+    currentWork = 2;
+    process.stdout.write(JSON.stringify({{
+      event: 'state',
+      state: {{ state: 'running', pid: process.pid, activeWork: 2 }},
+    }}) + '\n');
+  }}
+}}, 10);
+
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => {{
+  clearInterval(timer);
+  process.exit(0);
+}});
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'running', pid: process.pid, activeWork: 1 }} }}) + '\n');
+    return;
+  }}
+  if (msg.method === 'status') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ state: 'running', pid: process.pid, activeWork: currentWork }} }}) + '\n');
+    return;
+  }}
+  if (msg.method === 'shutdown') {{
+    clearInterval(timer);
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+            dir = serde_json::to_string(&dir.to_string_lossy().into_owned()).unwrap(),
+        );
+        let spec = write_node_script(dir, "power-error.mjs", &script);
+        let expected_err = PowerError::Unavailable {
+            backend: "fake-dbus",
+            detail: "polkit denied".to_owned(),
+        };
+        let stats = Arc::new(PowerStats::default());
+        let backend = Arc::new(FakePowerBackend {
+            stats: Arc::clone(&stats),
+            mode: BackendMode::Fail(expected_err.clone()),
+        });
+        let seen_errors = Arc::new(Mutex::new(Vec::new()));
+        let seen_errors_ref = Arc::clone(&seen_errors);
+        let cfg = HostSupervisorConfig::new(spec, contract)
+            .with_power_backend(backend)
+            .with_on_power_error(move |err| {
+                seen_errors_ref.lock().expect("errors poisoned").push(err);
+            });
+        let supervisor = HostSupervisor::new(cfg, |_| {}, || {});
+        supervisor.start();
+
+        assert!(wait_until(Duration::from_secs(5), || {
+            matches!(
+                supervisor.last_state(),
+                Some(SupervisedHostState::Running { active_work: 1, .. })
+            )
+        }));
+        assert_eq!(supervisor.last_power_error(), Some(expected_err.clone()));
+        assert_eq!(
+            *seen_errors.lock().expect("errors poisoned"),
+            vec![expected_err]
+        );
+        assert_eq!(stats.acquires.load(Ordering::SeqCst), 1);
+
+        fs::write(dir.join("step-busy2"), b"1").unwrap();
+        assert!(wait_until(Duration::from_secs(5), || {
+            matches!(
+                supervisor.last_state(),
+                Some(SupervisedHostState::Running { active_work: 2, .. })
+            )
+        }));
+        assert_eq!(stats.acquires.load(Ordering::SeqCst), 1);
+        assert_eq!(seen_errors.lock().expect("errors poisoned").len(), 1);
+        let status = supervisor
+            .call_renderer_forwarded("status", Value::Null)
+            .expect("Host RPCs remain healthy after KeepAwake acquire failure");
+        assert_eq!(status.get("activeWork").and_then(Value::as_u64), Some(2));
+        supervisor.stop().expect("clean stop succeeds");
+    }
 }

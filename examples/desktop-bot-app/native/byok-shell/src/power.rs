@@ -97,6 +97,32 @@ impl KeepAwake {
     }
 }
 
+/// Default client identifier passed to OS sleep inhibitors for active Host supervision.
+pub const DEFAULT_KEEP_AWAKE_WHO: &str = "byok-desktop-bots";
+
+/// Default reason string passed to OS sleep inhibitors for active Host supervision.
+pub const DEFAULT_KEEP_AWAKE_REASON: &str = "Host has active work";
+
+/// Type-erased sleep-inhibition guard released on drop.
+pub trait KeepAwakeGuard: Send {}
+
+impl KeepAwakeGuard for KeepAwake {}
+
+/// Injectable OS sleep-inhibition backend (production uses [`SystemKeepAwakeBackend`]).
+pub trait KeepAwakeBackend: Send + Sync {
+    fn acquire(&self, who: &str, reason: &str) -> Result<Box<dyn KeepAwakeGuard>, PowerError>;
+}
+
+/// Production sleep-inhibition backend delegating to [`KeepAwake::acquire`].
+#[derive(Debug, Default, Clone, Copy)]
+pub struct SystemKeepAwakeBackend;
+
+impl KeepAwakeBackend for SystemKeepAwakeBackend {
+    fn acquire(&self, who: &str, reason: &str) -> Result<Box<dyn KeepAwakeGuard>, PowerError> {
+        KeepAwake::acquire(who, reason).map(|guard| Box::new(guard) as Box<dyn KeepAwakeGuard>)
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod macos_impl {
     use std::ffi::{CString, c_char, c_void};
@@ -424,5 +450,17 @@ mod linux_impl {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::KeepAwake;
+
+    fn assert_send<T: Send>() {}
+
+    #[test]
+    fn keep_awake_is_send_on_all_platforms() {
+        assert_send::<KeepAwake>();
     }
 }
