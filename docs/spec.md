@@ -1160,6 +1160,12 @@ for that generation at or after the resulting capability revision. A mid-proof
 disconnect resolves `{ status: 'disconnected', connectionGeneration }` immediately
 without carrying stale acknowledgments into the next generation; caller abort,
 `halted`, `crashed`, and `stopped` reject with the same errors as `whenOpen()`.
+A resolved `whenCapabilitiesSettled()` is not by itself proof that rollback
+protection is on. The Host treats it as on only when `status` is `settled` and
+`capabilities` includes `agent-memory-commit-on-success`. On `disconnected`, or
+on `settled` without the flag (`memoryBackend` `unproven`, `unsupported`,
+`refused` or `not-configured`), it either waits, bounded, for the next open and
+calls again, or declines the offer or takes an unprotected path on purpose.
 
 A halted or crashed run stops working at once; the Host does not have to call
 `stop()` for that. It takes no further `task.offer`, ends every active task

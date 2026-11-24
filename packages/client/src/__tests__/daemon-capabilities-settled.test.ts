@@ -108,7 +108,9 @@ vi.mock('node:child_process', async (importOriginal) => {
                 child.emit('exit', wire.closeExitCode, wire.closeExitSignal);
               }
             };
-            if (wire.hangOpen && request.op === 'open') wire.finishOpen = reply;
+            if (wire.hangOpen && request.op === 'open') {
+              wire.finishOpen = () => { wire.finishOpen = undefined; reply(); };
+            }
             else queueMicrotask(reply);
             done();
           },
@@ -148,6 +150,8 @@ const roots: string[] = [];
 const daemons: Daemon[] = [];
 const testServers: TestServer[] = [];
 const realServers: RealServerHandle[] = [];
+/** Unblockers for test-held HTTP gates; afterEach runs them before teardown. */
+const releaseGates: Array<() => void> = [];
 
 async function tmpDir(prefix: string): Promise<string> {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -208,21 +212,49 @@ beforeEach(async () => {
   wire.closeExitSignal = null;
 });
 
+const TEARDOWN_STEP_TIMEOUT_MS = 4_000;
+
+// Names the teardown step that hung or threw, instead of Vitest's generic hook timeout.
+async function teardownStep(stage: string, run: () => Promise<unknown>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`timed out after ${TEARDOWN_STEP_TIMEOUT_MS} ms`)),
+      TEARDOWN_STEP_TIMEOUT_MS,
+    );
+  });
+  try {
+    await Promise.race([run(), timedOut]);
+  } catch (error) {
+    throw new Error(`afterEach step failed/timed out: ${stage}`, { cause: error });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 afterEach(async () => {
+  vi.useRealTimers();
+  for (const release of releaseGates.splice(0)) release();
+  wire.finishBarrier?.();
+  wire.finishOpen?.();
   Object.defineProperty(process, 'platform', platformDescriptor);
   Object.defineProperty(process, 'arch', archDescriptor);
-  for (const daemon of daemons.splice(0).reverse()) {
-    await daemon.stop().catch(() => undefined);
+  const failures: unknown[] = [];
+  const step = (stage: string, run: () => Promise<unknown>) =>
+    teardownStep(stage, run).catch((error: unknown) => { failures.push(error); });
+  for (const [idx, daemon] of daemons.splice(0).reverse().entries()) {
+    await step(`daemon.stop() [idx=${idx}]`, () => daemon.stop().catch(() => undefined));
   }
-  for (const server of testServers.splice(0).reverse()) {
-    await server.close();
+  for (const [idx, server] of testServers.splice(0).reverse().entries()) {
+    await step(`testServer.close() [idx=${idx}]`, () => server.close());
   }
-  for (const server of realServers.splice(0).reverse()) {
-    await server.close();
+  for (const [idx, server] of realServers.splice(0).reverse().entries()) {
+    await step(`realServer.close() [idx=${idx}]`, () => server.close());
   }
   await Promise.all(roots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true })));
   vi.restoreAllMocks();
-});
+  if (failures.length > 0) throw failures[0];
+}, 20_000);
 
 async function startTestServer(): Promise<TestServer> {
   const server = await TestServer.start();
@@ -599,6 +631,7 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
         (envelope) => envelope.type === 'conn.hello'
           && envelope.payload.capabilities.includes(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY),
       );
+      releaseGates.push(releaseGen1Refresh);
       capabilities.push(AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY);
       revision = 2;
       cm.refreshHello();
@@ -610,7 +643,11 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
         )).toBe(true);
       }, { timeout: 5_000 });
 
-      // Disconnect gen 1 while the gen-1 refreshHello HTTP 200 is still held.
+      // Disconnect gen 1 while its refreshHello HTTP 200 is still held. The held
+      // hello is already past the send-failure guard; failing sends as well as
+      // polls keeps every reconnect handshake from opening until both clear.
+      const opens = () => states.filter((entry) => entry.state === 'open');
+      server.setFailMessagesSends(true);
       server.setFailEventsPolls(true);
       await vi.waitFor(() => expect(states.at(-1)?.state).toBe('connecting'), { timeout: 5_000 });
 
@@ -618,14 +655,14 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
       releaseGen1Refresh();
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(refreshedAcks).toEqual([]);
+      expect(opens()).toHaveLength(1);
 
-      // Reconnect: its own handshake opens with revision 2. While polls fail the
-      // manager may already cycle through open again (hello succeeds, poll 500s),
-      // so wait for an open after the failure lifts rather than counting opens.
-      const opensBeforeReconnect = states.filter((entry) => entry.state === 'open').length;
+      // Reconnect gen 2: its own handshake opens with revision 2.
+      server.setFailMessagesSends(false);
       server.setFailEventsPolls(false);
-      await vi.waitFor(() => expect(states.filter((entry) => entry.state === 'open').length).toBeGreaterThan(opensBeforeReconnect), { timeout: 5_000 });
-      expect(states.filter((entry) => entry.state === 'open').at(-1)?.accepted).toEqual({
+      await vi.waitFor(() => expect(opens()).toHaveLength(2), { timeout: 5_000 });
+      expect(refreshedAcks).toEqual([]);
+      expect(opens()[1]?.accepted).toEqual({
         revision: 2,
         capabilities: ['agent-home-contract', AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY],
       });
@@ -635,15 +672,16 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
     }
   });
 
-  it('waits for discovery-triggered refreshHello ACK (host-mcp-task-context) and reports failed discovery cleanly', async () => {
+  it('waits for the discovery-triggered refreshHello ACK (host-mcp-task-context)', async () => {
     const server = await startTestServer();
     vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    // Case A: deployment declares host-mcp-task-context + deviceAssertion configured -> waits for refreshed conn.hello ACK.
+    // Deployment declares host-mcp-task-context + deviceAssertion configured -> waits for refreshed conn.hello ACK.
     const releaseTaskContextAck = server.holdNextMessagesResponse(
       (envelope) => envelope.type === 'conn.hello'
         && envelope.payload.capabilities.includes(HOST_MCP_TASK_CONTEXT_CAPABILITY),
     );
+    releaseGates.push(releaseTaskContextAck);
     const withAssertion = await createPairedDaemon(server.url, 'code-task-ctx', {
       deviceAssertion: { audiences: ['test-aud'] },
     });
@@ -669,8 +707,11 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
     if (settledCtx.status !== 'settled') throw new Error('unreachable');
     expect(settledCtx.capabilities).toContain(HOST_MCP_TASK_CONTEXT_CAPABILITY);
     await withAssertion.daemon.stop();
+  });
 
-    // Case B: GET /byok/capabilities returns 404 -> settles with deploymentDiscovery: 'failed'.
+  it('settles with deploymentDiscovery failed when GET /byok/capabilities returns 404', async () => {
+    const server = await startTestServer();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     server.setCapabilityDeclaration(undefined);
     const failedDiscovery = await createPairedDaemon(server.url, 'code-disc-fail');
     await failedDiscovery.daemon.start();
@@ -691,6 +732,7 @@ describe('Daemon.whenCapabilitiesSettled (#2471)', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     let releaseHungDiscovery!: () => void;
     server.setCapabilityResponseGate(new Promise<void>((resolve) => { releaseHungDiscovery = resolve; }));
+    releaseGates.push(releaseHungDiscovery);
     const timedOutDiscovery = await createPairedDaemon(server.url, 'code-disc-timeout');
     try {
       await timedOutDiscovery.daemon.start();
