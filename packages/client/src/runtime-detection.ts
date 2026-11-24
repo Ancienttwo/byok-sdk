@@ -4,7 +4,6 @@ import type { RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.j
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
 import type { ExecutionTarget, RuntimeId } from '@byok-sdk/protocol';
 import { SERVICE_ENVIRONMENT_UNAVAILABLE_CODES, type ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
-import { admissionDetect } from './adapters/detect-outcome.js';
 import { RUNTIME_DETECTION_FAILURE_KINDS, type RuntimeAdapter, type RuntimeAdapterDescriptor, type RuntimeDetectResult, type RuntimeDetectionRefusalReason, type RuntimeExecutableSource, type RuntimeVersionVerdict } from './types.js';
 
 /** How one restart changed an installed runtime's version token (#1103 §2.6). */
@@ -307,6 +306,25 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
  */
 export async function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult> {
   return observeDetection(adapter, detectSignal => adapter.detect(detectSignal), signal);
+}
+
+type AdmissionDetect = (signal?: AbortSignal) => Promise<RuntimeDetectResult>;
+const admissionDetects = new WeakMap<RuntimeAdapter, { readonly protoDetect: RuntimeAdapter['detect']; readonly detect: AdmissionDetect }>();
+
+/**
+ * A built-in adapter's detection for task admission, which never reads
+ * `authPresent` (#2468): it skips the login probe, so one offer runs the slow
+ * login read only once, at launch. `protoDetect` is the class's own `detect`;
+ * admission uses this entry only while the instance still has it, so a spy,
+ * an assigned `detect` or a subclass override keeps its own path.
+ */
+export function registerAdmissionDetect(adapter: RuntimeAdapter, protoDetect: RuntimeAdapter['detect'], detect: AdmissionDetect): void {
+  admissionDetects.set(adapter, { protoDetect, detect });
+}
+
+function admissionDetect(adapter: RuntimeAdapter): AdmissionDetect | undefined {
+  const entry = admissionDetects.get(adapter);
+  return entry !== undefined && adapter.detect === entry.protoDetect ? entry.detect : undefined;
 }
 
 /** {@link observeRuntimeDetection} for task admission: a built-in adapter may skip facts admission never reads (`registerAdmissionDetect`). */

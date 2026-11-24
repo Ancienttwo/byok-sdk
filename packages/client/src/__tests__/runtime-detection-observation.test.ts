@@ -261,16 +261,20 @@ describe.skipIf(process.platform === 'win32')('observeAdmissionDetection (#2468)
   it('skips the built-in login probe, and still routes a replaced detect() through the replacement', async () => {
     const log = path.join(await directory(), 'auth.log');
     vi.stubEnv('AUTH_LOG', log);
-    const command = await executable(authProbe);
-    const adapter = new ClaudeAdapter({ resolveBin: () => ({ command, source: 'env' }) });
-    const admitted = await observeAdmissionDetection(adapter);
-    expect(admitted).toMatchObject({ kind: 'available', version: 'fixture-v1' });
-    expect(admitted).not.toHaveProperty('authPresent');
-    await expect(fs.readFile(log, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
-    const replaced = vi.spyOn(adapter, 'detect');
-    expect(await observeAdmissionDetection(adapter)).toMatchObject({ kind: 'available', authPresent: true });
-    expect(replaced).toHaveBeenCalledOnce();
-    expect(await fs.readFile(log, 'utf8')).toBe('auth\n');
+    try {
+      const command = await executable(authProbe);
+      const adapter = new ClaudeAdapter({ resolveBin: () => ({ command, source: 'env' }) });
+      const admitted = await observeAdmissionDetection(adapter);
+      expect(admitted).toMatchObject({ kind: 'available', version: 'fixture-v1' });
+      expect(admitted).not.toHaveProperty('authPresent');
+      await expect(fs.readFile(log, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      const replaced = vi.spyOn(adapter, 'detect');
+      expect(await observeAdmissionDetection(adapter)).toMatchObject({ kind: 'available', authPresent: true });
+      expect(replaced).toHaveBeenCalledOnce();
+      expect(await fs.readFile(log, 'utf8')).toBe('auth\n');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

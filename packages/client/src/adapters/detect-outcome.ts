@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { RuntimeEnvironmentUnavailableError } from '../runtime/environment.js';
-import type { RuntimeAdapter, RuntimeDetectResult } from '../types.js';
+import type { RuntimeDetectResult } from '../types.js';
 
 type ProbeFailure = Exclude<RuntimeDetectResult, { kind: 'available' }>;
 type VersionProbeResult = ProbeFailure | { kind: 'available'; stdout: string; stderr: string };
@@ -99,25 +99,6 @@ export async function probeRuntimeVersion(command: string, timeoutMs: number, en
     case 'nonzero': return { kind: 'probe-failed' };
     case 'aborted': throw outcome.reason;
   }
-}
-
-type AdmissionDetect = (signal?: AbortSignal) => Promise<RuntimeDetectResult>;
-const admissionDetects = new WeakMap<RuntimeAdapter, { readonly protoDetect: RuntimeAdapter['detect']; readonly detect: AdmissionDetect }>();
-
-/**
- * A built-in adapter's detection for task admission, which never reads
- * `authPresent` (#2468): it skips the login probe, so one offer runs the slow
- * login read only once, at launch. `protoDetect` is the class's own `detect`;
- * admission uses this entry only while the instance still has it, so a spy,
- * an assigned `detect` or a subclass override keeps its own path.
- */
-export function registerAdmissionDetect(adapter: RuntimeAdapter, protoDetect: RuntimeAdapter['detect'], detect: AdmissionDetect): void {
-  admissionDetects.set(adapter, { protoDetect, detect });
-}
-
-export function admissionDetect(adapter: RuntimeAdapter): AdmissionDetect | undefined {
-  const entry = admissionDetects.get(adapter);
-  return entry !== undefined && adapter.detect === entry.protoDetect ? entry.detect : undefined;
 }
 
 /**

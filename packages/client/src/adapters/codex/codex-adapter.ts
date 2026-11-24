@@ -39,7 +39,8 @@ import {
   isRuntimeExecutionFailure,
 } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
-import { classifyDetectError, probeRuntimeVersion, probeTimeouts, registerAdmissionDetect, runDetectCommand } from '../detect-outcome.js';
+import { classifyDetectError, probeRuntimeVersion, probeTimeouts, runDetectCommand } from '../detect-outcome.js';
+import { registerAdmissionDetect } from '../../runtime-detection.js';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { withoutProviderCredentials } from '../provider-credential-environment.js';
