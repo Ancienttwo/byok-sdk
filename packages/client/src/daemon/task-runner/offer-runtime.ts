@@ -1,7 +1,7 @@
 // `TaskRunner` members that select the runtime adapter and prepare its
 // operation for an offer (see ./support.ts for how a member module runs).
 import { awaitAdmission } from '../admission-wait.js';
-import { detectedRuntimeCapabilities, observeRuntimeDetection } from '../../runtime-detection.js';
+import { detectedRuntimeCapabilities, observeAdmissionDetection } from '../../runtime-detection.js';
 import { AGENT_USER_CONTEXT_WINDOWS_REMEDY, runtimeUnavailableForDetection, runtimeUnavailableRetryable } from '../../runtime-unavailable.js';
 import { harnessSelectionNeedsModel, harnessSupportsTarget, type ExecutionTarget } from '@byok-sdk/protocol';
 import { freezeRuntimeAdapterDescriptor, type RuntimeAdapter, type RuntimeAdapterDescriptor } from '../../types.js';
@@ -378,7 +378,7 @@ export async function pickAdapter(
         retryable: false,
       };
     }
-    const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
+    const detected = await awaitAdmission(() => observeAdmissionDetection(adapter, signal), signal);
     // A Host-configured block is the one diagnostic verdict that changes
     // admission (#1103): decline this runtime non-retryably before claim.
     if (detected.kind === 'available' && detected.versionVerdict?.state === 'block') {
@@ -431,7 +431,7 @@ export async function pickAdapter(
     const rows = searchExposure ? searchCandidates(descriptor) : [];
     if ((searchExposure && rows.length === 0) || unmetRequirements(descriptor, requirements).length > 0) continue;
     capabilityEligible += 1;
-    const detected = await awaitAdmission(() => observeRuntimeDetection(adapter, signal), signal);
+    const detected = await awaitAdmission(() => observeAdmissionDetection(adapter, signal), signal);
     // Auto selection skips a blocked candidate and keeps the candidate order.
     if (detected.kind !== 'available' || detected.versionVerdict?.state === 'block'
       || !this['deps'].advertisedHarnesses().some(harness => harness.id === descriptor.id && harnessSupportsTarget(harness, target))) continue;

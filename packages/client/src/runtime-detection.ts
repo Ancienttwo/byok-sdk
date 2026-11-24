@@ -305,11 +305,42 @@ export function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult
  * platform outside `descriptor.platforms` is refused before `detect()` runs.
  */
 export async function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult> {
+  return observeDetection(adapter, detectSignal => adapter.detect(detectSignal), signal);
+}
+
+type AdmissionDetect = (signal?: AbortSignal) => Promise<RuntimeDetectResult>;
+const admissionDetects = new WeakMap<RuntimeAdapter, { readonly protoDetect: RuntimeAdapter['detect']; readonly detect: AdmissionDetect }>();
+
+/**
+ * A built-in adapter's detection for task admission, which never reads
+ * `authPresent` (#2468): it skips the login probe, so one offer runs the slow
+ * login read only once, at launch. `protoDetect` is the class's own `detect`;
+ * admission uses this entry only while the instance still has it, so a spy,
+ * an assigned `detect` or a subclass override keeps its own path.
+ */
+export function registerAdmissionDetect(adapter: RuntimeAdapter, protoDetect: RuntimeAdapter['detect'], detect: AdmissionDetect): void {
+  admissionDetects.set(adapter, { protoDetect, detect });
+}
+
+function admissionDetect(adapter: RuntimeAdapter): AdmissionDetect | undefined {
+  const entry = admissionDetects.get(adapter);
+  return entry !== undefined && adapter.detect === entry.protoDetect ? entry.detect : undefined;
+}
+
+/** {@link observeRuntimeDetection} for task admission: a built-in adapter may skip facts admission never reads (`registerAdmissionDetect`). */
+export async function observeAdmissionDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult> {
+  return observeDetection(adapter, detectSignal => {
+    const builtIn = admissionDetect(adapter);
+    return builtIn === undefined ? adapter.detect(detectSignal) : builtIn(detectSignal);
+  }, signal);
+}
+
+async function observeDetection(adapter: RuntimeAdapter, detect: (signal?: AbortSignal) => Promise<RuntimeDetectResult>, signal: AbortSignal | undefined): Promise<RuntimeDetectResult> {
   const platforms = adapter.descriptor.platforms;
   if (platforms !== undefined && !platforms.includes(process.platform)) {
     return validateRuntimeDetectResult({ kind: 'refused', reason: 'platform_unsupported' });
   }
-  return validateRuntimeDetectResult(await adapter.detect(signal));
+  return validateRuntimeDetectResult(await detect(signal));
 }
 
 /** Whether `id` is a frozen wire runtime id. Every other adapter id is selected by a `harness` target. */

@@ -2,13 +2,14 @@ import { testRuntimeEnvironment } from './fixtures/runtime-env';
 import { freshTestAgentRef, testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from "./fixtures/execution-scratch";
 import { promises as fs } from 'node:fs';
+import { spawn as realSpawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createEnvelope } from '@byok-sdk/protocol';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
-import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
+import { ClaudeAdapter, claudeProbeTimeouts, type SpawnFn } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { OpenCodeAdapter } from '../adapters/opencode/opencode-adapter';
 import { createDaemonWithAdapters, type Daemon, type DaemonConfig } from '../daemon/create-daemon';
@@ -169,6 +170,76 @@ describe('TaskRunner.pickAdapter — runtime selection + capability matching (M5
     expect(declined.payload, JSON.stringify(declined.payload)).toMatchObject({ code: 'invalid_request', retryable: false });
     expect(server.received.some(envelope => envelope.type === 'task.claim' && envelope.task_id === taskId)).toBe(false);
   });
+
+  /**
+   * A real built-in adapter on its fake CLI. `environment` is read per call:
+   * tests fill it after `setup()`, so the daemon's startup observation (the
+   * full `detect()`) runs on the plain fixture and only the offer sees the toggles.
+   */
+  function fakeRuntime<T extends ClaudeAdapter | CodexAdapter>(adapter: T, environment: Record<string, string>): T {
+    const runtimeEnvironment = testRuntimeEnvironment();
+    // Both adapters share `runtimeEnvironment`'s signature; spyOn cannot resolve it through the generic.
+    vi.spyOn(adapter as ClaudeAdapter, 'runtimeEnvironment').mockImplementation(async () => ({ ...runtimeEnvironment, env: { ...runtimeEnvironment.env, ...environment } }));
+    return adapter;
+  }
+  const fakeBin = (id: 'claude' | 'codex') => () => ({ command: fileURLToPath(new URL(`./fixtures/fake-${id}.mjs`, import.meta.url)), source: 'env' as const });
+  const subscriptionOffer = (id: 'claude' | 'codex', taskId: string) => createEnvelope('task.offer', {
+    target: { lane: 'harness', harnessId: id, selection: { mode: 'subscription', modelId: 'fixture-model' } },
+    agentRef: freshTestAgentRef(), instruction: 'x', ...FRESH_OFFER,
+  }, { taskId, seq: server.nextSeq() });
+
+  it('#2468: a slow Claude subscription login is read once, in its launch context, within the startup deadline', async () => {
+    // 30 s startup / 18 s login / 25 s cap, scaled: one read fits, a second would not.
+    const log = path.join(await tmpDir('byok-claude-auth-log-'), 'auth.jsonl');
+    const spawnCwds: string[] = [];
+    const spawnFn = ((command: string, args: string[], options: { cwd?: string }) => {
+      spawnCwds.push(String(options.cwd));
+      return realSpawn(command, args, options);
+    }) as unknown as SpawnFn;
+    const environment: Record<string, string> = {};
+    const adapter = fakeRuntime(new ClaudeAdapter({ resolveBin: fakeBin('claude'), spawnFn }), environment);
+    claudeProbeTimeouts.override(adapter, { authStatus: 3_400 });
+    await setup([adapter], { startupTimeoutMs: 4_000 });
+    Object.assign(environment, { FAKE_CLAUDE_AUTH_DELAY_MS: '2200', FAKE_CLAUDE_AUTH_LOG_FILE: log });
+    const taskId = 'claude-slow-login';
+    server.send(subscriptionOffer('claude', taskId));
+    await server.waitFor(e => e.type === 'task.claim' && e.task_id === taskId);
+    await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
+    await server.waitFor(e => e.type === 'task.complete' && e.task_id === taskId);
+    expect(server.received.some(e => (e.type === 'task.decline' || e.type === 'task.fail') && e.task_id === taskId)).toBe(false);
+    const reads = (await fs.readFile(log, 'utf8')).trim().split('\n').map(line => JSON.parse(line) as { cwd: string });
+    expect(reads).toHaveLength(1);
+    expect(spawnCwds).toHaveLength(1);
+    expect(await fs.realpath(reads[0]!.cwd)).toBe(await fs.realpath(spawnCwds[0]!));
+  }, 15_000);
+
+  it('#2468: a Claude subscription login past its deadline declines retryably before claim', async () => {
+    const spawnFn = vi.fn(() => { throw new Error('unexpected Claude session spawn'); });
+    const environment: Record<string, string> = {};
+    const adapter = fakeRuntime(new ClaudeAdapter({ resolveBin: fakeBin('claude'), spawnFn }), environment);
+    claudeProbeTimeouts.override(adapter, { authStatus: 200 });
+    await setup([adapter]);
+    environment.FAKE_CLAUDE_AUTH_HANG = '1';
+    const taskId = 'claude-login-timeout';
+    server.send(subscriptionOffer('claude', taskId));
+    const declined = await server.waitFor(e => e.type === 'task.decline' && e.task_id === taskId);
+    expect(declined.payload).toMatchObject({ retryable: true });
+    expect(server.received.some(e => e.type === 'task.claim' && e.task_id === taskId)).toBe(false);
+    expect(spawnFn).not.toHaveBeenCalled();
+  });
+
+  it('#2468: Codex subscription admission skips `login status` and confirms the account at launch', async () => {
+    // A hung `login status` would hold admission for its 25 s cap, past this startup deadline.
+    const environment: Record<string, string> = {};
+    const adapter = fakeRuntime(new CodexAdapter({ resolveBin: fakeBin('codex') }), environment);
+    await setup([adapter], { startupTimeoutMs: 8_000 });
+    environment.FAKE_CODEX_LOGIN_HANG = '1';
+    const taskId = 'codex-login-hang';
+    server.send(subscriptionOffer('codex', taskId));
+    await server.waitFor(e => e.type === 'task.started' && e.task_id === taskId);
+    await server.waitFor(e => e.type === 'task.complete' && e.task_id === taskId);
+    expect(server.received.some(e => (e.type === 'task.decline' || e.type === 'task.fail') && e.task_id === taskId)).toBe(false);
+  }, 15_000);
 
   it('declines an undeclared dispatch selection before preparing or claiming', async () => {
     const base = new StubRuntimeAdapter('claude');

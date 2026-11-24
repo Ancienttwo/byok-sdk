@@ -27,13 +27,22 @@
 //   FAKE_CLAUDE_VERSION=<text>          -> overrides `--version` output.
 //   FAKE_CLAUDE_AUTH_STATUS=<json>      -> overrides `auth status --json` output.
 //   FAKE_CLAUDE_AUTH_STATUS_FAIL=1      -> `auth status --json` exits 1 with no stdout.
+//   FAKE_CLAUDE_AUTH_STATUS_EXIT=<n>    -> `auth status --json` exit code after
+//                                          its stdout (the CLI exits 1 when
+//                                          logged out).
+//   FAKE_CLAUDE_AUTH_DELAY_MS=<ms>      -> `auth status --json` answers after <ms>.
+//   FAKE_CLAUDE_AUTH_LOG_FILE=<path>    -> `auth status --json` appends
+//                                          `{"cwd":...}` per run to <path>.
+//   FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE=<path>
+//                                       -> `auth status --json` leaves a
+//                                          detached grandchild holding stdout
+//                                          and stderr open, writes
+//                                          `<own pid> <grandchild pid>` to
+//                                          <path>, and exits with no output.
 //   FAKE_CLAUDE_VERSION_HANG=1          -> `claude --version` never responds
 //                                          at all (no stdout, no exit) —
-//                                          cross-model review finding (Fix
-//                                          4): proves claude-adapter.ts's
-//                                          own DETECT_TIMEOUT_MS actually
-//                                          bounds detect() instead of
-//                                          hanging it forever.
+//                                          proves claude-adapter.ts's own
+//                                          version deadline bounds detect().
 //   FAKE_CLAUDE_AUTH_HANG=1             -> `claude auth status --json` never
 //                                          responds at all — same Fix 4
 //                                          rationale as FAKE_CLAUDE_VERSION_HANG.
@@ -377,9 +386,17 @@ function runProbeOrTurnFlow() {
   }
 
   if (argv[0] === 'auth' && argv[1] === 'status' && argv[2] === '--json') {
+    if (process.env.FAKE_CLAUDE_AUTH_LOG_FILE) appendFileSync(process.env.FAKE_CLAUDE_AUTH_LOG_FILE, JSON.stringify({ cwd: process.cwd() }) + '\n');
     if (process.env.FAKE_CLAUDE_AUTH_STATUS_FAIL === '1') {
       process.stderr.write('error: not logged in\n');
       process.exit(1);
+    }
+    const grandchildPidFile = process.env.FAKE_CLAUDE_AUTH_GRANDCHILD_PID_FILE;
+    if (grandchildPidFile) {
+      const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
+      writeFileSync(grandchildPidFile, `${process.pid} ${grandchild.pid}`);
+      grandchild.unref();
+      process.exit(0);
     }
     const body =
       process.env.FAKE_CLAUDE_AUTH_STATUS ??
@@ -392,8 +409,10 @@ function runProbeOrTurnFlow() {
         orgName: "fake's Organization",
         subscriptionType: 'max',
       });
-    process.stdout.write(`${body}\n`);
-    process.exit(0);
+    setTimeout(() => {
+      process.stdout.write(`${body}\n`, () => process.exit(Number(process.env.FAKE_CLAUDE_AUTH_STATUS_EXIT ?? 0)));
+    }, Number(process.env.FAKE_CLAUDE_AUTH_DELAY_MS ?? 0));
+    return;
   }
 
   if (argv.includes('--version')) {
