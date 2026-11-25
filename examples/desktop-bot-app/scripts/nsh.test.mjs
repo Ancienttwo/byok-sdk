@@ -159,6 +159,7 @@ test('verifyBundleSpecifiers rejects forbidden import, require and dynamic-impor
   assert.throws(() => verifyBundleSpecifiers('   '), /empty/i);
   for (const code of [
     'import{version as v}from"react";',
+    'import x from"@byok-sdk/client";',
     'export*from"@byok-sdk/server/node";',
     'import"node:path";',
     'const fs=require("fs");',
