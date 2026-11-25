@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import test from 'node:test';
@@ -429,8 +429,8 @@ test('desktop CI workflow runs the full 3-OS S2.5 NSH verification and test lane
 
 test('verifyTrayAssetsProjection matches authoritative assets/tray byte-for-byte and rejects drift', () => {
   assert.deepStrictEqual(verifyTrayAssetsProjection(), {
-    count: 3,
-    files: ['tray.png', 'trayTemplate.png', 'trayTemplate@2x.png'],
+    count: 4,
+    files: ['tray.png', 'trayTemplate.png', 'trayTemplate.svg', 'trayTemplate@2x.png'],
   });
 
   const dir = mkdtempSync(join(tmpdir(), 'byok-tray-projection-test-'));
@@ -450,6 +450,15 @@ test('verifyTrayAssetsProjection matches authoritative assets/tray byte-for-byte
 
     rmSync(join(targetDir, 'extra.png'));
     writeFileSync(join(targetDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 9]));
+    assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /Tray asset projection drift for trayTemplate\.png/);
+
+    // A target-only symlink is an extra name; a symlink under a matched name is compared by the bytes it reaches.
+    writeFileSync(join(targetDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 8]));
+    symlinkSync('trayTemplate.png', join(targetDir, 'trayTemplate@3x.png'));
+    assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /file list diverges/i);
+    rmSync(join(targetDir, 'trayTemplate@3x.png'));
+    rmSync(join(targetDir, 'trayTemplate.png'));
+    symlinkSync('tray.png', join(targetDir, 'trayTemplate.png'));
     assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /Tray asset projection drift for trayTemplate\.png/);
   } finally {
     rmSync(dir, { recursive: true, force: true });

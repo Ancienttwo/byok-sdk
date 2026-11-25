@@ -8,7 +8,7 @@ import {
 } from '@byok-sdk/keys/model-route';
 import { useConversation } from '../conversation/use-conversation.ts';
 import './keys.css';
-import { refusalOf, runLocked, storedProfile, submitModelRoute, submitReplaceSecret, type Refusal, type SubmitOutcome } from './submit.ts';
+import { refusalOf, runLocked, storedProfile, submitModelRoute, submitReplaceSecret, type Refusal, type SubmitOutcome } from '../../keys/submit.ts';
 
 const ERROR_COPY: Readonly<Record<ModelRouteErrorCode, string>> = {
   required: 'Required.',

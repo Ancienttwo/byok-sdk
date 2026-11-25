@@ -200,6 +200,18 @@ describe("BYOK NSH Foundations Gallery", () => {
     await app.waitFor("id:keys-list-refusal");
     expect(calls).toEqual(["start"]);
 
+    // A valid draft still cannot be saved: keys.submit would only refuse with host_exited.
+    await app.type("id:keys-field-profile_ref", "zai-ui");
+    await app.type("id:keys-field-display_name", "ZAI UI");
+    await app.press("id:keys-field-provider_kind");
+    await app.press("text:Z.AI");
+    await app.waitFor("id:keys-field-model");
+    await app.type("id:keys-field-model", "glm-4.7");
+    await app.type("id:keys-field-secret", "sk-failed-start-secret");
+    expect(app.enabled("id:keys-save-btn")).toBe(false);
+    expect(app.enabled("id:keys-reload-btn")).toBe(true);
+    expect(calls).toEqual(["start"]);
+
     await app.press("id:keys-reload-btn");
     await app.waitUntil(() => calls.length === 2);
     await app.waitFor("id:keys-list-refusal");

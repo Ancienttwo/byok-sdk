@@ -56,6 +56,7 @@ function shellModules(
 
 describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
   test("sidebar switches workspace sections with zero hidden trees and isolates Gallery preview", async () => {
+    let k8ViewCalls = 0;
     const app = await open("../../../App.tsx", {
       platform: "macos",
       width: 1200,
@@ -65,6 +66,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
           return [makeStoredStatus()];
         }
         if (method === "k8.view") {
+          k8ViewCalls += 1;
           return {
             bots: [],
             roles: [],
@@ -122,6 +124,8 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     expect(app.shows("id:shell-failed-panel")).toBe(false);
     expect(app.shows("id:keys-bot-model-zai/glm-4.7")).toBe(true);
     expect(app.enabled("id:keys-models-refresh-btn")).toBe(true);
+    // One store-owned k8.view load: remounting the Keys section neither reloads nor drops it.
+    expect(k8ViewCalls).toBe(1);
   });
 
   test("close-to-tray hides main window and preserves active keys.submit lock across reopen", async () => {
@@ -309,6 +313,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
 
     const confirming = app.press("id:recovery-restore-confirm");
     await app.waitUntil(() => restoreCalls === 1 && !app.enabled("id:sidebar-restart-host"));
+    await app.keyboard.press("mod+shift+r");
     expect(restartCalls).toBe(0);
 
     rejectRestore(new Error("Restore snapshot corrupt"));
@@ -349,10 +354,17 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     expect(app.shows("text:Host exited with status 42")).toBe(true);
     expect(app.shows("id:sidebar-restart-host")).toBe(true);
     expect(calls.includes("shell.state")).toBe(false);
+    // The exited Host cannot export diagnostics; the card points to Restart Host instead.
+    expect(app.shows("id:failed-export-diagnostics")).toBe(false);
+    expect(app.shows("id:shell-failed-hint")).toBe(true);
 
     await app.press("id:recovery-restart-host");
     await app.waitUntil(() => restartCalls === 1);
     expect(restartCalls).toBe(1);
+
+    // The application menu's Restart Host shortcut reaches the same guarded store command.
+    await app.keyboard.press("mod+shift+r");
+    await app.waitUntil(() => restartCalls === 2);
   });
 
   test("LoginItemControl lazy-loads on Settings and toggles OS setting", async () => {

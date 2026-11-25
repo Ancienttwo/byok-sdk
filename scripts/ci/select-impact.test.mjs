@@ -372,6 +372,8 @@ test('a platform family is selected only by a path it owns', () => {
   assert.throws(() => selectImpact(['examples/desktop-bot-app/src/renderer/theme.scss']), /mapping/i);
   // The tray icons select the desktop example; other images stay unmapped.
   assert.ok(selectImpact(['examples/desktop-bot-app/assets/tray/trayTemplate@2x.png']).families.includes('desktop'));
+  assert.ok(selectImpact(['examples/desktop-bot-app/assets/tray/trayTemplate.svg']).families.includes('desktop'));
+  assert.throws(() => selectImpact(['examples/desktop-bot-app/assets/tray/other.svg']), /mapping/i);
   assert.throws(() => selectImpact(['examples/desktop-bot-app/assets/logo.png']), /mapping/i);
   // #1811: the packaging scripts and configuration select the desktop example.
   for (const path of ['scripts/package/bundle-host.mjs', 'scripts/package/smoke-host.ts', 'scripts/package/entitlements-mac.plist', 'scripts/package/license-gate.test.mjs', 'electron-builder.config.mjs']) {
@@ -400,6 +402,7 @@ test('a platform family is selected only by a path it owns', () => {
     'nsh-app/src/ui/Button.tsx',
     'nsh-app/assets/tray/tray.png',
     'nsh-app/assets/tray/trayTemplate@2x.png',
+    'nsh-app/assets/tray/trayTemplate.svg',
     'nsh-app/ext/byok-nsh-adapter/Cargo.toml',
     'nsh-app/ext/byok-nsh-adapter/Cargo.lock',
     'nsh-app/ext/byok-nsh-adapter/rust-toolchain.toml',

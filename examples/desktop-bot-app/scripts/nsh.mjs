@@ -779,9 +779,10 @@ export function verifyBundle(bundlePath, { repoRoot = REPO_ROOT } = {}) {
   return { files: chunkPaths, totalMapSources };
 }
 
-function listNonDotFiles(dir) {
+/** Lists regular files and symlinks: the NSH bundler ships a linked density variant like a file. */
+function listTrayEntries(dir) {
   return readdirSync(dir, { withFileTypes: true })
-    .filter((entry) => !entry.name.startsWith('.') && entry.isFile())
+    .filter((entry) => !entry.name.startsWith('.') && (entry.isFile() || entry.isSymbolicLink()))
     .map((entry) => entry.name)
     .sort();
 }
@@ -799,9 +800,9 @@ export function verifyTrayAssetsProjection({
     existsSync(targetDir),
     `NSH tray asset projection directory missing: ${targetDir} (mirror ${sourceDir})`,
   );
-  const sourceFiles = listNonDotFiles(sourceDir);
+  const sourceFiles = listTrayEntries(sourceDir);
   assert.ok(sourceFiles.length > 0, `Authoritative tray assets directory is empty: ${sourceDir}`);
-  const targetFiles = listNonDotFiles(targetDir);
+  const targetFiles = listTrayEntries(targetDir);
   assert.deepStrictEqual(
     targetFiles,
     sourceFiles,

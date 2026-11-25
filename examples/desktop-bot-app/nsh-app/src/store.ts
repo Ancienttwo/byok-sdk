@@ -1,5 +1,5 @@
 import { ByokShell } from "byok-nsh-adapter";
-import { setColorScheme, signal } from "nsh";
+import { resource, setColorScheme, signal } from "nsh";
 import type { WindowRef } from "nsh/desktop";
 import type { LoginItemView } from "../../src/bridge/domains/settings.ts";
 import type { ShellView } from "../../src/bridge/domains/shell.ts";
@@ -51,6 +51,15 @@ export const shellStart = () => shellStartSignal();
 /** True once the shell started and the live supervised Host reports `running`. */
 export const hostReady = () =>
   shellStartSignal().status === "started" && liveHostStateSignal()?.state === "running";
+
+/**
+ * The app's one `k8.view` load: it starts once the Host runs and reloads on each Host state hint.
+ * Module-scoped, so a section switch neither drops nor repeats it and no screen polls on its own.
+ */
+export const k8View = resource(
+  () => (hostReady() ? stateHintCount() + 1 : false),
+  async () => await bridge.call("k8.view", { botId: null }),
+);
 
 /** Active appearance override selected in the UI shell. */
 export const appearance = () => appearanceSignal();

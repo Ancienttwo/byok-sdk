@@ -3,8 +3,8 @@ import {
   applyModelRouteChange, modelRouteSubmission,
   type ModelRouteContext, type ModelRouteDraft, type ModelRouteStoredProfile, type ModelRouteSubmission,
 } from '@byok-sdk/keys/model-route';
-import type { CustodyChange } from '../../custody/protocol.ts';
-import { BridgeCallError } from '../../bridge/error.ts';
+import type { CustodyChange } from '../custody/protocol.ts';
+import { BridgeCallError } from '../bridge/error.ts';
 
 /** `keys.submit` as the renderer calls it: main hands the change to a custody child and returns its secret-free status. */
 export type KeysSubmit = (change: CustodyChange) => Promise<ProviderStatus>;

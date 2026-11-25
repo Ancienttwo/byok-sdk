@@ -8,7 +8,7 @@ import {
 } from "@byok-sdk/keys/model-route";
 import { describe, expect, open, test } from "nsh/test";
 import type { CustodyChange } from "../../../../src/custody/protocol.ts";
-import { refusalOf, storedProfile, submitModelRoute } from "../../../../src/renderer/keys/submit.ts";
+import { refusalOf, storedProfile, submitModelRoute } from "../../../../src/keys/submit.ts";
 import { createBridge } from "../../bridge.ts";
 
 function makeStoredStatus(overrides: Partial<ProviderStatus> = {}): ProviderStatus {

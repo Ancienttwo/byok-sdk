@@ -3,9 +3,9 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { ProviderStatus } from '@byok-sdk/keys';
 import { applyModelRouteChange, createModelRouteDraft, modelRouteContext, modelRouteSubmission, type ModelRouteChange } from '@byok-sdk/keys/model-route';
 import { describe, expect, it, vi } from 'vitest';
-import type { CustodyChange } from '../../custody/protocol.ts';
-import { BridgeCallError } from '../bridge.ts';
-import { Receipt } from './keys-section.tsx';
+import type { CustodyChange } from '../custody/protocol.ts';
+import { BridgeCallError } from '../renderer/bridge.ts';
+import { Receipt } from '../renderer/keys/keys-section.tsx';
 import { runLocked, storedProfile, submitModelRoute, submitReplaceSecret } from './submit.ts';
 
 const context = modelRouteContext();
