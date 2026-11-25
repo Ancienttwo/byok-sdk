@@ -317,14 +317,16 @@ function rustToolEnv(baseEnv = process.env) {
  * Build environment for source-building the pinned `nsh-cli`.
  * Stamps `NSH_CHANNEL` (`crates/nsh-cli/build.rs:94-101`) so a nightly CLI selects
  * `Nsh::Nightly(rev)` and emits `[patch.crates-io]` for every `nsh-*` crate in generated
- * `.nsh/rust` workspaces (`crates/nsh-cli/src/rust_app.rs:542-574, 3419-3431`), and mirrors
- * upstream's thin-LTO / 16-CGU release override (`.github/workflows/release.yml:318-322`).
+ * `.nsh/rust` workspaces (`crates/nsh-cli/src/rust_app.rs:542-574, 3419-3431`), and disables
+ * upstream's `Cargo.toml` fat-LTO / single-CGU release profile (`opt-level=2`, `lto=off`,
+ * `codegen-units=16`) so cold source builds finish well within the 3-OS CI budget.
  */
 export function buildCliFromSourceEnv(pin, baseEnv = process.env) {
   const env = {
     ...rustToolEnv(baseEnv),
     NSH_CHANNEL: pin.channel === 'nightly' ? 'nightly' : 'stable',
-    CARGO_PROFILE_RELEASE_LTO: baseEnv.CARGO_PROFILE_RELEASE_LTO?.trim() || 'thin',
+    CARGO_PROFILE_RELEASE_LTO: baseEnv.CARGO_PROFILE_RELEASE_LTO?.trim() || 'off',
+    CARGO_PROFILE_RELEASE_OPT_LEVEL: baseEnv.CARGO_PROFILE_RELEASE_OPT_LEVEL?.trim() || '2',
     CARGO_PROFILE_RELEASE_CODEGEN_UNITS: baseEnv.CARGO_PROFILE_RELEASE_CODEGEN_UNITS?.trim() || '16',
   };
   if (pin.channel === 'nightly' && typeof pin.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(pin.date)) {

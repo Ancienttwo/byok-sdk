@@ -45,11 +45,12 @@ test('assertNshVersion accepts matching pinned CLI output and rejects channel or
   assert.throws(() => assertNshVersion('nsh 0.6.1 (f577c51 nightly 2026-11-22)', pin), /mismatch/i);
 });
 
-test('buildCliFromSourceEnv stamps NSH_CHANNEL, SOURCE_DATE_EPOCH, release LTO, and full-commit root', () => {
+test('buildCliFromSourceEnv stamps NSH_CHANNEL, SOURCE_DATE_EPOCH, fast release profile, and full-commit root', () => {
   const nightlyEnv = buildCliFromSourceEnv(pin, {});
   assert.equal(nightlyEnv.NSH_CHANNEL, 'nightly');
   assert.equal(nightlyEnv.SOURCE_DATE_EPOCH, String(Date.parse(`${pin.date}T00:00:00Z`) / 1000));
-  assert.equal(nightlyEnv.CARGO_PROFILE_RELEASE_LTO, 'thin');
+  assert.equal(nightlyEnv.CARGO_PROFILE_RELEASE_LTO, 'off');
+  assert.equal(nightlyEnv.CARGO_PROFILE_RELEASE_OPT_LEVEL, '2');
   assert.equal(nightlyEnv.CARGO_PROFILE_RELEASE_CODEGEN_UNITS, '16');
   assert.equal(nightlyEnv.RUSTUP_TOOLCHAIN, readPinnedRustToolchain());
 
