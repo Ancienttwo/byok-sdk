@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "version": "0.46.0",
+  "version": "0.46.1",
   "items": {
     "bin:byok-agent": "@byok-sdk/client ./dist/bin/byok-agent.js",
     "bin:byok-agent-memory-mcp": "@byok-sdk/client ./dist/bin/byok-agent-memory-mcp.js",
@@ -3051,21 +3051,21 @@
     "examples/host-execution-core/src/fixtures/crash-host.ts": "bba64e867df2597d87c3d00daed2ed7ceb179d5e0ea38576164f1527872b1ae1",
     "examples/host-execution-core/src/fixtures/memory-restore-crash.ts": "a75abb1471b65b93f1cf6f9b665e8cadd410669e63880902a8d4a21540a2488d",
     "examples/host-execution-core/src/test-support.ts": "ef438dffe2956c3f79c51c925f50fdb919f65f50b739d272d522bdb971ca3673",
-    "packages/bot-collaboration/package.json": "f9fedd9424bc409141bda2273ad3ae591a09c7ecf862da1f9c024165f06183e7",
+    "packages/bot-collaboration/package.json": "60d162b7941787140e8657d6d1a9661c87267d86bf569bd75d54ca126207edc9",
     "packages/client/daemon-config.schema.json": "92f1d03613fd1bd1a14255f013f3fad43704aeb5873984b627a30cff36de3e79",
-    "packages/client/package.json": "334868dc12947acdd2468c1017e1a51e1b07d0859542116ac1cf78e22e503f6a",
+    "packages/client/package.json": "aa100a42e06f9f8b6fb740e597ba55c70eefa0101a238e54f81770840849c412",
     "packages/client/src/daemon/journal/sqlite-journal.ts": "b2ea3fc2d3562475283c65601763df99c053c458ada6077216d74dc943c83da1",
     "packages/client/src/util/path-mutation-gate.ts": "a44a47d4395306d9e9ba36f7d3ba617c244287be8504000685d535974923b592",
-    "packages/cloud-dataplane/package.json": "69b42b8d7644192832755d68fac38cd4eed431378f753890839817b2ac26e54e",
-    "packages/cloud/package.json": "2b6f5b13c911f70c1401c4202eda3c130d5b2be21338ebb7e1a07a9a17e558aa",
-    "packages/core/package.json": "826071ff7d54c520d8d6bb267179c30b0b983776beb05ce0ff82fc2284e4a05b",
-    "packages/keys/package.json": "7a834d34112d945a8fb51030bfca866e60c2f6c652737a7fe2b064607b99e891",
+    "packages/cloud-dataplane/package.json": "55e18add76666dafeb0f330ca6932168ab91d144ef0747bde8b50519e20954e0",
+    "packages/cloud/package.json": "06a094154660ad4c956280cba07a9bcaa5e8575415612f1eceac6c461a82193c",
+    "packages/core/package.json": "9426c34b913897d11c19592ed04a506e9d9c47f6e869cc90d29b1b376442766a",
+    "packages/keys/package.json": "e76f3377dc1252161fa40894f32135f942a85d25374b10598f01d1f9e1a3dd24",
     "packages/keys/src/pi-provider-launcher-core.ts": "3821ed7ddb2d019430353ad1786c292c4d481bff1f3e2e34e22ce75a790b2fa1",
     "packages/keys/src/sqlite-profile-store.ts": "a7c72b0b66548620ed0097131b45b78813e725350445299e9d4705912c945f1a",
-    "packages/protocol/package.json": "4469e194c45435cfdc2e4e12a539c2e8dd9a71628a6a392363077df7b0b4fce4",
-    "packages/server/package.json": "539f8ec0cdc27c742d1f402888222b2f7d9d707db87c2afee7e3cd0639e10320",
+    "packages/protocol/package.json": "0105369fee47802c19f1917834933fce4ffe9fbf06a6ca941f6e8a2419127acd",
+    "packages/server/package.json": "9a5797444962be676054186e8b984d57f9fbceea4c76143e1b51a7d38bbacb66",
     "packages/server/src/execution-core/ledger.ts": "1f5a978513abe038f6bd1e0793a2c9be9d9e8c28ec6c8840463a403339056fb6",
     "packages/server/src/stores/sqlite/index.ts": "695092fcb174fb35dd1b28775c97392e1882ddd94f0e24b1e58a263af3e33d24",
-    "packages/ui-runtime/package.json": "1f9fb672a1c9e563fb01f034637d0f2c4e29b0eb967a18ee92fbcd566da79286"
+    "packages/ui-runtime/package.json": "c3c8090965f31c92ff90dfd584e3c03150d7614b1c311d45a725a36b8b8b7501"
   }
 }

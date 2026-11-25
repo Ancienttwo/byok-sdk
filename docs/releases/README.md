@@ -12,16 +12,16 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
-The [0.46.1 candidate](v0.46.1.md) carries the 0.46.0 → 0.46.1 manifest
-with zero breaking and zero additive entries. The publication record archives
-the cut manifest and rebaselines to the published snapshot.
+The [0.46.1 release](v0.46.1.md) carries the 0.46.0 → 0.46.1 manifest
+with zero breaking and zero additive entries. The cut manifest is archived
+at `packages/client/upgrade-history/0.46.0-0.46.1.json` and the baseline reflects
+the published snapshot.
 
 The [0.46.0 release](v0.46.0.md) carries the 0.45.1 → 0.46.0 manifest
 with two breaking entries, `pi-160-closure` and `dsh-session-log-upload-off`.
 Follow its
 [Host upgrade checklist](host-upgrade-0.46.0.md). The cut manifest is archived
-at `packages/client/upgrade-history/0.45.1-0.46.0.json` and the baseline reflects
-the published snapshot.
+at `packages/client/upgrade-history/0.45.1-0.46.0.json`.
 Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
 
 The [0.45.1 release](v0.45.1.md) carried the 0.45.0 → 0.45.1 manifest
@@ -52,7 +52,7 @@ from evidence, not the author's judgment (see "Freeze rule" in
 ([Wire v8](host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)).
 0.44.1 is the last v7 release. `golden/v8.releases.json` pins the first
 v8 release, 0.45.0, which also serves as the published decoder baseline,
-the 0.45.1 release, the 0.46.0 release, and the 0.46.1 candidate.
+the 0.45.1 release, the 0.46.0 release, and the 0.46.1 release.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
