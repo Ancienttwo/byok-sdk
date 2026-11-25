@@ -5,7 +5,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { classifyDetectError, probeRuntimeVersion } from '../adapters/detect-outcome';
+import { classifyDetectError, probeRuntimeVersion, runDetectCommand } from '../adapters/detect-outcome';
 import { ClaudeAdapter } from '../adapters/claude/claude-adapter';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { PiAdapter } from '../adapters/pi/pi-adapter';
@@ -16,7 +16,7 @@ import { runDoctorCommand } from '../bin/commands/doctor';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { appendAuditRecord } from './fixtures/audit-records';
-import { projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
+import { observeAdmissionDetection, projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
 import type { RuntimeDetectResult } from '../types';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
@@ -189,6 +189,105 @@ else if (arg === 'login') console.log('Logged in using ChatGPT');`);
     expect(Number.isSafeInteger(pid) && pid > 0).toBe(true);
     expect(() => process.kill(pid, 0)).toThrow();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('runDetectCommand', () => {
+  const env = testRuntimeEnv();
+
+  it('keeps the streams of a non-zero exit and reports a clean exit as ok', async () => {
+    const command = await executable("console.log(JSON.stringify({ loggedIn: process.argv[2] === 'in' })); process.exit(process.argv[2] === 'in' ? 0 : 1);");
+    expect(await runDetectCommand(command, ['in'], { timeoutMs: 5_000, env })).toEqual({ kind: 'ok', stdout: '{"loggedIn":true}\n', stderr: '' });
+    expect(await runDetectCommand(command, ['out'], { timeoutMs: 5_000, env })).toEqual({ kind: 'nonzero', exitCode: 1, stdout: '{"loggedIn":false}\n', stderr: '' });
+  });
+
+  it('reports output overflow and spawn errors as failed, never timeout', async () => {
+    const overflow = await executable("process.stdout.on('error', () => {}); process.stdout.write('x'.repeat(2 * 1024 * 1024));");
+    expect(await runDetectCommand(overflow, [], { timeoutMs: 5_000, env })).toMatchObject({ kind: 'failed', error: { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' } });
+    const missing = path.join(await directory(), 'missing');
+    expect(await runDetectCommand(missing, [], { timeoutMs: 5_000, env })).toMatchObject({ kind: 'failed', error: { code: 'ENOENT' } });
+  });
+
+  it('resolves timeout at its deadline while a grandchild still holds both pipes', async () => {
+    const receipt = path.join(await directory(), 'grandchild-pid');
+    const command = await executable(`const { spawn } = require('node:child_process');
+const grandchild = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { stdio: ['ignore', 'inherit', 'inherit'], detached: true });
+require('node:fs').writeFileSync(${JSON.stringify(receipt)}, String(grandchild.pid));
+grandchild.unref();`);
+    const readPid = async () => Number(await fs.readFile(receipt, 'utf8').catch(() => '0'));
+    // Freeze only the probe deadline; the child, its grandchild and the pipes stay real.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const exec = vi.mocked(childProcess.execFile);
+    exec.mockClear();
+    try {
+      const result = runDetectCommand(command, [], { timeoutMs: 1_000, env });
+      const settled = vi.fn();
+      void result.then(settled);
+      const child: childProcess.ChildProcess = exec.mock.results[0]!.value;
+      // The child exits after writing the receipt; the grandchild keeps both pipes open.
+      await once(child, 'exit');
+      const pid = await readPid();
+      expect(pid).toBeGreaterThan(0);
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      await new Promise(resolve => setImmediate(resolve));
+      expect(settled).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1_000);
+      expect(await result).toEqual({ kind: 'timeout' });
+      expect(() => process.kill(pid, 0)).not.toThrow();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+      const pid = await readPid();
+      if (pid > 0) try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ }
+    }
+  });
+
+  it('stops the child on caller abort, reports the reason and removes its listener', async () => {
+    const command = await executable("console.log('ready'); setInterval(() => {}, 1000);");
+    const controller = new AbortController();
+    const remove = vi.spyOn(controller.signal, 'removeEventListener');
+    const exec = vi.mocked(childProcess.execFile);
+    exec.mockClear();
+    const pending = runDetectCommand(command, [], { timeoutMs: 60_000, env, signal: controller.signal });
+    const child: childProcess.ChildProcess = exec.mock.results[0]!.value;
+    children.push(child);
+    await once(child.stdout!, 'data');
+    const reason = new Error('caller stopped');
+    controller.abort(reason);
+    expect(await pending).toEqual({ kind: 'aborted', reason });
+    expect(child.signalCode).toBe('SIGKILL');
+    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function));
+  });
+
+  it('does not spawn for an already aborted signal', async () => {
+    const exec = vi.mocked(childProcess.execFile);
+    exec.mockClear();
+    const reason = new Error('already stopped');
+    expect(await runDetectCommand(process.execPath, ['-e', ''], { timeoutMs: 5_000, env, signal: AbortSignal.abort(reason) })).toEqual({ kind: 'aborted', reason });
+    expect(exec).not.toHaveBeenCalled();
+  });
+});
+
+describe.skipIf(process.platform === 'win32')('observeAdmissionDetection (#2468)', () => {
+  const authProbe = "if (process.argv[2] === '--version') console.log('fixture-v1'); else { require('node:fs').appendFileSync(process.env.AUTH_LOG, 'auth\\n'); console.log('{\"loggedIn\":true}'); }";
+
+  it('skips the built-in login probe, and still routes a replaced detect() through the replacement', async () => {
+    const log = path.join(await directory(), 'auth.log');
+    vi.stubEnv('AUTH_LOG', log);
+    try {
+      const command = await executable(authProbe);
+      const adapter = new ClaudeAdapter({ resolveBin: () => ({ command, source: 'env' }) });
+      const admitted = await observeAdmissionDetection(adapter);
+      expect(admitted).toMatchObject({ kind: 'available', version: 'fixture-v1' });
+      expect(admitted).not.toHaveProperty('authPresent');
+      await expect(fs.readFile(log, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+      const replaced = vi.spyOn(adapter, 'detect');
+      expect(await observeAdmissionDetection(adapter)).toMatchObject({ kind: 'available', authPresent: true });
+      expect(replaced).toHaveBeenCalledOnce();
+      expect(await fs.readFile(log, 'utf8')).toBe('auth\n');
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

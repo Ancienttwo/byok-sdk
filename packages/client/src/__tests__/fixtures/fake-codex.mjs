@@ -5,6 +5,8 @@
 // thread's, a `codex_apps` server while it has `apps` and the thread did not
 // turn the feature off, and one server per enabled plugin likewise.
 // FAKE_CODEX_STATUS_EXTRA: JSON array of more status entries, a source config/read does not show.
+// FAKE_CODEX_LOGIN_HANG=1 / FAKE_CODEX_APP_SERVER_HELP_HANG=1: `login status` / `app-server --help` never answer.
+// FAKE_CODEX_HANG_PID_FILE=<path>: a hanging probe first writes its pid to <path>.
 import { spawn } from 'node:child_process';
 import { existsSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -21,6 +23,12 @@ for (let i = 0; i < argv.length; i++)
 if (argv.includes('--version')) {
   console.log(process.env.FAKE_CODEX_VERSION ?? 'codex-cli 0.169.0');
   process.exit(0);
+}
+if ((argv[0] === 'login' && process.env.FAKE_CODEX_LOGIN_HANG === '1')
+  || (argv.includes('app-server') && argv.includes('--help') && process.env.FAKE_CODEX_APP_SERVER_HELP_HANG === '1')) {
+  if (process.env.FAKE_CODEX_HANG_PID_FILE) writeFileSync(process.env.FAKE_CODEX_HANG_PID_FILE, String(process.pid));
+  setInterval(() => {}, 60_000);
+  await new Promise(() => {});
 }
 if (argv[0] === 'login') {
   console.error(

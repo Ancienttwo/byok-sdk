@@ -176,6 +176,8 @@ function renderLaunchdPlist(def: { label: string; launcherPath: string; workingD
   </dict>
   <key>ThrottleInterval</key>
   <integer>10</integer>
+  <key>ProcessType</key>
+  <string>Interactive</string>
   <key>StandardOutPath</key>
   ${plistString(outLog)}
   <key>StandardErrorPath</key>

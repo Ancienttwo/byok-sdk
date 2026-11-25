@@ -6,7 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from '@byok-sdk/protocol';
-import { CodexAdapter } from '../adapters/codex/codex-adapter';
+import { CodexAdapter, codexProbeTimeouts } from '../adapters/codex/codex-adapter';
 import { createCodexAgentHome } from '../adapters/codex/agent-user-context';
 import * as ownedRuntimeHome from '../adapters/owned-runtime-home';
 import type { Session, MessageDraftDelta } from '../types';
@@ -232,6 +232,43 @@ describe('Codex persistent app-server adapter', () => {
     resources.mcpServers = { host: { command: '/fixture/server' } };
     expect((await turn(await open(runtime, task, resources))).at(-1)).toEqual({ type: 'turn_end' });
     expect(commands).toEqual([probed]);
+  });
+  const prepareInput = (runtime: CodexAdapter) => ({ offer: { target: CODEX_TARGET, instruction: 'hello' }, descriptor: runtime.descriptor, requiredToolsetIds: [] });
+  it('#2468: an `app-server --help` past its deadline is a timeout in detect and a retryable prepare refusal', async () => {
+    vi.stubEnv('FAKE_CODEX_APP_SERVER_HELP_HANG', '1');
+    const runtime = adapter();
+    codexProbeTimeouts.override(runtime, { appServerHelp: 200 });
+    expect(await runtime.detect()).toEqual({ kind: 'timeout' });
+    expect(await runtime.prepare(prepareInput(runtime)))
+      .toEqual({ kind: 'reject', reason: 'codex installation refused: timeout', retryable: true });
+  });
+  it('#2468: aborting prepare() stops its hung installation probe with the abort reason', async () => {
+    const pidFile = path.join(await fs.mkdtemp(path.join(os.tmpdir(), 'byok-codex-probe-')), 'pid');
+    dirs.push(path.dirname(pidFile));
+    vi.stubEnv('FAKE_CODEX_APP_SERVER_HELP_HANG', '1');
+    vi.stubEnv('FAKE_CODEX_HANG_PID_FILE', pidFile);
+    const runtime = adapter();
+    const controller = new AbortController();
+    const pending = runtime.prepare({ ...prepareInput(runtime), signal: controller.signal });
+    const pid = await vi.waitFor(async () => {
+      const value = Number(await fs.readFile(pidFile, 'utf8'));
+      expect(value).toBeGreaterThan(0);
+      return value;
+    }, { timeout: 5_000 });
+    const child = captureProcessIdentity(pid);
+    const reason = new Error('offer cancelled');
+    controller.abort(reason);
+    await expect(pending).rejects.toBe(reason);
+    await vi.waitFor(() => expectProcessNotLive(child));
+  });
+  it('#2468: a `login status` past its deadline is a timeout in detect, and prepare does not run it again', async () => {
+    vi.stubEnv('FAKE_CODEX_LOGIN_HANG', '1');
+    const runtime = adapter();
+    codexProbeTimeouts.override(runtime, { authStatus: 200 });
+    expect(await runtime.detect()).toEqual({ kind: 'timeout' });
+    // A 60 s hang would exceed the per-test timeout if prepare() ran `login status`.
+    codexProbeTimeouts.override(runtime, { authStatus: 60_000 });
+    expect(await runtime.prepare(prepareInput(runtime))).toMatchObject({ kind: 'prepared' });
   });
   it('detect refuses a missing app-server subcommand', async () => {
     vi.stubEnv('FAKE_CODEX_NO_APP_SERVER', '1');

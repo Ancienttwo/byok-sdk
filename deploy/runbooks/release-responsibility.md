@@ -77,6 +77,12 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
+0.46.1 is the PATCH candidate for all nine public packages on `release/0.46`.
+It keeps wire v8 and the public API; its upgrade manifest has zero breaking
+and zero additive entries. It fixes Claude and Codex login probes that timed
+out under a macOS launchd service (#2468).
+[Candidate notes](../../docs/releases/v0.46.1.md)
+
 0.46.0 is the published MINOR for all nine public packages. It was published on
 npm `latest` on 2026-11-23 (UTC) from `v0.46.0` (`b4996b4e7`) using exact-SHA
 release validation
@@ -136,7 +142,7 @@ differs from the train. `@byok-sdk/implementation-identity` remains retired. Eve
 the dist-tag `latest`, observed at 0.46.0 for all nine packages on 2026-11-23 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the historical 0.46.0 pre-publication baseline with prior `latest` 0.45.1 and
+records the 0.46.1 candidate baseline with prior `latest` 0.46.0 and
 `priorPublication: existing` for all nine packages, including
 `@byok-sdk/bot-collaboration`. Recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
