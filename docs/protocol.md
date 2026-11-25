@@ -270,8 +270,8 @@ token and reads it as `unknown`.
   `harness` lane, selection modes, inventory and the frozen cross-version
   refusal. The current decoder round-trips the envelope lines and checks
   the HTTP bodies against their committed values. `golden/v8.releases.json`
-  registers the published 0.45.0, 0.45.1, 0.46.0, and 0.46.1 releases and the
-  0.47.0 candidate. Each pins the same 514 envelope lines and 41 HTTP lines.
+  registers the published 0.45.0, 0.45.1, 0.46.0, 0.46.1 and 0.47.0 releases.
+  Each pins the same 514 envelope lines and 41 HTTP lines.
   Covered prefixes are immutable.
 - **Published rejection oracle.** `byok-protocol-previous` aliases the
   published 0.44.1 registry tarball, the last v7 release. It rejects v8
