@@ -352,12 +352,15 @@ export class DshAdapter implements RuntimeAdapter {
       const key = await resolveRuntimeApiKey('dsh', this.options.resolveKey, input.signal);
       env[DSH_PROVIDER_KEY_ENV] = key;
       const redactor = sessionCredentialRedactor({ env, mcpServers });
-      // The bridge mounts every MCP env and header value in memory, so each one is a credential whatever its name; a
-      // refused mount echoes them JSON-escaped. Values under eight characters keep the name rules, as a short value
-      // such as DEBUG=1 would redact every matching character of the model's output.
+      // The bridge mounts every MCP env and header value in memory, so each one is a credential whatever its name. A
+      // value under eight characters is not redacted, even under a credential name, unless it is inside a longer header
+      // or URL: a short value such as DEBUG=1 would redact every matching character of the model's output. A refused
+      // mount echoes the entries JSON-encoded, and its diagnostics can encode them again, so each credential, including
+      // a bearer token or URL password the redactor derived, is also registered with one and two levels of escaping.
       const mcpValues = mcpServers.flatMap((server) => Object.values(('headers' in server ? server.headers : server.env) ?? {}));
-      const credentials = [key, ...mcpValues.filter((value) => value.length >= MCP_EXPLICIT_CREDENTIAL_MIN_LENGTH)]
-        .flatMap((value) => { const escaped = JSON.stringify(value).slice(1, -1); return escaped === value ? [value] : [value, escaped]; });
+      const escape = (value: string): string => JSON.stringify(value).slice(1, -1);
+      const credentials = [...new Set([...redactor.values(), key, ...mcpValues.filter((value) => value.length >= MCP_EXPLICIT_CREDENTIAL_MIN_LENGTH)]
+        .flatMap((value) => [value, escape(value), escape(escape(value))]))];
       for (const credential of credentials) redactor.addExplicit(credential);
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp', stderrRedactor: redactor });
       const raw = await dshSession(

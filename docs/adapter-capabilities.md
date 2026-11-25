@@ -1278,8 +1278,10 @@ and `@agentclientprotocol/sdk` does not load. It runs on the custom-harness path
   reaches the launch patch, argv or the dsh process environment. A mount that
   fails closes the dsh process and fails the start; its message goes through
   the session credential redactor, which covers every `env` and header value
-  of eight or more characters, also in its JSON-escaped form; a shorter value
-  is covered only when its name marks a credential. A name outside `[A-Za-z0-9_-]{1,32}` is declined
+  of eight or more characters and the bearer tokens and URL passwords derived
+  from them, raw and with one or two levels of JSON escaping. A value under
+  eight characters is not redacted, even when its name contains TOKEN or
+  SECRET, unless it is inside a header or URL of eight or more characters. A name outside `[A-Za-z0-9_-]{1,32}` is declined
   before claim, without a retry. Entries are sent again on every resume.
 - Permissions: `sandbox` selects `DSH_PERMISSION_MODE`. The default,
   `danger-full-access`, pairs with dsh approval `never`. `workspace-write` and

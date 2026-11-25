@@ -67,7 +67,7 @@
     {
       "id": "oar-0-131-0",
       "impact": "additive",
-      "summary": "@byok-sdk/client vendors OAR 0.131.0. DshAdapter accepts Host toolsets with stdio env and HTTP headers, mounted in memory through the bridge. The Antigravity CLI qualified version is 1.5.16, so an installed 1.5.11 gets the unqualified-version warning under the default policy. A Codex resume sends the configured sandbox on thread/resume.",
+      "summary": "@byok-sdk/client vendors OAR 0.131.0. DshAdapter accepts MCP servers with stdio env and HTTP headers, mounted in memory through the bridge; DaemonConfig.mcpToolsets still rejects both. The Antigravity CLI qualified version is 1.5.16, so an installed 1.5.11 gets the unqualified-version warning under the default policy. CodexAdapter's resume is unchanged.",
       "migration": "docs/releases/host-upgrade-next-minor.md#oar-01310-2487",
       "items": [
         "export:@byok-sdk/client#UpgradeableRuntimeId"
