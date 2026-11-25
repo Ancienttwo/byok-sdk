@@ -65,6 +65,13 @@ struct LockState {
     listeners: Vec<QuitListener>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct LaunchGateState {
+    pub quitting: bool,
+    pub busy: bool,
+    pub handover: HandoverState,
+}
+
 /// Shared mutex coordinating `update`, `shell.restore`, `shell.startFresh`, `keys.submit`, `keys.list`, and app quit.
 #[derive(Clone)]
 pub struct MaintenanceLock {
@@ -175,17 +182,10 @@ impl MaintenanceLock {
         guard.listeners.push(Box::new(listener));
     }
 
-    /// Marks app quit requested, notifies listeners, waits unconditionally for any in-flight
-    /// exclusive maintenance window, and waits up to [`DEFAULT_CUSTODY_QUIT_WAIT`] for active
-    /// custody children (`keys.submit` / `keys.list`) to drop their guards before returning.
-    pub fn begin_quit(&self) -> QuitOutcome {
-        self.begin_quit_with_custody_wait(DEFAULT_CUSTODY_QUIT_WAIT)
-    }
-
-    /// Marks app quit requested, notifies listeners, waits unconditionally for any in-flight
-    /// exclusive maintenance window, and waits up to `max_custody_wait` for active custody
-    /// holders to finish before returning.
-    pub fn begin_quit_with_custody_wait(&self, max_custody_wait: Duration) -> QuitOutcome {
+    /// Marks app quit requested and notifies registered quit listeners off-lock without waiting
+    /// for in-flight maintenance or custody guards to drain. Safe to call repeatedly; subsequent
+    /// [`Self::begin_quit`] calls still wait for active work and report the handover outcome.
+    pub fn mark_quitting(&self) {
         let listeners = {
             let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
             if guard.quitting {
@@ -198,6 +198,35 @@ impl MaintenanceLock {
         for listener in listeners {
             listener();
         }
+    }
+
+    /// Evaluates a Host launch decision while holding `MaintenanceLock`'s state mutex so a
+    /// recorded quit, maintenance window, or handover cannot slip between the check and launch
+    /// reservation. Callers must preserve canonical lock order (`MaintenanceLock` -> `HostSupervisor`).
+    pub(crate) fn with_launch_state<F, R>(&self, f: F) -> R
+    where
+        F: FnOnce(LaunchGateState) -> R,
+    {
+        let guard = self.inner.state.lock().expect("maintenance lock poisoned");
+        f(LaunchGateState {
+            quitting: guard.quitting,
+            busy: guard.busy,
+            handover: guard.handover,
+        })
+    }
+
+    /// Marks app quit requested, notifies listeners, waits unconditionally for any in-flight
+    /// exclusive maintenance window, and waits up to [`DEFAULT_CUSTODY_QUIT_WAIT`] for active
+    /// custody children (`keys.submit` / `keys.list`) to drop their guards before returning.
+    pub fn begin_quit(&self) -> QuitOutcome {
+        self.begin_quit_with_custody_wait(DEFAULT_CUSTODY_QUIT_WAIT)
+    }
+
+    /// Marks app quit requested, notifies listeners, waits unconditionally for any in-flight
+    /// exclusive maintenance window, and waits up to `max_custody_wait` for active custody
+    /// holders to finish before returning.
+    pub fn begin_quit_with_custody_wait(&self, max_custody_wait: Duration) -> QuitOutcome {
+        self.mark_quitting();
         let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
         let mut custody_deadline: Option<Instant> = None;
         while guard.busy || guard.active_custody > 0 {
@@ -259,6 +288,31 @@ impl MaintenanceGuard {
     pub fn confirm(&self) {
         let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
         guard.handover = HandoverState::Confirmed;
+    }
+
+    /// Atomically checks under `MaintenanceLock`'s state mutex that app quit has not been
+    /// recorded, executes `on_allow` while holding that mutex (preserving `MaintenanceLock` ->
+    /// `HostSupervisor` lock order), and releases `busy` in the same critical section.
+    pub(crate) fn finish_if_not_quitting<F, R>(
+        mut self,
+        on_allow: F,
+    ) -> Result<R, MaintenanceBusyError>
+    where
+        F: FnOnce() -> R,
+    {
+        let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
+        let result = if guard.quitting {
+            Err(MaintenanceBusyError)
+        } else {
+            Ok(on_allow())
+        };
+        self.released = true;
+        if guard.handover != HandoverState::Confirmed {
+            guard.handover = HandoverState::None;
+        }
+        guard.busy = false;
+        self.inner.cv.notify_all();
+        result
     }
 
     fn release_inner(&mut self) {

@@ -1,16 +1,20 @@
 //! Single generic contract-enforced transport (`ByokShell.call`) bridging TSX and `byok-shell`.
 
+use std::future::{Future, poll_fn};
+use std::pin::{Pin, pin};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use byok_shell::{
-    BridgeContract, LoginItemView, RestoreSuccess, SecretBytes, ShellRouteError, ShellRouter,
-    StartFreshSuccess,
+    BridgeContract, LoginItemView, MaintenanceLock, RestoreSuccess, SecretBytes, ShellRouteError,
+    ShellRouter, StartFreshSuccess,
 };
 use nsh_core::JsonValue;
-use nsh_core::element::desktop::{launch_at_login, restart, set_launch_at_login};
+use nsh_core::element::desktop::{launch_at_login, quit, restart, set_launch_at_login};
 use nsh_core::element::{
-    Dialog, DialogButton, DialogButtonStyle, DialogReply, Os, blocking, dialog, os,
+    Dialog, DialogAnswer, DialogButton, DialogButtonStyle, DialogReply, Os, blocking, dialog, os,
 };
 use nsh_core::prelude::*;
 use zeroize::Zeroizing;
@@ -193,23 +197,155 @@ pub(crate) fn recovery_failure_dialog(err: &ShellRouteError) -> Dialog {
     }
 }
 
-pub(crate) async fn finish_recovery_call<T, D, DFut, R>(
+/// Opens the native recovery refusal dialog and pairs its answer future with its [`DialogCloser`]
+/// so a pending quit request can dismiss the alert on the engine thread before calling `desktop::quit()`.
+pub(crate) fn open_recovery_failure_dialog(dlg: Dialog) -> (DialogAnswer, impl FnOnce()) {
+    let answer = dialog(dlg);
+    let closer = answer.closer();
+    (answer, move || closer.close())
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RecoveryDialogOutcome {
+    Acknowledged,
+    QuitRequested,
+}
+
+struct QuitSignalState {
+    fired: bool,
+    waker: Option<Waker>,
+}
+
+struct QuitSignalFuture {
+    state: Arc<Mutex<QuitSignalState>>,
+}
+
+impl QuitSignalFuture {
+    fn new(maintenance: &MaintenanceLock) -> Self {
+        let state = Arc::new(Mutex::new(QuitSignalState {
+            fired: false,
+            waker: None,
+        }));
+        let listener_state = Arc::clone(&state);
+        maintenance.on_quit_requested(move || {
+            let waker = {
+                let mut guard = listener_state.lock().expect("quit signal lock poisoned");
+                guard.fired = true;
+                guard.waker.take()
+            };
+            if let Some(waker) = waker {
+                waker.wake();
+            }
+        });
+        Self { state }
+    }
+}
+
+impl Future for QuitSignalFuture {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let mut guard = self.state.lock().expect("quit signal lock poisoned");
+        if guard.fired {
+            return Poll::Ready(());
+        }
+        guard.waker = Some(cx.waker().clone());
+        Poll::Pending
+    }
+}
+
+impl Drop for QuitSignalFuture {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.state.lock() {
+            guard.waker = None;
+        }
+    }
+}
+
+struct CloseDialogGuard<C: FnOnce()>(Option<C>);
+
+impl<C: FnOnce()> CloseDialogGuard<C> {
+    fn close_now(&mut self) {
+        if let Some(close) = self.0.take() {
+            close();
+        }
+    }
+
+    fn disarm(&mut self) {
+        let _ = self.0.take();
+    }
+}
+
+impl<C: FnOnce()> Drop for CloseDialogGuard<C> {
+    fn drop(&mut self) {
+        self.close_now();
+    }
+}
+
+async fn await_recovery_failure_dialog<DFut, C>(
+    maintenance: &MaintenanceLock,
+    dialog_handle: (DFut, C),
+) -> RecoveryDialogOutcome
+where
+    DFut: Future<Output = DialogReply>,
+    C: FnOnce(),
+{
+    let (dialog_fut, close_dialog) = dialog_handle;
+    let mut dialog_fut = pin!(dialog_fut);
+    let mut quit_fut = pin!(QuitSignalFuture::new(maintenance));
+    let mut close_guard = CloseDialogGuard(Some(close_dialog));
+
+    poll_fn(|cx| {
+        if quit_fut.as_mut().poll(cx).is_ready() {
+            close_guard.close_now();
+            return Poll::Ready(RecoveryDialogOutcome::QuitRequested);
+        }
+        if dialog_fut.as_mut().poll(cx).is_ready() {
+            close_guard.disarm();
+            let outcome = if maintenance.is_quitting() {
+                RecoveryDialogOutcome::QuitRequested
+            } else {
+                RecoveryDialogOutcome::Acknowledged
+            };
+            return Poll::Ready(outcome);
+        }
+        Poll::Pending
+    })
+    .await
+}
+
+pub(crate) async fn finish_recovery_call<T, D, DFut, C, R, Q>(
     outcome: Result<T, ShellRouteError>,
     relaunched: bool,
+    maintenance: &MaintenanceLock,
     show_failure_dialog: D,
     on_restart: R,
+    on_quit: Q,
 ) -> Result<JsonValue, JsError>
 where
     T: serde::Serialize,
-    D: FnOnce(Dialog) -> DFut,
-    DFut: std::future::Future<Output = DialogReply>,
+    D: FnOnce(Dialog) -> (DFut, C),
+    DFut: Future<Output = DialogReply>,
+    C: FnOnce(),
     R: FnOnce(),
+    Q: FnOnce(),
 {
     if relaunched {
-        if let Err(err) = &outcome {
-            let _ = show_failure_dialog(recovery_failure_dialog(err)).await;
+        if maintenance.is_quitting() {
+            on_quit();
+        } else if let Err(err) = &outcome {
+            match await_recovery_failure_dialog(
+                maintenance,
+                show_failure_dialog(recovery_failure_dialog(err)),
+            )
+            .await
+            {
+                RecoveryDialogOutcome::Acknowledged => on_restart(),
+                RecoveryDialogOutcome::QuitRequested => on_quit(),
+            }
+        } else {
+            on_restart();
         }
-        on_restart();
     }
     let success = outcome.map_err(|err| JsError::Error(err.message).with_code(&err.code))?;
     serde_json::to_value(success)
@@ -234,6 +370,7 @@ pub(crate) async fn dispatch_call(
         JsError::Error("Host supervisor is not started".to_owned()).with_code("host_exited")
     })?;
     let router = shell.router;
+    let maintenance = shell.maintenance;
 
     match method.as_str() {
         "keys.submit" => {
@@ -265,7 +402,15 @@ pub(crate) async fn dispatch_call(
                 blocking(move || execute_restore_sync(&router, &app_version, &stamp))
                     .await
                     .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
-            finish_recovery_call(out, relaunched, dialog, restart).await
+            finish_recovery_call(
+                out,
+                relaunched,
+                &maintenance,
+                open_recovery_failure_dialog,
+                restart,
+                quit,
+            )
+            .await
         }
         "shell.startFresh" => {
             if !params.is_null() {
@@ -278,7 +423,15 @@ pub(crate) async fn dispatch_call(
             let (out, relaunched) = blocking(move || execute_start_fresh_sync(&router, &stamp))
                 .await
                 .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
-            finish_recovery_call(out, relaunched, dialog, restart).await
+            finish_recovery_call(
+                out,
+                relaunched,
+                &maintenance,
+                open_recovery_failure_dialog,
+                restart,
+                quit,
+            )
+            .await
         }
         _ => blocking(move || router.dispatch_renderer(&method, params))
             .await

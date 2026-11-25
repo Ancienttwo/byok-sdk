@@ -31,7 +31,13 @@ fn shell_slot() -> &'static Mutex<Option<RuntimeShell>> {
 }
 
 pub(crate) fn event_hub() -> &'static Arc<EventHub> {
-    EVENT_HUB.get_or_init(|| Arc::new(EventHub::new()))
+    EVENT_HUB.get_or_init(|| {
+        Arc::new(EventHub::with_quitting_hook(|| {
+            if let Some(shell) = active_shell() {
+                shell.maintenance.mark_quitting();
+            }
+        }))
+    })
 }
 
 pub(crate) fn active_shell() -> Option<RuntimeShell> {
@@ -53,13 +59,27 @@ pub(crate) enum ShellEvent {
 pub(crate) struct EventHub {
     next_id: AtomicU64,
     subscribers: Mutex<HashMap<u64, mpsc::Sender<ShellEvent>>>,
+    on_quitting: Option<Box<dyn Fn() + Send + Sync>>,
 }
 
 impl EventHub {
+    #[cfg(test)]
     pub(crate) fn new() -> Self {
         Self {
             next_id: AtomicU64::new(1),
             subscribers: Mutex::new(HashMap::new()),
+            on_quitting: None,
+        }
+    }
+
+    pub(crate) fn with_quitting_hook<F>(on_quitting: F) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        Self {
+            next_id: AtomicU64::new(1),
+            subscribers: Mutex::new(HashMap::new()),
+            on_quitting: Some(Box::new(on_quitting)),
         }
     }
 
@@ -81,8 +101,17 @@ impl EventHub {
     }
 
     pub(crate) fn publish(&self, event: ShellEvent) {
-        let mut subscribers = self.subscribers.lock().expect("event hub lock poisoned");
-        subscribers.retain(|_, tx| tx.send(event.clone()).is_ok());
+        let is_quitting = matches!(event, ShellEvent::Quitting);
+        {
+            let mut subscribers = self.subscribers.lock().expect("event hub lock poisoned");
+            subscribers.retain(|_, tx| tx.send(event.clone()).is_ok());
+        }
+        // Mirror `begin_graceful_quit` / `fallback_app_quit_cleanup` into the active shell's
+        // `MaintenanceLock` synchronously on the engine thread before the blocking drain task
+        // runs so pending recovery-refusal dialogs and Host restarts observe quit immediately.
+        if is_quitting && let Some(on_quitting) = &self.on_quitting {
+            on_quitting();
+        }
     }
 }
 
@@ -349,10 +378,13 @@ pub(crate) fn build_runtime_shell(
     let hub = Arc::clone(event_hub());
     let hint_hub = Arc::clone(&hub);
     let power_hub = Arc::clone(&hub);
+    let maintenance = MaintenanceLock::new();
 
-    let config = HostSupervisorConfig::new(command, contract).with_on_power_error(move |err| {
-        power_hub.publish(ShellEvent::PowerError(serialize_power_error(&err)));
-    });
+    let config = HostSupervisorConfig::new(command, contract)
+        .with_maintenance_lock(maintenance.clone())
+        .with_on_power_error(move |err| {
+            power_hub.publish(ShellEvent::PowerError(serialize_power_error(&err)));
+        });
 
     let supervisor = Arc::new(HostSupervisor::new(
         config,
@@ -363,7 +395,6 @@ pub(crate) fn build_runtime_shell(
             hint_hub.publish(ShellEvent::StateHint);
         },
     ));
-    let maintenance = MaintenanceLock::new();
     let router = Arc::new(ShellRouter::new(
         Arc::clone(&supervisor),
         maintenance.clone(),

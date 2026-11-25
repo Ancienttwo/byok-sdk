@@ -113,10 +113,10 @@ mod tests {
         BridgeContract, HostCommandSpec, HostSupervisor, HostSupervisorConfig, MaintenanceLock,
         QuitOutcome, SupervisedHostState,
     };
-    use nsh_core::desktop::DesktopCommand;
+    use nsh_core::desktop::{DesktopCommand, WindowEvent};
+    use nsh_core::element::desktop::{on_quit_request, quit, restart};
     use nsh_core::element::{
-        Dialog, DialogButtonStyle, DialogReply, Os, Root, declarations, desktop::restart, dialog,
-        px, size, spawn, view,
+        Dialog, DialogButtonStyle, DialogReply, Os, Root, declarations, px, size, spawn, view,
     };
     use nsh_core::prelude::*;
     use nsh_core::{
@@ -126,8 +126,8 @@ mod tests {
 
     use crate::bridge::{
         execute_restore_sync, execute_start_fresh_sync, finish_recovery_call, format_utc_stamp,
-        handle_login_item_get_with, handle_login_item_set_with, parse_login_item_set_param,
-        validate_renderer_method,
+        handle_login_item_get_with, handle_login_item_set_with, open_recovery_failure_dialog,
+        parse_login_item_set_param, validate_renderer_method,
     };
     use crate::quit::{drain_for_quit, drain_for_quit_with, should_call_desktop_quit};
     use crate::supervisor::{EventHub, ShellEvent, build_runtime_shell, restart_shell_sync};
@@ -520,21 +520,27 @@ if (subcmd === {custody_cmd}) {{
         );
         assert!(relaunched, "restore must request adapter restart()");
         let mut restart_calls = 0usize;
+        let mut quit_calls = 0usize;
         let payload = poll_ready(finish_recovery_call(
             out,
             relaunched,
+            &shell.maintenance,
             |_| {
                 panic!("successful restore must not show failure dialog");
                 #[allow(unreachable_code)]
-                std::future::ready(DialogReply::dismissed())
+                (std::future::ready(DialogReply::dismissed()), || {})
             },
             || {
                 restart_calls += 1;
+            },
+            || {
+                quit_calls += 1;
             },
         ))
         .expect("restore JSON payload");
         assert_eq!(payload["asidePath"], "/tmp/adapter-restored.aside");
         assert_eq!(restart_calls, 1);
+        assert_eq!(quit_calls, 0);
         assert!(shell.maintenance.is_handed_over());
 
         let mut quit_stop_calls = 0usize;
@@ -588,21 +594,27 @@ if (subcmd === {custody_cmd}) {{
             execute_start_fresh_sync(&shell_fresh.router, "2026-11-25T00-01-00.000Z");
         assert!(relaunched, "startFresh must request adapter restart()");
         let mut fresh_restart_calls = 0usize;
+        let mut fresh_quit_calls = 0usize;
         let payload = poll_ready(finish_recovery_call(
             out,
             relaunched,
+            &shell_fresh.maintenance,
             |_| {
                 panic!("successful startFresh must not show failure dialog");
                 #[allow(unreachable_code)]
-                std::future::ready(DialogReply::dismissed())
+                (std::future::ready(DialogReply::dismissed()), || {})
             },
             || {
                 fresh_restart_calls += 1;
+            },
+            || {
+                fresh_quit_calls += 1;
             },
         ))
         .expect("startFresh JSON payload");
         assert_eq!(payload["moved"].as_array().map(Vec::len), Some(1));
         assert_eq!(fresh_restart_calls, 1);
+        assert_eq!(fresh_quit_calls, 0);
         assert!(shell_fresh.maintenance.is_handed_over());
 
         let mut fresh_quit_stop_calls = 0usize;
@@ -645,21 +657,27 @@ if (subcmd === {custody_cmd}) {{
             execute_start_fresh_sync(&shell_fail.router, "2026-11-25T00-02-00.000Z");
         assert!(!pre_relaunched);
         let mut pre_restarts = 0usize;
+        let mut pre_quits = 0usize;
         let pre_err = poll_ready(finish_recovery_call(
             pre_out,
             pre_relaunched,
+            &shell_fail.maintenance,
             |_| {
                 panic!("pre-stop refusal must not show blocking relaunch dialog");
                 #[allow(unreachable_code)]
-                std::future::ready(DialogReply::dismissed())
+                (std::future::ready(DialogReply::dismissed()), || {})
             },
             || {
                 pre_restarts += 1;
+            },
+            || {
+                pre_quits += 1;
             },
         ))
         .expect_err("startFresh without storeRefused must fail precondition");
         assert_eq!(pre_err.code(), Some("precondition_failed"));
         assert_eq!(pre_restarts, 0);
+        assert_eq!(pre_quits, 0);
         assert!(!shell_fail.maintenance.is_handed_over());
         assert_eq!(shutdown_count(&fail_shutdowns), 0);
 
@@ -677,13 +695,19 @@ if (subcmd === {custody_cmd}) {{
         let post_err = poll_ready(finish_recovery_call(
             post_out,
             post_relaunched,
+            &shell_fail.maintenance,
             |dlg| {
                 *shown_dialog.borrow_mut() = Some(dlg);
                 events.borrow_mut().push("dialog");
-                std::future::ready(DialogReply::dismissed())
+                (std::future::ready(DialogReply::dismissed()), || {
+                    events.borrow_mut().push("close_dialog");
+                })
             },
             || {
                 events.borrow_mut().push("restart");
+            },
+            || {
+                events.borrow_mut().push("quit");
             },
         ))
         .expect_err("restore refusal surfaces bridge error code");
@@ -694,12 +718,18 @@ if (subcmd === {custody_cmd}) {{
             .expect("post-stop refusal must show blocking dialog before restart");
         assert_eq!(dlg.title.as_deref(), Some("Recovery failed"));
         let msg = dlg.message.as_deref().unwrap_or("");
-        assert!(msg.contains("restore_failed"), "dialog must carry refusal code: {msg}");
+        assert!(
+            msg.contains("restore_failed"),
+            "dialog must carry refusal code: {msg}"
+        );
         assert!(
             msg.contains("simulated restore refusal"),
             "dialog must carry refusal message: {msg}"
         );
-        assert!(msg.contains("*.aside-*"), "dialog must explain aside stores: {msg}");
+        assert!(
+            msg.contains("*.aside-*"),
+            "dialog must explain aside stores: {msg}"
+        );
         assert!(!dlg.cancelable);
         assert!(!dlg.sheet);
         assert!(dlg.input.is_none());
@@ -806,15 +836,21 @@ rl.on('line', line => {{
         // Drive the real `nsh_core::element::dialog` + `nsh_core::element::desktop::restart` path
         // inside `nsh_core::Core` for both post-stop restore (`restore_failed`) and startFresh (`clear_failed`).
         for (case_name, store_refused, expected_code, expected_msg) in [
-            ("restore-dialog", false, "restore_failed", "snapshot rename denied"),
-            ("fresh-dialog", true, "clear_failed", "enrollment revoke refused"),
+            (
+                "restore-dialog",
+                false,
+                "restore_failed",
+                "snapshot rename denied",
+            ),
+            (
+                "fresh-dialog",
+                true,
+                "clear_failed",
+                "enrollment revoke refused",
+            ),
         ] {
-            let (spec, spawns_log) = write_fail_mock(
-                case_name,
-                store_refused,
-                !store_refused,
-                store_refused,
-            );
+            let (spec, spawns_log) =
+                write_fail_mock(case_name, store_refused, !store_refused, store_refused);
             let shell = build_runtime_shell(spec, "1.0.0", true).expect("shell starts");
             assert!(wait_until(Duration::from_secs(5), || {
                 matches!(
@@ -835,8 +871,8 @@ rl.on('line', line => {{
 
             // Execute the real recovery call synchronously first (as `blocking(...)` does), then
             // run real `finish_recovery_call(..., dialog, restart)` on the NSH engine thread.
-            let pending_outcome: PendingRecoveryOutcome = Arc::new(Mutex::new(Some(
-                if !store_refused {
+            let pending_outcome: PendingRecoveryOutcome =
+                Arc::new(Mutex::new(Some(if !store_refused {
                     let (out, relaunched) = execute_restore_sync(
                         &shell.router,
                         &shell.app_version,
@@ -847,28 +883,41 @@ rl.on('line', line => {{
                     let (out, relaunched) =
                         execute_start_fresh_sync(&shell.router, "2026-11-25T00-04-00.000Z");
                     (out.map(|v| serde_json::to_value(v).unwrap()), relaunched)
-                },
-            )));
+                })));
 
             // Handover is already sealed by `guard.confirm()` before the dialog is even shown.
             assert!(shell.maintenance.is_handed_over());
 
-            // Component that spawns `finish_recovery_call(..., dialog, restart)` on the engine thread.
+            // Component that spawns `finish_recovery_call(..., open_recovery_failure_dialog, restart, quit)` on the engine thread.
             thread_local! {
                 static PENDING_CALL: std::cell::RefCell<
-                    Option<(PendingRecoveryOutcome, RecoveryResultSlot)>,
+                    Option<(PendingRecoveryOutcome, MaintenanceLock, RecoveryResultSlot)>,
                 > = const { std::cell::RefCell::new(None) };
             }
             PENDING_CALL.with(|cell| {
-                *cell.borrow_mut() = Some((Arc::clone(&pending_outcome), Arc::clone(&result_slot)));
+                *cell.borrow_mut() = Some((
+                    Arc::clone(&pending_outcome),
+                    shell.maintenance.clone(),
+                    Arc::clone(&result_slot),
+                ));
             });
 
             #[component]
             fn RecoveryDialogHarness() -> impl IntoElement {
-                if let Some((input, output)) = PENDING_CALL.with(|cell| cell.borrow_mut().take()) {
+                if let Some((input, maintenance, output)) =
+                    PENDING_CALL.with(|cell| cell.borrow_mut().take())
+                {
                     spawn(async move {
                         let (out, relaunched) = input.lock().unwrap().take().unwrap();
-                        let res = finish_recovery_call(out, relaunched, dialog, restart).await;
+                        let res = finish_recovery_call(
+                            out,
+                            relaunched,
+                            &maintenance,
+                            open_recovery_failure_dialog,
+                            restart,
+                            quit,
+                        )
+                        .await;
                         *output.lock().unwrap() = Some(res);
                     });
                 }
@@ -915,8 +964,14 @@ rl.on('line', line => {{
             assert_eq!(shown_dialog.title.as_deref(), Some("Recovery failed"));
             let msg = shown_dialog.message.as_deref().unwrap_or("");
             assert!(msg.contains(expected_code), "missing code in dialog: {msg}");
-            assert!(msg.contains(expected_msg), "missing message in dialog: {msg}");
-            assert!(msg.contains("*.aside-*"), "missing aside note in dialog: {msg}");
+            assert!(
+                msg.contains(expected_msg),
+                "missing message in dialog: {msg}"
+            );
+            assert!(
+                msg.contains("*.aside-*"),
+                "missing aside note in dialog: {msg}"
+            );
             assert_eq!(shown_dialog.buttons.len(), 1);
             assert_eq!(shown_dialog.buttons[0].text, "Restart");
             assert!(!shown_dialog.cancelable);
@@ -937,7 +992,10 @@ rl.on('line', line => {{
                     ("index", PayloadValue::Number(0.0)),
                 ]),
             );
-            assert!(handled, "Core must route EventKind::Dialog to pending DialogAnswer");
+            assert!(
+                handled,
+                "Core must route EventKind::Dialog to pending DialogAnswer"
+            );
             core.run_component_tasks();
             let after_batch = core.commit().expect("commit after dialog dismissal");
 
@@ -954,6 +1012,25 @@ rl.on('line', line => {{
                 saw_restart,
                 "desktop::restart() must fire immediately after user dismisses the recovery refusal dialog"
             );
+            assert!(
+                !after_batch.items.iter().any(|item| {
+                    matches!(
+                        item,
+                        MountItem::Command {
+                            id,
+                            command: Command::CloseDialog(_) | Command::Desktop(_)
+                        } if *id == ROOT_ID
+                            && !matches!(
+                                item,
+                                MountItem::Command {
+                                    command: Command::Desktop(desktop),
+                                    ..
+                                } if matches!(desktop.as_ref(), DesktopCommand::Restart)
+                            )
+                    )
+                }),
+                "ordinary dialog acknowledgement must not emit CloseDialog or desktop::quit()"
+            );
 
             let final_err = result_slot
                 .lock()
@@ -968,8 +1045,567 @@ rl.on('line', line => {{
     }
 
     #[test]
+    fn quit_during_recovery_refusal_dialog_closes_dialog_and_quits_without_restart_while_handover_sealed()
+     {
+        use std::sync::Mutex;
+
+        let tmp = TestTempDir::new("byok-adapter-dialog-quit");
+        let contract = BridgeContract::load().expect("contract loads");
+
+        let write_fail_mock = |name: &str,
+                               store_refused: bool,
+                               fail_restore: bool,
+                               fail_start_fresh: bool|
+         -> (HostCommandSpec, PathBuf) {
+            let spawns_log = tmp.path().join(format!("{name}-spawns.log"));
+            let script = format!(
+                r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+const [subcmd, arg1] = process.argv.slice(2);
+if (subcmd === {snapshot_status_cmd}) {{
+  process.stdout.write(JSON.stringify({{ ok: true, snapshot: {{ version: arg1, target: '/tmp/snap' }} }}) + '\n');
+  process.exit(0);
+}}
+if (subcmd === {restore_cmd}) {{
+  if ({fail_restore}) {{
+    process.stdout.write(JSON.stringify({{
+      ok: false,
+      code: 'restore_failed',
+      message: 'not enough space to stage snapshot',
+      movedBack: true,
+    }}) + '\n');
+    process.exit(1);
+  }}
+  process.stdout.write(JSON.stringify({{ ok: true, asidePath: '/tmp/ok.aside' }}) + '\n');
+  process.exit(0);
+}}
+if (subcmd === {start_fresh_cmd}) {{
+  if ({fail_start_fresh}) {{
+    process.stdout.write(JSON.stringify({{
+      ok: false,
+      code: 'clear_failed',
+      message: 'enrollment revoke refused',
+      movedBack: false,
+    }}) + '\n');
+    process.exit(1);
+  }}
+  process.stdout.write(JSON.stringify({{ ok: true, moved: [] }}) + '\n');
+  process.exit(0);
+}}
+fs.appendFileSync({spawns_log}, String(process.pid) + '\n');
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => process.exit(0));
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{
+      event: 'state',
+      state: {{ state: 'stopped', pid: process.pid, storeRefused: {store_refused}, reason: 'stopped' }},
+    }}) + '\n');
+  }} else if (msg.method === 'shutdown') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+                snapshot_status_cmd =
+                    serde_json::to_string(&contract.host_commands.snapshot_status).unwrap(),
+                restore_cmd = serde_json::to_string(&contract.host_commands.restore).unwrap(),
+                start_fresh_cmd =
+                    serde_json::to_string(&contract.host_commands.start_fresh).unwrap(),
+                spawns_log =
+                    serde_json::to_string(&spawns_log.to_string_lossy().into_owned()).unwrap(),
+            );
+            let script_path = tmp.path().join(format!("{name}.mjs"));
+            fs::write(&script_path, script).expect("write fail mock");
+            (HostCommandSpec::dev_node_host(script_path), spawns_log)
+        };
+
+        let count_lines = |path: &Path| -> usize {
+            fs::read_to_string(path)
+                .map(|text| text.lines().filter(|line| !line.is_empty()).count())
+                .unwrap_or(0)
+        };
+
+        // Drive system/user quit (`WindowEvent::QuitRequest`) while the native recovery-refusal
+        // dialog is open for both `shell.restore` (`restore_failed`) and `shell.startFresh` (`clear_failed`).
+        for (case_name, store_refused, expected_code) in [
+            ("restore-quit-dialog", false, "restore_failed"),
+            ("fresh-quit-dialog", true, "clear_failed"),
+        ] {
+            let (spec, spawns_log) =
+                write_fail_mock(case_name, store_refused, !store_refused, store_refused);
+            let shell = build_runtime_shell(spec, "1.0.0", true).expect("shell starts");
+            assert!(wait_until(Duration::from_secs(5), || {
+                matches!(
+                    shell.supervisor.last_state(),
+                    Some(SupervisedHostState::Stopped {
+                        store_refused: sr,
+                        ..
+                    }) if sr == store_refused
+                )
+            }));
+            assert_eq!(count_lines(&spawns_log), 1);
+
+            type PendingRecoveryOutcome =
+                Arc<Mutex<Option<(Result<JsonValue, byok_shell::ShellRouteError>, bool)>>>;
+            type RecoveryResultSlot = Arc<Mutex<Option<Result<JsonValue, JsError>>>>;
+
+            let result_slot: RecoveryResultSlot = Arc::new(Mutex::new(None));
+            let quit_handler_outcome = Arc::new(Mutex::new(None::<QuitOutcome>));
+            let quit_handler_stops = Arc::new(AtomicUsize::new(0));
+            let pending_outcome: PendingRecoveryOutcome =
+                Arc::new(Mutex::new(Some(if !store_refused {
+                    let (out, relaunched) = execute_restore_sync(
+                        &shell.router,
+                        &shell.app_version,
+                        "2026-11-25T00-04-30.000Z",
+                    );
+                    (out.map(|v| serde_json::to_value(v).unwrap()), relaunched)
+                } else {
+                    let (out, relaunched) =
+                        execute_start_fresh_sync(&shell.router, "2026-11-25T00-04-30.000Z");
+                    (out.map(|v| serde_json::to_value(v).unwrap()), relaunched)
+                })));
+
+            assert!(shell.maintenance.is_handed_over());
+
+            type QuitDialogHarnessState = (
+                PendingRecoveryOutcome,
+                crate::supervisor::RuntimeShell,
+                RecoveryResultSlot,
+                Arc<Mutex<Option<QuitOutcome>>>,
+                Arc<AtomicUsize>,
+            );
+            thread_local! {
+                static PENDING_QUIT_CALL: std::cell::RefCell<Option<QuitDialogHarnessState>> =
+                    const { std::cell::RefCell::new(None) };
+            }
+            PENDING_QUIT_CALL.with(|cell| {
+                *cell.borrow_mut() = Some((
+                    Arc::clone(&pending_outcome),
+                    shell.clone(),
+                    Arc::clone(&result_slot),
+                    Arc::clone(&quit_handler_outcome),
+                    Arc::clone(&quit_handler_stops),
+                ));
+            });
+
+            #[component]
+            fn RecoveryDialogQuitHarness() -> impl IntoElement {
+                if let Some((input, shell, output, outcome_slot, stop_counter)) =
+                    PENDING_QUIT_CALL.with(|cell| cell.borrow_mut().take())
+                {
+                    let shell_for_quit = shell.clone();
+                    on_quit_request(move || {
+                        let outcome = drain_for_quit_with(&shell_for_quit.maintenance, || {
+                            stop_counter.fetch_add(1, Ordering::SeqCst);
+                            shell_for_quit.supervisor.stop()
+                        });
+                        *outcome_slot.lock().unwrap() = Some(outcome);
+                        if should_call_desktop_quit(outcome) {
+                            quit();
+                        }
+                    });
+                    spawn(async move {
+                        let (out, relaunched) = input.lock().unwrap().take().unwrap();
+                        let res = finish_recovery_call(
+                            out,
+                            relaunched,
+                            &shell.maintenance,
+                            open_recovery_failure_dialog,
+                            restart,
+                            quit,
+                        )
+                        .await;
+                        *output.lock().unwrap() = Some(res);
+                    });
+                }
+                view()
+            }
+
+            let mut core = Core::new(ApproxTextEngine, size(px(800.0), px(600.0)));
+            core.mount_root(&Root::of::<RecoveryDialogQuitHarness>());
+            let first_batch = core.commit().expect("initial commit");
+            core.run_component_tasks();
+            let second_batch = core.commit();
+
+            let mut open_commands = Vec::new();
+            for batch in [Some(first_batch), second_batch].into_iter().flatten() {
+                for item in batch.items {
+                    if let MountItem::Command { id, command } = item
+                        && id == ROOT_ID
+                    {
+                        open_commands.push(command);
+                    }
+                }
+            }
+
+            let shown_dialog = open_commands
+                .iter()
+                .find_map(|cmd| match cmd {
+                    Command::Dialog(dlg) => Some(dlg.clone()),
+                    _ => None,
+                })
+                .expect("recovery refusal dialog must open on ROOT_ID");
+            assert!(
+                result_slot.lock().unwrap().is_none(),
+                "recovery call must stay pending while dialog is open"
+            );
+
+            // Leave the dialog unanswered and deliver a system/user QuitRequest (e.g. macOS Log Out / Shut Down).
+            core.component_event(
+                ROOT_ID,
+                EventKind::Window,
+                &EventPayload::Window(Box::new(WindowEvent::QuitRequest)),
+            );
+            core.run_component_tasks();
+            let after_batch = core.commit().expect("commit after quit during dialog");
+
+            // Quit handler saw confirmed handover, skipped a second Host stop, and deferred exit to recovery.
+            assert_eq!(
+                *quit_handler_outcome.lock().unwrap(),
+                Some(QuitOutcome::HandedOver)
+            );
+            assert_eq!(quit_handler_stops.load(Ordering::SeqCst), 0);
+
+            let root_commands: Vec<&Command> = after_batch
+                .items
+                .iter()
+                .filter_map(|item| match item {
+                    MountItem::Command { id, command } if *id == ROOT_ID => Some(command),
+                    _ => None,
+                })
+                .collect();
+
+            let close_pos = root_commands
+                .iter()
+                .position(|cmd| matches!(cmd, Command::CloseDialog(id) if *id == shown_dialog.id))
+                .expect("quit during pending refusal dialog must emit Command::CloseDialog(id)");
+            let quit_pos = root_commands
+                .iter()
+                .position(|cmd| {
+                    matches!(
+                        cmd,
+                        Command::Desktop(desktop) if matches!(desktop.as_ref(), DesktopCommand::Quit)
+                    )
+                })
+                .expect("quit during pending refusal dialog must emit DesktopCommand::Quit");
+            assert!(
+                close_pos < quit_pos,
+                "Command::CloseDialog must precede DesktopCommand::Quit: {root_commands:?}"
+            );
+            assert!(
+                !root_commands.iter().any(|cmd| {
+                    matches!(
+                        cmd,
+                        Command::Desktop(desktop) if matches!(desktop.as_ref(), DesktopCommand::Restart)
+                    )
+                }),
+                "quit during pending refusal dialog must NOT emit DesktopCommand::Restart"
+            );
+
+            let final_err = result_slot
+                .lock()
+                .unwrap()
+                .take()
+                .expect("recovery call must resolve once quit closes the refusal dialog")
+                .expect_err("recovery refusal must still reject with coded JsError");
+            assert_eq!(final_err.code(), Some(expected_code));
+            assert!(
+                shell.maintenance.is_handed_over(),
+                "handover must stay sealed through quit"
+            );
+            let restart_err = restart_shell_sync(&shell)
+                .expect_err("Host restart must stay refused while handover and quit are active");
+            assert_eq!(restart_err.code(), Some("maintenance_busy"));
+            assert_eq!(count_lines(&spawns_log), 1);
+        }
+    }
+
+    #[test]
+    fn quit_while_recovery_draining_routes_to_desktop_quit_without_dialog_or_restart() {
+        let tmp = TestTempDir::new("byok-adapter-quit-during-drain");
+        let contract = BridgeContract::load().expect("contract loads");
+
+        let count_lines = |path: &Path| -> usize {
+            fs::read_to_string(path)
+                .map(|text| text.lines().filter(|line| !line.is_empty()).count())
+                .unwrap_or(0)
+        };
+
+        for (case_name, fail_restore) in [("drain-fail", true), ("drain-ok", false)] {
+            let spawns_log = tmp.path().join(format!("{case_name}-spawns.log"));
+            let entered_marker = tmp.path().join(format!("{case_name}-entered"));
+            let release_marker = tmp.path().join(format!("{case_name}-release"));
+            let script = format!(
+                r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+const [subcmd, arg1] = process.argv.slice(2);
+if (subcmd === {snapshot_status_cmd}) {{
+  process.stdout.write(JSON.stringify({{ ok: true, snapshot: {{ version: arg1, target: '/tmp/snap' }} }}) + '\n');
+  process.exit(0);
+}}
+if (subcmd === {restore_cmd}) {{
+  const tmpEntered = {entered} + '.tmp';
+  fs.writeFileSync(tmpEntered, 'entered');
+  fs.renameSync(tmpEntered, {entered});
+  const timer = setInterval(() => {{
+    if (fs.existsSync({release})) {{
+      clearInterval(timer);
+      if ({fail_restore}) {{
+        process.stdout.write(JSON.stringify({{
+          ok: false,
+          code: 'restore_failed',
+          message: 'disk full while staging snapshot',
+          movedBack: true,
+        }}) + '\n');
+        process.exit(1);
+      }}
+      process.stdout.write(JSON.stringify({{ ok: true, asidePath: '/tmp/drained.aside' }}) + '\n');
+      process.exit(0);
+    }}
+  }}, 10);
+}} else {{
+  fs.appendFileSync({spawns_log}, String(process.pid) + '\n');
+  const rl = readline.createInterface({{ input: process.stdin }});
+  rl.on('close', () => process.exit(0));
+  rl.on('line', line => {{
+    const msg = JSON.parse(line);
+    if (msg.method === 'hello') {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{
+        event: 'state',
+        state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
+      }}) + '\n');
+    }} else if (msg.method === 'shutdown') {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+      process.exit(0);
+    }}
+  }});
+}}
+"#,
+                snapshot_status_cmd =
+                    serde_json::to_string(&contract.host_commands.snapshot_status).unwrap(),
+                restore_cmd = serde_json::to_string(&contract.host_commands.restore).unwrap(),
+                entered =
+                    serde_json::to_string(&entered_marker.to_string_lossy().into_owned()).unwrap(),
+                release =
+                    serde_json::to_string(&release_marker.to_string_lossy().into_owned()).unwrap(),
+                spawns_log =
+                    serde_json::to_string(&spawns_log.to_string_lossy().into_owned()).unwrap(),
+            );
+            let script_path = tmp.path().join(format!("{case_name}.mjs"));
+            fs::write(&script_path, script).expect("write drain mock");
+            let shell = build_runtime_shell(HostCommandSpec::dev_node_host(script_path), "1.0.0", true)
+                .expect("shell starts");
+            assert!(wait_until(Duration::from_secs(5), || {
+                matches!(
+                    shell.supervisor.last_state(),
+                    Some(SupervisedHostState::Stopped {
+                        store_refused: false,
+                        ..
+                    })
+                )
+            }));
+            assert_eq!(count_lines(&spawns_log), 1);
+
+            let restore_shell = shell.clone();
+            let restore_handle = std::thread::spawn(move || {
+                execute_restore_sync(
+                    &restore_shell.router,
+                    &restore_shell.app_version,
+                    "2026-11-25T00-04-45.000Z",
+                )
+            });
+            assert!(
+                wait_until(Duration::from_secs(5), || entered_marker.exists()),
+                "restore must reach barrier while holding MaintenanceLock"
+            );
+
+            // Quit arrives while recovery is still moving stores (`busy == true`).
+            let (quit_marked_tx, quit_marked_rx) = std::sync::mpsc::channel();
+            shell.maintenance.on_quit_requested(move || {
+                let _ = quit_marked_tx.send(());
+            });
+            let quit_shell = shell.clone();
+            let extra_stops = Arc::new(AtomicUsize::new(0));
+            let extra_stops_bg = Arc::clone(&extra_stops);
+            let quit_handle = std::thread::spawn(move || {
+                drain_for_quit_with(&quit_shell.maintenance, || {
+                    extra_stops_bg.fetch_add(1, Ordering::SeqCst);
+                    quit_shell.supervisor.stop()
+                })
+            });
+            quit_marked_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("quit drain marks quitting immediately while waiting on recovery");
+            assert!(
+                !quit_handle.is_finished(),
+                "quit drain must wait until recovery finishes moving stores"
+            );
+
+            fs::write(&release_marker, "go").expect("release recovery barrier");
+            let (out, relaunched) = restore_handle.join().expect("restore thread joins");
+            assert!(relaunched);
+            assert_eq!(
+                quit_handle.join().expect("quit thread joins"),
+                QuitOutcome::HandedOver
+            );
+            assert_eq!(extra_stops.load(Ordering::SeqCst), 0);
+            assert!(shell.maintenance.is_handed_over());
+
+            let mut restart_calls = 0usize;
+            let mut quit_calls = 0usize;
+            let res = poll_ready(finish_recovery_call(
+                out,
+                relaunched,
+                &shell.maintenance,
+                |_| {
+                    panic!("must not open blocking dialog when quit was already requested during recovery drain");
+                    #[allow(unreachable_code)]
+                    (std::future::ready(DialogReply::dismissed()), || {})
+                },
+                || {
+                    restart_calls += 1;
+                },
+                || {
+                    quit_calls += 1;
+                },
+            ));
+            if fail_restore {
+                assert_eq!(res.expect_err("restore refusal surfaces code").code(), Some("restore_failed"));
+            } else {
+                assert_eq!(res.expect("restore ok")["asidePath"], "/tmp/drained.aside");
+            }
+            assert_eq!(
+                restart_calls, 0,
+                "must not call desktop::restart() when quit was requested during recovery"
+            );
+            assert_eq!(
+                quit_calls, 1,
+                "must call desktop::quit() once recovery drained with handover still sealed"
+            );
+            assert!(shell.maintenance.is_handed_over());
+            assert_eq!(
+                restart_shell_sync(&shell)
+                    .expect_err("restart stays refused")
+                    .code(),
+                Some("maintenance_busy")
+            );
+            assert_eq!(count_lines(&spawns_log), 1);
+        }
+
+        // Pre-stop precondition refusal after quit already marked: `relaunched == false`, so
+        // `finish_recovery_call` must call neither dialog nor restart nor quit (quit drain owns exit).
+        let pre_lock = MaintenanceLock::new();
+        pre_lock.mark_quitting();
+        let mut pre_restarts = 0usize;
+        let mut pre_quits = 0usize;
+        let pre_err = poll_ready(finish_recovery_call::<JsonValue, _, _, _, _, _>(
+            Err(byok_shell::ShellRouteError::new(
+                "precondition_failed",
+                "Restore is offered only while the Host is stopped",
+            )),
+            false,
+            &pre_lock,
+            |_| {
+                panic!("pre-stop refusal must not show dialog");
+                #[allow(unreachable_code)]
+                (std::future::ready(DialogReply::dismissed()), || {})
+            },
+            || {
+                pre_restarts += 1;
+            },
+            || {
+                pre_quits += 1;
+            },
+        ))
+        .expect_err("pre-stop refusal returns coded error");
+        assert_eq!(pre_err.code(), Some("precondition_failed"));
+        assert_eq!(pre_restarts, 0);
+        assert_eq!(pre_quits, 0);
+
+        // Race branch: quit marked right as dialog opens (before first poll) still closes dialog
+        // via closer and routes to on_quit() without calling on_restart().
+        let race_lock = MaintenanceLock::new();
+        let events = std::cell::RefCell::new(Vec::new());
+        let race_err = poll_ready(finish_recovery_call::<JsonValue, _, _, _, _, _>(
+            Err(byok_shell::ShellRouteError::new(
+                "restore_failed",
+                "disk full",
+            )),
+            true,
+            &race_lock,
+            |_| {
+                events.borrow_mut().push("open_dialog");
+                race_lock.mark_quitting();
+                (std::future::pending::<DialogReply>(), || {
+                    events.borrow_mut().push("close_dialog");
+                })
+            },
+            || {
+                events.borrow_mut().push("restart");
+            },
+            || {
+                events.borrow_mut().push("quit");
+            },
+        ))
+        .expect_err("refusal surfaces coded error");
+        assert_eq!(race_err.code(), Some("restore_failed"));
+        assert_eq!(*events.borrow(), vec!["open_dialog", "close_dialog", "quit"]);
+
+        // Task cancellation while dialog is pending closes the dialog on drop without restart/quit.
+        let drop_lock = MaintenanceLock::new();
+        let drop_events = std::cell::RefCell::new(Vec::new());
+        {
+            let mut fut = pin!(finish_recovery_call::<JsonValue, _, _, _, _, _>(
+                Err(byok_shell::ShellRouteError::new(
+                    "clear_failed",
+                    "revoke denied",
+                )),
+                true,
+                &drop_lock,
+                |_| {
+                    drop_events.borrow_mut().push("open_dialog");
+                    (std::future::pending::<DialogReply>(), || {
+                        drop_events.borrow_mut().push("close_dialog");
+                    })
+                },
+                || {
+                    drop_events.borrow_mut().push("restart");
+                },
+                || {
+                    drop_events.borrow_mut().push("quit");
+                },
+            ));
+            let waker = Waker::noop();
+            let mut cx = Context::from_waker(waker);
+            assert!(matches!(fut.as_mut().poll(&mut cx), Poll::Pending));
+        }
+        assert_eq!(*drop_events.borrow(), vec!["open_dialog", "close_dialog"]);
+
+        // EventHub quitting hook mirrors `ShellEvent::Quitting` into MaintenanceLock synchronously.
+        let hub_lock = MaintenanceLock::new();
+        let hub_lock_hook = hub_lock.clone();
+        let hub = EventHub::with_quitting_hook(move || hub_lock_hook.mark_quitting());
+        let (_sub_id, rx) = hub.subscribe();
+        hub.publish(ShellEvent::StateHint);
+        assert!(!hub_lock.is_quitting());
+        hub.publish(ShellEvent::Quitting);
+        assert!(hub_lock.is_quitting());
+        assert!(matches!(rx.recv().unwrap(), ShellEvent::StateHint));
+        assert!(matches!(rx.recv().unwrap(), ShellEvent::Quitting));
+    }
+
+    #[test]
     fn adapter_restart_guard_refuses_during_barrier_handover_quit_and_allows_after_precondition_error()
-    {
+     {
         let tmp = TestTempDir::new("byok-adapter-restart-guard");
         let contract = BridgeContract::load().expect("contract loads");
 
@@ -1092,21 +1728,27 @@ if (subcmd === {restore_cmd}) {{
         let (out, relaunched) = restore_handle.join().expect("restore thread joins");
         assert!(relaunched);
         let mut restart_calls = 0usize;
+        let mut quit_calls = 0usize;
         let payload = poll_ready(finish_recovery_call(
             out,
             relaunched,
+            &shell.maintenance,
             |_| {
                 panic!("successful restore must not show failure dialog");
                 #[allow(unreachable_code)]
-                std::future::ready(DialogReply::dismissed())
+                (std::future::ready(DialogReply::dismissed()), || {})
             },
             || {
                 restart_calls += 1;
+            },
+            || {
+                quit_calls += 1;
             },
         ))
         .expect("restore succeeds");
         assert_eq!(payload["asidePath"], aside_path.to_string_lossy().as_ref());
         assert_eq!(restart_calls, 1);
+        assert_eq!(quit_calls, 0);
         assert!(shell.maintenance.is_handed_over());
 
         let post_handover_err = restart_shell_sync(&shell)
