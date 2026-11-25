@@ -3,7 +3,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 local Host: BotCollaboration, persona projection, compaction veto, team snapshot",
-      "budgetBytes": 3374349,
+      "budgetBytes": 3398207,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -148,7 +148,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 modules a Host adapter composes; Worker-loadable, no @byok-sdk/client",
-      "budgetBytes": 606534,
+      "budgetBytes": 609461,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -314,7 +314,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "K8 shared vectors and L test Host",
-      "budgetBytes": 3889336,
+      "budgetBytes": 3913529,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -487,7 +487,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Local daemon composition",
-      "budgetBytes": 3009668,
+      "budgetBytes": 3030598,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -625,7 +625,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapters; private hosts load lazily",
-      "budgetBytes": 818917,
+      "budgetBytes": 832331,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1013,7 +1013,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Runtime adapter and device credential test doubles; no daemon",
-      "budgetBytes": 766322,
+      "budgetBytes": 778246,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1091,7 +1091,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private ACP runtime stack (Grok, agy, OpenCode)",
-      "budgetBytes": 216598,
+      "budgetBytes": 220860,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -1260,7 +1260,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private on-demand OAR runtime readers",
-      "budgetBytes": 89943,
+      "budgetBytes": 89828,
       "zod": false,
       "codegen": false,
       "nodeBuiltins": {
@@ -1309,7 +1309,7 @@
     "kind": "imports",
     "policy": {
       "purpose": "Private Pi runtime host",
-      "budgetBytes": 664648,
+      "budgetBytes": 665521,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2686,7 +2686,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Resident Node server",
-      "budgetBytes": 796818,
+      "budgetBytes": 797153,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -2773,7 +2773,7 @@
     "kind": "exports",
     "policy": {
       "purpose": "Host execution core: FIFO, ledger, routines, memory restore",
-      "budgetBytes": 398759,
+      "budgetBytes": 401686,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {
@@ -3061,7 +3061,7 @@
     "kind": "bin",
     "policy": {
       "purpose": "Device daemon CLI",
-      "budgetBytes": 3009277,
+      "budgetBytes": 3029843,
       "zod": true,
       "codegen": true,
       "nodeBuiltins": {

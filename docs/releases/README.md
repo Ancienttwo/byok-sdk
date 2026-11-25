@@ -12,6 +12,12 @@ publication authorization. Follow the
 
 ## Upgrade manifest
 
+The [0.47.0 candidate](v0.47.0.md) carries the 0.46.1 → 0.47.0 manifest
+with zero breaking and five additive entries. Follow its
+[Host upgrade checklist](host-upgrade-0.47.0.md). The publication record
+archives the cut manifest and rebaselines to the published snapshot.
+Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
+
 The [0.46.1 release](v0.46.1.md) carries the 0.46.0 → 0.46.1 manifest
 with zero breaking and zero additive entries. The cut manifest is archived
 at `packages/client/upgrade-history/0.46.0-0.46.1.json` and the baseline reflects
@@ -22,7 +28,6 @@ with two breaking entries, `pi-160-closure` and `dsh-session-log-upload-off`.
 Follow its
 [Host upgrade checklist](host-upgrade-0.46.0.md). The cut manifest is archived
 at `packages/client/upgrade-history/0.45.1-0.46.0.json`.
-Subsequent changes belong to the [next-MINOR checklist](host-upgrade-next-minor.md).
 
 The [0.45.1 release](v0.45.1.md) carried the 0.45.0 → 0.45.1 manifest
 with zero breaking and zero additive entries. The cut manifest is archived
@@ -52,7 +57,7 @@ from evidence, not the author's judgment (see "Freeze rule" in
 ([Wire v8](host-upgrade-0.45.0.md#wire-v8-and-the-provider-store-cutover)).
 0.44.1 is the last v7 release. `golden/v8.releases.json` pins the first
 v8 release, 0.45.0, which also serves as the published decoder baseline,
-the 0.45.1 release, the 0.46.0 release, and the 0.46.1 release.
+the 0.45.1, 0.46.0, and 0.46.1 releases, and the 0.47.0 candidate.
 
 Retired v2 evidence. `golden/v2.envelopes.ndjson`, `golden/v2.http.ndjson`
 and the v2 registry `golden/releases.json` (floor 0.25.0; 0.25.0, 0.26.0 and
@@ -85,8 +90,8 @@ lines. The current decoder rejects v7 envelopes.
 
 v8 evidence. The generator `packages/protocol/src/__tests__/generate-v8-corpus.mjs`
 builds `golden/v8.envelopes.ndjson` and `golden/v8.http.ndjson` from the frozen
-v7 corpora. The 0.45.0, 0.45.1, 0.46.0 and 0.46.1 registrations pin the same 514 envelope
-and 41 HTTP lines.
+v7 corpora. The 0.45.0, 0.45.1, 0.46.0, 0.46.1, and 0.47.0 registrations pin
+the same 514 envelope and 41 HTTP lines.
 Covered prefixes are immutable, and further lines are append-only. Each
 stable entry in `golden/v8.releases.json` pins line counts and SHA-256 prefixes
 for both corpora. The guarantee covers registered stable releases.

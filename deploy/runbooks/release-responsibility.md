@@ -77,6 +77,11 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
+0.47.0 is the MINOR candidate for all nine public packages. It keeps wire v8
+and carries five additive manifest entries and zero breaking entries.
+[Candidate notes](../../docs/releases/v0.47.0.md) ·
+[Host upgrade checklist](../../docs/releases/host-upgrade-0.47.0.md)
+
 0.46.1 is the published PATCH for all nine public packages on `release/0.46`.
 It was published on npm `latest` on 2026-11-25 (UTC) from `v0.46.1`
 (`4db4ce4e4`) using exact-SHA release validation
@@ -145,7 +150,7 @@ differs from the train. `@byok-sdk/implementation-identity` remains retired. Eve
 the dist-tag `latest`, observed at 0.46.1 for all nine packages on 2026-11-25 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the historical 0.46.1 pre-publication baseline with prior `latest` 0.46.0 and
+records the 0.47.0 candidate baseline with prior `latest` 0.46.1 and
 `priorPublication: existing` for all nine packages, including
 `@byok-sdk/bot-collaboration`. Recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
