@@ -644,12 +644,11 @@ export function readHostLedger(path: string): HostLedgerRead {
     }
     if (!stat.isFile()) return unreadable('not_a_file', new Error('The Host ledger path is not a regular file'));
     return readSqliteSnapshot(path, (db): HostLedgerRead => {
-      const formats = storedFormats(db);
-      if (!formats) return { kind: 'absent', reason: 'no_table' };
-      if (formats.get('k4') !== K4_FORMAT) {
-        return unreadable('format_unsupported', new Error(`This Host ledger holds K4 format ${formats.get('k4') ?? 'none'}; this build reads ${K4_FORMAT}`));
-      }
       if (!db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='host_ledger'").get()) return { kind: 'absent', reason: 'no_table' };
+      const format = storedFormats(db)?.get('k4');
+      if (format !== K4_FORMAT) {
+        return unreadable('format_unsupported', new Error(`This Host ledger holds K4 format ${format ?? 'none'}; this build reads ${K4_FORMAT}`));
+      }
       return { kind: 'ok', tenants: db.prepare('SELECT tenant, body FROM host_ledger ORDER BY tenant').all().map(tenantRow) };
     }) ?? { kind: 'absent', reason: 'no_file' };
   } catch (error) {
