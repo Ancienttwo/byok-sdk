@@ -221,16 +221,18 @@ export class AgyAdapter implements RuntimeAdapter {
     input.signal?.throwIfAborted();
     // Launch the command an observation of this adapter probed: this offer's
     // admission observation when this adapter made it, else a fresh one.
-    let command = takeVerifiedDetection<string>(this, input.detected);
+    let detected = input.detected;
+    let command = takeVerifiedDetection<string>(this, detected);
     if (command === undefined) {
-      const detected = await this.detect(input.signal);
+      detected = await this.detect(input.signal);
       if (detected.kind !== 'available') {
         return { kind: 'reject', reason: `agy installation refused: ${detected.kind === 'refused' ? detected.reason : detected.kind}`, retryable: false };
       }
       command = takeVerifiedDetection<string>(this, detected);
       if (command === undefined) return { kind: 'reject', reason: 'agy installation refused: unverified detection', retryable: false };
     }
-    return { kind: 'prepared', operation: {
+    const { version, executableSource, versionVerdict } = detected as Extract<RuntimeDetectResult, { kind: 'available' }>;
+    return { kind: 'prepared', detected: { version, executableSource, versionVerdict }, operation: {
       acquireSessionLease: (sessionRef) => acquireAgySessionRetention(agyStoreDir(this.root), sessionRef),
       start: (start) => this.start(start, command, modelId, effort),
     } };

@@ -157,7 +157,7 @@ describe('GrokAdapter detect signal and prepare reuse (#2469)', () => {
     if (detected.kind !== 'available') throw new Error('fixture grok is unavailable');
     expect(await readProbes(log)).toEqual(['--version', 'agent stdio --help']);
     const input = { offer: { target: GROK_TARGET, instruction: 'x' }, descriptor: runtime.descriptor, requiredToolsetIds: [] };
-    expect(await runtime.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared' });
+    expect(await runtime.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared', detected: { version: detected.version } });
     expect(await readProbes(log)).toEqual([]);
     expect(await runtime.prepare({ ...input, detected: { ...detected, executablePath: '/elsewhere/grok' } })).toMatchObject({ kind: 'prepared' });
     expect(await readProbes(log)).toEqual(['--version', 'agent stdio --help']);
@@ -839,7 +839,7 @@ describe('AgyAdapter', () => {
     if (detected.kind !== 'available') throw new Error('fixture agy is unavailable');
     expect(await readProbes(log)).toEqual(['--version']);
     const input = { offer: { target: AGY_TARGET, instruction: 'x' }, descriptor: runtime.descriptor, requiredToolsetIds: [] };
-    expect(await runtime.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared' });
+    expect(await runtime.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared', detected: { version: detected.version } });
     expect(await readProbes(log)).toEqual([]);
     expect(await runtime.prepare(input)).toMatchObject({ kind: 'prepared' });
     expect(await readProbes(log)).toEqual(['--version']);
