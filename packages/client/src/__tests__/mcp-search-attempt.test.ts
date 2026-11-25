@@ -438,7 +438,7 @@ it.each(['start', 'activation'] as const)('revokes direct and inner nonces while
   expect(sent.some(envelope => envelope.type === 'task.fail')).toBe(true);
 });
 
-it.skipIf(process.platform === 'win32')('declines search when DSH prepare captures a newly published unqualified installation', async () => {
+it.skipIf(process.platform === 'win32')('declines search when a fresh DSH prepare probe captures a newly published unqualified installation', async () => {
   const root = testScratchRoot();
   const fixture = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url));
   const version = '0.2.2-rc.1';
@@ -455,7 +455,10 @@ it.skipIf(process.platform === 'win32')('declines search when DSH prepare captur
     runtimeEnvironment: { base: 'allowlist' },
   });
   const detect = vi.spyOn(adapter, 'detect');
-  const prepare = vi.spyOn(adapter, 'prepare');
+  // With this offer's admission observation, prepare() launches the installation admission verified (#2469).
+  // Without it, prepare() probes afresh, and a different installation must still fail the search evidence.
+  const freshPrepare = adapter.prepare.bind(adapter);
+  const prepare = vi.spyOn(adapter, 'prepare').mockImplementation(({ detected: _admitted, ...input }) => freshPrepare(input));
   const { offer, sent } = setup([adapter], {
     mcpSearch: {
       bin: { command: process.execPath, args: [hubBin] },

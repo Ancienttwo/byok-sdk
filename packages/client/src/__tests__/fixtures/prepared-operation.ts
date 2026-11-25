@@ -20,6 +20,8 @@ export interface PreparedOperationResources {
   mcpToolApprovals?: Readonly<Record<string, readonly string[]>>;
   /** Stands in for the daemon's `tools/list` observation; required whenever `mcpServers` carries a non-reserved server. */
   mcpToolsetTools?: McpToolsetToolObservation;
+  /** The offer's admission observation handed to `prepare()`; omitted, the adapter probes itself. */
+  detected?: import('../../types').RuntimeDetectResult;
   /**
    * A DIFFERENT observation handed to `start()` than the one `prepare()` was
    * admitted with — the drift case an adapter must refuse. Omitted
@@ -49,6 +51,7 @@ export async function startPreparedOperation(
     requiredToolsetIds: [],
     ...(resources.mcpServers === undefined ? {} : { mcpServers: resources.mcpServers }),
     ...(resources.mcpToolsetTools === undefined ? {} : { mcpToolsetTools: resources.mcpToolsetTools }),
+    ...(resources.detected === undefined ? {} : { detected: resources.detected }),
   });
   if (prepared.kind === 'reject') throw new Error(prepared.reason);
   if (typeof offer.instruction !== 'string') throw new Error('prepared adapter accepted a non-string instruction');

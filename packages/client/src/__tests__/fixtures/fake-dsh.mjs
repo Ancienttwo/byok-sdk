@@ -9,6 +9,8 @@
 // (FAKE_DSH_NO_ACP=1: exits 2). `--profile acp --patch <sdk> --patch <bridge>`
 // serves the bridge. The prompt text selects the scenario (see `prompt` below).
 // FAKE_DSH_LOG receives one JSON line per observed fact.
+// FAKE_DSH_PROBE_LOG=<path>: each `--version` / `--help` probe appends its argv line.
+// FAKE_DSH_HELP_HANG_PID_FILE=<path>: `--profile acp --help` writes its pid to <path> and never answers.
 // FAKE_DSH_ROUTE overrides the model route the first request reports.
 // FAKE_DSH_NO_STEER=1: `open` reports no native steer.
 // FAKE_DSH_SESSION_LOG_UNMOUNTED=1: the bridge refuses the requested session-log check, as it does when dsh mounts no session-log plugin.
@@ -19,6 +21,7 @@ import { createInterface } from 'node:readline';
 const args = process.argv.slice(2);
 const log = (fact) => { if (process.env.FAKE_DSH_LOG) appendFileSync(process.env.FAKE_DSH_LOG, `${JSON.stringify(fact)}\n`); };
 const home = process.env.DSH_HOME;
+if (process.env.FAKE_DSH_PROBE_LOG && (args[0] === '--version' || args[2] === '--help')) appendFileSync(process.env.FAKE_DSH_PROBE_LOG, `${args.join(' ')}\n`);
 
 if (args[0] === '--version') {
   process.stdout.write(`${process.env.FAKE_DSH_VERSION ?? '0.2.2-rc.1'}\n`);
@@ -26,6 +29,11 @@ if (args[0] === '--version') {
 }
 if (args[0] !== '--profile' || args[1] !== 'acp') { process.stderr.write(`unexpected argv ${JSON.stringify(args)}\n`); process.exit(64); }
 if (args[2] === '--help') {
+  if (process.env.FAKE_DSH_HELP_HANG_PID_FILE) {
+    writeFileSync(process.env.FAKE_DSH_HELP_HANG_PID_FILE, String(process.pid));
+    setInterval(() => {}, 60_000);
+    await new Promise(() => {});
+  }
   if (process.env.FAKE_DSH_NO_ACP === '1') process.exit(2);
   mkdirSync(path.join(home, 'profiles', 'acp'), { recursive: true });
   log({ kind: 'help', cwd: process.cwd() });

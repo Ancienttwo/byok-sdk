@@ -447,6 +447,14 @@ export interface RuntimeAdapterPrepareInput {
   mcpServers?: Readonly<Record<string, McpStdioServerConfig>>;
   /** {@link McpToolsetToolObservation} for exactly the projected toolset servers in `mcpServers`. */
   mcpToolsetTools?: McpToolsetToolObservation;
+  /**
+   * This offer's admission observation of this adapter, so `prepare()` need
+   * not probe the runtime again. Fresh per offer, never cached across offers.
+   * A built-in adapter's admission observation may omit `authPresent`
+   * (unmeasured). Absent when the caller observed nothing: `prepare()` then
+   * probes itself.
+   */
+  readonly detected?: RuntimeDetectResult;
 }
 
 /**

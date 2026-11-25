@@ -121,6 +121,68 @@ describe('GrokAdapter detection', () => {
   });
 });
 
+async function readProbes(log: string): Promise<string[]> {
+  const lines = (await fs.readFile(log, 'utf8').catch(() => '')).split('\n').filter(Boolean);
+  await fs.rm(log, { force: true });
+  return lines;
+}
+async function expectAbortStopsHungHelp(detect: (signal: AbortSignal) => Promise<unknown>): Promise<void> {
+  const reason = new Error('offer cancelled');
+  await expect(detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+  const pidFile = path.join(await tempDir('byok-acp-help-'), 'pid');
+  vi.stubEnv('FAKE_ACP_HELP_HANG_PID_FILE', pidFile);
+  const controller = new AbortController();
+  const pending = detect(controller.signal);
+  const pid = await vi.waitFor(async () => {
+    const value = Number(await fs.readFile(pidFile, 'utf8'));
+    expect(value).toBeGreaterThan(0);
+    return value;
+  }, { timeout: 5_000 });
+  const child = captureProcessIdentity(pid);
+  controller.abort(reason);
+  await expect(pending).rejects.toBe(reason);
+  await vi.waitFor(() => expectProcessNotLive(child));
+}
+
+describe('GrokAdapter detect signal and prepare reuse (#2469)', () => {
+  it('detect(signal) rethrows a pre-aborted reason and stops a hung `agent stdio --help` on abort', async () => {
+    await expectAbortStopsHungHelp(signal => adapter().detect(signal));
+  });
+
+  it('prepare() reuses the admission observation of the same executable and otherwise probes afresh', async () => {
+    const log = path.join(await tempDir(), 'probes');
+    vi.stubEnv('FAKE_ACP_PROBE_LOG', log);
+    const runtime = adapter();
+    const detected = await runtime.detect();
+    if (detected.kind !== 'available') throw new Error('fixture grok is unavailable');
+    expect(await readProbes(log)).toEqual(['--version', 'agent stdio --help']);
+    const input = { offer: { target: GROK_TARGET, instruction: 'x' }, descriptor: runtime.descriptor, requiredToolsetIds: [] };
+    expect(await runtime.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared' });
+    expect(await readProbes(log)).toEqual([]);
+    expect(await runtime.prepare({ ...input, detected: { ...detected, executablePath: '/elsewhere/grok' } })).toMatchObject({ kind: 'prepared' });
+    expect(await readProbes(log)).toEqual(['--version', 'agent stdio --help']);
+    expect(await runtime.prepare(input)).toMatchObject({ kind: 'prepared' });
+    expect(await readProbes(log)).toEqual(['--version', 'agent stdio --help']);
+    // A plain object never skips the probe, and a refusing CLI still refuses.
+    vi.stubEnv('FAKE_ACP_NO_STDIO', '1');
+    expect(await runtime.prepare({ ...input, detected: { kind: 'available', executableSource: 'config' } }))
+      .toEqual({ kind: 'reject', reason: 'grok installation refused: acp_unavailable', retryable: false });
+  });
+
+  it('prepare() launches the command its observation probed, even when the resolver now answers another', async () => {
+    let calls = 0;
+    const resolveBin = () => ({ command: calls++ % 2 === 0 ? fixture : path.join(os.tmpdir(), 'byok-no-such-grok-b'), source: 'path' as const });
+    const runtime = adapter({ resolveBin });
+    const detected = await runtime.detect();
+    expect(detected).toMatchObject({ kind: 'available', executablePath: fixture });
+    expect(await turn(await open(runtime, { target: GROK_TARGET, instruction: 'hello' }, { ...await ctx(), detected }))).toContainEqual({ type: 'turn_end' });
+    expect(calls).toBe(1);
+    calls = 0;
+    expect(await turn(await open(runtime, { target: GROK_TARGET, instruction: 'hello' }, await ctx()))).toContainEqual({ type: 'turn_end' });
+    expect(calls).toBe(1);
+  });
+});
+
 describe('GrokAdapter sessions', () => {
   it('declares resume and MCP toolsets, no steer, no approvals and no dispatch selection', async () => {
     const a = adapter();
@@ -739,6 +801,48 @@ describe('AgyAdapter', () => {
     expect(() => agyAdapterWithEndpoint(new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home: '/owned' }), 'http://127.0.0.1:9?key=x')).toThrow(/query/);
     expect(() => new AgyAdapter({ home: '/owned' } as AgyAdapterOptions)).toThrow(/resolveKey must be a function/);
     expect(new AgyAdapter({ resolveKey: async () => 'agy-task-resolver-key-fixture', home: '/owned' }).descriptor).toMatchObject({ id: 'agy', platforms: ['darwin', 'linux', 'win32'] });
+  });
+
+  it('#2469: detect(signal) rethrows a pre-aborted reason before writing the home', async () => {
+    const home = await agyVersion('1.5.0');
+    const reason = new Error('offer cancelled');
+    await expect(agy(home).detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+    expect(existsSync(path.join(home, '.gemini'))).toBe(false);
+  });
+
+  it('#2469: prepare() launches the command its observation probed, even when the resolver now answers another', async () => {
+    const home = await agyVersion('1.5.11');
+    let calls = 0;
+    const resolveBin = () => ({ command: calls++ % 2 === 0 ? fixture : path.join(os.tmpdir(), 'byok-no-such-agy-b'), source: 'path' as const });
+    const runtime = agy(home, { resolveBin });
+    const detected = await runtime.detect();
+    expect(detected).toMatchObject({ kind: 'available', executablePath: fixture });
+    expect(await turn(await open(runtime, { target: AGY_TARGET, instruction: 'hello' }, { ...await agyCtx(), detected }))).toContainEqual({ type: 'turn_end' });
+    expect(calls).toBe(1);
+    calls = 0;
+    expect(await turn(await open(runtime, { target: AGY_TARGET, instruction: 'hello' }, await agyCtx()))).toContainEqual({ type: 'turn_end' });
+    expect(calls).toBe(1);
+  });
+
+  it('#2469: a plain object never skips the version refusal', async () => {
+    const home = await agyVersion('1.4.9');
+    expect(await agy(home).prepare({ offer: { target: AGY_TARGET, instruction: 'x' }, descriptor: agy(home).descriptor, requiredToolsetIds: [], detected: { kind: 'available', version: '1.5.11' } }))
+      .toEqual({ kind: 'reject', reason: 'agy installation refused: acp_unavailable', retryable: false });
+  });
+
+  it('#2469: prepare() reuses the admission observation of the same executable and otherwise probes afresh', async () => {
+    const home = await agyVersion('1.5.0');
+    const log = path.join(await tempDir(), 'probes');
+    vi.stubEnv('FAKE_ACP_PROBE_LOG', log);
+    const runtime = agy(home);
+    const detected = await runtime.detect();
+    if (detected.kind !== 'available') throw new Error('fixture agy is unavailable');
+    expect(await readProbes(log)).toEqual(['--version']);
+    const input = { offer: { target: AGY_TARGET, instruction: 'x' }, descriptor: runtime.descriptor, requiredToolsetIds: [] };
+    expect(await runtime.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared' });
+    expect(await readProbes(log)).toEqual([]);
+    expect(await runtime.prepare(input)).toMatchObject({ kind: 'prepared' });
+    expect(await readProbes(log)).toEqual(['--version']);
   });
 
   it('detect refuses a CLI without native ACP, a prerelease and an extra notice, and writes the native settings', async () => {

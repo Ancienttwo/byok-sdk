@@ -263,13 +263,14 @@ export async function prepareOfferRuntime(this: TaskRunner, phase: OfferPhaseCon
     }
     mcpToolsetTools = Object.freeze(observed);
   }
-  const { adapter, descriptor } = pick;
+  const { adapter, descriptor, detected: admitted } = pick;
   let prepared: Awaited<ReturnType<RuntimeAdapter['prepare']>>;
   try {
     prepared = await awaitAdmission(() => adapter.prepare({
       signal: blobAbort.signal,
       offer: offered,
       descriptor,
+      detected: admitted,
       requiredToolsetIds: requiredToolsets ?? [],
       ...(taskMcpServers === undefined ? {} : { mcpServers: taskMcpServers }),
       ...(mcpToolsetTools === undefined ? {} : { mcpToolsetTools }),
@@ -411,7 +412,7 @@ export async function pickAdapter(
     }
     const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
     if (searchExposure && searchEvidence === undefined) return searchUnavailable;
-    return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
+    return { ok: true, adapter, detected, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
   }
 
   const eligible = this['deps'].adapters.filter(({ descriptor }) =>
@@ -437,7 +438,7 @@ export async function pickAdapter(
       || !this['deps'].advertisedHarnesses().some(harness => harness.id === descriptor.id && harnessSupportsTarget(harness, target))) continue;
     const searchEvidence = matchSearchRuntimeEvidence(rows, detected);
     if (!searchExposure || searchEvidence !== undefined) {
-      return { ok: true, adapter, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
+      return { ok: true, adapter, detected, searchEvidence, descriptor: freezeRuntimeAdapterDescriptor({ ...descriptor, capabilities: detectedRuntimeCapabilities(descriptor, detected) }) };
     }
   }
   if (searchExposure) return searchUnavailable;

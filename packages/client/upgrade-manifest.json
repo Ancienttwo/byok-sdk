@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.46.0",
-    "snapshotSha256": "289adee6214369904599631033ef5fbd56c3ce05bf7897b321ecaf535f0500c1"
+    "snapshotSha256": "8313f9a340577a351eac4fc783b8aedac826d4828d08c81abd3fe939dd0f0757"
   },
   "configFields": {
     "status": "tracked",
@@ -27,9 +27,48 @@
         "export:@byok-sdk/client#DaemonMemoryBackendProofState",
         "export:@byok-sdk/server#MachineInfo"
       ]
+    },
+    {
+      "id": "detect-signal-prepare-detected",
+      "impact": "additive",
+      "summary": "@byok-sdk/client built-in adapters declare detect(signal?: AbortSignal); an abort rejects with the reason and stops any probe child. RuntimeAdapterPrepareInput.detected carries the offer's admission observation; a built-in prepare() reuses one produced by the same adapter, once, and launches the command it probed. No Host action required.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#detect-signal-prepare-detected",
+      "items": [
+        "export:@byok-sdk/client#AgyAdapter",
+        "export:@byok-sdk/client#ClaudeAdapter",
+        "export:@byok-sdk/client#CodexAdapter",
+        "export:@byok-sdk/client#DshAdapter",
+        "export:@byok-sdk/client#GrokAdapter",
+        "export:@byok-sdk/client#OpenCodeAdapter",
+        "export:@byok-sdk/client#PiAdapter",
+        "export:@byok-sdk/client#RuntimeAdapterPrepareInput",
+        "export:@byok-sdk/client/adapters#AgyAdapter",
+        "export:@byok-sdk/client/adapters#ClaudeAdapter",
+        "export:@byok-sdk/client/adapters#CodexAdapter",
+        "export:@byok-sdk/client/adapters#DshAdapter",
+        "export:@byok-sdk/client/adapters#GrokAdapter",
+        "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+        "export:@byok-sdk/client/adapters#PiAdapter",
+        "export:@byok-sdk/client/adapters#RuntimeAdapterPrepareInput"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#ClaudeAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#CodexAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
     {
       "item": "export:@byok-sdk/client#Daemon",
       "change": "changed",
@@ -49,6 +88,71 @@
       "item": "export:@byok-sdk/client#DaemonMemoryBackendProofState",
       "change": "added",
       "entry": "daemon-when-capabilities-settled"
+    },
+    {
+      "item": "export:@byok-sdk/client#DshAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#GrokAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#OpenCodeAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#PiAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapterPrepareInput",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#ClaudeAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CodexAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#DshAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#GrokAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#OpenCodeAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#PiAdapter",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapterPrepareInput",
+      "change": "changed",
+      "entry": "detect-signal-prepare-detected"
     },
     {
       "item": "export:@byok-sdk/server#MachineInfo",

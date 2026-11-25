@@ -360,9 +360,12 @@ export class PiAdapter implements RuntimeAdapter {
     return projectPiMcpEnvironment(env);
   }
 
-  async detect(): Promise<RuntimeDetectResult> {
+  /** A caller abort rethrows its reason, on the packaged and the CLI branch alike. */
+  async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
+    signal?.throwIfAborted();
     try {
       const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
+      signal?.throwIfAborted();
       const host = this.options.sdkHelperHost;
       if (host !== undefined) {
         // The product bundles Pi at the SDK pin; there is no package to probe.
@@ -375,7 +378,7 @@ export class PiAdapter implements RuntimeAdapter {
         } catch {
           return { kind: 'not-found' };
         }
-        const authPresent = await probePiAuthPresent(env);
+        const authPresent = await probePiAuthPresent(env, signal);
         return {
           kind: 'available', version, authPresent,
           ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
@@ -384,10 +387,10 @@ export class PiAdapter implements RuntimeAdapter {
       const bin = this.resolveBin();
       const invocation = piInvocation(bin);
       const probe = await probeRuntimeVersion(invocation.command, DETECT_TIMEOUT_MS, env,
-        invocation.entry === undefined ? [] : [invocation.entry]);
+        invocation.entry === undefined ? [] : [invocation.entry], signal);
       if (probe.kind !== 'available') return probe;
       const version = probe.stdout.trim() || probe.stderr.trim();
-      const authPresent = await probePiAuthPresent(env);
+      const authPresent = await probePiAuthPresent(env, signal);
       return {
         kind: 'available', version, authPresent,
         // Only a Host resolveBin on the plain pi-rpc lane launches this file;
@@ -398,6 +401,7 @@ export class PiAdapter implements RuntimeAdapter {
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, version),
       };
     } catch (error) {
+      signal?.throwIfAborted();
       return classifyDetectError(error);
     }
   }

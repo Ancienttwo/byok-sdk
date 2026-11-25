@@ -21,7 +21,7 @@ import { promises as fs, constants as fsConstants } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { createEnvelope, RuntimeIdSchema, TERMINAL_INFERENCE_USAGE_MAX_TOKENS, type AgentEvent, type AgentMessageEgressRequirement, type AgentEgressPolicy, type Envelope, type PreparedAgentMemoryMode, type RuntimeId, type TerminalAgentHomeProjection, type TerminalAgentHomeMemoryChange, type TerminalResidentMemoryOverLimit, type TerminalProjectionSelection, type TaskDeclineCode, type TaskDeclinePayload, type InputPreparationOfferBinding } from '@byok-sdk/protocol';
-import type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeOperationStartInput, Session } from '../../types.js';
+import type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeDetectResult, RuntimeOperationStartInput, Session } from '../../types.js';
 import type { RuntimeUnavailableAdmission } from '../../runtime-unavailable.js';
 import { type AgentHomeExecutionBinding, type AgentRef, validateAgentRef } from '../../agent-home.js';
 import type { AgentHomeAccessMode, AgentHomeMemoryDigest } from '../../agent-home-readers.js';
@@ -291,7 +291,7 @@ export interface ClaimedAgentFailureContext {
 }
 
 export type PickResult =
-  | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor; searchEvidence?: SearchRuntimeEvidence }
+  | { ok: true; adapter: RuntimeAdapter; descriptor: RuntimeAdapterDescriptor; detected: Extract<RuntimeDetectResult, { kind: 'available' }>; searchEvidence?: SearchRuntimeEvidence }
   | { ok: false; reason: string; retryable: boolean; code?: TaskDeclineCode; runtimeUnavailable?: RuntimeUnavailableAdmission };
 
 /**

@@ -34,12 +34,13 @@ function stripJsonComments(input: string): string {
 }
 
 /** A JSON object, `'absent'` for a missing file, or `'invalid'` for any other read or parse failure. */
-async function readJsonObject(file: string, options: { readonly comments?: boolean } = {}): Promise<Record<string, unknown> | 'absent' | 'invalid'> {
+async function readJsonObject(file: string, options: { readonly comments?: boolean; readonly signal?: AbortSignal } = {}): Promise<Record<string, unknown> | 'absent' | 'invalid'> {
   try {
-    const text = (await fs.readFile(file, 'utf8')).replace(/^﻿/u, '');
+    const text = (await fs.readFile(file, { encoding: 'utf8', signal: options.signal })).replace(/^﻿/u, '');
     const parsed: unknown = JSON.parse(options.comments === true ? stripJsonComments(text) : text);
     return isObject(parsed) ? parsed : 'invalid';
   } catch (error) {
+    options.signal?.throwIfAborted();
     return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'invalid';
   }
 }
@@ -83,16 +84,19 @@ function hasConfiguredApiKey(provider: unknown): boolean {
  * agent-dir `models.json`. An unreadable or malformed `auth.json` or
  * `settings.json` observes `false`, as pi itself fails on such an `auth.json`;
  * a missing or malformed `models.json` contributes nothing, as pi ignores it.
- * This never throws and never returns, logs, or keeps any credential value.
+ * It throws only a caller abort's reason, and never returns, logs, or keeps
+ * any credential value.
  */
-export async function probePiAuthPresent(env: Env): Promise<boolean> {
+export async function probePiAuthPresent(env: Env, signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted();
   try {
     const agentDir = resolvePiAgentDir(env);
-    const auth = await readJsonObject(path.join(agentDir, 'auth.json'));
+    const auth = await readJsonObject(path.join(agentDir, 'auth.json'), { signal });
     if (auth === 'invalid') return false;
-    const settings = await readJsonObject(path.join(agentDir, 'settings.json'));
+    const settings = await readJsonObject(path.join(agentDir, 'settings.json'), { signal });
     if (settings === 'invalid') return false;
-    const models = await readJsonObject(path.join(agentDir, 'models.json'), { comments: true });
+    const models = await readJsonObject(path.join(agentDir, 'models.json'), { comments: true, signal });
+    signal?.throwIfAborted();
     const logins = auth === 'absent' ? {} : auth;
     const providers = typeof models === 'string' || !isObject(models.providers) ? {} : models.providers;
     const defaultProvider = settings === 'absent' ? undefined : settings.defaultProvider;
@@ -102,6 +106,7 @@ export async function probePiAuthPresent(env: Env): Promise<boolean> {
     }
     return Object.values(logins).some(isStoredLogin) || Object.values(providers).some(hasConfiguredApiKey);
   } catch {
+    signal?.throwIfAborted();
     return false;
   }
 }

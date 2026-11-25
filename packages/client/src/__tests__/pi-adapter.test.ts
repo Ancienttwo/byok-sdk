@@ -533,6 +533,33 @@ const __executionScratch = await testExecutionScratch();
       expect(spawned.map((env) => env?.PI_PACKAGE_DIR)).toEqual([PRODUCT_ASSETS]);
     });
 
+    it('#2469: an aborted packaged detect rejects with the reason, without reading auth before it and without returning during the read', async () => {
+      const adapter = new PiAdapter({ resolveBin, sdkHelperHost: bundle, packageDir: PRODUCT_ASSETS });
+      const reason = new Error('doctor cancelled');
+      const original = fs.readFile.bind(fs);
+      const authReads: string[] = [];
+      let reading!: () => void;
+      const authReadStarted = new Promise<void>(resolve => { reading = resolve; });
+      const readFile = vi.spyOn(fs, 'readFile').mockImplementation(((file: Parameters<typeof fs.readFile>[0], options?: { signal?: AbortSignal }) => {
+        if (!String(file).endsWith('auth.json')) return original(file, options as never);
+        authReads.push(String(file));
+        reading();
+        return new Promise((_resolve, reject) => options?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('The operation was aborted'), { name: 'AbortError', code: 'ABORT_ERR' }))));
+      }) as typeof fs.readFile);
+      try {
+        await expect(adapter.detect(AbortSignal.abort(reason))).rejects.toBe(reason);
+        expect(authReads).toEqual([]);
+        const controller = new AbortController();
+        const pending = adapter.detect(controller.signal);
+        await authReadStarted;
+        controller.abort(reason);
+        await expect(pending).rejects.toBe(reason);
+        expect(authReads).toHaveLength(1);
+      } finally {
+        readFile.mockRestore();
+      }
+    });
+
     // Was: the snapshot value won over a broken Host one. Now neither counts:
     // without packageDir a good snapshot root is refused, and with it a broken
     // snapshot and Host root are both replaced.

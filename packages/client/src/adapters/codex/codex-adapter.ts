@@ -40,7 +40,7 @@ import {
 } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
 import { classifyDetectError, probeRuntimeVersion, probeTimeouts, runDetectCommand } from '../detect-outcome.js';
-import { registerAdmissionDetect } from '../../runtime-detection.js';
+import { bindVerifiedDetection, registerAdmissionDetect, takeVerifiedDetection } from '../../runtime-detection.js';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { withoutProviderCredentials } from '../provider-credential-environment.js';
@@ -233,18 +233,21 @@ export class CodexAdapter implements RuntimeAdapter {
   runtimeEnvironment(): Promise<RuntimeEnvironment> {
     return buildRuntimeEnvironment(this.environmentPolicy);
   }
-  async detect(): Promise<RuntimeDetectResult> {
-    return (await this.detectInstallation({ checkAuth: true })).detected;
+  async detect(signal?: AbortSignal): Promise<RuntimeDetectResult> {
+    return (await this.detectInstallation({ checkAuth: true, signal })).detected;
   }
 
   /**
    * `checkAuth: false` (task admission and prepare()) omits `authPresent` (unmeasured):
    * neither reads it, and a subscription launch confirms the account itself
    * (`#readSubscription`), so `login status` would only spend the admission deadline.
-   * A caller abort rethrows its reason.
+   * A caller abort rethrows its reason, also before PATH lookup. An
+   * `available` observation carries its verified invocation
+   * (`bindVerifiedDetection`) for this adapter's `prepare()`.
    */
   private async detectInstallation(options: { readonly checkAuth: boolean; readonly signal?: AbortSignal }): Promise<CodexInstallation> {
     const { checkAuth, signal } = options;
+    signal?.throwIfAborted();
     try {
       const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const resolved = resolveRuntimeCommand(this.options.resolveBin, resolveCodexBin, () => resolveManagedRuntime(this.options.runtimeInstallRoot, 'codex'));
@@ -276,20 +279,21 @@ export class CodexAdapter implements RuntimeAdapter {
       }
       let authPresent: boolean | undefined;
       if (checkAuth) {
-        const login = await runDetectCommand(command, [...args, 'login', 'status'], { timeoutMs: timeouts.authStatus, env });
+        const login = await runDetectCommand(command, [...args, 'login', 'status'], { timeoutMs: timeouts.authStatus, env, signal });
+        if (login.kind === 'aborted') throw login.reason;
         if (login.kind === 'timeout') return { detected: { kind: 'timeout' } };
         // Codex reports configured credentials with exit 0; its display text is not a contract.
         // Any other end, such as an unreadable credential store, leaves auth presence unconfirmed.
         authPresent = login.kind === 'ok';
       }
-      return { invocation, detected: {
-        kind: 'available',
+      return { invocation, detected: bindVerifiedDetection(this, {
+        kind: 'available' as const,
         sessionCapabilities: codexRuntime.codexSessionCapabilities(),
         version: text,
         ...(authPresent === undefined ? {} : { authPresent }),
         ...runtimeExecutableFields(resolved, host.platform === 'win32' ? executable : named),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, codexVersionToken(text)),
-      } };
+      }, invocation) };
     } catch (error) {
       signal?.throwIfAborted();
       return { detected: classifyDetectError(error) };
@@ -310,7 +314,13 @@ export class CodexAdapter implements RuntimeAdapter {
         retryable: false,
       };
     }
-    const installation = await this.detectInstallation({ checkAuth: false, signal: input.signal });
+    input.signal?.throwIfAborted();
+    // This offer's admission observation, when this adapter verified it, carries
+    // the invocation its probes ran; otherwise probe now and launch what that probe ran.
+    const verified = takeVerifiedDetection<RuntimeInvocation>(this, input.detected);
+    const installation: CodexInstallation = verified === undefined
+      ? await this.detectInstallation({ checkAuth: false, signal: input.signal })
+      : { invocation: verified, detected: input.detected as Extract<RuntimeDetectResult, { kind: 'available' }> };
     const { detected } = installation;
     if (!('invocation' in installation))
       return {
