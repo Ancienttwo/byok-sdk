@@ -115,9 +115,22 @@ Written before `KeysScreen.tsx` implementation. Every state transition accounts 
 
 ---
 
-## 8. Upcoming Screen Motion Inventory Sections (Reserved)
+## 8. Motion Inventory — Shell & Recovery (Slice 3)
 
-Feature slices landing after Slice 2 (`KeysScreen`) will append their motion inventories here before implementation:
-- **Shell & Recovery screen** (Slice 3 — Host state transitions, S1 snapshot/restore progress & restart confirmation)
+Written before Slice 3 implementation. Every state change across workspace navigation, Host supervision, recovery dialogs, tray/window lifecycle, and login item toggles accounts for tool, tokens, and `reduceMotion()`:
+
+| State Change | Tool & Tokens | Reduced Motion Behavior |
+| --- | --- | --- |
+| Sidebar workspace section selection (`Conversation`, `Activity`, `Settings`, `Keys`, `Gallery`) | `ListItem` `MOTION_CLASSES.interactiveColor` (`duration-100 ease-out`) on active `bg-sidebar-accent`; main panel swaps via conditional `<If>` mount (zero hidden trees) | `motion-reduce:transition-none`; active row stays explicit via `accessibilityState={{ selected }}` |
+| Live Host status badge transitions (`HostStateBadge`) | Semantic host-state token colors + distinct symbol (`◐`/`●`/`↻`/`■`/`▲`) + label; Gallery previews write to an isolated preview signal so live `hostReady()` is unaffected | Instant pill swap without color transition; non-color symbol & label always shown |
+| Recovery panel (`stopped` / `failed`), `Dialog` confirmations, and diagnostics export | `Dialog` (`role="alertdialog"`, `animation={dialogAnimation()}`) handles Escape dismissal and focus restore cleanly; shared `recoveryBusy` disables buttons without layout shift; diagnostics output announces via `accessibilityLiveRegion="polite"` | `dialogAnimation()` resolves to `"none"`; status & refusal banners appear immediately |
+| Tray menu, close-to-tray hide, and `reopen` / `secondInstance` show | Window hides in place (`closeOnPress: false` -> `win.hide()`) and restores via unified store `showMainWindow()`, preserving mounted UI state & in-flight locks | Identical instant hide/show window transitions |
+| Login item toggle (`settings.loginItem` / `settings.setLoginItem`) | `Switch` thumb `MOTION_CLASSES.switchThumb` (`transition-transform duration-200 ease-in-out`) reflects OS-authoritative state after bridge resolution; Linux displays explicit unsupported notice | `motion-reduce:transition-none`; switch state jumps cleanly to resolved OS boolean |
+
+---
+
+## 9. Upcoming Screen Motion Inventory Sections (Reserved)
+
+Feature slices landing after Slice 3 (`Shell & Recovery`) will append their motion inventories here before implementation:
 - **Conversation workspace** (Slice 4 — sidebar selection, streaming `TextView`, Send/Cancel swap, timeline `List`)
-- **Activity & Settings** (Slice 5 — card disclosure, approval confirmation, login-item toggle feedback)
+- **Activity & Settings** (Slice 5 — card disclosure, approval confirmation, Dreaming & Device preferences)

@@ -18,6 +18,7 @@ import {
   verifyCapabilitiesAgainstGolden,
   verifyCargoMetadataNshProvenance,
   verifyFileSha256,
+  verifyTrayAssetsProjection,
 } from './nsh.mjs';
 
 const pin = loadPin();
@@ -424,4 +425,33 @@ test('desktop CI workflow runs the full 3-OS S2.5 NSH verification and test lane
     /nsh\.mjs build --release --split\n\s+node examples\/desktop-bot-app\/scripts\/nsh\.mjs verify-bundle/,
     'split release build must be followed by verify-bundle',
   );
+});
+
+test('verifyTrayAssetsProjection matches authoritative assets/tray byte-for-byte and rejects drift', () => {
+  assert.deepStrictEqual(verifyTrayAssetsProjection(), {
+    count: 3,
+    files: ['tray.png', 'trayTemplate.png', 'trayTemplate@2x.png'],
+  });
+
+  const dir = mkdtempSync(join(tmpdir(), 'byok-tray-projection-test-'));
+  try {
+    const sourceDir = join(dir, 'source');
+    const targetDir = join(dir, 'target');
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, 'tray.png'), Buffer.from([1, 2, 3, 4]));
+    writeFileSync(join(sourceDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 8]));
+    writeFileSync(join(targetDir, 'tray.png'), Buffer.from([1, 2, 3, 4]));
+    assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /file list diverges/i);
+
+    writeFileSync(join(targetDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 8]));
+    writeFileSync(join(targetDir, 'extra.png'), Buffer.from([9]));
+    assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /file list diverges/i);
+
+    rmSync(join(targetDir, 'extra.png'));
+    writeFileSync(join(targetDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 9]));
+    assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /Tray asset projection drift for trayTemplate\.png/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

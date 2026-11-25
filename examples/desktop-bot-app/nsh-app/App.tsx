@@ -1,20 +1,30 @@
 import { cleanup, effect, mount, platform, Scroll, signal, Text, View } from "nsh";
-import { currentWindow } from "nsh/desktop";
+import { currentWindow, isAvailable } from "nsh/desktop";
 import brand from "../brand.config.ts";
 import { BridgeCallError, submitSecret } from "./src/bridge.ts";
+import { installDesktopShell, syncDesktopChrome } from "./src/desktop.ts";
 import { KeysScreen } from "./src/features/keys/KeysScreen.tsx";
+import { LoginItemControl } from "./src/features/shell/LoginItemControl.tsx";
+import { DiagnosticsExportButton, RecoveryPanel } from "./src/features/shell/RecoveryPanel.tsx";
+import { ShellSidebar } from "./src/features/shell/ShellSidebar.tsx";
 import { openAllowedExternalUrl } from "./src/links.ts";
 import {
+  activeSection,
   appearance,
   connectShell,
   hostState,
   isQuitting,
+  isRecoveryBusy,
   powerError,
   requestQuit,
+  restartHost,
+  setActiveSection,
   setAppearance,
   setPreviewHostState,
+  showMainWindow,
   startShell,
   stateHintCount,
+  type WorkspaceSection,
 } from "./src/store.ts";
 import {
   Avatar,
@@ -67,13 +77,21 @@ const RUNTIME_ITEMS = [
   { value: "codex", title: "Codex" },
 ];
 
+const SECTION_TITLES: Record<WorkspaceSection, string> = {
+  conversation: "Conversation",
+  activity: "Activity",
+  settings: "Settings",
+  keys: "Keys",
+  gallery: "Foundations Gallery",
+};
+
 export function App() {
-  const activeView = signal<"keys" | "gallery">("keys");
+  const win = isAvailable ? currentWindow() : null;
 
   effect(() => {
-    if (platform.desktop) {
-      currentWindow().set({
-        title: `${brand.productName} — ${activeView() === "keys" ? "Keys" : "Foundations Gallery"}`,
+    if (win) {
+      win.set({
+        title: `${brand.productName} — ${SECTION_TITLES[activeSection()]}`,
       });
     }
   });
@@ -82,6 +100,26 @@ export function App() {
     const disconnect = connectShell();
     cleanup(disconnect);
     void startShell();
+  });
+
+  effect(() => {
+    const stopDesktop = installDesktopShell(win);
+    cleanup(stopDesktop);
+  });
+
+  effect(() => {
+    syncDesktopChrome({
+      host: hostState(),
+      quitting: isQuitting(),
+      recoveryBusy: isRecoveryBusy(),
+      activeSection: activeSection(),
+      appearance: appearance(),
+      onShow: showMainWindow,
+      onRestartHost: () => void restartHost(),
+      onQuit: requestQuit,
+      onSelectSection: setActiveSection,
+      onSelectAppearance: setAppearance,
+    });
   });
 
   const standardInput = signal("");
@@ -151,74 +189,84 @@ export function App() {
 
   return (
     <View class="flex-1 bg-background">
-      <Scroll class="flex-1" contentClass="p-6 gap-6 max-w-5xl w-full self-center">
-        {/* Header Bar */}
-        <Card>
-          <View class="flex-row flex-wrap items-center justify-between gap-4">
+      <View class="flex-row flex-1">
+        <ShellSidebar />
+        <Scroll class="flex-1" contentClass="p-6 gap-6 max-w-5xl w-full self-center">
+          {/* Header Bar */}
+          <Card>
             <View class="gap-1">
               <Text role="header" accessibilityLevel={1} class="text-lg font-semibold text-foreground">
-                {activeView() === "keys"
-                  ? `${brand.productName} — Keys`
-                  : `${brand.productName} — Foundations Gallery`}
+                {`${brand.productName} — ${SECTION_TITLES[activeSection()]}`}
               </Text>
               <Text class="text-xs text-muted-foreground">
                 {`Platform: ${platform.os} • Hints: ${stateHintCount()} • Quitting: ${isQuitting() ? "yes" : "no"}`}
               </Text>
             </View>
-            <View class="flex-row flex-wrap items-center gap-3">
-              <Tabs testID="app-nav-tabs" accessibilityLabel="Active workspace view">
-                <Tab
-                  testID="nav-keys"
-                  selected={activeView() === "keys"}
-                  onPress={() => activeView.set("keys")}
-                >
-                  Keys
-                </Tab>
-                <Tab
-                  testID="nav-gallery"
-                  selected={activeView() === "gallery"}
-                  onPress={() => activeView.set("gallery")}
-                >
-                  Gallery
-                </Tab>
-              </Tabs>
-              <HostStateBadge testID="host-state-badge" state={hostState()} />
-              <Tabs testID="appearance-tabs" accessibilityLabel="Appearance mode">
-                <Tab
-                  testID="theme-light"
-                  selected={appearance() === "light"}
-                  onPress={() => setAppearance("light")}
-                >
-                  Light
-                </Tab>
-                <Tab
-                  testID="theme-dark"
-                  selected={appearance() === "dark"}
-                  onPress={() => setAppearance("dark")}
-                >
-                  Dark
-                </Tab>
-                <Tab
-                  testID="theme-system"
-                  selected={appearance() === "system"}
-                  onPress={() => setAppearance("system")}
-                >
-                  System
-                </Tab>
-              </Tabs>
-              <Button testID="quit-app-btn" variant="outline" size="sm" onPress={requestQuit}>
-                Quit
-              </Button>
-            </View>
-          </View>
-          <If when={Boolean(powerError())}>
-            <Text class="text-xs text-warning">{`Power save notice: ${powerError()}`}</Text>
-          </If>
-        </Card>
+            <If when={Boolean(powerError())}>
+              <Text class="text-xs text-warning">{`Power save notice: ${powerError()}`}</Text>
+            </If>
+          </Card>
 
-        <If
-          when={activeView() === "keys"}
-          else={
+          <RecoveryPanel />
+
+          <If when={activeSection() === "keys"}>
+            <KeysScreen onNotify={pushToast} />
+          </If>
+
+          <If when={activeSection() === "settings"}>
+            <View testID="settings-section" class="gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Startup &amp; System</CardTitle>
+                  <CardDescription>
+                    OS-authoritative login-item preference synced directly with desktop services.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <LoginItemControl />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle>Diagnostics</CardTitle>
+                  <CardDescription>
+                    Export a redacted snapshot of supervised Host logs and S1 store state.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <DiagnosticsExportButton testID="settings-diagnostics-btn" disabled={isQuitting()} />
+                </CardContent>
+              </Card>
+            </View>
+          </If>
+
+          <If when={activeSection() === "conversation"}>
+            <View testID="conversation-section">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Conversation</CardTitle>
+                  <CardDescription>
+                    Native conversation workspace arrives in Slice 4 of #2461.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </View>
+          </If>
+
+          <If when={activeSection() === "activity"}>
+            <View testID="activity-section">
+              <Card>
+                <CardHeader>
+                  <CardTitle>Activity</CardTitle>
+                  <CardDescription>
+                    Native activity feed and run traces arrive in Slice 5 of #2461.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
+            </View>
+          </If>
+
+          <If when={activeSection() === "gallery"}>
             <View class="gap-6">
 
         {/* Actions & Semantic Status */}
@@ -496,7 +544,7 @@ export function App() {
           <CardHeader>
             <CardTitle>Overlays &amp; External Link UI Allowlist</CardTitle>
             <CardDescription>
-              Escape-dismissible overlays and UI-layer https + origin allowlist (native capability enforces https-only; native brand-origin check wires with #2461 product routes).
+              Escape-dismissible overlays and UI-layer https + brand.externalOrigins allowlist (enforced under ADR-052 D2 + #2457 D-O3).
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -582,11 +630,9 @@ export function App() {
           </CardFooter>
         </Card>
             </View>
-          }
-        >
-          <KeysScreen onNotify={pushToast} />
-        </If>
-      </Scroll>
+          </If>
+        </Scroll>
+      </View>
 
       <Dialog
         testID="demo-dialog"
