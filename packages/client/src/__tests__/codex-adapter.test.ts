@@ -497,7 +497,7 @@ describe('Codex persistent app-server adapter', () => {
   });
   it.each(['in an agent message frame', 'on stderr'])('#2493: redacts MCP env values echoed %s, whatever their names, raw and encoded once or twice', async (where) => {
     const credentials = ['abc12345', '/opt/service/secret-path-123', 'long"quoted\\secret-123'] as const;
-    const mcpServers = { local: { command: '/fixture/server', env: { HOST_ACCESS: credentials[0], SERVICE_REF: credentials[1], LOGIN_BLOB: credentials[2], DEBUG: '1' } } };
+    const mcpServers = { local: { command: '/fixture/server', env: { HOST_ACCESS: credentials[0], SERVICE_REF: credentials[1], LOGIN_BLOB: credentials[2], DEBUG: '1', NODE_ENV: 'production' } } };
     const escape = (value: string) => JSON.stringify(value).slice(1, -1);
     let text: string;
     if (where === 'on stderr') {
@@ -514,8 +514,9 @@ describe('Codex persistent app-server adapter', () => {
     for (const secret of credentials) {
       for (const form of [secret, escape(secret), escape(escape(secret)), escape(escape(escape(secret)))]) expect(text).not.toContain(form);
     }
-    // A value under eight characters is not redacted, so the echoed DEBUG=1 stays readable.
+    // A value under eight characters or of plain words is not redacted, so DEBUG=1 and NODE_ENV=production stay readable.
     expect(text).toMatch(/DEBUG\\*":\\*"1\\*"/);
+    expect(text).toMatch(/NODE_ENV\\*":\\*"production\\*"/);
   });
   it('marks an app-server exit during the open runtime_exited, and an open it did not end unknown (#869)', async () => {
     await expect(open(adapter(), task, await ctx({ FAKE_CODEX_CRASH_WITH_STDERR: 'crash' }))).rejects.toMatchObject({

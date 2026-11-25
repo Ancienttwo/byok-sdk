@@ -23,6 +23,15 @@ function escapedForms(value: string): readonly string[] {
   return [value, once, JSON.stringify(once).slice(1, -1)];
 }
 
+/**
+ * BYOK change: an MCP env or header value that no credential rule covers is still a credential when it is long and is
+ * not plain words: it has a digit or another character that is not a letter, `/`, `-`, `_` or `.`. A value such as
+ * `production` or `application/json` stays readable in model output.
+ */
+function credentialShaped(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.length >= CREDENTIAL_MIN_LENGTH && /[^\p{L}/_.-]/u.test(value);
+}
+
 /** A connection string proves its password is a credential, regardless of the env name. */
 function urlCredentials(value: string | null | undefined): readonly string[] {
   if (typeof value !== "string" || !/^[a-z][a-z\d+.-]*:\/\//iu.test(value) || !URL.canParse(value)) { return []; }
@@ -73,12 +82,6 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
     return true;
   };
   const remember = (value: string | null | undefined): void => { if (credentialValue(value)) { register(value); } };
-  // BYOK change: the caller hands each MCP env and header value to the runtime, so each one is a credential whatever
-  // its name or shape. A value under the minimum length is not registered, even under a credential name, unless it is
-  // inside a longer header or URL: a short value such as DEBUG=1 would redact every matching character of model output.
-  const mcpValue = (value: string | null | undefined): void => {
-    if (typeof value === "string" && value.length >= CREDENTIAL_MIN_LENGTH) { register(value); }
-  };
   const env = (entries: SessionOptions["env"]): void => {
     for (const [name, value] of Object.entries(entries ?? {})) {
       const upper = name.toUpperCase();
@@ -86,18 +89,26 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
       for (const credential of urlCredentials(value)) { register(credential); }
     }
   };
+  // BYOK change: the caller hands each MCP env and header value to the runtime, so a credential-shaped value is
+  // registered whatever its name or path shape, and so is the bare token of an authorization header.
+  const shaped = (value: string | null | undefined): void => { if (credentialShaped(value)) { register(value); } };
   env(options.env);
   for (const server of options.mcpServers ?? []) {
     if (!("type" in server)) {
-      for (const value of Object.values(server.env ?? {})) {
-        mcpValue(value);
-        for (const credential of urlCredentials(value)) { register(credential); }
-      }
+      env(server.env);
+      for (const value of Object.values(server.env ?? {})) { shaped(value); }
       continue;
     }
     for (const [name, value] of Object.entries(server.headers ?? {})) {
-      mcpValue(value);
-      if (AUTH_HEADERS.has(name.toUpperCase())) { mcpValue(/^\s*\S+\s+(.+?)\s*$/u.exec(value)?.[1]); }
+      const upper = name.toUpperCase();
+      const authorization = AUTH_HEADERS.has(upper);
+      if (authorization || CREDENTIAL_WORDS.has(upper.split("-").at(-1) ?? "")) { remember(value); }
+      shaped(value);
+      if (authorization) {
+        const token = /^\s*\S+\s+(.+?)\s*$/u.exec(value)?.[1];
+        remember(token);
+        shaped(token);
+      }
     }
   }
   const byLength = (values: Iterable<string>): readonly string[] => [...values].toSorted((left, right) => right.length - left.length);

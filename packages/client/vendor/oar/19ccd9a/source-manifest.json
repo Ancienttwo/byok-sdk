@@ -8,7 +8,7 @@
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
     "branch": "byok/0.131.0",
-    "commit": "46b18f79f2b7c09bec70e01fc824fe832d61a5ad"
+    "commit": "28254cd7df65372664589280812bef0c7040c95b"
   },
   "release": {
     "ecosystem": "npm",
@@ -1082,8 +1082,8 @@
       "path": "shared/credential-redactor.ts",
       "sourcePath": "packages/oar/src/shared/credential-redactor.ts",
       "upstreamSha256": "e7b1588d4e9079e24f92ecc274b72e8c616a6e455cb6e6513782968908bf99ea",
-      "vendoredSha256": "891c3d59b1573b881f276c105b6d589d788adc0de44ef2f7db8b8b575fc79dce",
-      "delta": "Preserve protocol discriminants, withhold credential-bearing keys, register explicit caller secrets and image inputs, and merge overlapping streaming matches. Register every MCP env and header value of eight or more characters, connection-string passwords and bare authorization tokens, and match each credential with one and two levels of JSON escaping; values() returns credentials as registered, so passing them to another redactor registers nothing new. Keep upstream explicit-environment credential readers."
+      "vendoredSha256": "55f3d94b281417cc7acf938e642926d68435c8f5edaa1c6f34a6f8ac81b138d6",
+      "delta": "Preserve protocol discriminants, withhold credential-bearing keys, register explicit caller secrets and image inputs, and merge overlapping streaming matches. Register every credential-shaped MCP env and header value and bare authorization token (eight or more characters with a digit or a character other than a letter, /, -, _ or .) whatever its name or path shape, and match each credential with one and two levels of JSON escaping; values() returns credentials as registered, so passing them to another redactor registers nothing new. Keep upstream explicit-environment credential readers."
     },
     {
       "path": "shared/deadline.ts",
