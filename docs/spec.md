@@ -405,10 +405,13 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-The current aligned release is `0.47.0`, the stable npm release published on
-2026-11-25 (UTC) with registry readback for all nine packages. The packed and
-published keys `@byok-sdk/core` dependency must pin the corresponding release
-version. Verify the `0.47.0` pin in an isolated standard npm install.
+The current aligned release is `0.47.1` (candidate). The stable npm release is
+`0.47.0`, published on 2026-11-25 (UTC) with registry readback for all nine
+packages.
+The packed keys `@byok-sdk/core` dependency must pin the corresponding release
+version. Verify the exact `0.47.1` pin in an isolated install of the accepted
+candidate tarballs. Publication requires separate authorization and registry
+readback.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
 0.28.2. Before that decision keys had its own version line, and its last
@@ -417,6 +420,16 @@ version alignment, not a breaking change. The keys changes in this train are
 in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
+
+0.47.1 is the PATCH candidate after 0.47.0 on `release/0.47`. All nine public
+packages move together and keep wire v8 and the public API, so 0.47.0 server
+databases, daemon journals, provider stores, and device pairings carry forward.
+The 0.47.0 → 0.47.1 upgrade manifest has zero breaking and zero additive
+entries. Every `@byok-sdk/client` entry imports one shared runtime-detection
+module, so admission delegation and verified detections cross package entries
+(#2505), and `readHostLedger` reports a database without `host_ledger` as
+`absent` / `no_table` (#2504).
+[0.47.1 candidate notes](releases/v0.47.1.md)
 
 0.47.0 is the published MINOR after 0.46.1. All nine public packages move
 together and keep wire v8. Existing 0.46.1 server databases, daemon journals,
