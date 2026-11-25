@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -8,6 +8,7 @@ import {
   assertNshVersion,
   loadPin,
   readBundleSourceMap,
+  readPinnedRustToolchain,
   verifyBundleSources,
   verifyBundleSpecifiers,
   verifyCapabilitiesAgainstGolden,
@@ -171,4 +172,41 @@ test('verifyBundleSpecifiers rejects forbidden import, require and dynamic-impor
 
 test('verifyBundleSpecifiers ignores unrelated text that mentions electron', () => {
   verifyBundleSpecifiers('const note="Runs without electron; see electron.md";import{a}from"nsh";');
+});
+
+test('readPinnedRustToolchain parses adapter toolchain channel and fails closed when missing', () => {
+  assert.equal(readPinnedRustToolchain(), '1.98.1');
+  const dir = mkdtempSync(join(tmpdir(), 'byok-nsh-toolchain-test-'));
+  try {
+    const file = join(dir, 'rust-toolchain.toml');
+    writeFileSync(file, '[toolchain]\nprofile = "minimal"\n');
+    assert.throws(() => readPinnedRustToolchain(file), error => error.message.includes(file));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('desktop CI workflow runs the full 3-OS S2.5 NSH verification and test lane', () => {
+  const workflow = readFileSync(new URL('../../../.github/workflows/ci.yml', import.meta.url), 'utf8');
+  const desktop = workflow.split('\n  desktop:\n')[1]?.split('\n  ci-required:\n')[0];
+  assert.ok(desktop, 'desktop job must exist before ci-required in ci.yml');
+  assert.match(desktop, /libclang-dev/);
+  assert.match(desktop, /LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin/);
+  assert.match(desktop, /RUST_MIN_STACK=268435456/);
+  assert.match(desktop, /if \[ "\$channel" = nightly \][\s\S]*nsh\.mjs build-cli-from-source/);
+
+  const stepSections = desktop.split('\n      - name: ').slice(1);
+  for (const requiredCmd of [
+    'node examples/desktop-bot-app/scripts/nsh.mjs ensure',
+    'node examples/desktop-bot-app/scripts/nsh.mjs check',
+    'node examples/desktop-bot-app/scripts/nsh.mjs build --release',
+    'node examples/desktop-bot-app/scripts/nsh.mjs verify-capabilities',
+    'node examples/desktop-bot-app/scripts/nsh.mjs verify-bundle',
+    'node examples/desktop-bot-app/scripts/nsh.mjs test',
+    'node examples/desktop-bot-app/scripts/nsh.mjs verify-lock --all',
+  ]) {
+    const step = stepSections.find(section => section.includes(requiredCmd));
+    assert.ok(step, `desktop job missing S2.5 step: ${requiredCmd}`);
+    assert.doesNotMatch(step, /^\s*if:\s*runner\.os\s*==/m, `step must run on all 3 OSes: ${requiredCmd}`);
+  }
 });
