@@ -398,6 +398,8 @@ test('a platform family is selected only by a path it owns', () => {
     'nsh-app/App.test.tsx',
     'nsh-app/src/bridge.ts',
     'nsh-app/src/ui/Button.tsx',
+    'nsh-app/assets/tray/tray.png',
+    'nsh-app/assets/tray/trayTemplate@2x.png',
     'nsh-app/ext/byok-nsh-adapter/Cargo.toml',
     'nsh-app/ext/byok-nsh-adapter/Cargo.lock',
     'nsh-app/ext/byok-nsh-adapter/rust-toolchain.toml',
@@ -412,6 +414,7 @@ test('a platform family is selected only by a path it owns', () => {
   for (const path of [
     'examples/desktop-bot-app/nsh-app/ext/other/x.rs',
     'examples/desktop-bot-app/nsh-app/ext/byok-nsh-adapter/build.rs',
+    'examples/desktop-bot-app/nsh-app/assets/tray/other.svg',
     'examples/desktop-bot-app/nsh-app/other.json',
     'examples/desktop-bot-app/scripts/other.json',
   ]) {

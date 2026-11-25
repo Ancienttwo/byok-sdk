@@ -975,7 +975,7 @@ export function selectImpact(paths, context = {}) {
       dirs.add(dir); continue;
     }
     if (dir === 'examples/desktop-bot-app'
-      && /^nsh-app\/(?:nsh\.(?:json|lock)|tsconfig\.json|capabilities\.expected\.json|App(?:\.test)?\.tsx|src\/.+\.tsx?)$/.test(relative)) {
+      && /^nsh-app\/(?:nsh\.(?:json|lock)|tsconfig\.json|capabilities\.expected\.json|App(?:\.test)?\.tsx|src\/.+\.tsx?|assets\/tray\/[A-Za-z0-9@-]+\.png)$/.test(relative)) {
       dirs.add(dir); continue;
     }
     if (dir === 'examples/desktop-bot-app'

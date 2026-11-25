@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -14,6 +14,7 @@ import {
   verifyCapabilitiesAgainstGolden,
   verifyCargoMetadataNshProvenance,
   verifyFileSha256,
+  verifyTrayAssetsProjection,
 } from './nsh.mjs';
 
 const pin = loadPin();
@@ -208,5 +209,34 @@ test('desktop CI workflow runs the full 3-OS S2.5 NSH verification and test lane
     const step = stepSections.find(section => section.includes(requiredCmd));
     assert.ok(step, `desktop job missing S2.5 step: ${requiredCmd}`);
     assert.doesNotMatch(step, /^\s*if:\s*runner\.os\s*==/m, `step must run on all 3 OSes: ${requiredCmd}`);
+  }
+});
+
+test('verifyTrayAssetsProjection matches authoritative assets/tray byte-for-byte and rejects drift', () => {
+  assert.deepStrictEqual(verifyTrayAssetsProjection(), {
+    count: 3,
+    files: ['tray.png', 'trayTemplate.png', 'trayTemplate@2x.png'],
+  });
+
+  const dir = mkdtempSync(join(tmpdir(), 'byok-tray-projection-test-'));
+  try {
+    const sourceDir = join(dir, 'source');
+    const targetDir = join(dir, 'target');
+    mkdirSync(sourceDir);
+    mkdirSync(targetDir);
+    writeFileSync(join(sourceDir, 'tray.png'), Buffer.from([1, 2, 3, 4]));
+    writeFileSync(join(sourceDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 8]));
+    writeFileSync(join(targetDir, 'tray.png'), Buffer.from([1, 2, 3, 4]));
+    assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /file list diverges/i);
+
+    writeFileSync(join(targetDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 8]));
+    writeFileSync(join(targetDir, 'extra.png'), Buffer.from([9]));
+    assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /file list diverges/i);
+
+    rmSync(join(targetDir, 'extra.png'));
+    writeFileSync(join(targetDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 9]));
+    assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /Tray asset projection drift for trayTemplate\.png/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });

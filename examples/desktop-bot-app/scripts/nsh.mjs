@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { builtinModules } from 'node:module';
-import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -19,6 +19,8 @@ const GENERATED_RUNNER_MANIFEST = resolve(NSH_APP_DIR, '.nsh/rust/Cargo.toml');
 const DEFAULT_BUILT_CAPABILITIES = resolve(NSH_APP_DIR, '.nsh/out/capabilities.json');
 const DEFAULT_EXPECTED_CAPABILITIES = resolve(NSH_APP_DIR, 'capabilities.expected.json');
 const DEFAULT_BUILT_BUNDLE = resolve(NSH_APP_DIR, '.nsh/out/bundle.js');
+const DEFAULT_TRAY_ASSETS_SOURCE = resolve(DESKTOP_APP_DIR, 'assets/tray');
+const DEFAULT_TRAY_ASSETS_TARGET = resolve(NSH_APP_DIR, 'assets/tray');
 
 /**
  * Packages the QuickJS TSX bundle must never contain. The single source for both release checks:
@@ -397,6 +399,46 @@ export function verifyBundleSpecifiers(source) {
   }
 }
 
+function listNonDotFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => !entry.name.startsWith('.') && entry.isFile())
+    .map((entry) => entry.name)
+    .sort();
+}
+
+/**
+ * Verifies the NSH tray asset projection matches `examples/desktop-bot-app/assets/tray/`
+ * byte-for-byte while Electron and NSH coexist prior to P4 cutover.
+ */
+export function verifyTrayAssetsProjection({
+  sourceDir = DEFAULT_TRAY_ASSETS_SOURCE,
+  targetDir = DEFAULT_TRAY_ASSETS_TARGET,
+} = {}) {
+  assert.ok(existsSync(sourceDir), `Authoritative tray assets directory missing: ${sourceDir}`);
+  assert.ok(
+    existsSync(targetDir),
+    `NSH tray asset projection directory missing: ${targetDir} (mirror ${sourceDir})`,
+  );
+  const sourceFiles = listNonDotFiles(sourceDir);
+  assert.ok(sourceFiles.length > 0, `Authoritative tray assets directory is empty: ${sourceDir}`);
+  const targetFiles = listNonDotFiles(targetDir);
+  assert.deepStrictEqual(
+    targetFiles,
+    sourceFiles,
+    `NSH tray asset projection file list diverges from examples/desktop-bot-app/assets/tray/`,
+  );
+  for (const file of sourceFiles) {
+    const sourceBytes = readFileSync(join(sourceDir, file));
+    const targetBytes = readFileSync(join(targetDir, file));
+    assert.equal(
+      Buffer.compare(sourceBytes, targetBytes),
+      0,
+      `Tray asset projection drift for ${file}: update projection from examples/desktop-bot-app/assets/tray/`,
+    );
+  }
+  return { count: sourceFiles.length, files: sourceFiles };
+}
+
 function runVerifyBundle(args) {
   let bundlePath = DEFAULT_BUILT_BUNDLE;
   for (let i = 0; i < args.length; i += 1) {
@@ -411,8 +453,9 @@ function runVerifyBundle(args) {
   const map = readBundleSourceMap(mapPath);
   verifyBundleSources(map);
   verifyBundleSpecifiers(readFileSync(bundlePath, 'utf8'));
+  const trayAssets = verifyTrayAssetsProjection();
   console.log(
-    `verify-bundle OK (${bundlePath}: ${map.sources.length} map sources and import specifiers clear of forbidden packages and Node builtins)`,
+    `verify-bundle OK (${bundlePath}: ${map.sources.length} map sources and import specifiers clear of forbidden packages and Node builtins; ${trayAssets.count} tray assets match source)`,
   );
 }
 

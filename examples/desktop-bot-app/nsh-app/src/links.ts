@@ -3,8 +3,9 @@ import brand from "../../brand.config.ts";
 
 /**
  * UI-layer validation of an external URL against the desktop app's `https:` + exact origin allowlist.
- * Note: `nsh.json` enforces `openUrl.schemes: ["https"]` at the NSH capability layer; `#2461` product
- * wiring must also enforce brand-origin validation inside a native Rust broker before OS `openUrl`.
+ * Per #2457 Decision D-O3 (2026-11-25): `nsh.json` enforces `openUrl.schemes: ["https"]` at the NSH
+ * capability layer and `links.ts` enforces exact `brand.externalOrigins` validation as the single
+ * TSX external-link gate (no Rust link broker).
  */
 export function parseAllowedExternalUrl(
   target: string,
