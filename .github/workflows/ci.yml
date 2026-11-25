@@ -2567,6 +2567,19 @@ jobs:
         run: |
           echo 'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> "$GITHUB_ENV"
           echo 'RUST_MIN_STACK=268435456' >> "$GITHUB_ENV"
+      - name: Read pinned NSH metadata
+        id: nsh-pin
+        shell: bash
+        run: |
+          commit="$(node -e "import('./examples/desktop-bot-app/scripts/nsh.mjs').then(m => console.log(m.loadPin().commit))")"
+          test -n "$commit"
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+      - name: Restore pinned NSH CLI cache
+        id: nsh-cli-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: _ops/nsh-pinned/${{ steps.nsh-pin.outputs.commit }}
+          key: nsh-cli-${{ runner.os }}-${{ runner.arch }}-${{ steps.nsh-pin.outputs.commit }}-${{ hashFiles('examples/desktop-bot-app/scripts/nsh.mjs') }}
       - name: Ensure pinned NSH CLI
         shell: bash
         run: |
@@ -2579,6 +2592,12 @@ jobs:
               exit 1
             fi
           fi
+      - name: Save pinned NSH CLI cache
+        if: steps.nsh-cli-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: _ops/nsh-pinned/${{ steps.nsh-pin.outputs.commit }}
+          key: ${{ steps.nsh-cli-cache.outputs.cache-primary-key }}
       - name: NSH check, release build, and capability/bundle gates
         shell: bash
         env:
@@ -2588,6 +2607,8 @@ jobs:
           node examples/desktop-bot-app/scripts/nsh.mjs check
           node examples/desktop-bot-app/scripts/nsh.mjs build --release
           node examples/desktop-bot-app/scripts/nsh.mjs verify-capabilities
+          node examples/desktop-bot-app/scripts/nsh.mjs verify-bundle
+          node examples/desktop-bot-app/scripts/nsh.mjs build --release --split
           node examples/desktop-bot-app/scripts/nsh.mjs verify-bundle
       - name: NSH headless tests (QuickJS + Keys + 30-vector model-route parity)
         shell: bash
