@@ -1,7 +1,17 @@
-//! Process-wide mutual exclusion lock across update, recovery, custody submit, and app quit draining.
+//! Process-wide mutual exclusion lock across update, recovery, custody operations, and app quit draining.
 
 use std::fmt;
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
+
+/// Default maximum time [`MaintenanceLock::begin_quit`] waits for in-flight custody children
+/// (`keys.submit` / `keys.list`) to exit before proceeding with app quit (`35s`).
+///
+/// Exceeds `DEFAULT_CUSTODY_DEADLINE` (`30s`) plus `list_from_custody`'s 2s force-kill reap
+/// margin so every `keys.list` and every normal `keys.submit` finishes before quit returns,
+/// while preventing a `keys.submit` child blocked indefinitely on an unanswered OS keychain
+/// unlock prompt (`kill_on_timeout = false`) from wedging app quit forever.
+pub const DEFAULT_CUSTODY_QUIT_WAIT: Duration = Duration::from_secs(35);
 
 /// Error raised when a second maintenance action attempts to enter while one is active or handed over.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +55,7 @@ struct LockState {
     listeners: Vec<QuitListener>,
 }
 
-/// Shared mutex coordinating `update`, `shell.restore`, `shell.startFresh`, `keys.submit`, and app quit.
+/// Shared mutex coordinating `update`, `shell.restore`, `shell.startFresh`, `keys.submit`, `keys.list`, and app quit.
 #[derive(Clone)]
 pub struct MaintenanceLock {
     inner: Arc<Inner>,
@@ -77,7 +87,11 @@ impl MaintenanceLock {
     /// Enters an exclusive maintenance window, returning an RAII guard that releases or seals on drop.
     pub fn try_begin(&self) -> Result<MaintenanceGuard, MaintenanceBusyError> {
         let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
-        if guard.busy || guard.active_custody > 0 || guard.handover != HandoverState::None || guard.quitting {
+        if guard.busy
+            || guard.active_custody > 0
+            || guard.handover != HandoverState::None
+            || guard.quitting
+        {
             return Err(MaintenanceBusyError);
         }
         guard.busy = true;
@@ -103,7 +117,19 @@ impl MaintenanceLock {
     /// Returns whether maintenance or custody write is currently active, handed over, or quitting.
     pub fn is_busy(&self) -> bool {
         let guard = self.inner.state.lock().expect("maintenance lock poisoned");
-        guard.busy || guard.active_custody > 0 || guard.handover != HandoverState::None || guard.quitting
+        guard.busy
+            || guard.active_custody > 0
+            || guard.handover != HandoverState::None
+            || guard.quitting
+    }
+
+    /// Returns the number of active custody child guards currently held.
+    pub fn active_custody_count(&self) -> usize {
+        self.inner
+            .state
+            .lock()
+            .expect("maintenance lock poisoned")
+            .active_custody
     }
 
     /// Returns whether terminal handover (`Confirmed`) has permanently sealed the lock.
@@ -139,8 +165,17 @@ impl MaintenanceLock {
         guard.listeners.push(Box::new(listener));
     }
 
-    /// Marks app quit requested, notifies listeners, and blocks until any in-flight maintenance finishes.
+    /// Marks app quit requested, notifies listeners, waits unconditionally for any in-flight
+    /// exclusive maintenance window, and waits up to [`DEFAULT_CUSTODY_QUIT_WAIT`] for active
+    /// custody children (`keys.submit` / `keys.list`) to drop their guards before returning.
     pub fn begin_quit(&self) -> QuitOutcome {
+        self.begin_quit_with_custody_wait(DEFAULT_CUSTODY_QUIT_WAIT)
+    }
+
+    /// Marks app quit requested, notifies listeners, waits unconditionally for any in-flight
+    /// exclusive maintenance window, and waits up to `max_custody_wait` for active custody
+    /// holders to finish before returning.
+    pub fn begin_quit_with_custody_wait(&self, max_custody_wait: Duration) -> QuitOutcome {
         let listeners = {
             let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
             if guard.quitting {
@@ -154,8 +189,30 @@ impl MaintenanceLock {
             listener();
         }
         let mut guard = self.inner.state.lock().expect("maintenance lock poisoned");
-        while guard.busy {
-            guard = self.inner.cv.wait(guard).expect("maintenance lock poisoned");
+        let mut custody_deadline: Option<Instant> = None;
+        while guard.busy || guard.active_custody > 0 {
+            if guard.busy {
+                guard = self
+                    .inner
+                    .cv
+                    .wait(guard)
+                    .expect("maintenance lock poisoned");
+                continue;
+            }
+            let deadline =
+                *custody_deadline.get_or_insert_with(|| Instant::now() + max_custody_wait);
+            let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+                break;
+            };
+            if remaining.is_zero() {
+                break;
+            }
+            let (next, _) = self
+                .inner
+                .cv
+                .wait_timeout(guard, remaining)
+                .expect("maintenance lock poisoned");
+            guard = next;
         }
         if guard.handover == HandoverState::Confirmed {
             QuitOutcome::HandedOver

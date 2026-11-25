@@ -11,11 +11,10 @@ use std::time::{Duration, Instant};
 use byok_shell::{
     BridgeClient, BridgeContract, BridgeErrorCode, FOREIGN_RUNTIME_VARIABLES, HostCommandSpec,
     HostState, HostSupervisor, HostSupervisorConfig, KeepAwake, KeepAwakeBackend, KeepAwakeGuard,
-    LinuxInhibitBackend, LoginItemBackend, LoginItemView, MaintenanceBusyError, MaintenanceLock,
-    PowerError, QuitOutcome, SecretBytes, ShellRouteError, ShellRouter, SupervisedHostState,
-    UnsupportedLoginItemBackend, filter_env_pairs, list_from_custody, run_restore, run_snapshot,
-    run_snapshot_status, select_linux_backend, shell_restore, shell_start_fresh, spawn_host_child,
-    submit_to_custody,
+    LinuxInhibitBackend, MaintenanceBusyError, MaintenanceLock, PowerError, QuitOutcome,
+    SecretBytes, ShellRouter, SupervisedHostState, filter_env_pairs, list_from_custody,
+    run_restore, run_snapshot, run_snapshot_status, select_linux_backend, shell_restore,
+    shell_start_fresh, spawn_host_child, submit_to_custody,
 };
 use serde_json::{Value, json};
 
@@ -73,9 +72,15 @@ fn with_temp_home_env(spec: HostCommandSpec, home: &Path) -> HostCommandSpec {
     let _ = fs::create_dir_all(&xdg_data_home);
     spec.with_env("HOME", home.to_string_lossy().into_owned())
         .with_env("USERPROFILE", home.to_string_lossy().into_owned())
-        .with_env("LOCALAPPDATA", local_app_data.to_string_lossy().into_owned())
+        .with_env(
+            "LOCALAPPDATA",
+            local_app_data.to_string_lossy().into_owned(),
+        )
         .with_env("APPDATA", roaming_app_data.to_string_lossy().into_owned())
-        .with_env("XDG_DATA_HOME", xdg_data_home.to_string_lossy().into_owned())
+        .with_env(
+            "XDG_DATA_HOME",
+            xdg_data_home.to_string_lossy().into_owned(),
+        )
 }
 
 fn real_host_spec_with_temp_home(bundle: &Path, home: &Path) -> HostCommandSpec {
@@ -186,8 +191,13 @@ fn real_host_s1_snapshot_status_restore_roundtrip_under_temp_home() {
     fs::write(host_dir.join("settings.json"), b"v1-host-settings").expect("write settings.json");
 
     assert_eq!(
-        run_snapshot_status(&spec, &contract.host_commands, "1.0.0", Some(Duration::from_secs(15)))
-            .expect("status query"),
+        run_snapshot_status(
+            &spec,
+            &contract.host_commands,
+            "1.0.0",
+            Some(Duration::from_secs(15))
+        )
+        .expect("status query"),
         None
     );
 
@@ -202,10 +212,14 @@ fn real_host_s1_snapshot_status_restore_roundtrip_under_temp_home() {
         canon_home.display()
     );
 
-    let status =
-        run_snapshot_status(&spec, &contract.host_commands, "1.0.0", Some(Duration::from_secs(15)))
-            .expect("status after snapshot")
-            .expect("snapshot exists");
+    let status = run_snapshot_status(
+        &spec,
+        &contract.host_commands,
+        "1.0.0",
+        Some(Duration::from_secs(15)),
+    )
+    .expect("status after snapshot")
+    .expect("snapshot exists");
     assert_eq!(status.version, "1.0.0");
     assert_eq!(status.target, snap_target);
 
@@ -262,12 +276,17 @@ fn real_host_rejects_hello_version_mismatch_and_malformed_json_fail_closed() {
     let mut child = spawn_host_child(&spec, &[]).expect("spawn real host");
     {
         let stdin = child.stdin.as_mut().expect("stdin");
-        stdin.write_all(b"not-valid-json\n").expect("write malformed");
+        stdin
+            .write_all(b"not-valid-json\n")
+            .expect("write malformed");
         stdin.flush().expect("flush");
     }
     drop(child.stdin.take());
     let output = child.wait_with_output().expect("wait real host");
-    assert!(!output.status.success(), "real Host must exit non-zero on malformed frame");
+    assert!(
+        !output.status.success(),
+        "real Host must exit non-zero on malformed frame"
+    );
     let stdout = String::from_utf8_lossy(&output.stdout);
     let parsed: Value = serde_json::from_str(stdout.trim()).expect("id:0 JSON error reply");
     assert_eq!(parsed["id"].as_u64(), Some(0));
@@ -283,7 +302,8 @@ fn real_host_custody_invalid_json_never_leaks_secret_in_receipt() {
     let contract = BridgeContract::load().expect("contract loads");
     let spec = real_host_spec_with_temp_home(&bundle, tmp.path());
     let sentinel = "sk-super-secret-do-not-echo-998877";
-    let malformed = SecretBytes::from_string(format!("{{\"op\":\"configure\",\"secret\":\"{sentinel}\""));
+    let malformed =
+        SecretBytes::from_string(format!("{{\"op\":\"configure\",\"secret\":\"{sentinel}\""));
     let dbg = format!("{malformed:?}");
     assert!(!dbg.contains(sentinel), "Debug must redact SecretBytes");
 
@@ -403,9 +423,11 @@ rl.on('line', line => {{
     // Out-of-order concurrent replies (`slow` requested first, `fast` returns first).
     let sup_a = Arc::clone(&supervisor);
     let sup_b = Arc::clone(&supervisor);
-    let h_slow = thread::spawn(move || sup_a.call_renderer_forwarded("k8.view", json!({ "botId": "slow" })));
+    let h_slow =
+        thread::spawn(move || sup_a.call_renderer_forwarded("k8.view", json!({ "botId": "slow" })));
     thread::sleep(Duration::from_millis(15));
-    let h_fast = thread::spawn(move || sup_b.call_renderer_forwarded("k8.view", json!({ "botId": "fast" })));
+    let h_fast =
+        thread::spawn(move || sup_b.call_renderer_forwarded("k8.view", json!({ "botId": "fast" })));
 
     assert_eq!(h_fast.join().unwrap().unwrap(), json!({ "ok": "fast" }));
     assert_eq!(h_slow.join().unwrap().unwrap(), json!({ "ok": "slow" }));
@@ -418,7 +440,9 @@ rl.on('line', line => {{
 
     supervisor.stop().expect("clean shutdown exits 0");
     // Repeated stop after clean exit remains idempotent Ok.
-    supervisor.stop().expect("repeat stop after clean exit is Ok");
+    supervisor
+        .stop()
+        .expect("repeat stop after clean exit is Ok");
 }
 
 #[test]
@@ -450,7 +474,10 @@ process.on('SIGTERM', () => {});
     assert!(wait_until(Duration::from_secs(3), || {
         matches!(
             supervisor.last_state(),
-            Some(SupervisedHostState::Stopped { store_refused: true, .. })
+            Some(SupervisedHostState::Stopped {
+                store_refused: true,
+                ..
+            })
         )
     }));
 
@@ -464,7 +491,9 @@ process.on('SIGTERM', () => {});
     let maintenance = MaintenanceLock::new();
     let start_fresh_res = shell_start_fresh(&supervisor, &maintenance, "2026-01-01", |_| {});
     assert_eq!(
-        start_fresh_res.expect_err("must not run S1 start-fresh after failed stop").code,
+        start_fresh_res
+            .expect_err("must not run S1 start-fresh after failed stop")
+            .code,
         "host_stop_failed"
     );
 }
@@ -512,7 +541,9 @@ process.stdin.on('end', () => {{
     let err = submit_to_custody(
         &spec,
         &contract.host_commands.custody,
-        SecretBytes::from_string(format!("{{\"op\":\"replace_secret\",\"profileRef\":\"w\",\"secret\":\"{sentinel}\"}}")),
+        SecretBytes::from_string(format!(
+            "{{\"op\":\"replace_secret\",\"profileRef\":\"w\",\"secret\":\"{sentinel}\"}}"
+        )),
         Duration::from_millis(100),
         Some(&lock),
         None,
@@ -561,7 +592,9 @@ process.stdin.on('end', () => {{
     let busy_err = submit_to_custody(
         &spec,
         &contract.host_commands.custody,
-        SecretBytes::from_string(r#"{"op":"replace_secret","profileRef":"w","secret":"s"}"#.to_owned()),
+        SecretBytes::from_string(
+            r#"{"op":"replace_secret","profileRef":"w","secret":"s"}"#.to_owned(),
+        ),
         Duration::from_secs(1),
         Some(&lock),
         None,
@@ -577,7 +610,11 @@ process.stdin.on('end', () => {{
     assert_eq!(quit_thread.join().unwrap(), QuitOutcome::Quit);
 
     // Large payload written to a child that never drains stdin must still time out within deadline.
-    let sleepy_stdin = write_node_script(tmp.path(), "sleepy-stdin.mjs", "setTimeout(() => {}, 5000);");
+    let sleepy_stdin = write_node_script(
+        tmp.path(),
+        "sleepy-stdin.mjs",
+        "setTimeout(() => {}, 5000);",
+    );
     let large_secret = "x".repeat(512 * 1024);
     let started = Instant::now();
     let stdin_timeout = submit_to_custody(
@@ -636,7 +673,9 @@ if (arg) {
     let refresh_err = submit_to_custody(
         &fast_custody_hung_host,
         &contract.host_commands.custody,
-        SecretBytes::from_string(r#"{"op":"replace_secret","profileRef":"w","secret":"ok"}"#.to_owned()),
+        SecretBytes::from_string(
+            r#"{"op":"replace_secret","profileRef":"w","secret":"ok"}"#.to_owned(),
+        ),
         Duration::from_millis(200),
         None,
         Some(&sup),
@@ -648,47 +687,42 @@ if (arg) {
 
 #[test]
 fn router_routes_main_methods_and_rejects_shell_only_methods_from_renderer() {
-    struct FakeLogin;
-    impl LoginItemBackend for FakeLogin {
-        fn get(&self) -> Result<LoginItemView, ShellRouteError> {
-            Ok(LoginItemView {
-                supported: true,
-                enabled: false,
-            })
-        }
-        fn set(&self, enabled: bool) -> Result<LoginItemView, ShellRouteError> {
-            Ok(LoginItemView {
-                supported: true,
-                enabled,
-            })
-        }
-    }
-
     let tmp = TempDir::new("byok-router");
-    let script = r#"
+    let host_saw_login_item = tmp.path().join("host-saw-login-item");
+    let script = format!(
+        r#"
+import fs from 'node:fs';
 import readline from 'node:readline';
-const rl = readline.createInterface({ input: process.stdin });
+const rl = readline.createInterface({{ input: process.stdin }});
 rl.on('close', () => process.exit(0));
-rl.on('line', line => {
+rl.on('line', line => {{
   const msg = JSON.parse(line);
-  if (msg.method === 'hello') {
-    process.stdout.write(JSON.stringify({ id: msg.id, result: { bridgeVersion: 2 } }) + '\n');
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
     return;
-  }
-  if (msg.method === 'shutdown') {
-    process.stdout.write(JSON.stringify({ id: msg.id, result: null }) + '\n');
+  }}
+  if (msg.method === 'shutdown') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
     process.exit(0);
-  }
-  if (msg.method === 'keys.profilesChanged') {
-    process.stdout.write(JSON.stringify({ id: msg.id, result: null }) + '\n');
+  }}
+  if (msg.method === 'keys.profilesChanged') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
     return;
-  }
-  if (msg.method === 'k8.view') {
-    process.stdout.write(JSON.stringify({ id: msg.id, result: { botId: msg.params?.botId ?? null } }) + '\n');
-  }
-});
-"#;
-    let spec = write_node_script(tmp.path(), "router-host.mjs", script);
+  }}
+  if (msg.method === 'settings.loginItem' || msg.method === 'settings.setLoginItem') {{
+    fs.writeFileSync({marker}, msg.method);
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ supported: true, enabled: true }} }}) + '\n');
+    return;
+  }}
+  if (msg.method === 'k8.view') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ botId: msg.params?.botId ?? null }} }}) + '\n');
+  }}
+}});
+"#,
+        marker =
+            serde_json::to_string(&host_saw_login_item.to_string_lossy().into_owned()).unwrap(),
+    );
+    let spec = write_node_script(tmp.path(), "router-host.mjs", &script);
     let contract = BridgeContract::load().expect("contract loads");
     let supervisor = Arc::new(HostSupervisor::new(
         HostSupervisorConfig::new(spec, contract),
@@ -698,28 +732,37 @@ rl.on('line', line => {
     supervisor.start();
 
     assert!(wait_until(Duration::from_secs(3), || {
-        supervisor.call_renderer_forwarded("k8.view", json!({ "botId": "b1" })).is_ok()
+        supervisor
+            .call_renderer_forwarded("k8.view", json!({ "botId": "b1" }))
+            .is_ok()
     }));
 
-    let router = ShellRouter::new(
-        Arc::clone(&supervisor),
-        MaintenanceLock::new(),
-        Box::new(FakeLogin),
-        "0.0.1",
-    );
+    let router = ShellRouter::new(Arc::clone(&supervisor), MaintenanceLock::new(), "0.0.1");
     assert_eq!(
-        router.dispatch_renderer("settings.loginItem", Value::Null).unwrap(),
-        json!({ "supported": true, "enabled": false })
+        router
+            .dispatch_renderer("k8.view", json!({ "botId": "b1" }))
+            .unwrap(),
+        json!({ "botId": "b1" })
     );
-    assert_eq!(
-        router.dispatch_renderer("settings.setLoginItem", json!({ "enabled": true })).unwrap(),
-        json!({ "supported": true, "enabled": true })
+    // Login-item methods belong exclusively to the engine-thread NSH adapter and must neither
+    // run a duplicate backend in ShellRouter nor forward to the Host.
+    let login_get = router
+        .dispatch_renderer("settings.loginItem", Value::Null)
+        .expect_err("settings.loginItem must not have a second path in ShellRouter");
+    assert_eq!(login_get.code, "unknown_method");
+    let login_set = router
+        .dispatch_renderer("settings.setLoginItem", json!({ "enabled": true }))
+        .expect_err("settings.setLoginItem must not have a second path in ShellRouter");
+    assert_eq!(login_set.code, "unknown_method");
+    assert!(
+        !host_saw_login_item.exists(),
+        "login-item mainMethods must never be forwarded to the Host"
     );
+
     let blocked = router
         .dispatch_renderer("keys.profilesChanged", Value::Null)
         .expect_err("renderer must never invoke shellToHostMethods");
     assert_eq!(blocked.code, "unknown_method");
-    assert!(UnsupportedLoginItemBackend.set(true).is_err());
 
     supervisor.stop().expect("clean shutdown");
 }
@@ -787,20 +830,20 @@ rl.on('line', line => {{
     assert!(wait_until(Duration::from_secs(5), || {
         matches!(
             supervisor.last_state(),
-            Some(SupervisedHostState::Stopped { store_refused: false, .. })
+            Some(SupervisedHostState::Stopped {
+                store_refused: false,
+                ..
+            })
         )
     }));
 
     let maintenance = MaintenanceLock::new();
-    let router = ShellRouter::new(
-        Arc::clone(&supervisor),
-        maintenance.clone(),
-        Box::new(UnsupportedLoginItemBackend),
-        "1.0.0",
-    )
-    .with_deadlines(Duration::from_secs(10), Some(Duration::from_secs(15)));
+    let router = ShellRouter::new(Arc::clone(&supervisor), maintenance.clone(), "1.0.0")
+        .with_deadlines(Duration::from_secs(10), Some(Duration::from_secs(15)));
 
-    let view = router.state("1.0.0").expect("router.state allowed by contract");
+    let view = router
+        .state("1.0.0")
+        .expect("router.state allowed by contract");
     assert_eq!(view.restore_error, None);
     assert_eq!(view.restore.map(|r| r.version), Some("1.0.0".to_owned()));
     let routed_state = router
@@ -828,8 +871,15 @@ rl.on('line', line => {{
     assert_eq!(relaunched_with_err, Some(false));
     assert_eq!(quit_outcome, Some(QuitOutcome::HandedOver));
     assert!(maintenance.is_handed_over());
-    assert!(fs::canonicalize(&ok.aside_path).unwrap().starts_with(fs::canonicalize(home).unwrap()));
-    assert_eq!(fs::read_to_string(store_dir.join("device.json")).unwrap(), "snapshot-v1");
+    assert!(
+        fs::canonicalize(&ok.aside_path)
+            .unwrap()
+            .starts_with(fs::canonicalize(home).unwrap())
+    );
+    assert_eq!(
+        fs::read_to_string(store_dir.join("device.json")).unwrap(),
+        "snapshot-v1"
+    );
 }
 
 #[test]
@@ -916,10 +966,15 @@ rl.on('line', line => {
     *sync_holder.lock().unwrap() = Some(Arc::clone(&sync_client));
     assert!(sync_client.call_raw("k8.view", Value::Null).is_ok());
     assert!(
-        rpc_rx.recv_timeout(Duration::from_secs(3)).expect("off-reader RPC must return").is_ok(),
+        rpc_rx
+            .recv_timeout(Duration::from_secs(3))
+            .expect("off-reader RPC must return")
+            .is_ok(),
         "synchronous status RPC inside on_state must not deadlock"
     );
-    sync_client.shutdown_and_wait(Duration::from_secs(3)).expect("clean shutdown");
+    sync_client
+        .shutdown_and_wait(Duration::from_secs(3))
+        .expect("clean shutdown");
     *sync_holder.lock().unwrap() = None;
 
     // 3. P2-2: shutdown reply missing `result` or returning non-null fails `stop()` even on exit 0.
@@ -943,7 +998,11 @@ rl.on('line', line => {{
 "#
         );
         let cli = BridgeClient::connect(
-            spawn_host_child(&write_node_script(tmp.path(), "bad-stop.mjs", &bad_script), &[]).unwrap(),
+            spawn_host_child(
+                &write_node_script(tmp.path(), "bad-stop.mjs", &bad_script),
+                &[],
+            )
+            .unwrap(),
             2,
             |_| {},
         )
@@ -999,13 +1058,8 @@ if (args[0] === 'byok-desktop-restore') {
         matches!(sup.last_state(), Some(SupervisedHostState::Stopped { .. }))
     }));
     let lock = MaintenanceLock::new();
-    let router = ShellRouter::new(
-        Arc::clone(&sup),
-        lock,
-        Box::new(UnsupportedLoginItemBackend),
-        "1.0.0",
-    )
-    .with_deadlines(Duration::from_secs(2), Some(Duration::from_millis(800)));
+    let router = ShellRouter::new(Arc::clone(&sup), lock, "1.0.0")
+        .with_deadlines(Duration::from_secs(2), Some(Duration::from_millis(800)));
     let res = router
         .restore("1.0.0", "2026-11-24T12-31-00.000Z", |_| {})
         .expect("mutating restore must finish without being killed by status deadline");
@@ -1013,23 +1067,24 @@ if (args[0] === 'byok-desktop-restore') {
 
     // 2. P2-5: narrowed contract removing shell.{state,restore,startFresh} rejects dedicated router methods.
     let mut narrowed = contract;
-    narrowed
-        .renderer_methods
-        .retain(|m| !matches!(m.as_str(), "shell.state" | "shell.restore" | "shell.startFresh"));
-    narrowed
-        .main_methods
-        .retain(|m| !matches!(m.as_str(), "shell.state" | "shell.restore" | "shell.startFresh"));
+    narrowed.renderer_methods.retain(|m| {
+        !matches!(
+            m.as_str(),
+            "shell.state" | "shell.restore" | "shell.startFresh"
+        )
+    });
+    narrowed.main_methods.retain(|m| {
+        !matches!(
+            m.as_str(),
+            "shell.state" | "shell.restore" | "shell.startFresh"
+        )
+    });
     let sup2 = Arc::new(HostSupervisor::new(
         HostSupervisorConfig::new(spec, narrowed),
         |_| {},
         || {},
     ));
-    let router2 = ShellRouter::new(
-        sup2,
-        MaintenanceLock::new(),
-        Box::new(UnsupportedLoginItemBackend),
-        "1.0.0",
-    );
+    let router2 = ShellRouter::new(sup2, MaintenanceLock::new(), "1.0.0");
     assert_eq!(router2.state("1.0.0").unwrap_err().code, "unknown_method");
     assert_eq!(
         router2.restore("1.0.0", "stamp", |_| {}).unwrap_err().code,
@@ -1153,8 +1208,8 @@ setInterval(() => {}, 10000);
     let supervisor = HostSupervisor::new(
         cfg,
         move |state| {
-            if let SupervisedHostState::Running { pid, .. } | SupervisedHostState::Stopped { pid, .. } =
-                state
+            if let SupervisedHostState::Running { pid, .. }
+            | SupervisedHostState::Stopped { pid, .. } = state
                 && recorded
                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
                     .is_ok()
@@ -1210,7 +1265,10 @@ fn kill_shell_process_triggers_host_stdin_eof_exit_even_with_concurrent_child() 
 
     let host_pid = wait_for_pid_file(&pid_file, Duration::from_secs(10))
         .expect("child Host pid never recorded cleanly");
-    assert!(is_pid_alive(host_pid), "Host must be running before shell kill");
+    assert!(
+        is_pid_alive(host_pid),
+        "Host must be running before shell kill"
+    );
 
     shell.kill().expect("kill parent shell process");
     let _ = shell.wait();
@@ -1229,7 +1287,8 @@ fn live_ci_real_host_supervisor_lifecycle_and_kill_eof() {
     }
 
     // 1. Live HostSupervisor connect -> hello -> running -> status -> clean stop() (exit 0).
-    let bundle = try_real_host_bundle().expect("real Host bundle required when BYOK_SHELL_E2E_LIVE_HOST=1");
+    let bundle =
+        try_real_host_bundle().expect("real Host bundle required when BYOK_SHELL_E2E_LIVE_HOST=1");
     let spec = HostCommandSpec::dev_node_host(bundle);
     let contract = BridgeContract::load().expect("contract loads");
     let cfg = HostSupervisorConfig::new(spec, contract);
@@ -1250,7 +1309,9 @@ fn live_ci_real_host_supervisor_lifecycle_and_kill_eof() {
         .call_renderer_forwarded("status", Value::Null)
         .expect("status RPC must succeed against live Host");
     assert!(status.is_object(), "status must return HostState object");
-    supervisor.stop().expect("clean shutdown against live Host must succeed");
+    supervisor
+        .stop()
+        .expect("clean shutdown against live Host must succeed");
 
     // 2. Hard-kill shell owning real dist/host/host.cjs -> real Host exits on stdin EOF within 15s.
     let tmp_kill = TempDir::new("byok-live-kill-eof");
@@ -1506,7 +1567,9 @@ rl.on('line', line => {{
             "crash release must happen before Restarting re-acquire"
         );
 
-        supervisor.stop().expect("clean stop releases active KeepAwake");
+        supervisor
+            .stop()
+            .expect("clean stop releases active KeepAwake");
         assert_eq!(stats.releases.load(Ordering::SeqCst), 3);
         assert_eq!(stats.active.load(Ordering::SeqCst), 0);
         assert_eq!(supervisor.last_power_error(), None);
@@ -1901,7 +1964,11 @@ rl.on('line', line => {{
     let initial_pid = initial_status.get("pid").and_then(Value::as_u64).unwrap();
 
     let timeout_err = supervisor
-        .call_shell_to_host_timeout("keys.profilesChanged", Value::Null, Duration::from_millis(40))
+        .call_shell_to_host_timeout(
+            "keys.profilesChanged",
+            Value::Null,
+            Duration::from_millis(40),
+        )
         .expect_err("keys.profilesChanged must time out");
     assert_eq!(timeout_err.code, BridgeErrorCode::CallTimeout);
 
@@ -2027,7 +2094,6 @@ if (subcmd === {custody_cmd}) {{
     let router = Arc::new(ShellRouter::new(
         Arc::clone(&supervisor),
         lock.clone(),
-        Box::new(UnsupportedLoginItemBackend),
         "1.0.0",
     ));
 
@@ -2037,7 +2103,10 @@ if (subcmd === {custody_cmd}) {{
         .dispatch_renderer("keys.list", Value::Null)
         .expect_err("keys.list must refuse while S1 maintenance holds lock");
     assert_eq!(list_err.code, "PROVIDER_CONFIGURATION_BUSY");
-    assert!(!list_started.exists(), "custody child must not spawn under S1 lock");
+    assert!(
+        !list_started.exists(),
+        "custody child must not spawn under S1 lock"
+    );
     assert_eq!(fs::read_to_string(&store_path).unwrap(), "initial-store");
     drop(s1_guard);
 
@@ -2048,13 +2117,19 @@ if (subcmd === {custody_cmd}) {{
         wait_until(Duration::from_secs(5), || list_started.exists()),
         "custody list child should start"
     );
-    assert!(lock.is_busy(), "MaintenanceLock must stay busy while keys.list child runs");
+    assert!(
+        lock.is_busy(),
+        "MaintenanceLock must stay busy while keys.list child runs"
+    );
     assert!(matches!(lock.try_begin(), Err(MaintenanceBusyError)));
     let restore_err = router
         .restore("1.0.0", "2026-11-25T00-00-00.000Z", |_| {})
         .expect_err("S1 restore must refuse while keys.list child is active");
     assert_eq!(restore_err.code, "maintenance_busy");
-    assert!(!s1_spawned.exists(), "S1 command must not spawn while keys.list runs");
+    assert!(
+        !s1_spawned.exists(),
+        "S1 command must not spawn while keys.list runs"
+    );
     assert_eq!(fs::read_to_string(&store_path).unwrap(), "initial-store");
 
     fs::write(&list_release, "go").expect("release list child");
@@ -2067,5 +2142,577 @@ if (subcmd === {custody_cmd}) {{
         wait_until(Duration::from_secs(3), || !lock.is_busy()),
         "MaintenanceLock must clear once keys.list child exits"
     );
-    let _post_guard = lock.try_begin().expect("S1 lock succeeds after keys.list exits");
+    let _post_guard = lock
+        .try_begin()
+        .expect("S1 lock succeeds after keys.list exits");
+    supervisor.stop().expect("clean shutdown");
+}
+
+#[test]
+fn quit_waits_for_delayed_custody_submit_and_list_and_preserves_store_intact() {
+    let tmp = TempDir::new("byok-quit-custody");
+    let store_path = tmp.path().join("store.json");
+    let hung_store_path = tmp.path().join("hung-store.json");
+    fs::write(&store_path, r#"{"version":1,"profiles":[]}"#).expect("seed store");
+
+    let submit_started = tmp.path().join("submit-started");
+    let submit_release = tmp.path().join("submit-release");
+    let list_started = tmp.path().join("list-started");
+    let list_release = tmp.path().join("list-release");
+    let hung_started = tmp.path().join("hung-started");
+    let hung_release = tmp.path().join("hung-release");
+
+    let contract = BridgeContract::load().expect("contract loads");
+    let custody_cmd = contract.host_commands.custody.clone();
+
+    let script = format!(
+        r#"
+import fs from 'node:fs';
+
+const [subcmd] = process.argv.slice(2);
+if (subcmd !== {custody_cmd}) {{
+  process.exit(2);
+}}
+let input = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', chunk => {{ input += chunk; }});
+process.stdin.on('end', () => {{
+  const req = JSON.parse(input);
+  if (req.op === 'list') {{
+    fs.writeFileSync({list_started}, 'started');
+    const timer = setInterval(() => {{
+      if (fs.existsSync({list_release})) {{
+        clearInterval(timer);
+        process.stdout.write(JSON.stringify({{
+          ok: true,
+          statuses: [{{ profile_ref: 'zai-main' }}],
+        }}) + '\n');
+        process.exit(0);
+      }}
+    }}, 10);
+    return;
+  }}
+  if (req.profileRef === 'hung-write') {{
+    fs.writeFileSync({hung_started}, 'started');
+    const timer = setInterval(() => {{
+      if (fs.existsSync({hung_release})) {{
+        clearInterval(timer);
+        fs.writeFileSync({hung_store_path}, 'committed-after-quit-bound');
+        process.stdout.write(JSON.stringify({{ ok: true, status: {{ profile_ref: 'hung-write' }} }}) + '\n');
+        process.exit(0);
+      }}
+    }}, 10);
+    return;
+  }}
+  fs.writeFileSync({submit_started}, 'started');
+  const timer = setInterval(() => {{
+    if (fs.existsSync({submit_release})) {{
+      clearInterval(timer);
+      const tmpStore = {store_path} + '.tmp';
+      fs.writeFileSync(tmpStore, JSON.stringify({{ version: 2, profiles: ['zai-main'] }}));
+      fs.renameSync(tmpStore, {store_path});
+      process.stdout.write(JSON.stringify({{ ok: true, status: {{ profile_ref: 'zai-main' }} }}) + '\n');
+      process.exit(0);
+    }}
+  }}, 10);
+}});
+"#,
+        custody_cmd = serde_json::to_string(&custody_cmd).unwrap(),
+        store_path = serde_json::to_string(&store_path.to_string_lossy().into_owned()).unwrap(),
+        hung_store_path =
+            serde_json::to_string(&hung_store_path.to_string_lossy().into_owned()).unwrap(),
+        submit_started =
+            serde_json::to_string(&submit_started.to_string_lossy().into_owned()).unwrap(),
+        submit_release =
+            serde_json::to_string(&submit_release.to_string_lossy().into_owned()).unwrap(),
+        list_started = serde_json::to_string(&list_started.to_string_lossy().into_owned()).unwrap(),
+        list_release = serde_json::to_string(&list_release.to_string_lossy().into_owned()).unwrap(),
+        hung_started = serde_json::to_string(&hung_started.to_string_lossy().into_owned()).unwrap(),
+        hung_release = serde_json::to_string(&hung_release.to_string_lossy().into_owned()).unwrap(),
+    );
+    let spec = write_node_script(tmp.path(), "quit-custody.mjs", &script);
+
+    // 1. Delayed keys.submit: begin_quit() blocks until CustodyGuard drops and the store commit finishes intact.
+    let submit_lock = MaintenanceLock::new();
+    let spec_bg = spec.clone();
+    let custody_bg = custody_cmd.clone();
+    let lock_bg = submit_lock.clone();
+    let submit_handle = thread::spawn(move || {
+        submit_to_custody(
+            &spec_bg,
+            &custody_bg,
+            SecretBytes::from_string(
+                r#"{"op":"replace_secret","profileRef":"zai-main","secret":"sk-test"}"#.to_owned(),
+            ),
+            Duration::from_secs(10),
+            Some(&lock_bg),
+            None,
+        )
+    });
+
+    assert!(
+        wait_until(Duration::from_secs(5), || submit_started.exists()),
+        "delayed custody submit child should start"
+    );
+    assert_eq!(submit_lock.active_custody_count(), 1);
+
+    let quit_lock = submit_lock.clone();
+    let quit_handle = thread::spawn(move || quit_lock.begin_quit());
+    assert!(
+        wait_until(Duration::from_secs(2), || submit_lock.is_quitting()),
+        "begin_quit should mark lock quitting immediately"
+    );
+
+    // While quitting, new custody holders must be refused without spawning.
+    let refused_while_quitting = submit_to_custody(
+        &spec,
+        &custody_cmd,
+        SecretBytes::from_string(
+            r#"{"op":"replace_secret","profileRef":"other","secret":"sk-2"}"#.to_owned(),
+        ),
+        Duration::from_secs(1),
+        Some(&submit_lock),
+        None,
+    )
+    .expect_err("new custody submit must refuse while quitting");
+    assert_eq!(refused_while_quitting.code, "PROVIDER_CONFIGURATION_BUSY");
+
+    thread::sleep(Duration::from_millis(100));
+    assert!(
+        !quit_handle.is_finished(),
+        "begin_quit must not return while delayed keys.submit custody guard is still held"
+    );
+    assert_eq!(
+        fs::read_to_string(&store_path).unwrap(),
+        r#"{"version":1,"profiles":[]}"#
+    );
+
+    fs::write(&submit_release, "go").expect("release delayed submit child");
+    assert_eq!(
+        quit_handle.join().expect("quit thread joins"),
+        QuitOutcome::Quit
+    );
+    assert_eq!(
+        submit_lock.active_custody_count(),
+        0,
+        "begin_quit must return only after custody guard drops"
+    );
+    let submitted = submit_handle
+        .join()
+        .expect("submit thread joins")
+        .expect("delayed keys.submit succeeds");
+    assert_eq!(submitted["profile_ref"], json!("zai-main"));
+    assert_eq!(
+        fs::read_to_string(&store_path).unwrap(),
+        r#"{"version":2,"profiles":["zai-main"]}"#,
+        "store must be intact after delayed custody write completes before quit returns"
+    );
+
+    // 2. Delayed keys.list: begin_quit() also waits for active list custody guard before returning.
+    let list_lock = MaintenanceLock::new();
+    let spec_bg = spec.clone();
+    let custody_bg = custody_cmd.clone();
+    let lock_bg = list_lock.clone();
+    let list_handle = thread::spawn(move || {
+        list_from_custody(
+            &spec_bg,
+            &custody_bg,
+            Duration::from_secs(10),
+            Some(&lock_bg),
+            None,
+        )
+    });
+
+    assert!(
+        wait_until(Duration::from_secs(5), || list_started.exists()),
+        "delayed custody list child should start"
+    );
+    assert_eq!(list_lock.active_custody_count(), 1);
+
+    let quit_lock = list_lock.clone();
+    let quit_handle = thread::spawn(move || quit_lock.begin_quit());
+    assert!(wait_until(Duration::from_secs(2), || list_lock.is_quitting()));
+    thread::sleep(Duration::from_millis(100));
+    assert!(
+        !quit_handle.is_finished(),
+        "begin_quit must not return while delayed keys.list custody guard is still held"
+    );
+
+    fs::write(&list_release, "go").expect("release delayed list child");
+    assert_eq!(
+        quit_handle.join().expect("quit thread joins"),
+        QuitOutcome::Quit
+    );
+    assert_eq!(list_lock.active_custody_count(), 0);
+    let statuses = list_handle
+        .join()
+        .expect("list thread joins")
+        .expect("delayed keys.list succeeds");
+    assert_eq!(statuses.len(), 1);
+
+    // 3. Hung keys.submit (kill_on_timeout = false): quit wait is bounded so quit cannot hang
+    //    forever, while the detached custody child still finishes writing cleanly without being killed.
+    let hung_lock = MaintenanceLock::new();
+    let timeout_err = submit_to_custody(
+        &spec,
+        &custody_cmd,
+        SecretBytes::from_string(
+            r#"{"op":"replace_secret","profileRef":"hung-write","secret":"sk-hung"}"#.to_owned(),
+        ),
+        Duration::from_millis(80),
+        Some(&hung_lock),
+        None,
+    )
+    .expect_err("hung submit should return custody_timeout while child continues");
+    assert_eq!(timeout_err.code, "custody_timeout");
+    assert!(
+        wait_until(Duration::from_secs(5), || hung_started.exists()),
+        "hung custody child should remain alive past submit_to_custody deadline"
+    );
+    assert_eq!(hung_lock.active_custody_count(), 1);
+
+    let quit_started = Instant::now();
+    assert_eq!(
+        hung_lock.begin_quit_with_custody_wait(Duration::from_millis(120)),
+        QuitOutcome::Quit
+    );
+    assert!(
+        quit_started.elapsed() >= Duration::from_millis(90)
+            && quit_started.elapsed() < Duration::from_secs(2),
+        "bounded custody wait must wait through its budget without hanging forever"
+    );
+    assert_eq!(
+        hung_lock.active_custody_count(),
+        1,
+        "detached hung custody child is still running when bounded wait returns"
+    );
+    fs::write(&hung_release, "go").expect("release hung submit child");
+    assert!(
+        wait_until(Duration::from_secs(5), || hung_store_path.exists()),
+        "detached hung submit child must still complete its store write cleanly"
+    );
+    assert_eq!(
+        fs::read_to_string(&hung_store_path).unwrap(),
+        "committed-after-quit-bound"
+    );
+    assert!(
+        wait_until(Duration::from_secs(5), || hung_lock.active_custody_count()
+            == 0),
+        "CustodyGuard drop after bounded quit must cleanly decrement active_custody to 0"
+    );
+
+    // 4. Multiple concurrent custody holders: begin_quit() waits until EVERY holder drops.
+    let multi_lock = MaintenanceLock::new();
+    let g1 = multi_lock.try_begin_custody().expect("first custody guard");
+    let g2 = multi_lock
+        .try_begin_custody()
+        .expect("second custody guard");
+    assert_eq!(multi_lock.active_custody_count(), 2);
+    let quit_multi_lock = multi_lock.clone();
+    let quit_multi = thread::spawn(move || quit_multi_lock.begin_quit());
+    assert!(wait_until(Duration::from_secs(2), || multi_lock.is_quitting()));
+    drop(g1);
+    thread::sleep(Duration::from_millis(80));
+    assert!(
+        !quit_multi.is_finished(),
+        "begin_quit must keep waiting while second custody guard is still held"
+    );
+    assert_eq!(multi_lock.active_custody_count(), 1);
+    drop(g2);
+    assert_eq!(
+        quit_multi.join().expect("multi quit joins"),
+        QuitOutcome::Quit
+    );
+    assert_eq!(multi_lock.active_custody_count(), 0);
+}
+
+#[test]
+fn recovery_restore_and_start_fresh_confirm_handover_relaunch_and_recover_keys_list_after_restart()
+{
+    let tmp = TempDir::new("byok-recovery-restart");
+    let contract = BridgeContract::load().expect("contract loads");
+
+    let build_mock_host = |name: &str,
+                           store_refused: bool,
+                           has_snapshot: bool,
+                           fail_start_fresh: bool|
+     -> (HostCommandSpec, PathBuf) {
+        let shutdown_log = tmp.path().join(format!("{name}-shutdowns.log"));
+        let script = format!(
+            r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+const [subcmd, arg1] = process.argv.slice(2);
+if (subcmd === {snapshot_status_cmd}) {{
+  const snapshot = {has_snapshot} ? {{ version: arg1, target: '/tmp/snapshot-target' }} : null;
+  process.stdout.write(JSON.stringify({{ ok: true, snapshot }}) + '\n');
+  process.exit(0);
+}}
+if (subcmd === {restore_cmd}) {{
+  process.stdout.write(JSON.stringify({{ ok: true, asidePath: '/tmp/restored.aside' }}) + '\n');
+  process.exit(0);
+}}
+if (subcmd === {start_fresh_cmd}) {{
+  if ({fail_start_fresh}) {{
+    process.stdout.write(JSON.stringify({{
+      ok: false,
+      code: 'clear_failed',
+      message: 'simulated enrollment clear refusal',
+      movedBack: true,
+    }}) + '\n');
+    process.exit(1);
+  }}
+  process.stdout.write(JSON.stringify({{
+    ok: true,
+    moved: [{{ from: '/tmp/host', to: '/tmp/host.aside' }}],
+  }}) + '\n');
+  process.exit(0);
+}}
+if (subcmd === {custody_cmd}) {{
+  let raw = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => {{ raw += chunk; }});
+  process.stdin.on('end', () => {{
+    const req = JSON.parse(raw);
+    if (req.op === 'list') {{
+      process.stdout.write(JSON.stringify({{
+        ok: true,
+        statuses: [{{ profile_ref: 'recovered-main', enabled: true }}],
+      }}) + '\n');
+      process.exit(0);
+    }}
+    process.stdout.write(JSON.stringify({{ ok: false, code: 'unexpected', message: 'unexpected op' }}) + '\n');
+    process.exit(1);
+  }});
+}} else {{
+  const rl = readline.createInterface({{ input: process.stdin }});
+  rl.on('close', () => process.exit(0));
+  rl.on('line', line => {{
+    const msg = JSON.parse(line);
+    if (msg.method === 'hello') {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{
+        event: 'state',
+        state: {{ state: 'stopped', pid: process.pid, storeRefused: {store_refused}, reason: 'stopped' }},
+      }}) + '\n');
+    }} else if (msg.method === 'keys.profilesChanged') {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ ok: true }} }}) + '\n');
+    }} else if (msg.method === 'shutdown') {{
+      fs.appendFileSync({shutdown_log}, 'shutdown\n');
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+      process.exit(0);
+    }}
+  }});
+}}
+"#,
+            snapshot_status_cmd =
+                serde_json::to_string(&contract.host_commands.snapshot_status).unwrap(),
+            restore_cmd = serde_json::to_string(&contract.host_commands.restore).unwrap(),
+            start_fresh_cmd = serde_json::to_string(&contract.host_commands.start_fresh).unwrap(),
+            custody_cmd = serde_json::to_string(&contract.host_commands.custody).unwrap(),
+            shutdown_log =
+                serde_json::to_string(&shutdown_log.to_string_lossy().into_owned()).unwrap(),
+        );
+        let spec = write_node_script(tmp.path(), &format!("{name}.mjs"), &script);
+        (spec, shutdown_log)
+    };
+
+    let shutdown_count = |path: &Path| -> usize {
+        fs::read_to_string(path)
+            .map(|text| text.lines().count())
+            .unwrap_or(0)
+    };
+
+    // 1. shell.restore: seals MaintenanceLock with confirm(), triggers relaunch, begin_quit() -> HandedOver
+    //    without stopping Host twice; old sealed process returns PROVIDER_CONFIGURATION_BUSY on keys.list,
+    //    and a fresh restarted process recovers keys.list cleanly.
+    let (restore_spec, restore_shutdowns) = build_mock_host("restore-ok", false, true, false);
+    let sup_restore = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(restore_spec.clone(), contract.clone()),
+        |_| {},
+        || {},
+    ));
+    sup_restore.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            sup_restore.last_state(),
+            Some(SupervisedHostState::Stopped {
+                store_refused: false,
+                ..
+            })
+        )
+    }));
+
+    let lock_restore = MaintenanceLock::new();
+    let router_restore = ShellRouter::new(Arc::clone(&sup_restore), lock_restore.clone(), "1.0.0");
+    let mut relaunch_calls = 0usize;
+    let mut quit_inside_relaunch = None;
+    let lock_for_cb = lock_restore.clone();
+    let restored = router_restore
+        .restore("1.0.0", "2026-11-25T00-00-00.000Z", |err| {
+            assert!(err.is_none());
+            relaunch_calls += 1;
+            assert!(lock_for_cb.is_handed_over());
+            quit_inside_relaunch = Some(lock_for_cb.begin_quit());
+        })
+        .expect("shell.restore succeeds");
+    assert_eq!(restored.aside_path, "/tmp/restored.aside");
+    assert_eq!(relaunch_calls, 1);
+    assert_eq!(quit_inside_relaunch, Some(QuitOutcome::HandedOver));
+    assert_eq!(lock_restore.begin_quit(), QuitOutcome::HandedOver);
+    assert_eq!(
+        shutdown_count(&restore_shutdowns),
+        1,
+        "Host must be stopped exactly once during restore handover"
+    );
+    let sealed_err = router_restore
+        .dispatch_renderer("keys.list", Value::Null)
+        .expect_err("sealed pre-restart process must refuse keys.list");
+    assert_eq!(sealed_err.code, "PROVIDER_CONFIGURATION_BUSY");
+
+    // Simulated restarted process (fresh unlocked MaintenanceLock): keys.list recovers.
+    let sup_after_restore = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(restore_spec, contract.clone()),
+        |_| {},
+        || {},
+    ));
+    let router_after_restore = ShellRouter::new(
+        Arc::clone(&sup_after_restore),
+        MaintenanceLock::new(),
+        "1.0.0",
+    );
+    let listed_after_restore = router_after_restore
+        .dispatch_renderer("keys.list", Value::Null)
+        .expect("restarted process keys.list succeeds");
+    assert_eq!(listed_after_restore.as_array().map(Vec::len), Some(1));
+
+    // 2. shell.startFresh: same handover + relaunch + single Host stop + post-restart keys.list recovery.
+    let (fresh_spec, fresh_shutdowns) = build_mock_host("fresh-ok", true, false, false);
+    let sup_fresh = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(fresh_spec.clone(), contract.clone()),
+        |_| {},
+        || {},
+    ));
+    sup_fresh.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            sup_fresh.last_state(),
+            Some(SupervisedHostState::Stopped {
+                store_refused: true,
+                ..
+            })
+        )
+    }));
+
+    let lock_fresh = MaintenanceLock::new();
+    let router_fresh = ShellRouter::new(Arc::clone(&sup_fresh), lock_fresh.clone(), "1.0.0");
+    let mut fresh_relaunch_calls = 0usize;
+    let mut fresh_quit_outcome = None;
+    let lock_for_cb = lock_fresh.clone();
+    let started_fresh = router_fresh
+        .start_fresh("2026-11-25T00-01-00.000Z", |err| {
+            assert!(err.is_none());
+            fresh_relaunch_calls += 1;
+            assert!(lock_for_cb.is_handed_over());
+            fresh_quit_outcome = Some(lock_for_cb.begin_quit());
+        })
+        .expect("shell.startFresh succeeds");
+    assert_eq!(started_fresh.moved.len(), 1);
+    assert_eq!(fresh_relaunch_calls, 1);
+    assert_eq!(fresh_quit_outcome, Some(QuitOutcome::HandedOver));
+    assert_eq!(lock_fresh.begin_quit(), QuitOutcome::HandedOver);
+    assert_eq!(shutdown_count(&fresh_shutdowns), 1);
+    assert_eq!(
+        router_fresh
+            .dispatch_renderer("keys.list", Value::Null)
+            .expect_err("sealed pre-restart process must refuse keys.list")
+            .code,
+        "PROVIDER_CONFIGURATION_BUSY"
+    );
+
+    let sup_after_fresh = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(fresh_spec, contract.clone()),
+        |_| {},
+        || {},
+    ));
+    let router_after_fresh = ShellRouter::new(
+        Arc::clone(&sup_after_fresh),
+        MaintenanceLock::new(),
+        "1.0.0",
+    );
+    let listed_after_fresh = router_after_fresh
+        .dispatch_renderer("keys.list", Value::Null)
+        .expect("restarted process keys.list succeeds after startFresh");
+    assert_eq!(listed_after_fresh.as_array().map(Vec::len), Some(1));
+
+    // 3. Post-stop failure on shell.startFresh still confirms handover and calls relaunch(Some(err)).
+    let (fresh_fail_spec, fresh_fail_shutdowns) = build_mock_host("fresh-fail", true, false, true);
+    let sup_fresh_fail = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(fresh_fail_spec, contract.clone()),
+        |_| {},
+        || {},
+    ));
+    sup_fresh_fail.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            sup_fresh_fail.last_state(),
+            Some(SupervisedHostState::Stopped {
+                store_refused: true,
+                ..
+            })
+        )
+    }));
+    let lock_fail = MaintenanceLock::new();
+    let router_fail = ShellRouter::new(Arc::clone(&sup_fresh_fail), lock_fail.clone(), "1.0.0");
+    let mut saw_failure = false;
+    let err = router_fail
+        .start_fresh("2026-11-25T00-02-00.000Z", |failure| {
+            saw_failure = failure.is_some();
+        })
+        .expect_err("startFresh refusal surfaces error code");
+    assert_eq!(err.code, "clear_failed");
+    assert!(saw_failure);
+    assert!(lock_fail.is_handed_over());
+    assert_eq!(lock_fail.begin_quit(), QuitOutcome::HandedOver);
+    assert_eq!(shutdown_count(&fresh_fail_shutdowns), 1);
+
+    // 4. Pre-stop failure (missing snapshot) leaves lock unsealed, skips relaunch, and keeps keys.list working.
+    let (no_snap_spec, no_snap_shutdowns) = build_mock_host("restore-nosnap", false, false, false);
+    let sup_no_snap = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(no_snap_spec, contract),
+        |_| {},
+        || {},
+    ));
+    sup_no_snap.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            sup_no_snap.last_state(),
+            Some(SupervisedHostState::Stopped {
+                store_refused: false,
+                ..
+            })
+        )
+    }));
+    let lock_no_snap = MaintenanceLock::new();
+    let router_no_snap = ShellRouter::new(Arc::clone(&sup_no_snap), lock_no_snap.clone(), "1.0.0");
+    let mut no_snap_relaunched = false;
+    let missing_err = router_no_snap
+        .restore("1.0.0", "2026-11-25T00-03-00.000Z", |_| {
+            no_snap_relaunched = true;
+        })
+        .expect_err("missing snapshot must refuse before Host stop");
+    assert_eq!(missing_err.code, "missing_snapshot");
+    assert!(!no_snap_relaunched);
+    assert!(!lock_no_snap.is_handed_over());
+    assert_eq!(shutdown_count(&no_snap_shutdowns), 0);
+    assert_eq!(
+        router_no_snap
+            .dispatch_renderer("keys.list", Value::Null)
+            .expect("keys.list keeps working after pre-stop refusal")
+            .as_array()
+            .map(Vec::len),
+        Some(1)
+    );
+    sup_no_snap.stop().expect("clean shutdown");
 }

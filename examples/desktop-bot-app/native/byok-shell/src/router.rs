@@ -13,7 +13,10 @@ use crate::host::HostSupervisor;
 use crate::maintenance::MaintenanceLock;
 use crate::recovery::{shell_restore, shell_start_fresh, shell_state};
 
-/// Exact list of `mainMethods` dispatched locally by the desktop shell (`settings.loginItem*` UI integration lives in `#2461`).
+/// Exact list of `mainMethods` owned by the desktop shell (`settings.loginItem*` execute on the
+/// NSH engine thread in `byok-nsh-adapter` because `nsh-core` login-item calls are engine-bound
+/// async futures; `keys.submit`, `shell.restore`, and `shell.startFresh` use dedicated `ShellRouter`
+/// methods).
 pub const HANDLED_MAIN_METHODS: &[&str] = &[
     "settings.loginItem",
     "settings.setLoginItem",
@@ -29,31 +32,6 @@ pub const HANDLED_MAIN_METHODS: &[&str] = &[
 pub struct LoginItemView {
     pub supported: bool,
     pub enabled: bool,
-}
-
-/// Platform hook for `settings.loginItem` / `settings.setLoginItem` implemented by UI layer (`#2461`).
-pub trait LoginItemBackend: Send + Sync {
-    fn get(&self) -> Result<LoginItemView, ShellRouteError>;
-    fn set(&self, enabled: bool) -> Result<LoginItemView, ShellRouteError>;
-}
-
-/// Default login item backend failing closed cleanly on unsupported / pre-UI contexts.
-pub struct UnsupportedLoginItemBackend;
-
-impl LoginItemBackend for UnsupportedLoginItemBackend {
-    fn get(&self) -> Result<LoginItemView, ShellRouteError> {
-        Ok(LoginItemView {
-            supported: false,
-            enabled: false,
-        })
-    }
-
-    fn set(&self, _enabled: bool) -> Result<LoginItemView, ShellRouteError> {
-        Err(ShellRouteError::new(
-            BridgeErrorCode::MethodFailed.as_str(),
-            "Login item switching is provided by the platform UI shell (#2461)",
-        ))
-    }
 }
 
 /// Structured refusal emitted by [`ShellRouter::dispatch_renderer`].
@@ -84,7 +62,6 @@ impl std::error::Error for ShellRouteError {}
 pub struct ShellRouter {
     supervisor: std::sync::Arc<HostSupervisor>,
     maintenance: MaintenanceLock,
-    login_item: Box<dyn LoginItemBackend>,
     app_version: String,
     custody_deadline: Duration,
     recovery_deadline: Option<Duration>,
@@ -94,13 +71,11 @@ impl ShellRouter {
     pub fn new(
         supervisor: std::sync::Arc<HostSupervisor>,
         maintenance: MaintenanceLock,
-        login_item: Box<dyn LoginItemBackend>,
         app_version: impl Into<String>,
     ) -> Self {
         Self {
             supervisor,
             maintenance,
-            login_item,
             app_version: app_version.into(),
             custody_deadline: DEFAULT_CUSTODY_DEADLINE,
             recovery_deadline: None,
@@ -134,34 +109,6 @@ impl ShellRouter {
 
         if contract.is_main_method(method) {
             return match method {
-                "settings.loginItem" => {
-                    if !params.is_null() {
-                        return Err(ShellRouteError::new(
-                            BridgeErrorCode::InvalidParams.as_str(),
-                            "settings.loginItem takes no params",
-                        ));
-                    }
-                    let view = self.login_item.get()?;
-                    serde_json::to_value(view).map_err(|err| {
-                        ShellRouteError::new(BridgeErrorCode::MethodFailed.as_str(), err.to_string())
-                    })
-                }
-                "settings.setLoginItem" => {
-                    let enabled = params
-                        .as_object()
-                        .and_then(|obj| obj.get("enabled"))
-                        .and_then(Value::as_bool)
-                        .ok_or_else(|| {
-                            ShellRouteError::new(
-                                BridgeErrorCode::InvalidParams.as_str(),
-                                "settings.setLoginItem needs { enabled: boolean }",
-                            )
-                        })?;
-                    let view = self.login_item.set(enabled)?;
-                    serde_json::to_value(view).map_err(|err| {
-                        ShellRouteError::new(BridgeErrorCode::MethodFailed.as_str(), err.to_string())
-                    })
-                }
                 "keys.list" => {
                     if !params.is_null() {
                         return Err(ShellRouteError::new(
@@ -190,9 +137,13 @@ impl ShellRouter {
                             "shell.state takes no params",
                         ));
                     }
-                    let view = shell_state(&self.supervisor, &self.app_version, self.recovery_deadline);
+                    let view =
+                        shell_state(&self.supervisor, &self.app_version, self.recovery_deadline);
                     serde_json::to_value(view).map_err(|err| {
-                        ShellRouteError::new(BridgeErrorCode::MethodFailed.as_str(), err.to_string())
+                        ShellRouteError::new(
+                            BridgeErrorCode::MethodFailed.as_str(),
+                            err.to_string(),
+                        )
                     })
                 }
                 "shell.restore" | "shell.startFresh" => Err(ShellRouteError::new(
@@ -240,7 +191,11 @@ impl ShellRouter {
     /// Executes `shell.state` with explicit app version (contract-checked).
     pub fn state(&self, app_version: &str) -> Result<crate::recovery::ShellView, ShellRouteError> {
         self.ensure_main_method("shell.state")?;
-        Ok(shell_state(&self.supervisor, app_version, self.recovery_deadline))
+        Ok(shell_state(
+            &self.supervisor,
+            app_version,
+            self.recovery_deadline,
+        ))
     }
 
     /// Executes `shell.restore` under `MaintenanceLock` and `supervisor.stop()`.
