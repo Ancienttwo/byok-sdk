@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { builtinModules } from 'node:module';
 import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -18,14 +19,23 @@ const DEFAULT_BUILT_CAPABILITIES = resolve(NSH_APP_DIR, '.nsh/out/capabilities.j
 const DEFAULT_EXPECTED_CAPABILITIES = resolve(NSH_APP_DIR, 'capabilities.expected.json');
 const DEFAULT_BUILT_BUNDLE = resolve(NSH_APP_DIR, '.nsh/out/bundle.js');
 
-export const FORBIDDEN_BUNDLE_MODULES = [
-  '@byok-sdk/ui-runtime',
-  '@byok-sdk/cloud',
+/**
+ * Packages the QuickJS TSX bundle must never contain. The single source for both release checks:
+ * source-map provenance (`node_modules/<name>/`, plus `packages/<dir>/` for workspace packages)
+ * and the import/require specifiers left in `bundle.js`. Node builtins are checked separately.
+ */
+export const FORBIDDEN_BUNDLE_PACKAGES = [
+  'react',
+  'react-dom',
   'hono',
   'electron',
-  'node:fs',
-  'node:child_process',
+  '@byok-sdk/client',
+  '@byok-sdk/server',
+  '@byok-sdk/ui-runtime',
+  '@byok-sdk/cloud',
 ];
+const WORKSPACE_SCOPE = '@byok-sdk/';
+const NODE_BUILTINS = new Set(builtinModules);
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -300,14 +310,70 @@ function runVerifyCapabilities(args) {
   console.log(`verify-capabilities OK (${builtPath} === ${expectedPath})`);
 }
 
-/** Rejects bundled QuickJS TSX output if Node/Electron/server/ui-runtime modules leaked into it. */
-export function verifyBundleContent(source, forbiddenModules = FORBIDDEN_BUNDLE_MODULES) {
+function forbiddenSourceRoots(name) {
+  const roots = [`node_modules/${name}/`];
+  if (name.startsWith(WORKSPACE_SCOPE)) {
+    roots.push(`packages/${name.slice(WORKSPACE_SCOPE.length)}/`);
+  }
+  return roots;
+}
+
+/** Reads the release source map next to the bundle; a missing or unparsable map fails closed. */
+export function readBundleSourceMap(mapPath) {
+  if (!existsSync(mapPath)) {
+    throw new Error(`Bundle source map not found: ${mapPath} (verify-bundle needs the map from build --release)`);
+  }
+  let map;
+  try {
+    map = JSON.parse(readFileSync(mapPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Bundle source map is not valid JSON: ${mapPath} (${error.message})`);
+  }
+  if (!Array.isArray(map?.sources) || map.sources.length === 0 || !map.sources.every((entry) => typeof entry === 'string')) {
+    throw new Error(`Bundle source map has no string sources list: ${mapPath}`);
+  }
+  return map;
+}
+
+/**
+ * Rejects a bundle whose source map shows a module from a forbidden package. NSH writes `sources`
+ * relative to the app directory it built from (`sourceBase`); each is resolved and compared by
+ * path segment against `node_modules/<name>/` and, for workspace packages, the repo's `packages/<dir>/`.
+ */
+export function verifyBundleSources(map, { sourceBase = NSH_APP_DIR, repoRoot = REPO_ROOT } = {}) {
+  const roots = FORBIDDEN_BUNDLE_PACKAGES.flatMap(forbiddenSourceRoots);
+  for (const entry of map.sources) {
+    const resolved = resolve(sourceBase, entry).replaceAll('\\', '/');
+    const repoRelative = relative(repoRoot, resolved).replaceAll('\\', '/');
+    const candidate = `/${repoRelative.startsWith('..') ? resolved : repoRelative}`;
+    const root = roots.find((r) => candidate.includes(`/${r}`));
+    assert.ok(root === undefined, `Forbidden module source in TSX bundle: ${entry} (under ${root})`);
+  }
+}
+
+const SPECIFIER_PATTERNS = [
+  /\b(?:import|export)\b[^;'"`]*?\bfrom\s*(['"])([^'"\n]+)\1/g,
+  /\bimport\s*(['"])([^'"\n]+)\1/g,
+  /\b(?:import|require)\s*\(\s*(['"`])([^'"`\n]+)\1\s*\)/g,
+];
+
+function forbiddenSpecifier(specifier) {
+  if (specifier.startsWith('node:') || NODE_BUILTINS.has(specifier) || NODE_BUILTINS.has(specifier.split('/')[0])) {
+    return 'Node builtin';
+  }
+  return FORBIDDEN_BUNDLE_PACKAGES.find((name) => specifier === name || specifier.startsWith(`${name}/`));
+}
+
+/** Rejects import/require/dynamic-import specifiers in bundled TSX output that name a Node builtin or a forbidden package. */
+export function verifyBundleSpecifiers(source) {
   assert.equal(typeof source, 'string', 'Bundled TSX output must be a string');
   assert.ok(source.trim().length > 0, 'Bundled TSX output must not be empty');
-  for (const mod of forbiddenModules) {
-    const escaped = escapeRegExp(mod);
-    const pattern = new RegExp(`(?:^|[^a-zA-Z0-9_/@-])${escaped}(?:$|[^a-zA-Z0-9_-])`);
-    assert.ok(!pattern.test(source), `Forbidden runtime/package module leaked into TSX bundle: ${mod}`);
+  for (const pattern of SPECIFIER_PATTERNS) {
+    for (const match of source.matchAll(pattern)) {
+      const specifier = match[2];
+      const rule = forbiddenSpecifier(specifier);
+      assert.ok(rule === undefined, `Forbidden module specifier in TSX bundle: ${specifier} (${rule})`);
+    }
   }
 }
 
@@ -321,9 +387,13 @@ function runVerifyBundle(args) {
       throw new Error(`Unknown verify-bundle option: ${args[i]}`);
     }
   }
-  const source = readFileSync(bundlePath, 'utf8');
-  verifyBundleContent(source);
-  console.log(`verify-bundle OK (${bundlePath}: zero forbidden runtime/package modules)`);
+  const mapPath = `${bundlePath}.map`;
+  const map = readBundleSourceMap(mapPath);
+  verifyBundleSources(map);
+  verifyBundleSpecifiers(readFileSync(bundlePath, 'utf8'));
+  console.log(
+    `verify-bundle OK (${bundlePath}: ${map.sources.length} map sources and import specifiers clear of forbidden packages and Node builtins)`,
+  );
 }
 
 async function runCli(argv) {

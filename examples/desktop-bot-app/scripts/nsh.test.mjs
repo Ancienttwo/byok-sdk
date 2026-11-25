@@ -6,9 +6,10 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   assertNshVersion,
-  FORBIDDEN_BUNDLE_MODULES,
   loadPin,
-  verifyBundleContent,
+  readBundleSourceMap,
+  verifyBundleSources,
+  verifyBundleSpecifiers,
   verifyCapabilitiesAgainstGolden,
   verifyCargoMetadataNshProvenance,
   verifyFileSha256,
@@ -123,13 +124,50 @@ test('verifyCapabilitiesAgainstGolden validates D2 golden equality and rejects w
   );
 });
 
-test('verifyBundleContent admits clean TSX bundle output and rejects forbidden runtime modules', () => {
-  verifyBundleContent('export const ok = "@byok-sdk/keys/model-route";');
-  assert.throws(() => verifyBundleContent('   '), /empty/i);
-  for (const forbidden of FORBIDDEN_BUNDLE_MODULES) {
-    assert.throws(
-      () => verifyBundleContent(`import x from "${forbidden}";`),
-      new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
-    );
+test('verifyBundleSources rejects a source map module from a forbidden package root', () => {
+  const sourceBase = '/repo/examples/desktop-bot-app/nsh-app';
+  const repoRoot = '/repo';
+  const check = (entry) => verifyBundleSources({ sources: ['App.tsx', entry] }, { sourceBase, repoRoot });
+  check('../../../node_modules/.bun/zod@4.6.7/node_modules/zod/v4/core/core.js');
+  check('../../../packages/keys/dist/model-route.js');
+  check('../../../packages/cloud-dataplane/dist/index.js');
+  assert.throws(
+    () => check('../../../node_modules/.bun/react@19.0.0/node_modules/react/index.js'),
+    /under node_modules\/react\//,
+  );
+  assert.throws(
+    () => check('../../../node_modules/@byok-sdk/client/dist/index.js'),
+    /under node_modules\/@byok-sdk\/client\//,
+  );
+  assert.throws(() => check('../../../packages/server/src/index.ts'), /under packages\/server\//);
+});
+
+test('readBundleSourceMap fails closed on a missing or unparsable map and names its path', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'byok-nsh-bundle-map-test-'));
+  try {
+    const missing = join(dir, 'bundle.js.map');
+    assert.throws(() => readBundleSourceMap(missing), (error) => error.message.includes(missing));
+    writeFileSync(missing, '{not json');
+    assert.throws(() => readBundleSourceMap(missing), (error) => error.message.includes(missing));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('verifyBundleSpecifiers rejects forbidden import, require and dynamic-import specifiers', () => {
+  verifyBundleSpecifiers('import{a as b}from"nsh";import"nsh/base";export*from"byok-nsh-adapter";import("@byok-sdk/keys/model-route");');
+  assert.throws(() => verifyBundleSpecifiers('   '), /empty/i);
+  for (const code of [
+    'import{version as v}from"react";',
+    'export*from"@byok-sdk/server/node";',
+    'import"node:path";',
+    'const fs=require("fs");',
+    'await import("electron");',
+  ]) {
+    assert.throws(() => verifyBundleSpecifiers(code), /Forbidden module specifier/, code);
+  }
+});
+
+test('verifyBundleSpecifiers ignores unrelated text that mentions electron', () => {
+  verifyBundleSpecifiers('const note="Runs without electron; see electron.md";import{a}from"nsh";');
 });
