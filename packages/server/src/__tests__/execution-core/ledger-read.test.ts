@@ -43,6 +43,12 @@ it('reports a database without the host_ledger table as absent', () => {
   expect(readHostLedger(other)).toEqual({ kind: 'absent', reason: 'no_table' });
 });
 
+it('reports a database with unrelated tables and no host_ledger as absent', () => {
+  const file = join(rootDir(), 'other.sqlite');
+  sql(file, 'CREATE TABLE unrelated (id INTEGER PRIMARY KEY)');
+  expect(readHostLedger(file)).toEqual({ kind: 'absent', reason: 'no_table' });
+});
+
 it('reads every tenant ordered by tenant, with only the application, intents and executions of each', () => {
   const file = join(rootDir(), 'host.sqlite');
   set(open(file, 'b'), 2); set(open(file, 'a'), 1);
