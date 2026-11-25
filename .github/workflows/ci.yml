@@ -2549,6 +2549,17 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = Linux ]; then export HOME="$RUNNER_TEMP/host-home"; fi
           cargo test --locked
+      # #2457 / #2461 Slice 1: NSH Mixed pinning checks and Rust adapter crate tests across all three OSes.
+      - name: NSH pin script tests
+        if: runner.os == 'Linux'
+        run: node examples/desktop-bot-app/scripts/nsh.test.mjs
+      - name: Rust byok-nsh-adapter tests (cargo test --locked)
+        working-directory: examples/desktop-bot-app/nsh-app/ext/byok-nsh-adapter
+        env:
+          RUSTFLAGS: '-D warnings'
+        run: cargo test --locked
+      - name: Verify single pinned NSH crate provenance
+        run: node examples/desktop-bot-app/scripts/nsh.mjs verify-lock
 
   ci-required:
     name: CI required

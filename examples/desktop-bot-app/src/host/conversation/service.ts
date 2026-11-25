@@ -6,17 +6,10 @@ import type { HostStore } from '../store/store.ts';
 import type { BotProfile } from '../store/types.ts';
 import type { ConversationBrand, ModelChoice, RolePreset } from './catalog.ts';
 import { DraftFollowers, type DraftTarget } from './drafts.ts';
+import type { ConversationSnapshot } from './types.ts';
 import { botViews, conversationItems, openTurns, type BotView, type ConversationView } from './view.ts';
 
-export interface ConversationSnapshot {
-  readonly bots: readonly BotView[];
-  readonly roles: readonly RolePreset[];
-  readonly models: readonly ModelChoice[];
-  /** The selected Bot's conversation; absent when no Bot is selected or the Bot is unknown. */
-  readonly conversation?: ConversationView;
-  /** Some Bot has open work or a profile catching up: the renderer reads again while this holds. */
-  readonly busy: boolean;
-}
+export type { ConversationSnapshot };
 
 const text = (value: unknown, name: string): string => {
   if (typeof value !== 'string' || value === '') throw new BridgeError('invalid_params', `${name} must be a non-empty string`);

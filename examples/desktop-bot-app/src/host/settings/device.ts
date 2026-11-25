@@ -2,31 +2,12 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import {
   diagnoseDevice, exportDeviceSupportBundle,
-  type Daemon, type DaemonConfig, type DaemonLifecycle, type DiagnoseDeviceOptions, type DiagnosticCheck,
-  type DiagnosticsSnapshot, type DiagnosticStatus, type RuntimeObservation,
+  type Daemon, type DaemonConfig, type DiagnoseDeviceOptions,
+  type DiagnosticsSnapshot, type DiagnosticStatus,
 } from '@byok-sdk/client';
+import type { DeviceView, RuntimeView } from './types.ts';
 
-export interface RuntimeView {
-  readonly id: string;
-  readonly present: boolean;
-  readonly outcome: RuntimeObservation['outcome'];
-  readonly reason?: string;
-  readonly version?: string;
-  /** The effective version policy's verdict; absent when the SDK reported none, never inferred as `allow`. */
-  readonly verdict?: 'allow' | 'warn' | 'block';
-}
-
-/** What the device page shows: the daemon's own status and the SDK doctor's checks, projected without reinterpretation. */
-export interface DeviceView {
-  readonly paired: boolean;
-  readonly deviceId?: string;
-  readonly lifecycle: DaemonLifecycle;
-  readonly activeTaskCount: number;
-  readonly pendingTerminalCommits: number;
-  readonly runtimes: readonly RuntimeView[];
-  readonly clockSkew: DiagnosticsSnapshot['clockSkew'];
-  readonly doctor: { readonly generatedAt: string; readonly worst: DiagnosticStatus; readonly checks: readonly DiagnosticCheck[] };
-}
+export type { DeviceView, RuntimeView };
 
 const SEVERITY: Record<DiagnosticStatus, number> = { pass: 0, warn: 1, fail: 2 };
 

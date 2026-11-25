@@ -385,6 +385,38 @@ test('a platform family is selected only by a path it owns', () => {
   for (const path of ['examples/desktop-bot-app/native/other/x.rs', 'examples/desktop-bot-app/native/byok-shell/build.rs']) {
     assert.throws(() => selectImpact([path]), /mapping/i, path);
   }
+  // #2457 / #2461 Slice 1: NSH Mixed app, Rust adapter crate, and pinning scripts select desktop; docs and unmapped siblings fail closed cleanly.
+  assert.deepEqual(selectImpact(['examples/desktop-bot-app/nsh-app/DESIGN.md']), {
+    dirs: [], files: ['examples/desktop-bot-app/nsh-app/DESIGN.md'], families: [], reason: 'docs-only',
+  });
+  for (const path of [
+    'nsh-app/nsh.json',
+    'nsh-app/nsh.lock',
+    'nsh-app/tsconfig.json',
+    'nsh-app/capabilities.expected.json',
+    'nsh-app/App.tsx',
+    'nsh-app/App.test.tsx',
+    'nsh-app/src/bridge.ts',
+    'nsh-app/src/ui/Button.tsx',
+    'nsh-app/ext/byok-nsh-adapter/Cargo.toml',
+    'nsh-app/ext/byok-nsh-adapter/Cargo.lock',
+    'nsh-app/ext/byok-nsh-adapter/rust-toolchain.toml',
+    'nsh-app/ext/byok-nsh-adapter/src/lib.rs',
+    'scripts/nsh-pin.json',
+    'scripts/nsh.mjs',
+    'scripts/nsh.test.mjs',
+  ]) {
+    const impact = selectImpact([`examples/desktop-bot-app/${path}`]);
+    assert.ok(impact.families.includes('desktop') && impact.dirs.includes('examples/desktop-bot-app'), path);
+  }
+  for (const path of [
+    'examples/desktop-bot-app/nsh-app/ext/other/x.rs',
+    'examples/desktop-bot-app/nsh-app/ext/byok-nsh-adapter/build.rs',
+    'examples/desktop-bot-app/nsh-app/other.json',
+    'examples/desktop-bot-app/scripts/other.json',
+  ]) {
+    assert.throws(() => selectImpact([path]), /mapping/i, path);
+  }
   for (const path of ['packages/client/src/bin/sdk-reserved-helper-runners.ts', 'packages/client/src/bin/byok-agent-result-mcp.ts', 'packages/client/src/lifecycle/sdk-reserved-helper-command.ts']) {
     for (const family of ['runtime-contract', 'credential-isolation-audit', 'npm-release-pack']) assert.ok(selectImpact([path]).families.includes(family), `${family}: ${path}`);
   }

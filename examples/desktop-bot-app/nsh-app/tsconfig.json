@@ -1,0 +1,7 @@
+{
+  "extends": "./.nsh/tsconfig.json",
+  "compilerOptions": {
+    "allowImportingTsExtensions": true
+  },
+  "include": ["App.tsx", "App.test.tsx", "src/**/*.ts", "src/**/*.tsx"]
+}

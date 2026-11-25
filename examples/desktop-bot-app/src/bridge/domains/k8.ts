@@ -3,7 +3,7 @@
  * Methods are named `k8.<verb>`; the Host handlers live in `src/host/k8/domain.ts`.
  */
 import type { TurnCancelResult } from '@byok-sdk/bot-collaboration/host-kit';
-import type { ConversationSnapshot } from '../../host/conversation/service.ts';
+import type { ConversationSnapshot } from '../../host/conversation/types.ts';
 import type { BotProfile } from '../../host/store/types.ts';
 import type { BridgeDomain } from '../domain.ts';
 

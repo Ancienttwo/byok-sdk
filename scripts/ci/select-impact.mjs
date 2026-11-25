@@ -965,12 +965,25 @@ export function selectImpact(paths, context = {}) {
     if (!workspaceGraph[dir]) requireMapping(path);
     if (/^(?:README|AGENTS|CLAUDE)\.md$/.test(relative)) continue;
     if (path === 'examples/desktop-bot-app/FORKING.md') continue;
+    if (path === 'examples/desktop-bot-app/nsh-app/DESIGN.md') continue;
     if (/^(?:tsconfig(?:\.[a-z-]+)?\.json|vitest\.config\.[cm]?ts)$/.test(relative)) { dirs.add(dir); continue; }
     if (dir === 'packages/client' && /^native\/agent-memory-fs\/.+\.(?:go|mod|sum)$/.test(relative)) {
       dirs.add(dir); families.add('npm-release-pack'); continue;
     }
     if (dir === 'examples/desktop-bot-app'
       && /^native\/byok-shell\/(?:Cargo\.(?:toml|lock)|rust-toolchain\.toml|(?:src|tests)\/.+\.rs)$/.test(relative)) {
+      dirs.add(dir); continue;
+    }
+    if (dir === 'examples/desktop-bot-app'
+      && /^nsh-app\/(?:nsh\.(?:json|lock)|tsconfig\.json|capabilities\.expected\.json|App(?:\.test)?\.tsx|src\/.+\.tsx?)$/.test(relative)) {
+      dirs.add(dir); continue;
+    }
+    if (dir === 'examples/desktop-bot-app'
+      && /^nsh-app\/ext\/byok-nsh-adapter\/(?:Cargo\.(?:toml|lock)|rust-toolchain\.toml|(?:src|tests)\/.+\.rs)$/.test(relative)) {
+      dirs.add(dir); continue;
+    }
+    if (dir === 'examples/desktop-bot-app'
+      && /^scripts\/(?:nsh-pin\.json|nsh(?:\.test)?\.mjs)$/.test(relative)) {
       dirs.add(dir); continue;
     }
     if (dir === 'packages/client' && /^scripts\/(?:(?:build|check|verify|copy)-agent-memory-helper[^/]*|agent-memory-helper-source)\.[cm]?[jt]s$/.test(relative)) {

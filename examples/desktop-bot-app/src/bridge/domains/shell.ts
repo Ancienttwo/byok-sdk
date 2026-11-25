@@ -6,7 +6,7 @@
  */
 import type { BridgeDomain } from '../domain.ts';
 import type { SupervisedHostState } from '../protocol.ts';
-import type { Move } from '../../recovery/stores.ts';
+import type { Move } from '../../recovery/types.ts';
 
 export interface ShellView {
   /** Main's last view of the Host; null until the first Host state arrived. */

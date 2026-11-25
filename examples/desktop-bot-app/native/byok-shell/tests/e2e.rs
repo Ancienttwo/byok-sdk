@@ -1872,8 +1872,9 @@ rl.on('line', line => {{
     let spec = write_node_script(dir, "late-reply-host.mjs", &script);
     let contract = BridgeContract::load().expect("contract loads");
     let mut cfg = HostSupervisorConfig::new(spec, contract);
-    cfg.initial_backoff = Duration::from_millis(50);
-    cfg.max_backoff = Duration::from_millis(100);
+    // Keep post-kill respawn parked well past `supervisor.stop()` so CI thread scheduling cannot respawn a fresh Host before stop verifies unclean kill authority (`stop()` wakes `backoff_wait` via `cv.notify_all()`).
+    cfg.initial_backoff = Duration::from_secs(30);
+    cfg.max_backoff = Duration::from_secs(30);
     let observed = Arc::new(Mutex::new(Vec::new()));
     let observed_ref = Arc::clone(&observed);
     let supervisor = HostSupervisor::new(

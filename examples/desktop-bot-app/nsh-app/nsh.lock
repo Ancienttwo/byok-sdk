@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "packages": [
+    {
+      "name": "byok-nsh-adapter",
+      "version": "0.1.0",
+      "path": "ext/byok-nsh-adapter",
+      "module": "byok-nsh-adapter"
+    }
+  ]
+}
