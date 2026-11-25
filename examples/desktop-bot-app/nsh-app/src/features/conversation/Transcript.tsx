@@ -170,8 +170,8 @@ function QuestionRow(props: { item: () => Item<"question"> }) {
   );
 }
 
-/** One transcript row; a key keeps its kind, so the branch is chosen once and the row reads `item()` as it updates. */
-function Row(props: { item: () => ConversationItem }) {
+/** One mounted row: its branch is chosen once, and it reads `item()` as the same key and kind update (a streaming draft). */
+function RowFor(props: { item: () => ConversationItem }) {
   switch (props.item().kind) {
     case "input":
       return <InputRow item={props.item as () => Item<"input">} />;
@@ -220,7 +220,13 @@ export function Transcript(props: { botId: string; items: readonly ConversationI
         maintainVisibleContentPosition={{ autoscrollToBottomThreshold: 48 }}
         empty={<Text class="text-sm text-muted-foreground">No messages yet.</Text>}
       >
-        {(item) => <Row item={item} />}
+        {(item) => (
+          // A List cell outlives its item: scrolling recycles it for another key, and the Host keeps `t<turnId>` when a
+          // working Turn ends. Mounting per key and kind gives each row its own renderer and local state.
+          <Each of={[item()]} key={(current) => `${current.key}:${current.kind}`}>
+            {(current) => <RowFor item={current} />}
+          </Each>
+        )}
       </List>
     </View>
   );

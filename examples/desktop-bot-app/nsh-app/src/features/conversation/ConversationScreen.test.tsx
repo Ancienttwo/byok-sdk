@@ -174,6 +174,63 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     expect(views(calls).filter((call) => call.params.botId === "a").length).toBe(2);
   });
 
+  test("a cancelled Turn's row turns from Working… into Turn cancelled under the same key", async () => {
+    const calls: Call[] = [];
+    const app = await openConversation(
+      conversationShell(calls, (params) => {
+        if (params.botId === null) return snapshot([bot("a", { state: "working" })]);
+        const cancelled = calls.some((call) => call.method === "k8.cancel");
+        return snapshot(
+          [bot("a", { state: cancelled ? "idle" : "working" })],
+          {
+            botId: "a",
+            cancellable: cancelled ? [] : ["t1"],
+            items: [
+              { kind: "input", key: "e1", text: "Write it", at: 1, folded: false },
+              cancelled
+                ? { kind: "ended", key: "tt1", folded: false, end: { turnId: "t1", conclusion: "cancelled" } }
+                : { kind: "working", key: "tt1", turnId: "t1" },
+            ],
+          },
+          !cancelled,
+        );
+      }),
+    );
+    await app.press("id:conv-bot-a");
+    await app.waitFor("text:Working…");
+    await app.press("id:conv-cancel-turn");
+    await app.waitFor("text:Turn cancelled", { timeout: 4000 });
+    expect(app.shows("text:Working…")).toBe(false);
+  });
+
+  test("a question row that the Host replaces with another question starts with an empty answer", async () => {
+    const calls: Call[] = [];
+    const app = await openConversation(
+      conversationShell(calls, (params) => {
+        if (params.botId === null) return snapshot([bot("a", { state: "waiting" })], undefined, true);
+        const first = views(calls).filter((call) => call.params.botId === "a").length === 1;
+        return snapshot(
+          [bot("a", { state: "waiting" })],
+          {
+            botId: "a",
+            items: [
+              first
+                ? { kind: "question", key: "qq1", id: "q1", question: { question: "Audience?", answerKind: "text" } }
+                : { kind: "question", key: "qq2", id: "q2", question: { question: "Deadline?", answerKind: "text" } },
+            ],
+          },
+          first,
+        );
+      }),
+    );
+    await app.press("id:conv-bot-a");
+    await app.waitFor("text:Audience?");
+    await app.type("id:conv-answer-q1", "Engineers");
+    await app.waitFor("text:Deadline?", { timeout: 4000 });
+    expect(app.value("id:conv-answer-q2")).toBe("");
+    expect(app.enabled("id:conv-answer-q2-submit")).toBe(false);
+  });
+
   test("a failed send keeps its action id for a retry of the same text; edited text starts a new one", async () => {
     const calls: Call[] = [];
     let sends = 0;
@@ -213,27 +270,45 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     expect(sent.every((params) => params.botId === "a")).toBe(true);
   });
 
-  test("Cancel Turn cancels the oldest open Turn, Clear context sends a clear, and the composer locks for an archived Bot", async () => {
+  test("Cancel Turn cancels the oldest open Turn, a failed clear keeps its action id for the retry, and the composer locks for an archived Bot", async () => {
     const calls: Call[] = [];
+    let clears = 0;
     const app = await openConversation(
-      conversationShell(calls, (params) => {
-        const bots = [bot("a", { state: "working" }), bot("z", { archived: true, state: "archived" })];
-        if (params.botId === "a") return snapshot(bots, { botId: "a", items: [], cancellable: ["t1", "t2"] });
-        if (params.botId === "z") return snapshot(bots, { botId: "z", items: [] });
-        return snapshot(bots);
-      }),
+      conversationShell(
+        calls,
+        (params) => {
+          const bots = [bot("a", { state: "working" }), bot("z", { archived: true, state: "archived" })];
+          if (params.botId === "a") return snapshot(bots, { botId: "a", items: [], cancellable: ["t1", "t2"] });
+          if (params.botId === "z") return snapshot(bots, { botId: "z", items: [] });
+          return snapshot(bots);
+        },
+        (method) => {
+          if (method === "k8.clear") {
+            clears += 1;
+            if (clears === 1) throw Object.assign(new Error("Host restarting"), { code: "host_exited" });
+          }
+          return null;
+        },
+      ),
     );
     await app.press("id:conv-bot-a");
     await app.waitFor("id:conv-cancel-turn");
     await app.press("id:conv-cancel-turn");
     await app.waitUntil(() => calls.some((call) => call.method === "k8.cancel"));
+    expect(calls.find((call) => call.method === "k8.cancel")?.params).toEqual({ turnId: "t1" });
+
+    const clearCalls = () => calls.filter((call) => call.method === "k8.clear").map((call) => call.params);
     await app.waitUntil(() => app.enabled("id:conv-clear"));
     await app.press("id:conv-clear");
-    await app.waitUntil(() => calls.some((call) => call.method === "k8.clear"));
-    expect(calls.find((call) => call.method === "k8.cancel")?.params).toEqual({ turnId: "t1" });
-    const clear = calls.find((call) => call.method === "k8.clear")?.params;
-    expect(clear.botId).toBe("a");
-    expect(typeof clear.actionId).toBe("string");
+    await app.waitFor("id:conv-composer-error");
+    await app.press("id:conv-clear");
+    await app.waitUntil(() => clearCalls().length === 2 && app.enabled("id:conv-clear"));
+    await app.press("id:conv-clear");
+    await app.waitUntil(() => clearCalls().length === 3);
+    const [failed, retried, next] = clearCalls();
+    expect(failed.botId).toBe("a");
+    expect(retried).toEqual(failed);
+    expect(next.actionId === failed.actionId).toBe(false);
 
     await app.press("id:conv-bot-z");
     await app.waitFor("text:This Bot is archived. Archiving is permanent; its conversation stays readable.");
@@ -241,6 +316,24 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     expect(app.enabled("id:conv-send")).toBe(false);
     expect(app.enabled("id:conv-clear")).toBe(false);
     expect(app.shows("id:conv-edit-profile")).toBe(false);
+  });
+
+  test("the busy reread stops when the Conversation section is left and resumes on return", async () => {
+    const calls: Call[] = [];
+    const app = await openConversation(
+      conversationShell(calls, (params) =>
+        snapshot([bot("a", { state: "working" })], params.botId === null ? undefined : { botId: "a", items: [] }, true),
+      ),
+    );
+    await app.press("id:conv-bot-a");
+    await app.waitUntil(() => views(calls).length === 2);
+    await app.press("id:nav-keys");
+    await app.wait(1700);
+    expect(views(calls).length).toBe(2);
+
+    await app.press("id:nav-conversation");
+    await app.waitUntil(() => views(calls).length === 3, { timeout: 4000 });
+    expect(views(calls).map((call) => call.params.botId)).toEqual([null, "a", "a"]);
   });
 
   test("questions take a single-choice or a text answer through k8.answer", async () => {

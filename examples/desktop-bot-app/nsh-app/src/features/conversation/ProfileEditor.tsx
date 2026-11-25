@@ -142,6 +142,7 @@ export function ProfileEditor(props: ProfileEditorProps) {
               testID="conv-archive-confirm"
               variant="danger"
               loading={command.busy()}
+              disabled={command.busy()}
               onPress={() => void archive()}
             >
               Archive permanently

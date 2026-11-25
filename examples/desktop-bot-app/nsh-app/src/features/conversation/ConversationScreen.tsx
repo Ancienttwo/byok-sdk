@@ -1,4 +1,4 @@
-import { signal, Text, View } from "nsh";
+import { cleanup, signal, Text, View } from "nsh";
 import type { RolePreset } from "../../../../src/host/conversation/catalog.ts";
 import type { BotProfile } from "../../../../src/host/store/types.ts";
 import { toBridgeCallError } from "../../bridge.ts";
@@ -14,6 +14,11 @@ type Editing = { readonly profile: BotProfile; readonly creating: boolean };
 /** The conversation section: the Bot rail, the selected Bot's conversation and composer, and the profile editor. */
 export function ConversationScreen() {
   const editing = signal<Editing | null>(null);
+  // A Save or Archive reply can land after the rail replaced its editor or the section unmounted: it then changes nothing.
+  let mounted = true;
+  cleanup(() => {
+    mounted = false;
+  });
   const snapshot = () => k8View();
   const failure = () => {
     const error = k8View.error();
@@ -78,6 +83,9 @@ export function ConversationScreen() {
                     creating={entry().creating}
                     models={loaded().models}
                     onDone={(saved) => {
+                      if (!mounted || editing() !== entry()) {
+                        return;
+                      }
                       editing.set(null);
                       if (saved !== undefined) {
                         selectBot(saved);

@@ -15,11 +15,13 @@ export interface ComposerProps {
 
 /**
  * Send, cancel and clear for one Bot. A send keeps its action id until it succeeds, so a retry of the same text is the
- * same command to the Host; editing the text starts a new one.
+ * same command to the Host; editing the text starts a new one. A clear keeps its action id the same way, so a retry
+ * after a lost reply adds no second clear.
  */
 export function Composer(props: ComposerProps) {
   const text = signal("");
   const pending = signal<{ actionId: string; text: string } | null>(null);
+  const pendingClear = signal<string | null>(null);
   const command = createCommand();
   const disabled = () => props.archived || !props.hostRunning;
   const send = async () => {
@@ -32,6 +34,13 @@ export function Composer(props: ComposerProps) {
     if (sent) {
       pending.set(null);
       text.set("");
+    }
+  };
+  const clear = async () => {
+    const actionId = pendingClear() ?? crypto.randomUUID();
+    pendingClear.set(actionId);
+    if (await command.run(() => clearContext({ actionId, botId: props.botId }))) {
+      pendingClear.set(null);
     }
   };
   const trySend = () => {
@@ -83,7 +92,7 @@ export function Composer(props: ComposerProps) {
           testID="conv-clear"
           variant="outline"
           disabled={command.busy() || disabled()}
-          onPress={() => void command.run(() => clearContext({ actionId: crypto.randomUUID(), botId: props.botId }))}
+          onPress={() => void clear()}
         >
           Clear context
         </Button>

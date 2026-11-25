@@ -1,5 +1,5 @@
 import { ByokShell } from "byok-nsh-adapter";
-import { resource, setColorScheme, signal } from "nsh";
+import { resource, setColorScheme, signal, untracked } from "nsh";
 import type { WindowRef } from "nsh/desktop";
 import type { BotProfile } from "../../src/host/store/types.ts";
 import type { LoginItemView } from "../../src/bridge/domains/settings.ts";
@@ -63,7 +63,8 @@ export const hostReady = () =>
 
 /**
  * The app's one `k8.view` load for the selected Bot: it starts once the Host runs and reloads on each Host state
- * hint, on a Bot switch, on `reloadK8View`, and after {@link BUSY_REREAD_MS} while the last read said `busy`.
+ * hint, on a Bot switch, on `reloadK8View`, and after {@link BUSY_REREAD_MS} while the last read said `busy` and the
+ * Conversation section shows (`armBusyReread`).
  * Module-scoped, so a section switch neither drops nor repeats it and no screen polls on its own. The resource keeps
  * its last value while it loads again and after a failure, so a failed read leaves the last snapshot on screen.
  */
@@ -78,12 +79,24 @@ export const k8View = resource(
   async (source, info) => {
     clearTimeout(busyRereadTimer);
     const snapshot = await bridge.call("k8.view", { botId: source.botId });
-    if (snapshot.busy && !info.signal.aborted) {
-      busyRereadTimer = setTimeout(() => k8BusyRereadSignal.update((n) => n + 1), BUSY_REREAD_MS);
+    if (!info.signal.aborted) {
+      armBusyReread(snapshot.busy);
     }
     return snapshot;
   },
 );
+
+/**
+ * Schedules the next busy reread, only while the Conversation section shows: the rail and transcript are what follow
+ * a runtime or profile catching up. Leaving the section cancels it; the section stays out of `k8View`'s source, so a
+ * section switch never reads `k8.view` by itself.
+ */
+function armBusyReread(busy: boolean): void {
+  clearTimeout(busyRereadTimer);
+  if (busy && untracked(() => activeSectionSignal()) === "conversation") {
+    busyRereadTimer = setTimeout(() => k8BusyRereadSignal.update((n) => n + 1), BUSY_REREAD_MS);
+  }
+}
 
 /** The Bot whose conversation `k8View` reads (null: none selected). */
 export const selectedBotId = () => selectedBotIdSignal();
@@ -160,6 +173,7 @@ export function setPreviewHostState(next: SupervisedHostState | null): void {
 /** Switches the active workspace section cleanly through the single store authority. */
 export function setActiveSection(section: WorkspaceSection): void {
   activeSectionSignal.set(section);
+  armBusyReread(untracked(() => k8View()?.busy === true));
 }
 
 /** Registers the active desktop main window ref so Show/Hide commands share one target. */
