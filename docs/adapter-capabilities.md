@@ -1277,11 +1277,15 @@ and `@agentclientprotocol/sdk` does not load. It runs on the custom-harness path
   client in memory and checks it is active before the session opens; none
   reaches the launch patch, argv or the dsh process environment. A mount that
   fails closes the dsh process and fails the start; its message goes through
-  the session credential redactor, which covers every `env` and header value
-  of eight or more characters and the bearer tokens and URL passwords derived
-  from them, raw and with one or two levels of JSON escaping. A value under
-  eight characters is not redacted, even when its name contains TOKEN or
-  SECRET, unless it is inside a header or URL of eight or more characters. A name outside `[A-Za-z0-9_-]{1,32}` is declined
+  the session credential redactor that all six OAR adapters share. Besides its
+  credential-name, `Authorization` and URL-password rules, it registers every
+  credential-shaped MCP `env` and header value and bare bearer token: eight
+  or more characters with a digit or a character other than a letter, `/`,
+  `-`, `_` or `.`. Each registered credential is redacted raw and with one or
+  two levels of JSON escaping. Plain words such as `production` or
+  `application/json` are not redacted, and neither is a value under eight
+  characters, even when its name contains TOKEN or SECRET, unless it is inside
+  a header or URL of eight or more characters. A name outside `[A-Za-z0-9_-]{1,32}` is declined
   before claim, without a retry. Entries are sent again on every resume.
 - Permissions: `sandbox` selects `DSH_PERMISSION_MODE`. The default,
   `danger-full-access`, pairs with dsh approval `never`. `workspace-write` and

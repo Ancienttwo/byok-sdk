@@ -350,7 +350,8 @@ export class DshAdapter implements RuntimeAdapter {
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const key = await resolveRuntimeApiKey('dsh', this.options.resolveKey, input.signal);
       env[DSH_PROVIDER_KEY_ENV] = key;
-      // The redactor registers every MCP env and header value and its JSON escaping; the provider key is registered here.
+      // The shared redactor registers the credential-shaped MCP env and header values and their JSON escaping; the provider
+      // key is registered here.
       const redactor = sessionCredentialRedactor({ env, mcpServers });
       redactor.addExplicit(key);
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp', stderrRedactor: redactor });
