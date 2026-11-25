@@ -2549,7 +2549,7 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = Linux ]; then export HOME="$RUNNER_TEMP/host-home"; fi
           cargo test --locked
-      # #2457 / #2461 Slice 1: NSH Mixed pinning checks and Rust adapter crate tests across all three OSes.
+      # #2457 / #2461 S2.5: 3-OS NSH Mixed build, verification gates, and headless QuickJS tests.
       - name: NSH pin script tests
         if: runner.os == 'Linux'
         run: node examples/desktop-bot-app/scripts/nsh.test.mjs
@@ -2558,8 +2558,45 @@ jobs:
         env:
           RUSTFLAGS: '-D warnings'
         run: cargo test --locked
-      - name: Verify single pinned NSH crate provenance
-        run: node examples/desktop-bot-app/scripts/nsh.mjs verify-lock
+      - name: Install Linux libclang for NSH QuickJS test runner
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq clang libclang-dev pkg-config
+      - name: Configure Windows NSH build environment
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          echo 'LIBCLANG_PATH=C:\Program Files\LLVM\bin' >> "$GITHUB_ENV"
+          echo 'RUST_MIN_STACK=268435456' >> "$GITHUB_ENV"
+      - name: Ensure pinned NSH CLI
+        shell: bash
+        run: |
+          if ! node examples/desktop-bot-app/scripts/nsh.mjs ensure; then
+            channel="$(node -e "import('./examples/desktop-bot-app/scripts/nsh.mjs').then(m => console.log(m.loadPin().channel))")"
+            if [ "$channel" = nightly ]; then
+              echo "::warning::Pinned nightly NSH archive unavailable or moved; building exact pinned commit from source (--locked)"
+              node examples/desktop-bot-app/scripts/nsh.mjs build-cli-from-source
+            else
+              exit 1
+            fi
+          fi
+      - name: NSH check, release build, and capability/bundle gates
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: '0'
+          CARGO_PROFILE_DEV_DEBUG: '0'
+        run: |
+          node examples/desktop-bot-app/scripts/nsh.mjs check
+          node examples/desktop-bot-app/scripts/nsh.mjs build --release
+          node examples/desktop-bot-app/scripts/nsh.mjs verify-capabilities
+          node examples/desktop-bot-app/scripts/nsh.mjs verify-bundle
+      - name: NSH headless tests (QuickJS + Keys + 30-vector model-route parity)
+        shell: bash
+        env:
+          CARGO_INCREMENTAL: '0'
+          CARGO_PROFILE_DEV_DEBUG: '0'
+        run: node examples/desktop-bot-app/scripts/nsh.mjs test
+      - name: Verify single pinned NSH crate provenance (adapter and generated runner)
+        run: node examples/desktop-bot-app/scripts/nsh.mjs verify-lock --all
 
   ci-required:
     name: CI required

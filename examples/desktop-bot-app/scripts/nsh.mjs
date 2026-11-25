@@ -14,6 +14,7 @@ const DESKTOP_APP_DIR = resolve(SCRIPT_DIR, '..');
 const REPO_ROOT = resolve(DESKTOP_APP_DIR, '../..');
 const NSH_APP_DIR = resolve(DESKTOP_APP_DIR, 'nsh-app');
 const ADAPTER_MANIFEST = resolve(NSH_APP_DIR, 'ext/byok-nsh-adapter/Cargo.toml');
+const ADAPTER_TOOLCHAIN_PATH = resolve(NSH_APP_DIR, 'ext/byok-nsh-adapter/rust-toolchain.toml');
 const GENERATED_RUNNER_MANIFEST = resolve(NSH_APP_DIR, '.nsh/rust/Cargo.toml');
 const DEFAULT_BUILT_CAPABILITIES = resolve(NSH_APP_DIR, '.nsh/out/capabilities.json');
 const DEFAULT_EXPECTED_CAPABILITIES = resolve(NSH_APP_DIR, 'capabilities.expected.json');
@@ -244,13 +245,30 @@ export async function ensurePinnedNsh(pin = loadPin()) {
   return checkBinaryVersion(installed, pin);
 }
 
+/** Reads the single pinned Rust toolchain channel from the adapter crate's `rust-toolchain.toml`. */
+export function readPinnedRustToolchain(toolchainPath = ADAPTER_TOOLCHAIN_PATH) {
+  const raw = readFileSync(toolchainPath, 'utf8');
+  const match = /^\s*channel\s*=\s*"([^"]+)"/m.exec(raw);
+  if (!match || !match[1].trim()) {
+    throw new Error(`Pinned Rust toolchain channel missing in ${toolchainPath}`);
+  }
+  return match[1];
+}
+
+function rustToolEnv() {
+  if (process.env.RUSTUP_TOOLCHAIN?.trim()) {
+    return process.env;
+  }
+  return { ...process.env, RUSTUP_TOOLCHAIN: readPinnedRustToolchain() };
+}
+
 export function buildCliFromSource(pin = loadPin()) {
   const root = pinnedInstallRoot(pin);
   mkdirSync(root, { recursive: true });
   execFileSync(
     'cargo',
     ['install', '--git', pin.sourceRepo, '--rev', pin.commit, '--locked', '--root', root, 'nsh-cli'],
-    { stdio: 'inherit' },
+    { stdio: 'inherit', env: rustToolEnv() },
   );
   const exe = process.platform === 'win32' ? 'nsh.exe' : 'nsh';
   const installed = join(root, 'bin', exe);
@@ -279,10 +297,12 @@ function runVerifyLock(args, pin) {
     targets.push(GENERATED_RUNNER_MANIFEST);
   }
 
+  const env = rustToolEnv();
   for (const manifestPath of targets) {
     const raw = execFileSync('cargo', ['metadata', '--format-version', '1', '--locked', '--manifest-path', manifestPath], {
       encoding: 'utf8',
       maxBuffer: 32 * 1024 * 1024,
+      env,
     });
     const result = verifyCargoMetadataNshProvenance(JSON.parse(raw), pin);
     console.log(`verify-lock OK (${manifestPath}): ${result.count} nsh crates -> ${result.source}`);
@@ -427,6 +447,7 @@ async function runCli(argv) {
     const result = spawnSync(bin, [command, ...rest], {
       cwd: NSH_APP_DIR,
       stdio: 'inherit',
+      env: rustToolEnv(),
     });
     process.exitCode = result.status ?? 1;
     return;
