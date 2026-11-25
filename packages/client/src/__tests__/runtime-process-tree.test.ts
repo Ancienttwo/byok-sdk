@@ -420,6 +420,31 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     await expect(disposeOwnedProcessTree(options)).resolves.toBeUndefined();
   });
 
+  // #2483: Darwin's killpg can miss a member forked while the SIGTERM is sent.
+  it('resends SIGTERM once when the root exited but its group outlived the first SIGTERM', async () => {
+    const rootPid = 900_005;
+    let rootRunning = true;
+    let missedMemberLive = true;
+    const signals: Array<NodeJS.Signals | number> = [];
+    const child = { pid: rootPid, exitCode: null, get signalCode() { return rootRunning ? null : 'SIGTERM'; } } as ChildProcess;
+    await disposeOwnedProcessTree({
+      child, label: 'missed member', waitClosed: async () => {}, isClosed: () => !rootRunning, termGraceMs: 5_000, killGraceMs: 0,
+      observeProcessTableFn: () => ({ table: new Map() }),
+      killFn(pid, signal) {
+        expect(pid).toBe(-rootPid);
+        if (signal === 0) {
+          if (!missedMemberLive) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+          return;
+        }
+        signals.push(signal);
+        if (signal !== 'SIGTERM') return;
+        if (rootRunning) rootRunning = false;
+        else missedMemberLive = false;
+      },
+    });
+    expect(signals).toEqual(['SIGTERM', 'SIGTERM']);
+  });
+
   function zombieDescendantDisposal(killGraceMs: number) {
     const rootPid = 900_003;
     const descendantPid = 900_004;

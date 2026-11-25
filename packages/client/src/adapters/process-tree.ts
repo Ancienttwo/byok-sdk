@@ -1068,7 +1068,18 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
     groupReachable = await signalGroup(options.child, pid, 'SIGTERM', options.label, kill);
     stateFor(options.child).requested = true;
   }
-  if (groupReachable && !(await waitUntil(() => groupExists(pid, options.label, kill), termGraceMs))) {
+  const termDeadline = Date.now() + termGraceMs;
+  let termQuiesced = !groupReachable || await waitUntil(() => isRunning(options.child) && groupExists(pid, options.label, kill), termGraceMs);
+  if (groupReachable && termQuiesced && groupExists(pid, options.label, kill)) {
+    // The root exited but its group outlived the SIGTERM. Darwin's killpg can
+    // miss a member that is mid-fork when the signal is sent, so that member
+    // never saw a SIGTERM. Its spawner already took the first one, so one
+    // resend reaches every such member. Members that keep living still face
+    // the SIGKILL below at the same termGraceMs deadline.
+    groupReachable = await signalGroup(options.child, pid, 'SIGTERM', options.label, kill);
+    termQuiesced = !groupReachable || await waitUntil(() => groupExists(pid, options.label, kill), Math.max(0, termDeadline - Date.now()));
+  }
+  if (groupReachable && !termQuiesced) {
     // Read again first: the root may have started more since the SIGTERM.
     const observation = readTable();
     const more = isRunning(options.child) ? descendantsOf(observation.table, pid) : [];
