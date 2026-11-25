@@ -3,7 +3,7 @@
 
 > **Runtime Docs**: user-level repo-harness reference
 > **Doc ID**: heartbeat-triage
-> **Source Command**: `repo-harness docs path heartbeat-triage`
+> **Source Command**: `rh docs path heartbeat-triage`
 
 This repo keeps workflow facts and runtime artifacts locally under `.ai/`.
-Use `repo-harness docs show heartbeat-triage` for the full generic runtime guide.
+Use `rh docs show heartbeat-triage` for the full generic runtime guide.
