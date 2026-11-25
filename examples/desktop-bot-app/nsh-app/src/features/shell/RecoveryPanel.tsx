@@ -1,6 +1,6 @@
 import { resource, signal, Text, View } from "nsh";
 import type { SupervisedHostState } from "../../../../src/bridge/protocol.ts";
-import { refusalOf, type Refusal } from "../../../../src/renderer/keys/submit.ts";
+import { refusalOf, type Refusal } from "../../../../src/keys/submit.ts";
 import {
   exportDiagnostics,
   hostState,
@@ -214,6 +214,10 @@ export function RecoveryPanel() {
                 <CardDescription>{host().reason}</CardDescription>
               </CardHeader>
               <CardContent>
+                {/* The Host has exited, so a diagnostics export could only refuse with host_exited. */}
+                <Text testID="shell-failed-hint" class="text-xs text-muted-foreground">
+                  Restart the Host; once it runs, Settings can export diagnostics.
+                </Text>
                 <View class="flex-row flex-wrap items-center gap-2">
                   <Button
                     testID="recovery-restart-host"
@@ -224,10 +228,6 @@ export function RecoveryPanel() {
                   >
                     Restart Host
                   </Button>
-                  <DiagnosticsExportButton
-                    testID="failed-export-diagnostics"
-                    disabled={restarting() || isRecoveryBusy()}
-                  />
                 </View>
               </CardContent>
             </Card>

@@ -8,7 +8,8 @@ import {
   type WindowRef,
 } from "nsh/desktop";
 import trayIcon from "../assets/tray/tray.png";
-import trayTemplateIcon from "../assets/tray/trayTemplate.png";
+// An SVG tray icon is an AppKit template on macOS: drawn in the menu bar's text color, so it stays visible on a dark bar.
+import trayTemplateIcon from "../assets/tray/trayTemplate.svg";
 import brand from "../../brand.config.ts";
 import type { SupervisedHostState } from "../../src/bridge/protocol.ts";
 import {
@@ -68,7 +69,13 @@ export function buildApplicationMenuItems(options: ApplicationMenuBuildOptions):
           ? [{ role: "about" as const }, { type: "separator" as const }]
           : []),
         { label: `Show ${options.productName}`, onSelect: options.onShow },
-        { label: "Restart Host", disabled: !canRestart, onSelect: options.onRestartHost },
+        {
+          label: "Restart Host",
+          // A disabled item's shortcut chooses nothing, so the key follows canRestartFromMenu too.
+          shortcut: "mod+shift+r",
+          disabled: !canRestart,
+          onSelect: options.onRestartHost,
+        },
         { type: "separator" },
         platform.os === "macos"
           ? { role: "quit" }

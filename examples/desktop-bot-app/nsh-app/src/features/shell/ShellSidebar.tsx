@@ -32,8 +32,11 @@ const PRIMARY_SECTIONS: readonly NavItem[] = [
 export function ShellSidebar() {
   const restarting = signal(false);
 
+  // The Gallery exists only in development builds (App.tsx); a release build folds this to hostState().
   const badgeState = () =>
-    activeSection() === "gallery" ? (previewHostState() ?? hostState()) : hostState();
+    process.env.NODE_ENV !== "production" && activeSection() === "gallery"
+      ? (previewHostState() ?? hostState())
+      : hostState();
 
   const canRestartHost = () => {
     const state = hostState()?.state;
@@ -67,13 +70,17 @@ export function ShellSidebar() {
             />
           ))}
         </View>
-        <Separator />
-        <ListItem
-          testID="nav-gallery"
-          title="Foundations Gallery"
-          selected={activeSection() === "gallery"}
-          onPress={() => setActiveSection("gallery")}
-        />
+        {process.env.NODE_ENV !== "production" ? (
+          <View class="gap-3">
+            <Separator />
+            <ListItem
+              testID="nav-gallery"
+              title="Foundations Gallery"
+              selected={activeSection() === "gallery"}
+              onPress={() => setActiveSection("gallery")}
+            />
+          </View>
+        ) : null}
       </View>
 
       <View class="gap-3 pt-3 border-t border-sidebar-border">

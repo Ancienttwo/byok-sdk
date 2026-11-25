@@ -14,7 +14,7 @@ import {
   type PiModelApi,
   type ProviderModelCapability,
 } from "@byok-sdk/keys/model-route";
-import { effect, resource, signal, Text, untracked, View } from "nsh";
+import { effect, signal, Text, untracked, View } from "nsh";
 import {
   refusalOf,
   runLocked,
@@ -23,9 +23,9 @@ import {
   submitReplaceSecret,
   type Refusal,
   type SubmitOutcome,
-} from "../../../../src/renderer/keys/submit.ts";
+} from "../../../../src/keys/submit.ts";
 import { bridge } from "../../bridge.ts";
-import { hostReady, shellStart, startShell, stateHintCount } from "../../store.ts";
+import { k8View, shellStart, startShell } from "../../store.ts";
 import {
   Badge,
   Button,
@@ -174,7 +174,7 @@ export interface KeysScreenProps {
 /**
  * Keys management screen: stored provider list (`keys.list`), dynamic `@byok-sdk/keys/model-route`
  * provider form, stored-profile key replacement (`keys.submit` with ADR-052 D2 Option A pre-bridge
- * secret signal clearing), and Host catalog model list (`k8.view`).
+ * secret signal clearing), and the Host catalog model list (the store's shared `k8View`).
  */
 export function KeysScreen(props: KeysScreenProps) {
   const initialContext = buildContext(null);
@@ -190,6 +190,8 @@ export function KeysScreen(props: KeysScreenProps) {
   // Single section lock shared across initial load, Save, Replace key, Reload, and post-receipt reload.
   const busy = signal(true);
 
+  // After a failed Host start every keys.submit would refuse with host_exited; only Reload retries the start.
+  const startFailed = () => shellStart().status === "failed";
   const view = () => modelRouteView(draft(), context());
   const visibleFields = () => view().fields.filter((field) => field.visible);
   const formTitle = () => {
@@ -263,7 +265,7 @@ export function KeysScreen(props: KeysScreenProps) {
 
   const submitRoute = () => {
     const currentView = view();
-    if (!currentView.valid || busy()) {
+    if (!currentView.valid || busy() || startFailed()) {
       return;
     }
     const snapshotDraft = draft();
@@ -283,7 +285,7 @@ export function KeysScreen(props: KeysScreenProps) {
   const submitReplace = () => {
     const stored = editing();
     const typed = replaceSecret();
-    if (!stored || typed === "" || busy()) {
+    if (!stored || typed === "" || busy() || startFailed()) {
       return;
     }
     // ADR-052 D2 Option A: clear reactive signal synchronously BEFORE handing secret across the bridge.
@@ -319,13 +321,8 @@ export function KeysScreen(props: KeysScreenProps) {
     }
   };
 
-  const snapshot = resource(
-    () => (hostReady() ? stateHintCount() + 1 : false),
-    async () => await bridge.call("k8.view", { botId: null }),
-  );
-
-  const snapshotRefusal = (): Refusal | null => {
-    const err = snapshot.error();
+  const k8ViewRefusal = (): Refusal | null => {
+    const err = k8View.error();
     return err ? refusalOf(err) : null;
   };
 
@@ -634,7 +631,7 @@ export function KeysScreen(props: KeysScreenProps) {
             testID="keys-save-btn"
             variant="primary"
             loading={busy()}
-            disabled={busy() || !view().valid}
+            disabled={busy() || startFailed() || !view().valid}
             onPress={submitRoute}
           >
             Save
@@ -671,7 +668,7 @@ export function KeysScreen(props: KeysScreenProps) {
                     testID="keys-replace-submit"
                     variant="secondary"
                     loading={busy()}
-                    disabled={busy() || replaceSecret() === ""}
+                    disabled={busy() || startFailed() || replaceSecret() === ""}
                     onPress={submitReplace}
                   >
                     Replace key
@@ -705,21 +702,21 @@ export function KeysScreen(props: KeysScreenProps) {
               testID="keys-models-refresh-btn"
               variant="outline"
               size="sm"
-              loading={snapshot.loading()}
-              onPress={() => snapshot.refetch()}
+              loading={k8View.loading()}
+              onPress={() => k8View.refetch()}
             >
               Refresh models
             </Button>
           </View>
         </CardHeader>
         <CardContent>
-          <If when={snapshot.loading() && snapshot() === undefined}>
+          <If when={k8View.loading() && k8View() === undefined}>
             <Spinner label="Loading Host models…" />
           </If>
-          <If when={snapshotRefusal()}>
+          <If when={k8ViewRefusal()}>
             {(refusal) => <RefusalBanner testID="keys-models-refusal" refusal={refusal()} />}
           </If>
-          <If when={snapshot()}>
+          <If when={k8View()}>
             {(data) => (
               <If
                 when={data().models.length > 0}

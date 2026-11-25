@@ -1,6 +1,6 @@
 import { resource, signal, Text, View } from "nsh";
 import type { LoginItemView } from "../../../../src/bridge/domains/settings.ts";
-import { refusalOf } from "../../../../src/renderer/keys/submit.ts";
+import { refusalOf } from "../../../../src/keys/submit.ts";
 import { readLoginItem, updateLoginItem } from "../../store.ts";
 import { Spinner, Switch } from "../../ui/index.ts";
 
