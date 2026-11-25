@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.47.0 (prepared, 2026-11-25)
+## 0.47.0 — 2026-11-25 (published)
 
-[Candidate notes](docs/releases/v0.47.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.47.0.md)
+[Release notes](docs/releases/v0.47.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.47.0.md)
 
 0.47.0 keeps wire v8. Existing 0.46.1 server databases, daemon journals, provider stores, and device pairings carry forward in place. The manifest has five additive entries and zero breaking entries.
 

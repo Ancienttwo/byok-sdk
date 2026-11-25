@@ -77,13 +77,17 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-0.47.0 is the MINOR candidate for all nine public packages. It keeps wire v8
-and carries five additive manifest entries and zero breaking entries.
-[Candidate notes](../../docs/releases/v0.47.0.md) ·
+0.47.0 is the published MINOR for all nine public packages. It was published on
+npm `latest` on 2026-11-25 (UTC) from `v0.47.0` (`ee4b1b975`) using exact-SHA
+release validation
+[run 45649376765](https://github.com/Ancienttwo/byok-sdk/actions/runs/45649376765)
+and accepted artifact `15038594309`. It keeps wire v8 and carries five
+additive manifest entries and zero breaking entries.
+[Release notes and publication evidence](../../docs/releases/v0.47.0.md) ·
 [Host upgrade checklist](../../docs/releases/host-upgrade-0.47.0.md)
 
 0.46.1 is the published PATCH for all nine public packages on `release/0.46`.
-It was published on npm `latest` on 2026-11-25 (UTC) from `v0.46.1`
+It was published on 2026-11-25 (UTC) from `v0.46.1`
 (`4db4ce4e4`) using exact-SHA release validation
 [run 45517708731](https://github.com/Ancienttwo/byok-sdk/actions/runs/45517708731)
 and accepted artifact `14978792549`. It keeps wire v8 and the public API; its
@@ -132,7 +136,7 @@ published on 2026-11-14 (UTC). cloud-do left the release train at 0.43.0 (#1959)
 its existing npm versions are deprecated and receive no further releases or fixes.
 See the [release notes](../../docs/releases/v0.43.0.md)
 and [Host upgrade order](../../docs/releases/v0.43.0.md#host-upgrade-order).
-The registry read of 2026-11-25 (UTC) reports `latest` 0.46.1 for all nine packages.
+The registry read of 2026-11-25 (UTC) reports `latest` 0.47.0 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -147,10 +151,10 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.46.1 for all nine packages on 2026-11-25 (UTC).
+the dist-tag `latest`, observed at 0.47.0 for all nine packages on 2026-11-25 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the 0.47.0 candidate baseline with prior `latest` 0.46.1 and
+records the historical 0.47.0 pre-publication baseline with prior `latest` 0.46.1 and
 `priorPublication: existing` for all nine packages, including
 `@byok-sdk/bot-collaboration`. Recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
@@ -223,11 +227,14 @@ the committed budgets between releases.
    3. After approving the exact package/version/channel plan, dry run `node scripts/release/publish.mjs --ci-run-id <run-id> --ci-artifact-id <artifact-id> --ci-artifact-digest <digest>` for stable; append `--tag rc` for an approved RC. Through `gh api` it verifies that the run is a successful `ci.yml` `workflow_dispatch` for `HEAD` on `main` or `release/*` and that the artifact belongs to that run with that digest, then downloads the ZIP and checks its digest. It refuses unless the frozen schema-3 `release-manifest.json` names the release version, exact complete package set and reviewed registry baseline, and was packed from the current `HEAD`. Every tarball the publish set needs must be present and match its recorded SHA-256, SHA-512, package identity and runtime dependency maps. Older manifests are not defaulted or upgraded in place. It queries registry version availability and, for an RC, the explicit prior-publication baseline, then prints the ordered plan. It does not publish, perform post-publication readback or tag. Only the appropriate clean not-found response can establish version/package absence; authentication, transport, malformed-output and other read errors block. `--artifacts <dir>` (already packed tarballs) and a bare dry run (builds and packs) are local dry-run inputs only: they cannot be combined with the CI evidence flags and cannot authorize publication.
    4. Obtain separate publication authorization for that exact destination, public package/version set and channel. For stable, release with `node scripts/release/publish.mjs --ci-run-id <run-id> --ci-artifact-id <artifact-id> --ci-artifact-digest <digest> --execute`, the same evidence flags as the dry run; append `--tag rc` only for an approved RC. `--execute` without all three flags fails with `RELEASE_CI_EVIDENCE_REQUIRED`. Run interactively in Terminal.app for npm write 2FA. It refuses if the tag already exists, if `npm whoami` reports no account, or if `npm profile get --json` does not report `tfa.mode` `auth-and-writes` — there is no override. Immediately before the first RC write, it rechecks exact-version absence and the entire baseline; this narrows the race window but npm publication remains nontransactional. It then publishes each tarball in dependency order (the local release logs that no attestation is attached), reads the registry back, and only then creates the annotated `v<version>` tag carrying the source commit.
 
-      On a slow uplink, raise npm's request timeout for this run (for example `npm_config_fetch_timeout=3600000`): the client tarball is about 10.8 MB, and its publish request can outlast npm's default `fetch-timeout` of 300000 ms.
+      On a slow uplink, raise npm's request timeout for this run (for example `npm_config_fetch_timeout=3600000`): the 0.47.0 client tarball is 18.1 MB, and its publish request can outlast npm's default `fetch-timeout` of 300000 ms.
 
       On the release machine, Node's automatic IPv4/IPv6 family selection can time out against `registry.npmjs.org` while `curl` succeeds: `npm view` fails with `ETIMEDOUT`, or after about 79 seconds falls back to stale cache. Before running `publish.mjs`, run `export NODE_OPTIONS="--no-network-family-autoselection --dns-result-order=ipv4first"`.
 
-      After a large tarball is published (client is about 10.8 MB), the registry can take about three minutes to serve it, so the `publish.mjs` readback can time out and the run exits before tagging. Re-run the same command: it continues from readback, under the rules for uncertain or partial publication and **Partial stable** below.
+      After a large tarball is published, the registry can take about three minutes to serve it, so the `publish.mjs` readback can time out and the run exits before tagging. Re-run the same command: it continues from readback, under the rules for uncertain or partial publication and **Partial stable** below.
+
+      npm `E409` (`Cannot publish over previously staged version`) means the registry holds a staged copy awaiting approval. The owner approves it in npmjs.com under Staged Packages or uses `npx npm@latest stage list` and `npx npm@latest stage approve <id>`. Re-run the same publish command. It skips versions already published with the frozen integrity, reads back the full release and creates the tag.
+
    5. Push the tag: `git push origin v<version>`. A tag exists only for a train the registry has already confirmed.
    6. Create the GitHub Release from the pushed tag with the release notes: `gh release create v<version> --verify-tag --notes-file docs/releases/v<version>.md`. `--verify-tag` refuses when the tag is not on the remote, so the Release never creates a tag of its own.
 
