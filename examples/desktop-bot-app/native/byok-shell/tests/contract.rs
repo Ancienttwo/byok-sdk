@@ -12,9 +12,18 @@ fn embedded_bridge_contract_loads_and_matches_expected_versions() {
 
     assert_eq!(contract.schema_version, EXPECTED_SCHEMA_VERSION);
     assert_eq!(contract.bridge_version, EXPECTED_BRIDGE_VERSION);
+    assert!(!HANDLED_MAIN_METHODS.contains(&"settings.loginItem"));
+    assert!(!HANDLED_MAIN_METHODS.contains(&"settings.setLoginItem"));
+    let mut expected_main_methods: Vec<&str> = vec!["settings.loginItem", "settings.setLoginItem"];
+    expected_main_methods.extend_from_slice(HANDLED_MAIN_METHODS);
     assert_eq!(
-        HANDLED_MAIN_METHODS,
-        contract.main_methods.iter().map(String::as_str).collect::<Vec<_>>().as_slice()
+        expected_main_methods.as_slice(),
+        contract
+            .main_methods
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>()
+            .as_slice()
     );
 
     assert!(contract.allows_shell_to_host_method("keys.profilesChanged"));

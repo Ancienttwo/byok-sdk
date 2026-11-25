@@ -147,7 +147,7 @@ impl RecoveryError {
 
 impl From<MaintenanceBusyError> for RecoveryError {
     fn from(err: MaintenanceBusyError) -> Self {
-        Self::new("maintenance_busy", err.to_string())
+        Self::new(err.code(), err.to_string())
     }
 }
 

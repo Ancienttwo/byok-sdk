@@ -4,7 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Condvar, Mutex};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -2371,34 +2371,43 @@ process.stdin.on('end', () => {{
     );
     assert_eq!(hung_lock.active_custody_count(), 1);
 
-    let quit_started = Instant::now();
-    assert_eq!(
-        hung_lock.begin_quit_with_custody_wait(Duration::from_millis(120)),
-        QuitOutcome::Quit
-    );
-    assert!(
-        quit_started.elapsed() >= Duration::from_millis(90)
-            && quit_started.elapsed() < Duration::from_secs(2),
-        "bounded custody wait must wait through its budget without hanging forever"
-    );
+    let (quit_entered_tx, quit_entered_rx) = mpsc::channel();
+    hung_lock.on_quit_requested(move || {
+        let _ = quit_entered_tx.send(());
+    });
+    let (quit_done_tx, quit_done_rx) = mpsc::channel();
+    let quit_hung_lock = hung_lock.clone();
+    let quit_hung_handle = thread::spawn(move || {
+        let outcome = quit_hung_lock.begin_quit_with_custody_wait(Duration::from_millis(50));
+        let _ = quit_done_tx.send(outcome);
+    });
+    quit_entered_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("begin_quit_with_custody_wait must enter and mark quitting");
+    let bounded_outcome = quit_done_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("bounded custody wait must return without hanging forever");
+    assert_eq!(bounded_outcome, QuitOutcome::Quit);
+    quit_hung_handle.join().expect("bounded quit thread joins");
     assert_eq!(
         hung_lock.active_custody_count(),
         1,
         "detached hung custody child is still running when bounded wait returns"
     );
-    fs::write(&hung_release, "go").expect("release hung submit child");
     assert!(
-        wait_until(Duration::from_secs(5), || hung_store_path.exists()),
-        "detached hung submit child must still complete its store write cleanly"
+        !hung_store_path.exists(),
+        "detached hung custody child must still be blocked before release"
     );
-    assert_eq!(
-        fs::read_to_string(&hung_store_path).unwrap(),
-        "committed-after-quit-bound"
-    );
+    fs::write(&hung_release, "go").expect("release hung submit child");
     assert!(
         wait_until(Duration::from_secs(5), || hung_lock.active_custody_count()
             == 0),
         "CustodyGuard drop after bounded quit must cleanly decrement active_custody to 0"
+    );
+    assert_eq!(
+        fs::read_to_string(&hung_store_path).unwrap(),
+        "committed-after-quit-bound",
+        "detached hung submit child must complete its store write cleanly before CustodyGuard drops"
     );
 
     // 4. Multiple concurrent custody holders: begin_quit() waits until EVERY holder drops.
@@ -2715,4 +2724,417 @@ if (subcmd === {custody_cmd}) {{
         Some(1)
     );
     sup_no_snap.stop().expect("clean shutdown");
+}
+
+#[test]
+fn restart_refuses_while_restore_paused_at_barrier_and_allows_after_precondition_error() {
+    let tmp = TempDir::new("byok-restart-guard-barrier");
+    let contract = BridgeContract::load().expect("contract loads");
+
+    let count_lines = |path: &Path| -> usize {
+        fs::read_to_string(path)
+            .map(|text| text.lines().filter(|line| !line.is_empty()).count())
+            .unwrap_or(0)
+    };
+
+    // 1. Barrier test: pause restore after Host stopped and before stores finish moving;
+    //    restart refuses with maintenance_busy and starts no Host. After restore completes,
+    //    only the normal handover runs and restart remains refused.
+    let store_path = tmp.path().join("store.json");
+    let aside_path = tmp.path().join("store.json.aside");
+    fs::write(&store_path, "pre-restore-store").expect("seed store");
+    let spawns_log = tmp.path().join("restore-spawns.log");
+    let shutdowns_log = tmp.path().join("restore-shutdowns.log");
+    let restore_entered = tmp.path().join("restore-entered");
+    let restore_release = tmp.path().join("restore-release");
+
+    let restore_script = format!(
+        r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+const [subcmd, arg1] = process.argv.slice(2);
+if (subcmd === {snapshot_status_cmd}) {{
+  process.stdout.write(JSON.stringify({{
+    ok: true,
+    snapshot: {{ version: arg1, target: '/tmp/snapshot-v1' }},
+  }}) + '\n');
+  process.exit(0);
+}}
+if (subcmd === {restore_cmd}) {{
+  const enteredTmp = {restore_entered} + '.tmp';
+  fs.writeFileSync(enteredTmp, 'entered');
+  fs.renameSync(enteredTmp, {restore_entered});
+  const timer = setInterval(() => {{
+    if (fs.existsSync({restore_release})) {{
+      clearInterval(timer);
+      fs.renameSync({store_path}, {aside_path});
+      const restoredTmp = {store_path} + '.tmp';
+      fs.writeFileSync(restoredTmp, 'restored-store');
+      fs.renameSync(restoredTmp, {store_path});
+      process.stdout.write(JSON.stringify({{ ok: true, asidePath: {aside_path} }}) + '\n');
+      process.exit(0);
+    }}
+  }}, 10);
+}} else {{
+  fs.appendFileSync({spawns_log}, String(process.pid) + '\n');
+  const rl = readline.createInterface({{ input: process.stdin }});
+  rl.on('close', () => process.exit(0));
+  rl.on('line', line => {{
+    const msg = JSON.parse(line);
+    if (msg.method === 'hello') {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{
+        event: 'state',
+        state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
+      }}) + '\n');
+    }} else if (msg.method === 'shutdown') {{
+      fs.appendFileSync({shutdowns_log}, String(process.pid) + '\n');
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+      process.exit(0);
+    }}
+  }});
+}}
+"#,
+        snapshot_status_cmd =
+            serde_json::to_string(&contract.host_commands.snapshot_status).unwrap(),
+        restore_cmd = serde_json::to_string(&contract.host_commands.restore).unwrap(),
+        restore_entered =
+            serde_json::to_string(&restore_entered.to_string_lossy().into_owned()).unwrap(),
+        restore_release =
+            serde_json::to_string(&restore_release.to_string_lossy().into_owned()).unwrap(),
+        store_path = serde_json::to_string(&store_path.to_string_lossy().into_owned()).unwrap(),
+        aside_path = serde_json::to_string(&aside_path.to_string_lossy().into_owned()).unwrap(),
+        spawns_log = serde_json::to_string(&spawns_log.to_string_lossy().into_owned()).unwrap(),
+        shutdowns_log =
+            serde_json::to_string(&shutdowns_log.to_string_lossy().into_owned()).unwrap(),
+    );
+    let restore_spec = write_node_script(tmp.path(), "barrier-restore.mjs", &restore_script);
+    let supervisor = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(restore_spec, contract.clone()),
+        |_| {},
+        || {},
+    ));
+    supervisor.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            supervisor.last_state(),
+            Some(SupervisedHostState::Stopped {
+                store_refused: false,
+                ..
+            })
+        )
+    }));
+    assert_eq!(count_lines(&spawns_log), 1);
+
+    let lock = MaintenanceLock::new();
+    let router = Arc::new(ShellRouter::new(
+        Arc::clone(&supervisor),
+        lock.clone(),
+        "1.0.0",
+    ));
+    let relaunch_calls = Arc::new(AtomicUsize::new(0));
+    let relaunch_calls_bg = Arc::clone(&relaunch_calls);
+    let router_bg = Arc::clone(&router);
+    let restore_handle = thread::spawn(move || {
+        router_bg.restore("1.0.0", "2026-11-25T00-00-00.000Z", |failure| {
+            assert!(failure.is_none());
+            relaunch_calls_bg.fetch_add(1, Ordering::SeqCst);
+        })
+    });
+
+    // Synchronous barrier: restore has stopped the Host and paused before moving stores.
+    assert!(
+        wait_until(Duration::from_secs(5), || restore_entered.exists()),
+        "restore child must reach barrier after Host stop"
+    );
+    assert_eq!(
+        count_lines(&shutdowns_log),
+        1,
+        "initial Host must already be stopped before restore runs"
+    );
+    assert_eq!(
+        fs::read_to_string(&store_path).unwrap(),
+        "pre-restore-store",
+        "stores must not have finished moving while paused at barrier"
+    );
+    assert!(!aside_path.exists());
+
+    let busy_err = supervisor
+        .restart(&lock)
+        .expect_err("restart must refuse while restore holds MaintenanceLock");
+    assert_eq!(busy_err, MaintenanceBusyError);
+    assert_eq!(busy_err.code(), "maintenance_busy");
+    assert_eq!(
+        count_lines(&spawns_log),
+        1,
+        "refused restart must start no new Host during restore"
+    );
+
+    // Release barrier so restore finishes moving stores and confirms handover.
+    fs::write(&restore_release, "go").expect("release restore barrier");
+    let restored = restore_handle
+        .join()
+        .expect("restore thread joins")
+        .expect("restore succeeds");
+    assert_eq!(restored.aside_path, aside_path.to_string_lossy());
+    assert_eq!(fs::read_to_string(&store_path).unwrap(), "restored-store");
+    assert_eq!(fs::read_to_string(&aside_path).unwrap(), "pre-restore-store");
+    assert_eq!(relaunch_calls.load(Ordering::SeqCst), 1);
+    assert!(lock.is_handed_over());
+
+    // After successful recovery, only the normal handover runs; restart remains refused.
+    let post_handover_err = supervisor
+        .restart(&lock)
+        .expect_err("restart must stay refused after confirmed handover");
+    assert_eq!(post_handover_err.code(), "maintenance_busy");
+    assert_eq!(
+        count_lines(&spawns_log),
+        1,
+        "no new Host may start after successful recovery handover"
+    );
+    assert_eq!(lock.begin_quit(), QuitOutcome::HandedOver);
+
+    // 2. Pending handover and quit also refuse restart and start no Host; recoverable
+    //    precondition errors release MaintenanceLock so restart is allowed again.
+    let precond_spawns = tmp.path().join("precond-spawns.log");
+    let precond_shutdowns = tmp.path().join("precond-shutdowns.log");
+    let precond_script = format!(
+        r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+const [subcmd] = process.argv.slice(2);
+if (subcmd === {snapshot_status_cmd}) {{
+  process.stdout.write(JSON.stringify({{ ok: true, snapshot: null }}) + '\n');
+  process.exit(0);
+}}
+fs.appendFileSync({spawns_log}, String(process.pid) + '\n');
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => process.exit(0));
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{
+      event: 'state',
+      state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
+    }}) + '\n');
+  }} else if (msg.method === 'shutdown') {{
+    fs.appendFileSync({shutdowns_log}, String(process.pid) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+        snapshot_status_cmd =
+            serde_json::to_string(&contract.host_commands.snapshot_status).unwrap(),
+        spawns_log =
+            serde_json::to_string(&precond_spawns.to_string_lossy().into_owned()).unwrap(),
+        shutdowns_log =
+            serde_json::to_string(&precond_shutdowns.to_string_lossy().into_owned()).unwrap(),
+    );
+    let precond_spec = write_node_script(tmp.path(), "precond-restart.mjs", &precond_script);
+    let precond_sup = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(precond_spec, contract.clone()),
+        |_| {},
+        || {},
+    ));
+    precond_sup.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            precond_sup.last_state(),
+            Some(SupervisedHostState::Stopped {
+                store_refused: false,
+                ..
+            })
+        )
+    }));
+    let first_pid = match precond_sup.last_state() {
+        Some(SupervisedHostState::Stopped { pid, .. }) => pid,
+        other => panic!("expected stopped host state, got {other:?}"),
+    };
+    assert_eq!(count_lines(&precond_spawns), 1);
+
+    let precond_lock = MaintenanceLock::new();
+    let precond_router = ShellRouter::new(Arc::clone(&precond_sup), precond_lock.clone(), "1.0.0");
+
+    // 2a. Missing snapshot precondition error releases lock; restart is allowed again.
+    let missing_err = precond_router
+        .restore("1.0.0", "2026-11-25T00-01-00.000Z", |_| {
+            panic!("precondition error must not relaunch");
+        })
+        .expect_err("missing snapshot must refuse");
+    assert_eq!(missing_err.code, "missing_snapshot");
+    assert!(!precond_lock.is_busy());
+    assert!(!precond_lock.is_handed_over());
+
+    precond_sup
+        .restart(&precond_lock)
+        .expect("restart must succeed after recoverable missing_snapshot precondition error");
+    assert!(
+        wait_until(Duration::from_secs(5), || {
+            matches!(
+                precond_sup.last_state(),
+                Some(SupervisedHostState::Stopped {
+                    pid,
+                    store_refused: false,
+                    ..
+                }) if pid != first_pid
+            )
+        }),
+        "allowed restart must spawn and connect a new Host"
+    );
+    let second_pid = match precond_sup.last_state() {
+        Some(SupervisedHostState::Stopped { pid, .. }) => pid,
+        other => panic!("expected restarted host state, got {other:?}"),
+    };
+    assert_eq!(count_lines(&precond_spawns), 2);
+    assert_eq!(count_lines(&precond_shutdowns), 1);
+
+    // 2b. startFresh precondition error (storeRefused=false) also releases lock for restart.
+    let fresh_precond_err = precond_router
+        .start_fresh("2026-11-25T00-02-00.000Z", |_| {
+            panic!("precondition error must not relaunch");
+        })
+        .expect_err("startFresh without storeRefused must refuse");
+    assert_eq!(fresh_precond_err.code, "precondition_failed");
+    assert!(!precond_lock.is_busy());
+
+    precond_sup
+        .restart(&precond_lock)
+        .expect("restart must succeed after recoverable startFresh precondition error");
+    assert!(
+        wait_until(Duration::from_secs(5), || {
+            matches!(
+                precond_sup.last_state(),
+                Some(SupervisedHostState::Stopped {
+                    pid,
+                    store_refused: false,
+                    ..
+                }) if pid != second_pid
+            )
+        }),
+        "allowed restart after startFresh precondition error must spawn and connect a new Host"
+    );
+    assert_eq!(count_lines(&precond_spawns), 3);
+    assert_eq!(count_lines(&precond_shutdowns), 2);
+
+    // 2c. Pending handover and quit refuse restart and spawn no new Host.
+    {
+        let pending_guard = precond_lock.try_begin().expect("acquire pending guard");
+        pending_guard.begin_pending();
+        let pending_err = precond_sup
+            .restart(&precond_lock)
+            .expect_err("restart must refuse during pending handover");
+        assert_eq!(pending_err.code(), "maintenance_busy");
+        assert_eq!(count_lines(&precond_spawns), 3);
+        pending_guard.cancel_pending();
+    }
+
+    assert_eq!(precond_lock.begin_quit(), QuitOutcome::Quit);
+    let quit_err = precond_sup
+        .restart(&precond_lock)
+        .expect_err("restart must refuse once quit holds MaintenanceLock");
+    assert_eq!(quit_err.code(), "maintenance_busy");
+    assert_eq!(count_lines(&precond_spawns), 3);
+
+    precond_sup.stop().expect("clean shutdown");
+
+    // 3. Concurrent begin_quit arriving while restart is shutting down the old Host:
+    //    begin_quit waits until restart drops MaintenanceGuard, and restart refuses
+    //    without spawning a new Host.
+    let slow_spawns = tmp.path().join("slow-quit-spawns.log");
+    let slow_shutdown_entered = tmp.path().join("slow-shutdown-entered");
+    let slow_shutdown_release = tmp.path().join("slow-shutdown-release");
+    let slow_script = format!(
+        r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+fs.appendFileSync({spawns_log}, String(process.pid) + '\n');
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => process.exit(0));
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{
+      event: 'state',
+      state: {{ state: 'running', pid: process.pid, activeWork: 0 }},
+    }}) + '\n');
+  }} else if (msg.method === 'shutdown') {{
+    const tmpMarker = {entered} + '.tmp';
+    fs.writeFileSync(tmpMarker, 'entered');
+    fs.renameSync(tmpMarker, {entered});
+    const timer = setInterval(() => {{
+      if (fs.existsSync({release})) {{
+        clearInterval(timer);
+        process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+        process.exit(0);
+      }}
+    }}, 10);
+  }}
+}});
+"#,
+        spawns_log = serde_json::to_string(&slow_spawns.to_string_lossy().into_owned()).unwrap(),
+        entered =
+            serde_json::to_string(&slow_shutdown_entered.to_string_lossy().into_owned()).unwrap(),
+        release =
+            serde_json::to_string(&slow_shutdown_release.to_string_lossy().into_owned()).unwrap(),
+    );
+    let slow_spec = write_node_script(tmp.path(), "slow-quit-restart.mjs", &slow_script);
+    let slow_sup = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(slow_spec, contract),
+        |_| {},
+        || {},
+    ));
+    slow_sup.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            slow_sup.last_state(),
+            Some(SupervisedHostState::Running { .. })
+        )
+    }));
+    assert_eq!(count_lines(&slow_spawns), 1);
+
+    let slow_lock = MaintenanceLock::new();
+    let restart_sup = Arc::clone(&slow_sup);
+    let restart_lock = slow_lock.clone();
+    let restart_handle = thread::spawn(move || restart_sup.restart(&restart_lock));
+    assert!(
+        wait_until(Duration::from_secs(5), || slow_shutdown_entered.exists()),
+        "restart must reach old-Host shutdown barrier"
+    );
+
+    let (quit_marked_tx, quit_marked_rx) = mpsc::channel();
+    slow_lock.on_quit_requested(move || {
+        let _ = quit_marked_tx.send(());
+    });
+    let quit_lock = slow_lock.clone();
+    let quit_handle = thread::spawn(move || quit_lock.begin_quit());
+    quit_marked_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("begin_quit marks quitting while restart holds MaintenanceLock");
+    assert!(
+        !quit_handle.is_finished(),
+        "begin_quit must wait while restart holds MaintenanceLock"
+    );
+
+    fs::write(&slow_shutdown_release, "go").expect("release old-Host shutdown");
+    let mid_quit_err = restart_handle
+        .join()
+        .expect("restart thread joins")
+        .expect_err("restart must refuse instead of unpausing when quit arrived mid-restart");
+    assert_eq!(mid_quit_err.code(), "maintenance_busy");
+    assert_eq!(
+        quit_handle.join().expect("quit thread joins"),
+        QuitOutcome::Quit
+    );
+    assert_eq!(
+        count_lines(&slow_spawns),
+        1,
+        "no new Host may start when quit arrives during restart"
+    );
+    slow_sup.stop().expect("clean shutdown");
 }
