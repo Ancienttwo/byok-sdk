@@ -773,6 +773,10 @@ class CodexSession implements Session {
   async interrupt(): Promise<void> {
     this.native?.interrupt();
     if (!this.raw || !this.active) return;
+    // The runner's cancel bound may finalize before this interrupt or close()
+    // settles; usage observed so far must reach it now. A later final frame
+    // supersedes it (terminal usage is last-observed).
+    this.flushPendingUsage();
     const waiter = this.turnWaiters.wait();
     try {
       await raceDeadline(this.raw.abort().then(async result => {
