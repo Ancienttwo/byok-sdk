@@ -47,7 +47,6 @@ import { PI_PROVIDER_ENV_KEYS } from '../pi/pi-provider-env.generated.js';
 import { offerSelection } from '../../types.js';
 
 /** DSH uses pi-ai catalog ids verbatim except for its own DeepSeek plugin. */
-const MCP_EXPLICIT_CREDENTIAL_MIN_LENGTH = 8;
 const DSH_PROVIDER_CATALOG_IDS = new Map([
   ...Object.keys(PI_PROVIDER_ENV_KEYS).map(id => [id, id] as const),
   ['deepseek', 'deepseek'], // The deepseek-official plugin serves pi-ai's deepseek provider.
@@ -351,17 +350,9 @@ export class DshAdapter implements RuntimeAdapter {
       const mcpServers = Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server }));
       const key = await resolveRuntimeApiKey('dsh', this.options.resolveKey, input.signal);
       env[DSH_PROVIDER_KEY_ENV] = key;
+      // The redactor registers every MCP env and header value and its JSON escaping; the provider key is registered here.
       const redactor = sessionCredentialRedactor({ env, mcpServers });
-      // The bridge mounts every MCP env and header value in memory, so each one is a credential whatever its name. A
-      // value under eight characters is not redacted, even under a credential name, unless it is inside a longer header
-      // or URL: a short value such as DEBUG=1 would redact every matching character of the model's output. A refused
-      // mount echoes the entries JSON-encoded, and its diagnostics can encode them again, so each credential, including
-      // a bearer token or URL password the redactor derived, is also registered with one and two levels of escaping.
-      const mcpValues = mcpServers.flatMap((server) => Object.values(('headers' in server ? server.headers : server.env) ?? {}));
-      const escape = (value: string): string => JSON.stringify(value).slice(1, -1);
-      const credentials = [...new Set([...redactor.values(), key, ...mcpValues.filter((value) => value.length >= MCP_EXPLICIT_CREDENTIAL_MIN_LENGTH)]
-        .flatMap((value) => [value, escape(value), escape(escape(value))]))];
-      for (const credential of credentials) redactor.addExplicit(credential);
+      redactor.addExplicit(key);
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp', stderrRedactor: redactor });
       const raw = await dshSession(
         (bin, args, options) => {
@@ -387,7 +378,7 @@ export class DshAdapter implements RuntimeAdapter {
           ...(resume === undefined ? {} : { resume }),
         },
         {
-          credentialsForRedaction: credentials,
+          credentialsForRedaction: [key],
           onReady: (id) => session.ready(id),
           onRouteMismatch: () => session.refuseRoute(),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.

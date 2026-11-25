@@ -13,6 +13,16 @@ function credentialValue(value: string | null | undefined): value is string {
   return typeof value === "string" && value.length >= CREDENTIAL_MIN_LENGTH && !PATH_VALUE.test(value);
 }
 
+/**
+ * BYOK change: a refused MCP mount echoes its entries JSON-encoded, and a diagnostic can encode them again, so a
+ * credential is also protected with one and two levels of JSON escaping. A value without quotes, backslashes or
+ * control characters escapes to itself.
+ */
+function escapedForms(value: string): readonly string[] {
+  const once = JSON.stringify(value).slice(1, -1);
+  return [value, once, JSON.stringify(once).slice(1, -1)];
+}
+
 /** A connection string proves its password is a credential, regardless of the env name. */
 function urlCredentials(value: string | null | undefined): readonly string[] {
   if (typeof value !== "string" || !/^[a-z][a-z\d+.-]*:\/\//iu.test(value) || !URL.canParse(value)) { return []; }
@@ -32,7 +42,7 @@ export interface CredentialRedactionTail {
 }
 
 export interface CredentialRedactor {
-  /** Private connection redaction input. Never put these values in records or diagnostics. */
+  /** Private connection redaction input, each credential as registered. Never put these values in records or diagnostics. */
   values(this: void): readonly string[];
   hasProtectedValues(this: void): boolean;
   matches(this: void, text: string): boolean;
@@ -49,27 +59,52 @@ export interface CredentialRedactor {
 
 /** Explicit session credentials only; runtime-native keys can be added after SDK resolution. */
 export function sessionCredentialRedactor(options: Partial<SessionOptions>): CredentialRedactor {
+  // BYOK change: `credentials` holds each registered credential as given, which `values()` returns, so passing one
+  // redactor's values to another's `add` registers nothing new. `known` is the match set: each credential with its
+  // escaped forms, and echoed image payloads.
+  const credentials = new Set<string>();
   const known = new Set<string>();
+  let orderedCredentials: readonly string[] = [];
   let orderedValues: readonly string[] = [];
-  const add = (value: string | null | undefined): void => { if (credentialValue(value)) { known.add(value); } };
+  const register = (value: string): boolean => {
+    if (value.length === 0 || credentials.has(value)) { return false; }
+    credentials.add(value);
+    for (const form of escapedForms(value)) { known.add(form); }
+    return true;
+  };
+  const remember = (value: string | null | undefined): void => { if (credentialValue(value)) { register(value); } };
+  // BYOK change: the caller hands each MCP env and header value to the runtime, so each one is a credential whatever
+  // its name or shape. A value under the minimum length is not registered, even under a credential name, unless it is
+  // inside a longer header or URL: a short value such as DEBUG=1 would redact every matching character of model output.
+  const mcpValue = (value: string | null | undefined): void => {
+    if (typeof value === "string" && value.length >= CREDENTIAL_MIN_LENGTH) { register(value); }
+  };
   const env = (entries: SessionOptions["env"]): void => {
     for (const [name, value] of Object.entries(entries ?? {})) {
       const upper = name.toUpperCase();
-      if (CREDENTIAL_WORDS.has(upper.split("_").at(-1) ?? "") || CREDENTIAL_NAMES.has(upper)) { add(value); }
-      for (const credential of urlCredentials(value)) { known.add(credential); }
+      if (CREDENTIAL_WORDS.has(upper.split("_").at(-1) ?? "") || CREDENTIAL_NAMES.has(upper)) { remember(value); }
+      for (const credential of urlCredentials(value)) { register(credential); }
     }
   };
   env(options.env);
   for (const server of options.mcpServers ?? []) {
-    if (!("type" in server)) { env(server.env); continue; }
+    if (!("type" in server)) {
+      for (const value of Object.values(server.env ?? {})) {
+        mcpValue(value);
+        for (const credential of urlCredentials(value)) { register(credential); }
+      }
+      continue;
+    }
     for (const [name, value] of Object.entries(server.headers ?? {})) {
-      const upper = name.toUpperCase();
-      const authorization = AUTH_HEADERS.has(upper);
-      if (authorization || CREDENTIAL_WORDS.has(upper.split("-").at(-1) ?? "")) { add(value); }
-      if (authorization) { add(/^\s*\S+\s+(.+?)\s*$/u.exec(value)?.[1]); }
+      mcpValue(value);
+      if (AUTH_HEADERS.has(name.toUpperCase())) { mcpValue(/^\s*\S+\s+(.+?)\s*$/u.exec(value)?.[1]); }
     }
   }
-  const refresh = (): void => { orderedValues = [...known].toSorted((left, right) => right.length - left.length); };
+  const byLength = (values: Iterable<string>): readonly string[] => [...values].toSorted((left, right) => right.length - left.length);
+  const refresh = (): void => {
+    orderedCredentials = byLength(credentials);
+    orderedValues = byLength(known);
+  };
   refresh();
   const redactTextParts = (text: string, streaming: boolean, tail?: CredentialRedactionTail): { ready: string; pending?: CredentialRedactionTail } => {
     const keys = orderedValues;
@@ -112,23 +147,23 @@ export function sessionCredentialRedactor(options: Partial<SessionOptions>): Cre
   };
   const redact = (text: string): string => redactTextParts(text, false).ready;
   const matches = (text: string): boolean => orderedValues.some(value => text.includes(value));
-  const addKnown = (value: string): void => {
-    if (value.length !== 0 && !known.has(value)) {
-      known.add(value);
-      refresh();
-    }
-  };
+  const addCredential = (value: string): void => { if (register(value)) { refresh(); } };
   return {
-    values: () => orderedValues,
+    values: () => orderedCredentials,
     hasProtectedValues: () => orderedValues.length !== 0,
     matches,
     redactChunk: (text, tail) => redactTextParts((tail?.text ?? "") + text, true, tail),
     finishRedaction: tail => tail === undefined ? "" : redactTextParts(tail.text, false, tail).ready,
     add(value) {
-      if (credentialValue(value)) { addKnown(value); }
+      if (credentialValue(value)) { addCredential(value); }
     },
-    addExplicit: addKnown,
-    addImage: addKnown,
+    addExplicit: addCredential,
+    addImage(data) {
+      if (data.length !== 0 && !known.has(data)) {
+        known.add(data);
+        refresh();
+      }
+    },
     redact,
     redactValue: (value, jsonField, structure) => orderedValues.length === 0 ? value : redactText(value, redact, jsonField, structure, matches),
   };
