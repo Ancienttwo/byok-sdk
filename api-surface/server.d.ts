@@ -91,6 +91,9 @@
 //   HostJobSpec -> dist/execution-core/model.d.ts
 //   HostLedger -> dist/execution-core/ledger.d.ts
 //   HostLedgerOptions -> dist/execution-core/ledger.d.ts
+//   HostLedgerRead -> dist/execution-core/ledger.d.ts
+//   HostLedgerReadState -> dist/execution-core/ledger.d.ts
+//   HostLedgerTenantRead -> dist/execution-core/ledger.d.ts
 //   HostMemoryPage -> dist/execution-core/memory.d.ts
 //   HostOccurrenceRoutineDefinition -> dist/execution-core/model.d.ts
 //   HostOccurrenceRun -> dist/execution-core/model.d.ts
@@ -164,6 +167,7 @@
 //   project -> dist/execution-core/model.d.ts
 //   promoteOccurrence -> dist/execution-core/routines.d.ts
 //   queuedExpiry -> dist/execution-core/transitions.d.ts
+//   readHostLedger -> dist/execution-core/ledger.d.ts
 //   recordOccurrence -> dist/execution-core/routines.d.ts
 //   routineCommands -> dist/execution-core/routines.d.ts
 //   routineTemplateBinding -> dist/execution-core/sealed-routine.d.ts
@@ -328,8 +332,8 @@ export declare class HostExecutionCore {
 // ==== @byok-sdk/server dist/execution-core/index.d.ts ====
 export { HostExecutionCore, WakeDispatchError } from './core.js';
 export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, OccurrenceTransaction, AgentMessageInput, MessageDecision, MessageTransaction } from './core.js';
-export { CompactVetoError, HostLedger, HostStoreFormatError, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger.js';
-export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage, LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger.js';
+export { CompactVetoError, HostLedger, HostStoreFormatError, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError, readHostLedger } from './ledger.js';
+export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage, LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone, HostLedgerRead, HostLedgerReadState, HostLedgerTenantRead } from './ledger.js';
 export { nextIntervalOccurrence } from './schedule.js';
 export type { NextOccurrence } from './schedule.js';
 export { DEFAULT_RETRY, frozenInput, isOccurrenceIntentKey, occurrenceIntentKey, occurrenceOfIntentKey, taskId, validateRetry } from './model.js';
@@ -455,6 +459,34 @@ export declare class HostLedger {
     discard(): void;
     close(): void;
 }
+export type HostLedgerReadState = Pick<LedgerState, 'application' | 'intents' | 'executions'>;
+export type HostLedgerTenantRead = {
+    tenant: string;
+    ok: true;
+    state: HostLedgerReadState;
+}
+ | {
+    tenant: string | null;
+    ok: false;
+    code: 'corrupt_row';
+    message: string;
+};
+export type HostLedgerRead = {
+    kind: 'ok';
+    tenants: HostLedgerTenantRead[];
+} | {
+    kind: 'absent';
+    reason: 'no_file' | 'no_table';
+} | {
+    kind: 'retryable';
+    code: 'snapshot_changed' | 'hot_journal';
+    message: string;
+} | {
+    kind: 'unreadable';
+    code: 'not_a_file' | 'not_sqlite' | 'corrupt' | 'format_unsupported' | 'open_failed';
+    message: string;
+};
+export declare function readHostLedger(path: string): HostLedgerRead;
 // ==== @byok-sdk/server dist/execution-core/memory-restore.d.ts ====
 import type { MemoryBinding } from './memory.js';
 import { type AgentMemoryExport, type AgentMemoryFile } from '@byok-sdk/protocol/agent-memory';

@@ -1,6 +1,6 @@
 # Host upgrade to the next MINOR
 
-This checklist starts after the published 0.46.0 release. Hosts on an earlier release first follow the
+This checklist starts after the published 0.46.1 release. Hosts on an earlier release first follow the
 [0.46.0 checklist](host-upgrade-0.46.0.md) and its predecessors.
 
 ## Settled device capabilities (#2471)
@@ -13,3 +13,21 @@ This checklist starts after the published 0.46.0 release. Hosts on an earlier re
 - Additive; no Host action required. Every built-in adapter class (`ClaudeAdapter`, `CodexAdapter`, `OpenCodeAdapter`, `PiAdapter`, `AgyAdapter`, `GrokAdapter`, `DshAdapter`) now declares `detect(signal?: AbortSignal)`, as `RuntimeAdapter.detect` already did. An abort stops the running probe child, including `claude auth status --json` and `codex login status`, and `detect()` rejects with `signal.reason`.
 - `RuntimeAdapterPrepareInput.detected` carries the offer's own admission observation. The daemon fills it on every offer. A built-in adapter's `prepare()` reuses an observation only if that same adapter instance produced it, and only once. It then launches the exact command it probed, without running `--version` or `--help` again. Any other value probes afresh, and that probe's command is the one launched. This covers an absent field, a copy, a hand-built object, another adapter's observation, or an observation already used. `detect()` itself still observes freshly on every call.
 - A Host adapter that wraps a built-in adapter's `prepare()` can pass through the `detected` it received, unchanged, to drop its duplicate probe. A Host adapter that ignores the field keeps its current behavior. [#2469](https://github.com/Ancienttwo/byok-sdk/issues/2469)
+
+## Decorated adapters keep fast admission detection (#2495)
+
+- Additive. `@byok-sdk/client/adapters` exports `delegateAdmissionDetection(decorator, inner)`. A Host that wraps a built-in adapter (for example to add toolset or disposal guards) calls it once after building the wrapper. Task admission then runs the built-in's fast detection, which skips the login probe, instead of the wrapper's full `detect()`. Under delegation the wrapper's own `detect()` does not run at admission. Admission falls back to `decorator.detect` when any adapter in the chain has a reassigned or spied `detect`, or when the chain does not end at a built-in adapter with a fast path (today `ClaudeAdapter` and `CodexAdapter`). The call throws `TypeError` for a cycle, a different descriptor `id` or `versionPolicy`, or decorator `platforms` wider than the inner adapter's.
+- `ClaudeAdapter`, `AgyAdapter` and `GrokAdapter` now return `prepared.detected` (`version`, `executableSource`, `versionVerdict`) when `prepare()` reuses the admission observation, as `CodexAdapter`, `OpenCodeAdapter` and `DshAdapter` already did.
+- Calling `delegateAdmissionDetection` alone only removes the duplicate probe at admission. Neither the fast path nor `prepared.detected` carries `authPresent`. A Host that also wants to drop the second `detect()` inside its wrapper's `prepare()` must check the login through the prepared operation's `resolveRuntimeLaunch` (subscription selections) instead, and read the version as `prepared.detected?.version ?? (input.detected?.kind === 'available' ? input.detected.version : undefined)` (only an `available` observation has `version`).
+- A wrapper's `prepare()` must pass `input.detected` to the inner `prepare()` unchanged and return the inner result's `detected`. Without it, an offer with search exposure on a non-`sdk-entry` runtime fails closed with the search-unavailable decline, and the daemon skips its post-prepare `versionVerdict` block check.
+
+## Host ledger reader (#2474)
+
+- Additive; no Host action required. `@byok-sdk/server/execution-core` exports `readHostLedger(path)`, which reads every tenant of a K4 Host ledger without opening it for writing, including commits still in its WAL. It reads a private copy, so the database, WAL and SHM files are not written and none is created. A Host that queries `host_ledger` with its own SQL for diagnostics or ordering can switch to it.
+- Branch on `kind`. `ok` lists each tenant ordered by tenant, with `application`, `intents` and `executions`, or `corrupt_row` for a malformed row; the other rows are still returned. `absent` (`no_file`, `no_table`) means there is nothing to read. `retryable` (`snapshot_changed`, `hot_journal`) means no consistent state could be taken this time: back off and read again, and do not treat it as empty. `unreadable` (`not_a_file`, `not_sqlite`, `corrupt`, `format_unsupported`, `open_failed`) is a ledger-level error; a ledger without K4 format 1 is `format_unsupported`.
+
+## OAR 0.131.0 (#2487)
+
+- `DshAdapter` accepts MCP servers with stdio `env` and `type: 'http'` entries with `headers`; it used to decline them before claim. OAR mounts them in memory through the bridge. `DaemonConfig.mcpToolsets` still rejects `env` and `headers`, so this reaches the SDK's own task-scoped servers and a Host that calls the adapter directly. A failed mount fails the start, with every `env` and header value of eight or more characters redacted from the message.
+- The Antigravity CLI qualified version is `1.5.16` (the default agy version policy and the `agy` runtime release record). Under the default `unqualified: 'warn'` policy, an installed 1.5.11 now gets the unqualified-version warning; update agy to clear it.
+- OAR's Codex session sends the caller's sandbox on `thread/resume`. `CodexAdapter` sets `codexSandbox` as an app-server launch override (`-c sandbox_mode`) and opens with `sandboxMode: 'inherit'`, so its `thread/resume` carries no `sandbox` field and its behavior is unchanged. No Host action.

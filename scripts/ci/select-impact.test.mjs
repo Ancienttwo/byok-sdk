@@ -810,8 +810,8 @@ test('upgrade-manifest data files select the script checks', () => {
   });
   assert.throws(() => selectImpact(['scripts/release/upgrade-manifest/other.json']), /reviewed CI mapping required/i);
   // #1316: each archived manifest is admitted by its exact path.
-  assert.deepEqual(selectImpact(['packages/client/upgrade-history/0.45.1-0.46.0.json']), {
-    dirs: [], files: ['packages/client/upgrade-history/0.45.1-0.46.0.json'], families: ['npm-release-pack'], reason: 'impacted',
+  assert.deepEqual(selectImpact(['packages/client/upgrade-history/0.46.0-0.46.1.json']), {
+    dirs: [], files: ['packages/client/upgrade-history/0.46.0-0.46.1.json'], families: ['npm-release-pack'], reason: 'impacted',
   });
   assert.throws(() => selectImpact(['packages/client/upgrade-history/0.42.0-0.42.0.json']), /reviewed CI mapping required/i);
 });

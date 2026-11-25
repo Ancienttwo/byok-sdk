@@ -18,8 +18,9 @@ import { observationOf } from './fixtures/mcp-observation';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process';
-import type { RawEvent } from '../../vendor/oar/c0c8b28/contracts/session';
+import type { RawEvent } from '../../vendor/oar/19ccd9a/contracts/session';
 import { sessionCredentialRedactor } from '../runtime/claude-session-runtime';
+import { observeAdmissionDetection } from '../runtime-detection';
 
 const CLAUDE_TARGET = { lane: 'harness', harnessId: 'claude', selection: { mode: 'device-default' } } as const;
 
@@ -743,6 +744,15 @@ describe('ClaudeAdapter against the fake-claude fixture', () => {
       descriptor: adapter.descriptor,
       requiredToolsetIds: [],
     })).resolves.toMatchObject({ kind: 'prepared' });
+  });
+
+  it('#2495: prepare() returns the version of the admission observation it reuses', async () => {
+    const adapter = fakeClaudeAdapter();
+    const detected = await observeAdmissionDetection(adapter);
+    if (detected.kind !== 'available') throw new Error('fixture claude is unavailable');
+    const input = { offer: baseTask, descriptor: adapter.descriptor, requiredToolsetIds: [] };
+    expect(await adapter.prepare({ ...input, detected })).toMatchObject({ kind: 'prepared', detected: { version: detected.version } });
+    expect(await adapter.prepare(input)).not.toHaveProperty('detected');
   });
 
   it('FAKE_CLAUDE_HANG_AFTER_TOOL keeps the session running past the tool call; interrupt ACK + close tear it down cleanly', async () => {

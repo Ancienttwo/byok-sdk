@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import test from 'node:test';
 import {
   assertNshVersion,
+  buildCliFromSourceEnv,
   loadPin,
+  pinnedInstallRoot,
   readBundleSourceMap,
   readPinnedRustToolchain,
+  runCargoGuard,
+  verifyBundle,
   verifyBundleSources,
   verifyBundleSpecifiers,
   verifyCapabilitiesAgainstGolden,
@@ -19,17 +23,46 @@ import {
 
 const pin = loadPin();
 
-test('assertNshVersion accepts matching pinned CLI output and rejects drift', () => {
+test('assertNshVersion accepts matching pinned CLI output and rejects channel or version drift', () => {
   assert.equal(
     assertNshVersion(`nsh ${pin.version} (${pin.shortCommit} nightly ${pin.date})\n`, pin),
     `nsh ${pin.version} (${pin.shortCommit} nightly ${pin.date})`,
   );
+  // A nightly pin must reject a CLI built without NSH_CHANNEL=nightly (which stamps stable).
+  assert.throws(
+    () => assertNshVersion(`nsh ${pin.version} (${pin.shortCommit})`, pin),
+    /mismatch/i,
+  );
+  const stablePin = { ...pin, channel: 'stable' };
   assert.equal(
-    assertNshVersion(`nsh ${pin.version} (${pin.shortCommit})`, pin),
+    assertNshVersion(`nsh ${pin.version} (${pin.shortCommit})`, stablePin),
     `nsh ${pin.version} (${pin.shortCommit})`,
+  );
+  assert.throws(
+    () => assertNshVersion(`nsh ${pin.version} (${pin.shortCommit} nightly ${pin.date})`, stablePin),
+    /mismatch/i,
   );
   assert.throws(() => assertNshVersion('nsh 0.4.0 (abcdef0)', pin), /mismatch/i);
   assert.throws(() => assertNshVersion('nsh 0.6.1 (f577c51 nightly 2026-11-22)', pin), /mismatch/i);
+});
+
+test('buildCliFromSourceEnv stamps NSH_CHANNEL, SOURCE_DATE_EPOCH, fast release profile, and full-commit root', () => {
+  const nightlyEnv = buildCliFromSourceEnv(pin, {});
+  assert.equal(nightlyEnv.NSH_CHANNEL, 'nightly');
+  assert.equal(nightlyEnv.SOURCE_DATE_EPOCH, String(Date.parse(`${pin.date}T00:00:00Z`) / 1000));
+  assert.equal(nightlyEnv.CARGO_PROFILE_RELEASE_LTO, 'off');
+  assert.equal(nightlyEnv.CARGO_PROFILE_RELEASE_OPT_LEVEL, '2');
+  assert.equal(nightlyEnv.CARGO_PROFILE_RELEASE_CODEGEN_UNITS, '16');
+  assert.equal(nightlyEnv.RUSTUP_TOOLCHAIN, readPinnedRustToolchain());
+
+  const stableEnv = buildCliFromSourceEnv({ ...pin, channel: 'stable' }, {});
+  assert.equal(stableEnv.NSH_CHANNEL, 'stable');
+  assert.equal(stableEnv.SOURCE_DATE_EPOCH, undefined);
+
+  assert.equal(
+    pinnedInstallRoot(pin).replaceAll('\\', '/').endsWith(`/_ops/nsh-pinned/${pin.commit}`),
+    true,
+  );
 });
 
 test('verifyFileSha256 accepts matching digest and rejects tampered files', () => {
@@ -85,9 +118,91 @@ test('verifyCargoMetadataNshProvenance enforces a single pinned git source', () 
     /expected git\+/i,
   );
   assert.throws(
+    () => verifyCargoMetadataNshProvenance({
+      packages: [
+        { name: 'nsh-core', version: '0.6.0', source },
+        { name: 'nsh-core', version: '0.6.0', source: 'registry+https://github.com/rust-lang/crates.io-index' },
+      ],
+    }, pin),
+    /nsh-core resolved from multiple sources:.*git\+.*registry\+/i,
+  );
+  assert.throws(
     () => verifyCargoMetadataNshProvenance({ packages: [{ name: 'serde', version: '1.0.0', source: 'registry+x' }] }, pin),
     /no nsh/i,
   );
+});
+
+test('runCargoGuard fails closed naming nsh-core before cargo compiles when a generated runner mixes crates.io and git', () => {
+  const gitSource = `git+${pin.sourceRepo}?rev=${pin.commit}#${pin.commit}`;
+  const runnerManifest = resolve('/repo/examples/desktop-bot-app/nsh-app/.nsh/rust/Cargo.toml');
+  let compiled = false;
+
+  assert.throws(
+    () => runCargoGuard(
+      ['build', '--manifest-path', runnerManifest, '-p', 'nsh-app-byok-nsh-adapter-describe'],
+      {
+        pin,
+        realCargo: 'cargo',
+        realCargoWasSet: false,
+        env: { CARGO: '/tmp/fake-guard', BYOK_REAL_CARGO: 'cargo', BYOK_REAL_CARGO_SET: '0' },
+        verifyManifest: () => verifyCargoMetadataNshProvenance({
+          packages: [
+            { name: 'nsh-core', version: '0.6.0', source: gitSource },
+            { name: 'nsh-core', version: '0.6.0', source: 'registry+https://github.com/rust-lang/crates.io-index' },
+          ],
+        }, pin),
+        spawn: () => {
+          compiled = true;
+          return { status: 0 };
+        },
+      },
+    ),
+    /nsh-core resolved from multiple sources/i,
+  );
+  assert.equal(compiled, false, 'cargo build must never run when generated runner provenance fails');
+
+  // A valid generated runner passes provenance and delegates to real cargo without recursive CARGO env.
+  let spawnedArgs = null;
+  let spawnedEnv = null;
+  const status = runCargoGuard(
+    ['build', '--manifest-path', runnerManifest, '-p', 'nsh-app-byok-nsh-adapter-describe'],
+    {
+      pin,
+      realCargo: 'cargo',
+      realCargoWasSet: false,
+      env: { CARGO: '/tmp/fake-guard', BYOK_REAL_CARGO: 'cargo', BYOK_REAL_CARGO_SET: '0' },
+      verifyManifest: () => verifyCargoMetadataNshProvenance({
+        packages: [{ name: 'nsh-core', version: '0.6.0', source: gitSource }],
+      }, pin),
+      spawn: (_cmd, args, opts) => {
+        spawnedArgs = args;
+        spawnedEnv = opts.env;
+        return { status: 0 };
+      },
+    },
+  );
+  assert.equal(status, 0);
+  assert.deepEqual(spawnedArgs, ['build', '--manifest-path', runnerManifest, '-p', 'nsh-app-byok-nsh-adapter-describe']);
+  assert.equal(spawnedEnv.CARGO, undefined);
+  assert.equal(spawnedEnv.BYOK_REAL_CARGO, undefined);
+
+  // Non-compile subcommands (metadata) pass directly without re-running provenance.
+  let metadataVerified = false;
+  const metaStatus = runCargoGuard(
+    ['metadata', '--format-version', '1', '--manifest-path', runnerManifest],
+    {
+      pin,
+      realCargo: 'cargo',
+      realCargoWasSet: false,
+      env: {},
+      verifyManifest: () => {
+        metadataVerified = true;
+      },
+      spawn: () => ({ status: 0 }),
+    },
+  );
+  assert.equal(metaStatus, 0);
+  assert.equal(metadataVerified, false);
 });
 
 test('verifyCapabilitiesAgainstGolden validates D2 golden equality and rejects widened permissions', () => {
@@ -156,23 +271,98 @@ test('readBundleSourceMap fails closed on a missing or unparsable map and names 
   }
 });
 
-test('verifyBundleSpecifiers rejects forbidden import, require and dynamic-import specifiers', () => {
+test('verifyBundleSpecifiers parses AST import, export, dynamic import() and require() and fails closed on syntax errors', () => {
   verifyBundleSpecifiers('import{a as b}from"nsh";import"nsh/base";export*from"byok-nsh-adapter";import("@byok-sdk/keys/model-route");');
   assert.throws(() => verifyBundleSpecifiers('   '), /empty/i);
+  assert.throws(() => verifyBundleSpecifiers('import { from "broken";'), /failed to parse/i);
   for (const code of [
     'import{version as v}from"react";',
     'import x from"@byok-sdk/client";',
     'export*from"@byok-sdk/server/node";',
+    'export{a}from"hono";',
     'import"node:path";',
     'const fs=require("fs");',
+    'const fs=(require)(`fs/promises`);',
     'await import("electron");',
+    'await import(`electron`);',
   ]) {
     assert.throws(() => verifyBundleSpecifiers(code), /Forbidden module specifier/, code);
   }
 });
 
-test('verifyBundleSpecifiers ignores unrelated text that mentions electron', () => {
-  verifyBundleSpecifiers('const note="Runs without electron; see electron.md";import{a}from"nsh";');
+test('verifyBundleSpecifiers ignores import/require text inside string literals, templates, comments, and member calls', () => {
+  verifyBundleSpecifiers([
+    'const example = \'Example: import "electron"\';',
+    'const tmpl = `export * from "@byok-sdk/server"; require("fs")`;',
+    '// import "react"\n/* await import("electron") */',
+    'const note = "Runs without electron; see electron.md";',
+    'const custom = { require: (x) => x }; custom.require("fs");',
+    'import { a } from "nsh";',
+    'console.log(example, tmpl, note, a);',
+  ].join('\n'));
+});
+
+test('verifyBundle checks every split chunk and map and resolves map sources against dirname(bundlePath)', () => {
+  const root = mkdtempSync(join(tmpdir(), 'byok-nsh-split-bundle-test-'));
+  try {
+    const outDir = join(root, 'out-split');
+    mkdirSync(join(outDir, 'assets'), { recursive: true });
+    writeFileSync(join(outDir, 'assets', 'ignore.js'), 'import "electron";');
+    writeFileSync(join(outDir, 'bundle.js'), 'import{a}from"nsh";export const entry=a;');
+    writeFileSync(join(outDir, 'bundle.js.map'), JSON.stringify({ version: 3, sources: ['App.tsx'] }));
+    writeFileSync(join(outDir, 'Settings.js'), 'import{entry}from"./bundle.js";export const s=\'Example: import "electron"\'+entry;');
+    writeFileSync(join(outDir, 'Settings.js.map'), JSON.stringify({ version: 3, sources: ['src/Settings.tsx'] }));
+
+    const ok = verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root });
+    assert.equal(ok.files.length, 2);
+    assert.equal(ok.totalMapSources, 2);
+
+    // Forbidden specifier in a split chunk fails naming the chunk.
+    writeFileSync(join(outDir, 'Settings.js'), 'await import("electron");');
+    assert.throws(
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      /Settings\.js.*electron/i,
+    );
+
+    // Restore clean JS; forbidden source in a split chunk map fails.
+    writeFileSync(join(outDir, 'Settings.js'), 'export const s=1;');
+    writeFileSync(
+      join(outDir, 'Settings.js.map'),
+      JSON.stringify({ version: 3, sources: ['../node_modules/react/index.js'] }),
+    );
+    assert.throws(
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      /under node_modules\/react\//,
+    );
+
+    // Missing source map for a split chunk fails closed.
+    rmSync(join(outDir, 'Settings.js.map'));
+    assert.throws(
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      /Settings\.js\.map/,
+    );
+
+    // Orphan source map without a matching JS chunk fails closed.
+    writeFileSync(join(outDir, 'Settings.js.map'), JSON.stringify({ version: 3, sources: ['src/Settings.tsx'] }));
+    writeFileSync(join(outDir, 'Orphan.js.map'), JSON.stringify({ version: 3, sources: ['src/Orphan.tsx'] }));
+    assert.throws(
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      /Orphan\.js\.map/,
+    );
+    rmSync(join(outDir, 'Orphan.js.map'));
+
+    // Map sources resolve against dirname(bundlePath), not a hardcoded app directory.
+    const nestedDir = join(root, 'packages', 'server', 'dist');
+    mkdirSync(nestedDir, { recursive: true });
+    writeFileSync(join(nestedDir, 'bundle.js'), 'import{a}from"nsh";export{a};');
+    writeFileSync(join(nestedDir, 'bundle.js.map'), JSON.stringify({ version: 3, sources: ['../src/index.ts'] }));
+    assert.throws(
+      () => verifyBundle(join(nestedDir, 'bundle.js'), { repoRoot: root }),
+      /under packages\/server\//,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('readPinnedRustToolchain parses adapter toolchain channel and fails closed when missing', () => {
@@ -197,12 +387,31 @@ test('desktop CI workflow runs the full 3-OS S2.5 NSH verification and test lane
   assert.match(desktop, /if \[ "\$channel" = nightly \][\s\S]*nsh\.mjs build-cli-from-source/);
 
   const stepSections = desktop.split('\n      - name: ').slice(1);
+  const indexOfStep = name => stepSections.findIndex(section => section.startsWith(`${name}\n`));
+  const restoreIdx = indexOfStep('Restore pinned NSH CLI cache');
+  const ensureIdx = indexOfStep('Ensure pinned NSH CLI');
+  const saveIdx = indexOfStep('Save pinned NSH CLI cache');
+  assert.ok(restoreIdx >= 0 && ensureIdx > restoreIdx && saveIdx > ensureIdx, 'cache restore must run before ensure and save after ensure');
+
+  const restoreStep = stepSections[restoreIdx];
+  assert.match(restoreStep, /uses:\s*actions\/cache\/restore@[0-9a-f]{40}/);
+  assert.match(restoreStep, /path:\s*_ops\/nsh-pinned\/\$\{\{\s*steps\.nsh-pin\.outputs\.commit\s*\}\}/);
+  assert.match(
+    restoreStep,
+    /key:.*\$\{\{\s*runner\.os\s*\}\}.*\$\{\{\s*runner\.arch\s*\}\}.*\$\{\{\s*steps\.nsh-pin\.outputs\.commit\s*\}\}.*\$\{\{\s*hashFiles\('examples\/desktop-bot-app\/scripts\/nsh\.mjs'\)\s*\}\}/,
+  );
+  const saveStep = stepSections[saveIdx];
+  assert.match(saveStep, /uses:\s*actions\/cache\/save@[0-9a-f]{40}/);
+  assert.match(saveStep, /if:\s*steps\.nsh-cli-cache\.outputs\.cache-hit != 'true'/);
+  assert.match(saveStep, /path:\s*_ops\/nsh-pinned\/\$\{\{\s*steps\.nsh-pin\.outputs\.commit\s*\}\}/);
+
   for (const requiredCmd of [
     'node examples/desktop-bot-app/scripts/nsh.mjs ensure',
     'node examples/desktop-bot-app/scripts/nsh.mjs check',
     'node examples/desktop-bot-app/scripts/nsh.mjs build --release',
     'node examples/desktop-bot-app/scripts/nsh.mjs verify-capabilities',
     'node examples/desktop-bot-app/scripts/nsh.mjs verify-bundle',
+    'node examples/desktop-bot-app/scripts/nsh.mjs build --release --split',
     'node examples/desktop-bot-app/scripts/nsh.mjs test',
     'node examples/desktop-bot-app/scripts/nsh.mjs verify-lock --all',
   ]) {
@@ -210,6 +419,12 @@ test('desktop CI workflow runs the full 3-OS S2.5 NSH verification and test lane
     assert.ok(step, `desktop job missing S2.5 step: ${requiredCmd}`);
     assert.doesNotMatch(step, /^\s*if:\s*runner\.os\s*==/m, `step must run on all 3 OSes: ${requiredCmd}`);
   }
+  const buildGateStep = stepSections.find(section => section.includes('nsh.mjs build --release --split'));
+  assert.match(
+    buildGateStep,
+    /nsh\.mjs build --release --split\n\s+node examples\/desktop-bot-app\/scripts\/nsh\.mjs verify-bundle/,
+    'split release build must be followed by verify-bundle',
+  );
 });
 
 test('verifyTrayAssetsProjection matches authoritative assets/tray byte-for-byte and rejects drift', () => {

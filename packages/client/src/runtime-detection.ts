@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import type { RuntimeUpgradeAdvice } from './runtime/runtime-releases.js';
 import type { RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
 import { RUNTIME_IDS } from '@byok-sdk/protocol/constants';
@@ -343,7 +344,10 @@ export async function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: 
 }
 
 type AdmissionDetect = (signal?: AbortSignal) => Promise<RuntimeDetectResult>;
-const admissionDetects = new WeakMap<RuntimeAdapter, { readonly protoDetect: RuntimeAdapter['detect']; readonly detect: AdmissionDetect }>();
+type AdmissionEntry =
+  | { readonly protoDetect: RuntimeAdapter['detect']; readonly detect: AdmissionDetect }
+  | { readonly protoDetect: RuntimeAdapter['detect']; readonly inner: RuntimeAdapter };
+const admissionDetects = new WeakMap<RuntimeAdapter, AdmissionEntry>();
 
 /**
  * A built-in adapter's detection for task admission, which never reads
@@ -356,9 +360,41 @@ export function registerAdmissionDetect(adapter: RuntimeAdapter, protoDetect: Ru
   admissionDetects.set(adapter, { protoDetect, detect });
 }
 
+/**
+ * Declares that a Host `decorator` delegates `detect()` to `inner`, so task
+ * admission keeps a built-in adapter's fast detection, which skips the login
+ * probe, for the decorator too (#2495). Admission then does not call
+ * `decorator.detect`. It takes the fast path only while every adapter in the
+ * chain still has the `detect` it had at registration and the chain ends at a
+ * built-in adapter with a fast path; otherwise it calls `decorator.detect`.
+ * Both adapters must run the same runtime: the same descriptor `id` and
+ * `versionPolicy`, and the decorator's `platforms` within the inner adapter's,
+ * because admission applies the decorator's descriptor to the inner result.
+ * Throws `TypeError` when they differ or the delegation would form a cycle.
+ */
+export function delegateAdmissionDetection(decorator: RuntimeAdapter, inner: RuntimeAdapter): void {
+  const outer = decorator.descriptor;
+  const wrapped = inner.descriptor;
+  if (outer.id !== wrapped.id) throw new TypeError('delegateAdmissionDetection requires the same descriptor id');
+  if (!isDeepStrictEqual(outer.versionPolicy, wrapped.versionPolicy)) throw new TypeError('delegateAdmissionDetection requires the same versionPolicy');
+  if (wrapped.platforms !== undefined && (outer.platforms === undefined || outer.platforms.some(platform => !wrapped.platforms!.includes(platform)))) {
+    throw new TypeError('delegateAdmissionDetection requires decorator platforms within the inner adapter platforms');
+  }
+  for (let node: RuntimeAdapter | undefined = inner; node !== undefined;) {
+    if (node === decorator) throw new TypeError('delegateAdmissionDetection would form a cycle');
+    const entry = admissionDetects.get(node);
+    node = entry !== undefined && 'inner' in entry ? entry.inner : undefined;
+  }
+  admissionDetects.set(decorator, { protoDetect: decorator.detect, inner });
+}
+
 function admissionDetect(adapter: RuntimeAdapter): AdmissionDetect | undefined {
-  const entry = admissionDetects.get(adapter);
-  return entry !== undefined && adapter.detect === entry.protoDetect ? entry.detect : undefined;
+  for (let node = adapter; ;) {
+    const entry = admissionDetects.get(node);
+    if (entry === undefined || node.detect !== entry.protoDetect) return undefined;
+    if ('detect' in entry) return entry.detect;
+    node = entry.inner;
+  }
 }
 
 /** {@link observeRuntimeDetection} for task admission: a built-in adapter may skip facts admission never reads (`registerAdmissionDetect`). */

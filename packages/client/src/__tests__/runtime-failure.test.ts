@@ -10,12 +10,12 @@ import type { RuntimeFailurePhase } from '../runtime-failure';
 import { promises as fs } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { oarStartClassifier, runtimeStartFailure } from '../adapters/runtime-start-failure';
-import { SessionNotFoundError } from '../../vendor/oar/c0c8b28/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/c0c8b28/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/c0c8b28/contracts/errors';
-import { ModelConfirmationError } from '../../vendor/oar/c0c8b28/contracts/model-confirmation-error';
-import { RuntimeFailureError } from '../../vendor/oar/c0c8b28/contracts/runtime-failure-error';
-import { configureAntigravityModel } from '../../vendor/oar/c0c8b28/runtimes/antigravity/model-selection';
+import { SessionNotFoundError } from '../../vendor/oar/19ccd9a/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/19ccd9a/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/19ccd9a/contracts/errors';
+import { ModelConfirmationError } from '../../vendor/oar/19ccd9a/contracts/model-confirmation-error';
+import { RuntimeFailureError } from '../../vendor/oar/19ccd9a/contracts/runtime-failure-error';
+import { configureAntigravityModel } from '../../vendor/oar/19ccd9a/runtimes/antigravity/model-selection';
 
 const teardownIsNotExecutionPhase = (): RuntimeFailurePhase => {
   // @ts-expect-error teardown evidence belongs to Sprint Row 3, not the execution failure union.

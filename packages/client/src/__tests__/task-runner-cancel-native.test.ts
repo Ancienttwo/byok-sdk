@@ -72,7 +72,7 @@ function alive(pid: number): boolean {
 }
 async function setup(runtime: RuntimeId, scenario: string, {
   holdStartupReceipt = false, ...overrides
-}: Partial<Pick<TaskRunnerDeps, 'startupTimeoutMs'>> & { holdStartupReceipt?: boolean } = {}) {
+}: Partial<Pick<TaskRunnerDeps, 'startupTimeoutMs' | 'shutdownInterruptTimeoutMs'>> & { holdStartupReceipt?: boolean } = {}) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'byok-t1-native-'));
   const tree = path.join(dir, 'tree.json');
   const traceFile = path.join(dir, 'trace');
@@ -576,6 +576,24 @@ describe('Codex interrupt result/deadline ordering', () => {
     expect(c.timing.events.find(event => event.event === 'native.receive'
       && (event.detail as { method?: string }).method === 'turn/completed')).toBeUndefined();
     expect(c.timing.events.find(event => event.event === 'interrupt.rejected')?.detail).toContain('late interrupt timed out');
+  });
+
+  it('delivers usage observed before a no-ACK interrupt when the runner bound ends before the adapter deadline', async () => {
+    // A runner bound shorter than the adapter's 60ms models a loaded host on
+    // which the adapter deadline arms late: the runner finalizes first.
+    const c = await setup('codex', 'no-ack', { shutdownInterruptTimeoutMs: 50 }); await c.offer();
+    await vi.waitFor(() => expect(c.events().some(event => event.type === 'progress')).toBe(true));
+    c.synchronizeInterruptClock();
+    const cancelled = c.cancel();
+    await c.timing.waitFor(event => event.event === 'interrupt.write');
+    await vi.advanceTimersByTimeAsync(50);
+    await cancelled;
+    expect(c.terminals().map(event => event.type)).toEqual(['task.cancelled']);
+    expectUsage(c, 123, 17); expectNoErrors(c); await c.assertReaped();
+    const usage = c.timing.events.find(event => event.event === 'agent.yield'
+      && (event.detail as { type: string }).type === 'usage')!;
+    const disposal = c.timing.events.find(event => event.event === 'disposal.enter')!;
+    expect(usage.seq).toBeLessThan(disposal.seq);
   });
 
   it('retains an already received final observation when the wall clock reaches the runner deadline before publication', async () => {

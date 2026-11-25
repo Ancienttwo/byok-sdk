@@ -16,8 +16,8 @@ import { runDoctorCommand } from '../bin/commands/doctor';
 import { collectDiagnostics } from '../diagnostics/diagnostics';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { appendAuditRecord } from './fixtures/audit-records';
-import { observeAdmissionDetection, projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
-import type { RuntimeDetectResult } from '../types';
+import { delegateAdmissionDetection, observeAdmissionDetection, projectRuntimeObservation, validateRuntimeDetectResult } from '../runtime-detection';
+import type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeDetectResult } from '../types';
 import type { DaemonConfig } from '../daemon/create-daemon';
 import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 
@@ -288,6 +288,70 @@ describe.skipIf(process.platform === 'win32')('observeAdmissionDetection (#2468)
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  /** A Host decorator that forwards `detect()` and `prepare()` to `inner`. */
+  function decorate(inner: RuntimeAdapter, descriptor: RuntimeAdapterDescriptor = inner.descriptor) {
+    const detect = vi.fn((signal?: AbortSignal) => inner.detect(signal));
+    return { descriptor, detect, prepare: inner.prepare.bind(inner), runtimeEnvironment: inner.runtimeEnvironment.bind(inner) } satisfies RuntimeAdapter;
+  }
+
+  async function claudeWithAuthLog(): Promise<{ adapter: ClaudeAdapter; log: string }> {
+    const log = path.join(await directory(), 'auth.log');
+    vi.stubEnv('AUTH_LOG', log);
+    const command = await executable(authProbe);
+    return { adapter: new ClaudeAdapter({ resolveBin: () => ({ command, source: 'env' }) }), log };
+  }
+
+  it('#2495: a delegated decorator, and a decorator stacked on it, keep the built-in fast detection', async () => {
+    try {
+      const { adapter, log } = await claudeWithAuthLog();
+      const decorator = decorate(adapter);
+      const outer = decorate(decorator);
+      delegateAdmissionDetection(decorator, adapter);
+      delegateAdmissionDetection(outer, decorator);
+      for (const admitted of [await observeAdmissionDetection(decorator), await observeAdmissionDetection(outer)]) {
+        expect(admitted).toMatchObject({ kind: 'available', version: 'fixture-v1' });
+        expect(admitted).not.toHaveProperty('authPresent');
+      }
+      expect(decorator.detect).not.toHaveBeenCalled();
+      expect(outer.detect).not.toHaveBeenCalled();
+      await expect(fs.readFile(log, 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('#2495: admission calls the decorator detect() when the inner adapter has no fast path or its detect() is replaced', async () => {
+    try {
+      const custom = new StubRuntimeAdapter('custom');
+      const overCustom = decorate(custom);
+      delegateAdmissionDetection(overCustom, custom);
+      expect(await observeAdmissionDetection(overCustom)).toMatchObject({ kind: 'available' });
+      expect(overCustom.detect).toHaveBeenCalledOnce();
+
+      const { adapter } = await claudeWithAuthLog();
+      const decorator = decorate(adapter);
+      delegateAdmissionDetection(decorator, adapter);
+      const spied = vi.spyOn(adapter, 'detect');
+      expect(await observeAdmissionDetection(decorator)).toMatchObject({ kind: 'available', authPresent: true });
+      expect(decorator.detect).toHaveBeenCalledOnce();
+      expect(spied).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('#2495: refuses a delegation cycle and a decorator for another versionPolicy or wider platforms', () => {
+    const inner = new ClaudeAdapter();
+    const first = decorate(inner);
+    const second = decorate(inner);
+    delegateAdmissionDetection(first, second);
+    expect(() => delegateAdmissionDetection(second, first)).toThrow(TypeError);
+    expect(() => delegateAdmissionDetection(first, first)).toThrow(TypeError);
+    const policy = { ...inner.descriptor.versionPolicy!, qualifiedVersion: '0.0.1' };
+    expect(() => delegateAdmissionDetection(decorate(inner, { ...inner.descriptor, versionPolicy: policy }), inner)).toThrow(TypeError);
+    expect(() => delegateAdmissionDetection(decorate(inner, { ...inner.descriptor, platforms: [...inner.descriptor.platforms!, 'aix'] }), inner)).toThrow(TypeError);
   });
 });
 

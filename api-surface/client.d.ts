@@ -689,6 +689,7 @@
 //   buildRuntimeEnvironment -> dist/runtime/environment.d.ts
 //   createExecutionScratch -> dist/daemon/retention/scratch.d.ts
 //   createRuntimeAdapters -> dist/adapters/runtime-adapters.d.ts
+//   delegateAdmissionDetection -> dist/runtime-detection.d.ts
 //   isWireRuntimeId -> dist/runtime-detection.d.ts
 //   observeRuntimeDetection -> dist/runtime-detection.d.ts
 //   projectRuntimeObservation -> dist/runtime/runtime-releases.d.ts
@@ -1007,7 +1008,7 @@ export declare function grokVersionToken(output: string): string;
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionRefusalReason, } from '../types.js';
 export type { RuntimeAccountUsage, RuntimeAccountUsageUnsupportedReason, RuntimeAccountUsageWindow, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeModelEntry, RuntimeReadOptions, RuntimeUnsupportedVersion, } from '../runtime/runtime-reader-types.js';
-export { isWireRuntimeId, observeRuntimeDetection, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
+export { delegateAdmissionDetection, isWireRuntimeId, observeRuntimeDetection, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
 export { projectRuntimeObservationWithUpgrade as projectRuntimeObservation } from '../runtime/runtime-releases.js';
 export type { RuntimeObservation } from '../runtime-detection.js';
 export { RuntimeDisposalFailure, RuntimeExecutionFailure, RuntimeStartupDisposalFailure } from '../runtime-failure.js';
@@ -5496,6 +5497,7 @@ export interface RuntimeObservation {
 }
 export declare function validateRuntimeDetectResult(value: unknown): RuntimeDetectResult;
 export declare function observeRuntimeDetection(adapter: RuntimeAdapter, signal?: AbortSignal): Promise<RuntimeDetectResult>;
+export declare function delegateAdmissionDetection(decorator: RuntimeAdapter, inner: RuntimeAdapter): void;
 export declare function isWireRuntimeId(id: string): id is RuntimeId;
 export declare function taskRuntimeTarget(descriptor: Pick<RuntimeAdapterDescriptor, 'id'>): Extract<ExecutionTarget, {
     lane: 'harness';
@@ -5714,7 +5716,7 @@ declare const RUNTIME_RELEASES: {
     };
     readonly agy: {
         readonly kind: 'vendor';
-        readonly qualifiedVersion: "1.5.11";
+        readonly qualifiedVersion: "1.5.16";
         readonly token: typeof agyVersionToken;
         readonly command: 'agy update';
         readonly reason: 'Use the Antigravity vendor installer to update the standalone CLI.';

@@ -1,13 +1,13 @@
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { codexSession } from '../../vendor/oar/c0c8b28/runtimes/codex/session';
-import * as projection from '../../vendor/oar/c0c8b28/runtimes/codex/projection';
-import * as rpc from '../../vendor/oar/c0c8b28/runtimes/codex/rpc-control';
-import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/c0c8b28/runtimes/codex/app-server-client';
-import { SessionNotFoundError } from '../../vendor/oar/c0c8b28/contracts/session-not-found-error';
-import { SessionUnavailableError } from '../../vendor/oar/c0c8b28/contracts/session-unavailable-error';
-import { UnsupportedOptionError } from '../../vendor/oar/c0c8b28/contracts/errors';
-import { inputImagesRefusal } from '../../vendor/oar/c0c8b28/shared/input-images';
+import { codexSession } from '../../vendor/oar/19ccd9a/runtimes/codex/session';
+import * as projection from '../../vendor/oar/19ccd9a/runtimes/codex/projection';
+import * as rpc from '../../vendor/oar/19ccd9a/runtimes/codex/rpc-control';
+import type { LineProcess, SpawnLineProcess } from '../../vendor/oar/19ccd9a/runtimes/codex/app-server-client';
+import { SessionNotFoundError } from '../../vendor/oar/19ccd9a/contracts/session-not-found-error';
+import { SessionUnavailableError } from '../../vendor/oar/19ccd9a/contracts/session-unavailable-error';
+import { UnsupportedOptionError } from '../../vendor/oar/19ccd9a/contracts/errors';
+import { inputImagesRefusal } from '../../vendor/oar/19ccd9a/shared/input-images';
 
 function fakeServer(openReply: Record<string, unknown> = {}) {
   let receive!: (line: string) => void;
@@ -51,6 +51,15 @@ describe('unconnected OAR Codex adapter', () => {
     expect(fake.spawn.mock.calls[0]![1]).toContain('sandbox_mode="danger-full-access"');
     expect(Object.keys(session).sort()).toEqual(['abort','capabilities','compact','dispose','graph','id','prompt','queue','rawEvents','records','steer','stopTask'].sort());
     await session.dispose(); expect(fake.child.kill).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends the caller sandbox on thread/resume, which restores the saved rollout permissions otherwise, and ignores OAR_CODEX_SANDBOX', async () => {
+    vi.stubEnv('OAR_CODEX_SANDBOX', 'read-only');
+    const fake = fakeServer();
+    const session = await codexSession(fake.spawn, { kind: 'available', via: 'executable', command: 'fake' }, { cwd: '/workspace', env: { HOME: '/home' }, resume: 'thread-root', sandboxMode: 'workspace-write' });
+    expect(fake.spawn.mock.calls[0]![1]).toContain('sandbox_mode="workspace-write"');
+    expect(fake.writes.find(frame => frame.method === 'thread/resume')?.params).toMatchObject({ sandbox: 'workspace-write', approvalPolicy: 'never' });
+    await session.dispose();
   });
 
   it('keeps wire identities for native interaction while withholding quoted credentials from record IDs', async () => {
