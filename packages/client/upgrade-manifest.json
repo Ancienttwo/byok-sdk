@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.46.1",
-    "snapshotSha256": "1695ba912f85d8de192e7be6a2edbabfa252bc4be8535ebe77c07d28018d1184"
+    "snapshotSha256": "3b5ceea6628cb99166527063fbe06e136ffe901053514b79ada432035324f8b7"
   },
   "configFields": {
     "status": "tracked",
@@ -170,6 +170,26 @@
       "item": "export:@byok-sdk/server#MachineInfo",
       "change": "changed",
       "entry": "daemon-when-capabilities-settled"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerRead",
+      "change": "added",
+      "entry": "host-ledger-read"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerReadState",
+      "change": "added",
+      "entry": "host-ledger-read"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerTenantRead",
+      "change": "added",
+      "entry": "host-ledger-read"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#readHostLedger",
+      "change": "added",
+      "entry": "host-ledger-read"
     }
   ]
 }
