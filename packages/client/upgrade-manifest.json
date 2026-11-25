@@ -51,6 +51,18 @@
         "export:@byok-sdk/client/adapters#PiAdapter",
         "export:@byok-sdk/client/adapters#RuntimeAdapterPrepareInput"
       ]
+    },
+    {
+      "id": "host-ledger-read",
+      "impact": "additive",
+      "summary": "@byok-sdk/server/execution-core adds readHostLedger(path), a read-only reader of every tenant of a K4 Host ledger that sees committed WAL frames from a private copy without writing or creating the database, WAL or SHM files. It returns HostLedgerRead: ok with HostLedgerTenantRead rows (HostLedgerReadState application, intents and executions, or a corrupt_row), absent, retryable (snapshot_changed, hot_journal) or unreadable (#2474).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledger-reader-2474",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostLedgerRead",
+        "export:@byok-sdk/server/execution-core#HostLedgerReadState",
+        "export:@byok-sdk/server/execution-core#HostLedgerTenantRead",
+        "export:@byok-sdk/server/execution-core#readHostLedger"
+      ]
     }
   ],
   "changes": [

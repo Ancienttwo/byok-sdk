@@ -21,7 +21,7 @@ export interface HostLedgerOptions {
   expectedFormats?: Readonly<Record<string, number>>;
 }
 /** The version of K4's own tables and ledger body, the `k4` row of `host_store_format`. */
-const K4_FORMAT = 1;
+export const K4_FORMAT = 1;
 /**
  * An existing Host ledger whose `host_store_format` rows differ from the formats this ledger expects, or that has tables
  * and no `host_store_format` (written before format metadata). It is refused before any write: keep the file and open a
@@ -152,11 +152,14 @@ function expectedFormats(extra: Readonly<Record<string, number>> | undefined): R
   return Object.freeze(formats);
 }
 
-/** Decides a ledger's format from its tables and `host_store_format` rows: 'empty' for a file with no tables. */
-function admitFormat(db: DatabaseSync, expected: Readonly<Record<string, number>>): 'empty' | 'current' {
+/**
+ * The `host_store_format` rows by owner, or `undefined` for a file with no tables. Throws {@link HostStoreFormatError}
+ * for a ledger with tables and no `host_store_format`, or with a malformed one.
+ */
+export function storedFormats(db: DatabaseSync): Map<string, number> | undefined {
   const tables = db.prepare("SELECT name FROM sqlite_schema WHERE type='table'").all().map(row => String(row.name));
   if (!tables.includes('host_store_format')) {
-    if (tables.length === 0) return 'empty';
+    if (tables.length === 0) return undefined;
     throw new HostStoreFormatError('This Host ledger was written before format metadata. Keep it and open a new ledger file.');
   }
   // The table is exactly the one SCHEMA creates, so an owner is unique and a version is an integer.
@@ -170,6 +173,13 @@ function admitFormat(db: DatabaseSync, expected: Readonly<Record<string, number>
     }
     found.set(row.owner, row.version);
   }
+  return found;
+}
+
+/** Decides a ledger's format from its tables and `host_store_format` rows: 'empty' for a file with no tables. */
+function admitFormat(db: DatabaseSync, expected: Readonly<Record<string, number>>): 'empty' | 'current' {
+  const found = storedFormats(db);
+  if (!found) return 'empty';
   for (const [owner, version] of Object.entries(expected)) {
     if (!found.has(owner)) throw new HostStoreFormatError(`This Host ledger has no ${owner} format; it was not written for ${owner}. Open a new ledger file.`);
     if (found.get(owner) !== version) throw new HostStoreFormatError(`This Host ledger holds ${owner} format ${found.get(owner)}; this build reads ${version}. Keep it and open a new ledger file.`);

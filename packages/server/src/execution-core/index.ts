@@ -4,6 +4,8 @@ export type { ExecutionServer, HostOptions, OutcomeTransaction, OccurrenceHook, 
 export { CompactVetoError, HostLedger, HostStoreFormatError, OutboxFullError, MIN_TOMBSTONE_RETENTION_MS, RetiredIntentIdentityError } from './ledger.js';
 export type { ApplicationRows, CompactionOptions, CompactionResult, CompactVeto, TombstoneKind, HostLedgerOptions, ProjectionOutboxLimits, ProjectionOutboxUsage,
   LedgerDump, LedgerDumpMemoryTombstone, LedgerDumpRow, LedgerDumpTombstone } from './ledger.js';
+export { readHostLedger } from './ledger-read.js';
+export type { HostLedgerRead, HostLedgerReadState, HostLedgerTenantRead } from './ledger-read.js';
 export { nextIntervalOccurrence } from './schedule.js';
 export type { NextOccurrence } from './schedule.js';
 export { DEFAULT_RETRY, frozenInput, isOccurrenceIntentKey, occurrenceIntentKey, occurrenceOfIntentKey, taskId, validateRetry } from './model.js';
