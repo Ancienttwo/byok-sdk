@@ -25,7 +25,7 @@ import {
   type SubmitOutcome,
 } from "../../../../src/renderer/keys/submit.ts";
 import { bridge } from "../../bridge.ts";
-import { stateHintCount } from "../../store.ts";
+import { hostReady, shellStart, startShell, stateHintCount } from "../../store.ts";
 import {
   Badge,
   Button,
@@ -295,14 +295,32 @@ export function KeysScreen(props: KeysScreenProps) {
     );
   };
 
+  // The first keys.list waits for the app-startup ByokShell.start; a failed start shows its coded
+  // refusal, and only the Reload button tries the start again.
   effect(() => {
+    const start = shellStart();
     untracked(() => {
-      void reload();
+      if (start.status === "started") {
+        void reload();
+      } else if (start.status === "failed") {
+        listed.set({ refusal: refusalOf(start.error) });
+        busy.set(false);
+      } else {
+        busy.set(true);
+      }
     });
   });
 
+  const onReload = () => {
+    if (shellStart().status === "failed") {
+      void startShell();
+    } else {
+      void reload();
+    }
+  };
+
   const snapshot = resource(
-    () => stateHintCount() + 1,
+    () => (hostReady() ? stateHintCount() + 1 : false),
     async () => await bridge.call("k8.view", { botId: null }),
   );
 
@@ -511,7 +529,7 @@ export function KeysScreen(props: KeysScreenProps) {
                 variant="outline"
                 size="sm"
                 loading={busy()}
-                onPress={() => void reload()}
+                onPress={onReload}
               >
                 Reload
               </Button>
@@ -680,7 +698,7 @@ export function KeysScreen(props: KeysScreenProps) {
             <View class="gap-1">
               <CardTitle>Models Bots can use</CardTitle>
               <CardDescription>
-                Live model catalog entries from Host k8.view (refreshes on Host state hints).
+                Live model catalog entries from Host k8.view (loads once the Host runs; refreshes on Host state hints).
               </CardDescription>
             </View>
             <Button

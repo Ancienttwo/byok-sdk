@@ -3,6 +3,18 @@ import { describe, expect, open, test } from "nsh/test";
 import { createBridge, submitSecret } from "./src/bridge.ts";
 import { parseAllowedExternalUrl } from "./src/links.ts";
 
+const RUNNING_HOST = { state: "running", pid: 1, activeWork: 0 };
+
+/** Adapter stand-ins so `open("./App.tsx")` never starts a real Host supervisor; `stubs` add or override members. */
+function headlessShell(stubs: Record<string, {} | null | ((...args: any[]) => unknown)> = {}) {
+  return {
+    "byok-nsh-adapter": {
+      "ByokShell.start": { started: true, alreadyStarted: false, state: null },
+      ...stubs,
+    },
+  };
+}
+
 describe("BYOK NSH Foundations Gallery", () => {
   test("mounts desktop gallery, switches Light/Dark appearance, and previews Host states", async () => {
     const app = await open("./App.tsx", {
@@ -10,6 +22,7 @@ describe("BYOK NSH Foundations Gallery", () => {
       width: 1200,
       height: 820,
       colorScheme: "light",
+      modules: headlessShell(),
     });
 
     await app.press("id:nav-gallery");
@@ -30,7 +43,7 @@ describe("BYOK NSH Foundations Gallery", () => {
   });
 
   test("interacts cleanly with Disclosure, Switch, Checkbox, Tabs, and Escape-dismissible Dialog", async () => {
-    const app = await open("./App.tsx", { platform: "macos", width: 1200, height: 820 });
+    const app = await open("./App.tsx", { platform: "macos", width: 1200, height: 820, modules: headlessShell() });
     await app.press("id:nav-gallery");
 
     expect(app.accessibility("id:disclosure-trigger")?.expanded).toBe(false);
@@ -91,25 +104,23 @@ describe("BYOK NSH Foundations Gallery", () => {
       platform: "macos",
       width: 1200,
       height: 820,
-      modules: {
-        "byok-nsh-adapter": {
-          "ByokShell.call": (method: string, params: unknown) => {
-            if (method === "keys.list") {
-              return [];
-            }
-            if (method === "k8.view") {
-              return { bots: [], roles: [], models: [], busy: false };
-            }
-            calls.push({ method, params });
-            return {
-              profile_ref: "foundations-demo",
-              provider: "openai",
-              configured: true,
-              has_secret: true,
-            };
-          },
+      modules: headlessShell({
+        "ByokShell.call": (method: string, params: unknown) => {
+          calls.push({ method, params });
+          if (method === "keys.list") {
+            return [];
+          }
+          if (method === "k8.view") {
+            return { bots: [], roles: [], models: [], busy: false };
+          }
+          return {
+            profile_ref: "foundations-demo",
+            provider: "openai",
+            configured: true,
+            has_secret: true,
+          };
         },
-      },
+      }),
     });
 
     await app.press("id:nav-gallery");
@@ -120,7 +131,7 @@ describe("BYOK NSH Foundations Gallery", () => {
     await app.press("id:secret-submit");
     await app.waitFor("text:Secret status: Submitted (signal cleared before bridge call)");
 
-    expect(calls).toEqual([
+    expect(calls.filter((entry) => entry.method === "keys.submit")).toEqual([
       {
         method: "keys.submit",
         params: {
@@ -132,6 +143,67 @@ describe("BYOK NSH Foundations Gallery", () => {
     ]);
     expect(app.value("id:secret-input")).toBe("");
     expect(app.texts().join("\n").includes(testSecret)).toBe(false);
+  });
+
+  test("app startup starts the Host supervisor once before the first Keys bridge call", async () => {
+    const calls: string[] = [];
+    const app = await open("./App.tsx", {
+      platform: "macos",
+      width: 1200,
+      height: 820,
+      modules: {
+        "byok-nsh-adapter": {
+          "ByokShell.start": () => {
+            calls.push("start");
+            return { started: true, alreadyStarted: false, state: RUNNING_HOST };
+          },
+          "ByokShell.call": (method: string) => {
+            calls.push(method);
+            if (method === "keys.list") {
+              return [];
+            }
+            if (method === "k8.view") {
+              return { bots: [], roles: [], models: [], busy: false };
+            }
+            return null;
+          },
+        },
+      },
+    });
+
+    await app.waitUntil(() => calls.includes("keys.list") && calls.includes("k8.view"));
+    expect(calls[0]).toBe("start");
+    expect(calls.filter((method) => method === "start")).toHaveLength(1);
+    await app.waitFor("text:No provider profiles stored");
+  });
+
+  test("a failed Host start shows the Keys refusal and retries only on Reload", async () => {
+    const calls: string[] = [];
+    const app = await open("./App.tsx", {
+      platform: "macos",
+      width: 1200,
+      height: 820,
+      modules: {
+        "byok-nsh-adapter": {
+          "ByokShell.start": () => {
+            calls.push("start");
+            throw Object.assign(new Error("No packaged Host binary"), { code: "host_exited" });
+          },
+          "ByokShell.call": (method: string) => {
+            calls.push(method);
+            return null;
+          },
+        },
+      },
+    });
+
+    await app.waitFor("id:keys-list-refusal");
+    expect(calls).toEqual(["start"]);
+
+    await app.press("id:keys-reload-btn");
+    await app.waitUntil(() => calls.length === 2);
+    await app.waitFor("id:keys-list-refusal");
+    expect(calls).toEqual(["start", "start"]);
   });
 
   test("real ByokShell adapter enforces bridge contract allowlist and exposes Stop listeners", async () => {
@@ -164,7 +236,7 @@ describe("BYOK NSH Foundations Gallery", () => {
     expect(parseAllowedExternalUrl("javascript:alert(1)", ["https://docs.byok.test"])).toBeNull();
     expect(parseAllowedExternalUrl("file:///etc/passwd", ["https://docs.byok.test"])).toBeNull();
 
-    const app = await open("./App.tsx", { platform: "macos", width: 1200, height: 820 });
+    const app = await open("./App.tsx", { platform: "macos", width: 1200, height: 820, modules: headlessShell() });
     await app.press("id:nav-gallery");
     await app.press("id:link-blocked");
     expect(app.openedUrls()).toEqual([]);
@@ -175,7 +247,7 @@ describe("BYOK NSH Foundations Gallery", () => {
   });
 
   test("Windows platform preserves CJK text in Input and Textarea cleanly", async () => {
-    const app = await open("./App.tsx", { platform: "windows", width: 1200, height: 820 });
+    const app = await open("./App.tsx", { platform: "windows", width: 1200, height: 820, modules: headlessShell() });
     await app.press("id:nav-gallery");
 
     await app.type("id:text-input", "你好世界");
@@ -186,7 +258,7 @@ describe("BYOK NSH Foundations Gallery", () => {
   });
 
   test("native quit hook handles desktop quitRequest and quits gracefully", async () => {
-    const app = await open("./App.tsx", { platform: "macos", width: 1200, height: 820 });
+    const app = await open("./App.tsx", { platform: "macos", width: 1200, height: 820, modules: headlessShell() });
     expect(app.quit()).toBe(false);
     await app.quitRequest();
     await app.waitUntil(() => app.quit());

@@ -47,6 +47,20 @@ function makeStoredStatus(overrides: Partial<ProviderStatus> = {}): ProviderStat
   };
 }
 
+/** Adapter stand-ins for a started shell whose Host runs; `call` answers the bridge RPCs. */
+function runningShell(call: (method: string, params: unknown) => unknown) {
+  return {
+    "byok-nsh-adapter": {
+      "ByokShell.start": {
+        started: true,
+        alreadyStarted: false,
+        state: { state: "running", pid: 1, activeWork: 0 },
+      },
+      "ByokShell.call": call,
+    },
+  };
+}
+
 describe("KeysScreen (#2461 Slice 2)", () => {
   test("loads stored providers, renders configuration_pending badge, and shows refusal on keys.list busy error", async () => {
     const stored = makeStoredStatus({
@@ -60,24 +74,20 @@ describe("KeysScreen (#2461 Slice 2)", () => {
       platform: "macos",
       width: 1200,
       height: 860,
-      modules: {
-        "byok-nsh-adapter": {
-          "ByokShell.call": (method: string) => {
-            if (method === "keys.list") {
-              return [stored];
-            }
-            if (method === "k8.view") {
-              return {
-                bots: [],
-                roles: [],
-                models: [{ id: "zai-chat", label: "ZAI Chat" }],
-                busy: false,
-              };
-            }
-            return null;
-          },
-        },
-      },
+      modules: runningShell((method: string) => {
+        if (method === "keys.list") {
+          return [stored];
+        }
+        if (method === "k8.view") {
+          return {
+            bots: [],
+            roles: [],
+            models: [{ id: "zai-chat", label: "ZAI Chat" }],
+            busy: false,
+          };
+        }
+        return null;
+      }),
     });
 
     await app.waitFor("id:keys-stored-pending-key");
@@ -109,20 +119,16 @@ describe("KeysScreen (#2461 Slice 2)", () => {
       platform: "macos",
       width: 1200,
       height: 860,
-      modules: {
-        "byok-nsh-adapter": {
-          "ByokShell.call": (method: string) => {
-            if (method === "keys.list") {
-              const err = new Error(
-                "Cannot list provider keys while an app update or recovery action is running",
-              ) as Error & { code: string };
-              err.code = "PROVIDER_CONFIGURATION_BUSY";
-              throw err;
-            }
-            throw Object.assign(new Error("Host exited"), { code: "host_exited" });
-          },
-        },
-      },
+      modules: runningShell((method: string) => {
+        if (method === "keys.list") {
+          const err = new Error(
+            "Cannot list provider keys while an app update or recovery action is running",
+          ) as Error & { code: string };
+          err.code = "PROVIDER_CONFIGURATION_BUSY";
+          throw err;
+        }
+        throw Object.assign(new Error("Host exited"), { code: "host_exited" });
+      }),
     });
 
     await busyApp.waitFor("id:keys-list-refusal");
@@ -183,28 +189,30 @@ describe("KeysScreen (#2461 Slice 2)", () => {
       profile_revision: "rev-2",
     });
 
+    let releaseSubmit = () => {};
+    const submitGate = new Promise<void>((resolve) => {
+      releaseSubmit = resolve;
+    });
+
     const app = await open("../../../App.tsx", {
       platform: "macos",
       width: 1200,
       height: 860,
-      modules: {
-        "byok-nsh-adapter": {
-          "ByokShell.call": (method: string, params: unknown) => {
-            calls.push({ method, params });
-            if (method === "keys.list") {
-              listCalls += 1;
-              return listCalls === 1 ? [] : [savedStatus];
-            }
-            if (method === "keys.submit") {
-              return savedStatus;
-            }
-            if (method === "k8.view") {
-              return { bots: [], roles: [], models: [], busy: false };
-            }
-            return null;
-          },
-        },
-      },
+      modules: runningShell(async (method: string, params: unknown) => {
+        calls.push({ method, params });
+        if (method === "keys.list") {
+          listCalls += 1;
+          return listCalls === 1 ? [] : [savedStatus];
+        }
+        if (method === "keys.submit") {
+          await submitGate;
+          return savedStatus;
+        }
+        if (method === "k8.view") {
+          return { bots: [], roles: [], models: [], busy: false };
+        }
+        return null;
+      }),
     });
 
     await app.waitFor("text:No provider profiles stored");
@@ -222,7 +230,11 @@ describe("KeysScreen (#2461 Slice 2)", () => {
     expect(app.value("id:keys-field-secret")).toBe(uiSecret);
     expect(app.enabled("id:keys-save-btn")).toBe(true);
 
-    await app.press("id:keys-save-btn");
+    const saving = app.press("id:keys-save-btn");
+    await app.waitUntil(() => calls.some((entry) => entry.method === "keys.submit"));
+    expect(app.value("id:keys-field-secret")).toBe("");
+    releaseSubmit();
+    await saving;
     await app.waitFor("id:keys-receipt");
     await app.waitFor("id:keys-stored-zai-ui");
 
@@ -253,25 +265,21 @@ describe("KeysScreen (#2461 Slice 2)", () => {
       platform: "macos",
       width: 1200,
       height: 860,
-      modules: {
-        "byok-nsh-adapter": {
-          "ByokShell.call": (method: string, params: unknown) => {
-            if (method === "keys.list") {
-              return [existing];
-            }
-            if (method === "keys.submit") {
-              submitPayloads.push(params);
-              const err = new Error("Keys catalog refused: profile locked") as Error & { code: string };
-              err.code = "custody_timeout";
-              throw err;
-            }
-            if (method === "k8.view") {
-              return { bots: [], roles: [], models: [], busy: false };
-            }
-            return null;
-          },
-        },
-      },
+      modules: runningShell((method: string, params: unknown) => {
+        if (method === "keys.list") {
+          return [existing];
+        }
+        if (method === "keys.submit") {
+          submitPayloads.push(params);
+          const err = new Error("Keys catalog refused: profile locked") as Error & { code: string };
+          err.code = "custody_timeout";
+          throw err;
+        }
+        if (method === "k8.view") {
+          return { bots: [], roles: [], models: [], busy: false };
+        }
+        return null;
+      }),
     });
 
     await app.waitFor("id:keys-stored-zai-edit");
@@ -318,28 +326,29 @@ describe("KeysScreen (#2461 Slice 2)", () => {
       display_name: "ZAI Replace",
     });
     const submitPayloads: unknown[] = [];
+    let releaseSubmit = () => {};
+    const submitGate = new Promise<void>((resolve) => {
+      releaseSubmit = resolve;
+    });
 
     const app = await open("../../../App.tsx", {
       platform: "macos",
       width: 1200,
       height: 860,
-      modules: {
-        "byok-nsh-adapter": {
-          "ByokShell.call": (method: string, params: unknown) => {
-            if (method === "keys.list") {
-              return [existing];
-            }
-            if (method === "keys.submit") {
-              submitPayloads.push(params);
-              return existing;
-            }
-            if (method === "k8.view") {
-              return { bots: [], roles: [], models: [], busy: false };
-            }
-            return null;
-          },
-        },
-      },
+      modules: runningShell(async (method: string, params: unknown) => {
+        if (method === "keys.list") {
+          return [existing];
+        }
+        if (method === "keys.submit") {
+          submitPayloads.push(params);
+          await submitGate;
+          return existing;
+        }
+        if (method === "k8.view") {
+          return { bots: [], roles: [], models: [], busy: false };
+        }
+        return null;
+      }),
     });
 
     await app.waitFor("id:keys-stored-zai-replace");
@@ -349,7 +358,11 @@ describe("KeysScreen (#2461 Slice 2)", () => {
     await app.type("id:keys-replace-secret", nextKey);
     expect(app.value("id:keys-replace-secret")).toBe(nextKey);
 
-    await app.press("id:keys-replace-submit");
+    const replacing = app.press("id:keys-replace-submit");
+    await app.waitUntil(() => submitPayloads.length === 1);
+    expect(app.value("id:keys-replace-secret")).toBe("");
+    releaseSubmit();
+    await replacing;
     await app.waitFor("id:keys-receipt");
 
     expect(submitPayloads).toEqual([
@@ -368,19 +381,15 @@ describe("KeysScreen (#2461 Slice 2)", () => {
       platform: "windows",
       width: 1200,
       height: 860,
-      modules: {
-        "byok-nsh-adapter": {
-          "ByokShell.call": (method: string) => {
-            if (method === "keys.list") {
-              return [];
-            }
-            if (method === "k8.view") {
-              return { bots: [], roles: [], models: [], busy: false };
-            }
-            return null;
-          },
-        },
-      },
+      modules: runningShell((method: string) => {
+        if (method === "keys.list") {
+          return [];
+        }
+        if (method === "k8.view") {
+          return { bots: [], roles: [], models: [], busy: false };
+        }
+        return null;
+      }),
     });
 
     await app.waitFor("id:keys-field-display_name");

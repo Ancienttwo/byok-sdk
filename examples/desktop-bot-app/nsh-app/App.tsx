@@ -13,6 +13,7 @@ import {
   requestQuit,
   setAppearance,
   setPreviewHostState,
+  startShell,
   stateHintCount,
 } from "./src/store.ts";
 import {
@@ -80,6 +81,7 @@ export function App() {
   effect(() => {
     const disconnect = connectShell();
     cleanup(disconnect);
+    void startShell();
   });
 
   const standardInput = signal("");
