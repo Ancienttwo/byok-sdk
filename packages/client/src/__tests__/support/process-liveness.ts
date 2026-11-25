@@ -11,11 +11,17 @@ function readProcess(pid: number): ProcessEntry | undefined {
 
 /** Capture while the fixture still owns the PID. Windows uses signal 0 for liveness. */
 export function captureProcessIdentity(pid: number): ProcessIdentity {
+  const identity = tryCaptureProcessIdentity(pid);
+  if (identity === undefined) throw new Error(`Cannot capture process identity: pid=${pid} is missing`);
+  return identity;
+}
+
+/** Allow a PID from an earlier process snapshot to have exited before capture. */
+export function tryCaptureProcessIdentity(pid: number): ProcessIdentity | undefined {
   if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error(`Invalid process pid=${pid}`);
   if (process.platform === 'win32') return { pid };
   const entry = readProcess(pid);
-  if (entry === undefined) throw new Error(`Cannot capture process identity: pid=${pid} is missing`);
-  return { pid, start: entry.start };
+  return entry === undefined ? undefined : { pid, start: entry.start };
 }
 
 function liveProcess(processOrPid: ProcessIdentity | number): ProcessIdentity | ProcessEntry | undefined {
