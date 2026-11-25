@@ -55,7 +55,7 @@ const SEPARATE_KEYS_SPEC = [
 // Builds a fixture repo root; every part can be overridden per test.
 function makeRoot(t, {
   release = '0.12.0', keys = release, readme = README, spec = SPEC,
-  claude = '2.1.326', codex = '0.169.0', agy = '1.5.11', dsh = '0.2.2-rc.1',
+  claude = '2.1.326', codex = '0.169.0', agy = '1.5.16', dsh = '0.2.2-rc.1',
 } = {}) {
   const root = mkdtempSync(path.join(tmpdir(), 'version-authority-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -84,7 +84,7 @@ function makeRoot(t, {
       'claude-aimock': { policy: 'accepted', version: '2.1.326' },
       'codex-aimock': { policy: 'accepted', version: '0.169.0' },
       'grok-aimock': { policy: 'accepted', version: '1.0.70' },
-      'antigravity-aimock': { policy: 'accepted', version: '1.5.11' },
+      'antigravity-aimock': { policy: 'accepted', version: '1.5.16' },
       'dsh-aimock': { policy: 'minimum', version: '0.2.1-rc.5' },
       'pi-rpc-minimum': { policy: 'minimum', version: '1.4.0' },
       'opencode-aimock': { policy: 'helper', version: '9.0.0' },
@@ -123,7 +123,7 @@ test('allows equal and newer qualified pins, and skips other policies and unsupp
 });
 
 for (const [runtime, drifted, policy, floor] of [
-  ['agy', '1.5.9', 'accepted', '1.5.11'],
+  ['agy', '1.5.9', 'accepted', '1.5.16'],
   ['dsh', '0.2.1-rc.4', 'minimum', '0.2.1-rc.5'],
 ]) {
   test(`reports both versions when the ${runtime} pin is below the OAR ${policy} version`, (t) => {

@@ -25,7 +25,7 @@ import {
 } from '../../types.js';
 import { RuntimeExecutionFailure, RuntimeStartupDisposalFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure } from '../../runtime-failure.js';
 import { assertRuntimeEnvironmentPolicy, buildRuntimeEnvironment, type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
-import { dshMcpRows, dshSession, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime.js';
+import { dshMcpConfigs, dshSession, type DshRecord, type RawDshSession } from '../../runtime/dsh-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { resolveRuntimeApiKey } from '../resolve-runtime-api-key.js';
@@ -291,7 +291,7 @@ export class DshAdapter implements RuntimeAdapter {
       return { kind: 'reject', code: 'invalid_request', reason: 'DSH requires a model ID when no default is configured', retryable: false };
     }
     try {
-      dshMcpRows(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');
+      dshMcpConfigs(Object.entries(input.mcpServers ?? {}).map(([name, server]) => ({ name, ...server })), '.');
     } catch (error) {
       return { kind: 'reject', reason: `dsh cannot attach the task MCP servers: ${(error as Error).message}`, retryable: false };
     }

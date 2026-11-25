@@ -331,7 +331,7 @@ try {
   const fakeEnvironment = (runtime) => ({ pass: ['PATH', `FAKE_${runtime.toUpperCase()}_*`] });
   const agyLog = path.join(workDir, 'agy.jsonl');
   const agyModel = 'gemini-3-pro-preview';
-  Object.assign(process.env, { FAKE_ACP_VERSION: '1.5.11', FAKE_ACP_LOG: agyLog, FAKE_ACP_MODEL_CATALOG: agyModel });
+  Object.assign(process.env, { FAKE_ACP_VERSION: '1.5.16', FAKE_ACP_LOG: agyLog, FAKE_ACP_MODEL_CATALOG: agyModel });
   const adapters = [
     new client.ClaudeAdapter({ runtimeEnvironment: fakeEnvironment('claude'), resolveBin: () => ({ command: runtimeShim('claude'), source: 'path' }) }),
     new client.CodexAdapter({ runtimeEnvironment: fakeEnvironment('codex'), resolveBin: () => ({ command: runtimeShim('codex'), source: 'path' }) }),

@@ -131,6 +131,11 @@ function prompt(sessionId, text) {
 
 const modelReadback = ({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort: process.env.FAKE_DSH_EFFORT_READBACK ?? reasoningEffort });
 const commands = {
+  mountMcp(request) {
+    // FAKE_DSH_MOUNT_FAIL=1: the native refusal echoes the mounted entries, credentials included.
+    if (process.env.FAKE_DSH_MOUNT_FAIL === '1') throw Object.assign(new Error(`MCP plugin is not active: ${JSON.stringify(request.servers)}`), { code: 'mcp_inactive' });
+    return {};
+  },
   models() {
     return { providers: [{ id: 'byok-custom', models: [{ id: 'loop-model', name: process.env.BYOK_DSH_PROVIDER_API_KEY }] }] };
   },

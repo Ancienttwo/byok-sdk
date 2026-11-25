@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.46.1",
-    "snapshotSha256": "3b5ceea6628cb99166527063fbe06e136ffe901053514b79ada432035324f8b7"
+    "snapshotSha256": "f48c868cbce8852bff49bd24bf82e372475dab7683a07f023253245cb2ab9cf8"
   },
   "configFields": {
     "status": "tracked",
@@ -62,6 +62,15 @@
         "export:@byok-sdk/server/execution-core#HostLedgerReadState",
         "export:@byok-sdk/server/execution-core#HostLedgerTenantRead",
         "export:@byok-sdk/server/execution-core#readHostLedger"
+      ]
+    },
+    {
+      "id": "oar-0-131-0",
+      "impact": "additive",
+      "summary": "@byok-sdk/client vendors OAR 0.131.0. DshAdapter accepts Host toolsets with stdio env and HTTP headers, mounted in memory through the bridge. The Antigravity CLI qualified version is 1.5.16, so an installed 1.5.11 gets the unqualified-version warning under the default policy. A Codex resume sends the configured sandbox on thread/resume.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#oar-01310-2487",
+      "items": [
+        "export:@byok-sdk/client#UpgradeableRuntimeId"
       ]
     }
   ],
@@ -125,6 +134,11 @@
       "item": "export:@byok-sdk/client#RuntimeAdapterPrepareInput",
       "change": "changed",
       "entry": "detect-signal-prepare-detected"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeableRuntimeId",
+      "change": "changed",
+      "entry": "oar-0-131-0"
     },
     {
       "item": "export:@byok-sdk/client/adapters#AgyAdapter",

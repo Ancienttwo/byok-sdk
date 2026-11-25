@@ -18,3 +18,9 @@ This checklist starts after the published 0.46.1 release. Hosts on an earlier re
 
 - Additive; no Host action required. `@byok-sdk/server/execution-core` exports `readHostLedger(path)`, which reads every tenant of a K4 Host ledger without opening it for writing, including commits still in its WAL. It reads a private copy, so the database, WAL and SHM files are not written and none is created. A Host that queries `host_ledger` with its own SQL for diagnostics or ordering can switch to it.
 - Branch on `kind`. `ok` lists each tenant ordered by tenant, with `application`, `intents` and `executions`, or `corrupt_row` for a malformed row; the other rows are still returned. `absent` (`no_file`, `no_table`) means there is nothing to read. `retryable` (`snapshot_changed`, `hot_journal`) means no consistent state could be taken this time: back off and read again, and do not treat it as empty. `unreadable` (`not_a_file`, `not_sqlite`, `corrupt`, `format_unsupported`, `open_failed`) is a ledger-level error; a ledger without K4 format 1 is `format_unsupported`.
+
+## OAR 0.131.0 (#2487)
+
+- `DshAdapter` accepts Host toolsets with stdio `env` and `type: 'http'` entries with `headers`; it used to decline them before claim. OAR mounts them in memory through the bridge, so a Host that wrapped a dsh server to avoid env or headers can pass them directly. A failed mount fails the start, with credentials redacted from the message.
+- The Antigravity CLI qualified version is `1.5.16` (the default agy version policy and the `agy` runtime release record). Under the default `unqualified: 'warn'` policy, an installed 1.5.11 now gets the unqualified-version warning; update agy to clear it.
+- A Codex resume sends the adapter's sandbox on `thread/resume`, so the configured `codexSandbox` applies to a resumed thread instead of the permissions saved in its rollout. No Host action.
