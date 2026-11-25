@@ -21,7 +21,7 @@ import { TestServer } from './fixtures/test-server';
 import { PI_MODEL_FIXTURE } from '../../../keys/src/fixtures/pi-model-config';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { FRESH_OFFER } from './fixtures/fresh-offer';
-import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
+import { captureProcessIdentity, expectProcessNotLive, tryCaptureProcessIdentity } from './support/process-liveness';
 const BUN_BIN = resolveBunBin();
 const PROCESS_WAIT = { timeout: 5_000, interval: 50 };
 const RECOVERY_TIMEOUT_MS = 60_000;
@@ -152,10 +152,21 @@ async function recoveryScenario(daemonOnly: boolean, interpreter = process.execP
   if(daemonOnly&&!waitingModel)expect((await rows(path.join(control,'ipc-events.jsonl'))).filter(row=>row.phase==='before-tool')).toEqual([{phase:'before-tool',ipcClosed:true}]);
   const toolGroup=waitingModel?undefined:Number(execFileSync('ps',['-p',(await fs.readFile(path.join(home,'tool-pid'),'utf8')).trim(),'-o','pgid='],{encoding:'utf8'}).trim());
   if(toolGroup!==undefined)expect(liveGroup(toolGroup).length).toBeGreaterThan(0);
-  const interruptedTree=processTree([first.pid!,oldLaunch!.launcherPid]);for(const pid of interruptedTree)ownedPids.add(pid);
-  const interruptedIdentities = interruptedTree.map(captureProcessIdentity);
+  const rootPids: number[] = [first.pid!, oldLaunch!.launcherPid];
+  const interruptedTree = processTree(rootPids);
+  for (const pid of interruptedTree) ownedPids.add(pid);
+  const interruptedIdentities = interruptedTree.flatMap(pid => {
+    if (rootPids.includes(pid)) return [captureProcessIdentity(pid)];
+    const identity = tryCaptureProcessIdentity(pid);
+    if (identity !== undefined) return [identity];
+    ownedPids.delete(pid);
+    return [];
+  });
   first.kill('SIGKILL'); await new Promise(resolve=>first.once('exit',resolve));expect(first.signalCode).toBe('SIGKILL');
-  if(!daemonOnly) { kill(oldLaunch!.launcherPid,true); for(const pid of interruptedTree)if(pid!==first.pid)kill(pid); }
+  if (!daemonOnly) {
+    kill(oldLaunch!.launcherPid, true);
+    for (const { pid } of interruptedIdentities) if (pid !== first.pid) kill(pid);
+  }
   await vi.waitFor(() => interruptedIdentities.forEach(expectProcessNotLive), PROCESS_WAIT);
   if(toolGroup!==undefined)await vi.waitFor(()=>expect(liveGroup(toolGroup)).toEqual([]),PROCESS_WAIT);
   for(const pid of interruptedTree)ownedPids.delete(pid);launcherPids=launcherPids.filter(pid=>!interruptedTree.includes(pid));
