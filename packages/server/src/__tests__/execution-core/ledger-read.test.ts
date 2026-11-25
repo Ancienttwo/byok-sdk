@@ -57,11 +57,11 @@ it('reports a malformed row and still returns the valid rows', () => {
   set(open(file, 'good'), 1);
   const valid = JSON.stringify({ application: {}, intents: {}, executions: {} });
   sql(file, `INSERT INTO host_ledger VALUES ('bad-json', '{'), ('bad-shape', '{"application":{},"intents":[],"executions":{}}'),
-    (7, '${valid}')`);
+    (X'07', '${valid}')`);
   const rows = tenants(readHostLedger(file));
-  // SQLite orders an integer tenant before text.
+  // SQLite orders text before a blob tenant, which TEXT affinity keeps as a blob.
   expect(rows.map(row => [row.tenant, row.ok, row.ok ? undefined : row.code])).toEqual([
-    [null, false, 'corrupt_row'], ['bad-json', false, 'corrupt_row'], ['bad-shape', false, 'corrupt_row'], ['good', true, undefined],
+    ['bad-json', false, 'corrupt_row'], ['bad-shape', false, 'corrupt_row'], ['good', true, undefined], [null, false, 'corrupt_row'],
   ]);
   expect(rows.find(row => row.tenant === 'good')).toEqual({ tenant: 'good', ok: true, state: { application: { n: 1 }, intents: {}, executions: {} } });
 });
