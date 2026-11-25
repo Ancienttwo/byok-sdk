@@ -1,22 +1,30 @@
 import { ByokShell } from "byok-nsh-adapter";
+import { BridgeCallError } from "../../src/bridge/error.ts";
 import type { BridgeMethods, RendererMethod } from "../../src/bridge/protocol.ts";
 
-/** Refused bridge call preserving the structured error `code` from `byok-shell`. */
-export class BridgeCallError extends Error {
-  readonly code: string;
-
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = "BridgeCallError";
-    this.code = code;
-  }
-}
+export { BridgeCallError };
 
 export interface AdapterBridge {
   call<M extends RendererMethod>(
     method: M,
     params: BridgeMethods[M]["params"],
   ): Promise<BridgeMethods[M]["result"]>;
+}
+
+/** Maps a rejection from the `byok-nsh-adapter` boundary to its coded `BridgeCallError`. */
+export function toBridgeCallError(error: unknown): BridgeCallError {
+  const record =
+    typeof error === "object" && error !== null
+      ? (error as { readonly code?: unknown; readonly message?: unknown })
+      : undefined;
+  const code = typeof record?.code === "string" && record.code ? record.code : "method_failed";
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof record?.message === "string"
+        ? record.message
+        : String(error);
+  return new BridgeCallError(code, message);
 }
 
 /** Creates a typed bridge over a raw transport invoker (defaults to `ByokShell.call`). */
@@ -29,18 +37,7 @@ export function createBridge(
       try {
         return (await invoke(method, params ?? null)) as BridgeMethods[typeof method]["result"];
       } catch (error) {
-        const record =
-          typeof error === "object" && error !== null
-            ? (error as { readonly code?: unknown; readonly message?: unknown })
-            : undefined;
-        const code = typeof record?.code === "string" && record.code ? record.code : "method_failed";
-        const message =
-          error instanceof Error
-            ? error.message
-            : typeof record?.message === "string"
-              ? record.message
-              : String(error);
-        throw new BridgeCallError(code, message);
+        throw toBridgeCallError(error);
       }
     },
   };

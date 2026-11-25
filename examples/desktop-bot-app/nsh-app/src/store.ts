@@ -1,14 +1,22 @@
 import { ByokShell } from "byok-nsh-adapter";
 import { setColorScheme, signal } from "nsh";
 import type { SupervisedHostState } from "../../src/bridge/protocol.ts";
+import { type BridgeCallError, toBridgeCallError } from "./bridge.ts";
 
 export type AppearanceMode = "light" | "dark" | "system";
+
+/** Outcome of the app-startup `ByokShell.start`: Keys bridge calls wait for `started`. */
+export type ShellStart =
+  | { readonly status: "pending" }
+  | { readonly status: "started" }
+  | { readonly status: "failed"; readonly error: BridgeCallError };
 
 const hostStateSignal = signal<SupervisedHostState | null>(null);
 const powerErrorSignal = signal<string | null>(null);
 const quittingSignal = signal(false);
 const stateHintCountSignal = signal(0);
 const appearanceSignal = signal<AppearanceMode>("light");
+const shellStartSignal = signal<ShellStart>({ status: "pending" });
 
 /** Latest Host supervisor state mirrored from Rust (null before first state arrives). */
 export const hostState = () => hostStateSignal();
@@ -21,6 +29,13 @@ export const isQuitting = () => quittingSignal();
 
 /** Counter incremented on each 50 ms coalesced Host state hint. */
 export const stateHintCount = () => stateHintCountSignal();
+
+/** Latest `ByokShell.start` outcome (`pending` until startup or a retry settles). */
+export const shellStart = () => shellStartSignal();
+
+/** True once the shell started and the supervised Host reports `running`. */
+export const hostReady = () =>
+  shellStartSignal().status === "started" && hostStateSignal()?.state === "running";
 
 /** Active appearance override selected in the UI shell. */
 export const appearance = () => appearanceSignal();
@@ -70,6 +85,24 @@ export function connectShell(): () => void {
     stopState();
     stopHooks();
   };
+}
+
+/**
+ * Starts (or confirms) the process-wide Host supervisor and records the outcome in `shellStart`.
+ * Runs once from app startup after `connectShell` subscribed to state, and again only on an
+ * explicit user retry. The returned state seeds `hostState`; later transitions arrive via `onState`.
+ */
+export async function startShell(): Promise<void> {
+  shellStartSignal.set({ status: "pending" });
+  try {
+    const result = (await ByokShell.start()) as { readonly state: SupervisedHostState | null };
+    if (result.state !== null) {
+      hostStateSignal.set(result.state);
+    }
+    shellStartSignal.set({ status: "started" });
+  } catch (error) {
+    shellStartSignal.set({ status: "failed", error: toBridgeCallError(error) });
+  }
 }
 
 /** Single app-wide command for setting color appearance. */

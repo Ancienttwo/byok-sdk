@@ -100,10 +100,24 @@ Written before `src/ui/` implementation. Every state change on the Gallery scree
 
 ---
 
-## 7. Upcoming Screen Motion Inventory Sections (Reserved)
+## 7. Motion Inventory — Keys Screen (Slice 2)
 
-Feature slices landing after this Foundations PR will append their motion inventories here before implementation:
-- **Keys screen** (Slice 2 — provider profile save/secret clear transitions)
+Written before `KeysScreen.tsx` implementation. Every state transition accounts for tool, tokens, and `reduceMotion()`:
+
+| State Change | Tool & Tokens | Reduced Motion Behavior |
+| --- | --- | --- |
+| Stored provider row selection & hover wash (`keys.list`) | `ListItem` `MOTION_CLASSES.interactiveColor` (`transition-colors duration-100 ease-out`) highlighting selected `bg-sidebar-accent` row | `motion-reduce:transition-none`; selection state stays explicit via `accessibilityState={{ selected }}` and trailing active indicator |
+| Busy section lock during `keys.list` / `keys.submit` / post-receipt reload | `Button loading={busy()}` shows inline `Spinner` + `accessibilityState={{ busy: true }}`; fields disable immediately with `disabled:opacity-50` without layout shift | `motion-reduce:` stops continuous spin animation while preserving busy text & disabled state |
+| Dynamic visible fields from `modelRouteView()` (vendor / auth / pi_model swaps) | Clean instant conditional mount (`<For>` / `<If>`) aligned along uniform `Field` vertical spine; zero jittery reflow | Identical instant mount/unmount; error and required markers stay explicit in text |
+| Select dropdown open/close (`provider_kind`, `adapter`, `auth_mode`, `thinking_level`, `model`) | `Select` popup chrome uses `MOTION_CLASSES.popupTransition` + `popupStarting` / `popupEnding` (`duration-150` fade/scale) | `motion-reduce:transition-none` — opens/closes immediately |
+| Secret input clearing & submission feedback | Masked `Input` `MOTION_CLASSES.interactiveColor`; secret signal clears synchronously before `keys.submit` FFI transfer; `Receipt` (`role="region"` + `accessibilityLiveRegion="polite"`) or `RefusalNote` (`role="alert"`) appears cleanly in-flow | `motion-reduce:transition-none`; secret-free receipt and typed refusal code appear immediately |
+| `ReplaceKeyForm` mount when editing `auth_mode !== "none"` stored profile | Conditional card section for stored-profile credential replacement + `configuration_pending` `Badge` (`warning` symbol + label) | Instant show/hide; status relies on explicit label & symbol, never color alone |
+
+---
+
+## 8. Upcoming Screen Motion Inventory Sections (Reserved)
+
+Feature slices landing after Slice 2 (`KeysScreen`) will append their motion inventories here before implementation:
 - **Shell & Recovery screen** (Slice 3 — Host state transitions, S1 snapshot/restore progress & restart confirmation)
 - **Conversation workspace** (Slice 4 — sidebar selection, streaming `TextView`, Send/Cancel swap, timeline `List`)
 - **Activity & Settings** (Slice 5 — card disclosure, approval confirmation, login-item toggle feedback)

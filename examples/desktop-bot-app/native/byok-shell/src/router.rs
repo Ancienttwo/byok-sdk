@@ -173,6 +173,7 @@ impl ShellRouter {
                         self.supervisor.command_spec(),
                         contract.host_commands.custody.as_str(),
                         self.custody_deadline,
+                        Some(&self.maintenance),
                         Some(&self.supervisor),
                     )
                     .map_err(|err| ShellRouteError::new(err.code, err.message))?;

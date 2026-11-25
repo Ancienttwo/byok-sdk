@@ -1,14 +1,7 @@
 import type { BridgeIpc, ByokBridge } from '../bridge/protocol.ts';
+import { BridgeCallError } from '../bridge/error.ts';
 
-/** A refused bridge call, with the code the refusing handler gave it (`invalid_params`, a custody or keys code, ...). */
-export class BridgeCallError extends Error {
-  readonly code: string;
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = 'BridgeCallError';
-    this.code = code;
-  }
-}
+export { BridgeCallError };
 
 /** `window.byok` over the preload's raw IPC: a call resolves to its value or rejects with a {@link BridgeCallError}. */
 export function rendererBridge(ipc: BridgeIpc): ByokBridge {
