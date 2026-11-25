@@ -28,6 +28,8 @@ export type KillFn = (pid: number, signal: NodeJS.Signals | number) => void;
 interface OwnedTerminationState {
   /** True only once a termination request actually reached the OS. A request that could not be spawned leaves this false so disposal re-issues it and surfaces the typed failure. */
   requested: boolean;
+  /** POSIX only: when the first group SIGTERM was sent. A resend waits at least one poll after it, so it does not fall into the same fork window. */
+  requestedAt?: number;
   /** win32 only: the process ids `taskkill /T /F` reported walking. This set — not taskkill's exit status — is what disposal measures for quiescence. */
   acceptedPids: Set<number>;
   boundOutputPipes?: true;
@@ -941,7 +943,9 @@ export async function requestOwnedProcessTreeTermination(options: OwnedProcessTr
   }
   rememberDescendants(options.child, pid, () => readDisposalTable(options));
   await signalGroup(options.child, pid, 'SIGTERM', options.label, options.killFn ?? defaultKill);
-  stateFor(options.child).requested = true;
+  const state = stateFor(options.child);
+  state.requested = true;
+  state.requestedAt = Date.now();
 }
 
 /**
@@ -1066,9 +1070,33 @@ export async function disposeOwnedProcessTree(options: OwnedProcessTreeOptions):
   if (groupReachable && !terminationState.get(options.child)?.requested) {
     rememberDescendants(options.child, pid, readTable);
     groupReachable = await signalGroup(options.child, pid, 'SIGTERM', options.label, kill);
-    stateFor(options.child).requested = true;
+    const state = stateFor(options.child);
+    state.requested = true;
+    state.requestedAt = Date.now();
   }
-  if (groupReachable && !(await waitUntil(() => groupExists(pid, options.label, kill), termGraceMs))) {
+  const termDeadline = Date.now() + termGraceMs;
+  const groupGoneBy = (until: number): Promise<boolean> =>
+    waitUntil(() => groupExists(pid, options.label, kill), Math.max(0, until - Date.now()));
+  let termQuiesced = !groupReachable;
+  if (groupReachable) {
+    await waitUntil(() => isRunning(options.child) && groupExists(pid, options.label, kill), termGraceMs);
+    termQuiesced = !groupExists(pid, options.label, kill);
+    if (!termQuiesced && termGraceMs > 0 && !isRunning(options.child) && Date.now() < termDeadline) {
+      // The root exited but its group outlived the SIGTERM. Darwin's killpg
+      // can miss a member that is mid-fork when the signal is sent, so that
+      // member never saw a SIGTERM. Its spawner already took the first one, so
+      // one resend reaches every such member, once it is at least a poll past
+      // the first SIGTERM and out of that fork window. Members that keep
+      // living still face the SIGKILL below at the same termGraceMs deadline.
+      const requestedAt = stateFor(options.child).requestedAt ?? 0;
+      termQuiesced = await groupGoneBy(Math.min(requestedAt + POLL_MS, termDeadline));
+      if (!termQuiesced && Date.now() < termDeadline) {
+        groupReachable = await signalGroup(options.child, pid, 'SIGTERM', options.label, kill);
+        termQuiesced = !groupReachable || await groupGoneBy(termDeadline);
+      }
+    }
+  }
+  if (groupReachable && !termQuiesced) {
     // Read again first: the root may have started more since the SIGTERM.
     const observation = readTable();
     const more = isRunning(options.child) ? descendantsOf(observation.table, pid) : [];

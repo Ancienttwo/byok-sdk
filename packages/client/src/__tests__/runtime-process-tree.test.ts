@@ -420,6 +420,47 @@ describe.skipIf(process.platform === 'win32')('POSIX descendants that left the o
     await expect(disposeOwnedProcessTree(options)).resolves.toBeUndefined();
   });
 
+  // #2483: Darwin's killpg can miss a member forked while the SIGTERM is sent.
+  // `memberExitsAfterMs` is how long after the first SIGTERM the group's last member exits; it exits on SIGKILL or a resend regardless.
+  async function missedMemberDisposal({ rootRunning, termGraceMs, memberExitsAfterMs = Infinity }: { rootRunning: boolean; termGraceMs: number; memberExitsAfterMs?: number }) {
+    const rootPid = 900_005;
+    let memberLive = true;
+    let firstTermAt: number | undefined;
+    const signals: Array<NodeJS.Signals | number> = [];
+    const child = { pid: rootPid, exitCode: null, get signalCode() { return rootRunning ? null : 'SIGTERM'; } } as ChildProcess;
+    await disposeOwnedProcessTree({
+      child, label: 'missed member', waitClosed: async () => {}, isClosed: () => !rootRunning, termGraceMs, killGraceMs: 0,
+      observeProcessTableFn: () => ({ table: new Map() }),
+      killFn(pid, signal) {
+        expect(pid).toBe(-rootPid);
+        if (signal === 0) {
+          if (firstTermAt !== undefined && Date.now() - firstTermAt >= memberExitsAfterMs) memberLive = false;
+          if (!memberLive) throw Object.assign(new Error('gone'), { code: 'ESRCH' });
+          return;
+        }
+        signals.push(signal);
+        // The first SIGTERM ends the root and misses the member; any later signal reaches it.
+        if (signal === 'SIGTERM' && firstTermAt === undefined) {
+          firstTermAt = Date.now();
+          rootRunning = false;
+        } else memberLive = false;
+      },
+    });
+    return signals;
+  }
+
+  it('resends SIGTERM once when the root exited but its group outlived the first SIGTERM', async () => {
+    await expect(missedMemberDisposal({ rootRunning: true, termGraceMs: 5_000 })).resolves.toEqual(['SIGTERM', 'SIGTERM']);
+  });
+
+  it('does not resend SIGTERM to a group that exits within a poll of the first SIGTERM', async () => {
+    await expect(missedMemberDisposal({ rootRunning: false, termGraceMs: 5_000, memberExitsAfterMs: 5 })).resolves.toEqual(['SIGTERM']);
+  });
+
+  it('escalates without a resend when termGraceMs is 0', async () => {
+    await expect(missedMemberDisposal({ rootRunning: false, termGraceMs: 0 })).resolves.toEqual(['SIGTERM', 'SIGKILL']);
+  });
+
   function zombieDescendantDisposal(killGraceMs: number) {
     const rootPid = 900_003;
     const descendantPid = 900_004;
