@@ -149,6 +149,22 @@ for (const target of ['index.js', 'adapters/index.js', 'bin/byok-agent.js']) {
   assert.deepEqual(sources.filter(source => readerSource.test(source)), [], `${target} bundles native reader sources`);
 }
 
+// One runtime-detection module serves every entry (#2505). Its private
+// WeakMaps carry the detections an adapter verified and the admission
+// delegations a Host declared through the adapters entry to a root-entry
+// daemon, so only the private entry may carry the source.
+const distRoot = fileURLToPath(new URL('../dist/', import.meta.url));
+const runtimeDetectionCopies = readdirSync(distRoot, { recursive: true })
+  .map(file => String(file).split(path.sep).join('/'))
+  .filter(file => file.endsWith('.js.map')
+    && readJson(path.join(distRoot, file)).sources.some(source => source.endsWith('src/runtime-detection.ts')))
+  .sort();
+assert.deepEqual(runtimeDetectionCopies, ['runtime-detection.js.map'], 'runtime detection must be bundled once, into its private entry');
+for (const target of ['index.js', 'adapters/index.js', 'testing/index.js', 'bin/byok-agent.js']) {
+  assert.match(readFileSync(path.join(distRoot, target), 'utf8'), /from\s*["']#byok-runtime-detection["']/,
+    `${target} must load the shared runtime detection`);
+}
+
 // The SDK root must not evaluate the prepared-input compile graph just because
 // it was imported. The compile calls the official public entry
 // `@earendil-works/pi-ai/api/openai-completions`, which statically loads the
