@@ -459,12 +459,12 @@ export function App() {
           </CardContent>
         </Card>
 
-        {/* Overlays & External Link Security */}
+        {/* Overlays & External Link UI Allowlist */}
         <Card>
           <CardHeader>
-            <CardTitle>Overlays &amp; External Link Gate</CardTitle>
+            <CardTitle>Overlays &amp; External Link UI Allowlist</CardTitle>
             <CardDescription>
-              Escape-dismissible overlays and strict https + origin allowlist link routing.
+              Escape-dismissible overlays and UI-layer https + origin allowlist (native capability enforces https-only; native brand-origin check wires with #2461 product routes).
             </CardDescription>
           </CardHeader>
           <CardContent>

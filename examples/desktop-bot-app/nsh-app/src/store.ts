@@ -83,7 +83,7 @@ export function requestQuit(): void {
   ByokShell.requestQuit();
 }
 
-/** Single app-wide command for restarting the supervised Host process. */
-export function restartHost(): void {
-  ByokShell.restart();
+/** Single app-wide command for restarting the supervised Host process off the engine thread. */
+export async function restartHost(): Promise<void> {
+  await ByokShell.restart();
 }

@@ -135,7 +135,7 @@ pub(crate) async fn dispatch_call(
                 );
             }
             let stamp = format_utc_stamp(SystemTime::now());
-            let app_version = env!("CARGO_PKG_VERSION").to_owned();
+            let app_version = shell.app_version;
             let result = blocking(move || {
                 let relaunched = AtomicBool::new(false);
                 let out = router.restore(&app_version, &stamp, |failure| {

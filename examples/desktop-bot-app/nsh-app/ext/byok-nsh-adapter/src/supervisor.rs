@@ -20,6 +20,7 @@ pub(crate) struct RuntimeShell {
     pub supervisor: Arc<HostSupervisor>,
     pub maintenance: MaintenanceLock,
     pub router: Arc<ShellRouter>,
+    pub app_version: String,
 }
 
 static RUNTIME_SHELL: OnceLock<Mutex<Option<RuntimeShell>>> = OnceLock::new();
@@ -330,9 +331,10 @@ pub(crate) fn serialize_power_error(error: &byok_shell::PowerError) -> JsonValue
     serde_json::json!({ "message": error.to_string() })
 }
 
-fn create_shell_with_spec(
+pub(crate) fn build_runtime_shell(
     command: HostCommandSpec,
     app_version: &str,
+    start: bool,
 ) -> Result<RuntimeShell, JsError> {
     let contract = BridgeContract::load()
         .map_err(|err| JsError::Error(err.to_string()).with_code("contract_error"))?;
@@ -360,12 +362,22 @@ fn create_shell_with_spec(
         Box::new(UnsupportedLoginItemBackend),
         app_version,
     ));
-    supervisor.start();
+    if start {
+        supervisor.start();
+    }
     Ok(RuntimeShell {
         supervisor,
         maintenance,
         router,
+        app_version: app_version.to_owned(),
     })
+}
+
+fn create_shell_with_spec(
+    command: HostCommandSpec,
+    app_version: &str,
+) -> Result<RuntimeShell, JsError> {
+    build_runtime_shell(command, app_version, true)
 }
 
 pub(crate) fn ensure_started(app_version: Option<String>) -> Result<JsonValue, JsError> {
@@ -392,11 +404,14 @@ pub(crate) fn ensure_started(app_version: Option<String>) -> Result<JsonValue, J
     Ok(serde_json::json!({ "started": true, "alreadyStarted": false, "state": current }))
 }
 
-pub(crate) fn restart_supervisor() -> Result<(), JsError> {
+pub(crate) async fn restart_supervisor() -> Result<(), JsError> {
     let shell = active_shell()
         .ok_or_else(|| JsError::Error("Host supervisor is not started".to_owned()).with_code("host_exited"))?;
-    shell.supervisor.restart();
-    Ok(())
+    blocking(move || {
+        shell.supervisor.restart();
+    })
+    .await
+    .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))
 }
 
 pub(crate) fn current_state() -> Option<JsonValue> {

@@ -132,6 +132,7 @@ describe("BYOK NSH Foundations Gallery", () => {
       await expect(ByokShell.call(forbidden, null)).rejects.toMatchObject({ code: "unknown_method" });
     }
     await expect(ByokShell.call("status", null)).rejects.toMatchObject({ code: "host_exited" });
+    await expect(ByokShell.restart()).rejects.toMatchObject({ code: "host_exited" });
 
     const stops = [
       ByokShell.onState(() => {}),
@@ -145,7 +146,7 @@ describe("BYOK NSH Foundations Gallery", () => {
     }
   });
 
-  test("external link allowlist permits only allowlisted https origins and drops unsafe schemes", async () => {
+  test("UI-layer external link allowlist permits only allowlisted https origins and drops unsafe schemes", async () => {
     expect(parseAllowedExternalUrl("https://docs.byok.test/guide", ["https://docs.byok.test"])).toBe(
       "https://docs.byok.test/guide",
     );

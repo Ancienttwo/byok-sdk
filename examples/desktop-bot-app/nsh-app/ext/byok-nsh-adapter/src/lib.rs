@@ -29,9 +29,9 @@ impl ByokShell {
         supervisor::ensure_started(app_version)
     }
 
-    /// Restarts the active `HostSupervisor` cleanly after a stop or crash.
-    pub fn restart() -> Result<(), JsError> {
-        supervisor::restart_supervisor()
+    /// Restarts the active `HostSupervisor` off the engine thread after a stop or crash.
+    pub async fn restart() -> Result<(), JsError> {
+        supervisor::restart_supervisor().await
     }
 
     /// Returns whether the process-wide `HostSupervisor` singleton has been started.
@@ -109,7 +109,7 @@ mod tests {
 
     use crate::bridge::{format_utc_stamp, parse_login_item_set_param, validate_renderer_method};
     use crate::quit::drain_for_quit;
-    use crate::supervisor::{EventHub, ShellEvent};
+    use crate::supervisor::{EventHub, ShellEvent, build_runtime_shell};
 
     #[test]
     fn declarations_have_zero_undocumented_symbols() {
@@ -125,12 +125,20 @@ mod tests {
             "export declare const ByokShell: ByokShellModule;",
             "call(method: string, params?: unknown | null): Promise<unknown>;",
             "start(appVersion?: string | null): unknown;",
+            "restart(): Promise<void>;",
             "installQuitHooks(): () => void;",
             "requestQuit(): void;",
             "bridgeVersion(): number;",
         ] {
             assert!(dts.contains(expected), "missing `{expected}` in:\n{dts}");
         }
+    }
+
+    #[test]
+    fn runtime_shell_retains_startup_app_version_for_restore() {
+        let command = HostCommandSpec::dev_node_host(PathBuf::from("nonexistent-host.cjs"));
+        let shell = build_runtime_shell(command, "2.4.0", false).expect("shell builds");
+        assert_eq!(shell.app_version, "2.4.0");
     }
 
     #[test]
