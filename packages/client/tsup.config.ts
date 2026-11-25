@@ -1,7 +1,12 @@
 import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'tsup';
 import { journalWorkerSource } from './scripts/journal-worker-source';
 import { workspaceExternals } from './scripts/workspace-externals';
+
+// Without the extension, so a `.js` specifier and an extensionless one compare equal.
+const runtimeDetectionSource = fileURLToPath(new URL('./src/runtime-detection', import.meta.url));
 
 const manifest = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8')) as { version?: unknown };
 if (typeof manifest.version !== 'string') throw new Error('packages/client/package.json must declare a string version');
@@ -35,6 +40,7 @@ export default defineConfig({
     'src/bin/byok-agent-team-mcp.ts',
     'src/bin/byok-mcp-hub.ts',
     'src/bin/mcp-hub-runtime.ts',
+    'src/runtime-detection.ts',
   ],
   format: ['esm'],
   target: 'es2022',
@@ -64,6 +70,18 @@ export default defineConfig({
           return { path: './index.js', external: true };
         }
         return undefined;
+      });
+    },
+  }, {
+    name: 'runtime-detection-entry',
+    setup(build) {
+      // Every entry must load one runtime-detection module: its private
+      // WeakMaps hold the verified detections and admission delegations that
+      // the adapters entry writes and a root-entry daemon reads (#2505).
+      build.onResolve({ filter: /(?:^|\/)runtime-detection(?:\.js)?$/ }, args => {
+        if (args.kind === 'entry-point') return undefined;
+        if (path.resolve(args.resolveDir, args.path.replace(/\.js$/, '')) !== runtimeDetectionSource) return undefined;
+        return { path: '#byok-runtime-detection', external: true, sideEffects: false };
       });
     },
   }],

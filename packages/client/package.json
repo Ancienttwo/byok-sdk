@@ -144,6 +144,10 @@
     "#byok-pi-todo-runtime": {
       "types": "./dist/bin/pi-todo-runtime.d.ts",
       "default": "./dist/bin/pi-todo-runtime.js"
+    },
+    "#byok-runtime-detection": {
+      "types": "./dist/runtime-detection.d.ts",
+      "default": "./dist/runtime-detection.js"
     }
   }
 }
