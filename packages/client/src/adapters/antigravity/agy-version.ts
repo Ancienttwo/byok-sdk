@@ -5,7 +5,7 @@ import type { RuntimeVersionPolicy } from '../../types.js';
  * user's machine, so another version is an advisory; a block is Host-only.
  * This is the release the runtime contract suite qualified.
  */
-export const QUALIFIED_AGY_VERSION = '1.5.11';
+export const QUALIFIED_AGY_VERSION = '1.5.16';
 
 /** The adapter's default policy (#1103). */
 export const AGY_VERSION_POLICY: RuntimeVersionPolicy = Object.freeze({

@@ -1,0 +1,291 @@
+// BYOK change: Modified from OAR 4f767ca to leave native session-file lookups out of open and dispose (Apache-2.0).
+import { dshInputSource } from "./bridge-input.js";
+import { dshControlSource } from "./bridge-controls.js";
+import { dshGoalSource } from "./bridge-goal.js";
+import { dshPromptSource } from "./bridge-prompt.js";
+
+/** Revision of the internal transport between this source and `control.ts`. Both ship together; it is not a public protocol. */
+export const DSH_BRIDGE_PROTOCOL = 1;
+
+/**
+ * The plugin DSH loads into its own process. It uses the services the running process
+ * injects, including its loader for the installed MCP client. A single-file host
+ * writes this source to a private directory. The vendor suite runs the same text.
+ *
+ * Native stdout frames carry the runtime payload unchanged alongside its routing fields.
+ */
+export const dshBridgeSource = String.raw`import { randomUUID } from "node:crypto";
+import { createInterface } from "node:readline";
+
+write({ type: "profile-loaded" }); // Cordis imports this module from the parsed profile.
+export const name = "oar-dsh-bridge";
+
+const PROTOCOL = ${String(DSH_BRIDGE_PROTOCOL)};
+const AGENT_METHODS = ["followup", "steer", "cancel"];
+const INBOX_METHODS = ["remove"];
+
+function write(value) { process.stdout.write(JSON.stringify(value) + "\n"); }
+
+// A native error object can hold anything; only what JSON can carry crosses, so a report never throws into the runtime.
+function jsonSafe(value) {
+  try { return JSON.stringify(value) === undefined ? undefined : value; } catch { return undefined; }
+}
+
+function structured(error, depth = 0) {
+  if (error === null || typeof error !== "object") { return { message: String(error) }; }
+  const fields = {};
+  for (const key of Object.keys(error)) {
+    const value = key === "cause" ? undefined : jsonSafe(error[key]);
+    if (value !== undefined) { fields[key] = value; }
+  }
+  const cause = depth < 4 && error.cause !== undefined ? { cause: structured(error.cause, depth + 1) } : {};
+  return { ...fields, name: error.name, message: String(error.message), ...cause };
+}
+
+function methods(target, names) {
+  return Object.fromEntries(names.map((key) => [key, typeof target?.[key] === "function"]));
+}
+
+function refusal(code, message, capability) {
+  const error = new Error(message);
+  error.code = code;
+  if (capability !== undefined) { error.capability = capability; }
+  return error;
+}
+
+function requireMethod(target, key, capability) {
+  if (typeof target?.[key] !== "function") {
+    throw refusal("native_method_unavailable", "This DSH does not provide " + key + "(), which " + capability + " requires", capability);
+  }
+}
+
+export function apply(ctx, config) {
+  const loader = ctx.get("loader");
+  if (typeof loader?.await !== "function") {
+    write({ type: "startup-error", error: { message: "This DSH does not provide loader.await(), which starting the bridge requires" }, capability: "startup", code: "native_method_unavailable" });
+    return;
+  }
+  // Activation must not wait for the barrier it observes.
+  void (async () => {
+    try {
+      await loader.await();
+      if (config?.sessionLogPlugin !== undefined) {
+        const plugin = config.sessionLogPlugin;
+        requireMethod(loader, "entries", "sessionLogUpload");
+        const entry = [...loader.entries()].find((row) => row.options?.id === plugin.id);
+        if (entry === undefined) {
+          throw refusal("option_not_applied", "DSH does not mount the " + plugin.id + " plugin, so OAR cannot confirm session-log upload is off", "sessionLogUpload");
+        }
+        if (entry.options?.name !== plugin.name) {
+          throw refusal("option_not_applied", "DSH " + plugin.id + " entry does not match " + plugin.name, "sessionLogUpload");
+        }
+        if (entry.options?.disabled !== true) {
+          if (entry.options?.config?.enabled !== false) {
+            throw refusal("option_not_applied", "DSH did not apply enabled: false to " + plugin.id, "sessionLogUpload");
+          }
+          const fiber = entry.fiber;
+          requireMethod(fiber, "await", "sessionLogUpload");
+          await fiber.await();
+          if (fiber.state !== 2) {
+            throw refusal("option_not_applied", "DSH " + plugin.id + " plugin is not active (native state " + fiber.state + ")", "sessionLogUpload");
+          }
+        }
+      }
+      boot(ctx, config);
+    }
+    catch (error) { const native = structured(error); write({ type: "startup-error", error: native, code: native.code, capability: native.capability }); }
+  })();
+}
+
+function boot(ctx) {
+  const agents = ctx.get("agents");
+  const persistence = ctx.get("sessionPersistence");
+${dshControlSource}
+  const handles = new Map();
+  const owned = (sessionId) => {
+    const handle = handles.get(sessionId);
+    if (handle === undefined) { throw refusal("unknown_session", "This process does not own session " + sessionId); }
+    return handle;
+  };
+  // A native splice commits before followup() or remove() returns. This routing
+  // field says which control caused it, which the splice alone cannot.
+  let cause;
+  ctx.on("session/event", (session, event) => { write({ type: "native", channel: "session/event", sessionId: session.header.id, ...(cause === undefined ? {} : { cause }), event }); });
+  ctx.on("agent/assistant-stream", ({ agent, frame }) => { write({ type: "native", channel: "agent/assistant-stream", sessionId: agent.session.id, frame }); });
+  ctx.on("agent/status", ({ agent, status }) => { write({ type: "native", channel: "agent/status", sessionId: agent.session.id, status }); });
+  ctx.on("agent/error", ({ agent, turn, step, error }) => { write({ type: "native", channel: "agent/error", sessionId: agent.session.id, turn, step, error: structured(error) }); });
+  for (const channel of ["subagent/start", "subagent/end"]) { ctx.on(channel, (info) => { write({ type: "native", channel, info }); }); }
+
+${dshInputSource}
+  const opened = async (handle, route) => {
+    const { agent } = handle;
+    handles.set(agent.session.id, handle);
+    routes.set(agent, route);
+    const modelCurrent = typeof agent.model?.current === "function";
+    // BYOK change: no persistence.stat lookup: the SDK exposes no native session file, so the opened frame names no host path and a failing stat cannot fail the open.
+    return { compact: typeof ctx.get("compaction")?.compactNow === "function", imageTypes: await imageTypes(agent), sessionId: agent.session.id, header: agent.session.header, status: agent.status,
+      jobMethods: methods(jobs, ["get", "kill", "wait"]),
+      methods: methods(agent, AGENT_METHODS), inboxMethods: methods(agent.inbox, INBOX_METHODS),
+      pending: { nextTurn: agent.inbox?.nextTurn?.length, nextStep: agent.inbox?.nextStep?.length },
+      modelCurrent, ...(modelCurrent ? { model: agent.model.current() } : {}) };
+  };
+
+  // Native validation before any turn; a route the runtime cannot run is refused at open.
+  const validated = async (route, explicit) => {
+    const llm = ctx.get("llm");
+    // An explicit request the runtime cannot check is refused, never run unchecked.
+    if (explicit.provider !== undefined) { requireMethod(llm, "resolveCallConfig", "confirming a model"); }
+    else if (explicit.reasoningEffort !== undefined) { requireMethod(llm, "resolveCallConfig", "confirming a reasoning effort"); }
+    else { return route; }
+    await llm.resolveCallConfig(route);
+    return route;
+  };
+  const defaultRoute = () => {
+    const defaults = ctx.get("agentDefaultModel");
+    return typeof defaults?.currentSelection === "function" ? defaults.currentSelection() : {};
+  };
+
+${dshPromptSource}  const configureSession = (agent, request) => {
+    configureDirectories(agent, request);
+    configureTools(agent, request);
+    configurePrompt(agent, request);
+  };
+
+${dshGoalSource}
+  const commands = {
+    async mountMcp(request) {
+      const loader = ctx.get("loader");
+      requireMethod(loader, "import", "session MCP");
+      requireMethod(loader, "unwrapExports", "session MCP");
+      requireMethod(ctx, "plugin", "session MCP");
+      const plugin = loader.unwrapExports(await loader.import("@deepseek-ai/dsh-mcp-client"));
+      for (const server of request.servers) {
+        const fiber = ctx.plugin(plugin, server)?.ctx?.fiber;
+        requireMethod(fiber, "await", "session MCP");
+        await fiber.await();
+        if (fiber.state !== 2) { throw refusal("mcp_inactive", "Requested MCP plugin is not active (native state " + fiber.state + ")", "session MCP"); }
+      }
+      return {};
+    },
+    ...goalCommands,
+    ...sessionControls,
+    name(request) {
+      const { agent } = owned(request.sessionId);
+      const title = ctx.get("sessionTitle");
+      requireMethod(title, "get", "name");
+      requireMethod(title, "rename", "name");
+      // Called only after every opening check. Preserve every saved native title.
+      const current = title.get(agent.session);
+      if (request.resuming && current !== undefined) { return current; }
+      try { return title.rename(agent.session, request.name); }
+      catch (error) { throw refusal("option_not_applied", String(error?.message ?? error), "name"); }
+    },
+    async open(request) {
+      requireMethod(agents, "create", "opening a session");
+      const explicit = request.agentOptions ?? {};
+      const route = await validated(explicit.provider === undefined ? { ...defaultRoute(), ...explicit } : explicit, explicit);
+      return opened(await agents.create({ sessionId: request.sessionId, meta: { cwd: request.cwd }, agentOptions: route, setup: (_ctx, agent) => configureSession(agent, request) }), route);
+    },
+    // The saved header and route, read without taking the session over.
+    async peek(request) {
+      requireMethod(persistence, "open", "reading a saved session before resume");
+      const stored = await persistence.open(request.sessionId, "read");
+      try {
+        const log = await stored.read();
+        const last = log.events.findLast((event) => event.type === "request/header");
+        const config = last?.data?.header?.config;
+        const defaulted = last?.data?.header?.adapterDefaults?.reasoningEffort === true;
+        return { header: stored.header, ...(config === undefined ? {} : { route: { provider: config.provider, model: config.model,
+          ...(config.reasoningEffort === undefined || defaulted ? {} : { reasoningEffort: config.reasoningEffort }) } }) };
+      } finally { await stored.close(); }
+    },
+    async resume(request) {
+      requireMethod(agents, "resume", "resuming a session");
+      const explicit = request.agentOptions ?? {};
+      const saved = request.route ?? defaultRoute();
+      const route = await validated(explicit.provider === undefined ? { ...saved, ...explicit } : explicit, explicit);
+      const handle = await agents.resume({ resumeSessionId: request.sessionId, agentOptions: route, setup: (_ctx, agent) => {
+        // Read the restored log before creation hooks can start another request.
+        const last = agent.session.requestContext?.();
+        if (typeof last?.contextWindow === "number" && (explicit.provider === undefined || (last.provider === explicit.provider && last.model === explicit.model))) {
+          write({ type: "native", channel: "session/requestContext", sessionId: agent.session.id, contextWindow: last.contextWindow });
+        }
+        configureSession(agent, request);
+      } });
+      // Releases with a recorded selection keep the saved route over these options unless told otherwise.
+      if ((explicit.provider !== undefined || explicit.reasoningEffort !== undefined) && typeof handle.agent.model?.select === "function") { handle.agent.model.select(route); }
+      return opened(handle, route);
+    },
+    prompt: request => admitInput("prompt", request),
+    queue: request => admitInput("queue", request),
+    steer: request => admitInput("steer", request),
+    async withdraw(request) {
+      const { agent } = owned(request.sessionId);
+      requireMethod(agent.inbox, "remove", "withdraw");
+      const matching = (pendingQueues.get(agent) ?? []).filter((entry) => entry.id === request.messageId);
+      for (const entry of matching) { entry.withdrawn = true; }
+      const intercepted = matching.length > 0 ? (await Promise.all(matching.map((entry) => entry.settled))).some(Boolean) : false;
+      // Only input held for a later turn: a steer may already be in the next request.
+      if (!agent.inbox.nextTurn.some((message) => message.id === request.messageId)) { return { removed: intercepted }; }
+      cause = "withdraw";
+      try { return { removed: agent.inbox.remove(request.messageId) || intercepted }; } finally { cause = undefined; }
+    },
+    cancel(request) {
+      const { agent } = owned(request.sessionId);
+      requireMethod(agent, "cancel", "abort");
+      if (agent.status === "idle") { throw refusal("no_active_turn", "no active turn"); }
+      agent.cancel({ kind: "user" }, { keepInbox: false });
+      return {};
+    },
+    async skills(request) {
+      const skills = ctx.get("skills");
+      requireMethod(skills, "snapshot", "listing skills");
+      return await skills.snapshot({ cwd: request.cwd });
+    },
+    async models() {
+      const llm = ctx.get("llm");
+      requireMethod(llm, "listProviders", "listing models");
+      requireMethod(llm, "listModels", "listing models");
+      requireMethod(llm, "resolveModelInfo", "listing models");
+      const providers = await Promise.all(llm.listProviders().map(async (provider) => {
+        try {
+          const models = await llm.listModels(provider.id);
+          const entries = await Promise.all(models.map(async (model) => {
+            const resolved = await llm.resolveModelInfo(provider.id, model.id);
+            return { id: model.id, name: model.name, ...(resolved.reasoning === undefined ? {} : { reasoning: resolved.reasoning }) };
+          }));
+          return { id: provider.id, name: provider.name, models: entries };
+        } catch (error) { return { id: provider.id, name: provider.name, failure: String(error?.message ?? error) }; }
+      }));
+      return { providers, default: defaultRoute() };
+    },
+    async dispose() {
+      const results = await Promise.allSettled([...handles.values()].map(async (handle) => { await handle.dispose(); }));
+      handles.clear();
+      if (typeof persistence?.flush === "function") { await persistence.flush(); }
+      // BYOK change: dispose reports no native session files.
+      const failed = results.find((result) => result.status === "rejected");
+      if (failed !== undefined) { throw failed.reason; }
+      return {};
+    },
+  };
+
+  write({ type: "ready", protocol: PROTOCOL,
+    services: { agents: methods(agents, ["create", "resume"]), sessionPersistence: methods(persistence, ["list", "open", "flush", "stat"]) } });
+
+  const input = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  input.on("line", (line) => { void receive(line); });
+  async function receive(line) {
+    let request = null;
+    try { request = JSON.parse(line); }
+    catch { write({ type: "protocol-error", error: { message: "Invalid command JSON" } }); return; }
+    if (request === null || typeof request !== "object" || typeof request.id !== "string" || !Object.hasOwn(commands, request.method)) {
+      write({ type: "protocol-error", error: { message: "Expected a command with an id and a known method" } });
+      return;
+    }
+    try { write({ type: "response", id: request.id, result: await commands[request.method](request) }); }
+    catch (error) { write({ type: "response", id: request.id, error: structured(error), code: error?.code, capability: error?.capability }); }
+  }
+  ctx.effect(() => () => { input.close(); });
+}
+`;

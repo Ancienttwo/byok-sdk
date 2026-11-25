@@ -17,9 +17,9 @@ import { testExecutionScratch } from './fixtures/execution-scratch';
 import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
-import { acquireDshProfile } from '../../vendor/oar/c0c8b28/runtimes/dsh/profile-startup.js';
-import { dshListModels } from '../../vendor/oar/c0c8b28/runtimes/dsh/list-models.js';
-import { dshBridgeSource } from '../../vendor/oar/c0c8b28/runtimes/dsh/bridge.js';
+import { acquireDshProfile } from '../../vendor/oar/19ccd9a/runtimes/dsh/profile-startup.js';
+import { dshListModels } from '../../vendor/oar/19ccd9a/runtimes/dsh/list-models.js';
+import { dshBridgeSource } from '../../vendor/oar/19ccd9a/runtimes/dsh/bridge.js';
 
 const DSH_TARGET = { lane: 'harness', harnessId: 'dsh', selection: { mode: 'byok', providerId: 'openai', modelId: 'byok-custom/loop-model' } } as const;
 
@@ -377,7 +377,7 @@ describe('DshAdapter sessions', () => {
     await vi.waitFor(() => fs.stat(path.join(scratch.sdkDir, 'oar-dsh-bridge.patch.json')));
     controller.abort('private cancellation value');
     expect(await outcome).toBeInstanceOf(Error);
-    release(false);
+    release();
     await new Promise(resolve => setTimeout(resolve, 100));
     expect((await facts()).some(row => row.kind === 'start')).toBe(false);
   });
@@ -396,7 +396,7 @@ describe('DshAdapter sessions', () => {
     await vi.waitFor(() => fs.stat(path.join(directory, 'oar-dsh-bridge.patch.json')));
     controller.abort();
     expect(await listing).toBeInstanceOf(Error);
-    release(false);
+    release();
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(spawnProcess).not.toHaveBeenCalled();
   });
@@ -419,6 +419,7 @@ describe('DshAdapter sessions', () => {
     try {
       const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
       const next = async () => JSON.parse((await lines.next()).value as string);
+      expect(await next()).toEqual({ type: 'profile-loaded' });
       expect(await next()).toMatchObject({ type: 'ready' });
       child.stdin!.write(`${JSON.stringify({ id: 'o1', method: 'open', sessionId: 's1', cwd: dir })}\n`);
       const opened = await next();
@@ -497,8 +498,10 @@ describe('DshAdapter sessions', () => {
     await turn(session);
     const all = await facts();
     expect(all.find((fact) => fact.method === 'open')!.request).toMatchObject({ cwd: workspaceDir, agentOptions: { provider: 'byok-custom', model: 'loop-model' } });
-    const [row] = all.find((fact) => fact.kind === 'start')!.overlay[1].insert;
-    expect(row).toMatchObject({ name: '@deepseek-ai/dsh-mcp-client', config: { serverName: 'byokagentresult', command: '/usr/bin/env', args: ['node', 'helper.mjs'], cwd: workspaceDir } });
+    expect(all.find((fact) => fact.kind === 'start')!.overlay[1].insert.map((row: { id: string }) => row.id)).toEqual(['oar-dsh-bridge']);
+    expect(all.find((fact) => fact.method === 'mountMcp')!.request.servers).toEqual([
+      { serverName: 'byokagentresult', failOnStartupError: true, transport: 'stdio', command: '/usr/bin/env', args: ['node', 'helper.mjs'], env: {}, cwd: workspaceDir },
+    ]);
     expect(session.sessionRef).toBe(all.find((fact) => fact.method === 'open')!.request.sessionId);
     // The vendored dsh session can carry these since OAR 0.111; a task with no Agent gets none of them (#2363).
     const opened = all.find((fact) => fact.method === 'open')!.request;
@@ -524,15 +527,56 @@ describe('DshAdapter sessions', () => {
     expect(all.some((fact) => fact.method === 'name')).toBe(false);
   });
 
+  it('mounts credentialed stdio and HTTP entries through the bridge and keeps their credentials out of the launch and the events', async () => {
+    const stdioToken = 'stdio-mcp-token-distinctive-suffix';
+    const bearer = 'http-mcp-bearer-distinctive-suffix';
+    const { open, facts, workspaceDir } = await setup();
+    const session = await open({ target: DSH_TARGET, instruction: 'hello' }, { mcpServers: {
+      local: { command: '/usr/bin/env', env: { HOST_TOKEN: stdioToken } },
+      remote: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: `Bearer ${bearer}` } },
+    } });
+    const events = await turn(session);
+    const all = await facts();
+    expect(all.find((fact) => fact.method === 'mountMcp')!.request.servers).toEqual([
+      { serverName: 'local', failOnStartupError: true, transport: 'stdio', command: '/usr/bin/env', args: [], env: { HOST_TOKEN: stdioToken }, cwd: workspaceDir },
+      { serverName: 'remote', failOnStartupError: true, transport: 'streamable-http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: `Bearer ${bearer}` } },
+    ]);
+    const start = JSON.stringify(all.find((fact) => fact.kind === 'start'));
+    for (const secret of [stdioToken, bearer]) {
+      expect(start).not.toContain(secret);
+      expect(JSON.stringify(events)).not.toContain(secret);
+    }
+  });
+
   it.each([
-    ['env', { command: '/usr/bin/env', env: { TOKEN: 'x' } }],
-    ['http', { type: 'http', url: 'http://127.0.0.1:9/mcp' }],
-  ])('refuses an MCP entry with %s before dsh starts, without a retry', async (_label, server) => {
-    const { adapter, facts } = await setup();
-    expect(await adapter.prepare({ offer: { target: DSH_TARGET, instruction: 'x' }, descriptor: adapter.descriptor, requiredToolsetIds: [], mcpServers: { host: server } as never })).toEqual({
-      kind: 'reject', reason: 'dsh cannot attach the task MCP servers: DSH session MCP supports stdio command and args only; HTTP, env and headers have no verified persistence boundary', retryable: false,
-    });
-    expect((await facts()).some((fact) => fact.kind === 'start')).toBe(false);
+    ['in a refusal frame', { FAKE_DSH_MOUNT_FAIL: '1' }, 'MCP plugin is not active'],
+    ['on stderr', { FAKE_DSH_MOUNT_FAIL: 'exit' }, 'mount failed'],
+    ['in a native event frame', {}, 'mounted'],
+  ])('redacts MCP credentials echoed %s, whatever their names, raw and encoded once or twice', async (where, env, marker) => {
+    const bare = 'bare"token\\value-123';
+    const credentials = ['abc12345', '/opt/service/secret-path-123', 'custom-header-credential-123', 'long"quoted\\secret-123', bare];
+    const { open, facts } = await setup({}, env);
+    const mcpServers = {
+      local: { command: '/usr/bin/env', env: { HOST_ACCESS: credentials[0], SERVICE_REF: credentials[1], LOGIN_BLOB: credentials[3], DEBUG: '1' } },
+      remote: { type: 'http' as const, url: 'http://127.0.0.1:9/mcp', headers: { 'X-Auth': credentials[2], Authorization: `Bearer ${bare}` } },
+    };
+    let text: string;
+    if (where === 'in a native event frame') {
+      text = JSON.stringify(await turn(await open({ target: DSH_TARGET, instruction: 'echo-mcp-mount' }, { mcpServers })));
+    } else {
+      const error = await open({ target: DSH_TARGET, instruction: 'hello' }, { mcpServers }).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ phase: 'start' });
+      text = JSON.stringify(error, Object.getOwnPropertyNames(error));
+      expect((await facts()).some((fact) => fact.method === 'open')).toBe(false);
+    }
+    expect(text).toContain(marker);
+    // The serialized output adds one level of escaping over the native text, which holds up to two.
+    const escape = (value: string) => JSON.stringify(value).slice(1, -1);
+    for (const secret of credentials) {
+      for (const form of [secret, escape(secret), escape(escape(secret)), escape(escape(escape(secret)))]) expect(text).not.toContain(form);
+    }
+    // A value under eight characters is not redacted, so the echoed DEBUG=1 stays readable.
+    expect(text).toMatch(/DEBUG\\*":\\*"1\\*"/);
   });
 
   it('projects committed messages, tools and billed usage, then ends the turn', async () => {
@@ -671,7 +715,7 @@ describe('DshAdapter sessions', () => {
     expect((await turn(resumed))[0]).toEqual({ type: 'progress', text: 'first message: again' });
     const all = await facts();
     expect(all.find((fact) => fact.method === 'resume')!.request).toMatchObject({ sessionId: sessionRef, route: { provider: 'saved', model: 'route' } });
-    expect(all.filter((fact) => fact.kind === 'start').at(-1)!.overlay[1].insert[0].config.serverName).toBe('byokagentresult');
+    expect(all.filter((fact) => fact.method === 'mountMcp').at(-1)!.request.servers.map((server: { serverName: string }) => server.serverName)).toEqual(['byokagentresult']);
   });
 
   it('fails a resume of an unknown session or another workspace as a non-retryable authority failure', async () => {

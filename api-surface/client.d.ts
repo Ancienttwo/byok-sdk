@@ -5714,7 +5714,7 @@ declare const RUNTIME_RELEASES: {
     };
     readonly agy: {
         readonly kind: 'vendor';
-        readonly qualifiedVersion: "1.5.11";
+        readonly qualifiedVersion: "1.5.16";
         readonly token: typeof agyVersionToken;
         readonly command: 'agy update';
         readonly reason: 'Use the Antigravity vendor installer to update the standalone CLI.';

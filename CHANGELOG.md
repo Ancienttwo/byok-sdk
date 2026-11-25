@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Changed (client, #2487)** — The client vendors OAR 0.131.0 (from 0.129.1). `DshAdapter` accepts MCP servers with stdio `env` and HTTP `headers`, mounted in memory through the bridge; it used to decline them. `DaemonConfig.mcpToolsets` still rejects both. The Antigravity CLI qualified version is 1.5.16. [Host upgrade](docs/releases/host-upgrade-next-minor.md#oar-01310-2487)
+
 ## 0.46.1 — 2026-11-25 (published)
 
 [Release notes](docs/releases/v0.46.1.md)

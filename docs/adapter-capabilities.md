@@ -47,7 +47,7 @@ checks the running model's image support before delivery.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.11` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.0` | `1.6.0` |
+| Qualified version (PR CI) | — | `1.5.16` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.0` | `1.6.0` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Image input declared by descriptor | `images` | no | no | no | no | no | no | yes | no |
@@ -621,7 +621,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads unless `agentUserContext` is also `excluded`. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/c0c8b28/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/19ccd9a/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -677,7 +677,7 @@ ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
 limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
-The [vendored launch profile](../packages/client/vendor/oar/c0c8b28/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/19ccd9a/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -1022,7 +1022,7 @@ What the upstream runtimes offer that the SDK does not use:
 
 - Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
   thread that "should not be materialized on disk"), and `codex exec --help`
-  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/c0c8b28/runtimes/codex/open.ts)
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/19ccd9a/runtimes/codex/open.ts)
   does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
   leaves the other `CODEX_HOME` files alone.
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
@@ -1129,7 +1129,7 @@ and adding persona text alone does not establish isolation.
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/c0c8b28`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/19ccd9a`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 
@@ -1271,12 +1271,18 @@ and `@agentclientprotocol/sdk` does not load. It runs on the custom-harness path
 - Working directory: the process starts in the execution scratch directory,
   so dsh never loads a workspace `.env`. The workspace, realpath-resolved, is
   the session `cwd`. `TMPDIR` is the execution scratch too.
-- Host toolsets: dsh takes stdio `command` and `args` only. An entry with
-  `type: 'http'`, non-empty `env` or `headers`, or a name outside
-  `[A-Za-z0-9_-]{1,32}` is declined before claim, without a retry. A Host
-  that configures env for its own server cannot run it under dsh. Do not put a
-  token in `args` instead: dsh persistence of MCP entries is unaudited. Entries
-  are sent again on every resume.
+- Host toolsets: dsh takes stdio entries with `command`, `args` and `env`,
+  and `type: 'http'` entries with `url` and `headers`. OAR sends them over the
+  bridge stdin after the bridge is ready, and the bridge mounts each MCP
+  client in memory and checks it is active before the session opens; none
+  reaches the launch patch, argv or the dsh process environment. A mount that
+  fails closes the dsh process and fails the start; its message goes through
+  the session credential redactor, which covers every `env` and header value
+  of eight or more characters and the bearer tokens and URL passwords derived
+  from them, raw and with one or two levels of JSON escaping. A value under
+  eight characters is not redacted, even when its name contains TOKEN or
+  SECRET, unless it is inside a header or URL of eight or more characters. A name outside `[A-Za-z0-9_-]{1,32}` is declined
+  before claim, without a retry. Entries are sent again on every resume.
 - Permissions: `sandbox` selects `DSH_PERMISSION_MODE`. The default,
   `danger-full-access`, pairs with dsh approval `never`. `workspace-write` and
   `read-only` keep dsh's OS sandbox (seatbelt on macOS, bwrap or landlock on
@@ -1416,7 +1422,7 @@ optional `model` and `versionPolicy`). The other options stay on the
   `auto` is declined before claim.
 - Detection: `agy --version` must be at least 1.5.0, the first with native ACP
   (an older CLI answers `acp` with its help, else `refused: acp_unavailable`),
-  and warns when it is not the qualified `1.5.11`. `authPresent` is not reported,
+  and warns when it is not the qualified `1.5.16`. `authPresent` is not reported,
   because the credential is not in agy.
 - Failures: a failed turn takes its class from the vendored OAR outcome, and a
   class taken from error text stays `unknown`. Resume needs `session/list` to

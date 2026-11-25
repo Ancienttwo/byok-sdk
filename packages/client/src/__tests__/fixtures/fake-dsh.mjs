@@ -70,6 +70,7 @@ const toolCall = (sessionId, callId, name, args) => {
   event(sessionId, 'tool/call', { callId, name, arguments: args });
 };
 let route;
+let mounted = [];
 let hanging;
 
 function prompt(sessionId, text) {
@@ -81,6 +82,10 @@ function prompt(sessionId, text) {
   }
   if (text === 'rate-limit') return end({ kind: 'error', error: { code: 'RATE_LIMIT', status: 429, message: 'rate limit exceeded' } });
   if (text === 'exit') process.exit(3);
+  if (text === 'echo-mcp-mount') {
+    assistant(sessionId, [{ type: 'text', text: `mounted ${mountEcho(mounted)}` }]);
+    return end({ kind: 'completed' });
+  }
   if (text === 'echo-provider-key') {
     assistant(sessionId, [{ type: 'text', text: `key was ${process.env.BYOK_DSH_PROVIDER_API_KEY}` }]);
     return end({ kind: 'completed' });
@@ -130,7 +135,19 @@ function prompt(sessionId, text) {
 }
 
 const modelReadback = ({ provider, model, reasoningEffort }) => ({ provider, model, reasoningEffort: process.env.FAKE_DSH_EFFORT_READBACK ?? reasoningEffort });
+// The entries JSON-encoded, encoded again, and each bearer token alone JSON-escaped, as native diagnostics can print them.
+const mountEcho = (servers) => {
+  const tokens = servers.flatMap(server => Object.values(server.headers ?? {})).map(value => /^Bearer (.+)$/u.exec(value)?.[1]).filter(Boolean);
+  return [JSON.stringify(servers), JSON.stringify(JSON.stringify(servers)), ...tokens.map(token => `token ${JSON.stringify(token)}`)].join(' ');
+};
 const commands = {
+  mountMcp(request) {
+    // FAKE_DSH_MOUNT_FAIL=1: the native refusal echoes the mounted entries, credentials included; =exit echoes them on stderr and exits.
+    if (process.env.FAKE_DSH_MOUNT_FAIL === 'exit') { process.stderr.write(`mount failed: ${mountEcho(request.servers)}\n`, () => process.exit(3)); return new Promise(() => {}); }
+    if (process.env.FAKE_DSH_MOUNT_FAIL === '1') throw Object.assign(new Error(`MCP plugin is not active: ${mountEcho(request.servers)}`), { code: 'mcp_inactive' });
+    mounted = request.servers;
+    return {};
+  },
   models() {
     return { providers: [{ id: 'byok-custom', models: [{ id: 'loop-model', name: process.env.BYOK_DSH_PROVIDER_API_KEY }] }] };
   },
