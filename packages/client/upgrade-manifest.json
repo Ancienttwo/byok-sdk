@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.46.1",
-    "snapshotSha256": "f48c868cbce8852bff49bd24bf82e372475dab7683a07f023253245cb2ab9cf8"
+    "snapshotSha256": "266e7a32431b155b1d5a243d45dbe343e72fc6d92fd08e7c52c2f45e116f6e8d"
   },
   "configFields": {
     "status": "tracked",
@@ -190,6 +190,11 @@
       "entry": "detect-signal-prepare-detected"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#delegateAdmissionDetection",
+      "change": "added",
+      "entry": "decorated-adapter-admission"
+    },
+    {
       "item": "export:@byok-sdk/server#MachineInfo",
       "change": "changed",
       "entry": "daemon-when-capabilities-settled"
@@ -213,11 +218,6 @@
       "item": "export:@byok-sdk/server/execution-core#readHostLedger",
       "change": "added",
       "entry": "host-ledger-read"
-    },
-    {
-      "item": "export:@byok-sdk/client/adapters#delegateAdmissionDetection",
-      "change": "added",
-      "entry": "decorated-adapter-admission"
     }
   ]
 }
