@@ -1106,7 +1106,9 @@ with `minimumIntervalMs: 0`, which disables throttling in every presence store.
 The lease is then `now + TTL` on the store clock, also when that clock moved
 backwards, so a wall-clock rollback cannot fail an accepted envelope or a poll.
 `machines.list()` projects
-`connected` and live discovery facts plus durable identity and harness discovery. All dispatches
+`connected` and live discovery facts plus durable identity, harness discovery, and
+the latest durable `capabilities` accepted from `conn.hello` (known `CapabilityFlag`
+values, omitted before the first handshake, #2471). All dispatches
 require an explicit `deviceId`; registered offline targets receive queued work,
 while unknown/revoked legacy targets fail with `device_not_found`. Presence
 and advertised toolset inventories never gate dispatch; durable capabilities
@@ -1141,6 +1143,29 @@ after `start()` resolved (an observer callback or the reconnect loop throwing)
 is a crash too: the connection stops, the same health failure is recorded,
 and `lifecycle` becomes `crashed` (it stays so, also after `stop()`, until the
 next `start()`); it is never an unhandled rejection.
+
+`Daemon.whenOpen({ signal })` stays strictly nonblocking with respect to deferred
+local probes (#2200). An embedded Host that needs deterministic capability-gated
+admission on the first Turn after startup (such as `agentMemoryCommit: 'on-success-if-advertised'`
+on macOS where strict-barrier helper proof runs asynchronously after `open`) awaits
+`Daemon.whenCapabilitiesSettled({ signal })` (#2471). It binds to the open
+`connectionGeneration` (monotonic across reconnects and `stop()`/`start()`) and
+resolves `{ status: 'settled', connectionGeneration, capabilities, memoryBackend, deploymentDiscovery }`
+only when all four hold for that generation: the connection is still `running/open`
+at that generation, the local memory backend proof is no longer `verifying`
+(`not-configured`, `unsupported`, `refused`, `unproven`, or `proven`), that
+generation's deployment capability discovery (`GET /byok/capabilities`) finished
+(`read`, `failed`, or `timeout`), and the server HTTP-200 acknowledged a `conn.hello`
+for that generation at or after the resulting capability revision. A mid-proof
+disconnect resolves `{ status: 'disconnected', connectionGeneration }` immediately
+without carrying stale acknowledgments into the next generation; caller abort,
+`halted`, `crashed`, and `stopped` reject with the same errors as `whenOpen()`.
+A resolved `whenCapabilitiesSettled()` is not by itself proof that rollback
+protection is on. The Host treats it as on only when `status` is `settled` and
+`capabilities` includes `agent-memory-commit-on-success`. On `disconnected`, or
+on `settled` without the flag (`memoryBackend` `unproven`, `unsupported`,
+`refused` or `not-configured`), it either waits, bounded, for the next open and
+calls again, or declines the offer or takes an unprotected path on purpose.
 
 A halted or crashed run stops working at once; the Host does not have to call
 `stop()` for that. It takes no further `task.offer`, ends every active task

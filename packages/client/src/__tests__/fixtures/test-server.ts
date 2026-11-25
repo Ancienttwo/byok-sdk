@@ -121,6 +121,8 @@ export class TestServer {
    * which is what every deployment looked like to this fixture before.
    */
   private capabilityResponseGate: Promise<void> | undefined;
+  /** `GET /byok/capabilities` requests that reached this server, counted before the response gate. */
+  capabilityRequests = 0;
 
   setCapabilityResponseGate(gate: Promise<void> | undefined): void {
     this.capabilityResponseGate = gate;
@@ -382,7 +384,18 @@ export class TestServer {
     this.waiters = [];
     // A held response keeps its connection open, and http.Server#close waits for it.
     for (const release of this.messagesHoldReleases) release();
-    await new Promise<void>((resolve) => this.httpServer.close(() => resolve()));
+    // Released handlers still need a turn to write their responses, so only idle
+    // sockets close now. A connected socket that never sent a request would hold
+    // close() until the server's headers timeout; the fallback force-closes it.
+    await new Promise<void>((resolve) => {
+      const forceTimer = setTimeout(() => this.httpServer.closeAllConnections(), 250);
+      forceTimer.unref();
+      this.httpServer.close(() => {
+        clearTimeout(forceTimer);
+        resolve();
+      });
+      this.httpServer.closeIdleConnections();
+    });
   }
 
   /** Per-connection monotonic counter for the redelivery `seq` (protocol §1.2) — shared across every server->daemon envelope type, matching the wire's single per-device sequence space. Tests constructing their own S->D envelopes (`task.offer`/`task.approve`/`task.reject`/`task.cancel`/`task.steer`) must call this too, so `seq` stays strictly increasing across the whole connection. */
@@ -418,6 +431,7 @@ export class TestServer {
         return void this.handleBlobUrl(req, res, url.pathname.split('/')[3] ?? '');
       }
       if (method === 'GET' && url.pathname === BYOK_CAPABILITIES_PATH) {
+        this.capabilityRequests += 1;
         await this.capabilityResponseGate;
         // Public by design (a client reads it before it holds a credential), so
         // no authorization check here — same as the real hosted route.

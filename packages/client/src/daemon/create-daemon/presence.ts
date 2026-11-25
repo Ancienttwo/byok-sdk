@@ -50,7 +50,11 @@ export function taskContextCapabilityAvailable(daemonScope: DaemonScope): boolea
  * assumption ADR-010 forbids a client to make about an unread deployment.
  * `refreshHello()` is how the answer reaches the server once it exists.
  */
-export function applyCapabilityDeclaration(daemonScope: DaemonScope, declaration: CapabilityDeclaration | undefined): void {
+export function applyCapabilityDeclaration(
+  daemonScope: DaemonScope,
+  declaration: CapabilityDeclaration | undefined,
+  options?: { readonly refresh?: boolean },
+): void {
   const { daemonState, setHelloCapability, taskContextCapabilityAvailable, logMember } = daemonScope;
   daemonState.deploymentDeclaration = declaration;
   const taskContext = setHelloCapability(HOST_MCP_TASK_CONTEXT_CAPABILITY, taskContextCapabilityAvailable());
@@ -61,7 +65,7 @@ export function applyCapabilityDeclaration(daemonScope: DaemonScope, declaration
   const sealedPayload = setHelloCapability(SEALED_PAYLOAD_CAPABILITY, kemEpoch);
   // #1045: the same member seals Agent messages and memory evidence, and matches a sealed disposition.
   const sealedPayloadV2 = setHelloCapability(SEALED_PAYLOAD_V2_CAPABILITY, kemEpoch);
-  if (taskContext || sealedPayload || sealedPayloadV2) daemonState.connection?.refreshHello();
+  if ((options?.refresh ?? true) && (taskContext || sealedPayload || sealedPayloadV2)) daemonState.connection?.refreshHello();
   if (kemEpoch) daemonState.deviceMember!.checkKemRotation();
 }
 
@@ -72,6 +76,7 @@ export function setHelloCapability(daemonScope: DaemonScope, flag: CapabilityFla
   if (wanted === (index !== -1)) return false;
   if (wanted) daemonState.helloCapabilities.push(flag);
   else daemonState.helloCapabilities.splice(index, 1);
+  daemonState.helloCapabilityRevision = (daemonState.helloCapabilityRevision ?? 0) + 1;
   return true;
 }
 
@@ -114,7 +119,7 @@ export async function waitForHostTaskContext(daemonScope: DaemonScope, taskId: s
 }
 
 /** Each connection open starts a fresh, bounded declaration read. */
-export function runPresenceDiscovery(daemonScope: DaemonScope): void {
+export function runPresenceDiscovery(daemonScope: DaemonScope, generation: number): void {
   const {
     daemonState, applyCapabilityDeclaration, capabilityDiscoveryTimeoutMs, config, toolsetRegistry,
     localAgentRelease, presenceCadence,
@@ -126,6 +131,7 @@ export function runPresenceDiscovery(daemonScope: DaemonScope): void {
   const abort = (): void => controller.abort();
   lifecycle.signal.addEventListener('abort', abort, { once: true });
   const pass = {
+    generation,
     controller,
     completion: Promise.resolve(),
     outcome: 'pending' as 'pending' | 'read' | 'failed' | 'timeout' | 'aborted',
@@ -140,8 +146,9 @@ export function runPresenceDiscovery(daemonScope: DaemonScope): void {
     rejectAbort = () => reject(new Error('capability discovery aborted'));
     controller.signal.addEventListener('abort', rejectAbort, { once: true });
   });
+  let timedOut = false;
   const timer = setTimeout(() => {
-    pass.outcome = 'timeout';
+    timedOut = true;
     controller.abort();
   }, capabilityDiscoveryTimeoutMs);
   pass.completion = (async () => {
@@ -149,7 +156,15 @@ export function runPresenceDiscovery(daemonScope: DaemonScope): void {
       const declaration = await Promise.race([
         fetchCapabilityDeclaration(config.serverUrl, { signal: controller.signal }), aborted,
       ]);
-      if (controller.signal.aborted || daemonState.presenceDiscoveryPass !== pass) return;
+      if (controller.signal.aborted || daemonState.presenceDiscoveryPass !== pass) {
+        if (daemonState.presenceDiscoveryPass === pass && timedOut && !lifecycle.signal.aborted) {
+          applyCapabilityDeclaration(undefined);
+          pass.outcome = 'timeout';
+        } else {
+          pass.outcome = 'aborted';
+        }
+        return;
+      }
       applyCapabilityDeclaration(declaration);
       pass.outcome = 'read';
       if (declares(declaration, PRESENCE_HINTS_CAPABILITY)) {
@@ -171,8 +186,8 @@ export function runPresenceDiscovery(daemonScope: DaemonScope): void {
         pass.outcome = 'aborted';
         return;
       }
-      if (pass.outcome !== 'timeout') pass.outcome = 'failed';
       applyCapabilityDeclaration(undefined);
+      pass.outcome = timedOut ? 'timeout' : 'failed';
       console.warn(
         `[byok/client] capability discovery ${pass.outcome}; presence publishing and the task assertion lane stay off until the next reconnect: ${err instanceof Error ? err.message : String(err)}`,
       );
@@ -180,6 +195,7 @@ export function runPresenceDiscovery(daemonScope: DaemonScope): void {
       clearTimeout(timer);
       controller.signal.removeEventListener('abort', rejectAbort);
       lifecycle.signal.removeEventListener('abort', abort);
+      daemonScope.notifyCapabilitySettlement?.();
     }
   })();
 }

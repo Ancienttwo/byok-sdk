@@ -136,10 +136,32 @@ export interface DaemonState {
   presenceDiscovery: AbortController | undefined;
   // One active read per connection generation; stale completions cannot publish.
   presenceDiscoveryPass: {
+    generation: number;
     controller: AbortController;
     completion: Promise<void>;
     outcome: 'pending' | 'read' | 'failed' | 'timeout' | 'aborted';
   } | undefined;
+  /**
+   * Monotonic per-daemon-instance counter incremented synchronously on every
+   * `open` transition, never reset across reconnects or `stop()`/`start()` (#2471).
+   */
+  connectionGeneration: number;
+  /**
+   * Monotonic revision incremented whenever `helloCapabilities` is initialized
+   * for a run or mutated via `setHelloCapability` (#2471).
+   */
+  helloCapabilityRevision: number;
+  /**
+   * Latest server-acknowledged `conn.hello` snapshot for the currently open
+   * connection generation, or `undefined` when not open (#2471).
+   */
+  acceptedHello: {
+    readonly generation: number;
+    readonly revision: number;
+    readonly capabilities: readonly CapabilityFlag[];
+  } | undefined;
+  /** Listeners notified whenever any clause of `whenCapabilitiesSettled` may have changed. */
+  capabilitySettlementListeners: Set<() => void>;
   /**
    * The deployment declaration this daemon last READ (ADR-010), or `undefined`
    * when it has read none — which is what a failed read leaves behind too, on

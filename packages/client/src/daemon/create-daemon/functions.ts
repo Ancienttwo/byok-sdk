@@ -1,7 +1,7 @@
 import { initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage } from './services.js';
 import { memberClient, startDeviceMember } from './member.js';
 import { checkServerUrl, pair, pairEmbedded, pairUnderLease, unpair, unpairUnderLease } from './pairing.js';
-import { runLifecycleMutation, replaceControlServer, setLifecycle, halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown, whenOpen } from './lifecycle.js';
+import { runLifecycleMutation, replaceControlServer, notifyCapabilitySettlement, setLifecycle, halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown, whenOpen, whenCapabilitiesSettled } from './lifecycle.js';
 import { runStartUnderLease } from './start.js';
 import { taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability, startPresenceProducer, waitForHostTaskContext, runPresenceDiscovery } from './presence.js';
 import { runShutdownSequence, performControlShutdown } from './shutdown.js';
@@ -13,8 +13,8 @@ import type { DaemonScope } from './scope.js';
 const daemonFunctions = {
   initializeInputPreparation, runInputPreparation, initializeOwnedHostedStorage,
   memberClient, startDeviceMember, checkServerUrl, pair,
-  pairEmbedded, pairUnderLease, unpair, unpairUnderLease, runLifecycleMutation, replaceControlServer, setLifecycle,
-  halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown, whenOpen,
+  pairEmbedded, pairUnderLease, unpair, unpairUnderLease, runLifecycleMutation, replaceControlServer, notifyCapabilitySettlement, setLifecycle,
+  halted, crashed, start, startupHaltReason, startUnderLease, stop, requestShutdown, whenOpen, whenCapabilitiesSettled,
   runStartUnderLease, taskContextCapabilityAvailable, applyCapabilityDeclaration, setHelloCapability,
   startPresenceProducer, waitForHostTaskContext, runPresenceDiscovery, runShutdownSequence,
   performControlShutdown, approve, reject, subscribe, tasks, reloadMcpToolsets,
@@ -51,6 +51,7 @@ export function bindDaemonFunctions(scope: () => DaemonScope): DaemonFunctions {
     unpairUnderLease: (...args) => unpairUnderLease(scope(), ...args),
     runLifecycleMutation: operation => runLifecycleMutation(scope(), operation),
     replaceControlServer: (...args) => replaceControlServer(scope(), ...args),
+    notifyCapabilitySettlement: (...args) => notifyCapabilitySettlement(scope(), ...args),
     setLifecycle: (...args) => setLifecycle(scope(), ...args),
     halted: (...args) => halted(scope(), ...args),
     crashed: (...args) => crashed(scope(), ...args),
@@ -60,6 +61,7 @@ export function bindDaemonFunctions(scope: () => DaemonScope): DaemonFunctions {
     stop: (...args) => stop(scope(), ...args),
     requestShutdown: (...args) => requestShutdown(scope(), ...args),
     whenOpen: (...args) => whenOpen(scope(), ...args),
+    whenCapabilitiesSettled: (...args) => whenCapabilitiesSettled(scope(), ...args),
     runStartUnderLease: (...args) => runStartUnderLease(scope(), ...args),
     taskContextCapabilityAvailable: (...args) => taskContextCapabilityAvailable(scope(), ...args),
     applyCapabilityDeclaration: (...args) => applyCapabilityDeclaration(scope(), ...args),

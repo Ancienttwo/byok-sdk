@@ -11,6 +11,7 @@ import { createAgentMemoryCommitStore, type AgentMemoryCommitStore } from '../ag
 import { openAgentMemoryFilesystemHelperWithBudget } from '../agent-memory-fs-helper-internal.js';
 import { isAgentMemoryHelperTimeout, isAgentMemoryHelperCancellation, agentMemoryHelperExitOutcome, HELPER_PROBE_TIMEOUT_MS } from '../agent-memory-helper-probe.js';
 import { backoffCeilingMs } from '../deterministic-jitter.js';
+import type { DaemonMemoryBackendProofState } from '../daemon-lifecycle.js';
 import type { DaemonScope } from './scope.js';
 
 /** The daemon's lazily initialized local services: input preparation, the owned hosted journal and the Agent memory intent backend (#926). */
@@ -87,6 +88,7 @@ export function initializeOwnedHostedStorage(daemonScope: DaemonScope): LocalTas
  */
 type MemoryProof = {
   status: 'proven' | 'unproven' | 'refused' | undefined;
+  state?: DaemonMemoryBackendProofState | 'verifying';
   backend: AgentMemoryIntentBackend | undefined;
   candidate?: AgentMemoryIntentBackend;
   helper?: Readonly<{ bin: string; root: string }>;
@@ -104,15 +106,29 @@ export function agentMemoryBackendProof(scope: DaemonScope): MemoryProof {
   return proof;
 }
 
+/** Explicit proof state for `whenCapabilitiesSettled` (#2471); never conflates verifying with unsupported/refused. */
+export function agentMemoryBackendProofState(scope: DaemonScope): DaemonMemoryBackendProofState | 'verifying' {
+  const proof = memoryProofs.get(scope);
+  if (proof?.state !== undefined) return proof.state;
+  if (proof?.status !== undefined) return proof.status;
+  return scope.config.agentHome === undefined ? 'not-configured' : 'verifying';
+}
+
 /** Validate configuration and prove native backends before the first hello; only helper volume proof is deferred. */
 export async function initializeAgentMemoryBackend(scope: DaemonScope): Promise<void> {
-  const proof: MemoryProof = { status: undefined, backend: undefined };
+  const proof: MemoryProof = { status: undefined, state: 'verifying', backend: undefined };
   memoryProofs.set(scope, proof);
   const { config, agentHomeManager, resolveAgentMemoryFilesystemHelperBin } = scope;
-  if (config.agentHome === undefined || agentHomeManager === undefined) return;
+  if (config.agentHome === undefined || agentHomeManager === undefined) {
+    proof.state = 'not-configured';
+    return;
+  }
   try {
     const helperBin = resolveAgentMemoryFilesystemHelperBin?.();
-    if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) return;
+    if (!isAgentMemorySecureFilesystemAvailable(helperBin !== undefined)) {
+      proof.state = 'unsupported';
+      return;
+    }
     let candidate = NATIVE_AGENT_MEMORY_INTENT_BACKEND;
     if (helperBin !== undefined) {
       const root = await fs.realpath(agentHomeManager.layout.hostRootInput());
@@ -120,10 +136,15 @@ export async function initializeAgentMemoryBackend(scope: DaemonScope): Promise<
       await fs.access(helperBin, constants.X_OK);
       proof.helper = { bin: helperBin, root };
     }
-    if (candidate.strictLedgerBarrier) proof.candidate = candidate;
+    if (!candidate.strictLedgerBarrier) {
+      proof.state = 'unsupported';
+      return;
+    }
+    proof.candidate = candidate;
   } catch (error) {
     if (config.agentMemoryIntents !== undefined) throw error;
     proof.status = 'refused';
+    proof.state = 'refused';
     console.error(`[byok/client] agent memory backend refused: ${proofFailureKind(error)}`);
     return;
   }
@@ -131,6 +152,7 @@ export async function initializeAgentMemoryBackend(scope: DaemonScope): Promise<
     const backend = proof.candidate;
     if (backend !== undefined && (backend.openFilesystem !== undefined || await probeAgentMemoryStrictDirectorySync(config.agentHome.hostStorageRoot))) proof.backend = backend;
     proof.status = proof.backend === undefined ? 'refused' : 'proven';
+    proof.state = proof.status;
   }
 }
 
@@ -181,6 +203,7 @@ export function recoverAgentMemoryBackend(scope: DaemonScope, signal: AbortSigna
     }
     proof.backend = backend;
     proof.status = status;
+    proof.state = status;
     changed();
     schedule();
   };

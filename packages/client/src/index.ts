@@ -473,7 +473,13 @@ export type {
 export type { ConnectionState } from './daemon/connection-manager.js';
 export { DaemonTaskUnknownError, type DaemonTaskSettlement, type DaemonTaskTerminal } from './daemon/task-settlement.js';
 export { DAEMON_HALT_REASONS, DaemonHaltError, DaemonNotOpenError, isDaemonHaltReason } from './daemon/daemon-lifecycle.js';
-export type { DaemonHaltReason, DaemonLifecycle } from './daemon/daemon-lifecycle.js';
+export type {
+  DaemonCapabilitiesSettlement,
+  DaemonDeploymentDiscoveryState,
+  DaemonHaltReason,
+  DaemonLifecycle,
+  DaemonMemoryBackendProofState,
+} from './daemon/daemon-lifecycle.js';
 export { ReplayCursorTooOldError } from './daemon/replay-cursor.js';
 export { BlobClient, BlobRequestAbortedError } from './daemon/blob-client.js';
 export type { BlobClientOptions, BlobRequestAbortReason, BlobRequestOptions, BlobResolver } from './daemon/blob-client.js';

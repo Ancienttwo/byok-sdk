@@ -1,9 +1,10 @@
 import type { Server as HttpServer } from 'node:http';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InMemoryPresenceStore } from '@byok-sdk/core';
+import { AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY, createEnvelope, PROTOCOL_VERSION } from '@byok-sdk/protocol';
 import { composeFacadeStores, serverTenantId } from '../stores';
 import { createByokServer, type ByokServer } from '../index';
-import { connectFakeDaemonLongPoll, nextEnvelope, startServer, stopServer, waitFor, TEST_AGENT_DISPATCH } from './test-support';
+import { connectFakeDaemonLongPoll, nextEnvelope, sendOne, startServer, stopServer, waitFor, TEST_AGENT_DISPATCH } from './test-support';
 
 const PRODUCT_ID = 'single-presence-lease';
 const T0 = Date.parse('2026-10-14T00:00:00.000Z');
@@ -100,6 +101,34 @@ describe('single TTL presence lease', () => {
 
   it('rejects a TTL that cannot outlast a held poll', () => {
     expect(() => createByokServer({ productId: PRODUCT_ID, longPollHoldMs: 1_000, presenceTtlMs: 1_000 })).toThrow(/presenceTtlMs must be an integer greater than longPollHoldMs/);
+  });
+
+  it('projects durable conn.hello capabilities onto MachineInfo, filters unknown flags, and updates on refreshed conn.hello (#2471)', async () => {
+    const h = await start({ longPollHoldMs: 10 });
+    const unannounced = await connectFakeDaemonLongPoll(h.baseUrl, h.byok, { productId: PRODUCT_ID, announce: false });
+    const beforeHello = (await h.byok.machines.list()).find((machine) => machine.deviceId === unannounced.deviceId);
+    expect(beforeHello).toBeDefined();
+    expect(beforeHello?.capabilities).toBeUndefined();
+
+    await sendOne(unannounced, createEnvelope('conn.hello', {
+      protocolVersions: [PROTOCOL_VERSION],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } }],
+      capabilities: ['agent-home-contract', 'unknown-future-capability-v99'],
+      deviceId: unannounced.deviceId,
+      productId: PRODUCT_ID,
+    }));
+    const afterFirstHello = (await h.byok.machines.list()).find((machine) => machine.deviceId === unannounced.deviceId);
+    expect(afterFirstHello?.capabilities).toEqual(['agent-home-contract']);
+
+    await sendOne(unannounced, createEnvelope('conn.hello', {
+      protocolVersions: [PROTOCOL_VERSION],
+      harnesses: [{ id: 'pi', capabilities: { selectionModes: ['device-default'], effort: false } }],
+      capabilities: ['agent-home-contract', AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY],
+      deviceId: unannounced.deviceId,
+      productId: PRODUCT_ID,
+    }));
+    const afterRefreshHello = (await h.byok.machines.list()).find((machine) => machine.deviceId === unannounced.deviceId);
+    expect(afterRefreshHello?.capabilities).toEqual(['agent-home-contract', AGENT_MEMORY_COMMIT_ON_SUCCESS_CAPABILITY]);
   });
 });
 

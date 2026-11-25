@@ -1,5 +1,5 @@
 import type { DeviceRecord, PendingApproval, TaskAttempt, TaskAttemptStatus, TaskOfferReadback, TerminalResult } from '@byok-sdk/cloud';
-import type { TaskState } from '@byok-sdk/protocol';
+import { CAPABILITY_FLAGS, type CapabilityFlag, type TaskState } from '@byok-sdk/protocol';
 import type { TenantReadinessPresence } from '@byok-sdk/core';
 import type { MachineInfo, TaskResult, TaskSnapshot } from './types.js';
 
@@ -110,9 +110,15 @@ export function toTaskSnapshot(
   };
 }
 
+const KNOWN_CAPABILITY_FLAGS: ReadonlySet<string> = new Set(CAPABILITY_FLAGS);
+
+function isCapabilityFlag(flag: string): flag is CapabilityFlag {
+  return KNOWN_CAPABILITY_FLAGS.has(flag);
+}
+
 /** Durable identity projected with the kernel's unexpired TTL observation. */
 export function toMachineInfo(
-  device: Pick<DeviceRecord, 'deviceId' | 'deviceName' | 'harnesses'>,
+  device: Pick<DeviceRecord, 'deviceId' | 'deviceName' | 'harnesses' | 'capabilities'>,
   presence: TenantReadinessPresence | undefined,
 ): MachineInfo {
   return {
@@ -123,5 +129,6 @@ export function toMachineInfo(
     ...(presence?.clientVersion === undefined ? {} : { clientVersion: presence.clientVersion }),
     harnesses: device.harnesses,
     configuredToolsets: presence?.configuredToolsets,
+    ...(device.capabilities === undefined ? {} : { capabilities: device.capabilities.filter(isCapabilityFlag) }),
   };
 }

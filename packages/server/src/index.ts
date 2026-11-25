@@ -902,10 +902,16 @@ export function createByokServer(opts: CreateByokServerOptions): ByokServer {
     machines: {
       async list(): Promise<MachineInfo[]> {
         const [devices, readiness] = await Promise.all([cloud.listDevices(tenant), cloud.readTenantReadiness(tenant)]);
-        const harnesses = new Map(devices.map((device) => [device.deviceId, device.harnesses]));
-        return readiness.devices.map((device) => toMachineInfo({
-          deviceId: device.deviceId, deviceName: device.deviceName, harnesses: harnesses.get(device.deviceId),
-        }, device.presence));
+        const byDeviceId = new Map(devices.map((device) => [device.deviceId, device]));
+        return readiness.devices.map((device) => {
+          const record = byDeviceId.get(device.deviceId);
+          return toMachineInfo({
+            deviceId: device.deviceId,
+            deviceName: device.deviceName,
+            harnesses: record?.harnesses,
+            capabilities: record?.capabilities,
+          }, device.presence);
+        });
       },
     },
 

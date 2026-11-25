@@ -1,3 +1,5 @@
+import type { CapabilityFlag } from '@byok-sdk/protocol';
+
 /**
  * The daemon's one lifecycle model (issues #391 and #394).
  *
@@ -84,13 +86,55 @@ export class DaemonHaltError extends Error {
   }
 }
 
-/** `whenOpen()` found the run ended without a halt reason: `stopped`, or `crashed`. */
+/** `whenOpen()` or `whenCapabilitiesSettled()` found the run ended without a halt reason: `stopped`, or `crashed`. */
 export class DaemonNotOpenError extends Error {
   constructor(readonly reason: 'stopped' | 'crashed') {
     super(`daemon not open: ${reason}`);
     this.name = 'DaemonNotOpenError';
   }
 }
+
+/**
+ * Settled state of this daemon's local Agent-memory backend durability proof (#2471).
+ *
+ * - `not-configured`: `DaemonConfig.agentHome` is absent.
+ * - `unsupported`: this platform/build lacks a secure strict-barrier memory backend.
+ * - `refused`: permanent refusal (config/access error, non-strict filesystem, or helper refusal).
+ * - `unproven`: the initial helper probe timed out or hit a transient error; background retries continue (#2200).
+ * - `proven`: durable strict-barrier backend proven; memory commit/intent capabilities advertised and server-ACKed.
+ */
+export type DaemonMemoryBackendProofState =
+  | 'not-configured'
+  | 'unsupported'
+  | 'refused'
+  | 'unproven'
+  | 'proven';
+
+/** Settled outcome of the current connection generation's deployment capability discovery (`GET /byok/capabilities`). */
+export type DaemonDeploymentDiscoveryState = 'read' | 'failed' | 'timeout';
+
+/**
+ * Outcome of {@link import('./create-daemon.js').Daemon.whenCapabilitiesSettled} (#2471).
+ *
+ * `settled` guarantees that for `connectionGeneration`: the initial local memory
+ * backend proof is no longer verifying, deployment capability discovery finished,
+ * and the server HTTP-200 acknowledged a `conn.hello` at or after the resulting
+ * capability revision (`capabilities` is that server-acknowledged snapshot).
+ * `disconnected` reports that `connectionGeneration` lost its session before
+ * settling; callers may wait again on the next open generation.
+ */
+export type DaemonCapabilitiesSettlement =
+  | {
+      readonly status: 'settled';
+      readonly connectionGeneration: number;
+      readonly capabilities: readonly CapabilityFlag[];
+      readonly memoryBackend: DaemonMemoryBackendProofState;
+      readonly deploymentDiscovery: DaemonDeploymentDiscoveryState;
+    }
+  | {
+      readonly status: 'disconnected';
+      readonly connectionGeneration: number;
+    };
 
 /**
  * Strict read of a persisted or transported {@link DaemonLifecycle} (an
