@@ -12,6 +12,7 @@ describe("BYOK NSH Foundations Gallery", () => {
       colorScheme: "light",
     });
 
+    await app.press("id:nav-gallery");
     expect(app.shows("text:BYOK Bots — Foundations Gallery")).toBe(true);
     expect(app.shows("id:host-state-badge")).toBe(true);
 
@@ -30,6 +31,7 @@ describe("BYOK NSH Foundations Gallery", () => {
 
   test("interacts cleanly with Disclosure, Switch, Checkbox, Tabs, and Escape-dismissible Dialog", async () => {
     const app = await open("./App.tsx", { platform: "macos", width: 1200, height: 820 });
+    await app.press("id:nav-gallery");
 
     expect(app.accessibility("id:disclosure-trigger")?.expanded).toBe(false);
     await app.press("id:disclosure-trigger");
@@ -92,6 +94,12 @@ describe("BYOK NSH Foundations Gallery", () => {
       modules: {
         "byok-nsh-adapter": {
           "ByokShell.call": (method: string, params: unknown) => {
+            if (method === "keys.list") {
+              return [];
+            }
+            if (method === "k8.view") {
+              return { bots: [], roles: [], models: [], busy: false };
+            }
             calls.push({ method, params });
             return {
               profile_ref: "foundations-demo",
@@ -104,6 +112,7 @@ describe("BYOK NSH Foundations Gallery", () => {
       },
     });
 
+    await app.press("id:nav-gallery");
     const testSecret = "sk-test-secret-42";
     await app.type("id:secret-input", testSecret);
     expect(app.value("id:secret-input")).toBe(testSecret);
@@ -156,6 +165,7 @@ describe("BYOK NSH Foundations Gallery", () => {
     expect(parseAllowedExternalUrl("file:///etc/passwd", ["https://docs.byok.test"])).toBeNull();
 
     const app = await open("./App.tsx", { platform: "macos", width: 1200, height: 820 });
+    await app.press("id:nav-gallery");
     await app.press("id:link-blocked");
     expect(app.openedUrls()).toEqual([]);
     expect(app.shows("text:Link status: Blocked https://evil.example/phish")).toBe(true);
@@ -166,6 +176,7 @@ describe("BYOK NSH Foundations Gallery", () => {
 
   test("Windows platform preserves CJK text in Input and Textarea cleanly", async () => {
     const app = await open("./App.tsx", { platform: "windows", width: 1200, height: 820 });
+    await app.press("id:nav-gallery");
 
     await app.type("id:text-input", "你好世界");
     expect(app.value("id:text-input")).toBe("你好世界");

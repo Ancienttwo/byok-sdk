@@ -2,6 +2,7 @@ import { cleanup, effect, mount, platform, Scroll, signal, Text, View } from "ns
 import { currentWindow } from "nsh/desktop";
 import brand from "../brand.config.ts";
 import { BridgeCallError, submitSecret } from "./src/bridge.ts";
+import { KeysScreen } from "./src/features/keys/KeysScreen.tsx";
 import { openAllowedExternalUrl } from "./src/links.ts";
 import {
   appearance,
@@ -66,9 +67,15 @@ const RUNTIME_ITEMS = [
 ];
 
 export function App() {
-  if (platform.desktop) {
-    currentWindow().set({ title: `${brand.productName} — Foundations Gallery` });
-  }
+  const activeView = signal<"keys" | "gallery">("keys");
+
+  effect(() => {
+    if (platform.desktop) {
+      currentWindow().set({
+        title: `${brand.productName} — ${activeView() === "keys" ? "Keys" : "Foundations Gallery"}`,
+      });
+    }
+  });
 
   effect(() => {
     const disconnect = connectShell();
@@ -148,13 +155,31 @@ export function App() {
           <View class="flex-row flex-wrap items-center justify-between gap-4">
             <View class="gap-1">
               <Text role="header" accessibilityLevel={1} class="text-lg font-semibold text-foreground">
-                {`${brand.productName} — Foundations Gallery`}
+                {activeView() === "keys"
+                  ? `${brand.productName} — Keys`
+                  : `${brand.productName} — Foundations Gallery`}
               </Text>
               <Text class="text-xs text-muted-foreground">
                 {`Platform: ${platform.os} • Hints: ${stateHintCount()} • Quitting: ${isQuitting() ? "yes" : "no"}`}
               </Text>
             </View>
             <View class="flex-row flex-wrap items-center gap-3">
+              <Tabs testID="app-nav-tabs" accessibilityLabel="Active workspace view">
+                <Tab
+                  testID="nav-keys"
+                  selected={activeView() === "keys"}
+                  onPress={() => activeView.set("keys")}
+                >
+                  Keys
+                </Tab>
+                <Tab
+                  testID="nav-gallery"
+                  selected={activeView() === "gallery"}
+                  onPress={() => activeView.set("gallery")}
+                >
+                  Gallery
+                </Tab>
+              </Tabs>
               <HostStateBadge testID="host-state-badge" state={hostState()} />
               <Tabs testID="appearance-tabs" accessibilityLabel="Appearance mode">
                 <Tab
@@ -188,6 +213,11 @@ export function App() {
             <Text class="text-xs text-warning">{`Power save notice: ${powerError()}`}</Text>
           </If>
         </Card>
+
+        <If
+          when={activeView() === "keys"}
+          else={
+            <View class="gap-6">
 
         {/* Actions & Semantic Status */}
         <Card>
@@ -549,6 +579,11 @@ export function App() {
             </Text>
           </CardFooter>
         </Card>
+            </View>
+          }
+        >
+          <KeysScreen onNotify={pushToast} />
+        </If>
       </Scroll>
 
       <Dialog

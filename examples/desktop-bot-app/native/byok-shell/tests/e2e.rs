@@ -538,15 +538,20 @@ process.stdin.on('end', () => {{
         "committed-cleanly-without-epipe"
     );
 
-    // 2. List times out at 100ms AND kills child so delayed work never finishes.
+    // 2. List times out at 100ms AND kills child so delayed work never finishes, releasing lock once killed.
     let list_err = list_from_custody(
         &spec,
         &contract.host_commands.custody,
         Duration::from_millis(100),
+        Some(&lock),
         None,
     )
     .expect_err("list must time out");
     assert_eq!(list_err.code, "custody_timeout");
+    assert!(
+        wait_until(Duration::from_secs(2), || !lock.is_busy()),
+        "MaintenanceLock must release custody exclusion after list timeout kill"
+    );
     thread::sleep(Duration::from_millis(1700));
     assert!(!list_marker.exists(), "list timeout must kill child");
 
@@ -1927,4 +1932,140 @@ rl.on('line', line => {{
         stop_err.0.contains("Host exited"),
         "unexpected stop error after duplicate reply kill: {stop_err}"
     );
+}
+
+#[test]
+fn keys_list_and_s1_recovery_are_mutually_exclusive_in_both_orders() {
+    let tmp = TempDir::new("byok-list-s1-mutex");
+    let store_path = tmp.path().join("store.json");
+    fs::write(&store_path, "initial-store").expect("seed store");
+    let list_started = tmp.path().join("list-started");
+    let list_release = tmp.path().join("list-release");
+    let s1_spawned = tmp.path().join("s1-spawned");
+
+    let contract = BridgeContract::load().expect("contract loads");
+    let custody_cmd = contract.host_commands.custody.clone();
+    let restore_cmd = contract.host_commands.restore.clone();
+    let status_cmd = contract.host_commands.snapshot_status.clone();
+
+    let script = format!(
+        r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+const [subcmd] = process.argv.slice(2);
+if (subcmd === {custody_cmd}) {{
+  let input = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', chunk => {{ input += chunk; }});
+  process.stdin.on('end', () => {{
+    const req = JSON.parse(input);
+    if (req.op !== 'list') {{
+      process.stdout.write(JSON.stringify({{ ok: false, code: 'unexpected', message: 'expected list' }}) + '\n');
+      process.exit(1);
+    }}
+    fs.writeFileSync({list_started}, 'started');
+    const timer = setInterval(() => {{
+      if (fs.existsSync({list_release})) {{
+        clearInterval(timer);
+        process.stdout.write(JSON.stringify({{
+          ok: true,
+          statuses: [{{ profile_ref: 'zai-main', display_name: 'GLM', provider_kind: 'zai', adapter: 'pi', auth_mode: 'api_key', model: 'glm-4.7', secret_configured: true, profile_revision: 'r1', enabled: true, capabilities: [] }}],
+        }}) + '\n');
+        process.exit(0);
+      }}
+    }}, 10);
+  }});
+}} else if (subcmd === {restore_cmd} || subcmd === {status_cmd}) {{
+  fs.writeFileSync({s1_spawned}, subcmd);
+  fs.writeFileSync({store_path}, 'mutated-by-s1');
+  process.stdout.write(JSON.stringify({{ ok: true, snapshot: null }}) + '\n');
+}} else {{
+  const rl = readline.createInterface({{ input: process.stdin }});
+  rl.on('close', () => process.exit(0));
+  rl.on('line', line => {{
+    const msg = JSON.parse(line);
+    if (msg.method === 'hello') {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+      process.stdout.write(JSON.stringify({{ event: 'state', state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }} }}) + '\n');
+    }} else if (msg.method === 'keys.profilesChanged') {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ ok: true }} }}) + '\n');
+    }} else if (msg.method === 'shutdown') {{
+      process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+      process.exit(0);
+    }}
+  }});
+}}
+"#,
+        custody_cmd = serde_json::to_string(&custody_cmd).unwrap(),
+        restore_cmd = serde_json::to_string(&restore_cmd).unwrap(),
+        status_cmd = serde_json::to_string(&status_cmd).unwrap(),
+        list_started = serde_json::to_string(&list_started.to_string_lossy().into_owned()).unwrap(),
+        list_release = serde_json::to_string(&list_release.to_string_lossy().into_owned()).unwrap(),
+        s1_spawned = serde_json::to_string(&s1_spawned.to_string_lossy().into_owned()).unwrap(),
+        store_path = serde_json::to_string(&store_path.to_string_lossy().into_owned()).unwrap(),
+    );
+
+    let spec = write_node_script(tmp.path(), "list-s1-host.mjs", &script);
+    let supervisor = Arc::new(HostSupervisor::new(
+        HostSupervisorConfig::new(spec, contract),
+        |_| {},
+        || {},
+    ));
+    supervisor.start();
+    assert!(wait_until(Duration::from_secs(5), || {
+        matches!(
+            supervisor.last_state(),
+            Some(SupervisedHostState::Stopped {
+                store_refused: false,
+                ..
+            })
+        )
+    }));
+
+    let lock = MaintenanceLock::new();
+    let router = Arc::new(ShellRouter::new(
+        Arc::clone(&supervisor),
+        lock.clone(),
+        Box::new(UnsupportedLoginItemBackend),
+        "1.0.0",
+    ));
+
+    // Order 1: S1 maintenance active -> keys.list refuses without spawning child or changing store.
+    let s1_guard = lock.try_begin().expect("acquire S1 guard");
+    let list_err = router
+        .dispatch_renderer("keys.list", Value::Null)
+        .expect_err("keys.list must refuse while S1 maintenance holds lock");
+    assert_eq!(list_err.code, "PROVIDER_CONFIGURATION_BUSY");
+    assert!(!list_started.exists(), "custody child must not spawn under S1 lock");
+    assert_eq!(fs::read_to_string(&store_path).unwrap(), "initial-store");
+    drop(s1_guard);
+
+    // Order 2: keys.list child active -> S1 restore & lock acquisition refuse until list child exits.
+    let router_bg = Arc::clone(&router);
+    let list_handle = thread::spawn(move || router_bg.dispatch_renderer("keys.list", Value::Null));
+    assert!(
+        wait_until(Duration::from_secs(5), || list_started.exists()),
+        "custody list child should start"
+    );
+    assert!(lock.is_busy(), "MaintenanceLock must stay busy while keys.list child runs");
+    assert!(matches!(lock.try_begin(), Err(MaintenanceBusyError)));
+    let restore_err = router
+        .restore("1.0.0", "2026-11-25T00-00-00.000Z", |_| {})
+        .expect_err("S1 restore must refuse while keys.list child is active");
+    assert_eq!(restore_err.code, "maintenance_busy");
+    assert!(!s1_spawned.exists(), "S1 command must not spawn while keys.list runs");
+    assert_eq!(fs::read_to_string(&store_path).unwrap(), "initial-store");
+
+    fs::write(&list_release, "go").expect("release list child");
+    let listed = list_handle
+        .join()
+        .expect("list thread joins")
+        .expect("keys.list succeeds after release");
+    assert_eq!(listed.as_array().map(Vec::len), Some(1));
+    assert!(
+        wait_until(Duration::from_secs(3), || !lock.is_busy()),
+        "MaintenanceLock must clear once keys.list child exits"
+    );
+    let _post_guard = lock.try_begin().expect("S1 lock succeeds after keys.list exits");
 }

@@ -6,7 +6,9 @@ import { join } from 'node:path';
 import test from 'node:test';
 import {
   assertNshVersion,
+  FORBIDDEN_BUNDLE_MODULES,
   loadPin,
+  verifyBundleContent,
   verifyCapabilitiesAgainstGolden,
   verifyCargoMetadataNshProvenance,
   verifyFileSha256,
@@ -119,4 +121,15 @@ test('verifyCapabilitiesAgainstGolden validates D2 golden equality and rejects w
     () => verifyCapabilitiesAgainstGolden(widenedHost, widenedHost),
     /forbids host/i,
   );
+});
+
+test('verifyBundleContent admits clean TSX bundle output and rejects forbidden runtime modules', () => {
+  verifyBundleContent('export const ok = "@byok-sdk/keys/model-route";');
+  assert.throws(() => verifyBundleContent('   '), /empty/i);
+  for (const forbidden of FORBIDDEN_BUNDLE_MODULES) {
+    assert.throws(
+      () => verifyBundleContent(`import x from "${forbidden}";`),
+      new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
+    );
+  }
 });

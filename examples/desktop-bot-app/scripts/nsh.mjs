@@ -16,6 +16,16 @@ const ADAPTER_MANIFEST = resolve(NSH_APP_DIR, 'ext/byok-nsh-adapter/Cargo.toml')
 const GENERATED_RUNNER_MANIFEST = resolve(NSH_APP_DIR, '.nsh/rust/Cargo.toml');
 const DEFAULT_BUILT_CAPABILITIES = resolve(NSH_APP_DIR, '.nsh/out/capabilities.json');
 const DEFAULT_EXPECTED_CAPABILITIES = resolve(NSH_APP_DIR, 'capabilities.expected.json');
+const DEFAULT_BUILT_BUNDLE = resolve(NSH_APP_DIR, '.nsh/out/bundle.js');
+
+export const FORBIDDEN_BUNDLE_MODULES = [
+  '@byok-sdk/ui-runtime',
+  '@byok-sdk/cloud',
+  'hono',
+  'electron',
+  'node:fs',
+  'node:child_process',
+];
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -290,6 +300,32 @@ function runVerifyCapabilities(args) {
   console.log(`verify-capabilities OK (${builtPath} === ${expectedPath})`);
 }
 
+/** Rejects bundled QuickJS TSX output if Node/Electron/server/ui-runtime modules leaked into it. */
+export function verifyBundleContent(source, forbiddenModules = FORBIDDEN_BUNDLE_MODULES) {
+  assert.equal(typeof source, 'string', 'Bundled TSX output must be a string');
+  assert.ok(source.trim().length > 0, 'Bundled TSX output must not be empty');
+  for (const mod of forbiddenModules) {
+    const escaped = escapeRegExp(mod);
+    const pattern = new RegExp(`(?:^|[^a-zA-Z0-9_/@-])${escaped}(?:$|[^a-zA-Z0-9_-])`);
+    assert.ok(!pattern.test(source), `Forbidden runtime/package module leaked into TSX bundle: ${mod}`);
+  }
+}
+
+function runVerifyBundle(args) {
+  let bundlePath = DEFAULT_BUILT_BUNDLE;
+  for (let i = 0; i < args.length; i += 1) {
+    if (args[i] === '--bundle' && args[i + 1]) {
+      bundlePath = resolve(args[i + 1]);
+      i += 1;
+    } else {
+      throw new Error(`Unknown verify-bundle option: ${args[i]}`);
+    }
+  }
+  const source = readFileSync(bundlePath, 'utf8');
+  verifyBundleContent(source);
+  console.log(`verify-bundle OK (${bundlePath}: zero forbidden runtime/package modules)`);
+}
+
 async function runCli(argv) {
   const [command, ...rest] = argv;
   const pin = loadPin();
@@ -312,6 +348,10 @@ async function runCli(argv) {
     runVerifyCapabilities(rest);
     return;
   }
+  if (command === 'verify-bundle') {
+    runVerifyBundle(rest);
+    return;
+  }
   if (command === 'check' || command === 'build' || command === 'test' || command === 'run') {
     const bin = await ensurePinnedNsh(pin);
     const result = spawnSync(bin, [command, ...rest], {
@@ -323,7 +363,7 @@ async function runCli(argv) {
   }
 
   throw new Error(
-    `Usage: node examples/desktop-bot-app/scripts/nsh.mjs <ensure|build-cli-from-source|verify-lock|verify-capabilities|check|build|test|run> [args...]`,
+    `Usage: node examples/desktop-bot-app/scripts/nsh.mjs <ensure|build-cli-from-source|verify-lock|verify-capabilities|verify-bundle|check|build|test|run> [args...]`,
   );
 }
 

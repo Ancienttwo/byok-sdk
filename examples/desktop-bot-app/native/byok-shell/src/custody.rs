@@ -10,7 +10,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::bridge::BridgeErrorCode;
-use crate::command::{CommandError, HostCommandSpec, run_host_command, run_host_command_with_stdin};
+use crate::command::{CommandError, HostCommandSpec, run_host_command_with_stdin};
 use crate::host::HostSupervisor;
 use crate::maintenance::MaintenanceLock;
 
@@ -340,19 +340,32 @@ pub fn submit_to_custody(
     }
 }
 
-/// Lists stored provider statuses via custody child, terminating on timeout (`kill_on_timeout = true`).
+/// Lists stored provider statuses via custody child, holding `maintenance_lock` custody exclusion
+/// until child exit and terminating on timeout (`kill_on_timeout = true`).
 pub fn list_from_custody(
     command: &HostCommandSpec,
     custody_subcommand: &str,
     deadline: Duration,
+    maintenance_lock: Option<&MaintenanceLock>,
     supervisor: Option<&HostSupervisor>,
 ) -> Result<Vec<Value>, CustodyError> {
-    let outcome = run_host_command(
+    let custody_guard = match maintenance_lock {
+        Some(lock) => Some(lock.try_begin_custody().map_err(|_| {
+            CustodyError::new(
+                "PROVIDER_CONFIGURATION_BUSY",
+                "Cannot list provider keys while an app update or recovery action is running",
+            )
+        })?),
+        None => None,
+    };
+
+    let outcome = run_host_command_with_stdin(
         command,
         &[custody_subcommand],
-        br#"{"op":"list"}"#,
+        |stdin| stdin.write_all(br#"{"op":"list"}"#).and_then(|_| stdin.flush()),
         Some(deadline),
         true,
+        custody_guard,
     )
     .map_err(|err| match err {
         CommandError::Timeout { .. } => CustodyError::new(

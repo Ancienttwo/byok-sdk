@@ -1,16 +1,8 @@
 import { ByokShell } from "byok-nsh-adapter";
+import { BridgeCallError } from "../../src/bridge/error.ts";
 import type { BridgeMethods, RendererMethod } from "../../src/bridge/protocol.ts";
 
-/** Refused bridge call preserving the structured error `code` from `byok-shell`. */
-export class BridgeCallError extends Error {
-  readonly code: string;
-
-  constructor(code: string, message: string) {
-    super(message);
-    this.name = "BridgeCallError";
-    this.code = code;
-  }
-}
+export { BridgeCallError };
 
 export interface AdapterBridge {
   call<M extends RendererMethod>(
