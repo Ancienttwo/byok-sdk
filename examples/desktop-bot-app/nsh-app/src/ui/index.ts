@@ -11,6 +11,7 @@ export { Icon, type IconName, type IconProps, type IconSize } from "./Icon.tsx";
 export { Input, Textarea, type InputSize, type InputVariant, type UiInputProps, type UiTextareaProps } from "./Input.tsx";
 export { LinkText, type LinkTextProps } from "./LinkText.tsx";
 export { ListItem, type ListItemProps } from "./ListItem.tsx";
+export { MarkdownView, type MarkdownViewProps } from "./MarkdownView.tsx";
 export { Menu, MenuItem, MenuSeparator, type UiMenuItemProps, type UiMenuProps } from "./Menu.tsx";
 export { dialogAnimation, MOTION_CLASSES } from "./motion.ts";
 export { Popover, Tooltip, type UiPopoverProps, type UiTooltipProps } from "./Popover.tsx";

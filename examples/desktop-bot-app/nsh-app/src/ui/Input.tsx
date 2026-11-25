@@ -1,4 +1,4 @@
-import { platform, type InputRef, type ViewRef } from "nsh";
+import { platform, type InputRef, type SubmitBehavior, type ViewRef } from "nsh";
 import { Input as BaseInput } from "nsh/base";
 import { MOTION_CLASSES } from "./motion.ts";
 import { cx, FOCUS_RING_CLASS } from "./tokens.ts";
@@ -13,7 +13,7 @@ const SIZE_CLASSES: Readonly<Record<InputSize, string>> = {
 };
 
 /** ADR-052 D4: central platform CJK font token on Windows so CJK input never renders tofu. */
-const platformInputFont = () => (platform.os === "windows" ? "font-cjk" : "");
+export const platformInputFont = () => (platform.os === "windows" ? "font-cjk" : "");
 
 export interface UiInputProps {
   ref?: InputRef | ((ref: InputRef) => void);
@@ -87,8 +87,12 @@ export interface UiTextareaProps {
   accessibilityLabel?: string;
   accessibilityDescribedBy?: ViewRef | null;
   testID?: string;
+  /** What return does: `"newline"` (default), `"submit"` (Shift / Option+Return still inserts a line break), `"blurAndSubmit"`. */
+  submitBehavior?: SubmitBehavior;
   onChange?: (e: { value: string }) => void;
   onSubmit?: (e: { text: string }) => void;
+  /** Before the text changes: `key` is the typed text, `Backspace` or `Enter`. */
+  onKeyPress?: (e: { key: string }) => void;
   onFocus?: () => void;
   onBlur?: () => void;
 }
@@ -113,8 +117,10 @@ export function Textarea(props: UiTextareaProps) {
         invalid: Boolean(props.invalid),
       }}
       testID={props.testID}
+      submitBehavior={props.submitBehavior}
       onChange={props.onChange}
       onSubmit={props.onSubmit}
+      onKeyPress={props.onKeyPress}
       onFocus={props.onFocus}
       onBlur={props.onBlur}
       class={cx(
