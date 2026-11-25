@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.46.1",
-    "snapshotSha256": "1695ba912f85d8de192e7be6a2edbabfa252bc4be8535ebe77c07d28018d1184"
+    "snapshotSha256": "3b5ceea6628cb99166527063fbe06e136ffe901053514b79ada432035324f8b7"
   },
   "configFields": {
     "status": "tracked",
@@ -50,6 +50,18 @@
         "export:@byok-sdk/client/adapters#OpenCodeAdapter",
         "export:@byok-sdk/client/adapters#PiAdapter",
         "export:@byok-sdk/client/adapters#RuntimeAdapterPrepareInput"
+      ]
+    },
+    {
+      "id": "host-ledger-read",
+      "impact": "additive",
+      "summary": "@byok-sdk/server/execution-core adds readHostLedger(path), a read-only reader of every tenant of a K4 Host ledger that sees committed WAL frames from a private copy without writing or creating the database, WAL or SHM files. It returns HostLedgerRead: ok with HostLedgerTenantRead rows (HostLedgerReadState application, intents and executions, or a corrupt_row), absent, retryable (snapshot_changed, hot_journal) or unreadable (#2474).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledger-reader-2474",
+      "items": [
+        "export:@byok-sdk/server/execution-core#HostLedgerRead",
+        "export:@byok-sdk/server/execution-core#HostLedgerReadState",
+        "export:@byok-sdk/server/execution-core#HostLedgerTenantRead",
+        "export:@byok-sdk/server/execution-core#readHostLedger"
       ]
     }
   ],
@@ -158,6 +170,26 @@
       "item": "export:@byok-sdk/server#MachineInfo",
       "change": "changed",
       "entry": "daemon-when-capabilities-settled"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerRead",
+      "change": "added",
+      "entry": "host-ledger-read"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerReadState",
+      "change": "added",
+      "entry": "host-ledger-read"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#HostLedgerTenantRead",
+      "change": "added",
+      "entry": "host-ledger-read"
+    },
+    {
+      "item": "export:@byok-sdk/server/execution-core#readHostLedger",
+      "change": "added",
+      "entry": "host-ledger-read"
     }
   ]
 }
