@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Changed (client, #2487)** — The client vendors OAR 0.131.0 (from 0.129.1). `DshAdapter` accepts MCP servers with stdio `env` and HTTP `headers`, mounted in memory through the bridge; it used to decline them. `DaemonConfig.mcpToolsets` still rejects both. The Antigravity CLI qualified version is 1.5.16. [Host upgrade](docs/releases/host-upgrade-next-minor.md#oar-01310-2487)
+
+## 0.46.1 — 2026-11-25 (published)
+
+[Release notes](docs/releases/v0.46.1.md)
+
+0.46.1 is a PATCH on `release/0.46`. It keeps wire v8 and the public API; the upgrade manifest has zero breaking and zero additive entries.
+
+- **Fixed (client, #2468 and #2470)** — Under a macOS launchd service, a slow Claude or Codex login probe no longer reports a signed-in runtime as signed out. A probe deadline reports `timeout` (retryable `probe_timeout`), detect budgets are split (10 s version, 25 s login status), task admission skips the login probe, `byok-agent runtimes` and `doctor` allow 35 s per probe, and the launchd plist sets `ProcessType=Interactive`. Run `install()` or `repair()` to update an existing plist. [Fixed](docs/releases/v0.46.1.md#fixed)
+
 ## 0.46.0 — 2026-11-23 (published)
 
 [Release notes](docs/releases/v0.46.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.46.0.md)

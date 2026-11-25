@@ -244,9 +244,10 @@ export class GrokAdapter implements RuntimeAdapter {
     input.signal?.throwIfAborted();
     // Launch the command an observation of this adapter probed: this offer's
     // admission observation when this adapter made it, else a fresh one.
-    let command = takeVerifiedDetection<string>(this, input.detected);
+    let detected = input.detected;
+    let command = takeVerifiedDetection<string>(this, detected);
     if (command === undefined) {
-      const detected = await this.detect(input.signal);
+      detected = await this.detect(input.signal);
       if (detected.kind !== 'available')
         return {
           kind: 'reject',
@@ -256,7 +257,8 @@ export class GrokAdapter implements RuntimeAdapter {
       command = takeVerifiedDetection<string>(this, detected);
       if (command === undefined) return { kind: 'reject', reason: 'grok installation refused: unverified detection', retryable: false };
     }
-    return { kind: 'prepared', operation: { start: start => {
+    const { version, executableSource, versionVerdict } = detected as Extract<RuntimeDetectResult, { kind: 'available' }>;
+    return { kind: 'prepared', detected: { version, executableSource, versionVerdict }, operation: { start: start => {
       const actual = start.manifest.selection;
       if (actual?.mode !== selection?.mode || (actual?.mode === 'adapter-model' && actual.modelId !== offeredModel) || start.manifest.effort !== effort) {
         throw authority('prepared Grok operation received a manifest with different runtime selection');

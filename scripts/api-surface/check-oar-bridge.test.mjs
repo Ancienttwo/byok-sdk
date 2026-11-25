@@ -1,7 +1,7 @@
 // Keep this check at root, outside package source and declaration build roots.
 // It compares the private JS/declaration bridge with vendor and SDK source types.
 // The SDK projection imports built protocol types, so run after `bun run build`.
-// On re-vendor, update the c0c8b28 pins together in these files:
+// On re-vendor, update the 19ccd9a pins together in these files:
 // packages/client/src/runtime/codex-session-runtime.js,
 // packages/client/src/runtime/oar-process-tree.js,
 // packages/client/src/runtime/acp-session-runtime.js,
@@ -35,14 +35,14 @@ test('OAR JS bridge re-exports the checked vendored codexSession and SessionNotF
     ];
   });
   assert.deepEqual(reexports, [
-    ['../../vendor/oar/c0c8b28/runtimes/codex/app-server-client.js', [['startAppServerClient', 'startAppServerClient']]],
-    ['../../vendor/oar/c0c8b28/runtimes/codex/session.js', [['codexSession', 'codexSession']]],
-    ['../../vendor/oar/c0c8b28/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
-    ['../../vendor/oar/c0c8b28/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
-    ['../../vendor/oar/c0c8b28/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
-    ['../../vendor/oar/c0c8b28/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
-    ['../../vendor/oar/c0c8b28/contracts/model-confirmation-error.js', [['ModelConfirmationError', 'ModelConfirmationError']]],
-    ['../../vendor/oar/c0c8b28/runtimes/codex/session.js', [['codexSessionCapabilities', 'codexSessionCapabilities']]],
+    ['../../vendor/oar/19ccd9a/runtimes/codex/app-server-client.js', [['startAppServerClient', 'startAppServerClient']]],
+    ['../../vendor/oar/19ccd9a/runtimes/codex/session.js', [['codexSession', 'codexSession']]],
+    ['../../vendor/oar/19ccd9a/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/19ccd9a/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
+    ['../../vendor/oar/19ccd9a/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/19ccd9a/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
+    ['../../vendor/oar/19ccd9a/contracts/model-confirmation-error.js', [['ModelConfirmationError', 'ModelConfirmationError']]],
+    ['../../vendor/oar/19ccd9a/runtimes/codex/session.js', [['codexSessionCapabilities', 'codexSessionCapabilities']]],
   ]);
 });
 
@@ -62,12 +62,12 @@ test('OAR process-tree JS bridge re-exports the checked vendored functions', () 
     assert.equal(statement.type, 'ExportNamedDeclaration');
     return [statement.source?.value, statement.specifiers.map(({ local, exported }) => [local.name, exported.name])];
   }), [
-    ['../../vendor/oar/c0c8b28/shared/executable/process-tree.js', [
+    ['../../vendor/oar/19ccd9a/shared/executable/process-tree.js', [
       ['descendantsOf', 'descendantsOf'], ['killEntries', 'killEntries'], ['observeProcessTable', 'observeProcessTable'],
       ['parseProcessPs', 'parseProcessPs'], ['readProcessTable', 'readProcessTable'],
     ]],
-    ['../../vendor/oar/c0c8b28/shared/executable/pipe-close.js', [['PIPE_CLOSE_MS', 'PIPE_CLOSE_MS'], ['closePipesAfterExit', 'closePipesAfterExit']]],
-    ['../../vendor/oar/c0c8b28/shared/executable/query.js', [['withQueryDeadline', 'withQueryDeadline']]],
+    ['../../vendor/oar/19ccd9a/shared/executable/pipe-close.js', [['PIPE_CLOSE_MS', 'PIPE_CLOSE_MS'], ['closePipesAfterExit', 'closePipesAfterExit']]],
+    ['../../vendor/oar/19ccd9a/shared/executable/query.js', [['withQueryDeadline', 'withQueryDeadline']]],
   ]);
 });
 
@@ -82,21 +82,21 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ];
   });
   assert.deepEqual(reexports, [
-    ['../../vendor/oar/c0c8b28/shared/acp/errors.js', [['AcpError', 'AcpError']]],
-    ['../../vendor/oar/c0c8b28/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
-    ['../../vendor/oar/c0c8b28/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
-    ['../../vendor/oar/c0c8b28/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
-    ['../../vendor/oar/c0c8b28/contracts/model-confirmation-error.js', [['ModelConfirmationError', 'ModelConfirmationError']]],
-    ['../../vendor/oar/c0c8b28/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
-    ['../../vendor/oar/c0c8b28/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
-    ['../../vendor/oar/c0c8b28/runtimes/opencode/session.js', [['opencodeSession', 'opencodeSession']]],
-    ['../../vendor/oar/c0c8b28/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
-    ['../../vendor/oar/c0c8b28/runtimes/grok/list-models.js', [['grokListModels', 'grokListModels']]],
-    ['../../vendor/oar/c0c8b28/runtimes/grok/account-usage.js', [['grokAccountUsage', 'grokAccountUsage']]],
-    ['../../vendor/oar/c0c8b28/runtimes/antigravity/list-models.js', [['antigravityListModels', 'antigravityListModels']]],
-    ['../../vendor/oar/c0c8b28/runtimes/antigravity/session.js', [['antigravitySessionCapabilities', 'antigravitySessionCapabilities']]],
-    ['../../vendor/oar/c0c8b28/runtimes/grok/session.js', [['grokSessionCapabilities', 'grokSessionCapabilities']]],
-    ['../../vendor/oar/c0c8b28/runtimes/opencode/version.js', [['opencodeSessionCapabilities', 'opencodeSessionCapabilities']]],
+    ['../../vendor/oar/19ccd9a/shared/acp/errors.js', [['AcpError', 'AcpError']]],
+    ['../../vendor/oar/19ccd9a/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/19ccd9a/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/19ccd9a/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
+    ['../../vendor/oar/19ccd9a/contracts/model-confirmation-error.js', [['ModelConfirmationError', 'ModelConfirmationError']]],
+    ['../../vendor/oar/19ccd9a/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
+    ['../../vendor/oar/19ccd9a/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
+    ['../../vendor/oar/19ccd9a/runtimes/opencode/session.js', [['opencodeSession', 'opencodeSession']]],
+    ['../../vendor/oar/19ccd9a/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
+    ['../../vendor/oar/19ccd9a/runtimes/grok/list-models.js', [['grokListModels', 'grokListModels']]],
+    ['../../vendor/oar/19ccd9a/runtimes/grok/account-usage.js', [['grokAccountUsage', 'grokAccountUsage']]],
+    ['../../vendor/oar/19ccd9a/runtimes/antigravity/list-models.js', [['antigravityListModels', 'antigravityListModels']]],
+    ['../../vendor/oar/19ccd9a/runtimes/antigravity/session.js', [['antigravitySessionCapabilities', 'antigravitySessionCapabilities']]],
+    ['../../vendor/oar/19ccd9a/runtimes/grok/session.js', [['grokSessionCapabilities', 'grokSessionCapabilities']]],
+    ['../../vendor/oar/19ccd9a/runtimes/opencode/version.js', [['opencodeSessionCapabilities', 'opencodeSessionCapabilities']]],
   ]);
 });
 
@@ -111,14 +111,14 @@ test('OAR dsh JS bridge re-exports the checked vendored values', () => {
     ];
   });
   assert.deepEqual(reexports, [
-    ['../../vendor/oar/c0c8b28/runtimes/dsh/mcp.js', [['dshMcpRows', 'dshMcpRows']]],
-    ['../../vendor/oar/c0c8b28/runtimes/dsh/session.js', [['dshSession', 'dshSession']]],
-    ['../../vendor/oar/c0c8b28/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
-    ['../../vendor/oar/c0c8b28/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
-    ['../../vendor/oar/c0c8b28/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
-    ['../../vendor/oar/c0c8b28/contracts/model-confirmation-error.js', [['ModelConfirmationError', 'ModelConfirmationError']]],
-    ['../../vendor/oar/c0c8b28/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
-    ['../../vendor/oar/c0c8b28/runtimes/dsh/session.js', [['dshSessionCapabilities', 'dshSessionCapabilities']]],
+    ['../../vendor/oar/19ccd9a/runtimes/dsh/mcp.js', [['dshMcpConfigs', 'dshMcpConfigs']]],
+    ['../../vendor/oar/19ccd9a/runtimes/dsh/session.js', [['dshSession', 'dshSession']]],
+    ['../../vendor/oar/19ccd9a/contracts/session-not-found-error.js', [['SessionNotFoundError', 'SessionNotFoundError']]],
+    ['../../vendor/oar/19ccd9a/contracts/runtime-failure-error.js', [['RuntimeFailureError', 'RuntimeFailureError']]],
+    ['../../vendor/oar/19ccd9a/contracts/errors.js', [['UnsupportedOptionError', 'UnsupportedOptionError']]],
+    ['../../vendor/oar/19ccd9a/contracts/model-confirmation-error.js', [['ModelConfirmationError', 'ModelConfirmationError']]],
+    ['../../vendor/oar/19ccd9a/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
+    ['../../vendor/oar/19ccd9a/runtimes/dsh/session.js', [['dshSessionCapabilities', 'dshSessionCapabilities']]],
   ]);
 });
 
@@ -133,7 +133,7 @@ test('OAR failure JS bridge re-exports the checked vendored failure tables', () 
     ];
   });
   assert.deepEqual(reexports, [
-    ['../../vendor/oar/c0c8b28/shared/failure-class.js', [['failureFromStatus', 'failureFromStatus']]],
+    ['../../vendor/oar/19ccd9a/shared/failure-class.js', [['failureFromStatus', 'failureFromStatus']]],
   ]);
 });
 
@@ -145,12 +145,12 @@ test('OAR Claude JS bridge re-exports the checked stream-json session and Claude
     return [statement.source?.value, statement.specifiers.map(({ local, exported }) => [local.name, exported.name])];
   });
   assert.deepEqual(reexports, [
-    ['../../vendor/oar/c0c8b28/shared/stream-json/session.js', [['streamJsonSession', 'streamJsonSession']]],
-    ['../../vendor/oar/c0c8b28/runtimes/claude/projection.js', [
+    ['../../vendor/oar/19ccd9a/shared/stream-json/session.js', [['streamJsonSession', 'streamJsonSession']]],
+    ['../../vendor/oar/19ccd9a/runtimes/claude/projection.js', [
       ['claudeProjectionProfile', 'claudeProjectionProfile'], ['initialClaudeProjection', 'initialClaudeProjection'], ['resumedClaudeProjection', 'resumedClaudeProjection'],
     ]],
-    ['../../vendor/oar/c0c8b28/shared/credential-redactor.js', [['sessionCredentialRedactor', 'sessionCredentialRedactor']]],
-    ['../../vendor/oar/c0c8b28/shared/stream-json/session.js', [['claudeSessionCapabilities', 'claudeSessionCapabilities']]],
+    ['../../vendor/oar/19ccd9a/shared/credential-redactor.js', [['sessionCredentialRedactor', 'sessionCredentialRedactor']]],
+    ['../../vendor/oar/19ccd9a/shared/stream-json/session.js', [['claudeSessionCapabilities', 'claudeSessionCapabilities']]],
   ]);
 });
 

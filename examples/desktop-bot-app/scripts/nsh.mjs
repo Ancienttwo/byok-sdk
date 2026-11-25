@@ -2,13 +2,27 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { builtinModules } from 'node:module';
-import { chmodSync, createWriteStream, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import {
+  chmodSync,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
+import { SyntaxKind as K } from 'typescript/unstable/ast';
+import { API as TsApi } from 'typescript/unstable/sync';
 
-const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
+const SCRIPT_DIR = dirname(SCRIPT_PATH);
 export const DEFAULT_PIN_PATH = resolve(SCRIPT_DIR, 'nsh-pin.json');
 const DESKTOP_APP_DIR = resolve(SCRIPT_DIR, '..');
 const REPO_ROOT = resolve(DESKTOP_APP_DIR, '../..');
@@ -38,9 +52,7 @@ export const FORBIDDEN_BUNDLE_PACKAGES = [
 const WORKSPACE_SCOPE = '@byok-sdk/';
 const NODE_BUILTINS = new Set(builtinModules);
 
-function escapeRegExp(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
+const NSH_VERSION_PATTERN = /^nsh\s+(\S+)\s+\(([^)\s]+)(?:\s+([^)]+))?\)$/;
 
 export function loadPin(pinPath = DEFAULT_PIN_PATH) {
   return JSON.parse(readFileSync(pinPath, 'utf8'));
@@ -52,10 +64,18 @@ export function assetKeyForPlatform(platform = process.platform, arch = process.
 
 export function assertNshVersion(output, pin) {
   const trimmed = String(output ?? '').trim();
-  const pattern = new RegExp(`^nsh\\s+${escapeRegExp(pin.version)}\\s+\\(${escapeRegExp(pin.shortCommit)}(?:\\s|\\))`);
-  if (!pattern.test(trimmed)) {
+  const match = NSH_VERSION_PATTERN.exec(trimmed);
+  const versionOk = match?.[1] === pin.version && match?.[2] === pin.shortCommit;
+  const meta = match?.[3] ?? '';
+  const channelOk = pin.channel === 'nightly'
+    ? meta === 'nightly' || meta.startsWith('nightly ')
+    : meta === '';
+  if (!versionOk || !channelOk) {
+    const expected = pin.channel === 'nightly'
+      ? `nsh ${pin.version} (${pin.shortCommit} nightly ...)`
+      : `nsh ${pin.version} (${pin.shortCommit})`;
     throw new Error(
-      `NSH CLI version mismatch: expected nsh ${pin.version} (${pin.shortCommit} ...), got ${JSON.stringify(trimmed)}`,
+      `NSH CLI version mismatch: expected ${expected}, got ${JSON.stringify(trimmed)}`,
     );
   }
   return trimmed;
@@ -68,6 +88,52 @@ export function verifyFileSha256(filePath, expectedSha256) {
     throw new Error(`SHA-256 mismatch for ${filePath}: expected ${expected}, got ${actual}`);
   }
   return actual;
+}
+
+function collectNshSourcesByCrate(nshPackages) {
+  const sourcesByCrate = new Map();
+  for (const pkg of nshPackages) {
+    const label = typeof pkg.source === 'string' && pkg.source ? pkg.source : '<path>';
+    let set = sourcesByCrate.get(pkg.name);
+    if (!set) {
+      set = new Set();
+      sourcesByCrate.set(pkg.name, set);
+    }
+    set.add(label);
+  }
+  for (const [name, sources] of sourcesByCrate) {
+    if (sources.size > 1) {
+      throw new Error(
+        `NSH crate ${name} resolved from multiple sources: ${[...sources].sort().join(', ')}`,
+      );
+    }
+  }
+  return sourcesByCrate;
+}
+
+function assertPinnedNshPackageSource(pkg, pin) {
+  if (typeof pkg.source !== 'string' || !pkg.source) {
+    throw new Error(`NSH crate ${pkg.name} uses an unpinned path dependency (source missing); expected git rev ${pin.commit}`);
+  }
+  if (pkg.source.startsWith('path+')) {
+    throw new Error(`NSH crate ${pkg.name} uses forbidden path dependency (${pkg.source})`);
+  }
+  if (pin.channel === 'stable') {
+    if (!pkg.source.startsWith('registry+')) {
+      throw new Error(`NSH crate ${pkg.name} must come from crates.io in stable mode, got ${pkg.source}`);
+    }
+    if (pkg.version !== pin.version) {
+      throw new Error(`NSH crate ${pkg.name} version ${pkg.version} !== pinned ${pin.version}`);
+    }
+    return;
+  }
+  const expectedPrefix = `git+${pin.sourceRepo}`;
+  const expectedFragment = `#${pin.commit}`;
+  if (!pkg.source.startsWith(expectedPrefix) || !pkg.source.endsWith(expectedFragment)) {
+    throw new Error(
+      `NSH crate ${pkg.name} resolved to ${pkg.source}, expected ${expectedPrefix}?rev=${pin.commit}${expectedFragment}`,
+    );
+  }
 }
 
 export function verifyCargoMetadataNshProvenance(metadata, pin) {
@@ -85,35 +151,20 @@ export function verifyCargoMetadataNshProvenance(metadata, pin) {
     throw new Error('cargo metadata contains no nsh or nsh-* packages');
   }
 
+  const sourcesByCrate = collectNshSourcesByCrate(nshPackages);
   const seenSources = new Set();
   for (const pkg of nshPackages) {
-    if (typeof pkg.source !== 'string' || !pkg.source) {
-      throw new Error(`NSH crate ${pkg.name} uses an unpinned path dependency (source missing); expected git rev ${pin.commit}`);
-    }
-    if (pkg.source.startsWith('path+')) {
-      throw new Error(`NSH crate ${pkg.name} uses forbidden path dependency (${pkg.source})`);
-    }
-    if (pin.channel === 'stable') {
-      if (!pkg.source.startsWith('registry+')) {
-        throw new Error(`NSH crate ${pkg.name} must come from crates.io in stable mode, got ${pkg.source}`);
-      }
-      if (pkg.version !== pin.version) {
-        throw new Error(`NSH crate ${pkg.name} version ${pkg.version} !== pinned ${pin.version}`);
-      }
-    } else {
-      const expectedPrefix = `git+${pin.sourceRepo}`;
-      const expectedFragment = `#${pin.commit}`;
-      if (!pkg.source.startsWith(expectedPrefix) || !pkg.source.endsWith(expectedFragment)) {
-        throw new Error(
-          `NSH crate ${pkg.name} resolved to ${pkg.source}, expected ${expectedPrefix}?rev=${pin.commit}${expectedFragment}`,
-        );
-      }
-    }
+    assertPinnedNshPackageSource(pkg, pin);
     seenSources.add(pkg.source);
   }
 
   if (seenSources.size !== 1) {
-    throw new Error(`Multiple NSH crate sources resolved in one lockfile: ${[...seenSources].join(', ')}`);
+    const details = [...sourcesByCrate.entries()]
+      .map(([name, sources]) => `${name}=${[...sources].join('|')}`)
+      .join(', ');
+    throw new Error(
+      `Multiple NSH crate sources resolved in one lockfile: ${[...seenSources].sort().join(', ')} (${details})`,
+    );
   }
 
   return {
@@ -150,8 +201,8 @@ function checkBinaryVersion(binPath, pin) {
   return binPath;
 }
 
-function pinnedInstallRoot(pin) {
-  return join(REPO_ROOT, '_ops', 'nsh-pinned', pin.shortCommit);
+export function pinnedInstallRoot(pin) {
+  return join(REPO_ROOT, '_ops', 'nsh-pinned', pin.commit);
 }
 
 function findInstalledBinary(root) {
@@ -255,11 +306,36 @@ export function readPinnedRustToolchain(toolchainPath = ADAPTER_TOOLCHAIN_PATH) 
   return match[1];
 }
 
-function rustToolEnv() {
-  if (process.env.RUSTUP_TOOLCHAIN?.trim()) {
-    return process.env;
+function rustToolEnv(baseEnv = process.env) {
+  if (baseEnv.RUSTUP_TOOLCHAIN?.trim()) {
+    return baseEnv;
   }
-  return { ...process.env, RUSTUP_TOOLCHAIN: readPinnedRustToolchain() };
+  return { ...baseEnv, RUSTUP_TOOLCHAIN: readPinnedRustToolchain() };
+}
+
+/**
+ * Build environment for source-building the pinned `nsh-cli`.
+ * Stamps `NSH_CHANNEL` (`crates/nsh-cli/build.rs:94-101`) so a nightly CLI selects
+ * `Nsh::Nightly(rev)` and emits `[patch.crates-io]` for every `nsh-*` crate in generated
+ * `.nsh/rust` workspaces (`crates/nsh-cli/src/rust_app.rs:542-574, 3419-3431`), and disables
+ * upstream's `Cargo.toml` fat-LTO / single-CGU release profile (`opt-level=2`, `lto=off`,
+ * `codegen-units=16`) so cold source builds finish well within the 3-OS CI budget.
+ */
+export function buildCliFromSourceEnv(pin, baseEnv = process.env) {
+  const env = {
+    ...rustToolEnv(baseEnv),
+    NSH_CHANNEL: pin.channel === 'nightly' ? 'nightly' : 'stable',
+    CARGO_PROFILE_RELEASE_LTO: baseEnv.CARGO_PROFILE_RELEASE_LTO?.trim() || 'off',
+    CARGO_PROFILE_RELEASE_OPT_LEVEL: baseEnv.CARGO_PROFILE_RELEASE_OPT_LEVEL?.trim() || '2',
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS: baseEnv.CARGO_PROFILE_RELEASE_CODEGEN_UNITS?.trim() || '16',
+  };
+  if (pin.channel === 'nightly' && typeof pin.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(pin.date)) {
+    const parsed = Date.parse(`${pin.date}T00:00:00Z`);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      env.SOURCE_DATE_EPOCH = String(Math.floor(parsed / 1000));
+    }
+  }
+  return env;
 }
 
 export function buildCliFromSource(pin = loadPin()) {
@@ -267,12 +343,138 @@ export function buildCliFromSource(pin = loadPin()) {
   mkdirSync(root, { recursive: true });
   execFileSync(
     'cargo',
-    ['install', '--git', pin.sourceRepo, '--rev', pin.commit, '--locked', '--root', root, 'nsh-cli'],
-    { stdio: 'inherit', env: rustToolEnv() },
+    ['install', '--git', pin.sourceRepo, '--rev', pin.commit, '--locked', '--force', '--root', root, 'nsh-cli'],
+    { stdio: 'inherit', env: buildCliFromSourceEnv(pin) },
   );
   const exe = process.platform === 'win32' ? 'nsh.exe' : 'nsh';
   const installed = join(root, 'bin', exe);
   return checkBinaryVersion(installed, pin);
+}
+
+/** Runs `cargo metadata` on `manifestPath` and enforces single-source pinned `nsh-*` provenance. */
+export function verifyManifestNshProvenance(
+  manifestPath,
+  pin = loadPin(),
+  { cargoBin = 'cargo', env = rustToolEnv(), locked = false } = {},
+) {
+  const args = ['metadata', '--format-version', '1'];
+  if (locked) {
+    args.push('--locked');
+  }
+  args.push('--manifest-path', manifestPath);
+  const raw = execFileSync(cargoBin, args, {
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+    env,
+  });
+  return verifyCargoMetadataNshProvenance(JSON.parse(raw), pin);
+}
+
+const CARGO_COMPILE_SUBCOMMANDS = new Set(['build', 'check', 'test', 'run', 'rustc']);
+
+export function parseCargoInvocation(args, cwd = process.cwd()) {
+  let subcommand = null;
+  let manifestPath = null;
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i];
+    if (arg === '--') break;
+    if (arg === '--manifest-path' && i + 1 < args.length) {
+      manifestPath = resolve(cwd, args[i + 1]);
+      i += 1;
+      continue;
+    }
+    if (arg.startsWith('--manifest-path=')) {
+      manifestPath = resolve(cwd, arg.slice('--manifest-path='.length));
+      continue;
+    }
+    if (subcommand === null && !arg.startsWith('-') && !arg.startsWith('+')) {
+      subcommand = arg;
+    }
+  }
+  return {
+    subcommand,
+    manifestPath: manifestPath ?? resolve(cwd, 'Cargo.toml'),
+  };
+}
+
+export function isGeneratedRunnerManifest(manifestPath) {
+  return /(?:^|[/\\])\.nsh[/\\]rust[/\\](?:[^/\\]+[/\\])?Cargo\.toml$/.test(manifestPath);
+}
+
+/**
+ * Guards `cargo` invocations made by `nsh` so a generated `.nsh/rust` workspace whose dependency
+ * graph resolves any `nsh-*` crate from more than one source (or a non-pinned source) fails closed
+ * before `cargo` compiles.
+ */
+export function runCargoGuard(
+  args,
+  {
+    pin = loadPin(),
+    realCargo = process.env.BYOK_REAL_CARGO?.trim() || 'cargo',
+    realCargoWasSet = process.env.BYOK_REAL_CARGO_SET === '1',
+    env = process.env,
+    cwd = process.cwd(),
+    spawn = spawnSync,
+    verifyManifest = verifyManifestNshProvenance,
+  } = {},
+) {
+  const cleanEnv = { ...env };
+  delete cleanEnv.BYOK_REAL_CARGO;
+  delete cleanEnv.BYOK_REAL_CARGO_SET;
+  if (realCargoWasSet) {
+    cleanEnv.CARGO = realCargo;
+  } else {
+    delete cleanEnv.CARGO;
+  }
+
+  const { subcommand, manifestPath } = parseCargoInvocation(args, cwd);
+  if (subcommand && CARGO_COMPILE_SUBCOMMANDS.has(subcommand) && isGeneratedRunnerManifest(manifestPath)) {
+    verifyManifest(manifestPath, pin, { cargoBin: realCargo, env: cleanEnv, locked: false });
+  }
+
+  const result = spawn(realCargo, args, {
+    cwd,
+    stdio: 'inherit',
+    env: cleanEnv,
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  return result.status ?? 1;
+}
+
+function shellSingleQuote(value) {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function withCargoGuardEnv(baseEnv, fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'byok-nsh-cargo-guard-'));
+  try {
+    const isWin = process.platform === 'win32';
+    const shimPath = join(dir, isWin ? 'cargo-guard.cmd' : 'cargo-guard');
+    if (isWin) {
+      writeFileSync(
+        shimPath,
+        `@echo off\r\n"${process.execPath}" "${SCRIPT_PATH}" __cargo-guard %*\r\nexit /b %ERRORLEVEL%\r\n`,
+      );
+    } else {
+      writeFileSync(
+        shimPath,
+        `#!/bin/sh\nexec ${shellSingleQuote(process.execPath)} ${shellSingleQuote(SCRIPT_PATH)} __cargo-guard "$@"\n`,
+      );
+      chmodSync(shimPath, 0o755);
+    }
+    const realCargoWasSet = Boolean(baseEnv.CARGO?.trim());
+    const realCargo = realCargoWasSet ? baseEnv.CARGO.trim() : 'cargo';
+    return fn({
+      ...baseEnv,
+      CARGO: shimPath,
+      BYOK_REAL_CARGO: realCargo,
+      BYOK_REAL_CARGO_SET: realCargoWasSet ? '1' : '0',
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function runVerifyLock(args, pin) {
@@ -299,12 +501,7 @@ function runVerifyLock(args, pin) {
 
   const env = rustToolEnv();
   for (const manifestPath of targets) {
-    const raw = execFileSync('cargo', ['metadata', '--format-version', '1', '--locked', '--manifest-path', manifestPath], {
-      encoding: 'utf8',
-      maxBuffer: 32 * 1024 * 1024,
-      env,
-    });
-    const result = verifyCargoMetadataNshProvenance(JSON.parse(raw), pin);
+    const result = verifyManifestNshProvenance(manifestPath, pin, { env, locked: true });
     console.log(`verify-lock OK (${manifestPath}): ${result.count} nsh crates -> ${result.source}`);
   }
 }
@@ -355,27 +552,30 @@ export function readBundleSourceMap(mapPath) {
   return map;
 }
 
+function resolveBundleSourcePath(entry, sourceBase, sourceRoot) {
+  if (entry.startsWith('file://')) {
+    return fileURLToPath(entry);
+  }
+  return sourceRoot ? resolve(sourceBase, sourceRoot, entry) : resolve(sourceBase, entry);
+}
+
 /**
- * Rejects a bundle whose source map shows a module from a forbidden package. NSH writes `sources`
- * relative to the app directory it built from (`sourceBase`); each is resolved and compared by
- * path segment against `node_modules/<name>/` and, for workspace packages, the repo's `packages/<dir>/`.
+ * Rejects a bundle whose source map shows a module from a forbidden package. Source map entries
+ * are resolved against `sourceBase` (`dirname(bundlePath)`) and compared by path segment against
+ * `node_modules/<name>/` and, for workspace packages, the repo's `packages/<dir>/`.
  */
-export function verifyBundleSources(map, { sourceBase = NSH_APP_DIR, repoRoot = REPO_ROOT } = {}) {
+export function verifyBundleSources(map, { sourceBase = dirname(DEFAULT_BUILT_BUNDLE), repoRoot = REPO_ROOT } = {}) {
   const roots = FORBIDDEN_BUNDLE_PACKAGES.flatMap(forbiddenSourceRoots);
+  const sourceRoot = typeof map?.sourceRoot === 'string' && map.sourceRoot ? map.sourceRoot : '';
   for (const entry of map.sources) {
-    const resolved = resolve(sourceBase, entry).replaceAll('\\', '/');
-    const repoRelative = relative(repoRoot, resolved).replaceAll('\\', '/');
+    const resolvedPath = resolveBundleSourcePath(entry, sourceBase, sourceRoot);
+    const resolved = resolvedPath.replaceAll('\\', '/');
+    const repoRelative = relative(repoRoot, resolvedPath).replaceAll('\\', '/');
     const candidate = `/${repoRelative.startsWith('..') ? resolved : repoRelative}`;
     const root = roots.find((r) => candidate.includes(`/${r}`));
     assert.ok(root === undefined, `Forbidden module source in TSX bundle: ${entry} (under ${root})`);
   }
 }
-
-const SPECIFIER_PATTERNS = [
-  /\b(?:import|export)\b[^;'"`]*?\bfrom\s*(['"])([^'"\n]+)\1/g,
-  /\bimport\s*(['"])([^'"\n]+)\1/g,
-  /\b(?:import|require)\s*\(\s*(['"`])([^'"`\n]+)\1\s*\)/g,
-];
 
 function forbiddenSpecifier(specifier) {
   if (specifier.startsWith('node:') || NODE_BUILTINS.has(specifier) || NODE_BUILTINS.has(specifier.split('/')[0])) {
@@ -384,17 +584,197 @@ function forbiddenSpecifier(specifier) {
   return FORBIDDEN_BUNDLE_PACKAGES.find((name) => specifier === name || specifier.startsWith(`${name}/`));
 }
 
-/** Rejects import/require/dynamic-import specifiers in bundled TSX output that name a Node builtin or a forbidden package. */
-export function verifyBundleSpecifiers(source) {
+function normalizeTsPath(filePath) {
+  const posix = filePath.replaceAll('\\', '/');
+  return process.platform === 'win32' ? posix.toLowerCase() : posix;
+}
+
+function unwrapParens(node) {
+  let current = node;
+  while (current?.kind === K.ParenthesizedExpression) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function staticModuleSpecifier(node) {
+  const inner = unwrapParens(node);
+  if (inner?.kind === K.StringLiteral || inner?.kind === K.NoSubstitutionTemplateLiteral) {
+    return inner.text;
+  }
+  return null;
+}
+
+function extractSpecifiersFromAst(sourceFile) {
+  const specifiers = [];
+  const visit = (node) => {
+    if (node.kind === K.ImportDeclaration) {
+      const specifier = staticModuleSpecifier(node.moduleSpecifier);
+      if (specifier !== null) specifiers.push(specifier);
+    } else if (node.kind === K.ExportDeclaration) {
+      const specifier = staticModuleSpecifier(node.moduleSpecifier);
+      if (specifier !== null) specifiers.push(specifier);
+    } else if (node.kind === K.CallExpression) {
+      const callee = unwrapParens(node.expression);
+      if (
+        callee?.kind === K.ImportKeyword
+        || (callee?.kind === K.Identifier && callee.text === 'require')
+      ) {
+        const specifier = staticModuleSpecifier(node.arguments[0]);
+        if (specifier !== null) specifiers.push(specifier);
+      }
+    }
+    node.forEachChild(visit);
+  };
+  visit(sourceFile);
+  return specifiers;
+}
+
+function parseBundleSpecifiersBatch(entries) {
+  const root = DESKTOP_APP_DIR.replaceAll('\\', '/');
+  const configPath = `${root}/.__verify-bundle.tsconfig.json`;
+  const virtualPaths = entries.map((_, index) => `${root}/.__verify-bundle-${index}.mjs`);
+  const virtualFiles = new Map([
+    [
+      normalizeTsPath(configPath),
+      JSON.stringify({
+        compilerOptions: {
+          allowJs: true,
+          noResolve: true,
+          noLib: true,
+          target: 'esnext',
+          module: 'esnext',
+        },
+        files: virtualPaths,
+      }),
+    ],
+  ]);
+  for (let i = 0; i < entries.length; i += 1) {
+    virtualFiles.set(normalizeTsPath(virtualPaths[i]), entries[i].source);
+  }
+
+  const api = new TsApi({
+    cwd: root,
+    fs: {
+      readFile: (file) => virtualFiles.get(normalizeTsPath(file)),
+      fileExists: (file) => (virtualFiles.has(normalizeTsPath(file)) ? true : undefined),
+    },
+  });
+  try {
+    const snapshot = api.updateSnapshot({ openProjects: [configPath] });
+    const program = snapshot.getProject(configPath)?.program;
+    if (!program) {
+      throw new Error('TypeScript parser did not open the bundle verification project');
+    }
+    return entries.map((entry, index) => {
+      const virtualPath = virtualPaths[index];
+      const diagnostics = program.getSyntacticDiagnostics(virtualPath);
+      if (diagnostics.length > 0) {
+        throw new Error(
+          `Bundled TSX output failed to parse (${entry.label}): ${diagnostics[0].text}`,
+        );
+      }
+      const sourceFile = program.getSourceFile(virtualPath);
+      if (!sourceFile) {
+        throw new Error(`TypeScript parser did not produce an AST for ${entry.label}`);
+      }
+      return { label: entry.label, specifiers: extractSpecifiersFromAst(sourceFile) };
+    });
+  } finally {
+    api.close();
+  }
+}
+
+function assertSpecifiersClear(specifiers, label) {
+  for (const specifier of specifiers) {
+    const rule = forbiddenSpecifier(specifier);
+    assert.ok(
+      rule === undefined,
+      `Forbidden module specifier in TSX bundle (${label}): ${specifier} (${rule})`,
+    );
+  }
+}
+
+/**
+ * Parses bundled TSX output with the TypeScript AST parser and rejects import, export, dynamic
+ * `import()`, or `require()` specifiers that name a Node builtin or a forbidden package.
+ */
+export function verifyBundleSpecifiers(source, label = 'bundle.js') {
   assert.equal(typeof source, 'string', 'Bundled TSX output must be a string');
   assert.ok(source.trim().length > 0, 'Bundled TSX output must not be empty');
-  for (const pattern of SPECIFIER_PATTERNS) {
-    for (const match of source.matchAll(pattern)) {
-      const specifier = match[2];
-      const rule = forbiddenSpecifier(specifier);
-      assert.ok(rule === undefined, `Forbidden module specifier in TSX bundle: ${specifier} (${rule})`);
+  const [{ specifiers }] = parseBundleSpecifiersBatch([{ label, source }]);
+  assertSpecifiersClear(specifiers, label);
+}
+
+/**
+ * Lists the entry bundle and every emitted split JS chunk under `dirname(bundlePath)`
+ * (excluding copied static files under `assets/`), failing closed on missing entry or orphan maps.
+ */
+export function collectBundleChunks(bundlePath) {
+  const entryPath = resolve(bundlePath);
+  if (!existsSync(entryPath)) {
+    throw new Error(`Bundle entry not found: ${entryPath}`);
+  }
+  const outDir = dirname(entryPath);
+  const chunks = new Set([entryPath]);
+  const mapFiles = [];
+
+  const walk = (dir, isRoot) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (isRoot && entry.isDirectory() && entry.name === 'assets') {
+        continue;
+      }
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(full, false);
+      } else if (entry.isFile()) {
+        if (/\.(?:js|mjs)$/.test(entry.name)) {
+          chunks.add(full);
+        } else if (/\.(?:js|mjs)\.map$/.test(entry.name)) {
+          mapFiles.push(full);
+        }
+      }
+    }
+  };
+  walk(outDir, true);
+
+  for (const mapFile of mapFiles.sort()) {
+    const expectedChunk = mapFile.slice(0, -'.map'.length);
+    if (!chunks.has(expectedChunk)) {
+      throw new Error(`Orphan bundle source map without JS chunk: ${mapFile}`);
     }
   }
+
+  const rest = [...chunks].filter((file) => file !== entryPath).sort();
+  return [entryPath, ...rest];
+}
+
+/**
+ * Verifies the entry bundle and every split chunk under `dirname(bundlePath)`: reads each chunk's
+ * adjacent source map (resolving `sources` against `dirname(chunkPath)`), validates non-empty JS,
+ * and checks every AST import/export/dynamic-import/require specifier.
+ */
+export function verifyBundle(bundlePath, { repoRoot = REPO_ROOT } = {}) {
+  const chunkPaths = collectBundleChunks(bundlePath);
+  let totalMapSources = 0;
+  const parsedInputs = [];
+
+  for (const chunkPath of chunkPaths) {
+    const mapPath = `${chunkPath}.map`;
+    const map = readBundleSourceMap(mapPath);
+    verifyBundleSources(map, { sourceBase: dirname(chunkPath), repoRoot });
+    totalMapSources += map.sources.length;
+
+    const source = readFileSync(chunkPath, 'utf8');
+    assert.ok(source.trim().length > 0, `Bundled TSX output must not be empty: ${chunkPath}`);
+    parsedInputs.push({ label: chunkPath, source });
+  }
+
+  for (const { label, specifiers } of parseBundleSpecifiersBatch(parsedInputs)) {
+    assertSpecifiersClear(specifiers, label);
+  }
+
+  return { files: chunkPaths, totalMapSources };
 }
 
 function runVerifyBundle(args) {
@@ -407,12 +787,9 @@ function runVerifyBundle(args) {
       throw new Error(`Unknown verify-bundle option: ${args[i]}`);
     }
   }
-  const mapPath = `${bundlePath}.map`;
-  const map = readBundleSourceMap(mapPath);
-  verifyBundleSources(map);
-  verifyBundleSpecifiers(readFileSync(bundlePath, 'utf8'));
+  const { files, totalMapSources } = verifyBundle(bundlePath);
   console.log(
-    `verify-bundle OK (${bundlePath}: ${map.sources.length} map sources and import specifiers clear of forbidden packages and Node builtins)`,
+    `verify-bundle OK (${bundlePath}: ${files.length} bundle/chunk file(s), ${totalMapSources} map sources and AST import/export/require specifiers clear of forbidden packages and Node builtins)`,
   );
 }
 
@@ -420,6 +797,10 @@ async function runCli(argv) {
   const [command, ...rest] = argv;
   const pin = loadPin();
 
+  if (command === '__cargo-guard') {
+    process.exitCode = runCargoGuard(rest, { pin });
+    return;
+  }
   if (command === 'ensure') {
     const bin = await ensurePinnedNsh(pin);
     console.log(bin);
@@ -444,11 +825,13 @@ async function runCli(argv) {
   }
   if (command === 'check' || command === 'build' || command === 'test' || command === 'run') {
     const bin = await ensurePinnedNsh(pin);
-    const result = spawnSync(bin, [command, ...rest], {
-      cwd: NSH_APP_DIR,
-      stdio: 'inherit',
-      env: rustToolEnv(),
-    });
+    const result = withCargoGuardEnv(rustToolEnv(), (env) =>
+      spawnSync(bin, [command, ...rest], {
+        cwd: NSH_APP_DIR,
+        stdio: 'inherit',
+        env,
+      }),
+    );
     process.exitCode = result.status ?? 1;
     return;
   }
