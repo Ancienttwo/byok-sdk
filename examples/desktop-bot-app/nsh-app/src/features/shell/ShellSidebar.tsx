@@ -6,6 +6,7 @@ import {
   describeHostState,
   hostState,
   isQuitting,
+  isRecoveryBusy,
   previewHostState,
   requestQuit,
   restartHost,
@@ -40,7 +41,7 @@ export function ShellSidebar() {
   };
 
   const handleRestartHost = () => {
-    if (restarting() || isQuitting()) {
+    if (restarting() || isQuitting() || isRecoveryBusy()) {
       return;
     }
     restarting.set(true);
@@ -88,7 +89,7 @@ export function ShellSidebar() {
             variant="secondary"
             size="sm"
             loading={restarting()}
-            disabled={restarting() || isQuitting()}
+            disabled={restarting() || isQuitting() || isRecoveryBusy()}
             onPress={handleRestartHost}
           >
             Restart Host

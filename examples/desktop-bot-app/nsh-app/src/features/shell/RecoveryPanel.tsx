@@ -5,6 +5,7 @@ import {
   exportDiagnostics,
   hostState,
   isQuitting,
+  isRecoveryBusy,
   readShellView,
   restartHost,
   runShellRestore,
@@ -105,17 +106,15 @@ export function RecoveryPanel() {
   const restoreErrorText = () => shellView()?.restoreError ?? null;
 
   const confirmAction = signal<"restore" | "startFresh" | null>(null);
-  const recoveryBusy = signal(false);
   const recoveryError = signal<string | null>(null);
   const restarting = signal(false);
 
   const runRecovery = async (action: "restore" | "startFresh") => {
-    if (recoveryBusy()) {
+    if (isRecoveryBusy() || isQuitting()) {
       return;
     }
     confirmAction.set(null);
     recoveryError.set(null);
-    recoveryBusy.set(true);
     try {
       if (action === "restore") {
         await runShellRestore();
@@ -126,12 +125,11 @@ export function RecoveryPanel() {
       const refusal = refusalOf(error);
       const prefix = action === "restore" ? "Restore failed" : "Start fresh failed";
       recoveryError.set(`${prefix}: ${formatRefusalText(refusal)}`);
-      recoveryBusy.set(false);
     }
   };
 
   const handleRestart = () => {
-    if (restarting() || isQuitting()) {
+    if (restarting() || isQuitting() || isRecoveryBusy()) {
       return;
     }
     restarting.set(true);
@@ -151,7 +149,7 @@ export function RecoveryPanel() {
                 <CardDescription>{host().reason}</CardDescription>
               </CardHeader>
               <CardContent>
-                <DiagnosticsExportButton testID="recovery-export-diagnostics" disabled={recoveryBusy()} />
+                <DiagnosticsExportButton testID="recovery-export-diagnostics" disabled={isRecoveryBusy()} />
 
                 <If when={shellView.loading() && shellView() === undefined}>
                   <Spinner label="Checking S1 recovery snapshot…" />
@@ -175,7 +173,7 @@ export function RecoveryPanel() {
                       <Button
                         testID="recovery-restore-btn"
                         variant="secondary"
-                        disabled={recoveryBusy() || isQuitting()}
+                        disabled={isRecoveryBusy() || isQuitting()}
                         onPress={() => confirmAction.set("restore")}
                       >
                         {`Restore data of version ${restore().version}`}
@@ -186,7 +184,7 @@ export function RecoveryPanel() {
                     <Button
                       testID="recovery-start-fresh-btn"
                       variant="danger"
-                      disabled={recoveryBusy() || isQuitting()}
+                      disabled={isRecoveryBusy() || isQuitting()}
                       onPress={() => confirmAction.set("startFresh")}
                     >
                       Start fresh
@@ -221,12 +219,15 @@ export function RecoveryPanel() {
                     testID="recovery-restart-host"
                     variant="primary"
                     loading={restarting()}
-                    disabled={restarting() || isQuitting()}
+                    disabled={restarting() || isQuitting() || isRecoveryBusy()}
                     onPress={handleRestart}
                   >
                     Restart Host
                   </Button>
-                  <DiagnosticsExportButton testID="failed-export-diagnostics" disabled={restarting()} />
+                  <DiagnosticsExportButton
+                    testID="failed-export-diagnostics"
+                    disabled={restarting() || isRecoveryBusy()}
+                  />
                 </View>
               </CardContent>
             </Card>
@@ -245,7 +246,7 @@ export function RecoveryPanel() {
             : undefined
         }
         onOpenChange={(open) => {
-          if (!open && !recoveryBusy()) {
+          if (!open && !isRecoveryBusy()) {
             confirmAction.set(null);
           }
         }}
@@ -255,7 +256,7 @@ export function RecoveryPanel() {
               testID="recovery-restore-cancel"
               variant="outline"
               size="sm"
-              disabled={recoveryBusy()}
+              disabled={isRecoveryBusy()}
               onPress={() => confirmAction.set(null)}
             >
               Cancel
@@ -264,8 +265,8 @@ export function RecoveryPanel() {
               testID="recovery-restore-confirm"
               variant="primary"
               size="sm"
-              loading={recoveryBusy()}
-              disabled={recoveryBusy()}
+              loading={isRecoveryBusy()}
+              disabled={isRecoveryBusy()}
               onPress={() => void runRecovery("restore")}
             >
               Restore and restart
@@ -285,7 +286,7 @@ export function RecoveryPanel() {
         title="Move data aside and start fresh?"
         description="The app stops and renames its data folders to *.aside-<time> next to where they were; nothing is deleted. It removes this device's enrollment and restarts as a new device with no Bots and no provider profiles."
         onOpenChange={(open) => {
-          if (!open && !recoveryBusy()) {
+          if (!open && !isRecoveryBusy()) {
             confirmAction.set(null);
           }
         }}
@@ -295,7 +296,7 @@ export function RecoveryPanel() {
               testID="recovery-start-fresh-cancel"
               variant="outline"
               size="sm"
-              disabled={recoveryBusy()}
+              disabled={isRecoveryBusy()}
               onPress={() => confirmAction.set(null)}
             >
               Cancel
@@ -304,8 +305,8 @@ export function RecoveryPanel() {
               testID="recovery-start-fresh-confirm"
               variant="danger"
               size="sm"
-              loading={recoveryBusy()}
-              disabled={recoveryBusy()}
+              loading={isRecoveryBusy()}
+              disabled={isRecoveryBusy()}
               onPress={() => void runRecovery("startFresh")}
             >
               Move the data aside and start fresh

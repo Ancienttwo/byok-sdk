@@ -23,6 +23,7 @@ import {
 export interface TrayMenuBuildOptions {
   readonly host: SupervisedHostState | null;
   readonly quitting: boolean;
+  readonly recoveryBusy: boolean;
   readonly productName: string;
   readonly onShow: () => void;
   readonly onRestartHost: () => void;
@@ -36,12 +37,16 @@ export interface ApplicationMenuBuildOptions extends TrayMenuBuildOptions {
   readonly onSelectAppearance: (mode: AppearanceMode) => void;
 }
 
+function canRestartFromMenu(options: TrayMenuBuildOptions): boolean {
+  return !options.quitting && !options.recoveryBusy && options.host?.state !== "starting";
+}
+
 /**
  * Pure tray context menu builder wired strictly to unified store commands.
  * Matches Electron `trayMenu` semantics while adding explicit Host restart and Quit actions.
  */
 export function buildTrayMenuItems(options: TrayMenuBuildOptions): MenuItem[] {
-  const canRestart = !options.quitting && options.host?.state !== "starting";
+  const canRestart = canRestartFromMenu(options);
   return [
     { label: `Show ${options.productName}`, onSelect: options.onShow },
     { label: trayStatusLabel(options.host), disabled: true },
@@ -54,7 +59,7 @@ export function buildTrayMenuItems(options: TrayMenuBuildOptions): MenuItem[] {
 
 /** Pure desktop application menu builder wired to store workspace & Host commands. */
 export function buildApplicationMenuItems(options: ApplicationMenuBuildOptions): MenuItem[] {
-  const canRestart = !options.quitting && options.host?.state !== "starting";
+  const canRestart = canRestartFromMenu(options);
   return [
     {
       label: options.productName,

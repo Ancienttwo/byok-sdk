@@ -4,7 +4,7 @@ import type { WindowRef } from "nsh/desktop";
 import type { LoginItemView } from "../../src/bridge/domains/settings.ts";
 import type { ShellView } from "../../src/bridge/domains/shell.ts";
 import type { SupervisedHostState } from "../../src/bridge/protocol.ts";
-import { type BridgeCallError, bridge, toBridgeCallError } from "./bridge.ts";
+import { BridgeCallError, bridge, toBridgeCallError } from "./bridge.ts";
 
 export type AppearanceMode = "light" | "dark" | "system";
 export type WorkspaceSection = "conversation" | "activity" | "settings" | "keys" | "gallery";
@@ -19,6 +19,7 @@ const liveHostStateSignal = signal<SupervisedHostState | null>(null);
 const previewHostStateSignal = signal<SupervisedHostState | null>(null);
 const powerErrorSignal = signal<string | null>(null);
 const quittingSignal = signal(false);
+const recoveryBusySignal = signal(false);
 const stateHintCountSignal = signal(0);
 const appearanceSignal = signal<AppearanceMode>("light");
 const activeSectionSignal = signal<WorkspaceSection>("keys");
@@ -37,6 +38,9 @@ export const powerError = () => powerErrorSignal();
 
 /** True once app shutdown drain has started. */
 export const isQuitting = () => quittingSignal();
+
+/** True while S1 store restore/start-fresh recovery is running or handing over to restart. */
+export const isRecoveryBusy = () => recoveryBusySignal();
 
 /** Counter incremented on each 50 ms coalesced Host state hint. */
 export const stateHintCount = () => stateHintCountSignal();
@@ -203,7 +207,26 @@ export function requestQuit(): void {
 
 /** Single app-wide command for restarting the supervised Host process off the engine thread. */
 export async function restartHost(): Promise<void> {
+  if (quittingSignal() || recoveryBusySignal()) {
+    return;
+  }
   await ByokShell.restart();
+}
+
+async function withRecoveryLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (recoveryBusySignal() || quittingSignal()) {
+    throw new BridgeCallError(
+      "RECOVERY_IN_PROGRESS",
+      "Another recovery or shutdown operation is already in progress.",
+    );
+  }
+  recoveryBusySignal.set(true);
+  try {
+    return await operation();
+  } catch (error) {
+    recoveryBusySignal.set(false);
+    throw error;
+  }
 }
 
 /** Reads recovery snapshot state (`shell.state`) from the Rust shell. */
@@ -213,12 +236,12 @@ export async function readShellView(): Promise<ShellView> {
 
 /** Triggers S1 store restore and app restart (`shell.restore`). */
 export async function runShellRestore(): Promise<{ asidePath: string }> {
-  return await bridge.call("shell.restore", undefined);
+  return await withRecoveryLock(() => bridge.call("shell.restore", undefined));
 }
 
 /** Triggers S1 start-fresh move-aside and app restart (`shell.startFresh`). */
 export async function runShellStartFresh(): Promise<{ moved: readonly unknown[] }> {
-  return await bridge.call("shell.startFresh", undefined);
+  return await withRecoveryLock(() => bridge.call("shell.startFresh", undefined));
 }
 
 /** Exports diagnostics bundle under the Host's diagnostics directory (`settings.exportDiagnostics`). */

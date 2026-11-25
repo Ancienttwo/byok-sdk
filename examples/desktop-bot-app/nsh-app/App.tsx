@@ -14,6 +14,7 @@ import {
   connectShell,
   hostState,
   isQuitting,
+  isRecoveryBusy,
   powerError,
   requestQuit,
   restartHost,
@@ -110,6 +111,7 @@ export function App() {
     syncDesktopChrome({
       host: hostState(),
       quitting: isQuitting(),
+      recoveryBusy: isRecoveryBusy(),
       activeSection: activeSection(),
       appearance: appearance(),
       onShow: showMainWindow,

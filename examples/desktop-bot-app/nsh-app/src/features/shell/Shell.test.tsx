@@ -253,6 +253,70 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     await app.press("id:recovery-start-fresh-confirm");
     await app.waitUntil(() => calls.includes("shell.startFresh"));
     expect(calls.filter((entry) => entry === "shell.startFresh")).toHaveLength(1);
+    expect(app.enabled("id:sidebar-restart-host")).toBe(false);
+    expect(app.enabled("id:recovery-start-fresh-btn")).toBe(false);
+  });
+
+  test("blocks sidebar Restart Host while shell.restore is in flight and re-enables on refusal", async () => {
+    const stoppedHost: SupervisedHostState = {
+      state: "stopped",
+      pid: 4100,
+      reason: "Store schema is newer than this binary",
+      storeRefused: true,
+    };
+    let restoreCalls = 0;
+    let restartCalls = 0;
+    let rejectRestore = (_err: Error) => {};
+    const restoreGate = new Promise<never>((_resolve, reject) => {
+      rejectRestore = reject;
+    });
+
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1200,
+      height: 820,
+      modules: shellModules(
+        stoppedHost,
+        (method) => {
+          if (method === "shell.state") {
+            return {
+              host: stoppedHost,
+              restore: { version: "0.45.0", createdAt: "2026-11-24T00:00:00.000Z" },
+              restoreError: null,
+            };
+          }
+          if (method === "shell.restore") {
+            restoreCalls += 1;
+            return restoreGate;
+          }
+          if (method === "keys.list") {
+            return [];
+          }
+          return null;
+        },
+        {
+          "ByokShell.restart": () => {
+            restartCalls += 1;
+          },
+        },
+      ),
+    });
+
+    await app.waitFor("id:recovery-restore-btn");
+    expect(app.enabled("id:sidebar-restart-host")).toBe(true);
+    await app.press("id:recovery-restore-btn");
+    await app.waitFor("id:recovery-restore-confirm");
+
+    const confirming = app.press("id:recovery-restore-confirm");
+    await app.waitUntil(() => restoreCalls === 1 && !app.enabled("id:sidebar-restart-host"));
+    expect(restartCalls).toBe(0);
+
+    rejectRestore(new Error("Restore snapshot corrupt"));
+    await confirming;
+    await app.waitFor("id:recovery-error");
+    expect(app.texts().join("\n")).toContain("Restore snapshot corrupt");
+    expect(app.enabled("id:sidebar-restart-host")).toBe(true);
+    expect(restartCalls).toBe(0);
   });
 
   test("RecoveryPanel failed Host card restarts via ByokShell.restart without fetching shell.state", async () => {
@@ -388,6 +452,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     const trayRunning = buildTrayMenuItems({
       host: { state: "running", pid: 7, activeWork: 2 },
       quitting: false,
+      recoveryBusy: false,
       productName: "BYOK Bots",
       onShow: () => {
         shown += 1;
@@ -423,6 +488,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     const trayStarting = buildTrayMenuItems({
       host: { state: "starting", pid: 7 },
       quitting: false,
+      recoveryBusy: false,
       productName: "BYOK Bots",
       onShow: () => {},
       onRestartHost: () => {},
@@ -433,6 +499,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     const trayQuitting = buildTrayMenuItems({
       host: { state: "failed", reason: "exit" },
       quitting: true,
+      recoveryBusy: false,
       productName: "BYOK Bots",
       onShow: () => {},
       onRestartHost: () => {},
@@ -440,11 +507,23 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     });
     expect((trayQuitting[3] as { disabled?: boolean }).disabled).toBe(true);
 
+    const trayRecoveryBusy = buildTrayMenuItems({
+      host: { state: "stopped", pid: 7, reason: "halted", storeRefused: true },
+      quitting: false,
+      recoveryBusy: true,
+      productName: "BYOK Bots",
+      onShow: () => {},
+      onRestartHost: () => {},
+      onQuit: () => {},
+    });
+    expect((trayRecoveryBusy[3] as { disabled?: boolean }).disabled).toBe(true);
+
     const selectedSections: string[] = [];
     const selectedAppearances: string[] = [];
     const appMenu = buildApplicationMenuItems({
       host: { state: "running", pid: 7, activeWork: 0 },
       quitting: false,
+      recoveryBusy: false,
       productName: "BYOK Bots",
       activeSection: "settings",
       appearance: "dark",
@@ -465,5 +544,23 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     viewMenu.submenu.find((entry) => entry.label === "Light Appearance")?.onSelect?.();
     expect(selectedSections).toEqual(["keys"]);
     expect(selectedAppearances).toEqual(["light"]);
+
+    const appMenuRecoveryBusy = buildApplicationMenuItems({
+      host: { state: "failed", reason: "exit" },
+      quitting: false,
+      recoveryBusy: true,
+      productName: "BYOK Bots",
+      activeSection: "keys",
+      appearance: "light",
+      onShow: () => {},
+      onRestartHost: () => {},
+      onQuit: () => {},
+      onSelectSection: () => {},
+      onSelectAppearance: () => {},
+    });
+    const appSubmenu = appMenuRecoveryBusy.find(
+      (item) => "label" in item && item.label === "BYOK Bots",
+    ) as { submenu: { label?: string; disabled?: boolean }[] };
+    expect(appSubmenu.submenu.find((entry) => entry.label === "Restart Host")?.disabled).toBe(true);
   });
 });
