@@ -6,38 +6,57 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 
-use byok_shell::{HostSupervisor, MaintenanceLock, QuitOutcome};
+use byok_shell::{HostSupervisor, MaintenanceLock, QuitOutcome, StopError};
+use nsh_core::desktop::QuitMode;
 #[cfg(target_os = "macos")]
 use nsh_core::desktop::QuitRequestOptions;
-use nsh_core::desktop::QuitMode;
-use nsh_core::element::desktop::{on_app_quit, on_quit_request, quit, set_quit_mode};
 #[cfg(target_os = "macos")]
 use nsh_core::element::desktop::set_quit_request_options;
+use nsh_core::element::desktop::{on_app_quit, on_quit_request, quit, set_quit_mode};
 use nsh_core::element::{Local, blocking, create_root, spawn};
 use nsh_core::prelude::*;
 
 use crate::supervisor::{RuntimeShell, ShellEvent, active_shell, event_hub};
 
-/// Waits for active `MaintenanceLock` work, then stops `supervisor` with its 10s shutdown grace unless handed over.
+/// Waits for active `MaintenanceLock` work (including in-flight custody children), then stops
+/// `supervisor` with its 10s shutdown grace unless terminal handover already owns shutdown.
 pub(crate) fn drain_for_quit(
     maintenance: &MaintenanceLock,
     supervisor: &HostSupervisor,
 ) -> QuitOutcome {
+    drain_for_quit_with(maintenance, || supervisor.stop())
+}
+
+pub(crate) fn drain_for_quit_with<F>(maintenance: &MaintenanceLock, stop_host: F) -> QuitOutcome
+where
+    F: FnOnce() -> Result<(), StopError>,
+{
     let outcome = maintenance.begin_quit();
     if outcome == QuitOutcome::HandedOver {
         return outcome;
     }
-    if let Err(err) = supervisor.stop() {
+    let remaining_custody = maintenance.active_custody_count();
+    if remaining_custody > 0 {
+        log::warn!(
+            "Proceeding with app quit after drain timeout while {remaining_custody} custody child(ren) remain active"
+        );
+    }
+    if let Err(err) = stop_host() {
         log::warn!("Host supervisor unclean stop during app quit: {err}");
     }
     outcome
 }
 
-fn drain_active_shell(shell: &RuntimeShell) {
-    drain_for_quit(&shell.maintenance, &shell.supervisor);
+pub(crate) fn should_call_desktop_quit(outcome: QuitOutcome) -> bool {
+    outcome != QuitOutcome::HandedOver
 }
 
-/// Runs the graceful quit sequence on the engine thread (`MaintenanceLock` + `HostSupervisor::stop`), then calls `desktop::quit()`.
+fn drain_active_shell(shell: &RuntimeShell) -> QuitOutcome {
+    drain_for_quit(&shell.maintenance, &shell.supervisor)
+}
+
+/// Runs the graceful quit sequence on the engine thread (`MaintenanceLock` + `HostSupervisor::stop`),
+/// then calls `desktop::quit()` unless terminal handover (`restart()`) already owns process exit.
 pub(crate) fn begin_graceful_quit(quitting: &AtomicBool) {
     if quitting.swap(true, Ordering::AcqRel) {
         return;
@@ -48,8 +67,12 @@ pub(crate) fn begin_graceful_quit(quitting: &AtomicBool) {
         return;
     };
     spawn(async move {
-        let _ = blocking(move || drain_active_shell(&shell)).await;
-        quit();
+        let outcome = blocking(move || drain_active_shell(&shell))
+            .await
+            .unwrap_or(QuitOutcome::Quit);
+        if should_call_desktop_quit(outcome) {
+            quit();
+        }
     });
 }
 
@@ -110,9 +133,7 @@ pub(crate) fn install_quit_hooks(sys: &System, cx: CallCx<'_>) -> Stop {
                 #[cfg(target_os = "macos")]
                 set_quit_request_options(QuitRequestOptions::default().system(true));
                 on_quit_request(move || begin_graceful_quit(&quitting_for_request));
-                on_app_quit(move || {
-                    fallback_app_quit_cleanup(Arc::clone(&quitting_for_app_quit))
-                });
+                on_app_quit(move || fallback_app_quit_cleanup(Arc::clone(&quitting_for_app_quit)));
             });
             owner
         };

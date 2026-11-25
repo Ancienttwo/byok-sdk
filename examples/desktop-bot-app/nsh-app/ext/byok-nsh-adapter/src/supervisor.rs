@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use byok_shell::{
     BridgeContract, HostCommandSpec, HostSupervisor, HostSupervisorConfig, MaintenanceLock,
-    ShellRouter, UnsupportedLoginItemBackend,
+    ShellRouter,
 };
 use nsh_core::JsonValue;
 use nsh_core::element::{Local, blocking};
@@ -204,17 +204,17 @@ fn register_stop<T: Clone + 'static>(
     })
 }
 
-pub(crate) fn subscribe_state(
-    sys: &System,
-    cx: CallCx<'_>,
-    listener: Callback<JsonValue>,
-) -> Stop {
+pub(crate) fn subscribe_state(sys: &System, cx: CallCx<'_>, listener: Callback<JsonValue>) -> Stop {
     let locals = sys.locals.get::<LocalHub>();
     register_stop::<JsonValue>(
         &locals,
         cx,
         |hub, id| hub.state_listeners.borrow_mut().push((id, listener)),
-        |hub, id| hub.state_listeners.borrow_mut().retain(|(entry, _)| *entry != id),
+        |hub, id| {
+            hub.state_listeners
+                .borrow_mut()
+                .retain(|(entry, _)| *entry != id)
+        },
     )
 }
 
@@ -224,7 +224,11 @@ pub(crate) fn subscribe_state_hint(sys: &System, cx: CallCx<'_>, listener: Callb
         &locals,
         cx,
         |hub, id| hub.hint_listeners.borrow_mut().push((id, listener)),
-        |hub, id| hub.hint_listeners.borrow_mut().retain(|(entry, _)| *entry != id),
+        |hub, id| {
+            hub.hint_listeners
+                .borrow_mut()
+                .retain(|(entry, _)| *entry != id)
+        },
     )
 }
 
@@ -252,7 +256,11 @@ pub(crate) fn subscribe_quitting(sys: &System, cx: CallCx<'_>, listener: Callbac
         &locals,
         cx,
         |hub, id| hub.quitting_listeners.borrow_mut().push((id, listener)),
-        |hub, id| hub.quitting_listeners.borrow_mut().retain(|(entry, _)| *entry != id),
+        |hub, id| {
+            hub.quitting_listeners
+                .borrow_mut()
+                .retain(|(entry, _)| *entry != id)
+        },
     )
 }
 
@@ -359,7 +367,6 @@ pub(crate) fn build_runtime_shell(
     let router = Arc::new(ShellRouter::new(
         Arc::clone(&supervisor),
         maintenance.clone(),
-        Box::new(UnsupportedLoginItemBackend),
         app_version,
     ));
     if start {
@@ -390,7 +397,9 @@ pub(crate) fn ensure_started(app_version: Option<String>) -> Result<JsonValue, J
             .last_state()
             .map(|state| serialize_host_state(&state))
             .unwrap_or(JsonValue::Null);
-        return Ok(serde_json::json!({ "started": true, "alreadyStarted": true, "state": current }));
+        return Ok(
+            serde_json::json!({ "started": true, "alreadyStarted": true, "state": current }),
+        );
     }
 
     let command = resolve_host_command_spec()?;
@@ -405,8 +414,9 @@ pub(crate) fn ensure_started(app_version: Option<String>) -> Result<JsonValue, J
 }
 
 pub(crate) async fn restart_supervisor() -> Result<(), JsError> {
-    let shell = active_shell()
-        .ok_or_else(|| JsError::Error("Host supervisor is not started".to_owned()).with_code("host_exited"))?;
+    let shell = active_shell().ok_or_else(|| {
+        JsError::Error("Host supervisor is not started".to_owned()).with_code("host_exited")
+    })?;
     blocking(move || {
         shell.supervisor.restart();
     })

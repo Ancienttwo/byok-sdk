@@ -3,7 +3,10 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use byok_shell::{BridgeContract, SecretBytes};
+use byok_shell::{
+    BridgeContract, LoginItemView, RestoreSuccess, SecretBytes, ShellRouteError, ShellRouter,
+    StartFreshSuccess,
+};
 use nsh_core::JsonValue;
 use nsh_core::element::desktop::{launch_at_login, restart, set_launch_at_login};
 use nsh_core::element::{Os, blocking, os};
@@ -62,31 +65,127 @@ pub(crate) fn parse_login_item_set_param(params: &JsonValue) -> Result<bool, JsE
         })
 }
 
-async fn handle_login_item_get(params: &JsonValue) -> Result<JsonValue, JsError> {
-    if !params.is_null() {
-        return Err(JsError::Error("settings.loginItem takes no params".to_owned())
-            .with_code("invalid_params"));
-    }
-    if os() == Os::Linux {
-        return Ok(serde_json::json!({ "supported": false, "enabled": false }));
-    }
-    let enabled = launch_at_login().await;
-    Ok(serde_json::json!({ "supported": true, "enabled": enabled }))
+fn serialize_login_item(view: LoginItemView) -> Result<JsonValue, JsError> {
+    serde_json::to_value(view)
+        .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))
 }
 
-async fn handle_login_item_set(params: &JsonValue) -> Result<JsonValue, JsError> {
+pub(crate) async fn handle_login_item_get_with<F, Fut>(
+    current_os: Os,
+    params: &JsonValue,
+    read_enabled: F,
+) -> Result<JsonValue, JsError>
+where
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = bool>,
+{
+    if !params.is_null() {
+        return Err(
+            JsError::Error("settings.loginItem takes no params".to_owned())
+                .with_code("invalid_params"),
+        );
+    }
+    if !matches!(current_os, Os::MacOs | Os::Windows) {
+        return serialize_login_item(LoginItemView {
+            supported: false,
+            enabled: false,
+        });
+    }
+    let enabled = read_enabled().await;
+    serialize_login_item(LoginItemView {
+        supported: true,
+        enabled,
+    })
+}
+
+pub(crate) async fn handle_login_item_set_with<S, SFut, G, GFut, E>(
+    current_os: Os,
+    params: &JsonValue,
+    set_enabled: S,
+    read_enabled: G,
+) -> Result<JsonValue, JsError>
+where
+    S: FnOnce(bool) -> SFut,
+    SFut: std::future::Future<Output = Result<(), E>>,
+    G: FnOnce() -> GFut,
+    GFut: std::future::Future<Output = bool>,
+    E: std::fmt::Display,
+{
     let enabled = parse_login_item_set_param(params)?;
-    if os() == Os::Linux {
+    if current_os == Os::Linux {
         return Err(
             JsError::Error("Login item is not supported on Linux".to_owned())
                 .with_code("method_failed"),
         );
     }
-    set_launch_at_login(enabled)
+    if !matches!(current_os, Os::MacOs | Os::Windows) {
+        return Err(
+            JsError::Error("Login item is not supported on this platform".to_owned())
+                .with_code("method_failed"),
+        );
+    }
+    set_enabled(enabled)
         .await
         .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
-    let reported = launch_at_login().await;
-    Ok(serde_json::json!({ "supported": true, "enabled": reported }))
+    let reported = read_enabled().await;
+    serialize_login_item(LoginItemView {
+        supported: true,
+        enabled: reported,
+    })
+}
+
+async fn handle_login_item_get(params: &JsonValue) -> Result<JsonValue, JsError> {
+    handle_login_item_get_with(os(), params, launch_at_login).await
+}
+
+async fn handle_login_item_set(params: &JsonValue) -> Result<JsonValue, JsError> {
+    handle_login_item_set_with(os(), params, set_launch_at_login, launch_at_login).await
+}
+
+pub(crate) fn execute_restore_sync(
+    router: &ShellRouter,
+    app_version: &str,
+    stamp: &str,
+) -> (Result<RestoreSuccess, ShellRouteError>, bool) {
+    let relaunched = AtomicBool::new(false);
+    let out = router.restore(app_version, stamp, |failure| {
+        if let Some(err) = failure {
+            log::error!("Recovery restore failed: {err}");
+        }
+        relaunched.store(true, Ordering::Release);
+    });
+    (out, relaunched.load(Ordering::Acquire))
+}
+
+pub(crate) fn execute_start_fresh_sync(
+    router: &ShellRouter,
+    stamp: &str,
+) -> (Result<StartFreshSuccess, ShellRouteError>, bool) {
+    let relaunched = AtomicBool::new(false);
+    let out = router.start_fresh(stamp, |failure| {
+        if let Some(err) = failure {
+            log::error!("Recovery startFresh failed: {err}");
+        }
+        relaunched.store(true, Ordering::Release);
+    });
+    (out, relaunched.load(Ordering::Acquire))
+}
+
+pub(crate) fn finish_recovery_call<T, R>(
+    outcome: Result<T, ShellRouteError>,
+    relaunched: bool,
+    on_restart: R,
+) -> Result<JsonValue, JsError>
+where
+    T: serde::Serialize,
+    R: FnOnce(),
+{
+    if relaunched {
+        on_restart();
+    }
+    let success = outcome.map_err(|err| JsError::Error(err.message).with_code(&err.code))?;
+    serde_json::to_value(success)
+        .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))
 }
 
 /// Executes one contract-allowlisted bridge call on behalf of TSX (`method`, optional JSON `params`).
@@ -111,10 +210,10 @@ pub(crate) async fn dispatch_call(
     match method.as_str() {
         "keys.submit" => {
             if !params.is_object() {
-                return Err(
-                    JsError::Error("keys.submit needs an object CustodyChange payload".to_owned())
-                        .with_code("invalid_params"),
-                );
+                return Err(JsError::Error(
+                    "keys.submit needs an object CustodyChange payload".to_owned(),
+                )
+                .with_code("invalid_params"));
             }
             let mut raw = Zeroizing::new(
                 serde_json::to_vec(&params)
@@ -129,34 +228,16 @@ pub(crate) async fn dispatch_call(
         }
         "shell.restore" => {
             if !params.is_null() {
-                return Err(
-                    JsError::Error("shell.restore takes no params".to_owned())
-                        .with_code("invalid_params"),
-                );
+                return Err(JsError::Error("shell.restore takes no params".to_owned())
+                    .with_code("invalid_params"));
             }
             let stamp = format_utc_stamp(SystemTime::now());
             let app_version = shell.app_version;
-            let result = blocking(move || {
-                let relaunched = AtomicBool::new(false);
-                let out = router.restore(&app_version, &stamp, |failure| {
-                    if let Some(err) = failure {
-                        log::error!("Recovery restore failed: {err}");
-                    }
-                    relaunched.store(true, Ordering::Release);
-                });
-                (out, relaunched.load(Ordering::Acquire))
-            })
-            .await
-            .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
-
-            if result.1 {
-                restart();
-            }
-            let success = result
-                .0
-                .map_err(|err| JsError::Error(err.message).with_code(&err.code))?;
-            serde_json::to_value(success)
-                .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))
+            let (out, relaunched) =
+                blocking(move || execute_restore_sync(&router, &app_version, &stamp))
+                    .await
+                    .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
+            finish_recovery_call(out, relaunched, restart)
         }
         "shell.startFresh" => {
             if !params.is_null() {
@@ -166,27 +247,10 @@ pub(crate) async fn dispatch_call(
                 );
             }
             let stamp = format_utc_stamp(SystemTime::now());
-            let result = blocking(move || {
-                let relaunched = AtomicBool::new(false);
-                let out = router.start_fresh(&stamp, |failure| {
-                    if let Some(err) = failure {
-                        log::error!("Recovery startFresh failed: {err}");
-                    }
-                    relaunched.store(true, Ordering::Release);
-                });
-                (out, relaunched.load(Ordering::Acquire))
-            })
-            .await
-            .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
-
-            if result.1 {
-                restart();
-            }
-            let success = result
-                .0
-                .map_err(|err| JsError::Error(err.message).with_code(&err.code))?;
-            serde_json::to_value(success)
-                .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))
+            let (out, relaunched) = blocking(move || execute_start_fresh_sync(&router, &stamp))
+                .await
+                .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
+            finish_recovery_call(out, relaunched, restart)
         }
         _ => blocking(move || router.dispatch_renderer(&method, params))
             .await
