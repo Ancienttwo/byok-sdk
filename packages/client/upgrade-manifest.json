@@ -72,6 +72,15 @@
       "items": [
         "export:@byok-sdk/client#UpgradeableRuntimeId"
       ]
+    },
+    {
+      "id": "decorated-adapter-admission",
+      "impact": "additive",
+      "summary": "@byok-sdk/client/adapters adds delegateAdmissionDetection(decorator, inner): a Host decorator of a built-in RuntimeAdapter keeps the built-in's fast task-admission detection (no login probe) while every adapter in the chain keeps its registered detect() and the chain ends at a built-in fast path; otherwise admission calls decorator.detect(). It throws TypeError for a cycle, a different descriptor id or versionPolicy, or wider platforms. ClaudeAdapter, AgyAdapter and GrokAdapter now return prepared.detected when prepare() reuses the admission observation (#2495).",
+      "migration": "docs/releases/host-upgrade-next-minor.md#decorated-adapters-keep-fast-admission-detection-2495",
+      "items": [
+        "export:@byok-sdk/client/adapters#delegateAdmissionDetection"
+      ]
     }
   ],
   "changes": [
@@ -204,6 +213,11 @@
       "item": "export:@byok-sdk/server/execution-core#readHostLedger",
       "change": "added",
       "entry": "host-ledger-read"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#delegateAdmissionDetection",
+      "change": "added",
+      "entry": "decorated-adapter-admission"
     }
   ]
 }
