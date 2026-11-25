@@ -391,7 +391,6 @@ pub(crate) fn ensure_started(app_version: Option<String>) -> Result<JsonValue, J
     let version = app_version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
     let mut slot = shell_slot().lock().expect("runtime shell lock poisoned");
     if let Some(existing) = slot.as_ref() {
-        existing.supervisor.start();
         let current = existing
             .supervisor
             .last_state()
@@ -413,15 +412,20 @@ pub(crate) fn ensure_started(app_version: Option<String>) -> Result<JsonValue, J
     Ok(serde_json::json!({ "started": true, "alreadyStarted": false, "state": current }))
 }
 
+pub(crate) fn restart_shell_sync(shell: &RuntimeShell) -> Result<(), JsError> {
+    shell
+        .supervisor
+        .restart(&shell.maintenance)
+        .map_err(|err| JsError::Error(err.to_string()).with_code(err.code()))
+}
+
 pub(crate) async fn restart_supervisor() -> Result<(), JsError> {
     let shell = active_shell().ok_or_else(|| {
         JsError::Error("Host supervisor is not started".to_owned()).with_code("host_exited")
     })?;
-    blocking(move || {
-        shell.supervisor.restart();
-    })
-    .await
-    .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))
+    blocking(move || restart_shell_sync(&shell))
+        .await
+        .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?
 }
 
 pub(crate) fn current_state() -> Option<JsonValue> {

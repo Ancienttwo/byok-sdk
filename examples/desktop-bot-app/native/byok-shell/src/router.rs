@@ -13,13 +13,11 @@ use crate::host::HostSupervisor;
 use crate::maintenance::MaintenanceLock;
 use crate::recovery::{shell_restore, shell_start_fresh, shell_state};
 
-/// Exact list of `mainMethods` owned by the desktop shell (`settings.loginItem*` execute on the
-/// NSH engine thread in `byok-nsh-adapter` because `nsh-core` login-item calls are engine-bound
-/// async futures; `keys.submit`, `shell.restore`, and `shell.startFresh` use dedicated `ShellRouter`
-/// methods).
+/// Exact list of `mainMethods` dispatched by [`ShellRouter`] (`keys.list` and `shell.state` via
+/// [`ShellRouter::dispatch_renderer`]; `keys.submit`, `shell.restore`, and `shell.startFresh` via
+/// dedicated `ShellRouter` methods). `settings.loginItem` and `settings.setLoginItem` execute
+/// exclusively on the NSH engine thread in `byok-nsh-adapter`.
 pub const HANDLED_MAIN_METHODS: &[&str] = &[
-    "settings.loginItem",
-    "settings.setLoginItem",
     "keys.submit",
     "keys.list",
     "shell.state",

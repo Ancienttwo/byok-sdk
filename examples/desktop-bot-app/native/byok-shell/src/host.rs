@@ -12,6 +12,7 @@ use crate::bridge::{
 };
 use crate::command::{HostCommandSpec, spawn_host_child};
 use crate::contract::BridgeContract;
+use crate::maintenance::{MaintenanceBusyError, MaintenanceLock};
 use crate::power::{
     DEFAULT_KEEP_AWAKE_REASON, DEFAULT_KEEP_AWAKE_WHO, KeepAwakeBackend, KeepAwakeGuard,
     PowerError, SystemKeepAwakeBackend,
@@ -447,24 +448,55 @@ impl HostSupervisor {
         self.inner.cv.notify_all();
     }
 
-    /// Restarts supervision after a failed stop or crash so the shell does not stay permanently stranded.
-    pub fn restart(&self) {
-        let (existing_client, release_epoch) = {
+    /// Restarts supervision under a single [`MaintenanceLock::try_begin`] acquisition so no Host
+    /// can start while recovery, handover, custody, or app quit holds the maintenance lock.
+    pub fn restart(&self, maintenance: &MaintenanceLock) -> Result<(), MaintenanceBusyError> {
+        let _maintenance_guard = maintenance.try_begin()?;
+        let (existing_client, mut release_epoch) = {
             let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
             guard.stopping = true;
             guard.paused = true;
+            self.inner.cv.notify_all();
             (guard.client.take(), guard.run_seq)
         };
-        if let Some(client) = existing_client {
-            let _ = client.shutdown_and_wait(self.inner.config.shutdown_grace);
+        let shutdown_res = existing_client
+            .map(|client| client.shutdown_and_wait(self.inner.config.shutdown_grace));
+        let settle_deadline = Instant::now() + self.inner.config.shutdown_grace;
+        {
+            let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
+            while guard.active_run && !guard.destroyed {
+                let Some(remaining) = settle_deadline.checked_duration_since(Instant::now()) else {
+                    break;
+                };
+                let (next, _) = self
+                    .inner
+                    .cv
+                    .wait_timeout(guard, remaining)
+                    .expect("supervisor lock poisoned");
+                guard = next;
+            }
+            if let Some(res) = shutdown_res {
+                guard.stop_authority = match res {
+                    Ok(()) => StopAuthority::CleanExit,
+                    Err(err) => StopAuthority::Unclean(err.0),
+                };
+            }
+            release_epoch = release_epoch.max(guard.run_seq);
         }
         self.inner.power.release_through(release_epoch);
         let mut guard = self.inner.state.lock().expect("supervisor lock poisoned");
+        if maintenance.is_quitting() {
+            return Err(MaintenanceBusyError);
+        }
+        if guard.destroyed {
+            return Ok(());
+        }
         guard.attempt = 0;
         guard.stopping = false;
         guard.paused = false;
         guard.stop_authority = StopAuthority::Running;
         self.inner.cv.notify_all();
+        Ok(())
     }
 
     /// Returns the most recently observed Host state.

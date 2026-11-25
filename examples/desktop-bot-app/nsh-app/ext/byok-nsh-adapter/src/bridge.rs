@@ -9,7 +9,9 @@ use byok_shell::{
 };
 use nsh_core::JsonValue;
 use nsh_core::element::desktop::{launch_at_login, restart, set_launch_at_login};
-use nsh_core::element::{Os, blocking, os};
+use nsh_core::element::{
+    Dialog, DialogButton, DialogButtonStyle, DialogReply, Os, blocking, dialog, os,
+};
 use nsh_core::prelude::*;
 use zeroize::Zeroizing;
 
@@ -150,7 +152,7 @@ pub(crate) fn execute_restore_sync(
     let relaunched = AtomicBool::new(false);
     let out = router.restore(app_version, stamp, |failure| {
         if let Some(err) = failure {
-            log::error!("Recovery restore failed: {err}");
+            log::error!("Recovery restore failed ({}): {}", err.code, err.message);
         }
         relaunched.store(true, Ordering::Release);
     });
@@ -164,23 +166,49 @@ pub(crate) fn execute_start_fresh_sync(
     let relaunched = AtomicBool::new(false);
     let out = router.start_fresh(stamp, |failure| {
         if let Some(err) = failure {
-            log::error!("Recovery startFresh failed: {err}");
+            log::error!("Recovery startFresh failed ({}): {}", err.code, err.message);
         }
         relaunched.store(true, Ordering::Release);
     });
     (out, relaunched.load(Ordering::Acquire))
 }
 
-pub(crate) fn finish_recovery_call<T, R>(
+/// Builds the blocking native alert shown before `desktop::restart()` when a post-stop recovery
+/// refusal occurs so the coded refusal reaches the user across the relaunch.
+pub(crate) fn recovery_failure_dialog(err: &ShellRouteError) -> Dialog {
+    Dialog {
+        id: 0,
+        title: Some("Recovery failed".to_owned()),
+        message: Some(format!(
+            "{}\n\nError code: {}\n\nThe app restarts. Stores that were moved aside keep their data beside their directories (*.aside-*).",
+            err.message, err.code
+        )),
+        buttons: vec![DialogButton {
+            text: "Restart".to_owned(),
+            style: DialogButtonStyle::Default,
+        }],
+        cancelable: false,
+        sheet: false,
+        input: None,
+    }
+}
+
+pub(crate) async fn finish_recovery_call<T, D, DFut, R>(
     outcome: Result<T, ShellRouteError>,
     relaunched: bool,
+    show_failure_dialog: D,
     on_restart: R,
 ) -> Result<JsonValue, JsError>
 where
     T: serde::Serialize,
+    D: FnOnce(Dialog) -> DFut,
+    DFut: std::future::Future<Output = DialogReply>,
     R: FnOnce(),
 {
     if relaunched {
+        if let Err(err) = &outcome {
+            let _ = show_failure_dialog(recovery_failure_dialog(err)).await;
+        }
         on_restart();
     }
     let success = outcome.map_err(|err| JsError::Error(err.message).with_code(&err.code))?;
@@ -237,7 +265,7 @@ pub(crate) async fn dispatch_call(
                 blocking(move || execute_restore_sync(&router, &app_version, &stamp))
                     .await
                     .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
-            finish_recovery_call(out, relaunched, restart)
+            finish_recovery_call(out, relaunched, dialog, restart).await
         }
         "shell.startFresh" => {
             if !params.is_null() {
@@ -250,7 +278,7 @@ pub(crate) async fn dispatch_call(
             let (out, relaunched) = blocking(move || execute_start_fresh_sync(&router, &stamp))
                 .await
                 .map_err(|err| JsError::Error(err.to_string()).with_code("method_failed"))?;
-            finish_recovery_call(out, relaunched, restart)
+            finish_recovery_call(out, relaunched, dialog, restart).await
         }
         _ => blocking(move || router.dispatch_renderer(&method, params))
             .await

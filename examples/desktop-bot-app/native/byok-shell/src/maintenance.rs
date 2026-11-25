@@ -13,9 +13,19 @@ use std::time::{Duration, Instant};
 /// unlock prompt (`kill_on_timeout = false`) from wedging app quit forever.
 pub const DEFAULT_CUSTODY_QUIT_WAIT: Duration = Duration::from_secs(35);
 
+/// Bridge error code emitted when an operation is refused because [`MaintenanceLock`] is busy, handed over, or quitting.
+pub const MAINTENANCE_BUSY_CODE: &str = "maintenance_busy";
+
 /// Error raised when a second maintenance action attempts to enter while one is active or handed over.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaintenanceBusyError;
+
+impl MaintenanceBusyError {
+    /// Returns the existing bridge error code (`"maintenance_busy"`) for maintenance-lock refusals.
+    pub const fn code(&self) -> &'static str {
+        MAINTENANCE_BUSY_CODE
+    }
+}
 
 impl fmt::Display for MaintenanceBusyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
