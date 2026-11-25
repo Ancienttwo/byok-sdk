@@ -281,9 +281,13 @@ async function runTurn(id, input) {
       },
     });
   }
-  const messageText = input.map((p) => p.text ?? '').join('')
-    ? 'hello from fake codex'
-    : 'empty prompt';
+  // FAKE_CODEX_ECHO_MCP=1: the reply echoes the session MCP configs raw and JSON-encoded once and twice.
+  const echoed = JSON.stringify(sessionMcpServers);
+  const messageText = process.env.FAKE_CODEX_ECHO_MCP === '1'
+    ? `mcp ${echoed} ${JSON.stringify(echoed)}`
+    : input.map((p) => p.text ?? '').join('')
+      ? 'hello from fake codex'
+      : 'empty prompt';
   // FAKE_CODEX_MESSAGE_DELTAS=1: stream the message as two deltas, plus one
   // delta of a stale turn. FAKE_CODEX_REPLY_GATE=<dir> then waits for
   // `<dir>/release` before the completed item.
