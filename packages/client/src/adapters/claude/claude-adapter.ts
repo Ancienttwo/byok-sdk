@@ -8,7 +8,7 @@ import { CLAUDE_RUNTIME_CAPABILITIES } from './claude-capabilities.js';
 import { claudeAgentUserContextSettings } from './agent-user-context.js';
 import type { ExecutionScratch } from '../../daemon/retention/scratch.js';
 import { classifyDetectError, probeRuntimeVersion, probeTimeouts, runDetectCommand } from '../detect-outcome.js';
-import { registerAdmissionDetect } from '../../runtime-detection.js';
+import { bindVerifiedDetection, registerAdmissionDetect, takeVerifiedDetection } from '../../runtime-detection.js';
 import { promises as fs, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -335,12 +335,12 @@ export class ClaudeAdapter implements RuntimeAdapter {
         if (auth.kind === 'timeout') return { kind: 'timeout' };
         authPresent = auth.kind === 'ok' && auth.status.loggedIn === true;
       }
-      return {
+      return bindVerifiedDetection(this, {
         kind: 'available', version, ...(authPresent === undefined ? {} : { authPresent }),
         sessionCapabilities: { ...claudeSessionCapabilities(), steer: this.descriptor.capabilities.steer },
         ...runtimeExecutableFields(resolved, invocation.executable),
         ...runtimeVersionDetectionFields(this.effectiveVersionPolicy, claudeVersionToken(version)),
-      };
+      }, invocation);
     } catch (error) {
       signal?.throwIfAborted();
       return classifyDetectError(error);
@@ -359,35 +359,44 @@ export class ClaudeAdapter implements RuntimeAdapter {
     } catch (error) {
       return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: false };
     }
-    let bin: { command: string };
-    try {
-      bin = this.resolveBin();
-    } catch (error) {
-      return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
+    input.signal?.throwIfAborted();
+    // Launch the invocation this offer's admission observation probed, when
+    // this adapter made it; otherwise resolve the installation here.
+    let invocation = takeVerifiedDetection<RuntimeInvocation>(this, input.detected);
+    const detected = invocation === undefined ? undefined : input.detected as Extract<RuntimeDetectResult, { kind: 'available' }>;
+    if (invocation === undefined) {
+      let bin: { command: string };
+      try {
+        bin = this.resolveBin();
+      } catch (error) {
+        return { kind: 'reject', reason: error instanceof Error ? error.message : String(error), retryable: true };
+      }
+      try {
+        invocation = resolveRuntimeInvocation(bin.command, runtimeInvocationHost((await this.runtimeEnvironment()).env));
+      } catch (error) {
+        // As Codex: the reason names the detect kind only, never a local path.
+        return { kind: 'reject', reason: `claude installation refused: ${classifyDetectError(error).kind}`, retryable: false };
+      }
     }
-    let invocation: RuntimeInvocation;
-    try {
-      invocation = resolveRuntimeInvocation(bin.command, runtimeInvocationHost((await this.runtimeEnvironment()).env));
-    } catch (error) {
-      // As Codex: the reason names the detect kind only, never a local path.
-      return { kind: 'reject', reason: `claude installation refused: ${classifyDetectError(error).kind}`, retryable: false };
-    }
+    const launched = invocation;
     let admittedLaunch: ClaudeSubscriptionLaunch | undefined;
     const operation: PreparedRuntimeOperation = {
-      start: startInput => this.startPrepared(startInput, selection, invocation, effort, admittedLaunch),
+      start: startInput => this.startPrepared(startInput, selection, launched, effort, admittedLaunch),
     };
     if (selection.mode === 'subscription') {
       operation.resolveRuntimeLaunch = async ({ cwd, env, scratch, signal = input.signal }) => {
         if (admittedLaunch !== undefined) throw invalidClaudeRequest('Claude subscription launch was already resolved');
         const launchEnv = Object.freeze(claudeCredentialEnvironment({ ...env, ...scratch.env }));
-        const auth = await this.#readAuthStatus(invocation, launchEnv, cwd, signal);
+        const auth = await this.#readAuthStatus(launched, launchEnv, cwd, signal);
         signal?.throwIfAborted();
         requireClaudeSubscription(auth);
         admittedLaunch = Object.freeze({ cwd, env: launchEnv, scratch, release: () => scratch.release() });
         return admittedLaunch;
       };
     }
-    return { kind: 'prepared', operation };
+    if (detected === undefined) return { kind: 'prepared', operation };
+    const { version, executableSource, versionVerdict } = detected;
+    return { kind: 'prepared', operation, detected: { version, executableSource, versionVerdict } };
   }
 
   private executionSelection(input: HarnessSelection | undefined): ClaudeSelection {
