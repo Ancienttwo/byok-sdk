@@ -47,6 +47,7 @@ import { PI_PROVIDER_ENV_KEYS } from '../pi/pi-provider-env.generated.js';
 import { offerSelection } from '../../types.js';
 
 /** DSH uses pi-ai catalog ids verbatim except for its own DeepSeek plugin. */
+const MCP_EXPLICIT_CREDENTIAL_MIN_LENGTH = 8;
 const DSH_PROVIDER_CATALOG_IDS = new Map([
   ...Object.keys(PI_PROVIDER_ENV_KEYS).map(id => [id, id] as const),
   ['deepseek', 'deepseek'], // The deepseek-official plugin serves pi-ai's deepseek provider.
@@ -351,7 +352,13 @@ export class DshAdapter implements RuntimeAdapter {
       const key = await resolveRuntimeApiKey('dsh', this.options.resolveKey, input.signal);
       env[DSH_PROVIDER_KEY_ENV] = key;
       const redactor = sessionCredentialRedactor({ env, mcpServers });
-      redactor.addExplicit(key);
+      // The bridge mounts every MCP env and header value in memory, so each one is a credential whatever its name; a
+      // refused mount echoes them JSON-escaped. Values under eight characters keep the name rules, as a short value
+      // such as DEBUG=1 would redact every matching character of the model's output.
+      const mcpValues = mcpServers.flatMap((server) => Object.values(('headers' in server ? server.headers : server.env) ?? {}));
+      const credentials = [key, ...mcpValues.filter((value) => value.length >= MCP_EXPLICIT_CREDENTIAL_MIN_LENGTH)]
+        .flatMap((value) => { const escaped = JSON.stringify(value).slice(1, -1); return escaped === value ? [value] : [value, escaped]; });
+      for (const credential of credentials) redactor.addExplicit(credential);
       const spawnAgent = createOwnedLineProcessSpawn({ nativeAssetRoot: this.options.nativeAssetRoot, spawnFn: this.options.spawnFn, label: 'dsh acp', stderrRedactor: redactor });
       const raw = await dshSession(
         (bin, args, options) => {
@@ -377,7 +384,7 @@ export class DshAdapter implements RuntimeAdapter {
           ...(resume === undefined ? {} : { resume }),
         },
         {
-          credentialsForRedaction: [key],
+          credentialsForRedaction: credentials,
           onReady: (id) => session.ready(id),
           onRouteMismatch: () => session.refuseRoute(),
           // A kernel observer: the kernel swallows its errors, so record() fails the session itself.

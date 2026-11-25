@@ -21,6 +21,6 @@ This checklist starts after the published 0.46.1 release. Hosts on an earlier re
 
 ## OAR 0.131.0 (#2487)
 
-- `DshAdapter` accepts Host toolsets with stdio `env` and `type: 'http'` entries with `headers`; it used to decline them before claim. OAR mounts them in memory through the bridge, so a Host that wrapped a dsh server to avoid env or headers can pass them directly. A failed mount fails the start, with credentials redacted from the message.
+- `DshAdapter` accepts MCP servers with stdio `env` and `type: 'http'` entries with `headers`; it used to decline them before claim. OAR mounts them in memory through the bridge. `DaemonConfig.mcpToolsets` still rejects `env` and `headers`, so this reaches the SDK's own task-scoped servers and a Host that calls the adapter directly. A failed mount fails the start, with every `env` and header value of eight or more characters redacted from the message.
 - The Antigravity CLI qualified version is `1.5.16` (the default agy version policy and the `agy` runtime release record). Under the default `unqualified: 'warn'` policy, an installed 1.5.11 now gets the unqualified-version warning; update agy to clear it.
-- A Codex resume sends the adapter's sandbox on `thread/resume`, so the configured `codexSandbox` applies to a resumed thread instead of the permissions saved in its rollout. No Host action.
+- OAR's Codex session sends the caller's sandbox on `thread/resume`. `CodexAdapter` sets `codexSandbox` as an app-server launch override (`-c sandbox_mode`) and opens with `sandboxMode: 'inherit'`, so its `thread/resume` carries no `sandbox` field and its behavior is unchanged. No Host action.

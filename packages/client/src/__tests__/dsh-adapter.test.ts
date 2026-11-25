@@ -548,18 +548,24 @@ describe('DshAdapter sessions', () => {
     }
   });
 
-  it('redacts MCP credentials a refused mount echoes', async () => {
-    const stdioToken = 'stdio-mcp-token-distinctive-suffix';
-    const bearer = 'http-mcp-bearer-distinctive-suffix';
-    const { open, facts } = await setup({}, { FAKE_DSH_MOUNT_FAIL: '1' });
+  it.each([
+    ['in the refusal frame', '1', 'MCP plugin is not active'],
+    ['on stderr', 'exit', 'mount failed'],
+  ])('redacts MCP credentials a refused mount echoes %s, whatever their names, raw and JSON-escaped', async (_where, mode, marker) => {
+    const credentials = ['abc12345', '/opt/service/secret-path-123', 'custom-header-credential-123', 'long"quoted\\secret-123'];
+    const { open, facts } = await setup({}, { FAKE_DSH_MOUNT_FAIL: mode });
     const error = await open({ target: DSH_TARGET, instruction: 'hello' }, { mcpServers: {
-      local: { command: '/usr/bin/env', env: { HOST_TOKEN: stdioToken } },
-      remote: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { Authorization: `Bearer ${bearer}` } },
+      local: { command: '/usr/bin/env', env: { HOST_ACCESS: credentials[0], SERVICE_REF: credentials[1], LOGIN_BLOB: credentials[3], DEBUG: '1' } },
+      remote: { type: 'http', url: 'http://127.0.0.1:9/mcp', headers: { 'X-Auth': credentials[2] } },
     } }).catch((caught: unknown) => caught);
     expect(error).toMatchObject({ phase: 'start' });
     const text = JSON.stringify(error, Object.getOwnPropertyNames(error));
-    expect(text).toContain('MCP plugin is not active');
-    for (const secret of [stdioToken, bearer]) expect(text).not.toContain(secret);
+    expect(text).toContain(marker);
+    for (const secret of credentials) {
+      for (const form of [secret, JSON.stringify(secret).slice(1, -1), JSON.stringify(JSON.stringify(secret).slice(1, -1)).slice(1, -1)]) expect(text).not.toContain(form);
+    }
+    // A value under eight characters keeps the name rules, so the echoed DEBUG=1 stays readable.
+    expect(text).toMatch(/DEBUG\\*":\\*"1\\*"/);
     expect((await facts()).some((fact) => fact.method === 'open')).toBe(false);
   });
 
