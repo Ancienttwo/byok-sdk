@@ -6,8 +6,8 @@
     "snapshotSha256": "af918f69f23c4b475c3f8d768d085cbd73ececd35f56fbe3d3302efa1dce9c8f"
   },
   "to": {
-    "version": "0.46.1",
-    "snapshotSha256": "266e7a32431b155b1d5a243d45dbe343e72fc6d92fd08e7c52c2f45e116f6e8d"
+    "version": "0.47.0",
+    "snapshotSha256": "0398d5986f58dc101448b06f0d9d68bc8a6f041c62d341ae8ecddccb78bf2040"
   },
   "configFields": {
     "status": "tracked",
@@ -19,7 +19,7 @@
       "id": "daemon-when-capabilities-settled",
       "impact": "additive",
       "summary": "Daemon.whenCapabilitiesSettled({ signal }) awaits initial local memory backend proof, deployment capability discovery, and server HTTP-200 conn.hello acknowledgment for an open connection generation, returning DaemonCapabilitiesSettlement (with DaemonMemoryBackendProofState and DaemonDeploymentDiscoveryState) or disconnected on mid-proof reconnect; @byok-sdk/server MachineInfo projects readonly capabilities?: readonly CapabilityFlag[] from accepted conn.hello handshakes. The Daemon member is required, so a Host test double typed as Daemon adds it (#2471).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#settled-device-capabilities-2471",
+      "migration": "docs/releases/host-upgrade-0.47.0.md#settled-device-capabilities-2471",
       "items": [
         "export:@byok-sdk/client#Daemon",
         "export:@byok-sdk/client#DaemonCapabilitiesSettlement",
@@ -32,7 +32,7 @@
       "id": "detect-signal-prepare-detected",
       "impact": "additive",
       "summary": "@byok-sdk/client built-in adapters declare detect(signal?: AbortSignal); an abort rejects with the reason and stops any probe child. RuntimeAdapterPrepareInput.detected carries the offer's admission observation; a built-in prepare() reuses one produced by the same adapter, once, and launches the command it probed. No Host action required.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#detect-signal-prepare-detected",
+      "migration": "docs/releases/host-upgrade-0.47.0.md#detect-signal-prepare-detected",
       "items": [
         "export:@byok-sdk/client#AgyAdapter",
         "export:@byok-sdk/client#ClaudeAdapter",
@@ -56,7 +56,7 @@
       "id": "host-ledger-read",
       "impact": "additive",
       "summary": "@byok-sdk/server/execution-core adds readHostLedger(path), a read-only reader of every tenant of a K4 Host ledger that sees committed WAL frames from a private copy without writing or creating the database, WAL or SHM files. It returns HostLedgerRead: ok with HostLedgerTenantRead rows (HostLedgerReadState application, intents and executions, or a corrupt_row), absent, retryable (snapshot_changed, hot_journal) or unreadable (#2474).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#host-ledger-reader-2474",
+      "migration": "docs/releases/host-upgrade-0.47.0.md#host-ledger-reader-2474",
       "items": [
         "export:@byok-sdk/server/execution-core#HostLedgerRead",
         "export:@byok-sdk/server/execution-core#HostLedgerReadState",
@@ -67,8 +67,8 @@
     {
       "id": "oar-0-131-0",
       "impact": "additive",
-      "summary": "@byok-sdk/client vendors OAR 0.131.0. DshAdapter accepts MCP servers with stdio env and HTTP headers, mounted in memory through the bridge; DaemonConfig.mcpToolsets still rejects both. The Antigravity CLI qualified version is 1.5.16, so an installed 1.5.11 gets the unqualified-version warning under the default policy. CodexAdapter's resume is unchanged.",
-      "migration": "docs/releases/host-upgrade-next-minor.md#oar-01310-2487",
+      "summary": "@byok-sdk/client vendors OAR 0.131.0. DshAdapter accepts MCP servers with stdio env and HTTP headers, mounted in memory through the bridge; DaemonConfig.mcpToolsets still rejects both. The Antigravity CLI qualified version is 1.5.16, so an installed 1.5.11 gets the unqualified-version warning under the default policy. The shared OAR redactor registers credential-shaped MCP env and header values across all six OAR adapters (#2493).",
+      "migration": "docs/releases/host-upgrade-0.47.0.md#oar-01310-2487",
       "items": [
         "export:@byok-sdk/client#UpgradeableRuntimeId"
       ]
@@ -77,7 +77,7 @@
       "id": "decorated-adapter-admission",
       "impact": "additive",
       "summary": "@byok-sdk/client/adapters adds delegateAdmissionDetection(decorator, inner): a Host decorator of a built-in RuntimeAdapter keeps the built-in's fast task-admission detection (no login probe) while every adapter in the chain keeps its registered detect() and the chain ends at a built-in fast path; otherwise admission calls decorator.detect(). It throws TypeError for a cycle, a different descriptor id or versionPolicy, or wider platforms. ClaudeAdapter, AgyAdapter and GrokAdapter now return prepared.detected when prepare() reuses the admission observation (#2495).",
-      "migration": "docs/releases/host-upgrade-next-minor.md#decorated-adapters-keep-fast-admission-detection-2495",
+      "migration": "docs/releases/host-upgrade-0.47.0.md#decorated-adapters-keep-fast-admission-detection-2495",
       "items": [
         "export:@byok-sdk/client/adapters#delegateAdmissionDetection"
       ]

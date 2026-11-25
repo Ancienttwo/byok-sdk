@@ -2,7 +2,17 @@
 
 ## Unreleased
 
-- **Changed (client, #2487)** — The client vendors OAR 0.131.0 (from 0.129.1). `DshAdapter` accepts MCP servers with stdio `env` and HTTP `headers`, mounted in memory through the bridge; it used to decline them. `DaemonConfig.mcpToolsets` still rejects both. The Antigravity CLI qualified version is 1.5.16. [Host upgrade](docs/releases/host-upgrade-next-minor.md#oar-01310-2487)
+## 0.47.0 (prepared, 2026-11-25)
+
+[Candidate notes](docs/releases/v0.47.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.47.0.md)
+
+0.47.0 keeps wire v8. Existing 0.46.1 server databases, daemon journals, provider stores, and device pairings carry forward in place. The manifest has five additive entries and zero breaking entries.
+
+- **Added (client, server, #2471 and #2473).** `Daemon.whenCapabilitiesSettled({ signal })` waits for initial capability proof, discovery, and server acceptance of `conn.hello`. `MachineInfo.capabilities` exposes the latest accepted flags. Host test doubles typed as `Daemon` must implement the new member. [Host steps](docs/releases/host-upgrade-0.47.0.md#settled-device-capabilities-2471)
+- **Added (client, #2469, #2476, and #2496).** Built-in `detect()` methods accept `AbortSignal`. The daemon passes the admission observation to `prepare()`, and adapter wrappers can opt into fast admission with `delegateAdmissionDetection`. Claude, Antigravity, and Grok return version evidence in `prepared.detected`. [Adapter detection](docs/releases/v0.47.0.md#runtime-detection-and-adapter-wrappers)
+- **Added (server, #2486).** `readHostLedger()` reads all K4 tenants from a committed SQLite snapshot, including WAL commits. It opens a private copy and reports malformed rows individually. [Host steps](docs/releases/host-upgrade-0.47.0.md#host-ledger-reader-2474)
+- **Changed (client, #2490 and #2497).** The client vendors OAR 0.131.0 (from 0.129.1) and qualifies Antigravity CLI 1.5.16. DSH mounts task-scoped MCP stdio `env` and HTTP `headers` in memory. The shared OAR redactor covers credential-shaped MCP values across all six OAR adapters. [OAR details](docs/releases/v0.47.0.md#oar-01310)
+- **Fixed (client, #2484 and #2489).** Codex cancellation receipts retain observed usage when the interrupt goes unacknowledged. POSIX disposal repeats group `SIGTERM` once if the root exits and the group survives. [Fixed](docs/releases/v0.47.0.md#fixed)
 
 ## 0.46.1 — 2026-11-25 (published)
 
