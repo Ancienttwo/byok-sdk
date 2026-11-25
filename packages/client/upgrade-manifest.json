@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "package": "@byok-sdk/client",
   "from": {
-    "version": "0.46.0",
-    "snapshotSha256": "36fc4ada3073f23b720259463ccf81fba8eca3f068ba1c95739fc72b4ee3bbb6"
+    "version": "0.46.1",
+    "snapshotSha256": "af918f69f23c4b475c3f8d768d085cbd73ececd35f56fbe3d3302efa1dce9c8f"
   },
   "to": {
-    "version": "0.46.0",
-    "snapshotSha256": "8313f9a340577a351eac4fc783b8aedac826d4828d08c81abd3fe939dd0f0757"
+    "version": "0.46.1",
+    "snapshotSha256": "1695ba912f85d8de192e7be6a2edbabfa252bc4be8535ebe77c07d28018d1184"
   },
   "configFields": {
     "status": "tracked",
