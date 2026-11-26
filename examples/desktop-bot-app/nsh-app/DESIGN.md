@@ -131,8 +131,27 @@ Written before Slice 3 implementation. Every state change across workspace navig
 
 ---
 
-## 9. Upcoming Screen Motion Inventory Sections (Reserved)
+## 9. Motion Inventory — Conversation Workspace (Slice 4)
 
-Feature slices landing after Slice 3 (`Shell & Recovery`) will append their motion inventories here before implementation:
-- **Conversation workspace** (Slice 4 — sidebar selection, streaming `TextView`, Send/Cancel swap, timeline `List`)
+Written before `src/features/conversation/` implementation. Every state change in the bot rail, profile editor, transcript, and composer accounts for tool, tokens, and `reduceMotion()`:
+
+| State Change | Tool & Tokens | Reduced Motion Behavior |
+| --- | --- | --- |
+| Bot rail selection & hover wash | `ListItem` `MOTION_CLASSES.interactiveColor` (`duration-100 ease-out`) on the selected `bg-sidebar-accent` row; the selected Bot's conversation swaps in only once its own `k8.view` read lands (no stale transcript under the new header) | `motion-reduce:transition-none`; selection stays explicit via `accessibilityState={{ selected }}` |
+| Bot state badge changes (`Idle`, `Working`, `Waiting for you`, `Profile updating`, `Runtime unavailable`, `Archived`) | `Badge` pill swap: semantic tone plus symbol and label, so state never relies on color alone | Instant swap; symbol and label always shown |
+| "New by role" list open/close | `Disclosure` (`Collapsible reveal={!reduceMotion()}`) | `reveal={false}`: expands and collapses at once |
+| Profile editor replacing the conversation pane (create / edit / close) | Instant conditional `<If>` mount on the same `Field` spine; Save and Archive show `Button loading` while their command runs | Identical instant mount; busy and error text stay explicit |
+| Archive confirmation | `Dialog role="alertdialog"` with `animation={dialogAnimation()}`; focus moves into the dialog and returns on close; Escape keeps the Bot | `dialogAnimation()` resolves to `"none"`: the dialog appears and leaves at once |
+| Streaming reply (`working` row draft) | `MarkdownView streaming` (`TextView` `options={{ streaming: true }}`): only changed blocks re-render, with a static `▍` caret after the last block; no fade or typewriter effect | Same: text appears as it arrives; the caret is static, never blinking |
+| New rows and row updates in the transcript | `List` keyed by the Host's stable item keys (`e<seq>` / `t<turnId>` / `q<questionId>`), `alignment="bottom"`, `initialScrollAtEnd`, and `maintainVisibleContentPosition` so streaming text and new messages keep the reading position; rows insert without enter animation | No animation either way; scroll position rules are unchanged |
+| Folded history toggle (rows above the latest clear) | `Button` label swap (`Show N earlier messages` / `Hide N earlier messages`); the open state lives in the store per Bot, so switching Bots or sections keeps it | Instant show/hide of the folded rows |
+| Send / Cancel Turn / Clear context / Answer | `Button loading` while the command runs; a failed command shows `role="alert"` text in flow without layout shift of the controls | Spinner stops under `motion-reduce:`; busy and disabled states stay explicit |
+| `k8.view` failure | The last snapshot stays on screen; a `role="alert"` banner with Retry appears above it | Instant appearance |
+| Drag / swipe / throw | None in this workspace | N/A |
+
+---
+
+## 10. Upcoming Screen Motion Inventory Sections (Reserved)
+
+Feature slices landing after Slice 4 (`Conversation workspace`) will append their motion inventories here before implementation:
 - **Activity & Settings** (Slice 5 — card disclosure, approval confirmation, Dreaming & Device preferences)

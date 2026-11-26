@@ -1,9 +1,10 @@
 import { ByokShell } from "byok-nsh-adapter";
-import { resource, setColorScheme, signal } from "nsh";
+import { resource, setColorScheme, signal, untracked } from "nsh";
 import type { WindowRef } from "nsh/desktop";
+import type { BotProfile } from "../../src/host/store/types.ts";
 import type { LoginItemView } from "../../src/bridge/domains/settings.ts";
 import type { ShellView } from "../../src/bridge/domains/shell.ts";
-import type { SupervisedHostState } from "../../src/bridge/protocol.ts";
+import type { BridgeMethods, SupervisedHostState } from "../../src/bridge/protocol.ts";
 import { BridgeCallError, bridge, toBridgeCallError } from "./bridge.ts";
 
 export type AppearanceMode = "light" | "dark" | "system";
@@ -24,6 +25,14 @@ const stateHintCountSignal = signal(0);
 const appearanceSignal = signal<AppearanceMode>("light");
 const activeSectionSignal = signal<WorkspaceSection>("keys");
 const shellStartSignal = signal<ShellStart>({ status: "pending" });
+const selectedBotIdSignal = signal<string | null>(null);
+const k8ReloadSignal = signal(0);
+const k8BusyRereadSignal = signal(0);
+const unfoldedBotsSignal = signal<ReadonlySet<string>>(new Set());
+
+/** How soon `k8.view` is read again while some Bot is busy: a runtime or profile catching up reaches no Host hint. */
+export const BUSY_REREAD_MS = 1500;
+let busyRereadTimer: ReturnType<typeof setTimeout> | undefined;
 
 let mainWindowRef: WindowRef | null = null;
 
@@ -53,13 +62,102 @@ export const hostReady = () =>
   shellStartSignal().status === "started" && liveHostStateSignal()?.state === "running";
 
 /**
- * The app's one `k8.view` load: it starts once the Host runs and reloads on each Host state hint.
- * Module-scoped, so a section switch neither drops nor repeats it and no screen polls on its own.
+ * The app's one `k8.view` load for the selected Bot: it starts once the Host runs and reloads on each Host state
+ * hint, on a Bot switch, on `reloadK8View`, and after {@link BUSY_REREAD_MS} while the last read said `busy` and the
+ * Conversation section shows (`armBusyReread`).
+ * Module-scoped, so a section switch neither drops nor repeats it and no screen polls on its own. The resource keeps
+ * its last value while it loads again and after a failure, so a failed read leaves the last snapshot on screen.
  */
 export const k8View = resource(
-  () => (hostReady() ? stateHintCount() + 1 : false),
-  async () => await bridge.call("k8.view", { botId: null }),
+  () =>
+    hostReady()
+      ? {
+          botId: selectedBotIdSignal(),
+          tick: stateHintCount() + k8ReloadSignal() + k8BusyRereadSignal(),
+        }
+      : false,
+  async (source, info) => {
+    clearTimeout(busyRereadTimer);
+    const snapshot = await bridge.call("k8.view", { botId: source.botId });
+    if (!info.signal.aborted) {
+      armBusyReread(snapshot.busy);
+    }
+    return snapshot;
+  },
 );
+
+/**
+ * Schedules the next busy reread, only while the Conversation section shows: the rail and transcript are what follow
+ * a runtime or profile catching up. Leaving the section cancels it; the section stays out of `k8View`'s source, so a
+ * section switch never reads `k8.view` by itself.
+ */
+function armBusyReread(busy: boolean): void {
+  clearTimeout(busyRereadTimer);
+  if (busy && untracked(() => activeSectionSignal()) === "conversation") {
+    busyRereadTimer = setTimeout(() => k8BusyRereadSignal.update((n) => n + 1), BUSY_REREAD_MS);
+  }
+}
+
+/** The Bot whose conversation `k8View` reads (null: none selected). */
+export const selectedBotId = () => selectedBotIdSignal();
+
+/** Selects the Bot whose conversation `k8View` reads. */
+export function selectBot(id: string | null): void {
+  selectedBotIdSignal.set(id);
+}
+
+/** Reads `k8.view` again (the Retry of a failed read). */
+export function reloadK8View(): void {
+  k8ReloadSignal.update((n) => n + 1);
+}
+
+/** Whether the rows above the latest clear show for `botId`; kept per Bot across Bot and section switches. */
+export const historyUnfolded = (botId: string) => unfoldedBotsSignal().has(botId);
+
+/** Shows or hides the rows above the latest clear for `botId`. */
+export function setHistoryUnfolded(botId: string, unfolded: boolean): void {
+  unfoldedBotsSignal.update((current) => {
+    const next = new Set(current);
+    if (unfolded) {
+      next.add(botId);
+    } else {
+      next.delete(botId);
+    }
+    return next;
+  });
+}
+
+/** Creates (under a UI-made id, reused on retry) or edits a Bot (`k8.saveBot`). */
+export async function saveBot(profile: BotProfile): Promise<null> {
+  return await bridge.call("k8.saveBot", profile);
+}
+
+/** Archives a Bot for good (`k8.archiveBot`). */
+export async function archiveBot(id: string): Promise<null> {
+  return await bridge.call("k8.archiveBot", { id });
+}
+
+/** One send keyed by the UI's action id, reused on retry (`k8.send`). */
+export async function sendMessage(
+  params: BridgeMethods["k8.send"]["params"],
+): Promise<BridgeMethods["k8.send"]["result"]> {
+  return await bridge.call("k8.send", params);
+}
+
+/** Clears the Bot's context: it no longer sees the messages above (`k8.clear`). */
+export async function clearContext(params: BridgeMethods["k8.clear"]["params"]): Promise<null> {
+  return await bridge.call("k8.clear", params);
+}
+
+/** Cancels one open Turn (`k8.cancel`). */
+export async function cancelTurn(turnId: string): Promise<BridgeMethods["k8.cancel"]["result"]> {
+  return await bridge.call("k8.cancel", { turnId });
+}
+
+/** Answers a Bot's question (`k8.answer`). */
+export async function answerQuestion(questionId: string, answer: string): Promise<null> {
+  return await bridge.call("k8.answer", { questionId, answer });
+}
 
 /** Active appearance override selected in the UI shell. */
 export const appearance = () => appearanceSignal();
@@ -75,6 +173,7 @@ export function setPreviewHostState(next: SupervisedHostState | null): void {
 /** Switches the active workspace section cleanly through the single store authority. */
 export function setActiveSection(section: WorkspaceSection): void {
   activeSectionSignal.set(section);
+  armBusyReread(untracked(() => k8View()?.busy === true));
 }
 
 /** Registers the active desktop main window ref so Show/Hide commands share one target. */

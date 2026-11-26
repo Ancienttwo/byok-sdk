@@ -2,6 +2,7 @@ import { cleanup, effect, mount, platform, Scroll, signal, Text, View } from "ns
 import { currentWindow, isAvailable } from "nsh/desktop";
 import brand from "../brand.config.ts";
 import { installDesktopShell, syncDesktopChrome } from "./src/desktop.ts";
+import { ConversationScreen } from "./src/features/conversation/ConversationScreen.tsx";
 import { GalleryScreen } from "./src/features/gallery/GalleryScreen.tsx";
 import { KeysScreen } from "./src/features/keys/KeysScreen.tsx";
 import { LoginItemControl } from "./src/features/shell/LoginItemControl.tsx";
@@ -144,16 +145,7 @@ export function App() {
           </If>
 
           <If when={activeSection() === "conversation"}>
-            <View testID="conversation-section">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Conversation</CardTitle>
-                  <CardDescription>
-                    Native conversation workspace arrives in Slice 4 of #2461.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </View>
+            <ConversationScreen />
           </If>
 
           <If when={activeSection() === "activity"}>
