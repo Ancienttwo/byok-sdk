@@ -15,13 +15,12 @@ export interface ComposerProps {
 
 /**
  * Send, cancel and clear for one Bot. A send keeps its action id until it succeeds, so a retry of the same text is the
- * same command to the Host; editing the text starts a new one. A clear keeps its action id the same way, so a retry
- * after a lost reply adds no second clear.
+ * same command to the Host; editing the text starts a new one. The store keeps a clear's action id per Bot
+ * (`clearContext`).
  */
 export function Composer(props: ComposerProps) {
   const text = signal("");
   const pending = signal<{ actionId: string; text: string } | null>(null);
-  const pendingClear = signal<string | null>(null);
   const command = createCommand();
   const disabled = () => props.archived || !props.hostRunning;
   const send = async () => {
@@ -33,14 +32,10 @@ export function Composer(props: ComposerProps) {
     );
     if (sent) {
       pending.set(null);
-      text.set("");
-    }
-  };
-  const clear = async () => {
-    const actionId = pendingClear() ?? crypto.randomUUID();
-    pendingClear.set(actionId);
-    if (await command.run(() => clearContext({ actionId, botId: props.botId }))) {
-      pendingClear.set(null);
+      // The field stays editable during a slow send: text typed since then is a new message, not the one sent.
+      if (text() === action.text) {
+        text.set("");
+      }
     }
   };
   const trySend = () => {
@@ -92,7 +87,7 @@ export function Composer(props: ComposerProps) {
           testID="conv-clear"
           variant="outline"
           disabled={command.busy() || disabled()}
-          onPress={() => void clear()}
+          onPress={() => void command.run(() => clearContext(props.botId))}
         >
           Clear context
         </Button>

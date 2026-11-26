@@ -39,6 +39,15 @@ const FIXTURE_FILES: ReadonlyArray<readonly [string, ModelRouteFixtureFile]> = [
 ];
 
 describe("@byok-sdk/keys/model-route 30-vector QuickJS parity", () => {
+  // ADR-052 D2 / #2461 parity (b): the vectors run under Policy::harden, the release policy. `nsh test` loads test
+  // files as `Bundle::bytecode`, whose `Policy::default()` hardens; a development policy would fail this first.
+  test("runs under Policy::harden: no eval, no Function constructor, frozen shared prototypes", () => {
+    expect(typeof (globalThis as { eval?: unknown }).eval).toBe("undefined");
+    expect(() => new Function("return 1")).toThrow("the Function constructor is disabled");
+    expect(Object.isFrozen(Object.prototype)).toBe(true);
+    expect(Object.isFrozen(Array.prototype)).toBe(true);
+  });
+
   test("contains exactly 30 fixture vectors across the four files", () => {
     const total = FIXTURE_FILES.reduce((sum, [, fixture]) => sum + fixture.vectors.length, 0);
     expect(total).toBe(30);

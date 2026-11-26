@@ -177,6 +177,51 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
     expect(app.enabled("id:settings-refresh")).toBe(true);
   });
 
+  test("a save that outlives a section switch keeps Refresh disabled and holds the remounted read until it settles", async () => {
+    const calls: Call[] = [];
+    let stored: DreamingSetting = { enabled: true, models: ["m1"] };
+    let releaseSave = () => {};
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1280,
+      height: 900,
+      modules: settingsShell(calls, {
+        dreaming: () => stored,
+        save: async (setting) => {
+          await saveGate;
+          stored = setting;
+          return { dreaming: setting };
+        },
+      }),
+    });
+    try {
+      await app.press("id:nav-settings");
+      await app.waitFor("id:settings-dreaming-form");
+      await app.press("id:settings-dreaming-model-m2");
+      const saving = app.press("id:settings-dreaming-save");
+      await app.waitUntil(() => count(calls, "settings.setDreaming") === 1);
+      await app.press("id:nav-keys");
+      await app.press("id:nav-settings");
+      await app.waitFor("id:settings-refresh");
+      expect(app.enabled("id:settings-refresh")).toBe(false);
+      expect(app.shows("id:settings-dreaming-form")).toBe(false);
+      await app.wait(50);
+      expect(count(calls, "settings.get")).toBe(1);
+
+      releaseSave();
+      await saving;
+      await app.waitFor("id:settings-dreaming-form");
+      expect(count(calls, "settings.get")).toBe(2);
+      expect(app.accessibility("id:settings-dreaming-model-m2")?.label).toBe("Model Two (#2)");
+      expect(app.enabled("id:settings-refresh")).toBe(true);
+    } finally {
+      releaseSave();
+    }
+  });
+
   test("while the Host does not run, nothing loads and diagnostics export is disabled with its note", async () => {
     const calls: Call[] = [];
     const app = await open("../../../App.tsx", {

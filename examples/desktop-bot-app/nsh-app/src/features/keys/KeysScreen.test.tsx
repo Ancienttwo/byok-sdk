@@ -194,63 +194,68 @@ describe("KeysScreen (#2461 Slice 2)", () => {
       releaseSubmit = resolve;
     });
 
-    const app = await open("../../../App.tsx", {
-      platform: "macos",
-      width: 1200,
-      height: 860,
-      modules: runningShell(async (method: string, params: unknown) => {
-        calls.push({ method, params });
-        if (method === "keys.list") {
-          listCalls += 1;
-          return listCalls === 1 ? [] : [savedStatus];
-        }
-        if (method === "keys.submit") {
-          await submitGate;
-          return savedStatus;
-        }
-        if (method === "k8.view") {
-          return { bots: [], roles: [], models: [], busy: false };
-        }
-        return null;
-      }),
-    });
+    try {
+      const app = await open("../../../App.tsx", {
+        platform: "macos",
+        width: 1200,
+        height: 860,
+        modules: runningShell(async (method: string, params: unknown) => {
+          calls.push({ method, params });
+          if (method === "keys.list") {
+            listCalls += 1;
+            return listCalls === 1 ? [] : [savedStatus];
+          }
+          if (method === "keys.submit") {
+            await submitGate;
+            return savedStatus;
+          }
+          if (method === "k8.view") {
+            return { bots: [], roles: [], models: [], busy: false };
+          }
+          return null;
+        }),
+      });
 
-    await app.waitFor("text:No provider profiles stored");
+      await app.waitFor("text:No provider profiles stored");
 
-    await app.type("id:keys-field-profile_ref", "zai-ui");
-    await app.type("id:keys-field-display_name", "ZAI UI");
-    await app.press("id:keys-field-provider_kind");
-    await app.press("text:Z.AI");
-    await app.waitFor("id:keys-field-model");
-    await app.press("id:keys-field-model-select");
-    await app.press("text:glm-4.7 (openai-completions)");
+      await app.type("id:keys-field-profile_ref", "zai-ui");
+      await app.type("id:keys-field-display_name", "ZAI UI");
+      await app.press("id:keys-field-provider_kind");
+      await app.press("text:Z.AI");
+      await app.waitFor("id:keys-field-model");
+      await app.press("id:keys-field-model-select");
+      await app.press("text:glm-4.7 (openai-completions)");
 
-    const uiSecret = "sk-ui-configure-secret-99";
-    await app.type("id:keys-field-secret", uiSecret);
-    expect(app.value("id:keys-field-secret")).toBe(uiSecret);
-    expect(app.enabled("id:keys-save-btn")).toBe(true);
+      const uiSecret = "sk-ui-configure-secret-99";
+      await app.type("id:keys-field-secret", uiSecret);
+      expect(app.value("id:keys-field-secret")).toBe(uiSecret);
+      expect(app.enabled("id:keys-save-btn")).toBe(true);
 
-    const saving = app.press("id:keys-save-btn");
-    await app.waitUntil(() => calls.some((entry) => entry.method === "keys.submit"));
-    expect(app.value("id:keys-field-secret")).toBe("");
-    releaseSubmit();
-    await saving;
-    await app.waitFor("id:keys-receipt");
-    await app.waitFor("id:keys-stored-zai-ui");
+      const saving = app.press("id:keys-save-btn");
+      await app.waitUntil(() => calls.some((entry) => entry.method === "keys.submit"));
+      expect(app.value("id:keys-field-secret")).toBe("");
+      releaseSubmit();
+      await saving;
+      await app.waitFor("id:keys-receipt");
+      await app.waitFor("id:keys-stored-zai-ui");
 
-    expect(listCalls).toBe(2);
-    const submitCalls = calls.filter((entry) => entry.method === "keys.submit");
-    expect(submitCalls).toHaveLength(1);
-    const payload = submitCalls[0]!.params as Extract<CustodyChange, { op: "configure" }>;
-    expect(payload.op).toBe("configure");
-    expect(payload.secret).toBe(uiSecret);
-    expect(payload.configuration.profile_ref).toBe("zai-ui");
-    expect(payload.configuration.display_name).toBe("ZAI UI");
-    expect(payload.configuration.provider_kind).toBe("zai");
-    expect(payload.configuration.model).toBe("glm-4.7");
+      expect(listCalls).toBe(2);
+      const submitCalls = calls.filter((entry) => entry.method === "keys.submit");
+      expect(submitCalls).toHaveLength(1);
+      const payload = submitCalls[0]!.params as Extract<CustodyChange, { op: "configure" }>;
+      expect(payload.op).toBe("configure");
+      expect(payload.secret).toBe(uiSecret);
+      expect(payload.configuration.profile_ref).toBe("zai-ui");
+      expect(payload.configuration.display_name).toBe("ZAI UI");
+      expect(payload.configuration.provider_kind).toBe("zai");
+      expect(payload.configuration.model).toBe("glm-4.7");
 
-    expect(app.shows("text:Saved ZAI UI")).toBe(true);
-    expect(app.texts().join("\n").includes(uiSecret)).toBe(false);
+      expect(app.shows("text:Saved ZAI UI")).toBe(true);
+      expect(app.texts().join("\n").includes(uiSecret)).toBe(false);
+    } finally {
+      // A failure or timeout above must not leave keys.submit waiting until the runner limit.
+      releaseSubmit();
+    }
   });
 
   test("editing stored profile preserves keep + enabled, and refusal shows code without resubmitting", async () => {
@@ -331,49 +336,54 @@ describe("KeysScreen (#2461 Slice 2)", () => {
       releaseSubmit = resolve;
     });
 
-    const app = await open("../../../App.tsx", {
-      platform: "macos",
-      width: 1200,
-      height: 860,
-      modules: runningShell(async (method: string, params: unknown) => {
-        if (method === "keys.list") {
-          return [existing];
-        }
-        if (method === "keys.submit") {
-          submitPayloads.push(params);
-          await submitGate;
-          return existing;
-        }
-        if (method === "k8.view") {
-          return { bots: [], roles: [], models: [], busy: false };
-        }
-        return null;
-      }),
-    });
+    try {
+      const app = await open("../../../App.tsx", {
+        platform: "macos",
+        width: 1200,
+        height: 860,
+        modules: runningShell(async (method: string, params: unknown) => {
+          if (method === "keys.list") {
+            return [existing];
+          }
+          if (method === "keys.submit") {
+            submitPayloads.push(params);
+            await submitGate;
+            return existing;
+          }
+          if (method === "k8.view") {
+            return { bots: [], roles: [], models: [], busy: false };
+          }
+          return null;
+        }),
+      });
 
-    await app.waitFor("id:keys-stored-zai-replace");
-    await app.press("id:keys-stored-zai-replace");
+      await app.waitFor("id:keys-stored-zai-replace");
+      await app.press("id:keys-stored-zai-replace");
 
-    const nextKey = "sk-replaced-key-42";
-    await app.type("id:keys-replace-secret", nextKey);
-    expect(app.value("id:keys-replace-secret")).toBe(nextKey);
+      const nextKey = "sk-replaced-key-42";
+      await app.type("id:keys-replace-secret", nextKey);
+      expect(app.value("id:keys-replace-secret")).toBe(nextKey);
 
-    const replacing = app.press("id:keys-replace-submit");
-    await app.waitUntil(() => submitPayloads.length === 1);
-    expect(app.value("id:keys-replace-secret")).toBe("");
-    releaseSubmit();
-    await replacing;
-    await app.waitFor("id:keys-receipt");
+      const replacing = app.press("id:keys-replace-submit");
+      await app.waitUntil(() => submitPayloads.length === 1);
+      expect(app.value("id:keys-replace-secret")).toBe("");
+      releaseSubmit();
+      await replacing;
+      await app.waitFor("id:keys-receipt");
 
-    expect(submitPayloads).toEqual([
-      {
-        op: "replace_secret",
-        profileRef: "zai-replace",
-        secret: nextKey,
-      },
-    ]);
-    expect(app.shows("text:Saved ZAI Replace")).toBe(true);
-    expect(app.texts().join("\n").includes(nextKey)).toBe(false);
+      expect(submitPayloads).toEqual([
+        {
+          op: "replace_secret",
+          profileRef: "zai-replace",
+          secret: nextKey,
+        },
+      ]);
+      expect(app.shows("text:Saved ZAI Replace")).toBe(true);
+      expect(app.texts().join("\n").includes(nextKey)).toBe(false);
+    } finally {
+      // A failure or timeout above must not leave keys.submit waiting until the runner limit.
+      releaseSubmit();
+    }
   });
 
   test("Windows KeysScreen inputs preserve CJK provider names cleanly", async () => {

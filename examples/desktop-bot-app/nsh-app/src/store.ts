@@ -34,6 +34,7 @@ const unfoldedBotsSignal = signal<ReadonlySet<string>>(new Set());
 const activityReloadSignal = signal(0);
 const expandedCardsSignal = signal<ReadonlySet<string>>(new Set());
 const approvalDecisionsSignal = signal<ReadonlyMap<string, ApprovalDecision>>(new Map());
+const dreamingSavingSignal = signal(false);
 
 /** One approval decision's state: the decision running, or the Host's refusal of the last attempt. */
 export interface ApprovalDecision {
@@ -92,6 +93,7 @@ export const k8View = resource(
     const snapshot = await bridge.call("k8.view", { botId: source.botId });
     if (!info.signal.aborted) {
       armBusyReread(snapshot.busy);
+      retainIds(unfoldedBotsSignal, snapshot.bots.map((bot) => bot.id));
     }
     return snapshot;
   },
@@ -150,6 +152,14 @@ export const activityCards = resource(
       : false,
   async (): Promise<ActivityCard[]> => await bridge.call("activity.cards", undefined),
 );
+
+/** Drops the ids that the newest snapshot no longer lists, so the set does not grow with every Bot ever seen. */
+function retainIds(set: typeof unfoldedBotsSignal, live: readonly string[]): void {
+  const keep = new Set(live);
+  set.update((current) =>
+    [...current].every((id) => keep.has(id)) ? current : new Set([...current].filter((id) => keep.has(id))),
+  );
+}
 
 /** Reads `activity.cards` again (Retry, and after an approval decision). */
 export function reloadActivityCards(): void {
@@ -220,9 +230,33 @@ export async function readHostSettings(): Promise<HostSettings> {
   return await bridge.call("settings.get", undefined);
 }
 
+let dreamingSaveInFlight: Promise<HostSettings> | null = null;
+
+/** True while a dreaming save runs; kept across section switches, so a remounted Settings sees it too. */
+export const dreamingSaving = () => dreamingSavingSignal();
+
 /** Saves the dreaming switch and model order; K8 reads them when the Host next starts (`settings.setDreaming`). */
 export async function saveDreaming(setting: DreamingSetting): Promise<HostSettings> {
-  return await bridge.call("settings.setDreaming", setting);
+  const saving = bridge.call("settings.setDreaming", setting);
+  dreamingSaveInFlight = saving;
+  dreamingSavingSignal.set(true);
+  try {
+    return await saving;
+  } finally {
+    dreamingSaveInFlight = null;
+    dreamingSavingSignal.set(false);
+  }
+}
+
+/**
+ * Resolves once no dreaming save runs. A `settings.get` waits for it: the Host serves both at once and renames the
+ * file last, so a read during a save can return the value before it, and the save's reply belongs to a form that a
+ * Refresh or a section switch already replaced. The save's own outcome reaches the form that started it.
+ */
+export async function dreamingSaveSettled(): Promise<void> {
+  if (dreamingSaveInFlight !== null) {
+    await Promise.allSettled([dreamingSaveInFlight]);
+  }
 }
 
 /** Creates (under a UI-made id, reused on retry) or edits a Bot (`k8.saveBot`). */
@@ -242,9 +276,23 @@ export async function sendMessage(
   return await bridge.call("k8.send", params);
 }
 
-/** Clears the Bot's context: it no longer sees the messages above (`k8.clear`). */
-export async function clearContext(params: BridgeMethods["k8.clear"]["params"]): Promise<null> {
-  return await bridge.call("k8.clear", params);
+const pendingClears = new Map<string, string>();
+
+/**
+ * Clears the Bot's context: it no longer sees the messages above (`k8.clear`). The action id stays with the Bot until
+ * the Host confirms the clear, so a retry after a lost reply, also after a Bot switch, adds no second clear.
+ */
+export async function clearContext(botId: string): Promise<null> {
+  let actionId = pendingClears.get(botId);
+  if (actionId === undefined) {
+    actionId = crypto.randomUUID();
+    pendingClears.set(botId, actionId);
+  }
+  await bridge.call("k8.clear", { actionId, botId });
+  if (pendingClears.get(botId) === actionId) {
+    pendingClears.delete(botId);
+  }
+  return null;
 }
 
 /** Cancels one open Turn (`k8.cancel`). */

@@ -149,7 +149,10 @@ export function RecoveryPanel() {
                 <CardDescription>{host().reason}</CardDescription>
               </CardHeader>
               <CardContent>
-                <DiagnosticsExportButton testID="recovery-export-diagnostics" disabled={isRecoveryBusy()} />
+                <DiagnosticsExportButton
+                  testID="recovery-export-diagnostics"
+                  disabled={isRecoveryBusy() || isQuitting()}
+                />
 
                 <If when={shellView.loading() && shellView() === undefined}>
                   <Spinner label="Checking S1 recovery snapshot…" />

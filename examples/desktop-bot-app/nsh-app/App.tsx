@@ -33,7 +33,8 @@ const SECTION_TITLES: Record<WorkspaceSection, string> = {
   activity: "Activity",
   settings: "Settings",
   keys: "Keys",
-  gallery: "Foundations Gallery",
+  // The Gallery exists only in development builds: a release build folds this to "" and drops the title text.
+  gallery: process.env.NODE_ENV !== "production" ? "Foundations Gallery" : "",
 };
 
 export function App() {

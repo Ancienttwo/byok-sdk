@@ -1,7 +1,15 @@
 import { computed, resource, signal, Text, View } from "nsh";
 import { toBridgeCallError } from "../../bridge.ts";
-import type { DreamingSetting } from "../../../../src/host/settings/types.ts";
-import { hostReady, isQuitting, k8View, readDevice, readHostSettings, saveDreaming } from "../../store.ts";
+import {
+  dreamingSaveSettled,
+  dreamingSaving,
+  hostReady,
+  isQuitting,
+  k8View,
+  readDevice,
+  readHostSettings,
+  saveDreaming,
+} from "../../store.ts";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Spinner } from "../../ui/index.ts";
 import { LoginItemControl } from "../shell/LoginItemControl.tsx";
 import { DiagnosticsExportButton } from "../shell/RecoveryPanel.tsx";
@@ -23,21 +31,15 @@ export function SettingsScreen() {
     async () => await readDevice(),
   );
   // `load` names the read: a new one mounts a new dreaming form from it, a save keeps the form (`mutate`, same load).
+  // A read waits for a running save (also one started before a section switch remounted this screen), so it never
+  // mounts the form on the value before the save; Refresh stays disabled meanwhile.
   const settings = resource(
     () => (ready() ? refreshes() : false),
-    async (load) => ({ load, dreaming: (await readHostSettings()).dreaming }),
+    async (load) => {
+      await dreamingSaveSettled();
+      return { load, dreaming: (await readHostSettings()).dreaming };
+    },
   );
-  // Refresh waits for a running save: a read during it could mount the form on the value before the save and drop the
-  // save's reply with the form it belonged to.
-  const saving = signal(false);
-  const save = async (setting: DreamingSetting) => {
-    saving.set(true);
-    try {
-      return await saveDreaming(setting);
-    } finally {
-      saving.set(false);
-    }
-  };
   const deviceFailure = () => failureText(device.error());
   const settingsFailure = () => failureText(settings.error());
   const modelsFailure = () => failureText(k8View.error());
@@ -54,7 +56,7 @@ export function SettingsScreen() {
           testID="settings-refresh"
           variant="outline"
           size="sm"
-          loading={device.loading() || settings.loading() || saving()}
+          loading={device.loading() || settings.loading() || dreamingSaving()}
           disabled={!ready()}
           onPress={() => refreshes.update((n) => n + 1)}
         >
@@ -113,7 +115,7 @@ export function SettingsScreen() {
                       <DreamingForm
                         saved={() => entry().dreaming}
                         models={choices()}
-                        save={save}
+                        save={saveDreaming}
                         onSaved={(dreaming) => settings.mutate({ load: entry().load, dreaming })}
                       />
                     )}
