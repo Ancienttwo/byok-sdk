@@ -145,6 +145,38 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
     expect(app.accessibility("id:settings-dreaming-model-m1")?.label).toBe("Model One (#2)");
   });
 
+  test("Refresh waits while a save runs, so the save's reply lands on its own form", async () => {
+    const calls: Call[] = [];
+    // `press` resolves once the app is quiet, after the save settled; the save stub reads Refresh while it runs.
+    let refreshWhileSaving: { enabled: boolean; busy: boolean | undefined } | undefined;
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1280,
+      height: 900,
+      modules: settingsShell(calls, {
+        save: (setting) =>
+          new Promise((resolve) =>
+            setTimeout(() => {
+              refreshWhileSaving = {
+                enabled: app.enabled("id:settings-refresh"),
+                busy: app.accessibility("id:settings-refresh")?.busy,
+              };
+              resolve({ dreaming: setting });
+            }, 50),
+          ),
+      }),
+    });
+    await app.press("id:nav-settings");
+    await app.waitFor("id:settings-dreaming-form");
+    await app.press("id:settings-dreaming-model-m2");
+    await app.press("id:settings-dreaming-save");
+    await app.waitFor("id:settings-dreaming-result");
+    expect(refreshWhileSaving).toEqual({ enabled: false, busy: true });
+    expect(count(calls, "settings.get")).toBe(1);
+    expect(app.accessibility("id:settings-dreaming-model-m2")?.label).toBe("Model Two (#2)");
+    expect(app.enabled("id:settings-refresh")).toBe(true);
+  });
+
   test("while the Host does not run, nothing loads and diagnostics export is disabled with its note", async () => {
     const calls: Call[] = [];
     const app = await open("../../../App.tsx", {

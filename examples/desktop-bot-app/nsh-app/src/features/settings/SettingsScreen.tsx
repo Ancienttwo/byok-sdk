@@ -1,6 +1,7 @@
 import { computed, resource, signal, Text, View } from "nsh";
 import { toBridgeCallError } from "../../bridge.ts";
-import { hostReady, isQuitting, k8View, readDevice, readHostSettings } from "../../store.ts";
+import type { DreamingSetting } from "../../../../src/host/settings/types.ts";
+import { hostReady, isQuitting, k8View, readDevice, readHostSettings, saveDreaming } from "../../store.ts";
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Spinner } from "../../ui/index.ts";
 import { LoginItemControl } from "../shell/LoginItemControl.tsx";
 import { DiagnosticsExportButton } from "../shell/RecoveryPanel.tsx";
@@ -26,6 +27,17 @@ export function SettingsScreen() {
     () => (ready() ? refreshes() : false),
     async (load) => ({ load, dreaming: (await readHostSettings()).dreaming }),
   );
+  // Refresh waits for a running save: a read during it could mount the form on the value before the save and drop the
+  // save's reply with the form it belonged to.
+  const saving = signal(false);
+  const save = async (setting: DreamingSetting) => {
+    saving.set(true);
+    try {
+      return await saveDreaming(setting);
+    } finally {
+      saving.set(false);
+    }
+  };
   const deviceFailure = () => failureText(device.error());
   const settingsFailure = () => failureText(settings.error());
   const modelsFailure = () => failureText(k8View.error());
@@ -42,7 +54,7 @@ export function SettingsScreen() {
           testID="settings-refresh"
           variant="outline"
           size="sm"
-          loading={device.loading() || settings.loading()}
+          loading={device.loading() || settings.loading() || saving()}
           disabled={!ready()}
           onPress={() => refreshes.update((n) => n + 1)}
         >
@@ -101,6 +113,7 @@ export function SettingsScreen() {
                       <DreamingForm
                         saved={() => entry().dreaming}
                         models={choices()}
+                        save={save}
                         onSaved={(dreaming) => settings.mutate({ load: entry().load, dreaming })}
                       />
                     )}

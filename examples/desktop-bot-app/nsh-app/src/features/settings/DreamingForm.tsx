@@ -1,8 +1,7 @@
 import { cleanup, signal, Text, untracked, View } from "nsh";
 import type { ModelChoice } from "../../../../src/host/conversation/catalog.ts";
-import type { DreamingSetting } from "../../../../src/host/settings/types.ts";
+import type { DreamingSetting, HostSettings } from "../../../../src/host/settings/types.ts";
 import { toBridgeCallError } from "../../bridge.ts";
-import { saveDreaming } from "../../store.ts";
 import { Button, Checkbox, Switch } from "../../ui/index.ts";
 
 /**
@@ -12,6 +11,7 @@ import { Button, Checkbox, Switch } from "../../ui/index.ts";
 export function DreamingForm(props: {
   saved: () => DreamingSetting;
   models: readonly ModelChoice[];
+  save: (setting: DreamingSetting) => Promise<HostSettings>;
   onSaved: (setting: DreamingSetting) => void;
 }) {
   const draft = signal<DreamingSetting>(untracked(props.saved));
@@ -41,7 +41,7 @@ export function DreamingForm(props: {
     saved.set(false);
     saveError.set(null);
     try {
-      const settings = await saveDreaming(draft());
+      const settings = await props.save(draft());
       if (mounted) {
         props.onSaved(settings.dreaming);
         saved.set(true);
