@@ -270,7 +270,51 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     expect(sent.every((params) => params.botId === "a")).toBe(true);
   });
 
-  test("Cancel Turn cancels the oldest open Turn, a failed clear keeps its action id for the retry, and the composer locks for an archived Bot", async () => {
+  test("text typed during a slow send stays in the field; the sent text goes out once", async () => {
+    const calls: Call[] = [];
+    let releaseSend = () => {};
+    const sendGate = new Promise<void>((resolve) => {
+      releaseSend = resolve;
+    });
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1280,
+      height: 900,
+      // A manual clock: a step taken while the send waits then does not wait out the runner's 2 s limit for a quiet app.
+      clock: {},
+      modules: conversationShell(
+        calls,
+        (params) => snapshot([bot("a")], params.botId === null ? undefined : { botId: "a", items: [] }),
+        async (method) => {
+          if (method === "k8.send") {
+            await sendGate;
+            return { turnId: "t1" };
+          }
+          return null;
+        },
+      ),
+    });
+    try {
+      await app.press("id:nav-conversation");
+      await app.press("id:conv-bot-a");
+      await app.waitFor("id:conv-composer-input");
+      await app.type("id:conv-composer-input", "First");
+      const sending = app.submit("id:conv-composer-input");
+      await app.waitUntil(() => calls.some((call) => call.method === "k8.send"));
+      await app.clear("id:conv-composer-input");
+      await app.type("id:conv-composer-input", "Second");
+      releaseSend();
+      await sending;
+      await app.waitUntil(() => app.accessibility("id:conv-send")?.busy !== true);
+      expect(app.value("id:conv-composer-input")).toBe("Second");
+      const sent = calls.filter((call) => call.method === "k8.send").map((call) => call.params);
+      expect(sent.map((params) => params.text)).toEqual(["First"]);
+    } finally {
+      releaseSend();
+    }
+  });
+
+  test("Cancel Turn cancels the oldest open Turn, a failed clear keeps its action id for the retry across a Bot switch, and the composer locks for an archived Bot", async () => {
     const calls: Call[] = [];
     let clears = 0;
     const app = await openConversation(
@@ -301,6 +345,11 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     await app.waitUntil(() => app.enabled("id:conv-clear"));
     await app.press("id:conv-clear");
     await app.waitFor("id:conv-composer-error");
+    // A Bot switch mounts a new composer; the store still holds the unconfirmed clear's action id for Bot a.
+    await app.press("id:conv-bot-z");
+    await app.waitFor("text:This Bot is archived. Archiving is permanent; its conversation stays readable.");
+    await app.press("id:conv-bot-a");
+    await app.waitUntil(() => app.enabled("id:conv-clear"));
     await app.press("id:conv-clear");
     await app.waitUntil(() => clearCalls().length === 2 && app.enabled("id:conv-clear"));
     await app.press("id:conv-clear");
@@ -458,6 +507,40 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     expect(app.shows("text:Old a")).toBe(true);
     expect(app.shows("text:Hide 1 earlier messages")).toBe(true);
   });
+
+  test("a Bot that leaves the snapshot drops its unfolded history", async () => {
+    const calls: Call[] = [];
+    let dropA = false;
+    const items = (botId: string): ConversationItem[] => [
+      { kind: "input", key: "e1", text: `Old ${botId}`, at: 1, folded: true },
+      { kind: "clear", key: "e2", at: 2 },
+      { kind: "input", key: "e3", text: `New ${botId}`, at: 3, folded: false },
+    ];
+    const app = await openConversation(
+      conversationShell(calls, (params) => {
+        const conversation = params.botId === null ? undefined : { botId: params.botId, items: items(params.botId) };
+        if (dropA) {
+          // One read without Bot a; `busy` brings the next read, which lists it again.
+          dropA = false;
+          return snapshot([bot("b")], conversation, true);
+        }
+        return snapshot([bot("a"), bot("b")], conversation);
+      }),
+    );
+    await app.press("id:conv-bot-a");
+    await app.press("text:Show 1 earlier messages");
+    await app.waitFor("text:Old a");
+
+    dropA = true;
+    await app.press("id:conv-bot-b");
+    await app.waitFor("id:conv-bot-a", { state: "gone" });
+    await app.waitFor("id:conv-bot-a");
+    await app.press("id:conv-bot-a");
+    await app.waitFor("text:New a");
+    expect(app.shows("text:Old a")).toBe(false);
+    expect(app.shows("text:Show 1 earlier messages")).toBe(true);
+  });
+
 
   test("a reply's link goes only through the links.ts allowlist (the brand allows no origin)", async () => {
     const calls: Call[] = [];

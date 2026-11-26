@@ -177,6 +177,132 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
     expect(app.enabled("id:settings-refresh")).toBe(true);
   });
 
+  test("a save that outlives a section switch keeps Refresh disabled and holds the remounted read until it settles", async () => {
+    const calls: Call[] = [];
+    let stored: DreamingSetting = { enabled: true, models: ["m1"] };
+    let releaseSave = () => {};
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1280,
+      height: 900,
+      // A manual clock: a step taken while the save waits then does not wait out the runner's 2 s limit for a quiet app.
+      clock: {},
+      modules: settingsShell(calls, {
+        dreaming: () => stored,
+        save: async (setting) => {
+          await saveGate;
+          stored = setting;
+          return { dreaming: setting };
+        },
+      }),
+    });
+    try {
+      await app.press("id:nav-settings");
+      await app.waitFor("id:settings-dreaming-form");
+      await app.press("id:settings-dreaming-model-m2");
+      const saving = app.press("id:settings-dreaming-save");
+      await app.waitUntil(() => count(calls, "settings.setDreaming") === 1);
+      await app.press("id:nav-keys");
+      await app.press("id:nav-settings");
+      await app.waitFor("id:settings-refresh");
+      expect(app.enabled("id:settings-refresh")).toBe(false);
+      expect(app.shows("id:settings-dreaming-form")).toBe(false);
+      await app.waitUntil(() => count(calls, "settings.device") === 2);
+      expect(count(calls, "settings.get")).toBe(1);
+
+      releaseSave();
+      await saving;
+      await app.waitFor("id:settings-dreaming-form");
+      expect(count(calls, "settings.get")).toBe(2);
+      expect(app.accessibility("id:settings-dreaming-model-m2")?.label).toBe("Model Two (#2)");
+      expect(app.enabled("id:settings-refresh")).toBe(true);
+    } finally {
+      releaseSave();
+    }
+  });
+
+  test("a Settings view left before a running save settles sends no read once it settles", async () => {
+    const calls: Call[] = [];
+    let releaseSave = () => {};
+    const saveGate = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1280,
+      height: 900,
+      // A manual clock: a step taken while the save waits then does not wait out the runner's 2 s limit for a quiet app.
+      clock: {},
+      modules: settingsShell(calls, {
+        save: async (setting) => {
+          await saveGate;
+          return { dreaming: setting };
+        },
+      }),
+    });
+    try {
+      await app.press("id:nav-settings");
+      await app.waitFor("id:settings-dreaming-form");
+      await app.press("id:settings-dreaming-model-m2");
+      const saving = app.press("id:settings-dreaming-save");
+      await app.waitUntil(() => count(calls, "settings.setDreaming") === 1);
+      await app.press("id:nav-keys");
+      await app.press("id:nav-settings");
+      await app.waitFor("id:settings-refresh");
+      await app.press("id:nav-keys");
+      await app.waitFor("id:settings-section", { state: "gone" });
+
+      releaseSave();
+      await saving;
+      await app.wait(100);
+      expect(count(calls, "settings.get")).toBe(1);
+    } finally {
+      releaseSave();
+    }
+  });
+
+  test("Save waits while a Refresh read runs, so the read cannot replace the form under a running save", async () => {
+    const calls: Call[] = [];
+    let releaseRead = () => {};
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    const modules = settingsShell(calls);
+    const shell = modules["byok-nsh-adapter"];
+    const answer = shell["ByokShell.call"];
+    shell["ByokShell.call"] = async (method: string, params: any) => {
+      if (method === "settings.get" && count(calls, "settings.get") === 1) {
+        calls.push({ method, params });
+        await readGate;
+        return { dreaming: { enabled: true, models: ["m1"] } };
+      }
+      return answer(method, params);
+    };
+    // A manual clock: a step taken while the read waits then does not wait out the runner's 2 s limit for a quiet app.
+    const app = await open("../../../App.tsx", { platform: "macos", width: 1280, height: 900, clock: {}, modules });
+    try {
+      await app.press("id:nav-settings");
+      await app.waitFor("id:settings-dreaming-form");
+      expect(app.enabled("id:settings-dreaming-save")).toBe(true);
+      // Not awaited: the press settles once the read it starts does.
+      const refreshing = app.press("id:settings-refresh");
+      await app.waitUntil(() => count(calls, "settings.get") === 2);
+      expect(app.enabled("id:settings-dreaming-save")).toBe(false);
+
+      releaseRead();
+      await refreshing;
+      await app.waitUntil(() => app.enabled("id:settings-dreaming-save"));
+      await app.press("id:settings-dreaming-save");
+      await app.waitFor("id:settings-dreaming-result");
+      expect(count(calls, "settings.setDreaming")).toBe(1);
+    } finally {
+      releaseRead();
+    }
+  });
+
   test("while the Host does not run, nothing loads and diagnostics export is disabled with its note", async () => {
     const calls: Call[] = [];
     const app = await open("../../../App.tsx", {

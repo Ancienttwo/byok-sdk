@@ -7,17 +7,21 @@ import test from 'node:test';
 import {
   assertNshVersion,
   buildCliFromSourceEnv,
+  D2_DECLARED_CAPABILITIES,
   loadPin,
   pinnedInstallRoot,
   readBundleSourceMap,
   readPinnedRustToolchain,
   runCargoGuard,
+  verifyAppConfig,
   verifyBundle,
   verifyBundleSources,
   verifyBundleSpecifiers,
   verifyCapabilitiesAgainstGolden,
   verifyCargoMetadataNshProvenance,
   verifyFileSha256,
+  verifyNoUpdaterPackages,
+  verifyReleaseRunners,
   verifyTrayAssetsProjection,
 } from './nsh.mjs';
 
@@ -302,6 +306,11 @@ test('verifyBundleSpecifiers ignores import/require text inside string literals,
   ].join('\n'));
 });
 
+/** A version 3 source map naming `sources` (path -> original text) with their `sourcesContent`. */
+function sourceMap(sources) {
+  return JSON.stringify({ version: 3, sources: Object.keys(sources), sourcesContent: Object.values(sources) });
+}
+
 test('verifyBundle checks every split chunk and map and resolves map sources against dirname(bundlePath)', () => {
   const root = mkdtempSync(join(tmpdir(), 'byok-nsh-split-bundle-test-'));
   try {
@@ -309,18 +318,18 @@ test('verifyBundle checks every split chunk and map and resolves map sources aga
     mkdirSync(join(outDir, 'assets'), { recursive: true });
     writeFileSync(join(outDir, 'assets', 'ignore.js'), 'import "electron";');
     writeFileSync(join(outDir, 'bundle.js'), 'import{a}from"nsh";export const entry=a;');
-    writeFileSync(join(outDir, 'bundle.js.map'), JSON.stringify({ version: 3, sources: ['App.tsx'] }));
+    writeFileSync(join(outDir, 'bundle.js.map'), sourceMap({ 'App.tsx': 'export {};' }));
     writeFileSync(join(outDir, 'Settings.js'), 'import{entry}from"./bundle.js";export const s=\'Example: import "electron"\'+entry;');
-    writeFileSync(join(outDir, 'Settings.js.map'), JSON.stringify({ version: 3, sources: ['src/Settings.tsx'] }));
+    writeFileSync(join(outDir, 'Settings.js.map'), sourceMap({ 'src/Settings.tsx': 'export {};' }));
 
-    const ok = verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root });
+    const ok = verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root });
     assert.equal(ok.files.length, 2);
     assert.equal(ok.totalMapSources, 2);
 
     // Forbidden specifier in a split chunk fails naming the chunk.
     writeFileSync(join(outDir, 'Settings.js'), 'await import("electron");');
     assert.throws(
-      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /Settings\.js.*electron/i,
     );
 
@@ -328,25 +337,25 @@ test('verifyBundle checks every split chunk and map and resolves map sources aga
     writeFileSync(join(outDir, 'Settings.js'), 'export const s=1;');
     writeFileSync(
       join(outDir, 'Settings.js.map'),
-      JSON.stringify({ version: 3, sources: ['../node_modules/react/index.js'] }),
+      sourceMap({ '../node_modules/react/index.js': 'export {};' }),
     );
     assert.throws(
-      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /under node_modules\/react\//,
     );
 
     // Missing source map for a split chunk fails closed.
     rmSync(join(outDir, 'Settings.js.map'));
     assert.throws(
-      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /Settings\.js\.map/,
     );
 
     // Orphan source map without a matching JS chunk fails closed.
-    writeFileSync(join(outDir, 'Settings.js.map'), JSON.stringify({ version: 3, sources: ['src/Settings.tsx'] }));
-    writeFileSync(join(outDir, 'Orphan.js.map'), JSON.stringify({ version: 3, sources: ['src/Orphan.tsx'] }));
+    writeFileSync(join(outDir, 'Settings.js.map'), sourceMap({ 'src/Settings.tsx': 'export {};' }));
+    writeFileSync(join(outDir, 'Orphan.js.map'), sourceMap({ 'src/Orphan.tsx': 'export {};' }));
     assert.throws(
-      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /Orphan\.js\.map/,
     );
     rmSync(join(outDir, 'Orphan.js.map'));
@@ -355,11 +364,133 @@ test('verifyBundle checks every split chunk and map and resolves map sources aga
     const nestedDir = join(root, 'packages', 'server', 'dist');
     mkdirSync(nestedDir, { recursive: true });
     writeFileSync(join(nestedDir, 'bundle.js'), 'import{a}from"nsh";export{a};');
-    writeFileSync(join(nestedDir, 'bundle.js.map'), JSON.stringify({ version: 3, sources: ['../src/index.ts'] }));
+    writeFileSync(join(nestedDir, 'bundle.js.map'), sourceMap({ '../src/index.ts': 'export {};' }));
     assert.throws(
-      () => verifyBundle(join(nestedDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(nestedDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /under packages\/server\//,
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('verifyBundle rejects Gallery modules and text, openUrl outside src/links.ts, links="open", and maps without sourcesContent', () => {
+  const root = mkdtempSync(join(tmpdir(), 'byok-nsh-isolation-test-'));
+  try {
+    const bundle = join(root, 'bundle.js');
+    const write = (code, sources) => {
+      writeFileSync(bundle, code);
+      writeFileSync(`${bundle}.map`, sources === null ? JSON.stringify({ version: 3, sources: ['App.tsx'] }) : sourceMap(sources));
+    };
+    const linksSource = 'import { openUrl } from "nsh";\nexport const open = (url: string) => openUrl(url);';
+    const markdown = 'export const M = () => <TextView links="report" onLinkPress={open} />;';
+    write('import{openUrl as o}from"nsh";export const a=o;', { 'src/links.ts': linksSource, 'src/ui/MarkdownView.tsx': markdown });
+    verifyBundle(bundle, { repoRoot: root, appDir: root });
+
+    write('export const t="Foundations Gallery";', { 'App.tsx': 'export {};' });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /Gallery-only text "Foundations Gallery"/);
+    write('export {};', { 'src/features/gallery/GalleryScreen.tsx': 'export {};' });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /Gallery module: src\/features\/gallery\/GalleryScreen\.tsx/);
+    write('export {};', null);
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /no sourcesContent/);
+    write('export {};', { 'src/features/conversation/Composer.tsx': 'import { openUrl as go } from "nsh";\nexport const x = go;' });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /openUrl in src\/features\/conversation\/Composer\.tsx/);
+    write('export {};', { 'src/ui/MarkdownView.tsx': markdown.replace('"report"', '"open"') });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /links="open" in src\/ui\/MarkdownView\.tsx/);
+    write('export {};', { 'src/ui/MarkdownView.tsx': markdown.replace('"report"', '{mode}') });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /links prop without a static value/);
+    // A spread can supply links, alone or after links="report": a TextView needs links="report" after its last spread.
+    const spreadOpen = 'import { TextView as T } from "nsh/base";\nexport const M = () => <T {...{ links: "open" as const }} />;';
+    write('export {};', { 'src/ui/MarkdownView.tsx': spreadOpen });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /TextView spread without a later links="report"/);
+    write('export {};', { 'src/ui/MarkdownView.tsx': markdown.replace('links="report"', 'links="report" {...{ links: "open" as const }}') });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /TextView spread without a later links="report"/);
+    write('export {};', { 'src/ui/MarkdownView.tsx': markdown.replace('links="report"', '{...rest} links="report"') });
+    verifyBundle(bundle, { repoRoot: root, appDir: root });
+
+    // A map's sourcesContent must be the file on disk under the app: lowered output cannot stand in for the source.
+    mkdirSync(join(root, 'app', 'src', 'ui'), { recursive: true });
+    writeFileSync(join(root, 'app', 'src', 'ui', 'MarkdownView.tsx'), markdown.replace('"report"', '"open"'));
+    write('export {};', { 'src/ui/MarkdownView.tsx': 'export const M = (p) => h(TextView, { links: p.mode });' });
+    assert.throws(
+      () => verifyBundle(bundle, { repoRoot: root, appDir: join(root, 'app') }),
+      /sourcesContent for src\/ui\/MarkdownView\.tsx differs from .*MarkdownView\.tsx/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('verifyAppConfig requires the exact D2 capabilities and no updater.packages', () => {
+  verifyAppConfig({ name: 'BYOK Bots', capabilities: structuredClone(D2_DECLARED_CAPABILITIES) });
+  verifyAppConfig(JSON.parse(readFileSync(new URL('../nsh-app/nsh.json', import.meta.url), 'utf8')));
+  assert.throws(
+    () => verifyAppConfig({ capabilities: { ...structuredClone(D2_DECLARED_CAPABILITIES), clipboard: true } }),
+    /D2 set exactly/,
+  );
+  assert.throws(
+    () => verifyAppConfig({
+      capabilities: structuredClone(D2_DECLARED_CAPABILITIES),
+      updater: { url: 'https://example.com/latest.json', packages: { roots: [] } },
+    }),
+    /forbids updater\.packages/,
+  );
+});
+
+test('verifyNoUpdaterPackages accepts no nsh-updater.json or one without packages and rejects package roots', () => {
+  const out = mkdtempSync(join(tmpdir(), 'byok-nsh-updater-test-'));
+  try {
+    verifyNoUpdaterPackages(out);
+    mkdirSync(join(out, 'assets'));
+    const asset = join(out, 'assets', 'nsh-updater.json');
+    writeFileSync(asset, JSON.stringify({ id: 'io.byok-sdk.byok-desktop-bots', version: '0.1.0', publicKey: 'k' }));
+    verifyNoUpdaterPackages(out);
+    writeFileSync(asset, JSON.stringify({ id: 'io.byok-sdk.byok-desktop-bots', version: '0.1.0', packages: { roots: ['cm9vdA'] } }));
+    assert.throws(() => verifyNoUpdaterPackages(out), /forbids signed packages/);
+    rmSync(asset);
+    // `nsh package` stages `.nsh-updater.json` and ships `nsh/assets/nsh-updater.json` inside the app bundle.
+    const resources = join(out, 'BYOK Bots.app', 'Contents', 'Resources');
+    mkdirSync(join(resources, 'nsh', 'assets'), { recursive: true });
+    const shipped = join(resources, 'nsh', 'assets', 'nsh-updater.json');
+    writeFileSync(shipped, JSON.stringify({ id: 'io.byok-sdk.byok-desktop-bots', version: '0.1.0' }));
+    verifyNoUpdaterPackages(out);
+    writeFileSync(shipped, JSON.stringify({ id: 'io.byok-sdk.byok-desktop-bots', version: '0.1.0', packages: { roots: ['cm9vdA'] } }));
+    assert.throws(() => verifyNoUpdaterPackages(out), /forbids signed packages: .*nsh[/\\]assets[/\\]nsh-updater\.json/);
+    rmSync(shipped);
+    writeFileSync(join(out, '.nsh-updater.json'), JSON.stringify({ id: 'x', version: '0.1.0', packages: { roots: ['cm9vdA'] } }));
+    assert.throws(() => verifyNoUpdaterPackages(out), /forbids signed packages: .*\.nsh-updater\.json/);
+  } finally {
+    rmSync(out, { recursive: true, force: true });
+  }
+});
+
+test('verifyReleaseRunners requires each desktop runner to start nsh-<os>-app and rejects a development policy', () => {
+  const root = mkdtempSync(join(tmpdir(), 'byok-nsh-runner-test-'));
+  try {
+    const rustDir = join(root, 'rust');
+    const appSrc = join(root, 'adapter', 'src');
+    mkdirSync(join(appSrc, 'nested'), { recursive: true });
+    writeFileSync(join(appSrc, 'nested', 'quit.rs'), 'pub fn quit() {}\n');
+    const runner = (os, body = `nsh_${os}_app::main()`) => {
+      mkdirSync(join(rustDir, `${os}-app`), { recursive: true });
+      writeFileSync(join(rustDir, `${os}-app`, 'main.rs'), `fn main() -> std::process::ExitCode {\n    ${body}\n}\n`);
+    };
+    for (const os of ['macos', 'linux', 'windows']) runner(os);
+    // `*-host` crates are NSH's development hosts: only the `*-app` release runners count.
+    mkdirSync(join(rustDir, 'macos-host'));
+    writeFileSync(join(rustDir, 'macos-host', 'main.rs'), 'Policy::development()\n');
+    const check = () => verifyReleaseRunners({ rustDir, appRustSources: [appSrc] });
+    assert.equal(check().files.length, 4);
+
+    runner('linux', 'nsh_platform_linux::run_dev()');
+    assert.throws(check, /must start nsh_linux_app::main\(\)/);
+    runner('linux', 'let _ = Bundle::source(String::new()).with_policy(Policy::development());\n    nsh_linux_app::main()');
+    assert.throws(check, /turns off Policy::harden at .*linux-app[/\\]main\.rs:2/);
+    runner('linux');
+    writeFileSync(join(appSrc, 'nested', 'quit.rs'), 'const P: Policy = Policy { harden: false, ..DEFAULT };\n');
+    assert.throws(check, /turns off Policy::harden at .*quit\.rs:1/);
+    writeFileSync(join(appSrc, 'nested', 'quit.rs'), 'pub fn f(p: &mut Policy) {\n    p.harden = false;\n}\n');
+    assert.throws(check, /turns off Policy::harden at .*quit\.rs:2/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -427,7 +558,22 @@ test('desktop CI workflow runs the full 3-OS S2.5 NSH verification and test lane
   );
 });
 
-test('verifyTrayAssetsProjection matches authoritative assets/tray byte-for-byte and rejects drift', () => {
+/** False only where Windows refuses to create a symlink for this account (EPERM); any other failure throws. */
+function canSymlink(dir) {
+  const probe = join(dir, '.symlink-probe');
+  try {
+    symlinkSync(dir, probe, 'dir');
+  } catch (error) {
+    if (process.platform === 'win32' && error.code === 'EPERM') {
+      return false;
+    }
+    throw error;
+  }
+  rmSync(probe);
+  return true;
+}
+
+test('verifyTrayAssetsProjection matches authoritative assets/tray byte-for-byte and rejects drift', (t) => {
   assert.deepStrictEqual(verifyTrayAssetsProjection(), {
     count: 4,
     files: ['tray.png', 'trayTemplate.png', 'trayTemplate.svg', 'trayTemplate@2x.png'],
@@ -452,14 +598,27 @@ test('verifyTrayAssetsProjection matches authoritative assets/tray byte-for-byte
     writeFileSync(join(targetDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 9]));
     assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /Tray asset projection drift for trayTemplate\.png/);
 
-    // A target-only symlink is an extra name; a symlink under a matched name is compared by the bytes it reaches.
+    // A target-only symlink is an extra name; a symlink under a matched name is compared by the bytes it reaches and
+    // must reach a regular file. Windows without SeCreateSymbolicLinkPrivilege refuses symlinks (EPERM): only these
+    // sub-cases are skipped there.
     writeFileSync(join(targetDir, 'trayTemplate.png'), Buffer.from([5, 6, 7, 8]));
+    if (!canSymlink(dir)) {
+      t.diagnostic('symlink sub-cases skipped: this Windows account may not create symlinks (EPERM)');
+      return;
+    }
     symlinkSync('trayTemplate.png', join(targetDir, 'trayTemplate@3x.png'));
     assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /file list diverges/i);
     rmSync(join(targetDir, 'trayTemplate@3x.png'));
     rmSync(join(targetDir, 'trayTemplate.png'));
     symlinkSync('tray.png', join(targetDir, 'trayTemplate.png'));
     assert.throws(() => verifyTrayAssetsProjection({ sourceDir, targetDir }), /Tray asset projection drift for trayTemplate\.png/);
+    rmSync(join(targetDir, 'trayTemplate.png'));
+    mkdirSync(join(dir, 'not-a-file'));
+    symlinkSync(join(dir, 'not-a-file'), join(targetDir, 'trayTemplate.png'), 'dir');
+    assert.throws(
+      () => verifyTrayAssetsProjection({ sourceDir, targetDir }),
+      /Tray asset projection drift for trayTemplate\.png: .* is not a regular file/,
+    );
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

@@ -11,10 +11,11 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, extname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
@@ -35,6 +36,29 @@ const DEFAULT_EXPECTED_CAPABILITIES = resolve(NSH_APP_DIR, 'capabilities.expecte
 const DEFAULT_BUILT_BUNDLE = resolve(NSH_APP_DIR, '.nsh/out/bundle.js');
 const DEFAULT_TRAY_ASSETS_SOURCE = resolve(DESKTOP_APP_DIR, 'assets/tray');
 const DEFAULT_TRAY_ASSETS_TARGET = resolve(NSH_APP_DIR, 'assets/tray');
+const DEFAULT_APP_CONFIG = resolve(NSH_APP_DIR, 'nsh.json');
+const DEFAULT_RUST_WORKSPACE = resolve(NSH_APP_DIR, '.nsh/rust');
+/** The app-owned Rust code linked into the release runner: the NSH adapter crate and the `byok-shell` it wraps. */
+const DEFAULT_APP_RUST_SOURCES = [
+  resolve(NSH_APP_DIR, 'ext/byok-nsh-adapter/src'),
+  resolve(DESKTOP_APP_DIR, 'native/byok-shell/src'),
+];
+
+/** ADR-052 D2: the `nsh.json` `capabilities` the owner signed (2026-11-25), verbatim. */
+export const D2_DECLARED_CAPABILITIES = { application: true, openUrl: { schemes: ['https'] } };
+
+/** The desktop release runners `nsh build` generates: each must start its platform's `nsh-<os>-app` runner. */
+const RELEASE_RUNNER_OSES = ['macos', 'linux', 'windows'];
+
+/** Rust that turns off `Policy::harden` (`nsh-engine/src/lib.rs` `Policy`): only NSH's development hosts may do it. */
+const DEVELOPMENT_POLICY_PATTERN = /\bPolicy::development\b|\bharden\s*[:=]\s*false\b|\.with_policy\s*\(/;
+
+/** Text that only the development-only Foundations Gallery puts into a bundle. */
+const GALLERY_ONLY_TEXT = ['Foundations Gallery', 'GalleryScreen'];
+const GALLERY_SOURCE_SEGMENT = 'src/features/gallery/';
+/** The one module that may reach `openUrl` (`nsh-app/src/links.ts`), as the bundle's source map names it. */
+const LINKS_SOURCE = 'src/links.ts';
+const CODE_SOURCE_EXTENSION = /\.(?:[cm]?[jt]sx?)$/;
 
 /**
  * Packages the QuickJS TSX bundle must never contain. The single source for both release checks:
@@ -508,9 +532,45 @@ function runVerifyLock(args, pin) {
   }
 }
 
+/**
+ * ADR-052 D2 proof #1, source side: `nsh.json` declares exactly the signed D2 capabilities and configures no signed
+ * packages (`updater.packages`), so no `.nshpkg` can replace the bundle over the air.
+ */
+export function verifyAppConfig(config) {
+  assert.deepStrictEqual(
+    config?.capabilities,
+    D2_DECLARED_CAPABILITIES,
+    'nsh.json capabilities must equal the ADR-052 D2 set exactly',
+  );
+  assert.equal(config.updater?.packages, undefined, 'ADR-052 D2 forbids updater.packages in nsh.json');
+}
+
+/** The updater configuration's file names: `nsh package` stages `.nsh-updater.json` and ships `nsh-updater.json`. */
+const UPDATER_CONFIG_NAMES = new Set(['nsh-updater.json', '.nsh-updater.json']);
+
+/**
+ * ADR-052 D2 proof #1, output side: no updater configuration anywhere under `outDir` (a build output, or a package
+ * with its `nsh/assets/nsh-updater.json`) takes signed packages (`Config`, camelCase: `packages: { roots }`).
+ */
+export function verifyNoUpdaterPackages(outDir) {
+  const configs = readdirSync(outDir, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile() && UPDATER_CONFIG_NAMES.has(entry.name))
+    .map((entry) => join(entry.parentPath, entry.name));
+  for (const path of configs) {
+    const config = JSON.parse(readFileSync(path, 'utf8'));
+    const packages = config.packages ?? null;
+    assert.ok(
+      packages === null || (Array.isArray(packages.roots) && packages.roots.length === 0),
+      `ADR-052 D2 forbids signed packages: ${path} has packages.roots ${JSON.stringify(packages?.roots)}`,
+    );
+  }
+}
+
 function runVerifyCapabilities(args) {
   let builtPath = DEFAULT_BUILT_CAPABILITIES;
   let expectedPath = DEFAULT_EXPECTED_CAPABILITIES;
+  let appConfigPath = DEFAULT_APP_CONFIG;
+  let outputDir = null;
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--built' && args[i + 1]) {
       builtPath = resolve(args[i + 1]);
@@ -518,15 +578,26 @@ function runVerifyCapabilities(args) {
     } else if (args[i] === '--expected' && args[i + 1]) {
       expectedPath = resolve(args[i + 1]);
       i += 1;
+    } else if (args[i] === '--app-config' && args[i + 1]) {
+      appConfigPath = resolve(args[i + 1]);
+      i += 1;
+    } else if (args[i] === '--output' && args[i + 1]) {
+      outputDir = resolve(args[i + 1]);
+      i += 1;
     } else {
       throw new Error(`Unknown verify-capabilities option: ${args[i]}`);
     }
   }
 
+  verifyAppConfig(JSON.parse(readFileSync(appConfigPath, 'utf8')));
+  outputDir ??= dirname(builtPath);
+  verifyNoUpdaterPackages(outputDir);
   const actual = JSON.parse(readFileSync(builtPath, 'utf8'));
   const expected = JSON.parse(readFileSync(expectedPath, 'utf8'));
   verifyCapabilitiesAgainstGolden(actual, expected);
-  console.log(`verify-capabilities OK (${builtPath} === ${expectedPath})`);
+  console.log(
+    `verify-capabilities OK (${appConfigPath} declares the D2 set without updater.packages; no signed packages under ${outputDir}; ${builtPath} === ${expectedPath})`,
+  );
 }
 
 function forbiddenSourceRoots(name) {
@@ -632,16 +703,95 @@ function extractSpecifiersFromAst(sourceFile) {
   return specifiers;
 }
 
-function parseBundleSpecifiersBatch(entries) {
+function unwrapExpression(node) {
+  let current = node;
+  while (
+    current?.kind === K.ParenthesizedExpression
+    || current?.kind === K.AsExpression
+    || current?.kind === K.SatisfiesExpression
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function staticString(node) {
+  const inner = unwrapExpression(node?.kind === K.JsxExpression ? node.expression : node);
+  return inner?.kind === K.StringLiteral || inner?.kind === K.NoSubstitutionTemplateLiteral ? inner.text : null;
+}
+
+const propertyNameText = (name) =>
+  name?.kind === K.Identifier || name?.kind === K.StringLiteral ? name.text : null;
+
+/**
+ * Lists the release-isolation findings in one source module: a `links` prop that is not a static string other than
+ * `"open"`, a `links: "open"` object property, a `TextView` whose spread could supply `links` without a later static
+ * `links` prop (model output must never open links itself; the default is `"report"`), and any `openUrl` name or
+ * string (`links.ts` is its one gate).
+ */
+function isolationFindingsFromAst(sourceFile) {
+  const textViewNames = new Set(['TextView']);
+  const collectAliases = (node) => {
+    if (node.kind === K.ImportSpecifier && (node.propertyName ?? node.name)?.text === 'TextView') {
+      textViewNames.add(node.name.text);
+    }
+    node.forEachChild(collectAliases);
+  };
+  collectAliases(sourceFile);
+  const isTextView = (tag) =>
+    (tag?.kind === K.Identifier && textViewNames.has(tag.text))
+    || (tag?.kind === K.PropertyAccessExpression && tag.name?.text === 'TextView');
+
+  const findings = [];
+  const visit = (node) => {
+    if ((node.kind === K.JsxOpeningElement || node.kind === K.JsxSelfClosingElement) && isTextView(node.tagName)) {
+      const attributes = node.attributes.properties;
+      const lastSpread = attributes.findLastIndex((attribute) => attribute.kind === K.JsxSpreadAttribute);
+      const linksAfter = attributes.some(
+        (attribute, index) => index > lastSpread && attribute.kind === K.JsxAttribute && attribute.name?.text === 'links',
+      );
+      if (lastSpread >= 0 && !linksAfter) {
+        findings.push('a TextView spread without a later links="report"');
+      }
+    }
+    if (node.kind === K.JsxAttribute && node.name?.text === 'links') {
+      const value = staticString(node.initializer);
+      if (value === null || value === 'open') {
+        findings.push(value === 'open' ? 'links="open"' : 'a links prop without a static value');
+      }
+    } else if (
+      node.kind === K.PropertyAssignment
+      && propertyNameText(node.name) === 'links'
+      && staticString(node.initializer) === 'open'
+    ) {
+      findings.push('links: "open"');
+    } else if (
+      (node.kind === K.Identifier || node.kind === K.StringLiteral || node.kind === K.NoSubstitutionTemplateLiteral)
+      && node.text === 'openUrl'
+    ) {
+      findings.push('openUrl');
+    }
+    node.forEachChild(visit);
+  };
+  visit(sourceFile);
+  return findings;
+}
+
+/**
+ * Parses each entry (`{ label, source, ext, visit }`) with the TypeScript AST parser and returns `visit(sourceFile)`
+ * per entry; a syntax error fails closed naming the entry.
+ */
+function parseBatch(entries) {
   const root = DESKTOP_APP_DIR.replaceAll('\\', '/');
   const configPath = `${root}/.__verify-bundle.tsconfig.json`;
-  const virtualPaths = entries.map((_, index) => `${root}/.__verify-bundle-${index}.mjs`);
+  const virtualPaths = entries.map((entry, index) => `${root}/.__verify-bundle-${index}${entry.ext}`);
   const virtualFiles = new Map([
     [
       normalizeTsPath(configPath),
       JSON.stringify({
         compilerOptions: {
           allowJs: true,
+          jsx: 'preserve',
           noResolve: true,
           noLib: true,
           target: 'esnext',
@@ -680,7 +830,7 @@ function parseBundleSpecifiersBatch(entries) {
       if (!sourceFile) {
         throw new Error(`TypeScript parser did not produce an AST for ${entry.label}`);
       }
-      return { label: entry.label, specifiers: extractSpecifiersFromAst(sourceFile) };
+      return entry.visit(sourceFile);
     });
   } finally {
     api.close();
@@ -704,7 +854,7 @@ function assertSpecifiersClear(specifiers, label) {
 export function verifyBundleSpecifiers(source, label = 'bundle.js') {
   assert.equal(typeof source, 'string', 'Bundled TSX output must be a string');
   assert.ok(source.trim().length > 0, 'Bundled TSX output must not be empty');
-  const [{ specifiers }] = parseBundleSpecifiersBatch([{ label, source }]);
+  const [specifiers] = parseBatch([{ label, source, ext: '.mjs', visit: extractSpecifiersFromAst }]);
   assertSpecifiersClear(specifiers, label);
 }
 
@@ -751,15 +901,63 @@ export function collectBundleChunks(bundlePath) {
   return [entryPath, ...rest];
 }
 
+const normalizeMapSource = (entry) => entry.replaceAll('\\', '/').replace(/^(?:\.\/)+/, '');
+
 /**
- * Verifies the entry bundle and every split chunk under `dirname(bundlePath)`: reads each chunk's
- * adjacent source map (resolving `sources` against `dirname(chunkPath)`), validates non-empty JS,
- * and checks every AST import/export/dynamic-import/require specifier.
+ * ADR-052 D2 proof #3, bundle side, for one chunk: no Gallery module or Gallery-only text, and the modules the map
+ * names (parsed from `sourcesContent`, which must be present and, for a file that exists on disk relative to `appDir`,
+ * equal it) use `openUrl` only in `src/links.ts` and never let a `TextView` open links. Returns the parse inputs;
+ * `verifyBundle` parses every chunk's in one batch.
  */
-export function verifyBundle(bundlePath, { repoRoot = REPO_ROOT } = {}) {
+function releaseIsolationInputs(chunkPath, source, map, appDir) {
+  for (const text of GALLERY_ONLY_TEXT) {
+    assert.ok(!source.includes(text), `Release bundle contains Gallery-only text "${text}": ${chunkPath}`);
+  }
+  if (!Array.isArray(map.sourcesContent) || map.sourcesContent.length !== map.sources.length) {
+    throw new Error(`Bundle source map has no sourcesContent for each source: ${chunkPath}.map`);
+  }
+  const inputs = [];
+  map.sources.forEach((entry, index) => {
+    const name = normalizeMapSource(entry);
+    assert.ok(!name.includes(GALLERY_SOURCE_SEGMENT), `Release bundle contains a Gallery module: ${entry} (${chunkPath})`);
+    if (!CODE_SOURCE_EXTENSION.test(name)) {
+      return;
+    }
+    const content = map.sourcesContent[index];
+    if (typeof content !== 'string') {
+      throw new Error(`Bundle source map has no sourcesContent for ${entry}: ${chunkPath}.map`);
+    }
+    // The check reads the map's copy of the source: it must be the file itself, not output standing in for it.
+    const onDisk = resolve(appDir, name);
+    if (existsSync(onDisk) && readFileSync(onDisk, 'utf8') !== content) {
+      throw new Error(`Bundle source map sourcesContent for ${entry} differs from ${onDisk}: ${chunkPath}.map`);
+    }
+    inputs.push({
+      label: `${entry} (${chunkPath})`,
+      source: content,
+      ext: extname(name),
+      visit: (sourceFile) => {
+        for (const finding of isolationFindingsFromAst(sourceFile)) {
+          assert.ok(
+            finding === 'openUrl' && name === LINKS_SOURCE,
+            `Release isolation: ${finding} in ${entry} (${chunkPath}); only ${LINKS_SOURCE} may call openUrl, and TextView links never "open"`,
+          );
+        }
+      },
+    });
+  });
+  return inputs;
+}
+
+/**
+ * Verifies the entry bundle and every split chunk under `dirname(bundlePath)`: reads each chunk's adjacent source map
+ * (resolving `sources` against `dirname(chunkPath)`), validates non-empty JS, checks every AST
+ * import/export/dynamic-import/require specifier, and checks release isolation (`releaseIsolationInputs`).
+ */
+export function verifyBundle(bundlePath, { repoRoot = REPO_ROOT, appDir = NSH_APP_DIR } = {}) {
   const chunkPaths = collectBundleChunks(bundlePath);
   let totalMapSources = 0;
-  const parsedInputs = [];
+  const parseInputs = [];
 
   for (const chunkPath of chunkPaths) {
     const mapPath = `${chunkPath}.map`;
@@ -769,14 +967,57 @@ export function verifyBundle(bundlePath, { repoRoot = REPO_ROOT } = {}) {
 
     const source = readFileSync(chunkPath, 'utf8');
     assert.ok(source.trim().length > 0, `Bundled TSX output must not be empty: ${chunkPath}`);
-    parsedInputs.push({ label: chunkPath, source });
+    parseInputs.push({
+      label: chunkPath,
+      source,
+      ext: '.mjs',
+      visit: (sourceFile) => assertSpecifiersClear(extractSpecifiersFromAst(sourceFile), chunkPath),
+    });
+    parseInputs.push(...releaseIsolationInputs(chunkPath, source, map, appDir));
   }
 
-  for (const { label, specifiers } of parseBundleSpecifiersBatch(parsedInputs)) {
-    assertSpecifiersClear(specifiers, label);
-  }
-
+  parseBatch(parseInputs);
   return { files: chunkPaths, totalMapSources };
+}
+
+function listRustFiles(dir) {
+  return readdirSync(dir, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.rs'))
+    .map((entry) => join(entry.parentPath, entry.name))
+    .sort();
+}
+
+function assertNoDevelopmentPolicy(file) {
+  readFileSync(file, 'utf8').split('\n').forEach((line, index) => {
+    assert.ok(
+      !DEVELOPMENT_POLICY_PATTERN.test(line),
+      `Release runner code turns off Policy::harden at ${file}:${index + 1}: ${line.trim()}`,
+    );
+  });
+}
+
+/**
+ * ADR-052 D2 proof #3, runner side: each generated desktop release runner (`<os>-app/main.rs`) starts its platform's
+ * `nsh-<os>-app` runner, whose `Bundle::read_trusted` keeps `Policy::default()` (`harden: true`), and neither it nor
+ * the app's own Rust (`appRustSources`) enables `Policy::development()`, `harden: false` or another policy.
+ */
+export function verifyReleaseRunners({ rustDir = DEFAULT_RUST_WORKSPACE, appRustSources = DEFAULT_APP_RUST_SOURCES } = {}) {
+  const files = [];
+  for (const os of RELEASE_RUNNER_OSES) {
+    const runner = join(rustDir, `${os}-app`, 'main.rs');
+    assert.ok(existsSync(runner), `Release runner missing: ${runner} (run build --release first)`);
+    assert.ok(
+      readFileSync(runner, 'utf8').includes(`nsh_${os}_app::main()`),
+      `Release runner ${runner} must start nsh_${os}_app::main()`,
+    );
+    files.push(runner);
+  }
+  for (const dir of appRustSources) {
+    assert.ok(existsSync(dir), `App Rust sources missing: ${dir}`);
+    files.push(...listRustFiles(dir));
+  }
+  files.forEach(assertNoDevelopmentPolicy);
+  return { files };
 }
 
 /** Lists regular files and symlinks: the NSH bundler ships a linked density variant like a file. */
@@ -809,6 +1050,13 @@ export function verifyTrayAssetsProjection({
     `NSH tray asset projection file list diverges from examples/desktop-bot-app/assets/tray/`,
   );
   for (const file of sourceFiles) {
+    // A link must reach a regular file: reading a FIFO would block, and a directory or device is no tray asset.
+    for (const path of [join(sourceDir, file), join(targetDir, file)]) {
+      assert.ok(
+        statSync(path, { throwIfNoEntry: false })?.isFile(),
+        `Tray asset projection drift for ${file}: ${path} is not a regular file`,
+      );
+    }
     const sourceBytes = readFileSync(join(sourceDir, file));
     const targetBytes = readFileSync(join(targetDir, file));
     assert.equal(
@@ -831,9 +1079,10 @@ function runVerifyBundle(args) {
     }
   }
   const { files, totalMapSources } = verifyBundle(bundlePath);
+  const runners = verifyReleaseRunners();
   const trayAssets = verifyTrayAssetsProjection();
   console.log(
-    `verify-bundle OK (${bundlePath}: ${files.length} bundle/chunk file(s), ${totalMapSources} map sources and AST import/export/require specifiers clear of forbidden packages and Node builtins; ${trayAssets.count} tray assets match source)`,
+    `verify-bundle OK (${bundlePath}: ${files.length} bundle/chunk file(s), ${totalMapSources} map sources and AST import/export/require specifiers clear of forbidden packages and Node builtins; no Gallery module or text, openUrl only in ${LINKS_SOURCE}, no links="open"; ${runners.files.length} release runner and app Rust files keep Policy::harden; ${trayAssets.count} tray assets match source)`,
   );
 }
 

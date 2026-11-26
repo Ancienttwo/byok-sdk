@@ -261,6 +261,26 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     expect(app.enabled("id:recovery-start-fresh-btn")).toBe(false);
   });
 
+  test("RecoveryPanel disables its diagnostics export once the app starts quitting", async () => {
+    const stoppedHost: SupervisedHostState = { state: "stopped", pid: 4100, reason: "Host crashed", storeRefused: false };
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1200,
+      height: 820,
+      modules: shellModules(stoppedHost, (method) => {
+        if (method === "shell.state") return { host: stoppedHost, restore: null, restoreError: null };
+        if (method === "keys.list") return [];
+        return null;
+      }),
+    });
+    await app.waitFor("id:recovery-export-diagnostics");
+    expect(app.enabled("id:recovery-export-diagnostics")).toBe(true);
+    // The adapter's quit hook hears the request and announces the drain (`ByokShell.onQuitting`).
+    await app.quitRequest();
+    await app.waitFor("text:Platform: macos • Hints: 0 • Quitting: yes");
+    expect(app.enabled("id:recovery-export-diagnostics")).toBe(false);
+  });
+
   test("blocks sidebar Restart Host while shell.restore is in flight and re-enables on refusal", async () => {
     const stoppedHost: SupervisedHostState = {
       state: "stopped",
