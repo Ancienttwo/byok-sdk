@@ -75,6 +75,20 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * Claude asks for MCP elicitation (`form` or `url`) over the same control
+ * channel. No Host surface answers it, so it is declined at once: unanswered
+ * it would hang an unattended run, and the native-interaction bridge would
+ * treat it as an unknown request and end the task.
+ */
+function declineElicitation(message: ClaudeStreamMessage, respond: (reply: Record<string, unknown>) => Promise<void>): boolean {
+  const request = message.request as { subtype?: unknown } | undefined;
+  if (message.type !== 'control_request' || typeof message.request_id !== 'string' || request?.subtype !== 'elicitation') return false;
+  // A failed write means the session already halted or the process is gone; that failure surfaces on its own path.
+  void respond({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { action: 'decline' } } }).catch(() => undefined);
+  return true;
+}
+
 function claudeCredentialEnvironment(base: Readonly<Record<string, string>>): Record<string, string> {
   const env = withoutProviderCredentials(base);
   for (const name of Object.keys(env)) {
@@ -630,8 +644,11 @@ export class ClaudeAdapter implements RuntimeAdapter {
           ...(native === undefined && gate === undefined ? {} : { initialize: { hooks: gate?.hooks ?? null } }),
           onFrame: frame => native?.receive(frame),
           onExit: () => { native?.close(); gate?.close(); },
-          // A request neither bridge takes is never answered: no default allow.
-          onAppRequest: (message, respond) => { if (!gate?.receive(message, respond)) native?.request(message, respond); },
+          // A request no bridge takes is never answered: no default allow.
+          onAppRequest: (message, respond) => {
+            if (gate?.receive(message, respond) || declineElicitation(message, respond)) return;
+            native?.request(message, respond);
+          },
         }), cancelled]);
       } catch (cause) {
         if (isRuntimeStartupDisposalFailure(cause) || isRuntimeExecutionFailure(cause)) throw cause;

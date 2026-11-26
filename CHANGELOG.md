@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Changed (client, #2512).** The client vendors OAR 0.136.0 (from 0.131.0). OpenCode 2.x `listModels()` reads the full catalog from a private loopback listener, and `effortLevels` drops OpenCode's `default` variant. Antigravity usage window labels drop the trailing "Remaining". [Host steps](docs/releases/host-upgrade-next-minor.md#oar-01360-2512-2513)
+- **Fixed (client, #2512).** `ClaudeAdapter` declines MCP elicitation requests instead of hanging an unattended task or ending a `nativeInteractions` task.
+- **Fixed (client, #2513).** With `nativeInteractions`, `CodexAdapter` enables `default_mode_request_user_input`, so Codex 0.107.0 and later ask the Host outside plan mode.
+
 ## 0.47.0 — 2026-11-25 (published)
 
 [Release notes](docs/releases/v0.47.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.47.0.md)

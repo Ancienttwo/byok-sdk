@@ -26,7 +26,7 @@ import * as processTree from '../adapters/process-tree';
 import { observationOf } from './fixtures/mcp-observation';
 import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 import { CodexProjection } from '../adapters/codex/projection';
-import * as vendoredProjection from '../../vendor/oar/19ccd9a/runtimes/codex/projection';
+import * as vendoredProjection from '../../vendor/oar/87c0929/runtimes/codex/projection';
 
 const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 const SUBSCRIPTION_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'subscription', modelId: 'wanted' } } as const;

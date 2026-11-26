@@ -18,10 +18,10 @@ async function open(scenario = 'question', host?: Partial<NativeInteractionHostO
   const requests: { request: NativeInteractionRequest; channel: NativeInteractionChannel }[] = [];
   const adapter = new CodexAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }), nativeInteractions: { timeoutMs: 1000, onRequest: (request, channel) => { requests.push({ request, channel }); }, ...host } });
   const session = await startPreparedOperation(adapter, { target: CODEX_TARGET, instruction: 'fixture', ...(resume ? { sessionRef: resume } : {}) }, {
-    workspaceDir: dir, env: { PATH: process.env.PATH, FAKE_NATIVE_SCENARIO: scenario, FAKE_NATIVE_RECEIPT: receipt },
+    workspaceDir: dir, env: { PATH: process.env.PATH, FAKE_NATIVE_SCENARIO: scenario, FAKE_NATIVE_RECEIPT: receipt, FAKE_NATIVE_ARGV: path.join(dir, 'argv.jsonl') },
   });
   sessions.push(session);
-  return { adapter, session, requests, frames: async () => (await readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) as Record<string, any>[] };
+  return { adapter, session, requests, argv: async () => (await readFile(path.join(dir, 'argv.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[]), frames: async () => (await readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) as Record<string, any>[] };
 }
 async function finish(session: Session) { for await (const event of session.events) if (event.type === 'turn_end') break; }
 async function first(f: Awaited<ReturnType<typeof open>>) { await vi.waitFor(() => expect(f.requests.length).toBeGreaterThan(0)); return f.requests[0]!; }
@@ -35,6 +35,9 @@ describe('Codex native interaction prepared-adapter bridge', () => {
     expect(f.adapter.descriptor.capabilities).toMatchObject({ approvalInteractive: false, nativeInteractions: { approvalDecisions: [], structuredQuestions: true } });
     const r = await first(f); await f.session.interactions!.respond(answer(r.request)); await finish(f.session);
     expect((await f.frames()).find(frame => frame.method === 'thread/start')?.params.approvalPolicy).toBe('never');
+    // Outside plan mode Codex asks request_user_input only with this feature on.
+    const session = (await f.argv()).find(args => args[0] === 'app-server');
+    expect(session?.join(' ')).toContain('-c features.default_mode_request_user_input=true');
   });
   it('refuses a native approval request without a Host prompt: permission is the SDK auto|all decision', async () => {
     const f = await open('approval'); await finish(f.session);

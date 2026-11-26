@@ -336,7 +336,7 @@ describe('Claude runtime requests on the OAR stream-json session', () => {
     await vi.waitFor(() => expect(records(stream, 'hook-1')).toHaveLength(2));
     const [request, response] = records(stream, 'hook-1');
     expect(request).toMatchObject({ kind: 'request', direction: 'toApp', body: { kind: 'native', type: 'hook_callback' } });
-    expect(response).toMatchObject({ kind: 'response', body: { kind: 'accepted', native: { response: { request_id: 'hook-1',
+    expect(response).toMatchObject({ kind: 'response', body: { kind: 'answered', native: { response: { request_id: 'hook-1',
       response: { hookSpecificOutput: { permissionDecision: 'deny' } } } } } });
     expect(claude.written).toMatchObject([{ type: 'control_response', response: { request_id: 'hook-1' } }]);
   });

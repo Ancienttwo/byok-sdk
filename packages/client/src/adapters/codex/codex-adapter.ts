@@ -157,6 +157,7 @@ export interface CodexAdapterOptions {
 const READER_PROJECT_ROOT_ARGS = Object.freeze(['-c', 'project_root_markers=[".byok"]']);
 const DISABLE_PLUGINS_ARGS = ['-c', 'features.plugins=false'] as const;
 const DISABLE_MEMORIES_ARGS = ['-c', 'features.memories=false'] as const;
+const DEFAULT_MODE_USER_INPUT_ARGS = ['-c', 'features.default_mode_request_user_input=true'] as const;
 
 /** Codex app-server is experimental and has no exec compatibility path. Version policy: `codex-version.ts`. */
 export class CodexAdapter implements RuntimeAdapter {
@@ -488,7 +489,8 @@ export class CodexAdapter implements RuntimeAdapter {
           // The shared launch arguments already contain the SDK's sandbox override.
           sandboxMode: 'inherit',
           ...(mcpServers.length === 0 ? {} : { mcpServers }),
-          launchArgs: launch.launchArgs,
+          // Outside plan mode Codex refuses request_user_input unless this feature is on (Codex >= 0.107.0 asks and resolves).
+          launchArgs: this.options.nativeInteractions === undefined ? launch.launchArgs : [...launch.launchArgs, ...DEFAULT_MODE_USER_INPUT_ARGS],
           ...(input.manifest.sessionRef === undefined
             ? {}
             : { resume: input.manifest.sessionRef }),

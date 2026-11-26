@@ -244,9 +244,13 @@ export function codexOpenReadback(
     const detail = reported === null ? `did not confirm requested model ${options.model}` : `kept model ${reported} although ${options.model} was requested`;
     return { events, refusal: new ModelConfirmationError(`codex ${method} ${detail}`, { requested: options.model, reported }), resumeEffort: null };
   }
-  if (options.serviceTier !== undefined && codexServiceTier(reply) !== options.serviceTier) {
-    const actual = codexServiceTier(visibleReply) ?? "unreported";
-    return { events, refusal: `codex ${method} reports serviceTier ${actual} although ${options.serviceTier} was requested`, resumeEffort: null };
+  if (options.serviceTier !== undefined) {
+    const reported = codexServiceTier(reply);
+    const downgradedToDefault = options.serviceTierFallback === "default" && reported === "default";
+    if (reported !== options.serviceTier && !downgradedToDefault) {
+      const actual = codexServiceTier(visibleReply) ?? "unreported";
+      return { events, refusal: `codex ${method} reports serviceTier ${actual} although ${options.serviceTier} was requested`, resumeEffort: null };
+    }
   }
   if (options.effort === undefined || effort === options.effort) {
     return { events, refusal: null, resumeEffort: null };

@@ -94,7 +94,7 @@ export declare class RuntimeFailureError extends Error {
 }
 export declare class UnsupportedOptionError extends Error {
   readonly name: string;
-  readonly option: 'modelRequests' | 'retainedBytes' | 'goals' | 'endTurnProcessesOnAbort' | 'cwd' | 'additionalDirectories' | 'model' | 'effort' | 'serviceTier' | 'outputSchema' | 'name' | 'resume' | 'fork' | 'env' | 'userConfiguration' | 'systemPrompt' | 'appendSystemPrompt' | 'mcpServers' | 'disallowedTools' | 'launchArgs' | 'nativeMemoryDefault' | 'sessionLogUpload' | 'nativePermissions' | 'placement';
+  readonly option: 'modelRequests' | 'retainedBytes' | 'goals' | 'endTurnProcessesOnAbort' | 'cwd' | 'additionalDirectories' | 'model' | 'effort' | 'serviceTier' | 'serviceTierFallback' | 'userQuestions' | 'outputSchema' | 'name' | 'resume' | 'fork' | 'env' | 'userConfiguration' | 'systemPrompt' | 'appendSystemPrompt' | 'mcpServers' | 'disallowedTools' | 'launchArgs' | 'nativeMemoryDefault' | 'sessionLogUpload' | 'nativePermissions' | 'placement';
 }
 /** The open could not confirm the requested model from the runtime's readback: the vendored typed error. */
 export declare class ModelConfirmationError extends Error {

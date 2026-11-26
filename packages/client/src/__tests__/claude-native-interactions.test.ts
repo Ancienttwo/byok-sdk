@@ -217,6 +217,16 @@ describe('Claude native interactions through prepared process transport', () => 
     expect(responseFrames(await frames())).toEqual([]);
   });
 
+  it.each([
+    ['form', false], ['url', false], ['form', true], ['url', true],
+  ] as const)('declines a %s MCP elicitation at once (nativeInteractions=%s)', async (mode, enabled) => {
+    const requests: NativeInteractionRequest[] = [];
+    const { session, frames } = await start(`elicitation-${mode}`, enabled ? { onRequest: request => { requests.push(request); } } : undefined);
+    expect((await takeTurn(session)).map(event => event.type)).toContain('turn_end');
+    expect(requests).toEqual([]);
+    expect(responseFrames(await frames())).toEqual([{ type: 'control_response', response: { subtype: 'success', request_id: 'elicitation-1', response: { action: 'decline' } } }]);
+  });
+
   it.each(['init-error', 'init-exit'])('fails startup before sending a user message on %s', async scenario => {
     await expect(start(scenario, { onRequest: () => {} })).rejects.toThrow(/initialization failed/);
     const transcript = path.join(directories[directories.length - 1]!, 'transcript.jsonl');
