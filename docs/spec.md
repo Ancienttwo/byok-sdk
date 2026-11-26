@@ -405,12 +405,13 @@ store it owns: `inspectDaemonStores` in client (also
 `inspectProviderProfileStore` in keys. All three return core's
 `StoreCompatibility`. Checked-in stores written by recent releases pin the
 verdicts ([store compatibility precheck](upgrade-manifest.md#store-compatibility-precheck)).
-The current aligned release is `0.47.0` (candidate). The stable npm release
-is `0.46.1`, published on 2026-11-25 (UTC) with registry readback for all nine
-packages. The packed keys `@byok-sdk/core` edge must pin the corresponding
-release version. Verify the exact `0.47.0` edge in an isolated install of the
-accepted candidate tarballs. Publication requires separate authorization and
-registry readback.
+The current aligned release is `0.47.1` (candidate). The stable npm release is
+`0.47.0`, published on 2026-11-25 (UTC) with registry readback for all nine
+packages.
+The packed keys `@byok-sdk/core` dependency must pin the corresponding release
+version. Verify the exact `0.47.1` pin in an isolated install of the accepted
+candidate tarballs. Publication requires separate authorization and registry
+readback.
 
 The owner's 2026-10-22 decision puts keys on the release train version from
 0.28.2. Before that decision keys had its own version line, and its last
@@ -420,12 +421,22 @@ in the CHANGELOG, as for every other package. The dependency rules do not
 change: keys depends only on `@byok-sdk/core`, and no dispatch package depends
 on keys.
 
-0.47.0 is the MINOR candidate after 0.46.1. All nine public packages move
+0.47.1 is the PATCH candidate after 0.47.0 on `release/0.47`. All nine public
+packages move together and keep wire v8 and the public API, so 0.47.0 server
+databases, daemon journals, provider stores, and device pairings carry forward.
+The 0.47.0 → 0.47.1 upgrade manifest has zero breaking and zero additive
+entries. Every `@byok-sdk/client` entry imports one shared runtime-detection
+module, so admission delegation and verified detections cross package entries
+(#2505), and `readHostLedger` reports a database without `host_ledger` as
+`absent` / `no_table` (#2504).
+[0.47.1 candidate notes](releases/v0.47.1.md)
+
+0.47.0 is the published MINOR after 0.46.1. All nine public packages move
 together and keep wire v8. Existing 0.46.1 server databases, daemon journals,
 provider stores, and device pairings carry forward. The 0.46.1 → 0.47.0
 upgrade manifest records five additive entries and zero breaking entries.
 Hosts with test doubles typed as `Daemon` must add `whenCapabilitiesSettled`.
-[0.47.0 candidate notes](releases/v0.47.0.md) ·
+[0.47.0 release notes](releases/v0.47.0.md) ·
 [Host upgrade checklist](releases/host-upgrade-0.47.0.md)
 
 0.46.1 is the published PATCH after 0.46.0 on `release/0.46`. All nine public
@@ -610,7 +621,7 @@ included additive public APIs and new public behavior. See the
 its additive APIs and persistence changes. See the
 [0.28.1 release notes](releases/v0.28.1.md).
 
-The registry read of 2026-11-25 (UTC) reports `latest` 0.46.1 for all nine
+The registry read of 2026-11-25 (UTC) reports `latest` 0.47.0 for all nine
 packages in the release train; cloud-do remains archived at 0.42.0. The earlier
 published versions include 0.42.0 (2026-11-13, UTC), 0.41.0, 0.40.0, 0.39.0, 0.38.0, 0.37.0, 0.36.0, 0.35.0, 0.34.0, 0.33.0, 0.32.0, 0.31.0, 0.30.2, 0.30.1,
 0.30.0, 0.29.0, 0.28.3, 0.28.2, 0.28.1 / keys 0.13.1 and 0.28.0 / keys 0.13.0. The registry publication times are 2026-10-20 (UTC) for

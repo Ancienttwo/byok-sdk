@@ -1,6 +1,6 @@
 {
   "name": "@byok-sdk/client",
-  "version": "0.47.0",
+  "version": "0.47.1",
   "byok": {
     "piRuntimePin": "1.6.0"
   },
@@ -144,6 +144,10 @@
     "#byok-pi-todo-runtime": {
       "types": "./dist/bin/pi-todo-runtime.d.ts",
       "default": "./dist/bin/pi-todo-runtime.js"
+    },
+    "#byok-runtime-detection": {
+      "types": "./dist/runtime-detection.d.ts",
+      "default": "./dist/runtime-detection.js"
     }
   }
 }

@@ -7,14 +7,21 @@ composition over Postgres and R2.
 
 ## Release status
 
-**0.47.0 is in preparation** (2026-11-25, UTC). The candidate keeps wire v8,
-so 0.46.1 stores and device pairings carry forward. The upgrade manifest
+**0.47.1 is in preparation** (2026-11-26, UTC) on `release/0.47` as a wire v8
+PATCH for all nine public packages. It shares one runtime-detection module
+across the client package entries (#2505) and makes `readHostLedger` report a
+database without a Host ledger as absent (#2504), with zero breaking and zero
+additive manifest entries. [0.47.1 candidate notes](docs/releases/v0.47.1.md)
+
+**0.47.0 is published** on npm `latest` on 2026-11-25 (UTC) for all nine public
+packages. It keeps wire v8, so 0.46.1 stores and device pairings carry
+forward. The upgrade manifest
 records five additive entries, including settled device capabilities, the
 K4 Host ledger reader, adapter detection changes, and OAR 0.131.0.
-[0.47.0 candidate notes](docs/releases/v0.47.0.md) ·
+[0.47.0 release notes](docs/releases/v0.47.0.md) ·
 [Host upgrade checklist](docs/releases/host-upgrade-0.47.0.md)
 
-**0.46.1 is published** on npm `latest` on 2026-11-25 (UTC) from `release/0.46`
+**0.46.1 is published** on 2026-11-25 (UTC) from `release/0.46`
 as a wire v8 PATCH for all nine public packages. It fixes Claude and Codex login probes that
 timed out under a macOS launchd service (#2468) with zero breaking and zero
 additive manifest entries. [0.46.1 release notes](docs/releases/v0.46.1.md)
@@ -149,7 +156,7 @@ Another earlier stable release is **0.30.2** for all nine packages. See the
 notes do not say that 0.30.2, or a Host on it, is ready for production; the
 product loop gate (#977) moves to 0.34.0 with the Host upgrade checklist.
 
-A registry read on 2026-11-25 (UTC) shows `latest` **0.46.1** for all nine
+A registry read on 2026-11-25 (UTC) shows `latest` **0.47.0** for all nine
 packages in the release train. The registry lists 0.42.0 (2026-11-13, UTC), the first
 publication of `@byok-sdk/bot-collaboration`, and 0.41.0 (2026-11-09, UTC), 0.40.0 (2026-11-08, UTC), 0.39.0 (2026-11-06, UTC), 0.38.0 and 0.37.0 (2026-11-04, UTC), 0.36.0 (2026-11-03, UTC), 0.35.0 and 0.34.0 (2026-11-02, UTC), 0.33.0 and 0.32.0 (2026-11-01, UTC), 0.31.0 (2026-10-29,
 UTC), 0.30.2 (2026-10-26, UTC), 0.30.1 and 0.30.0 (2026-10-24, UTC), 0.29.0
@@ -170,8 +177,8 @@ changes server, cloud, client and keys APIs.
 [Release notes](docs/releases/v0.27.0.md) describe the changes since 0.26.1
 and the Host upgrade and migration steps.
 
-Versioned install examples below name the 0.47.0 candidate. Use accepted
-candidate tarballs for validation. The stable npm release is 0.46.1.
+Versioned install examples below name the 0.47.1 candidate. Use accepted
+candidate tarballs for validation. The stable npm release is 0.47.0.
 The historical `rc` publication is **0.27.0-rc.2** / keys **0.12.0-rc.2**; see its
 [publication record](docs/releases/v0.27.0-rc.2-publication.md).
 
@@ -248,7 +255,7 @@ and the keys SQLite profile schema; then **0.17.0** with keys **0.4.3**
 
 The published 0.23.0 train, like 0.22.0, uses unmodified official
 `@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure;
-the 0.47.0 candidate and stable 0.46.0 and 0.46.1 pin 1.6.0; stable 0.42.0 through 0.45.1 pin 1.5.2; stable 0.37.0, 0.38.0 and 0.39.0 pin 1.5.0; 1.4.0 ships in stable 0.30.1 through 0.36.0; 1.3.0 ships in stable 0.28.x, 0.29.0 and 0.30.0; 1.2.0 ships in stable 0.27.0 and its published RCs; 1.1.0 ships in stable 0.25.0, 0.26.x and their published RCs.
+stable 0.46.0, 0.46.1 and 0.47.0 pin 1.6.0; stable 0.42.0 through 0.45.1 pin 1.5.2; stable 0.37.0, 0.38.0 and 0.39.0 pin 1.5.0; 1.4.0 ships in stable 0.30.1 through 0.36.0; 1.3.0 ships in stable 0.28.x, 0.29.0 and 0.30.0; 1.2.0 ships in stable 0.27.0 and its published RCs; 1.1.0 ships in stable 0.25.0, 0.26.x and their published RCs.
 The maintained fork is retired from this train; 0.21.0 remains the historical
 fork-based release. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.
@@ -285,7 +292,7 @@ Hono/HTTP façade over the shared `cloud` kernel, `client` is the local
 daemon, and `keys` keeps provider credentials on the device.
 
 ```sh
-npm install @byok-sdk/client@0.47.0 @byok-sdk/server@0.47.0 @byok-sdk/keys@0.47.0
+npm install @byok-sdk/client@0.47.1 @byok-sdk/server@0.47.1 @byok-sdk/keys@0.47.1
 ```
 
 Also installed: `@byok-sdk/cloud`, `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -301,7 +308,7 @@ for the Postgres + R2 data plane (`@byok-sdk/cloud-dataplane/runtime` on
 Workers through Hyperdrive), and `ui-runtime` for the Live Activity Timeline.
 
 ```sh
-npm install @byok-sdk/cloud@0.47.0 @byok-sdk/cloud-dataplane@0.47.0 @byok-sdk/ui-runtime@0.47.0
+npm install @byok-sdk/cloud@0.47.1 @byok-sdk/cloud-dataplane@0.47.1 @byok-sdk/ui-runtime@0.47.1
 ```
 
 Also installed: `@byok-sdk/core`, `@byok-sdk/protocol`.
@@ -471,7 +478,7 @@ It is intentionally outside the dispatch packages and their entire dependency
 graph. Install it explicitly when that security model is required:
 
 ```sh
-npm install @byok-sdk/keys@0.47.0
+npm install @byok-sdk/keys@0.47.1
 ```
 
 ## Host connector composition
@@ -487,7 +494,7 @@ included.
 
 ## Runtime and license
 
-The dispatch SDK and the independently installable `@byok-sdk/keys@0.47.0`
+The dispatch SDK and the independently installable `@byok-sdk/keys@0.47.1`
 require Node.js 24.22.1 or newer. MIT licensed.
 
 ## Entry dependencies
@@ -538,6 +545,7 @@ Third-party dependencies and code-generation evidence follow static dependency e
 | `@byok-sdk/client#byok-oar-readers` | Private on-demand OAR runtime readers | — | forbidden | 89828 B |
 | `@byok-sdk/client#byok-pi-runtime-host` | Private Pi runtime host | `@cfworker/json-schema`, `@earendil-works/chord`, `@earendil-works/pi-agent-core`, `@earendil-works/pi-ai`, `@earendil-works/pi-codemode`, `@earendil-works/pi-coding-agent`, `@earendil-works/pi-durable`, `@earendil-works/pi-mcp`, `@earendil-works/pi-schema`, `@earendil-works/pi-telemetry`, `@earendil-works/pi-tui`, `@isaacs/nonrecursive-glob-match`, `@modelcontextprotocol/client`, `@modelcontextprotocol/core`, `balanced-match`, `brace-expansion`, `chalk`, `cross-spawn`, `diff`, `eventsource`, `eventsource-parser`, `get-east-asian-width`, `graceful-fs`, `highlight.js`, `hosted-git-info`, `ignore`, `isexe`, `lovely-mermaid`, `lru-cache`, `marked`, `marked-cjk-friendly`, `minimatch`, `openai`, `p-limit`, `partial-json`, `path-key`, `pi-web-access`, `pkce-challenge`, `proper-lockfile`, `retry`, `semver`, `shebang-command`, `shebang-regex`, `signal-exit`, `typebox`, `undici`, `which`, `yaml`, `yocto-queue`, `zod` | allowed | 665521 B |
 | `@byok-sdk/client#byok-pi-todo-runtime` | Private pure todo runtime | — | forbidden | 409847 B |
+| `@byok-sdk/client#byok-runtime-detection` | Private runtime detection state shared by every client entry | — | forbidden | 25524 B |
 | `@byok-sdk/cloud` | Cloud coordination and HTTP handlers | `@cfworker/json-schema`, `hono`, `zod` | allowed | 599377 B |
 | `@byok-sdk/cloud-dataplane` | Postgres stores and Node operations | `@cfworker/json-schema`, `@nodable/entities`, `anynum`, `aws4fetch`, `fast-xml-builder`, `fast-xml-parser`, `hono`, `is-unsafe`, `path-expression-matcher`, `pg`, `pg-connection-string`, `pg-int8`, `pg-native`, `pg-pool`, `pg-protocol`, `pg-types`, `postgres-array`, `postgres-bytea`, `postgres-date`, `postgres-interval`, `strnum`, `xml-naming`, `xtend`, `zod` | allowed | 859119 B |
 | `@byok-sdk/cloud-dataplane/package.json` | Package metadata | — | forbidden | 1974 B |

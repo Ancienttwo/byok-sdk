@@ -6,6 +6,8 @@ first follow the [0.46.0 checklist](host-upgrade-0.46.0.md) and the
 
 0.47.0 keeps wire v8. Existing 0.46.1 server databases, daemon journals,
 provider stores, and device pairings carry forward in place.
+The [archived upgrade manifest](../../packages/client/upgrade-history/0.46.1-0.47.0.json)
+records the Host-visible changes in this release.
 
 ## Settled device capabilities (#2471)
 

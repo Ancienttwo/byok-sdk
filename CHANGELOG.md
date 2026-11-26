@@ -2,9 +2,19 @@
 
 ## Unreleased
 
-## 0.47.0 (prepared, 2026-11-25)
+## 0.47.1 — 2026-11-26 (prepared)
 
-[Candidate notes](docs/releases/v0.47.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.47.0.md)
+[Candidate notes](docs/releases/v0.47.1.md)
+
+0.47.1 is a PATCH on `release/0.47`. It keeps wire v8 and the public API; the upgrade manifest has zero breaking and zero additive entries.
+
+- **Fixed (client, #2505 and #2508)** — All `@byok-sdk/client` entries share one runtime-detection module (`dist/runtime-detection.js`, private import `#byok-runtime-detection`). A daemon from `@byok-sdk/client` now sees `delegateAdmissionDetection` registrations and verified detections from `@byok-sdk/client/adapters`, so delegated fast admission and `prepare()` detection reuse work across entries. [Fixed](docs/releases/v0.47.1.md#one-runtime-detection-module-across-client-package-entries)
+- **Fixed (server, #2504 and #2506)** — `readHostLedger` returns `absent` / `no_table` for a readable SQLite database without a `host_ledger` table instead of `unreadable` / `format_unsupported`. [Fixed](docs/releases/v0.47.1.md#readhostledger-on-a-database-without-a-host-ledger)
+- **Test (client, #2502 and #2507)** — The durable daemon recovery test tolerates a short-lived descendant that exits before identity capture.
+
+## 0.47.0 — 2026-11-25 (published)
+
+[Release notes](docs/releases/v0.47.0.md) · [Host upgrade checklist](docs/releases/host-upgrade-0.47.0.md)
 
 0.47.0 keeps wire v8. Existing 0.46.1 server databases, daemon journals, provider stores, and device pairings carry forward in place. The manifest has five additive entries and zero breaking entries.
 

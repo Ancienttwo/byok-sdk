@@ -29,6 +29,7 @@
         "packages/bot-collaboration/dist/index.d.ts"
       ],
       "bareImports": [
+        "#byok-runtime-detection",
         "@byok-sdk/client",
         "@byok-sdk/core",
         "@byok-sdk/core/provider-model",
@@ -348,6 +349,7 @@
       ],
       "bareImports": [
         "#byok-embedded-blob-storage",
+        "#byok-runtime-detection",
         "@byok-sdk/client",
         "@byok-sdk/cloud",
         "@byok-sdk/core",
@@ -513,6 +515,7 @@
         "packages/client/dist/index.d.ts"
       ],
       "bareImports": [
+        "#byok-runtime-detection",
         "@byok-sdk/core",
         "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sealed-payload",
@@ -643,6 +646,7 @@
         "packages/client/dist/adapters/index.d.ts"
       ],
       "bareImports": [
+        "#byok-runtime-detection",
         "@byok-sdk/core/provider-model",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
@@ -1031,6 +1035,7 @@
         "packages/client/dist/testing/index.d.ts"
       ],
       "bareImports": [
+        "#byok-runtime-detection",
         "@byok-sdk/core/provider-model",
         "@byok-sdk/core/system-tool",
         "@byok-sdk/protocol/constants",
@@ -1693,6 +1698,46 @@
           "os",
           "path",
           "url"
+        ],
+        "thirdParty": []
+      },
+      "codegen": []
+    }
+  },
+  "@byok-sdk/client#byok-runtime-detection": {
+    "kind": "imports",
+    "policy": {
+      "purpose": "Private runtime detection state shared by every client entry",
+      "budgetBytes": 25524,
+      "zod": false,
+      "codegen": false,
+      "nodeBuiltins": {
+        "workspace": true,
+        "thirdParty": false
+      },
+      "thirdParty": []
+    },
+    "facts": {
+      "target": "packages/client/dist/runtime-detection.js",
+      "conditions": [
+        "default"
+      ],
+      "types": [
+        "packages/client/dist/runtime-detection.d.ts"
+      ],
+      "bareImports": [
+        "@byok-sdk/protocol/constants",
+        "node:path",
+        "node:util"
+      ],
+      "lazyImports": [],
+      "thirdParty": [],
+      "unavailableOptional": [],
+      "opaqueImports": [],
+      "nodeBuiltins": {
+        "workspace": [
+          "node:path",
+          "node:util"
         ],
         "thirdParty": []
       },
@@ -3083,6 +3128,7 @@
       "conditions": [],
       "types": [],
       "bareImports": [
+        "#byok-runtime-detection",
         "@byok-sdk/core",
         "@byok-sdk/core/provider-model",
         "@byok-sdk/core/sealed-payload",
