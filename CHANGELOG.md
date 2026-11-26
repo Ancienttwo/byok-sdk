@@ -2,9 +2,9 @@
 
 ## Unreleased
 
-## 0.47.1 — 2026-11-26 (prepared)
+## 0.47.1 — 2026-11-26 (published)
 
-[Candidate notes](docs/releases/v0.47.1.md)
+[Release notes](docs/releases/v0.47.1.md)
 
 0.47.1 is a PATCH on `release/0.47`. It keeps wire v8 and the public API; the upgrade manifest has zero breaking and zero additive entries.
 
