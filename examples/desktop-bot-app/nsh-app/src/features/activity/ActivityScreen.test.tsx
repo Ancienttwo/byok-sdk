@@ -1,5 +1,6 @@
 import { describe, expect, open, test } from "nsh/test";
 import type { ActivityCard } from "../../../../src/host/activity/cards.ts";
+import { approvalConfirmOptions } from "./ActivityCardView.tsx";
 
 type Call = { method: string; params: any };
 type TimelineItem = NonNullable<ActivityCard["timeline"]>["items"][number];
@@ -116,6 +117,15 @@ describe("ActivityScreen (#2461 Slice 5)", () => {
     await app.wait(50);
     expect(app.dialogs().map((dialog) => dialog.title)).toEqual(["Approve this request?", "Reject this request?"]);
     expect(app.dialogs()[0].buttons).toEqual(["Cancel", "Approve"]);
+    // No "default" action (an omitted role is one): Cancel, listed first, takes the alert's initial focus, so a held
+    // Enter or Space cannot confirm. The headless dialog does not expose roles, so the options are checked directly.
+    for (const kind of ["approve", "reject"] as const) {
+      const actions = approvalConfirmOptions(kind, "Run the build script", "task-a").actions;
+      expect(actions.map((action) => [action.id, action.role])).toEqual([
+        ["cancel", "cancel"],
+        [kind, "destructive"],
+      ]);
+    }
     expect(decisions(calls)).toEqual([]);
     expect(cardReads(calls)).toBe(1);
 

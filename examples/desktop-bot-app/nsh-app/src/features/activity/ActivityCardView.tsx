@@ -45,6 +45,28 @@ const itemKey = (item: TimelineItem) => `${item.orderKey.revision}:${item.orderK
 const lostEvents = (timeline: Timeline) => timeline.dropped + timeline.gaps.reduce((sum, gap) => sum + gap.missing, 0);
 
 /**
+ * The confirmation of one decision. No action has the `"default"` role: an OS alert focuses its default action first
+ * (Windows presses the focused button on each repeated key-down), so Cancel, listed first, takes the initial focus and
+ * a held Enter or Space cannot confirm an irreversible decision.
+ */
+export function approvalConfirmOptions(
+  kind: "approve" | "reject",
+  title: string,
+  taskId: string,
+): Parameters<typeof confirmAlert>[0] {
+  const label = kind === "approve" ? "Approve" : "Reject";
+  return {
+    title: `${label} this request?`,
+    description: `${title} (task ${taskId}). The decision cannot be undone.`,
+    actions: [
+      { label: "Cancel", role: "cancel", id: "cancel" },
+      { label, role: "destructive", id: kind },
+    ],
+    closeOnEscape: true,
+  };
+}
+
+/**
  * One approval. Only a pending request that names its approval id can be answered: the decision targets exactly it,
  * after the native alert confirms it. Its running and refused state lives in the store, keyed by task and approval id.
  */
@@ -62,16 +84,7 @@ function ApprovalRow(props: { taskId: string; item: () => ApprovalItem }) {
     if (approvalId === undefined || running() !== null) {
       return;
     }
-    const label = kind === "approve" ? "Approve" : "Reject";
-    const answer = await confirmAlert({
-      title: `${label} this request?`,
-      description: `${title()} (task ${props.taskId}). The decision cannot be undone.`,
-      actions: [
-        { label: "Cancel", role: "cancel", id: "cancel" },
-        { label, role: kind === "reject" ? "destructive" : "default", id: kind },
-      ],
-      closeOnEscape: true,
-    });
+    const answer = await confirmAlert(approvalConfirmOptions(kind, title(), props.taskId));
     if (answer.action === kind) {
       await decideApproval(props.taskId, approvalId, kind);
     }
