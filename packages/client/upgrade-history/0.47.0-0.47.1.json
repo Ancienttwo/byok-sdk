@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "package": "@byok-sdk/client",
+  "from": {
+    "version": "0.47.0",
+    "snapshotSha256": "0398d5986f58dc101448b06f0d9d68bc8a6f041c62d341ae8ecddccb78bf2040"
+  },
+  "to": {
+    "version": "0.47.1",
+    "snapshotSha256": "777d9649287a5d436026c0a9668cbe76c2004aa2abf92007ed866c9bd59ea901"
+  },
+  "configFields": {
+    "status": "tracked",
+    "source": "packages/client/daemon-config.schema.json",
+    "owner": "#1094"
+  },
+  "entries": [],
+  "changes": []
+}

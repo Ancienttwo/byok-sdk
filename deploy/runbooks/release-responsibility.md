@@ -77,15 +77,18 @@ An artifact SHA-256 only proves that downloaded bytes match a manifest. If the m
 
 ## Version selection
 
-0.47.1 is the PATCH candidate for all nine public packages on `release/0.47`.
-It keeps wire v8 and the public API; its upgrade manifest has zero breaking
-and zero additive entries. It shares one runtime-detection module across the
-client package entries (#2505) and makes `readHostLedger` report a database
-without a Host ledger as absent (#2504).
-[Candidate notes](../../docs/releases/v0.47.1.md)
+0.47.1 is the published PATCH for all nine public packages on `release/0.47`.
+It was published on npm `latest` on 2026-11-26 (UTC) from `v0.47.1`
+(`c4a2c39f0`) using exact-SHA release validation
+[run 45763232718](https://github.com/Ancienttwo/byok-sdk/actions/runs/45763232718)
+and accepted artifact `15091136274`. It keeps wire v8 and the public API; its
+upgrade manifest has zero breaking and zero additive entries. It shares one
+runtime-detection module across the client package entries (#2505) and makes
+`readHostLedger` report a database without a Host ledger as absent (#2504).
+[Release notes and publication evidence](../../docs/releases/v0.47.1.md)
 
 0.47.0 is the published MINOR for all nine public packages. It was published on
-npm `latest` on 2026-11-25 (UTC) from `v0.47.0` (`ee4b1b975`) using exact-SHA
+2026-11-25 (UTC) from `v0.47.0` (`ee4b1b975`) using exact-SHA
 release validation
 [run 45649376765](https://github.com/Ancienttwo/byok-sdk/actions/runs/45649376765)
 and accepted artifact `15038594309`. It keeps wire v8 and carries five
@@ -143,7 +146,7 @@ published on 2026-11-14 (UTC). cloud-do left the release train at 0.43.0 (#1959)
 its existing npm versions are deprecated and receive no further releases or fixes.
 See the [release notes](../../docs/releases/v0.43.0.md)
 and [Host upgrade order](../../docs/releases/v0.43.0.md#host-upgrade-order).
-The registry read of 2026-11-25 (UTC) reports `latest` 0.47.0 for all nine packages.
+The registry read of 2026-11-26 (UTC) reports `latest` 0.47.1 for all nine packages.
 
 Use the authoritative [pre-1.0 version policy](../../docs/spec.md#pre-10-package-version-policy).
 Historical 0.27.0 preparation named train 0.27.0 and
@@ -158,10 +161,10 @@ dependencies consistent.
 A release set contains eight aligned packages plus keys: nine packages. From 0.28.2 all
 of them carry one version; `check:release-graph` fails when keys
 differs from the train. `@byok-sdk/implementation-identity` remains retired. Every public package targets
-the dist-tag `latest`, observed at 0.47.0 for all nine packages on 2026-11-25 (UTC).
+the dist-tag `latest`, observed at 0.47.1 for all nine packages on 2026-11-26 (UTC).
 The pre-publication
 [reviewed registry baseline](../../scripts/release/registry-expectations.json)
-records the 0.47.1 candidate baseline with prior `latest` 0.47.0 and
+records the historical 0.47.1 pre-publication baseline with prior `latest` 0.47.0 and
 `priorPublication: existing` for all nine packages, including
 `@byok-sdk/bot-collaboration`. Recheck registry state at each publication.
 The [implemented contract](../../scripts/release/registry-contract.mjs) verifies
