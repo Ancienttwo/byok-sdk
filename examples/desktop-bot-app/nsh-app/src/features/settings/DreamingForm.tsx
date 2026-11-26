@@ -6,11 +6,13 @@ import { Button, Checkbox, Switch } from "../../ui/index.ts";
 
 /**
  * The global switch and the preferred models, in the order picked; K8 reads them when the Host next starts. The draft
- * starts from `saved` when the form mounts (each settings load mounts a new form); a save keeps it.
+ * starts from `saved` when the form mounts (each settings load mounts a new form); a save keeps it. Save waits while
+ * `reading`: the read in flight mounts a new form from a value that may predate the save and drops its reply.
  */
 export function DreamingForm(props: {
   saved: () => DreamingSetting;
   models: readonly ModelChoice[];
+  reading: boolean;
   save: (setting: DreamingSetting) => Promise<HostSettings>;
   onSaved: (setting: DreamingSetting) => void;
 }) {
@@ -34,7 +36,7 @@ export function DreamingForm(props: {
     }));
 
   const save = async () => {
-    if (busy()) {
+    if (busy() || props.reading) {
       return;
     }
     busy.set(true);
@@ -89,7 +91,13 @@ export function DreamingForm(props: {
         </Each>
       </View>
       <View class="flex-row items-center gap-2">
-        <Button testID="settings-dreaming-save" size="sm" loading={busy()} onPress={() => void save()}>
+        <Button
+          testID="settings-dreaming-save"
+          size="sm"
+          loading={busy()}
+          disabled={props.reading}
+          onPress={() => void save()}
+        >
           Save dreaming
         </Button>
       </View>

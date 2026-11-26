@@ -115,6 +115,7 @@ export function SettingsScreen() {
                       <DreamingForm
                         saved={() => entry().dreaming}
                         models={choices()}
+                        reading={settings.loading()}
                         save={saveDreaming}
                         onSaved={(dreaming) => settings.mutate({ load: entry().load, dreaming })}
                       />

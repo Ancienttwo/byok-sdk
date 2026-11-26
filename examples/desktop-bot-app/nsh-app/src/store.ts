@@ -93,7 +93,11 @@ export const k8View = resource(
     const snapshot = await bridge.call("k8.view", { botId: source.botId });
     if (!info.signal.aborted) {
       armBusyReread(snapshot.busy);
-      retainIds(unfoldedBotsSignal, snapshot.bots.map((bot) => bot.id));
+      // Drop the Bots the snapshot no longer lists, so the set does not grow with every Bot ever seen.
+      const live = new Set(snapshot.bots.map((bot) => bot.id));
+      unfoldedBotsSignal.update((current) =>
+        [...current].every((id) => live.has(id)) ? current : new Set([...current].filter((id) => live.has(id))),
+      );
     }
     return snapshot;
   },
@@ -152,14 +156,6 @@ export const activityCards = resource(
       : false,
   async (): Promise<ActivityCard[]> => await bridge.call("activity.cards", undefined),
 );
-
-/** Drops the ids that the newest snapshot no longer lists, so the set does not grow with every Bot ever seen. */
-function retainIds(set: typeof unfoldedBotsSignal, live: readonly string[]): void {
-  const keep = new Set(live);
-  set.update((current) =>
-    [...current].every((id) => keep.has(id)) ? current : new Set([...current].filter((id) => keep.has(id))),
-  );
-}
 
 /** Reads `activity.cards` again (Retry, and after an approval decision). */
 export function reloadActivityCards(): void {

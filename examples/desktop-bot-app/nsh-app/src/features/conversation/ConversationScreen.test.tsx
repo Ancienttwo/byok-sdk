@@ -276,8 +276,13 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     const sendGate = new Promise<void>((resolve) => {
       releaseSend = resolve;
     });
-    const app = await openConversation(
-      conversationShell(
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1280,
+      height: 900,
+      // A manual clock: a step taken while the send waits then does not wait out the runner's 2 s limit for a quiet app.
+      clock: {},
+      modules: conversationShell(
         calls,
         (params) => snapshot([bot("a")], params.botId === null ? undefined : { botId: "a", items: [] }),
         async (method) => {
@@ -288,8 +293,9 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
           return null;
         },
       ),
-    );
+    });
     try {
+      await app.press("id:nav-conversation");
       await app.press("id:conv-bot-a");
       await app.waitFor("id:conv-composer-input");
       await app.type("id:conv-composer-input", "First");
