@@ -40,6 +40,13 @@ createInterface({ input: process.stdin, crlfDelay: Infinity }).on('line', line =
   if (frame.type !== 'user' || (enabled && !initialized)) process.exit(15);
   turn += 1;
   emit({ type: 'system', subtype: 'init', session_id: sessionId, model: 'fixture-model' });
+  // An MCP elicitation arrives with or without the stdio permission prompt; its reply ends the turn.
+  if (scenario.startsWith('elicitation-')) {
+    const mode = scenario.slice('elicitation-'.length);
+    emit({ type: 'control_request', request_id: 'elicitation-1', request: { subtype: 'elicitation', mcp_server_name: 'fixture-mcp', message: 'Sign in to continue', mode,
+      ...(mode === 'url' ? { url: 'https://example.invalid/sign-in', elicitation_id: 'fixture-elicitation' } : { requested_schema: { type: 'object', properties: { name: { type: 'string' } } } }) } });
+    return;
+  }
   if (!enabled) { result(); return; }
   const requestId = turn === 1 ? 'native-request-1' : `native-request-${turn}`;
   const questions = [

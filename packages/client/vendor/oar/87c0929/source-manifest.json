@@ -2,21 +2,21 @@
   "format": "byok.vendor-source",
   "version": 1,
   "package": "@botiverse/oar",
-  "packageVersion": "0.131.0",
+  "packageVersion": "0.136.0",
   "repository": "https://github.com/botiverse/oar",
-  "commit": "19ccd9a1e055d21f770dc813d03d68cd7ad298f8",
+  "commit": "87c0929cf4ce85a0687cf3ac41390e7a5fa04aa5",
   "fork": {
     "repository": "https://github.com/Ancienttwo/oar",
-    "branch": "byok/0.131.0",
-    "commit": "28254cd7df65372664589280812bef0c7040c95b"
+    "branch": "byok/0.136.0",
+    "commit": "705e4d6918263c59a25f5b3bb9fa2ab3e4476846"
   },
   "release": {
     "ecosystem": "npm",
     "name": "@botiverse/oar",
-    "version": "0.131.0",
-    "integrity": "sha512-vz2pObUcFIpCGW7EVn+C0TZluDyGVxHUfjR4jvbzhnZVDgT37FkWD5UuLFuiHz8Ze4lVo/tL3OOrRo6IiMNAuw==",
-    "gitCommit": "19ccd9a1e055d21f770dc813d03d68cd7ad298f8",
-    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.131.0"
+    "version": "0.136.0",
+    "integrity": "sha512-6j5xqlswYHAaHeTf4qQgGpS7fyQ3jFpB1XLRQJq/VWt/xwCYYUDJMnmFJGuXh/vKQr24uu5dZtwotUVDydnU7w==",
+    "gitCommit": "87c0929cf4ce85a0687cf3ac41390e7a5fa04aa5",
+    "provenance": "https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.136.0"
   },
   "license": "Apache-2.0",
   "files": [
@@ -188,8 +188,8 @@
     {
       "path": "contracts/runtime.ts",
       "sourcePath": "packages/oar/src/contracts/runtime.ts",
-      "upstreamSha256": "d835a9cf87877c98654cee8ebae1ae2206a2f0266194aeb2113e560f2b3bf233",
-      "vendoredSha256": "d835a9cf87877c98654cee8ebae1ae2206a2f0266194aeb2113e560f2b3bf233"
+      "upstreamSha256": "333402b7b5dc0c530b166b8878a64074f784defd01865743ee5fc8c1bc30aa3a",
+      "vendoredSha256": "333402b7b5dc0c530b166b8878a64074f784defd01865743ee5fc8c1bc30aa3a"
     },
     {
       "path": "contracts/session-not-found-error.ts",
@@ -200,8 +200,8 @@
     {
       "path": "contracts/session-options.ts",
       "sourcePath": "packages/oar/src/contracts/session-options.ts",
-      "upstreamSha256": "8ef7bfb3f4323d53b90190c59945a17ede7a4a3d0574d27011e5737b897d1ba7",
-      "vendoredSha256": "416497896192746f837129b533b26fcce5db11a56f261c8b515593cc224029b6",
+      "upstreamSha256": "afed5262e8d70f41fd63cfba7fa398263f68182dc93459f5728e40c115b1c29d",
+      "vendoredSha256": "3db806ad1de68a29548c07fbc4bcb1f85222537e0ff3f08fc5608f9b6dc4ed3a",
       "delta": "Comment only (#2056): retainedBytes says text and reasoning text have their own 16 MiB retained limit, past which the oldest frames lose them; the newest frame is always whole."
     },
     {
@@ -213,8 +213,8 @@
     {
       "path": "contracts/session.ts",
       "sourcePath": "packages/oar/src/contracts/session.ts",
-      "upstreamSha256": "9eea3e6a56edec020c628d6994fa5469837f61d4677c176bdf9a13f61c0ea1d1",
-      "vendoredSha256": "9eea3e6a56edec020c628d6994fa5469837f61d4677c176bdf9a13f61c0ea1d1"
+      "upstreamSha256": "c3a3b84b55f6491509c92e8a4906df467a10661172d14138ca2245ac12464ce9",
+      "vendoredSha256": "c3a3b84b55f6491509c92e8a4906df467a10661172d14138ca2245ac12464ce9"
     },
     {
       "path": "contracts/side-question.ts",
@@ -251,6 +251,12 @@
       "sourcePath": "packages/oar/src/contracts/update.ts",
       "upstreamSha256": "a53318541287c40fe1801c712f1c8b2e6926cbcc6c20b6dbbae68fa658118272",
       "vendoredSha256": "a53318541287c40fe1801c712f1c8b2e6926cbcc6c20b6dbbae68fa658118272"
+    },
+    {
+      "path": "contracts/user-questions.ts",
+      "sourcePath": "packages/oar/src/contracts/user-questions.ts",
+      "upstreamSha256": "e6c877130f5eef3a95e6c348ddae5ded51ffac9edfc2babe2dd8fd12629352bf",
+      "vendoredSha256": "e6c877130f5eef3a95e6c348ddae5ded51ffac9edfc2babe2dd8fd12629352bf"
     },
     {
       "path": "observe/conversation.ts",
@@ -292,8 +298,8 @@
     {
       "path": "runtimes/antigravity/account-usage.ts",
       "sourcePath": "packages/oar/src/runtimes/antigravity/account-usage.ts",
-      "upstreamSha256": "3478fa458003604aeebd1d4641818994ca4838ad289f21e4a8977203d688407f",
-      "vendoredSha256": "e342cc54a318c71b9bb94f0b2921536420b7b1640714caa65e08536f723c9ff2",
+      "upstreamSha256": "69e4405a26f0be37b6fb7f3deecbddef31516751f1b3b24f7a1c83edf0a8ca3c",
+      "vendoredSha256": "d83b111cabcb1fdbeca007400d72ea4d69779800500a9b33051088cab39ba3f4",
       "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1."
     },
     {
@@ -325,8 +331,8 @@
     {
       "path": "runtimes/antigravity/options.ts",
       "sourcePath": "packages/oar/src/runtimes/antigravity/options.ts",
-      "upstreamSha256": "5c37f7558f59eab224d67e63bfc712c423de42d9362a19b95beb018ba6e465a5",
-      "vendoredSha256": "5c37f7558f59eab224d67e63bfc712c423de42d9362a19b95beb018ba6e465a5"
+      "upstreamSha256": "64f3549d811ca8eb50d72431a431b9613a662bfe6ca524c6feeeef4e6bbfa6cc",
+      "vendoredSha256": "64f3549d811ca8eb50d72431a431b9613a662bfe6ca524c6feeeef4e6bbfa6cc"
     },
     {
       "path": "runtimes/antigravity/quota.ts",
@@ -417,8 +423,8 @@
     {
       "path": "runtimes/claude/service-tier.ts",
       "sourcePath": "packages/oar/src/runtimes/claude/service-tier.ts",
-      "upstreamSha256": "47a8e565b07dd8612ae539a1dd85643481e8e9249e22128bd01108261b4ef2f7",
-      "vendoredSha256": "47a8e565b07dd8612ae539a1dd85643481e8e9249e22128bd01108261b4ef2f7"
+      "upstreamSha256": "6c959e1d52027210ba0696957769c55343edf83fc44e2cd20f55626dc190ca9a",
+      "vendoredSha256": "6c959e1d52027210ba0696957769c55343edf83fc44e2cd20f55626dc190ca9a"
     },
     {
       "path": "runtimes/claude/tasks.ts",
@@ -513,9 +519,9 @@
     {
       "path": "runtimes/codex/open.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/open.ts",
-      "upstreamSha256": "a10bb2ce994e4ac943f905177abc15536b93ff8fdb8cb60abd338462072cbb9e",
-      "vendoredSha256": "9eaec8d8106388e54e7ba1feee66f4896abd4c1f6a69f5bf8e521fbbf953071a",
-      "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\". Type explicit fresh and resumed effort readback mismatches as UnsupportedOptionError(effort). Upstream: planned contribution (#2378)."
+      "upstreamSha256": "5795039f8720a3c3725df8a290722f60604b5e39d55fc89777b7d954f446d159",
+      "vendoredSha256": "bcb021cea69c06813576696565061f3f8e813dadcf28488976027211c8611da6",
+      "delta": "Caller-owned interaction opt-in: codexThreadOpen accepts approvalPolicy \"never\" | \"on-request\" and sends it on thread/start and thread/resume; the default stays \"never\". Type explicit fresh and resumed effort readback mismatches as UnsupportedOptionError(effort). Upstream: planned contribution (#2378). The serviceTier and model refusal texts name the tier and model from the redacted reply; the comparison and the upstream serviceTierFallback \"default\" readback use the native reply."
     },
     {
       "path": "runtimes/codex/options.ts",
@@ -526,8 +532,8 @@
     {
       "path": "runtimes/codex/projection.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/projection.ts",
-      "upstreamSha256": "7c133c960667fc2a6815a1f529b962fa581bb652cbdb161c844c9ed11637013d",
-      "vendoredSha256": "7c133c960667fc2a6815a1f529b962fa581bb652cbdb161c844c9ed11637013d"
+      "upstreamSha256": "eeef5711b08339148c56ced9048bf47c6e70d9b66630b75578653a353492daba",
+      "vendoredSha256": "eeef5711b08339148c56ced9048bf47c6e70d9b66630b75578653a353492daba"
     },
     {
       "path": "runtimes/codex/quota-reset.ts",
@@ -564,9 +570,9 @@
     {
       "path": "runtimes/codex/session.ts",
       "sourcePath": "packages/oar/src/runtimes/codex/session.ts",
-      "upstreamSha256": "5c115b1d31207a6dcc78276ca62d31a8f482d2f9116ac9c5604fc65e76dbd3f0",
+      "upstreamSha256": "dd2d71281e165722dfa7ecabf0d2fb54a9d06cdda11a7b92b4df8193ff192b17",
       "vendoredSha256": "f2b56dac60b6bc6decf87aa275fbf4c1c7c2056f7f6a3a4bc17482e954b169a3",
-      "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort uses the caller-owned isolated POSIX process reader and stays a no-op on Windows (#2381); the caller's retainedBytes goes to the upstream kernel's record retention. Propagate the typed resume effort refusal. Upstream: planned contribution (#2378). Share Runtime.sessionCapabilities with the narrow BYOK bridge."
+      "delta": "Raw adapter for the SDK: injected spawn and a required explicit filtered env; caller-selected sandboxMode (danger-full-access default, inherit passes no override) instead of ambient OAR_CODEX_SANDBOX; native goals are not exposed (options.goals is omitted and no goal control is returned). Returns AdapterSession without sealSession/withSessionCredentials/observe, building one sessionCredentialRedactor per open as the kernel redact hook and for errors from the open path and every control. The upstream kernel is created with that redactor, and the onRecord hook is registered as a kernel observer before any record is appended. Native-first recording: each notification is retained as a body.origin=\"byok-native\" frame before the fold; a fold failure kills the process visibly. Server requests: caller-owned bounded native interaction lifecycle when configured, else synchronous decline/-32601 rejection under a 1000ms dispatch deadline; on-request approval policy is verified in the open reply. Owned process lifetime: spawn/adoption settles before the first write; every open failure kills and awaits the process, including failures now owned by the session rather than openThread. Caller-owned open steps: optional beforeOpen and afterOpen hooks run on the same client before the thread open request (returning its params) and after its read-back, before onReady; a throw kills the process. Without them the open is unchanged. Codex steer is a required member. OAR 0.99: upstream refusal.ts is kept unchanged on this open path (codexVersion from initialize, typed runtime_outdated/runtime_config_invalid open refusals, codexControlRefusal for start/steer/queue rejections). endTurnProcessesOnAbort uses the caller-owned isolated POSIX process reader and stays a no-op on Windows (#2381); the caller's retainedBytes goes to the upstream kernel's record retention. Propagate the typed resume effort refusal. Upstream: planned contribution (#2378). Share Runtime.sessionCapabilities with the narrow BYOK bridge. OAR 0.136 host user questions (codex/user-questions.ts, runtime-requests.ts) are not adopted: server requests stay with the caller's onServerRequest hook."
     },
     {
       "path": "runtimes/codex/task-control.ts",
@@ -678,8 +684,8 @@
     {
       "path": "runtimes/dsh/options.ts",
       "sourcePath": "packages/oar/src/runtimes/dsh/options.ts",
-      "upstreamSha256": "69e41d8a92f03f4aee7eda48cfe1e951c20b077c8cfd116b80c3543a5598ada3",
-      "vendoredSha256": "b537cf2848b744f912c92079299db1a9096800f38fa12ff75ffd19ca88b9e6e8",
+      "upstreamSha256": "cb1a9b1e7e64977ba26bdbb8e36dc9efdaaf2ff227b1c60036b4ab6dfb837cc5",
+      "vendoredSha256": "0214dda1f26fb92bdbdcf7b6fe624a7dc1cfd65c2344a7338b4113184e69bea3",
       "delta": "Report the required provider/model form without echoing the rejected model value (#2408)."
     },
     {
@@ -765,8 +771,8 @@
     {
       "path": "runtimes/grok/options.ts",
       "sourcePath": "packages/oar/src/runtimes/grok/options.ts",
-      "upstreamSha256": "3c91ac5e7fab45faef4d9cb104bfa78071f1ac75a456cfa9c9613a343312e7b3",
-      "vendoredSha256": "3c91ac5e7fab45faef4d9cb104bfa78071f1ac75a456cfa9c9613a343312e7b3"
+      "upstreamSha256": "6c5cadaadd34626d072ab0ed79f53f911fed0dd6d037b57a64afdd06bcf7c939",
+      "vendoredSha256": "6c5cadaadd34626d072ab0ed79f53f911fed0dd6d037b57a64afdd06bcf7c939"
     },
     {
       "path": "runtimes/grok/session.ts",
@@ -800,23 +806,37 @@
       "vendoredSha256": "f75a7b8a17363b953efadd0d4ae79ac55b6dc327354b7caa6c3cd81bf960f6ea"
     },
     {
+      "path": "runtimes/opencode/discovery-server.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/discovery-server.ts",
+      "upstreamSha256": "ccd29988ccb8971301827ccf8b909fc0781974f39fa00fac5d8fd4653aebcb84",
+      "vendoredSha256": "7cbe70eef09a93a983d7213c153b6403e900cc55ba60c59ef3f0c5def1c38096",
+      "delta": "Spawn the loopback catalog server through the caller-owned OwnedReaderOptions.spawn instead of spawnLineProcess; the caller's process-tree authority owns shutdown, and own() kills and awaits it when the query ends. serveEnvironment is inlined so provider-auth-server.ts and shared/login.ts stay out of the vendored closure. Upstream: draft D1."
+    },
+    {
       "path": "runtimes/opencode/failure.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/failure.ts",
       "upstreamSha256": "d59a85bf2e043fefa748b711266886683c4c372515058b0236d9b52cce650d9a",
       "vendoredSha256": "d59a85bf2e043fefa748b711266886683c4c372515058b0236d9b52cce650d9a"
     },
     {
+      "path": "runtimes/opencode/list-models-v2.ts",
+      "sourcePath": "packages/oar/src/runtimes/opencode/list-models-v2.ts",
+      "upstreamSha256": "f983a78a1fe11587d7ab53f72e756bc8a800349cb59c74e80f3697ff5a575fdd",
+      "vendoredSha256": "fadee0f1c283a601f1ab4ac15da736d79ec121df3340900625ac5d88d935bcdb",
+      "delta": "Take the caller-owned OwnedReaderOptions.spawn and pass it to the discovery server. Upstream: draft D1."
+    },
+    {
       "path": "runtimes/opencode/list-models.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/list-models.ts",
-      "upstreamSha256": "2814cacc114280979bd96e8f2583cc65548629ab3252acb633b20e87f7366925",
-      "vendoredSha256": "b0b3eb16ded7a6d19c15e311a09586d160b8dbca75941b68d7c666e6f8f4ab4a",
-      "delta": "Caller-owned reader processes and explicit filtered environments. Upstream: draft D1."
+      "upstreamSha256": "e513c43a10a763abac314a05e31549e6d0e0d0327d66307c0c7f8ef1f7f3f43e",
+      "vendoredSha256": "4adaeec876845471ab4ea1c22d554c84441b9ff583118b24ddedaf53997ac20d",
+      "delta": "Caller-owned reader processes and explicit filtered environments: v1 runs `models --verbose` through the caller's run and drops the native \"default\" variant as upstream does; v2 reads the `opencode serve --stdio` loopback catalog (list-models-v2.ts) inside withQueryDeadline with the reader's timeoutMs and signal. Upstream: draft D1."
     },
     {
       "path": "runtimes/opencode/options.ts",
       "sourcePath": "packages/oar/src/runtimes/opencode/options.ts",
-      "upstreamSha256": "a436571c741107daba4868e9f5863ac909f4285d64047019ec222eadfb2ddcc4",
-      "vendoredSha256": "a436571c741107daba4868e9f5863ac909f4285d64047019ec222eadfb2ddcc4"
+      "upstreamSha256": "f95d183e4ad489c7a5490c589455c3079ac629f6c018de4b106991749c17ed23",
+      "vendoredSha256": "f95d183e4ad489c7a5490c589455c3079ac629f6c018de4b106991749c17ed23"
     },
     {
       "path": "runtimes/opencode/prompt-config-v2.ts",
@@ -1228,6 +1248,12 @@
       "vendoredSha256": "4cdacb86431183fc408c16eb243e54e6e8bf75812d8706202707c9c254e006dd"
     },
     {
+      "path": "shared/inventory.ts",
+      "sourcePath": "packages/oar/src/shared/inventory.ts",
+      "upstreamSha256": "9b834aa4d1343b988a48e02a2330dc4ed62ea9b295329e8a939ad410c44b863e",
+      "vendoredSha256": "9b834aa4d1343b988a48e02a2330dc4ed62ea9b295329e8a939ad410c44b863e"
+    },
+    {
       "path": "shared/json.ts",
       "sourcePath": "packages/oar/src/shared/json.ts",
       "upstreamSha256": "14c655b29c9df8355fd8a396ff2e15420de6e9dce183e55f8ee7cf336e6626cb",
@@ -1304,8 +1330,8 @@
     {
       "path": "shared/session-options.ts",
       "sourcePath": "packages/oar/src/shared/session-options.ts",
-      "upstreamSha256": "a20973713927fbda360e3df7ba0fdf87c0ea59c73ac59f36d2443c7b0e0d3569",
-      "vendoredSha256": "a20973713927fbda360e3df7ba0fdf87c0ea59c73ac59f36d2443c7b0e0d3569"
+      "upstreamSha256": "c69358f6d4e275065861db431f147dc288950f98cd9ff7399a683ddf89733b4a",
+      "vendoredSha256": "c69358f6d4e275065861db431f147dc288950f98cd9ff7399a683ddf89733b4a"
     },
     {
       "path": "shared/stream-json/compaction.ts",
@@ -1335,8 +1361,8 @@
     {
       "path": "shared/stream-json/profile.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/profile.ts",
-      "upstreamSha256": "84d92c16c689eb7c915b99d2812e8aa45b8013d8fb0add68455264e89a4cf260",
-      "vendoredSha256": "84d92c16c689eb7c915b99d2812e8aa45b8013d8fb0add68455264e89a4cf260"
+      "upstreamSha256": "be929a50e25b50907479bd88470074dcb98ff1cbfee52e177825d4a64a6f1511",
+      "vendoredSha256": "be929a50e25b50907479bd88470074dcb98ff1cbfee52e177825d4a64a6f1511"
     },
     {
       "path": "shared/stream-json/projection.ts",
@@ -1348,9 +1374,9 @@
     {
       "path": "shared/stream-json/session.ts",
       "sourcePath": "packages/oar/src/shared/stream-json/session.ts",
-      "upstreamSha256": "30fb96e277eddb1f91d1b98fc100f2da11e62c8d1487a8bb3af6a5d85283da67",
-      "vendoredSha256": "fed64b5f9ca32f5c54ef9858ec63f0e9444ba760de92d96f18821e4632a8e12b",
-      "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it; profile.permissionResponse is not read, and a request no hook answers stays unanswered. An optional retainedBytes goes to the upstream kernel's record retention, which elides the oldest native payloads past it after every observer has the complete record. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing. A refused or unwritten interrupt withdraws its abort mark and kill fallback: the interrupt goes through the acknowledged write, a write that throws or rejects rejects the abort with code error, a write not acknowledged within 10 s counts as written, the fallback is armed once the write is acknowledged or that bound passes unless Claude refused the interrupt, once the fallback fires the queue does not drain and the held result waits for the exit, and a root result arriving while an interrupt is pending is held, with later lines except control responses, until every pending interrupt settles. Redact echoed image data before recording native output."
+      "upstreamSha256": "74bf06daf2fc6a28926e929b08d1a5e1248b365fb081dfb04cb50c858fbe52d5",
+      "vendoredSha256": "42f9be84baf921ea5edb7742519ff27128b11c650c87112dfcae888e805aea6c",
+      "delta": "Caller-owned process: streamJsonSession takes the injected Codex LineProcess and a CredentialRedactor built with sessionCredentialRedactor, creates the upstream kernel with it as the redact hook and returns the raw AdapterSession without sealSession; open and control errors go through the same redaction guard. hooks.onRecord is a kernel observer registered before any record is appended. Every toApp request, whatever its type, is recorded and passed to hooks.onAppRequest, whose respond writes the native reply through the acknowledged stdin write and records it as answered, as upstream does; profile.permissionResponse is not read, and a request no hook answers stays unanswered. An optional retainedBytes goes to the upstream kernel's record retention, which elides the oldest native payloads past it after every observer has the complete record. No diagnostics(), resources or cleanup reason. The synchronous hooks.beforeInterrupt replaces the upstream cancellation observation window: it runs before the interrupt is written, and a throw rejects the abort with code error and writes nothing. A refused or unwritten interrupt withdraws its abort mark and kill fallback: the interrupt goes through the acknowledged write, a write that throws or rejects rejects the abort with code error, a write not acknowledged within 10 s counts as written, the fallback is armed once the write is acknowledged or that bound passes unless Claude refused the interrupt, once the fallback fires the queue does not drain and the held result waits for the exit, and a root result arriving while an interrupt is pending is held, with later lines except control responses, until every pending interrupt settles. Redact echoed image data before recording native output."
     },
     {
       "path": "shared/stream-json/state.ts",

@@ -6,6 +6,7 @@ const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('codex-cli 0.169.0'); process.exit(0); }
 if (args[0] === 'login') { console.log('Not logged in'); process.exit(1); }
 if (args.includes('--help')) { console.log('app-server --listen stdio://'); process.exit(0); }
+if (process.env.FAKE_NATIVE_ARGV) appendFileSync(process.env.FAKE_NATIVE_ARGV, `${JSON.stringify(args)}\n`);
 const send = frame => console.log(JSON.stringify(frame));
 const notify = (method, params) => send({ method, params });
 const scenario = process.env.FAKE_NATIVE_SCENARIO ?? 'question';

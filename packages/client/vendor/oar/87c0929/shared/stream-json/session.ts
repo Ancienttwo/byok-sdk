@@ -420,7 +420,7 @@ export async function streamJsonSession<S extends StreamJsonProjectionState>(
           // Without a hook, or when the hook does not answer, the request stays unanswered: nothing here allows by default.
           hooks.onAppRequest?.({ id: command.id, type: command.type, native: message }, async (reply) => {
             await child.writeAcknowledged(`${JSON.stringify(reply)}\n`);
-            kernel.respond(command.id, { kind: "accepted", native: reply });
+            kernel.respond(command.id, { kind: "answered", native: reply });
           });
           break;
         }

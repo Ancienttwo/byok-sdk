@@ -3,7 +3,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
-import { AgyAdapter, CodexAdapter, createRuntimeAdapters } from '../adapters/index.js';
+import { AgyAdapter, CodexAdapter, OpenCodeAdapter, createRuntimeAdapters } from '../adapters/index.js';
 import { findRuntimeCommandOnPath, runtimeInvocationHost } from '../adapters/runtime-invocation.js';
 import { detectRuntimes } from '../daemon/create-daemon/support.js';
 import { createDaemonRecordProjector } from '../daemon/daemon-record.js';
@@ -11,6 +11,8 @@ import { unmeasuredRetentionSnapshot } from '../daemon/retention/sweeper.js';
 import { formatLiveStatusLines } from '../diagnostics/format.js';
 import { parseControlStatusRuntimes } from '../runtime-detection.js';
 import { createRuntimeReaders } from '../runtime/runtime-readers.js';
+import { opencodeListModels } from '../runtime/oar-readers.js';
+import { createOwnedLineProcessSpawn } from '../runtime/owned-line-process.js';
 import { agyAdapterWithEndpoint } from '../adapters/antigravity/agy-endpoint.js';
 import { startLoopbackProvider, CONTRACT_REPLY_CHUNKS } from './runtime-contract/loopback.js';
 
@@ -252,7 +254,7 @@ fetch(process.env.GOOGLE_GEMINI_BASE_URL + '/v1beta/models', { headers: { 'x-goo
   await response.text();
   if (command === 'models') return;
   console.log(JSON.stringify({ status: 'SUCCESS', command: query === '/usage'
-    ? { name: 'usage', data: { groups: [{ name: 'Shared', buckets: [{ remaining_fraction: Number(ratio) }] }] } }
+    ? { name: 'usage', data: { groups: [{ name: 'Shared', buckets: [{ name: 'Weekly Limit Remaining', remaining_fraction: Number(ratio) }, { name: 'Remaining', remaining_fraction: Number(ratio) }] }] } }
     : { name: 'credits', data: { remaining_credits: 0 } } }));
 }).catch(() => process.exit(1));`;
   const resolved: string[] = [];
@@ -274,7 +276,10 @@ fetch(process.env.GOOGLE_GEMINI_BASE_URL + '/v1beta/models', { headers: { 'x-goo
     }) as typeof spawn,
   }), provider.origin);
   try {
-    await expect(adapter.accountUsage()).resolves.toMatchObject({ kind: 'available', rateLimited: exhausted });
+    const usage = await adapter.accountUsage();
+    expect(usage).toMatchObject({ kind: 'available', rateLimited: exhausted });
+    // agy names buckets by what remains; the window carries a used ratio, so the label drops "Remaining".
+    expect(usage.kind === 'available' && usage.windows.map(window => window.label)).toEqual(['Shared · Weekly Limit', 'Shared · Limit']);
     expect(commands.map(args => args[0] === '-p' ? args[1] : args[0])).toEqual(['--version', 'models', '/usage', ...(exhausted ? ['/credits'] : [])]);
     expect(resolved).toHaveLength(exhausted ? 3 : 2);
     expect(provider.requests.map(request => request.apiKey)).toEqual(resolved);
@@ -282,6 +287,95 @@ fetch(process.env.GOOGLE_GEMINI_BASE_URL + '/v1beta/models', { headers: { 'x-goo
   } finally {
     await provider.close();
   }
+});
+
+const opencodeFixture = String.raw`
+const http = require('node:http');
+const [version, mode, ...args] = process.argv.slice(1);
+if (args[0] === '--version') { console.log(version); process.exit(0); }
+if (args[0] === 'models' && args[1] === '--verbose') {
+  process.stdout.write('openai/gpt-x\n{\n  "name": "GPT X",\n  "providerID": "openai",\n  "variants": { "default": {}, "low": {}, "high": {} }\n}\n');
+  process.exit(0);
+}
+if (args.join(' ') !== 'serve --stdio --hostname 127.0.0.1 --port 0') process.exit(2);
+const auth = 'Basic ' + Buffer.from('opencode:' + process.env.OPENCODE_PASSWORD).toString('base64');
+let pluginReads = 0;
+const server = http.createServer((request, response) => {
+  if (request.headers.authorization !== auth || request.headers['x-opencode-directory'] === undefined) { response.writeHead(401).end(); return; }
+  if (request.url === '/api/plugin') { pluginReads += 1; response.end(JSON.stringify({ data: pluginReads < 2 ? [] : [{ id: 'plugin' }] })); return; }
+  if (request.url !== '/api/model' || mode === 'hang') return;
+  if (mode === 'error') { response.writeHead(500).end('failed ' + process.env.READER_API_KEY); return; }
+  response.end(JSON.stringify({ data: [
+    { id: 'gpt-x', providerID: 'openai', name: ' GPT X ', variants: [{ id: 'default' }, { id: 'low' }, { id: 'high' }] },
+    { id: 'claude-y', providerID: 'anthropic', name: '', variants: null },
+  ] }));
+});
+server.listen(0, '127.0.0.1', () => console.log(JSON.stringify({ url: 'http://127.0.0.1:' + server.address().port })));`;
+
+function opencodeSpawn(version: string, mode: string, servers: Array<ReturnType<typeof spawn>>) {
+  return ((_command: string, args: readonly string[], options: SpawnOptions) => {
+    const child = spawn(process.execPath, ['-e', opencodeFixture, '--', version, mode, ...args], options);
+    if (args[0] === 'serve') servers.push(child);
+    return child;
+  }) as typeof spawn;
+}
+
+const exited = (child: ReturnType<typeof spawn>) => new Promise<void>(resolve => {
+  if (child.exitCode !== null || child.signalCode !== null) resolve(); else child.once('exit', () => resolve());
+});
+
+function opencodeAdapter(version: string, mode: string, servers: Array<ReturnType<typeof spawn>>) {
+  vi.stubEnv('READER_API_KEY', credential);
+  return new OpenCodeAdapter({
+    resolveBin: () => ({ command: process.execPath, source: 'env' }),
+    runtimeEnvironment: { base: 'allowlist', allow: ['READER_API_KEY'] },
+    spawnFn: opencodeSpawn(version, mode, servers),
+  });
+}
+
+it('lists OpenCode v1 models without the native "default" variant', async () => {
+  await expect(opencodeAdapter('1.18.30', 'ok', []).listModels()).resolves.toEqual({ kind: 'ok', models: [
+    { id: 'openai/gpt-x', displayName: 'GPT X', effortLevels: ['low', 'high'], provider: { id: 'openai' } },
+  ] });
+});
+
+it('lists OpenCode v2 models from its loopback catalog and stops the server', async () => {
+  const servers: Array<ReturnType<typeof spawn>> = [];
+  await expect(opencodeAdapter('2.4.0', 'ok', servers).listModels()).resolves.toEqual({ kind: 'ok', models: [
+    { id: 'anthropic/claude-y', provider: { id: 'anthropic' } },
+    { id: 'openai/gpt-x', provider: { id: 'openai' }, displayName: 'GPT X', effortLevels: ['low', 'high'] },
+  ] });
+  expect(servers).toHaveLength(1);
+  expect(servers[0]!.exitCode !== null || servers[0]!.signalCode !== null).toBe(true);
+});
+
+it('redacts an OpenCode v2 catalog failure and stops the server', async () => {
+  const servers: Array<ReturnType<typeof spawn>> = [];
+  const failure = await opencodeAdapter('2.4.0', 'error', servers).listModels().catch((error: unknown) => error);
+  expect(failure).toBeInstanceOf(Error);
+  expect(String((failure as Error).message)).not.toContain(credential);
+  await exited(servers[0]!);
+});
+
+it('stops the OpenCode v2 server when the caller cancels the listing', async () => {
+  const servers: Array<ReturnType<typeof spawn>> = [];
+  const controller = new AbortController();
+  const listing = opencodeAdapter('2.4.0', 'hang', servers).listModels({ signal: controller.signal });
+  await vi.waitFor(() => expect(servers).toHaveLength(1));
+  controller.abort();
+  await expect(listing).rejects.toThrow('runtime read cancelled');
+  await exited(servers[0]!);
+});
+
+it('stops the OpenCode v2 server when the listing reaches its deadline', async () => {
+  const servers: Array<ReturnType<typeof spawn>> = [];
+  const listing = opencodeListModels({ kind: 'available', via: 'executable', command: process.execPath, version: '2.4.0' }, {
+    env: {}, timeoutMs: 500, redact: text => text,
+    spawn: createOwnedLineProcessSpawn({ spawnFn: opencodeSpawn('2.4.0', 'hang', servers), label: 'opencode reader' }),
+    run: () => Promise.reject(new Error('v2 listing runs no command')),
+  });
+  await expect(listing).rejects.toThrow('OpenCode model listing timed out');
+  await exited(servers[0]!);
 });
 
 it.skipIf(process.platform === 'win32')('keeps native version floor evidence local to status and doctor', async () => {
