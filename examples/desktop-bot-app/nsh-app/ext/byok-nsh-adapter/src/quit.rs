@@ -16,7 +16,7 @@ use nsh_core::element::desktop::{on_app_quit, on_quit_request, quit, set_quit_mo
 use nsh_core::element::{Local, blocking, create_root, spawn};
 use nsh_core::prelude::*;
 
-use crate::supervisor::{RuntimeShell, ShellEvent, active_shell, event_hub};
+use crate::supervisor::{EventHub, RuntimeShell, ShellEvent, active_shell, event_hub};
 
 /// Waits for active `MaintenanceLock` work (including in-flight custody children), then stops
 /// `supervisor` with its 10s shutdown grace unless terminal handover already owns shutdown.
@@ -76,14 +76,30 @@ pub(crate) fn begin_graceful_quit(quitting: &AtomicBool) {
     });
 }
 
-async fn fallback_app_quit_cleanup(quitting: Arc<AtomicBool>) {
+pub(crate) async fn fallback_app_quit_cleanup_with<GetShell, RunBlocking, Fut>(
+    quitting: Arc<AtomicBool>,
+    hub: &EventHub,
+    get_shell: GetShell,
+    run_blocking: RunBlocking,
+) where
+    GetShell: FnOnce() -> Option<RuntimeShell>,
+    RunBlocking: FnOnce(Box<dyn FnOnce() -> QuitOutcome + Send>) -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
     if quitting.swap(true, Ordering::AcqRel) {
         return;
     }
-    event_hub().publish(ShellEvent::Quitting);
-    if let Some(shell) = active_shell() {
-        let _ = blocking(move || drain_active_shell(&shell)).await;
+    hub.publish(ShellEvent::Quitting);
+    if let Some(shell) = get_shell() {
+        run_blocking(Box::new(move || drain_active_shell(&shell))).await;
     }
+}
+
+async fn fallback_app_quit_cleanup(quitting: Arc<AtomicBool>) {
+    fallback_app_quit_cleanup_with(quitting, event_hub(), active_shell, |work| async move {
+        let _ = blocking(work).await;
+    })
+    .await;
 }
 
 /// Per-VM quit-hook ownership stored in `sys.locals` so `on_quit_request` and its re-entrancy guard stay isolated per VM.

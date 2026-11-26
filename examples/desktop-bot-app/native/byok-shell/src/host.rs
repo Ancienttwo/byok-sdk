@@ -1,6 +1,7 @@
 //! Host child process supervisor, exponential backoff, clean stop authority, and 50 ms hint coalescing.
 
 use std::fmt;
+use std::process::Child;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -21,6 +22,8 @@ use crate::power::{
 type HintCallback = Box<dyn Fn() + Send + Sync>;
 type StateCallback = Arc<dyn Fn(SupervisedHostState) + Send + Sync>;
 type PowerErrorCallback = Arc<dyn Fn(PowerError) + Send + Sync>;
+#[cfg(test)]
+type SpawnHook = Arc<dyn Fn(&HostCommandSpec) -> std::io::Result<Child> + Send + Sync>;
 
 /// Coalesces bursts of Host state pushes into a single trailing notification (`50ms` default).
 pub struct StateHintCoalescer {
@@ -355,6 +358,10 @@ struct SupervisorInner {
     before_finish_restart: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
     #[cfg(test)]
     before_launch_reserve: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
+    #[cfg(test)]
+    in_launch_spawn: Mutex<Option<SpawnHook>>,
+    #[cfg(test)]
+    before_connect_hello: Mutex<Option<Arc<dyn Fn() + Send + Sync>>>,
 }
 
 impl SupervisorInner {
@@ -437,6 +444,10 @@ impl HostSupervisor {
             before_finish_restart: Mutex::new(None),
             #[cfg(test)]
             before_launch_reserve: Mutex::new(None),
+            #[cfg(test)]
+            in_launch_spawn: Mutex::new(None),
+            #[cfg(test)]
+            before_connect_hello: Mutex::new(None),
         });
 
         let loop_inner = Arc::clone(&inner);
@@ -758,32 +769,65 @@ fn compute_backoff(attempt: u32, initial: Duration, max: Duration) -> Duration {
     initial.saturating_mul(factor).min(max)
 }
 
+struct SpawnedLaunch {
+    run_id: u64,
+    expected_version: u32,
+    hello_timeout: Duration,
+    spawn_result: std::io::Result<Child>,
+}
+
 enum LaunchDecision {
-    Launch {
-        run_id: u64,
-        expected_version: u32,
-        hello_timeout: Duration,
-        command: HostCommandSpec,
-    },
+    Launch(SpawnedLaunch),
     RetryWait,
     WaitBusy,
 }
 
-fn reserve_run(guard: &mut SupervisorState, inner: &SupervisorInner) -> LaunchDecision {
+fn spawn_host(inner: &SupervisorInner) -> std::io::Result<Child> {
+    #[cfg(test)]
+    {
+        let hook = inner
+            .in_launch_spawn
+            .lock()
+            .expect("test hook lock poisoned")
+            .clone();
+        if let Some(hook) = hook {
+            return hook(&inner.config.command);
+        }
+    }
+    spawn_host_child(&inner.config.command, &[])
+}
+
+#[cfg(test)]
+fn run_before_connect_hello(inner: &SupervisorInner) {
+    let hook = inner
+        .before_connect_hello
+        .lock()
+        .expect("test hook lock poisoned")
+        .clone();
+    if let Some(hook) = hook {
+        hook();
+    }
+}
+
+#[cfg(not(test))]
+fn run_before_connect_hello(_inner: &SupervisorInner) {}
+
+fn reserve_and_spawn(guard: &mut SupervisorState, inner: &SupervisorInner) -> LaunchDecision {
     if guard.destroyed || guard.paused || guard.stopping || guard.client.is_some() {
         return LaunchDecision::RetryWait;
     }
+    let spawn_result = spawn_host(inner);
     guard.run_seq = guard.run_seq.saturating_add(1);
     let run_id = guard.run_seq;
     guard.active_run = true;
     guard.connecting = true;
     guard.stop_authority = StopAuthority::Running;
-    LaunchDecision::Launch {
+    LaunchDecision::Launch(SpawnedLaunch {
         run_id,
         expected_version: inner.config.contract.bridge_version,
         hello_timeout: inner.config.shutdown_grace,
-        command: inner.config.command.clone(),
-    }
+        spawn_result,
+    })
 }
 
 fn decide_launch(inner: &SupervisorInner, maintenance: Option<&MaintenanceLock>) -> LaunchDecision {
@@ -802,16 +846,16 @@ fn decide_launch(inner: &SupervisorInner, maintenance: Option<&MaintenanceLock>)
             if gate.busy {
                 return LaunchDecision::WaitBusy;
             }
-            reserve_run(&mut guard, inner)
+            reserve_and_spawn(&mut guard, inner)
         }),
         None => {
             let mut guard = inner.state.lock().expect("supervisor lock poisoned");
-            reserve_run(&mut guard, inner)
+            reserve_and_spawn(&mut guard, inner)
         }
     }
 }
 
-fn wait_for_next_launch(inner: &SupervisorInner) -> Option<(u64, u32, Duration, HostCommandSpec)> {
+fn wait_for_next_launch(inner: &SupervisorInner) -> Option<SpawnedLaunch> {
     loop {
         let maintenance = {
             let mut guard = inner.state.lock().expect("supervisor lock poisoned");
@@ -836,16 +880,12 @@ fn wait_for_next_launch(inner: &SupervisorInner) -> Option<(u64, u32, Duration, 
             }
         }
 
-        // Canonical lock order (`MaintenanceLock` -> `HostSupervisor`): synchronize the launch
-        // reservation with the maintenance state that marks quit/handover/busy so a recorded quit
-        // vetoes the replacement Host launch before `spawn_host_child` can run.
+        // Canonical lock order (`MaintenanceLock` -> `HostSupervisor`): check maintenance state,
+        // reserve the run, and spawn the Host child under one `MaintenanceLock::with_launch_state`
+        // acquisition so a recorded quit cannot slip between reservation and process creation;
+        // the lock is released before `BridgeClient::connect_with_hello_timeout`.
         match decide_launch(inner, maintenance.as_ref()) {
-            LaunchDecision::Launch {
-                run_id,
-                expected_version,
-                hello_timeout,
-                command,
-            } => return Some((run_id, expected_version, hello_timeout, command)),
+            LaunchDecision::Launch(launch) => return Some(launch),
             LaunchDecision::RetryWait => continue,
             LaunchDecision::WaitBusy => {
                 let guard = inner.state.lock().expect("supervisor lock poisoned");
@@ -861,12 +901,12 @@ fn wait_for_next_launch(inner: &SupervisorInner) -> Option<(u64, u32, Duration, 
 }
 
 fn supervisor_loop(inner: Arc<SupervisorInner>) {
-    while let Some((run_id, expected_version, hello_timeout, command)) =
-        wait_for_next_launch(&inner)
-    {
+    while let Some(launch) = wait_for_next_launch(&inner) {
+        let run_id = launch.run_id;
         let started_at = Instant::now();
         let state_inner = Arc::clone(&inner);
-        let connect_result = spawn_host_child(&command, &[])
+        let connect_result = launch
+            .spawn_result
             .map_err(|err| {
                 BridgeError::new(
                     BridgeErrorCode::HostExited,
@@ -874,10 +914,11 @@ fn supervisor_loop(inner: Arc<SupervisorInner>) {
                 )
             })
             .and_then(|child| {
+                run_before_connect_hello(&inner);
                 BridgeClient::connect_with_hello_timeout(
                     child,
-                    expected_version,
-                    Some(hello_timeout),
+                    launch.expected_version,
+                    Some(launch.hello_timeout),
                     move |host_state| {
                         state_inner.publish_host_state(run_id, host_state);
                     },
@@ -1379,5 +1420,320 @@ rl.on('line', line => {{
             "start() must be vetoed when bound MaintenanceLock already recorded quit"
         );
         assert_eq!(count_lines(&veto_spawns), 0);
+    }
+
+    fn is_pid_alive(pid: u32) -> bool {
+        #[cfg(unix)]
+        {
+            // SAFETY: kill(pid, 0) probes process existence without delivering a signal.
+            unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+        }
+        #[cfg(windows)]
+        {
+            let out = std::process::Command::new("tasklist")
+                .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+                .output();
+            match out {
+                Ok(res) => String::from_utf8_lossy(&res.stdout).contains(&format!(",\"{pid}\",")),
+                Err(_) => false,
+            }
+        }
+    }
+
+    fn read_logged_pids(path: &Path) -> Vec<u32> {
+        fs::read_to_string(path)
+            .unwrap_or_default()
+            .lines()
+            .filter_map(|line| line.trim().parse::<u32>().ok())
+            .collect()
+    }
+
+    fn write_mock_host_with_shutdown_log(
+        dir: &Path,
+        name: &str,
+        spawns_log: &Path,
+        shutdowns_log: &Path,
+    ) -> PathBuf {
+        let script = format!(
+            r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+fs.appendFileSync({spawns_log}, String(process.pid) + '\n');
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => process.exit(0));
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{
+      event: 'state',
+      state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
+    }}) + '\n');
+  }} else if (msg.method === 'shutdown') {{
+    fs.appendFileSync({shutdowns_log}, String(process.pid) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+            spawns_log =
+                serde_json::to_string(&spawns_log.to_string_lossy().into_owned()).unwrap(),
+            shutdowns_log =
+                serde_json::to_string(&shutdowns_log.to_string_lossy().into_owned()).unwrap(),
+        );
+        let path = dir.join(format!("{name}.mjs"));
+        fs::write(&path, script).expect("write mock host");
+        path
+    }
+
+    fn wait_state_cond(
+        inner: &SupervisorInner,
+        timeout: Duration,
+        mut pred: impl FnMut(&SupervisorState) -> bool,
+        context: &str,
+    ) {
+        let deadline = Instant::now() + timeout;
+        let mut guard = inner.state.lock().expect("supervisor lock poisoned");
+        while !pred(&guard) {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .unwrap_or_else(|| panic!("timed out waiting for supervisor state: {context}"));
+            let (next, res) = inner
+                .cv
+                .wait_timeout(guard, remaining)
+                .expect("supervisor lock poisoned");
+            guard = next;
+            if res.timed_out() && !pred(&guard) {
+                panic!("timed out waiting for supervisor state: {context}");
+            }
+        }
+    }
+
+    fn wait_for_stopped_pid(
+        state_rx: &mpsc::Receiver<SupervisedHostState>,
+        timeout: Duration,
+    ) -> u32 {
+        let deadline = Instant::now() + timeout;
+        loop {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("timed out waiting for SupervisedHostState::Stopped");
+            match state_rx.recv_timeout(remaining) {
+                Ok(SupervisedHostState::Stopped { pid, .. }) => return pid,
+                Ok(_) => continue,
+                Err(err) => panic!("failed waiting for SupervisedHostState::Stopped: {err}"),
+            }
+        }
+    }
+
+    #[test]
+    fn launch_held_before_with_launch_state_never_spawns_when_quit_recorded() {
+        let tmp = TestDir::new("byok-host-launch-before-lock-quit");
+        let spawns_log = tmp.path().join("spawns.log");
+        let shutdowns_log = tmp.path().join("shutdowns.log");
+        let script =
+            write_mock_host_with_shutdown_log(tmp.path(), "host", &spawns_log, &shutdowns_log);
+        let contract = BridgeContract::load().expect("contract loads");
+        let lock = MaintenanceLock::new();
+        let spawn_calls = Arc::new(AtomicUsize::new(0));
+
+        let sup = Arc::new(HostSupervisor::new(
+            HostSupervisorConfig::new(HostCommandSpec::dev_node_host(script), contract)
+                .with_maintenance_lock(lock.clone()),
+            |_| {},
+            || {},
+        ));
+
+        let spawn_calls_hook = Arc::clone(&spawn_calls);
+        *sup.inner.in_launch_spawn.lock().unwrap() = Some(Arc::new(move |command| {
+            spawn_calls_hook.fetch_add(1, Ordering::SeqCst);
+            spawn_host_child(command, &[])
+        }));
+
+        let (pre_hook, pre_entered_rx, pre_release_tx) = one_shot_barrier();
+        *sup.inner.before_launch_reserve.lock().unwrap() = Some(pre_hook);
+
+        sup.start();
+        pre_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker must pause before entering with_launch_state");
+        assert_eq!(spawn_calls.load(Ordering::SeqCst), 0);
+
+        // MaintenanceLock is not held at the pre-reserve barrier, so begin_quit records quit cleanly.
+        assert_eq!(lock.begin_quit(), QuitOutcome::Quit);
+
+        pre_release_tx
+            .send(())
+            .expect("release pre-with_launch_state barrier");
+
+        wait_state_cond(
+            &sup.inner,
+            Duration::from_secs(5),
+            |st| st.paused && st.stopping && !st.active_run && !st.connecting,
+            "worker vetoes launch on recorded quit",
+        );
+
+        assert_eq!(
+            spawn_calls.load(Ordering::SeqCst),
+            0,
+            "spawn_host_child must never be called after quit is recorded"
+        );
+        assert_eq!(count_lines(&spawns_log), 0);
+        assert_eq!(
+            sup.restart(&lock),
+            Err(MaintenanceBusyError),
+            "restart must return the existing maintenance_busy outcome after quit"
+        );
+        assert_eq!(
+            MaintenanceBusyError.code(),
+            crate::maintenance::MAINTENANCE_BUSY_CODE
+        );
+        assert_eq!(
+            sup.stop(),
+            Ok(()),
+            "stop after vetoed launch must remain clean"
+        );
+        assert_eq!(spawn_calls.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn quit_during_in_lock_spawn_blocks_then_drains_child_without_orphan() {
+        let tmp = TestDir::new("byok-host-quit-during-in-lock-spawn");
+        let spawns_log = tmp.path().join("spawns.log");
+        let shutdowns_log = tmp.path().join("shutdowns.log");
+        let script =
+            write_mock_host_with_shutdown_log(tmp.path(), "host", &spawns_log, &shutdowns_log);
+        let contract = BridgeContract::load().expect("contract loads");
+        let lock = MaintenanceLock::new();
+
+        // Register quit observer before launch holds MaintenanceLock to avoid locking during the barrier.
+        let (quit_marked_tx, quit_marked_rx) = mpsc::channel();
+        lock.on_quit_requested(move || {
+            let _ = quit_marked_tx.send(());
+        });
+
+        let (state_tx, state_rx) = mpsc::channel();
+        let sup = Arc::new(HostSupervisor::new(
+            HostSupervisorConfig::new(HostCommandSpec::dev_node_host(script), contract)
+                .with_maintenance_lock(lock.clone()),
+            move |state| {
+                let _ = state_tx.send(state);
+            },
+            || {},
+        ));
+
+        sup.start();
+        let first_pid = wait_for_stopped_pid(&state_rx, Duration::from_secs(5));
+        assert_eq!(read_logged_pids(&spawns_log), vec![first_pid]);
+
+        // Hold the replacement spawn inside MaintenanceLock::with_launch_state, then pause again
+        // after the lock is released and before BridgeClient::connect_with_hello_timeout.
+        let (spawn_entered_tx, spawn_entered_rx) = mpsc::channel::<u32>();
+        let (spawn_release_tx, spawn_release_rx) = mpsc::channel::<()>();
+        let spawn_barrier_state = Arc::new(Mutex::new(Some((spawn_entered_tx, spawn_release_rx))));
+        *sup.inner.in_launch_spawn.lock().unwrap() = Some(Arc::new(move |command| {
+            let child = spawn_host_child(command, &[])?;
+            if let Some((tx, rx)) = spawn_barrier_state.lock().unwrap().take() {
+                let _ = tx.send(child.id());
+                let _ = rx.recv_timeout(Duration::from_secs(5));
+            }
+            Ok(child)
+        }));
+
+        let (connect_hook, connect_entered_rx, connect_release_tx) = one_shot_barrier();
+        *sup.inner.before_connect_hello.lock().unwrap() = Some(connect_hook);
+
+        sup.restart(&lock)
+            .expect("restart succeeds before quit is requested");
+
+        let spawned_pid = spawn_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("replacement launch must pause inside spawn_host_child with MaintenanceLock held");
+        assert_ne!(spawned_pid, first_pid);
+
+        let (quit_started_tx, quit_started_rx) = mpsc::channel();
+        let (quit_lock_done_tx, quit_lock_done_rx) = mpsc::channel();
+        let quit_lock = lock.clone();
+        let quit_sup = Arc::clone(&sup);
+        let quit_handle = thread::spawn(move || {
+            let _ = quit_started_tx.send(());
+            let outcome = quit_lock.begin_quit();
+            let _ = quit_lock_done_tx.send(outcome);
+            let stop_res = quit_sup.stop();
+            (outcome, stop_res)
+        });
+
+        quit_started_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("quit drain thread must start");
+        assert_eq!(
+            quit_marked_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty),
+            "begin_quit must block while spawn_host_child holds MaintenanceLock"
+        );
+        assert_eq!(
+            quit_lock_done_rx.try_recv(),
+            Err(mpsc::TryRecvError::Empty),
+            "begin_quit must not complete while spawn_host_child holds MaintenanceLock"
+        );
+
+        // Release spawn barrier: with_launch_state returns Child and drops MaintenanceLock before hello.
+        spawn_release_tx
+            .send(())
+            .expect("release in-lock spawn barrier");
+
+        connect_entered_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("worker must reach pre-hello hook after releasing MaintenanceLock");
+        quit_marked_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("begin_quit must acquire MaintenanceLock once spawn releases it");
+        assert_eq!(
+            quit_lock_done_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("begin_quit must finish before BridgeClient::connect_with_hello_timeout"),
+            QuitOutcome::Quit
+        );
+
+        // Ensure quit drain has entered sup.stop() while the spawned child is still connecting.
+        wait_state_cond(
+            &sup.inner,
+            Duration::from_secs(5),
+            |st| st.stopping && st.paused && st.connecting && st.active_run,
+            "quit drain enters sup.stop() before hello finishes",
+        );
+
+        connect_release_tx
+            .send(())
+            .expect("release pre-hello barrier so worker hands child to immediate shutdown");
+
+        let (outcome, stop_res) = quit_handle.join().expect("quit thread joins cleanly");
+        assert_eq!(outcome, QuitOutcome::Quit);
+        assert_eq!(
+            stop_res,
+            Ok(()),
+            "quit drain must take over and cleanly stop the spawned child"
+        );
+
+        assert!(
+            !is_pid_alive(first_pid),
+            "first Host process must not remain alive"
+        );
+        assert!(
+            !is_pid_alive(spawned_pid),
+            "spawned replacement Host must not remain an orphan process"
+        );
+        assert_eq!(read_logged_pids(&spawns_log), vec![first_pid, spawned_pid]);
+        assert_eq!(
+            read_logged_pids(&shutdowns_log),
+            vec![first_pid, spawned_pid]
+        );
+        {
+            let guard = sup.inner.state.lock().unwrap();
+            assert!(guard.paused && guard.stopping && !guard.active_run && !guard.connecting);
+            assert!(guard.client.is_none());
+        }
+        assert_eq!(sup.restart(&lock), Err(MaintenanceBusyError));
     }
 }

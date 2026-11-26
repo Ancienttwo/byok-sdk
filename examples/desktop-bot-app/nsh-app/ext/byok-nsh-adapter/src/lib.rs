@@ -111,10 +111,10 @@ mod tests {
 
     use byok_shell::{
         BridgeContract, HostCommandSpec, HostSupervisor, HostSupervisorConfig, MaintenanceLock,
-        QuitOutcome, SupervisedHostState,
+        QuitOutcome, ShellRouter, SupervisedHostState,
     };
     use nsh_core::desktop::{DesktopCommand, WindowEvent};
-    use nsh_core::element::desktop::{on_quit_request, quit, restart};
+    use nsh_core::element::desktop::{QUIT_TIMEOUT, on_app_quit, on_quit_request, quit, restart};
     use nsh_core::element::{
         Dialog, DialogButtonStyle, DialogReply, Os, Root, declarations, px, size, spawn, view,
     };
@@ -129,8 +129,13 @@ mod tests {
         handle_login_item_get_with, handle_login_item_set_with, open_recovery_failure_dialog,
         parse_login_item_set_param, validate_renderer_method,
     };
-    use crate::quit::{drain_for_quit, drain_for_quit_with, should_call_desktop_quit};
-    use crate::supervisor::{EventHub, ShellEvent, build_runtime_shell, restart_shell_sync};
+    use crate::quit::{
+        drain_for_quit, drain_for_quit_with, fallback_app_quit_cleanup_with,
+        should_call_desktop_quit,
+    };
+    use crate::supervisor::{
+        EventHub, RuntimeShell, ShellEvent, build_runtime_shell, restart_shell_sync,
+    };
 
     struct TestTempDir(PathBuf);
 
@@ -1843,5 +1848,264 @@ rl.on('line', line => {{
             .expect_err("adapter restart must refuse once quit holds MaintenanceLock");
         assert_eq!(quit_err.code(), Some("maintenance_busy"));
         assert_eq!(count_lines(&precond_spawns), 2);
+    }
+
+    #[test]
+    fn fallback_app_quit_cleanup_runs_on_quit_timeout_path_drains_once_and_guards_reentry() {
+        use std::future::Future;
+        use std::pin::Pin;
+        use std::sync::{Mutex, mpsc};
+
+        // ADR-052 D2: Windows/Linux OS shutdown runs `on_app_quit` under upstream 200 ms `QUIT_TIMEOUT`.
+        assert_eq!(QUIT_TIMEOUT, Duration::from_millis(200));
+
+        struct OffThreadDrainFuture {
+            state: Arc<Mutex<(bool, Option<Waker>)>>,
+        }
+
+        impl OffThreadDrainFuture {
+            fn spawn(work: Box<dyn FnOnce() -> QuitOutcome + Send>, runs: Arc<AtomicUsize>) -> Self {
+                let state = Arc::new(Mutex::new((false, None::<Waker>)));
+                let bg_state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    runs.fetch_add(1, Ordering::SeqCst);
+                    let _ = work();
+                    let waker = {
+                        let mut guard = bg_state.lock().expect("drain future state lock poisoned");
+                        guard.0 = true;
+                        guard.1.take()
+                    };
+                    if let Some(waker) = waker {
+                        waker.wake();
+                    }
+                });
+                Self { state }
+            }
+        }
+
+        impl Future for OffThreadDrainFuture {
+            type Output = ();
+
+            fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+                let mut guard = self.state.lock().expect("drain future state lock poisoned");
+                if guard.0 {
+                    Poll::Ready(())
+                } else {
+                    guard.1 = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            }
+        }
+
+        let tmp = TestTempDir::new("byok-adapter-d2-fallback-quit");
+        let spawns_log = tmp.path().join("spawns.log");
+        let shutdowns_log = tmp.path().join("shutdowns.log");
+        let script = format!(
+            r#"
+import fs from 'node:fs';
+import readline from 'node:readline';
+
+fs.appendFileSync({spawns_log}, String(process.pid) + '\n');
+const rl = readline.createInterface({{ input: process.stdin }});
+rl.on('close', () => process.exit(0));
+rl.on('line', line => {{
+  const msg = JSON.parse(line);
+  if (msg.method === 'hello') {{
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: {{ bridgeVersion: 2 }} }}) + '\n');
+    process.stdout.write(JSON.stringify({{
+      event: 'state',
+      state: {{ state: 'stopped', pid: process.pid, storeRefused: false, reason: 'stopped' }},
+    }}) + '\n');
+  }} else if (msg.method === 'shutdown') {{
+    fs.appendFileSync({shutdowns_log}, String(process.pid) + '\n');
+    process.stdout.write(JSON.stringify({{ id: msg.id, result: null }}) + '\n');
+    process.exit(0);
+  }}
+}});
+"#,
+            spawns_log =
+                serde_json::to_string(&spawns_log.to_string_lossy().into_owned()).unwrap(),
+            shutdowns_log =
+                serde_json::to_string(&shutdowns_log.to_string_lossy().into_owned()).unwrap(),
+        );
+        let script_path = tmp.path().join("host.mjs");
+        fs::write(&script_path, script).expect("write mock host");
+
+        let read_logged_pids = |path: &Path| -> Vec<u32> {
+            fs::read_to_string(path)
+                .unwrap_or_default()
+                .lines()
+                .filter_map(|line| line.trim().parse::<u32>().ok())
+                .collect()
+        };
+
+        let contract = BridgeContract::load().expect("contract loads");
+        let maintenance = MaintenanceLock::new();
+        let (state_tx, state_rx) = mpsc::channel();
+        let supervisor = Arc::new(HostSupervisor::new(
+            HostSupervisorConfig::new(HostCommandSpec::dev_node_host(script_path), contract)
+                .with_maintenance_lock(maintenance.clone()),
+            move |state| {
+                let _ = state_tx.send(state);
+            },
+            || {},
+        ));
+        let router = Arc::new(ShellRouter::new(
+            Arc::clone(&supervisor),
+            maintenance.clone(),
+            "1.0.0",
+        ));
+        supervisor.start();
+        let shell = RuntimeShell {
+            supervisor,
+            maintenance,
+            router,
+            app_version: "1.0.0".to_owned(),
+        };
+
+        let host_pid = loop {
+            match state_rx
+                .recv_timeout(Duration::from_secs(5))
+                .expect("mock host must emit initial stopped state")
+            {
+                SupervisedHostState::Stopped { pid, .. } => break pid,
+                _ => continue,
+            }
+        };
+        assert_eq!(read_logged_pids(&spawns_log), vec![host_pid]);
+
+        let shell_for_hook = shell.clone();
+        let hub = Arc::new(EventHub::with_quitting_hook(move || {
+            shell_for_hook.maintenance.mark_quitting();
+        }));
+        let (_sub_id, events_rx) = hub.subscribe();
+        let quitting = Arc::new(AtomicBool::new(false));
+        let get_shell_calls = Arc::new(AtomicUsize::new(0));
+        let drain_runs = Arc::new(AtomicUsize::new(0));
+
+        type FallbackQuitHarnessState = (
+            Arc<AtomicBool>,
+            Arc<EventHub>,
+            RuntimeShell,
+            Arc<AtomicUsize>,
+            Arc<AtomicUsize>,
+        );
+        thread_local! {
+            static PENDING_FALLBACK_QUIT: std::cell::RefCell<Option<FallbackQuitHarnessState>> =
+                const { std::cell::RefCell::new(None) };
+        }
+        PENDING_FALLBACK_QUIT.with(|cell| {
+            *cell.borrow_mut() = Some((
+                Arc::clone(&quitting),
+                Arc::clone(&hub),
+                shell.clone(),
+                Arc::clone(&get_shell_calls),
+                Arc::clone(&drain_runs),
+            ));
+        });
+
+        #[component]
+        fn FallbackQuitHarness() -> impl IntoElement {
+            if let Some((quitting, hub, shell, get_shell_calls, drain_runs)) =
+                PENDING_FALLBACK_QUIT.with(|cell| cell.borrow_mut().take())
+            {
+                on_app_quit(move || {
+                    let quitting = Arc::clone(&quitting);
+                    let hub = Arc::clone(&hub);
+                    let shell = shell.clone();
+                    let get_shell_calls = Arc::clone(&get_shell_calls);
+                    let drain_runs = Arc::clone(&drain_runs);
+                    async move {
+                        fallback_app_quit_cleanup_with(
+                            quitting,
+                            &hub,
+                            move || {
+                                get_shell_calls.fetch_add(1, Ordering::SeqCst);
+                                Some(shell)
+                            },
+                            move |work| OffThreadDrainFuture::spawn(work, drain_runs),
+                        )
+                        .await;
+                    }
+                });
+            }
+            view()
+        }
+
+        let (wake_tx, wake_rx) = mpsc::channel::<()>();
+        let mut core = Core::new(ApproxTextEngine, size(px(800.0), px(600.0)));
+        core.set_task_notify(Arc::new(move || {
+            let _ = wake_tx.send(());
+        }));
+        core.mount_root(&Root::of::<FallbackQuitHarness>());
+        core.commit();
+        assert!(core.has_quit_listeners());
+        assert!(!shell.maintenance.is_quitting());
+        assert!(events_rx.try_recv().is_err());
+
+        // 1. First `on_app_quit` call (Windows/Linux `QUIT_TIMEOUT` path): publishes `Quitting`
+        //    once and drains the active shell (marks MaintenanceLock quitting + stops Host).
+        assert!(
+            core.start_quit(),
+            "Core::start_quit must start registered on_app_quit fallback cleanup"
+        );
+        core.run_component_tasks();
+        assert!(quitting.load(Ordering::Acquire));
+        assert!(
+            matches!(events_rx.try_recv(), Ok(ShellEvent::Quitting)),
+            "fallback_app_quit_cleanup must publish ShellEvent::Quitting once"
+        );
+        assert!(
+            events_rx.try_recv().is_err(),
+            "fallback_app_quit_cleanup must not publish duplicate Quitting events"
+        );
+        assert!(shell.maintenance.is_quitting());
+
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while core.quit_pending() {
+            let remaining = deadline
+                .checked_duration_since(Instant::now())
+                .expect("fallback_app_quit_cleanup drain must finish cleanly");
+            wake_rx
+                .recv_timeout(remaining)
+                .expect("off-thread shell drain must wake Core");
+            core.run_component_tasks();
+        }
+        assert!(!core.quit_pending());
+        assert_eq!(get_shell_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(drain_runs.load(Ordering::SeqCst), 1);
+        assert_eq!(read_logged_pids(&shutdowns_log), vec![host_pid]);
+        assert_eq!(read_logged_pids(&spawns_log), vec![host_pid]);
+        assert!(shell.supervisor.stop().is_ok());
+
+        // 2. Second call returns at once via the `quitting` swap guard (no second event or drain).
+        let second_shell_calls = Arc::new(AtomicUsize::new(0));
+        let second_drain_runs = Arc::new(AtomicUsize::new(0));
+        poll_ready(fallback_app_quit_cleanup_with(
+            Arc::clone(&quitting),
+            &hub,
+            || {
+                second_shell_calls.fetch_add(1, Ordering::SeqCst);
+                Some(shell.clone())
+            },
+            |_| {
+                second_drain_runs.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(())
+            },
+        ));
+        assert_eq!(second_shell_calls.load(Ordering::SeqCst), 0);
+        assert_eq!(second_drain_runs.load(Ordering::SeqCst), 0);
+        assert!(events_rx.try_recv().is_err());
+
+        // Re-firing `Core::start_quit()` through `on_app_quit` also settles immediately on poll 1.
+        assert!(core.start_quit());
+        core.run_component_tasks();
+        assert!(
+            !core.quit_pending(),
+            "re-entrant on_app_quit call must return immediately without scheduling a second drain"
+        );
+        assert_eq!(get_shell_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(drain_runs.load(Ordering::SeqCst), 1);
+        assert!(events_rx.try_recv().is_err());
     }
 }
