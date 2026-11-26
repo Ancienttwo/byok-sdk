@@ -66,9 +66,10 @@ describe("@byok-sdk/keys/model-route 30-vector QuickJS parity", () => {
           vector.draft === null
             ? createModelRouteDraft(context)
             : applyModelRouteChange(vector.draft, vector.change!, context);
-        expect(draft).toEqual(vector.expect.draft);
-        expect(modelRouteView(draft, context)).toEqual(vector.expect.view);
-        expect(modelRouteSubmission(draft, context)).toEqual(vector.expect.submission);
+        // Serialized, so key order counts: the fixtures match the Node baseline serialized byte for byte.
+        expect(JSON.stringify(draft)).toBe(JSON.stringify(vector.expect.draft));
+        expect(JSON.stringify(modelRouteView(draft, context))).toBe(JSON.stringify(vector.expect.view));
+        expect(JSON.stringify(modelRouteSubmission(draft, context))).toBe(JSON.stringify(vector.expect.submission));
       });
     }
   }

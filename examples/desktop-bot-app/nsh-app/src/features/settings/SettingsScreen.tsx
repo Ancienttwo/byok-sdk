@@ -32,11 +32,13 @@ export function SettingsScreen() {
   );
   // `load` names the read: a new one mounts a new dreaming form from it, a save keeps the form (`mutate`, same load).
   // A read waits for a running save (also one started before a section switch remounted this screen), so it never
-  // mounts the form on the value before the save; Refresh stays disabled meanwhile.
+  // mounts the form on the value before the save; Refresh stays disabled meanwhile. A read whose screen went away or
+  // was superseded while it waited sends nothing.
   const settings = resource(
     () => (ready() ? refreshes() : false),
-    async (load) => {
+    async (load, info) => {
       await dreamingSaveSettled();
+      info.signal.throwIfAborted();
       return { load, dreaming: (await readHostSettings()).dreaming };
     },
   );

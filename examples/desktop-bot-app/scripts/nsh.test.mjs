@@ -322,14 +322,14 @@ test('verifyBundle checks every split chunk and map and resolves map sources aga
     writeFileSync(join(outDir, 'Settings.js'), 'import{entry}from"./bundle.js";export const s=\'Example: import "electron"\'+entry;');
     writeFileSync(join(outDir, 'Settings.js.map'), sourceMap({ 'src/Settings.tsx': 'export {};' }));
 
-    const ok = verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root });
+    const ok = verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root });
     assert.equal(ok.files.length, 2);
     assert.equal(ok.totalMapSources, 2);
 
     // Forbidden specifier in a split chunk fails naming the chunk.
     writeFileSync(join(outDir, 'Settings.js'), 'await import("electron");');
     assert.throws(
-      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /Settings\.js.*electron/i,
     );
 
@@ -340,14 +340,14 @@ test('verifyBundle checks every split chunk and map and resolves map sources aga
       sourceMap({ '../node_modules/react/index.js': 'export {};' }),
     );
     assert.throws(
-      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /under node_modules\/react\//,
     );
 
     // Missing source map for a split chunk fails closed.
     rmSync(join(outDir, 'Settings.js.map'));
     assert.throws(
-      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /Settings\.js\.map/,
     );
 
@@ -355,7 +355,7 @@ test('verifyBundle checks every split chunk and map and resolves map sources aga
     writeFileSync(join(outDir, 'Settings.js.map'), sourceMap({ 'src/Settings.tsx': 'export {};' }));
     writeFileSync(join(outDir, 'Orphan.js.map'), sourceMap({ 'src/Orphan.tsx': 'export {};' }));
     assert.throws(
-      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(outDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /Orphan\.js\.map/,
     );
     rmSync(join(outDir, 'Orphan.js.map'));
@@ -366,7 +366,7 @@ test('verifyBundle checks every split chunk and map and resolves map sources aga
     writeFileSync(join(nestedDir, 'bundle.js'), 'import{a}from"nsh";export{a};');
     writeFileSync(join(nestedDir, 'bundle.js.map'), sourceMap({ '../src/index.ts': 'export {};' }));
     assert.throws(
-      () => verifyBundle(join(nestedDir, 'bundle.js'), { repoRoot: root }),
+      () => verifyBundle(join(nestedDir, 'bundle.js'), { repoRoot: root, appDir: root }),
       /under packages\/server\//,
     );
   } finally {
@@ -385,20 +385,37 @@ test('verifyBundle rejects Gallery modules and text, openUrl outside src/links.t
     const linksSource = 'import { openUrl } from "nsh";\nexport const open = (url: string) => openUrl(url);';
     const markdown = 'export const M = () => <TextView links="report" onLinkPress={open} />;';
     write('import{openUrl as o}from"nsh";export const a=o;', { 'src/links.ts': linksSource, 'src/ui/MarkdownView.tsx': markdown });
-    verifyBundle(bundle, { repoRoot: root });
+    verifyBundle(bundle, { repoRoot: root, appDir: root });
 
     write('export const t="Foundations Gallery";', { 'App.tsx': 'export {};' });
-    assert.throws(() => verifyBundle(bundle, { repoRoot: root }), /Gallery-only text "Foundations Gallery"/);
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /Gallery-only text "Foundations Gallery"/);
     write('export {};', { 'src/features/gallery/GalleryScreen.tsx': 'export {};' });
-    assert.throws(() => verifyBundle(bundle, { repoRoot: root }), /Gallery module: src\/features\/gallery\/GalleryScreen\.tsx/);
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /Gallery module: src\/features\/gallery\/GalleryScreen\.tsx/);
     write('export {};', null);
-    assert.throws(() => verifyBundle(bundle, { repoRoot: root }), /no sourcesContent/);
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /no sourcesContent/);
     write('export {};', { 'src/features/conversation/Composer.tsx': 'import { openUrl as go } from "nsh";\nexport const x = go;' });
-    assert.throws(() => verifyBundle(bundle, { repoRoot: root }), /openUrl in src\/features\/conversation\/Composer\.tsx/);
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /openUrl in src\/features\/conversation\/Composer\.tsx/);
     write('export {};', { 'src/ui/MarkdownView.tsx': markdown.replace('"report"', '"open"') });
-    assert.throws(() => verifyBundle(bundle, { repoRoot: root }), /links="open" in src\/ui\/MarkdownView\.tsx/);
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /links="open" in src\/ui\/MarkdownView\.tsx/);
     write('export {};', { 'src/ui/MarkdownView.tsx': markdown.replace('"report"', '{mode}') });
-    assert.throws(() => verifyBundle(bundle, { repoRoot: root }), /links prop without a static value/);
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /links prop without a static value/);
+    // A spread can supply links, alone or after links="report": a TextView needs links="report" after its last spread.
+    const spreadOpen = 'import { TextView as T } from "nsh/base";\nexport const M = () => <T {...{ links: "open" as const }} />;';
+    write('export {};', { 'src/ui/MarkdownView.tsx': spreadOpen });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /TextView spread without a later links="report"/);
+    write('export {};', { 'src/ui/MarkdownView.tsx': markdown.replace('links="report"', 'links="report" {...{ links: "open" as const }}') });
+    assert.throws(() => verifyBundle(bundle, { repoRoot: root, appDir: root }), /TextView spread without a later links="report"/);
+    write('export {};', { 'src/ui/MarkdownView.tsx': markdown.replace('links="report"', '{...rest} links="report"') });
+    verifyBundle(bundle, { repoRoot: root, appDir: root });
+
+    // A map's sourcesContent must be the file on disk under the app: lowered output cannot stand in for the source.
+    mkdirSync(join(root, 'app', 'src', 'ui'), { recursive: true });
+    writeFileSync(join(root, 'app', 'src', 'ui', 'MarkdownView.tsx'), markdown.replace('"report"', '"open"'));
+    write('export {};', { 'src/ui/MarkdownView.tsx': 'export const M = (p) => h(TextView, { links: p.mode });' });
+    assert.throws(
+      () => verifyBundle(bundle, { repoRoot: root, appDir: join(root, 'app') }),
+      /sourcesContent for src\/ui\/MarkdownView\.tsx differs from .*MarkdownView\.tsx/,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -430,6 +447,18 @@ test('verifyNoUpdaterPackages accepts no nsh-updater.json or one without package
     verifyNoUpdaterPackages(out);
     writeFileSync(asset, JSON.stringify({ id: 'io.byok-sdk.byok-desktop-bots', version: '0.1.0', packages: { roots: ['cm9vdA'] } }));
     assert.throws(() => verifyNoUpdaterPackages(out), /forbids signed packages/);
+    rmSync(asset);
+    // `nsh package` stages `.nsh-updater.json` and ships `nsh/assets/nsh-updater.json` inside the app bundle.
+    const resources = join(out, 'BYOK Bots.app', 'Contents', 'Resources');
+    mkdirSync(join(resources, 'nsh', 'assets'), { recursive: true });
+    const shipped = join(resources, 'nsh', 'assets', 'nsh-updater.json');
+    writeFileSync(shipped, JSON.stringify({ id: 'io.byok-sdk.byok-desktop-bots', version: '0.1.0' }));
+    verifyNoUpdaterPackages(out);
+    writeFileSync(shipped, JSON.stringify({ id: 'io.byok-sdk.byok-desktop-bots', version: '0.1.0', packages: { roots: ['cm9vdA'] } }));
+    assert.throws(() => verifyNoUpdaterPackages(out), /forbids signed packages: .*nsh[/\\]assets[/\\]nsh-updater\.json/);
+    rmSync(shipped);
+    writeFileSync(join(out, '.nsh-updater.json'), JSON.stringify({ id: 'x', version: '0.1.0', packages: { roots: ['cm9vdA'] } }));
+    assert.throws(() => verifyNoUpdaterPackages(out), /forbids signed packages: .*\.nsh-updater\.json/);
   } finally {
     rmSync(out, { recursive: true, force: true });
   }
@@ -460,6 +489,8 @@ test('verifyReleaseRunners requires each desktop runner to start nsh-<os>-app an
     runner('linux');
     writeFileSync(join(appSrc, 'nested', 'quit.rs'), 'const P: Policy = Policy { harden: false, ..DEFAULT };\n');
     assert.throws(check, /turns off Policy::harden at .*quit\.rs:1/);
+    writeFileSync(join(appSrc, 'nested', 'quit.rs'), 'pub fn f(p: &mut Policy) {\n    p.harden = false;\n}\n');
+    assert.throws(check, /turns off Policy::harden at .*quit\.rs:2/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

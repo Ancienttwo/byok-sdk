@@ -51,7 +51,7 @@ export const D2_DECLARED_CAPABILITIES = { application: true, openUrl: { schemes:
 const RELEASE_RUNNER_OSES = ['macos', 'linux', 'windows'];
 
 /** Rust that turns off `Policy::harden` (`nsh-engine/src/lib.rs` `Policy`): only NSH's development hosts may do it. */
-const DEVELOPMENT_POLICY_PATTERN = /\bPolicy::development\b|\bharden\s*:\s*false\b|\.with_policy\s*\(/;
+const DEVELOPMENT_POLICY_PATTERN = /\bPolicy::development\b|\bharden\s*[:=]\s*false\b|\.with_policy\s*\(/;
 
 /** Text that only the development-only Foundations Gallery puts into a bundle. */
 const GALLERY_ONLY_TEXT = ['Foundations Gallery', 'GalleryScreen'];
@@ -545,15 +545,18 @@ export function verifyAppConfig(config) {
   assert.equal(config.updater?.packages, undefined, 'ADR-052 D2 forbids updater.packages in nsh.json');
 }
 
+/** The updater configuration's file names: `nsh package` stages `.nsh-updater.json` and ships `nsh-updater.json`. */
+const UPDATER_CONFIG_NAMES = new Set(['nsh-updater.json', '.nsh-updater.json']);
+
 /**
- * ADR-052 D2 proof #1, output side: the release output carries no `nsh-updater.json`, or one that takes no signed
- * packages. `nsh package` writes it as the asset `nsh-updater.json` (`Config`, camelCase: `packages: { roots }`).
+ * ADR-052 D2 proof #1, output side: no updater configuration anywhere under `outDir` (a build output, or a package
+ * with its `nsh/assets/nsh-updater.json`) takes signed packages (`Config`, camelCase: `packages: { roots }`).
  */
 export function verifyNoUpdaterPackages(outDir) {
-  for (const path of [join(outDir, 'nsh-updater.json'), join(outDir, 'assets', 'nsh-updater.json')]) {
-    if (!existsSync(path)) {
-      continue;
-    }
+  const configs = readdirSync(outDir, { withFileTypes: true, recursive: true })
+    .filter((entry) => entry.isFile() && UPDATER_CONFIG_NAMES.has(entry.name))
+    .map((entry) => join(entry.parentPath, entry.name));
+  for (const path of configs) {
     const config = JSON.parse(readFileSync(path, 'utf8'));
     const packages = config.packages ?? null;
     assert.ok(
@@ -567,6 +570,7 @@ function runVerifyCapabilities(args) {
   let builtPath = DEFAULT_BUILT_CAPABILITIES;
   let expectedPath = DEFAULT_EXPECTED_CAPABILITIES;
   let appConfigPath = DEFAULT_APP_CONFIG;
+  let outputDir = null;
   for (let i = 0; i < args.length; i += 1) {
     if (args[i] === '--built' && args[i + 1]) {
       builtPath = resolve(args[i + 1]);
@@ -577,18 +581,22 @@ function runVerifyCapabilities(args) {
     } else if (args[i] === '--app-config' && args[i + 1]) {
       appConfigPath = resolve(args[i + 1]);
       i += 1;
+    } else if (args[i] === '--output' && args[i + 1]) {
+      outputDir = resolve(args[i + 1]);
+      i += 1;
     } else {
       throw new Error(`Unknown verify-capabilities option: ${args[i]}`);
     }
   }
 
   verifyAppConfig(JSON.parse(readFileSync(appConfigPath, 'utf8')));
-  verifyNoUpdaterPackages(dirname(builtPath));
+  outputDir ??= dirname(builtPath);
+  verifyNoUpdaterPackages(outputDir);
   const actual = JSON.parse(readFileSync(builtPath, 'utf8'));
   const expected = JSON.parse(readFileSync(expectedPath, 'utf8'));
   verifyCapabilitiesAgainstGolden(actual, expected);
   console.log(
-    `verify-capabilities OK (${appConfigPath} declares the D2 set without updater.packages; no signed packages in ${dirname(builtPath)}; ${builtPath} === ${expectedPath})`,
+    `verify-capabilities OK (${appConfigPath} declares the D2 set without updater.packages; no signed packages under ${outputDir}; ${builtPath} === ${expectedPath})`,
   );
 }
 
@@ -695,19 +703,68 @@ function extractSpecifiersFromAst(sourceFile) {
   return specifiers;
 }
 
+function unwrapExpression(node) {
+  let current = node;
+  while (
+    current?.kind === K.ParenthesizedExpression
+    || current?.kind === K.AsExpression
+    || current?.kind === K.SatisfiesExpression
+  ) {
+    current = current.expression;
+  }
+  return current;
+}
+
+function staticString(node) {
+  const inner = unwrapExpression(node?.kind === K.JsxExpression ? node.expression : node);
+  return inner?.kind === K.StringLiteral || inner?.kind === K.NoSubstitutionTemplateLiteral ? inner.text : null;
+}
+
+const propertyNameText = (name) =>
+  name?.kind === K.Identifier || name?.kind === K.StringLiteral ? name.text : null;
+
 /**
  * Lists the release-isolation findings in one source module: a `links` prop that is not a static string other than
- * `"open"` (model output must never open links itself), and any `openUrl` name or string (`links.ts` is its one gate).
+ * `"open"`, a `links: "open"` object property, a `TextView` whose spread could supply `links` without a later static
+ * `links` prop (model output must never open links itself; the default is `"report"`), and any `openUrl` name or
+ * string (`links.ts` is its one gate).
  */
 function isolationFindingsFromAst(sourceFile) {
+  const textViewNames = new Set(['TextView']);
+  const collectAliases = (node) => {
+    if (node.kind === K.ImportSpecifier && (node.propertyName ?? node.name)?.text === 'TextView') {
+      textViewNames.add(node.name.text);
+    }
+    node.forEachChild(collectAliases);
+  };
+  collectAliases(sourceFile);
+  const isTextView = (tag) =>
+    (tag?.kind === K.Identifier && textViewNames.has(tag.text))
+    || (tag?.kind === K.PropertyAccessExpression && tag.name?.text === 'TextView');
+
   const findings = [];
   const visit = (node) => {
+    if ((node.kind === K.JsxOpeningElement || node.kind === K.JsxSelfClosingElement) && isTextView(node.tagName)) {
+      const attributes = node.attributes.properties;
+      const lastSpread = attributes.findLastIndex((attribute) => attribute.kind === K.JsxSpreadAttribute);
+      const linksAfter = attributes.some(
+        (attribute, index) => index > lastSpread && attribute.kind === K.JsxAttribute && attribute.name?.text === 'links',
+      );
+      if (lastSpread >= 0 && !linksAfter) {
+        findings.push('a TextView spread without a later links="report"');
+      }
+    }
     if (node.kind === K.JsxAttribute && node.name?.text === 'links') {
-      const init = node.initializer;
-      const value = init?.kind === K.JsxExpression ? staticModuleSpecifier(init.expression) : staticModuleSpecifier(init);
+      const value = staticString(node.initializer);
       if (value === null || value === 'open') {
         findings.push(value === 'open' ? 'links="open"' : 'a links prop without a static value');
       }
+    } else if (
+      node.kind === K.PropertyAssignment
+      && propertyNameText(node.name) === 'links'
+      && staticString(node.initializer) === 'open'
+    ) {
+      findings.push('links: "open"');
     } else if (
       (node.kind === K.Identifier || node.kind === K.StringLiteral || node.kind === K.NoSubstitutionTemplateLiteral)
       && node.text === 'openUrl'
@@ -848,10 +905,11 @@ const normalizeMapSource = (entry) => entry.replaceAll('\\', '/').replace(/^(?:\
 
 /**
  * ADR-052 D2 proof #3, bundle side, for one chunk: no Gallery module or Gallery-only text, and the modules the map
- * names (parsed from `sourcesContent`, which must be present) use `openUrl` only in `src/links.ts` and never
- * `links="open"`. Returns the parse inputs; `verifyBundle` parses every chunk's in one batch.
+ * names (parsed from `sourcesContent`, which must be present and, for a file that exists on disk relative to `appDir`,
+ * equal it) use `openUrl` only in `src/links.ts` and never let a `TextView` open links. Returns the parse inputs;
+ * `verifyBundle` parses every chunk's in one batch.
  */
-function releaseIsolationInputs(chunkPath, source, map) {
+function releaseIsolationInputs(chunkPath, source, map, appDir) {
   for (const text of GALLERY_ONLY_TEXT) {
     assert.ok(!source.includes(text), `Release bundle contains Gallery-only text "${text}": ${chunkPath}`);
   }
@@ -868,6 +926,11 @@ function releaseIsolationInputs(chunkPath, source, map) {
     const content = map.sourcesContent[index];
     if (typeof content !== 'string') {
       throw new Error(`Bundle source map has no sourcesContent for ${entry}: ${chunkPath}.map`);
+    }
+    // The check reads the map's copy of the source: it must be the file itself, not output standing in for it.
+    const onDisk = resolve(appDir, name);
+    if (existsSync(onDisk) && readFileSync(onDisk, 'utf8') !== content) {
+      throw new Error(`Bundle source map sourcesContent for ${entry} differs from ${onDisk}: ${chunkPath}.map`);
     }
     inputs.push({
       label: `${entry} (${chunkPath})`,
@@ -891,7 +954,7 @@ function releaseIsolationInputs(chunkPath, source, map) {
  * (resolving `sources` against `dirname(chunkPath)`), validates non-empty JS, checks every AST
  * import/export/dynamic-import/require specifier, and checks release isolation (`releaseIsolationInputs`).
  */
-export function verifyBundle(bundlePath, { repoRoot = REPO_ROOT } = {}) {
+export function verifyBundle(bundlePath, { repoRoot = REPO_ROOT, appDir = NSH_APP_DIR } = {}) {
   const chunkPaths = collectBundleChunks(bundlePath);
   let totalMapSources = 0;
   const parseInputs = [];
@@ -910,7 +973,7 @@ export function verifyBundle(bundlePath, { repoRoot = REPO_ROOT } = {}) {
       ext: '.mjs',
       visit: (sourceFile) => assertSpecifiersClear(extractSpecifiersFromAst(sourceFile), chunkPath),
     });
-    parseInputs.push(...releaseIsolationInputs(chunkPath, source, map));
+    parseInputs.push(...releaseIsolationInputs(chunkPath, source, map, appDir));
   }
 
   parseBatch(parseInputs);
