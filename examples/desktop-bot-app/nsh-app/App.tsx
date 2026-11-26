@@ -2,11 +2,12 @@ import { cleanup, effect, mount, platform, Scroll, signal, Text, View } from "ns
 import { currentWindow, isAvailable } from "nsh/desktop";
 import brand from "../brand.config.ts";
 import { installDesktopShell, syncDesktopChrome } from "./src/desktop.ts";
+import { ActivityScreen } from "./src/features/activity/ActivityScreen.tsx";
 import { ConversationScreen } from "./src/features/conversation/ConversationScreen.tsx";
 import { GalleryScreen } from "./src/features/gallery/GalleryScreen.tsx";
 import { KeysScreen } from "./src/features/keys/KeysScreen.tsx";
-import { LoginItemControl } from "./src/features/shell/LoginItemControl.tsx";
-import { DiagnosticsExportButton, RecoveryPanel } from "./src/features/shell/RecoveryPanel.tsx";
+import { SettingsScreen } from "./src/features/settings/SettingsScreen.tsx";
+import { RecoveryPanel } from "./src/features/shell/RecoveryPanel.tsx";
 import { ShellSidebar } from "./src/features/shell/ShellSidebar.tsx";
 import {
   activeSection,
@@ -25,15 +26,7 @@ import {
   stateHintCount,
   type WorkspaceSection,
 } from "./src/store.ts";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-  ToastRegion,
-  type ToastNotice,
-} from "./src/ui/index.ts";
+import { Card, ToastRegion, type ToastNotice } from "./src/ui/index.ts";
 
 const SECTION_TITLES: Record<WorkspaceSection, string> = {
   conversation: "Conversation",
@@ -118,30 +111,7 @@ export function App() {
           </If>
 
           <If when={activeSection() === "settings"}>
-            <View testID="settings-section" class="gap-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Startup &amp; System</CardTitle>
-                  <CardDescription>
-                    OS-authoritative login-item preference synced directly with desktop services.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <LoginItemControl />
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle>Diagnostics</CardTitle>
-                  <CardDescription>
-                    Export a redacted snapshot of supervised Host logs and S1 store state.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <DiagnosticsExportButton testID="settings-diagnostics-btn" disabled={isQuitting()} />
-                </CardContent>
-              </Card>
-            </View>
+            <SettingsScreen />
           </If>
 
           <If when={activeSection() === "conversation"}>
@@ -149,16 +119,7 @@ export function App() {
           </If>
 
           <If when={activeSection() === "activity"}>
-            <View testID="activity-section">
-              <Card>
-                <CardHeader>
-                  <CardTitle>Activity</CardTitle>
-                  <CardDescription>
-                    Native activity feed and run traces arrive in Slice 5 of #2461.
-                  </CardDescription>
-                </CardHeader>
-              </Card>
-            </View>
+            <ActivityScreen />
           </If>
 
           {process.env.NODE_ENV !== "production" ? (

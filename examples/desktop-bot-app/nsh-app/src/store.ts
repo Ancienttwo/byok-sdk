@@ -2,6 +2,8 @@ import { ByokShell } from "byok-nsh-adapter";
 import { resource, setColorScheme, signal, untracked } from "nsh";
 import type { WindowRef } from "nsh/desktop";
 import type { BotProfile } from "../../src/host/store/types.ts";
+import type { ActivityCard } from "../../src/host/activity/cards.ts";
+import type { DeviceView, DreamingSetting, HostSettings } from "../../src/host/settings/types.ts";
 import type { LoginItemView } from "../../src/bridge/domains/settings.ts";
 import type { ShellView } from "../../src/bridge/domains/shell.ts";
 import type { BridgeMethods, SupervisedHostState } from "../../src/bridge/protocol.ts";
@@ -29,6 +31,15 @@ const selectedBotIdSignal = signal<string | null>(null);
 const k8ReloadSignal = signal(0);
 const k8BusyRereadSignal = signal(0);
 const unfoldedBotsSignal = signal<ReadonlySet<string>>(new Set());
+const activityReloadSignal = signal(0);
+const expandedCardsSignal = signal<ReadonlySet<string>>(new Set());
+const approvalDecisionsSignal = signal<ReadonlyMap<string, ApprovalDecision>>(new Map());
+
+/** One approval decision's state: the decision running, or the Host's refusal of the last attempt. */
+export interface ApprovalDecision {
+  readonly running: "approve" | "reject" | null;
+  readonly error: string | null;
+}
 
 /** How soon `k8.view` is read again while some Bot is busy: a runtime or profile catching up reaches no Host hint. */
 export const BUSY_REREAD_MS = 1500;
@@ -125,6 +136,93 @@ export function setHistoryUnfolded(botId: string, unfolded: boolean): void {
     }
     return next;
   });
+}
+
+/**
+ * The app's one `activity.cards` load: it runs only while the Host runs and the Activity section shows, and loads
+ * again on each Host state hint and on `reloadActivityCards`. Leaving the section stops it, so no other section reads
+ * the cards. The resource keeps its last value after a failure: the screen checks `activityCards.error()` first.
+ */
+export const activityCards = resource(
+  () =>
+    hostReady() && activeSectionSignal() === "activity"
+      ? { tick: stateHintCount() + activityReloadSignal() }
+      : false,
+  async (): Promise<ActivityCard[]> => await bridge.call("activity.cards", undefined),
+);
+
+/** Reads `activity.cards` again (Retry, and after an approval decision). */
+export function reloadActivityCards(): void {
+  activityReloadSignal.update((n) => n + 1);
+}
+
+/** Whether the card of `taskId` shows its timeline; kept per task across reloads, recycled cells and sections. */
+export const cardExpanded = (taskId: string) => expandedCardsSignal().has(taskId);
+
+/** Shows or hides the timeline of the card of `taskId`. */
+export function setCardExpanded(taskId: string, expanded: boolean): void {
+  expandedCardsSignal.update((current) => {
+    const next = new Set(current);
+    if (expanded) {
+      next.add(taskId);
+    } else {
+      next.delete(taskId);
+    }
+    return next;
+  });
+}
+
+const decisionKey = (taskId: string, approvalId: string) => `${taskId}\n${approvalId}`;
+
+/** The running or refused decision on one approval; kept in the store, so a recycled List cell neither drops nor repeats it. */
+export const approvalDecision = (taskId: string, approvalId: string): ApprovalDecision | undefined =>
+  approvalDecisionsSignal().get(decisionKey(taskId, approvalId));
+
+function setApprovalDecision(key: string, decision: ApprovalDecision | null): void {
+  approvalDecisionsSignal.update((current) => {
+    const next = new Map(current);
+    if (decision === null) {
+      next.delete(key);
+    } else {
+      next.set(key, decision);
+    }
+    return next;
+  });
+}
+
+/**
+ * Approves or rejects exactly this pending approval (`activity.approve` / `activity.reject`). The Host answers a
+ * decision the other entry made first with `StaleApprovalError`; either way the cards load again, so they show the
+ * decided state, and a refusal stays on the approval until the next attempt.
+ */
+export async function decideApproval(taskId: string, approvalId: string, decision: "approve" | "reject"): Promise<void> {
+  const key = decisionKey(taskId, approvalId);
+  if (untracked(() => approvalDecisionsSignal().get(key)?.running)) {
+    return;
+  }
+  setApprovalDecision(key, { running: decision, error: null });
+  try {
+    await bridge.call(decision === "approve" ? "activity.approve" : "activity.reject", { taskId, approvalId });
+    setApprovalDecision(key, null);
+  } catch (error) {
+    setApprovalDecision(key, { running: null, error: toBridgeCallError(error).message });
+  }
+  reloadActivityCards();
+}
+
+/** Reads the daemon's status and the SDK doctor (`settings.device`). */
+export async function readDevice(): Promise<DeviceView> {
+  return await bridge.call("settings.device", undefined);
+}
+
+/** Reads the Host settings (`settings.get`). */
+export async function readHostSettings(): Promise<HostSettings> {
+  return await bridge.call("settings.get", undefined);
+}
+
+/** Saves the dreaming switch and model order; K8 reads them when the Host next starts (`settings.setDreaming`). */
+export async function saveDreaming(setting: DreamingSetting): Promise<HostSettings> {
+  return await bridge.call("settings.setDreaming", setting);
 }
 
 /** Creates (under a UI-made id, reused on retry) or edits a Bot (`k8.saveBot`). */
