@@ -151,7 +151,21 @@ Written before `src/features/conversation/` implementation. Every state change i
 
 ---
 
-## 10. Upcoming Screen Motion Inventory Sections (Reserved)
+## 10. Motion Inventory — Activity & Settings (Slice 5)
 
-Feature slices landing after Slice 4 (`Conversation workspace`) will append their motion inventories here before implementation:
-- **Activity & Settings** (Slice 5 — card disclosure, approval confirmation, Dreaming & Device preferences)
+Written before `src/features/activity/` and `src/features/settings/` implementation. Every state change in the activity cards, approval decisions, device facts, and Dreaming preferences accounts for tool, tokens, and `reduceMotion()`:
+
+| State Change | Tool & Tokens | Reduced Motion Behavior |
+| --- | --- | --- |
+| Activity cards arriving, updating, or leaving (`activity.cards` on section entry, each Host state hint, Retry, and after a decision) | `List` (`viewport="parent"`) keyed by `taskId`; each recycled cell mounts its card by the current `taskId`, so a reused cell carries no state of the card it showed before; rows insert and update without enter animation | No animation either way; content is the same |
+| Card timeline expand/collapse | `Disclosure` (`Collapsible reveal={!reduceMotion()}`); the expanded set lives in the store by `taskId`, so a reload, a recycled cell, or a section switch keeps it | `reveal={false}`: expands and collapses at once |
+| Approval status changes (`pending` → `approved` / `rejected`, by either entry) | `Badge` pill swap: semantic tone plus symbol (`◐` / `✓` / `✕`) and label, so status never relies on color alone; a pending approval sits outside the `Disclosure`, so it shows while the card is folded | Instant swap; symbol and label always shown |
+| Approve / Reject confirmation | Native `confirmAlert` (`AlertDialog`, the OS alert dialog): the platform presents it, moves focus in and back, and Escape cancels it (`closeOnEscape`) | The OS alert follows the system's reduced-motion setting |
+| Approve / Reject running and its result | `Button loading` while the decision runs (both buttons disabled); a Host refusal (a stale approval included) shows `role="alert"` text in flow and the cards reload to the decided state | Spinner stops under `motion-reduce:`; busy and disabled states stay explicit |
+| `activity.cards` failure | A `role="alert"` banner with Retry replaces the list; no stale cards stay on screen | Instant appearance |
+| Settings load and Refresh (`settings.device`, `settings.get`) | Loads only when the section shows or Refresh is pressed; `Button loading` on Refresh; device facts, runtimes, and doctor checks swap in at once when the read lands | Spinner stops under `motion-reduce:`; content appears at once |
+| Runtime verdict and doctor status badges | `Badge` with tone plus symbol (`✓` / `!` / `✕`, `?` when none reported) and label | Instant swap; symbol and label always shown |
+| Dreaming switch and model choice | `Switch` thumb `MOTION_CLASSES.switchThumb` (`duration-200 ease-in-out`); `Checkbox` state wash `duration-150`; the `#1` / `#2` order label swaps in the row label | `motion-reduce:transition-none`: thumb and tick jump to the end state; order stays explicit in text |
+| Dreaming save | `Button loading` while `settings.setDreaming` runs; the result shows as `role="status"` text, a failure as `role="alert"` text | Spinner stops under `motion-reduce:`; result text appears at once |
+| Diagnostics export while the Host is not running | The button disables and a muted note explains why, in flow without layout shift | Identical |
+| Drag / swipe / throw | None in these workspaces | N/A |
