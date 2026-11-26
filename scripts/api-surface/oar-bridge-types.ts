@@ -101,8 +101,9 @@ export type CheckSession = Assert<Equal<Bridge.RawCodexSession, BridgeSession>>;
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 manual compaction) is omitted on purpose: exposing it is a separate product decision.
 // 'nativeSessionFile' and 'lastModelRequest' (OAR 0.128 optional members) are omitted: the fork wires neither and the SDK exposes neither.
+// 'answerQuestion' (OAR 0.136 host user questions) is omitted: native questions stay on the caller-owned request hooks.
 export type CheckSessionMembers = Assert<Equal<
-  Exclude<keyof CodexAdapterSession, 'goal' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask' | 'nativeSessionFile' | 'lastModelRequest'>,
+  Exclude<keyof CodexAdapterSession, 'goal' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask' | 'nativeSessionFile' | 'lastModelRequest' | 'answerQuestion'>,
   keyof Bridge.RawCodexSession
 >>;
 export type CheckReturn = Assert<Equal<ReturnType<typeof Bridge.codexSession>, Promise<Bridge.RawCodexSession>>>;
@@ -208,7 +209,7 @@ export type CheckAcpSession = Assert<Equal<AcpBridge.RawAcpSession, AcpBridgeSes
 // Name each intentional omission so new vendor members fail this check.
 // 'compact' (OAR 0.86 generic contract) is omitted on purpose, as for Codex.
 export type CheckAcpSessionMembers = Assert<Equal<
-  Exclude<keyof AdapterSession, 'goal' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask' | 'nativeSessionFile' | 'lastModelRequest'>,
+  Exclude<keyof AdapterSession, 'goal' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask' | 'nativeSessionFile' | 'lastModelRequest' | 'answerQuestion'>,
   keyof AcpBridge.RawAcpSession
 >>;
 export type CheckAcpPermissionHook = Assert<Assignable<NonNullable<AcpBridgeHooks['onPermission']>, NonNullable<AcpSessionHooks['onPermission']>>>;
@@ -273,7 +274,7 @@ export type CheckDshControl = Assert<Equal<DshBridge.DshControl, BridgeControl>>
 export type CheckDshRecord = Assert<Equal<DshBridge.DshRecord, Flatten<BridgeRecord>>>;
 export type CheckDshSession = Assert<Equal<DshBridge.RawDshSession, DshBridgeSession>>;
 export type CheckDshSessionMembers = Assert<Equal<
-  Exclude<keyof DshVendorSession, 'goal' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask' | 'nativeSessionFile' | 'lastModelRequest'>,
+  Exclude<keyof DshVendorSession, 'goal' | 'withdraw' | 'rawEvents' | 'graph' | 'resources' | 'contextBreakdown' | 'compact' | 'stopTask' | 'nativeSessionFile' | 'lastModelRequest' | 'answerQuestion'>,
   keyof DshBridge.RawDshSession
 >>;
 export type CheckDshVendorSession = Assert<Assignable<DshVendorSession, DshBridge.RawDshSession>>;
