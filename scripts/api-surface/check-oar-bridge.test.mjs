@@ -88,7 +88,7 @@ test('OAR process-tree JS bridge re-exports the checked vendored functions', () 
   ]);
 });
 
-test('OAR ACP JS bridge re-exports the checked vendored values', () => {
+test('ACP JS bridge re-exports the checked vendored and BYOK values', () => {
   const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/acp-session-runtime.js'), 'utf8');
   const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
   const reexports = body.map((statement) => {
@@ -107,6 +107,8 @@ test('OAR ACP JS bridge re-exports the checked vendored values', () => {
     ['../../vendor/oar/223703d/runtimes/grok/session.js', [['grokSession', 'grokSession']]],
     ['../../vendor/oar/223703d/runtimes/antigravity/session.js', [['antigravitySession', 'antigravitySession']]],
     ['../../vendor/oar/223703d/runtimes/opencode/session.js', [['opencodeSession', 'opencodeSession']]],
+    ['./cursor-acp-profile.js', [['cursorSession', 'cursorSession']]],
+    ['./cursor-list-models.js', [['cursorListModels', 'cursorListModels']]],
     ['../../vendor/oar/223703d/contracts/session-unavailable-error.js', [['SessionUnavailableError', 'SessionUnavailableError']]],
     ['../../vendor/oar/223703d/runtimes/grok/list-models.js', [['grokListModels', 'grokListModels']]],
     ['../../vendor/oar/223703d/runtimes/grok/account-usage.js', [['grokAccountUsage', 'grokAccountUsage']]],

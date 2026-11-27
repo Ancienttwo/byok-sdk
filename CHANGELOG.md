@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Added (client, #2514).** Opt in to `CursorAdapter` on macOS and Linux with a user-installed Cursor Agent CLI and `cursor-agent login`. Phase 1 includes fake-CLI contract coverage. [Host setup](docs/releases/host-upgrade-next-minor.md#cursor-agent-cli-2514)
+
 - **Breaking (client, keys, #2522).** The official Pi closure moves to 1.6.1. Re-prepare Pi inputs before dispatch and replace model IDs removed from the pinned catalog. Existing durable SQLite replicas open in place. [Host steps](docs/releases/host-upgrade-next-minor.md#pi-161-closure)
 - **Changed (client, #2521).** The client vendors OAR 0.138.1 and qualifies Antigravity CLI 1.5.18. `AgyAdapter.accountUsage()` requires `{ allowPrintMode: true }` to run its quota commands. agy subprocesses use `AGY_CLI_DISABLE_AUTO_UPDATE=true`. [Host steps](docs/releases/host-upgrade-next-minor.md#oar-01381-2521)
 - **Fixed (client, #2521).** Codex secret answers are scrubbed from the matching native output before SDK recording and projection.

@@ -1,3 +1,4 @@
+import { CursorAdapter, type CursorAdapterOptions } from './cursor/cursor-adapter.js';
 import { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter.js';
 import type { RuntimeId } from '@byok-sdk/protocol';
 import { isAbsolute } from 'node:path';
@@ -108,6 +109,15 @@ export interface RuntimeAdaptersRuntimes {
     /** This runtime's environment policy (#1759): it replaces the top-level `runtimeEnvironment` for this runtime; it is not merged with the top-level `pass`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084); `pass` and `allowlist` are unchanged. */
     runtimeEnvironment?: RuntimeEnvironmentPolicy;
   };
+  /** Optional settings for the user-installed Cursor Agent CLI. */
+  cursor?: {
+    /** Host default model selector. */
+    model?: CursorAdapterOptions['model'];
+    /** Executable override, resolved before PATH. */
+    executable?: string;
+    versionPolicy?: RuntimeVersionPolicy;
+    runtimeEnvironment?: RuntimeEnvironmentPolicy;
+  };
   /** Required when `runtimeAllowlist` lists `agy`, and applies only then. */
   agy?: {
     /** `AgyAdapterOptions.home`: the absolute OS home the SDK owns for agy and its tools. It must persist across executions and must not be the user's home. */
@@ -136,7 +146,7 @@ export interface RuntimeAdaptersConfig {
   nativeAssetRoot?: string;
   /** Re-enter the product's single-file/SEA executable for SDK helpers and every Pi launch. */
   sdkHelperHost?: SdkHelperHostConfig;
-  /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). `grok`, `dsh` and `agy` are built only when listed. */
+  /** Runtimes to build: unset = pi, claude and codex; set = exactly the listed ids (unknown ids ignored). Custom harnesses such as `cursor` are built only when listed. */
   runtimeAllowlist?: string[];
   runtimes?: RuntimeAdaptersRuntimes;
   /** The environment a built runtime gives its children (#1095) when `runtimes.<id>.runtimeEnvironment` is unset; Pi's policy must not pass `PI_PACKAGE_DIR`. The default `login-shell` base gives children the daemon's live `HOME`, not the snapshot's (#2084). */
@@ -199,6 +209,7 @@ const RUNTIME_OPTION_VALUES: Readonly<Record<keyof RuntimeAdaptersRuntimes, Read
   dsh: { sandbox: ['danger-full-access', 'read-only', 'workspace-write'] },
   agy: {},
   opencode: {},
+  cursor: {},
 };
 
 /**
@@ -346,6 +357,18 @@ function buildAdapter(id: SdkBuiltRuntimeId, config: DaemonRuntimeAdaptersConfig
       return buildDshAdapter(config, environment);
     case 'agy':
       return buildAgyAdapter(config, environment);
+    case 'cursor': {
+      const options = config.runtimes?.cursor ?? {};
+      try {
+        return new CursorAdapter({ model: options.model, nativeAssetRoot: config.nativeAssetRoot, ...environment,
+          ...(options.executable === undefined ? {} : { resolveBin: () => ({ command: options.executable!, source: 'env' as const }) }),
+          ...(options.versionPolicy === undefined ? {} : { versionPolicy: options.versionPolicy }),
+        });
+      } catch (error) {
+        if (error instanceof TypeError) throw new DaemonConfigInvalidError([invalid('runtimes.cursor', error.message)]);
+        throw error;
+      }
+    }
     case 'opencode': {
       const options = config.runtimes?.opencode ?? {};
       try {
@@ -474,6 +497,11 @@ function runtimeAdaptersConfigIssues(config: RuntimeAdaptersConfig): DaemonConfi
         issues.push(invalid('runtimes.opencode.models', 'DaemonConfig.runtimes.opencode.models must be an array of strings'));
       }
       expect(optional(opencode.executable, isString), 'runtimes.opencode.executable', 'a string');
+    }
+    const cursor = record.cursor;
+    if (isObject(cursor)) {
+      expect(optional(cursor.model, isString), 'runtimes.cursor.model', 'a string');
+      expect(optional(cursor.executable, isString), 'runtimes.cursor.executable', 'a string');
     }
     const agy = record.agy;
     if (isObject(agy)) {

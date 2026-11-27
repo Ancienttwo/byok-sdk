@@ -132,6 +132,20 @@
         "export:@byok-sdk/server#VerifyHostMcpTaskAssertionInput",
         "export:@byok-sdk/server#verifyHostMcpTaskAssertion"
       ]
+    },
+    {
+      "id": "cursor-agent-cli",
+      "impact": "additive",
+      "summary": "CursorAdapter adds an opt-in Cursor Agent CLI harness on macOS and Linux. It uses the device user's CLI login. Phase 1 has fake-CLI coverage.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#cursor-agent-cli-2514",
+      "items": [
+        "config:runtimes",
+        "export:@byok-sdk/client#CursorAdapter",
+        "export:@byok-sdk/client#CursorAdapterOptions",
+        "export:@byok-sdk/client/adapters#CursorAdapter",
+        "export:@byok-sdk/client/adapters#CursorAdapterOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes"
+      ]
     }
   ],
   "changes": [

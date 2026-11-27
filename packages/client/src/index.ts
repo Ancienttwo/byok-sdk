@@ -642,3 +642,4 @@ export type {
 } from './tool-authorization.js';
 
 export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './adapters/opencode/opencode-adapter.js';
+export { CursorAdapter, type CursorAdapterOptions } from './adapters/cursor/cursor-adapter.js';

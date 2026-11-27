@@ -819,7 +819,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildRuntimeAdapters`; the `grok`, `dsh` and `agy`\ncustom harnesses are built only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
+      "description": "Restricts which runtimes this daemon will ever use — enforced in two\nplaces that must stay consistent: `createDaemon` (this file) builds its\nbundled adapter set FROM this list (unset = the three wire runtimes —\npi, claude, codex; set = exactly the listed runtime ids, unknown ids\nignored — see `buildRuntimeAdapters`; custom harnesses such as `cursor`\nare built only when listed), and `TaskRunner.pickAdapter`\n(`task-runner.ts`) separately fail-closed-rejects any `task.offer`\nnaming a runtime outside this list regardless of which adapters were\nconstructed. `createDaemonWithAdapters` callers supply their own\n`adapters` array directly, so for them this field is enforcement-only,\nunchanged from M1/M2."
     },
     "runtimeInstallRoot": {
       "type": "string",
@@ -1884,6 +1884,206 @@
           },
           "additionalProperties": false,
           "description": "Optional OpenCode settings. Native user configuration is inherited."
+        },
+        "cursor": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string",
+              "description": "Host default model selector."
+            },
+            "executable": {
+              "type": "string",
+              "description": "Executable override, resolved before PATH."
+            },
+            "versionPolicy": {
+              "type": "object",
+              "properties": {
+                "qualifiedVersion": {
+                  "type": "string",
+                  "description": "The normalized token this SDK was qualified against, for example `0.160.0`."
+                },
+                "unqualified": {
+                  "enum": [
+                    "allow",
+                    "block",
+                    "warn"
+                  ],
+                  "description": "What an unmatched token means. A descriptor default may not use `block`; only a Host layer may."
+                },
+                "allow": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "description": "Explicitly known-good versions outside the qualified range."
+                },
+                "warn": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "description": "Versions that must stay a warning even where `unqualified` is `allow`."
+                },
+                "block": {
+                  "type": "array",
+                  "items": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "exact"
+                          },
+                          "version": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "version"
+                        ],
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "kind": {
+                            "const": "prefix"
+                          },
+                          "prefix": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "kind",
+                          "prefix"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "description": "Versions this Host refuses before claim. Host layer only."
+                }
+              },
+              "required": [
+                "qualifiedVersion",
+                "unqualified"
+              ],
+              "additionalProperties": false
+            },
+            "runtimeEnvironment": {
+              "anyOf": [
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "login-shell"
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "base": {
+                      "const": "allowlist"
+                    },
+                    "allow": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
+                    "pass": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  },
+                  "required": [
+                    "base"
+                  ],
+                  "additionalProperties": false
+                }
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "description": "Optional settings for the user-installed Cursor Agent CLI."
         },
         "agy": {
           "x-byok-surface": "embedded-only",

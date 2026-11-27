@@ -7,6 +7,7 @@ import { testAgentHomeConfig } from './fixtures/test-agent';
 import { testScratchRoot } from './fixtures/execution-scratch';
 import { DEFAULT_AGENT_EGRESS_POLICY } from '../daemon/agent-egress-policy';
 import { CodexProjection } from '../adapters/codex/projection';
+import { CursorAdapter } from '../adapters/cursor/cursor-adapter';
 import { GrokProjection } from '../adapters/grok/projection';
 import { createDaemonRecordProjector } from '../daemon/daemon-record';
 import { DaemonObserver, type DaemonEvent } from '../daemon/observer';
@@ -24,7 +25,7 @@ import { StubRuntimeAdapter } from './fixtures/stub-adapter';
 import { testHarnesses, testIngressBudget, acceptClaimSettlement } from './fixtures/activity-ingress';
 import { FRESH_OFFER, freshOfferEgressDeps, resumeSession } from './fixtures/fresh-offer';
 import { advertiseEveryDeviceFlag } from './support/advertised-capabilities';
-import type { RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeCapabilities, RuntimeOperationStartInput } from '../types';
+import type { RuntimeAdapter, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeCapabilities, RuntimeOperationStartInput } from '../types';
 import type { ToolAuthorizationDecision, ToolAuthorizationResolver, ToolAuthorizationTask, ToolReminder } from '../tool-authorization';
 
 const unusedBlobClient: BlobResolver = {
@@ -47,7 +48,7 @@ class GateCapturingAdapter extends StubRuntimeAdapter {
 const AUTO_CAPABLE: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true, toolAuthorizationAuto: true };
 const NO_AUTO: RuntimeCapabilities = { steer: true, resume: true, approvalInteractive: false, mcpToolsets: true };
 
-function makeRunner(adapter: StubRuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs'>> = {}) {
+function makeRunner(adapter: RuntimeAdapter, sent: Envelope[], extra: Partial<Pick<TaskRunnerDeps, 'toolAuthorization' | 'onToolReminder' | 'onToolAuthorizationDecision' | 'approvalTimeoutMs'>> = {}) {
   const approvalRegistry = new ApprovalRegistry();
   const runner = new TaskRunner({ advertisedHarnesses() { return testHarnesses(this.adapters); },
     advertisedCapabilities: advertiseEveryDeviceFlag, ...freshOfferEgressDeps(), getIngressBudget: testIngressBudget, awaitClaimSettlement: acceptClaimSettlement, scratchRoot: testScratchOwner(),
@@ -404,6 +405,24 @@ describe('daemon tool authorization', () => {
     expect(plainDecline(sent)).toMatchObject({ code: 'tool_authorization_unsupported', reason: expect.stringMatching(new RegExp(`^runtime ${runtimeId} `)) });
     expect(sent.some(event => event.type === 'task.claim')).toBe(false);
     expect(adapter.inputs).toEqual([]);
+  });
+
+  it.skipIf(process.platform === 'win32')('declines auto for the Cursor adapter before claiming', async () => {
+    const fixture = path.join(import.meta.dirname, 'fixtures/fake-cursor-agent.mjs');
+    const adapter = new CursorAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }), runtimeEnvironment: { base: 'allowlist' } });
+    const probes = vi.spyOn(adapter, 'detect').mockResolvedValue({ kind: 'available', version: '2026.09.18-9a7762b' });
+    const start = vi.fn();
+    vi.spyOn(adapter, 'prepare').mockResolvedValue({ kind: 'prepared', operation: { start } });
+    try {
+      const sent: Envelope[] = [];
+      const { runner } = makeRunner(adapter, sent, { toolAuthorization: () => ({ default: 'auto' }) });
+      await runner.handleEnvelope(createEnvelope('task.offer', { target: { lane: 'harness', harnessId: 'cursor', selection: { mode: 'device-default' } },
+        agentRef: freshTestAgentRef(), ...FRESH_OFFER, instruction: 'do work' }, { taskId: 'cursor-auto', seq: 1 }));
+      expect(probes).toHaveBeenCalled();
+      expect(plainDecline(sent)).toMatchObject({ code: 'tool_authorization_unsupported', retryable: false });
+      expect(sent.some(event => event.type === 'task.claim')).toBe(false);
+      expect(start).not.toHaveBeenCalled();
+    } finally { vi.restoreAllMocks(); }
   });
 
   it('publishes content-free gate audit records and redacts reminder summaries', () => {

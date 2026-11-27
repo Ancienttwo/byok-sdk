@@ -8,6 +8,8 @@ export { ModelConfirmationError } from '../../vendor/oar/223703d/contracts/model
 export { grokSession } from '../../vendor/oar/223703d/runtimes/grok/session.js';
 export { antigravitySession } from '../../vendor/oar/223703d/runtimes/antigravity/session.js';
 export { opencodeSession } from '../../vendor/oar/223703d/runtimes/opencode/session.js';
+export { cursorSession } from './cursor-acp-profile.js';
+export { cursorListModels } from './cursor-list-models.js';
 export { SessionUnavailableError } from '../../vendor/oar/223703d/contracts/session-unavailable-error.js';
 export { grokListModels } from '../../vendor/oar/223703d/runtimes/grok/list-models.js';
 export { grokAccountUsage } from '../../vendor/oar/223703d/runtimes/grok/account-usage.js';

@@ -65,3 +65,4 @@ export { createExecutionScratch, ScratchRootPathError } from '../daemon/retentio
 export type { ExecutionScratch } from '../daemon/retention/scratch.js';
 
 export { OpenCodeAdapter, type OpenCodeAdapterOptions } from './opencode/opencode-adapter.js';
+export { CursorAdapter, type CursorAdapterOptions } from './cursor/cursor-adapter.js';
