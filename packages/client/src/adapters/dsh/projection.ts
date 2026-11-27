@@ -1,9 +1,57 @@
-import { accumulateUsage, objectRecord as record, projectProviderContext } from '../shared-rules.js';
+import { accumulateUsage, normalizeOarToolContent, objectRecord as record, projectProviderContext } from '../shared-rules.js';
 import { AcpChildTurns } from '../acp-turn-buffer.js';
 import { BufferedToolUse } from '../buffered-tool-use.js';
 import type { AgentEvent, RuntimeFailureClass } from '@byok-sdk/protocol';
+import type { McpEventIdentities, McpEventIdentity } from '../../mcp/event-identity.js';
+import { qualifiedMcpToolName } from '../../mcp/projection.js';
 import { RuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
 import type { DshRecord } from '../../runtime/dsh-session-runtime.js';
+import type { McpToolsetToolObservation } from '../../types.js';
+
+const DSH_MAX_QUALIFIED_MCP_NAME = 64;
+
+/**
+ * Exact admitted dsh MCP names (`mcp__<server>__<tool>`, verbatim up to 64
+ * chars). Longer names are hash-shortened by dsh and stay unattributed rather
+ * than guessed; a name two tools share is ambiguous and gets no identity.
+ */
+export function dshMcpEventIdentities(observation: McpToolsetToolObservation = {}): McpEventIdentities {
+  const byName = new Map<string, McpEventIdentity | null>();
+  for (const [server, { tools }] of Object.entries(observation)) {
+    for (const { name: tool } of tools) {
+      const name = qualifiedMcpToolName(server, tool);
+      if (name.length > DSH_MAX_QUALIFIED_MCP_NAME) continue;
+      byName.set(name, byName.has(name) ? null : Object.freeze({ server, tool }));
+    }
+  }
+  return new Map([...byName].filter((entry): entry is [string, McpEventIdentity] => entry[1] !== null));
+}
+
+function projectDshMcpToolResult(
+  event: Record<string, unknown>,
+  native: unknown,
+): { output: Record<string, unknown>; isError: boolean } {
+  const message = record(record(record(native)?.data)?.message);
+  const isError = event.result === 'failed' || message?.isError === true;
+  let content: unknown[];
+  if (Array.isArray(message?.content)) {
+    content = message.content;
+  } else if (typeof message?.content === 'string') {
+    content = [{ type: 'text', text: message.content }];
+  } else {
+    content = normalizeOarToolContent(event.content);
+  }
+  const structuredContent = message?.structuredContent !== undefined && message.structuredContent !== null
+    ? message.structuredContent
+    : undefined;
+  return {
+    output: {
+      content,
+      ...(structuredContent === undefined ? {} : { structuredContent }),
+    },
+    isError,
+  };
+}
 
 type Usage = Extract<AgentEvent, { type: 'usage' }>;
 type Tokens = { input?: unknown; output?: unknown; reasoning?: unknown; cacheRead?: unknown };
@@ -56,14 +104,14 @@ function messageText(native: unknown): string {
  * The terminal usage remains the session-wide total with the root context.
  */
 export class DshProjection {
-  private readonly tools = new Map<string, { tool: string; agentPath?: string[] }>();
+  private readonly tools = new Map<string, { tool: string; agentPath?: string[]; mcp?: McpEventIdentity }>();
   private readonly buffered = new BufferedToolUse();
   private readonly billed = new Map<string, Tokens>();
   private pending?: Usage;
 
   private readonly children: AcpChildTurns;
 
-  constructor(rootSessionId: string) {
+  constructor(rootSessionId: string, private readonly identities: McpEventIdentities = new Map()) {
     this.children = new AcpChildTurns(rootSessionId);
   }
 
@@ -90,20 +138,40 @@ export class DshProjection {
       }
       if (path === undefined) continue;
       switch (event?.kind) {
-        case 'tool_call_started':
+        case 'tool_call_started': {
           if (typeof event.callId !== 'string' || typeof event.tool !== 'string') break;
           const callId = identify(event.callId);
-          this.tools.set(callId, { tool: event.tool, ...attribution });
+          const mcp = this.identities.get(event.tool);
+          this.tools.set(callId, { tool: event.tool, ...attribution, ...(mcp === undefined ? {} : { mcp }) });
           const args = toolInput(body?.native);
-          this.buffered.start({ type: 'tool_use', tool: event.tool, toolCallId: callId, ...(args === undefined ? {} : { input: args }), ...attribution });
+          this.buffered.start({
+            type: 'tool_use',
+            tool: event.tool,
+            toolCallId: callId,
+            ...(args === undefined ? {} : { input: args }),
+            ...attribution,
+            ...(mcp === undefined ? {} : { mcp }),
+          });
           this.buffered.observe(callId, undefined, false, true, emit);
           break;
+        }
         case 'tool_call_ended': {
           if (typeof event.callId !== 'string') break;
           const callId = identify(event.callId);
-          const tool = this.tools.get(callId)?.tool ?? 'tool';
+          const tracked = this.tools.get(callId);
+          const tool = tracked?.tool ?? 'tool';
           this.buffered.finish(callId, emit);
           this.tools.delete(callId);
+          const mcp = tracked?.mcp ?? this.identities.get(tool);
+          if (mcp !== undefined) {
+            const projected = projectDshMcpToolResult(event, body?.native);
+            emit({
+              type: 'tool_result', tool, toolCallId: callId, ...attribution, mcp,
+              output: projected.output,
+              ...(projected.isError ? { isError: true } : {}),
+            });
+            break;
+          }
           emit({
             type: 'tool_result', tool, toolCallId: callId, ...attribution,
             output: { ...(event.content === undefined ? {} : { content: event.content }) },
@@ -132,7 +200,11 @@ export class DshProjection {
   private endTurn(turn: Record<string, unknown>, emit: (event: AgentEvent) => void, outcome: (turn: DshTurnOutcome) => void): void {
     for (const [toolCallId, tool] of this.tools) {
       this.buffered.finish(toolCallId, emit);
-      emit({ type: 'tool_result', ...tool, toolCallId, output: { status: turn.kind === 'aborted' ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' } });
+      emit({
+        type: 'tool_result', ...tool, toolCallId,
+        ...(tool.mcp === undefined ? {} : { isError: true }),
+        output: { status: turn.kind === 'aborted' ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' },
+      });
     }
     this.tools.clear();
     const usage = this.takePendingUsage();

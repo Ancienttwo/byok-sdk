@@ -261,9 +261,9 @@ it('projects an inner attempt and reminder before progress without attributing i
   const mcp = { server: 'byoktools', tool: 'call_tool' };
   const tool = 'mcp__byoktools__call_tool';
   session.emit({ type: 'tool_use', tool, mcp, toolCallId: 'a', input: { server: 'inner', tool: 'echo', arguments: { path: 'fixture.txt' } } });
-  session.emit({ type: 'tool_result', tool, mcp, toolCallId: 'a', isError: false, output: { result: {
-    details: { serverName: 'byoktools', toolName: 'call_tool', isError: true },
-  } } });
+  session.emit({ type: 'tool_result', tool, mcp, toolCallId: 'a', isError: true, output: {
+    content: [{ type: 'text', text: 'hub call failed' }],
+  } });
   session.emit({ type: 'turn_end' });
   await vi.waitFor(() => expect(sent.some(row => row.type === 'task.complete')).toBe(true));
   expect(reminders).toMatchObject([{ toolName: 'mcp__inner__echo', toolCallId: 'a', authorization: { ruleIds: ['review-inner'] } }]);

@@ -111,20 +111,9 @@ export function sameLabel(left: ToolLabel, right: ToolLabel): boolean {
   return left.tool === right.tool && left.mcp?.server === right.mcp?.server && left.mcp?.tool === right.mcp?.tool;
 }
 
-/** The failed-call signals of the method doc table: `isError: true`, or a Codex `output.status` of `failed`. */
+/** The failed-call signal: `isError: true`. */
 function failedSignal(event: Record<string, unknown>): boolean {
-  if (event.isError === true) return true;
-  const output = event.output as { status?: unknown } | undefined;
-  return output !== null && typeof output === 'object' && output.status === 'failed';
-}
-
-/** The submitted document inside `tool_use.input`: MCP call wrappers carry it as `arguments`. */
-function submittedDocument(input: unknown): unknown {
-  if (input !== null && typeof input === 'object' && !Array.isArray(input)) {
-    const record = input as Record<string, unknown>;
-    if (Object.hasOwn(record, 'arguments') && typeof record.tool === 'string') return record.arguments;
-  }
-  return input;
+  return event.isError === true;
 }
 
 interface ToolCall { at: string; toolCallId: string | null; use?: Record<string, unknown>; result?: Record<string, unknown> }
@@ -162,7 +151,7 @@ export function extractSubmissions(events: readonly ObservedEvent[], predicate: 
     if (body?.kind === 'staged' && staged && staged.receiptId === body.receiptId) {
       byteCount = staged.byteCount; hash = staged.contentHash;
     } else if (call.use && call.use.spill === undefined && Object.hasOwn(call.use, 'input')) {
-      const document = submittedDocument(call.use.input);
+      const document = call.use.input;
       byteCount = Buffer.byteLength(JSON.stringify(document) ?? '', 'utf8');
       hash = resultDigest(document);
     }

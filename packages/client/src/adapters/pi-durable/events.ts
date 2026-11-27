@@ -122,7 +122,20 @@ export class DurableViewProjection {
 export function withMcpIdentity(event: AgentEvent, identities: McpEventIdentities): AgentEvent {
   if (event.type !== 'tool_use' && event.type !== 'tool_result') return event;
   const mcp = identities.get(event.tool);
-  return mcp === undefined ? event : { ...event, mcp };
+  if (mcp === undefined) return event;
+  if (event.type === 'tool_use') return { ...event, mcp };
+  const message = object(event.output);
+  const details = object(message.details);
+  const content = Array.isArray(details.rawContent) ? details.rawContent : message.content;
+  const structuredContent = details.structuredContent === null ? undefined : details.structuredContent;
+  const isError = event.isError === true || details.isError === true;
+  const output = content === undefined && structuredContent === undefined
+    ? event.output
+    : {
+      ...(content === undefined ? {} : { content }),
+      ...(structuredContent === undefined ? {} : { structuredContent }),
+    };
+  return { ...event, mcp, output, isError };
 }
 /** Run boundaries never complete a BYOK execution; the engine decides that after idle. */
 export function projectDurableEvent(event: DurableEvent): AgentEvent[] {

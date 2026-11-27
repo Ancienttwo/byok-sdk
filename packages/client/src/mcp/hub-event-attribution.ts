@@ -2,25 +2,12 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { McpEventIdentity } from './event-identity.js';
 import type { ToolCall } from '../tool-authorization.js';
 import { readMcpHubCatalog, type McpHubCatalogBinding } from './hub/catalog.js';
-import { HUB_CALL_TOOL, HUB_SEARCH_TOOL, MCP_HUB_SERVER_NAME, isJsonObject, parseHubCall } from './hub/protocol.js';
+import { HUB_CALL_TOOL, MCP_HUB_SERVER_NAME, parseHubCall } from './hub/protocol.js';
 import { qualifiedMcpToolName } from './projection.js';
 
 const OUTER_CALL = qualifiedMcpToolName(MCP_HUB_SERVER_NAME, HUB_CALL_TOOL);
 
 type ToolUse = Extract<AgentEvent, { type: 'tool_use' }>;
-type ToolResult = Extract<AgentEvent, { type: 'tool_result' }>;
-
-/** Pi reports callback exceptions separately from the SDK MCP bridge's isError. */
-export function projectPiHubError(event: ToolResult): ToolResult {
-  const { mcp, output } = event;
-  if (event.isError === true || mcp?.server !== MCP_HUB_SERVER_NAME
-    || (mcp.tool !== HUB_SEARCH_TOOL && mcp.tool !== HUB_CALL_TOOL)
-    || event.tool !== qualifiedMcpToolName(mcp.server, mcp.tool)
-    || !isJsonObject(output) || !isJsonObject(output.result) || !isJsonObject(output.result.details)) return event;
-  const { details } = output.result;
-  if (details.serverName !== mcp.server || details.toolName !== mcp.tool || details.isError !== true) return event;
-  return { ...event, isError: true };
-}
 
 /** A runtime start frame can identify an attempted call. It carries no server receipt. */
 export async function attributeHubAttempt(

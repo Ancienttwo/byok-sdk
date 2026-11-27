@@ -61,3 +61,22 @@ export function accumulateUsage(next: Usage, tokens: Record<string, unknown> | u
   }
   return tokens;
 }
+
+/**
+ * Convert OAR's normalized `ToolOutputPart[]` (`mediaType` on images, `other`
+ * wrapper on non-text/image blocks) back to MCP `CallToolResult.content` items.
+ */
+export function normalizeOarToolContent(content: unknown): unknown[] {
+  if (!Array.isArray(content)) return [];
+  return content.map((item) => {
+    const part = objectRecord(item);
+    if (part === undefined) return item;
+    if (part.type === 'image' && typeof part.data === 'string' && typeof part.mediaType === 'string') {
+      return { type: 'image', data: part.data, mimeType: part.mediaType };
+    }
+    if (part.type === 'other' && Object.hasOwn(part, 'value')) {
+      return part.value;
+    }
+    return item;
+  });
+}

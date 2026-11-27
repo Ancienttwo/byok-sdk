@@ -947,7 +947,8 @@ describe('Codex persistent app-server adapter', () => {
     expect(gone(pids.mcp)).toBe(false);
     await s.followUp(task);
     expect(await turn(s)).toContainEqual(expect.objectContaining({ type: 'tool_result', toolCallId: 'mcp-after-abort',
-      output: expect.objectContaining({ result: expect.objectContaining({ content: [{ type: 'text', text: 'byok-echo:after abort' }] }) }),
+      mcp: { server: 'host', tool: 'echo' }, isError: false,
+      output: { content: [{ type: 'text', text: 'byok-echo:after abort' }] },
     }));
     expect(gone(pids.mcp)).toBe(false);
   });

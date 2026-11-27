@@ -199,6 +199,7 @@ export class CodexProjection {
           events.push({
             type: 'tool_result',
             ...active,
+            ...(active.mcp === undefined ? {} : { isError: true }),
             output: {
               status: 'interrupted',
               reason:
@@ -274,20 +275,43 @@ export class CodexProjection {
         : item.type === 'fileChange'
           ? { changes }
           : item.type === 'mcpToolCall'
-            ? {
-                server: item.server,
-                tool: item.tool,
-                arguments: item.arguments,
-              }
+            ? item.arguments
             : { query: item.query };
     const mcp = item.type === 'mcpToolCall' && typeof item.server === 'string' && item.server.length > 0
       && typeof item.tool === 'string' && item.tool.length > 0 ? { server: item.server, tool: item.tool } : undefined;
     const identity = { ...attribution, ...(mcp === undefined ? {} : { mcp }) };
     if (started) {
       state.active.set(activeKey, { tool, toolCallId, ...identity });
-      return [{ type: 'tool_use', tool, toolCallId, input: inputValue, ...identity }];
+      return [{ type: 'tool_use', tool, toolCallId, ...(inputValue === undefined ? {} : { input: inputValue }), ...identity }];
     }
     state.active.delete(activeKey);
+    if (item.type === 'mcpToolCall') {
+      const result = record(item.result);
+      const isError = item.status !== 'completed'
+        || (item.error !== undefined && item.error !== null)
+        || result?.isError === true;
+      let output: unknown;
+      if (result !== undefined && (result.content !== undefined || result.structuredContent !== undefined)) {
+        output = {
+          ...(result.content === undefined ? {} : { content: result.content }),
+          ...(result.structuredContent === undefined || result.structuredContent === null
+            ? {}
+            : { structuredContent: result.structuredContent }),
+        };
+      } else if (item.result !== undefined && item.result !== null) {
+        output = item.result;
+      } else if (item.error !== undefined && item.error !== null) {
+        output = { error: item.error };
+      }
+      return [{
+        type: 'tool_result',
+        tool,
+        toolCallId,
+        ...(output === undefined ? {} : { output }),
+        isError,
+        ...identity,
+      }];
+    }
     const output =
       item.type === 'commandExecution'
         ? {
@@ -298,9 +322,7 @@ export class CodexProjection {
           }
         : item.type === 'fileChange'
           ? { changes, status: item.status }
-          : item.type === 'mcpToolCall'
-            ? { result: item.result, error: item.error, status: item.status }
-            : { query: item.query, status: item.status };
+          : { query: item.query, status: item.status };
     const events: AgentEvent[] = [
       { type: 'tool_result', tool, toolCallId, output, ...identity },
     ];

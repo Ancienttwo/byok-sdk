@@ -51,18 +51,32 @@ it('compares documents by the key-sorted digest, not by JSON.stringify', () => {
     .toMatchObject({ category: 'valid', exactTarget: true, firstCallValid: true });
 });
 
-it('reads the helper body from each runtime output shape and ignores a spilled preview', () => {
+it('reads the helper body from canonical MCP output and ignores a spilled preview', () => {
   expect(findHelperBody(staged('r1'))).toEqual({ kind: 'staged', receiptId: 'r1' });
-  expect(findHelperBody({ status: 'completed', result: staged('r2') })).toEqual({ kind: 'staged', receiptId: 'r2' });
+  expect(findHelperBody({ content: [], structuredContent: { receiptId: 'r2', state: 'staged' } })).toEqual({ kind: 'staged', receiptId: 'r2' });
   expect(findHelperBody(rejected)).toEqual({ kind: 'rejected', reason: 'schema-mismatch' });
   expect(findHelperBody('plain text')).toBeUndefined();
   const spilled: ObservedEvent[] = [{ at, event: { type: 'tool_result', tool: 'submit_result', toolCallId: 's', output: staged('r3'), spill: { totalBytes: 1 } } }];
   expect(extractSubmissions(spilled, confirmed, null)).toEqual([expect.objectContaining({ validation: 'unknown' })]);
-  // A Codex call: the result carries the label and `output.status`; no tool_use is required.
-  const codex: ObservedEvent[] = [{ at, event: { type: 'tool_result', tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' }, toolCallId: 'c', output: { status: 'failed', error: 'refused' } } }];
+  // A canonical Codex MCP error call: the result carries `mcp` and `isError: true`; no tool_use is required.
+  const codex: ObservedEvent[] = [{ at, event: { type: 'tool_result', tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' }, toolCallId: 'c', isError: true, output: { error: { message: 'refused' } } } }];
   const codexPredicate: CallPredicate = { confirmed: true, label: { tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' } }, source: 'test' };
   expect(extractSubmissions(codex, codexPredicate, null)).toEqual([expect.objectContaining({ validation: 'error', label: codexPredicate.label })]);
   expect(extractSubmissions(codex, confirmed, null)).toEqual([]);
+  // Old non-canonical `output.status: 'failed'` without `isError: true` is no longer read as a failure.
+  const staleStatusOnly: ObservedEvent[] = [{ at, event: { type: 'tool_result', tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' }, toolCallId: 'c2', output: { status: 'failed', error: 'refused' } } }];
+  expect(extractSubmissions(staleStatusOnly, codexPredicate, null)).toEqual([expect.objectContaining({ validation: 'unknown', label: codexPredicate.label })]);
+  // Canonical `tool_use.input` is hashed whole without unwrapping a top-level `arguments` field.
+  const documentWithArgs = { tool: 'report', arguments: { count: 1 } };
+  const rawInputCall: ObservedEvent[] = [
+    { at, event: { type: 'tool_use', tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' }, toolCallId: 'c3', input: documentWithArgs } },
+    { at, event: { type: 'tool_result', tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' }, toolCallId: 'c3', isError: true, output: rejected } },
+  ];
+  expect(extractSubmissions(rawInputCall, codexPredicate, null)).toEqual([expect.objectContaining({
+    validation: 'rejected',
+    hash: resultDigest(documentWithArgs),
+    byteCount: Buffer.byteLength(JSON.stringify(documentWithArgs), 'utf8'),
+  })]);
 });
 
 it('assigns one category in the order of the method doc', () => {

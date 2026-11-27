@@ -144,11 +144,11 @@ async function runPair({ root, command, arm, annotations, interactive, cases }) 
       const searched = arm !== 'hub' || (search.length === 2 && targets.every(server => JSON.stringify(searchResult ?? '').includes(server)));
       const calls = await Promise.all(targets.map(async (server) => {
         const source = arm === 'hub' ? toolEvents(mcpEvents, MCP_HUB_SERVER_NAME, HUB_CALL_TOOL) : toolEvents(mcpEvents, server, tool);
-        const uses = source.filter(event => event.type === 'tool_use' && (arm !== 'hub' || event.input?.arguments?.server === server));
+        const uses = source.filter(event => event.type === 'tool_use' && (arm !== 'hub' || event.input?.server === server));
         const result = uses.length === 1 ? source.find(event => event.type === 'tool_result' && event.toolCallId === uses[0].toolCallId) : undefined;
         const received = await receipts(receiptPaths[server]);
         const wireInput = uses[0]?.input;
-        const args = arm === 'hub' ? wireInput?.arguments?.arguments : wireInput?.arguments;
+        const args = arm === 'hub' ? wireInput?.arguments : wireInput;
         const complete = received.length === (server === 'alpha' ? 1 : 0)
           && received.every(call => call.name === tool && call.arguments?.text === `${turnId}-${server}`)
           && (arm === 'native' && server === 'beta' || (

@@ -103,7 +103,8 @@ export async function runPiDurableHost(argv: readonly string[]): Promise<void> {
     // harness reads the model's text from `output` only (#1303).
     for (const tool of createPiMcpTools(rows, pool, naming)) tools.push({ name: tool.name, description: tool.description, parameters: tool.parameters as ToolRegistration['parameters'], replay: 'unsafe', execute: async (parameters, toolApi, ctx): Promise<ToolExecutionResult> => {
       const result = await tool.execute(toolApi.callId, parameters, ctx.abortSignal);
-      return { output: result.content, details: { ...result.details }, isError: result.details.isError };
+      // SAFETY: MCP CallToolResult fields are parsed JSON-RPC payloads, so `details` is always a JsonValue object.
+      return { output: result.content, details: { ...result.details } as unknown as ToolExecutionResult['details'], isError: result.details.isError };
     } });
   }
   const fileTools: ToolRegistration[] | undefined = scope?.tools.map(tool => ({

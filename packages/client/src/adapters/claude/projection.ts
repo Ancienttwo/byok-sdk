@@ -272,6 +272,34 @@ function mapAssistant(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation)
  * as `unknown` regardless, so a future array shape still round-trips
  * correctly without a mapping change.
  */
+function normalizeClaudeMcpContent(blockContent: unknown): unknown[] {
+  if (Array.isArray(blockContent)) return blockContent;
+  if (typeof blockContent === 'string') return [{ type: 'text', text: blockContent }];
+  return [];
+}
+
+function projectClaudeMcpToolResult(
+  blockContent: unknown,
+  toolUseResult: unknown,
+  blockIsError: boolean | undefined,
+): { output: Record<string, unknown>; isError: boolean | undefined } {
+  const result = object(toolUseResult);
+  if (result !== undefined && (Array.isArray(result.content) || result.structuredContent !== undefined)) {
+    const content = Array.isArray(result.content) ? result.content : normalizeClaudeMcpContent(blockContent);
+    const structuredContent = result.structuredContent === null ? undefined : result.structuredContent;
+    const isError = blockIsError === true || result.isError === true ? true : blockIsError;
+    return {
+      output: {
+        content,
+        ...(structuredContent === undefined ? {} : { structuredContent }),
+      },
+      isError,
+    };
+  }
+  const content = Array.isArray(toolUseResult) ? toolUseResult : normalizeClaudeMcpContent(blockContent);
+  return { output: { content }, isError: blockIsError };
+}
+
 function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, options: MapClaudeMessageOptions): MapClaudeMessageResult {
   const message = msg.message as { content?: unknown } | undefined;
   const content = message?.content;
@@ -279,6 +307,7 @@ function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, opti
 
   const events: AgentEvent[] = [];
   let unmappedLabel: string | undefined;
+  const toolResultCount = content.filter((raw) => (raw as { type?: unknown } | null)?.type === 'tool_result').length;
 
   for (const raw of content) {
     const block = raw as { type?: unknown; tool_use_id?: unknown; content?: unknown; is_error?: unknown };
@@ -294,10 +323,27 @@ function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, opti
     // local use frame remains explicitly unpaired; it is never matched by
     // name or by output content.
     const tool = correlation.toolNameByUseId.get(block.tool_use_id) ?? 'unknown';
+    const mcp = correlation.mcpIdentities?.get(tool);
     const isError = typeof block.is_error === 'boolean' ? block.is_error : undefined;
+    if (mcp !== undefined) {
+      const projected = projectClaudeMcpToolResult(
+        block.content,
+        toolResultCount === 1 ? msg.tool_use_result : undefined,
+        isError,
+      );
+      const event: Extract<AgentEvent, { type: 'tool_result' }> = {
+        type: 'tool_result',
+        mcp,
+        tool,
+        output: projected.output,
+        toolCallId: block.tool_use_id,
+      };
+      if (projected.isError !== undefined) event.isError = projected.isError;
+      events.push(event);
+      continue;
+    }
     const event: Extract<AgentEvent, { type: 'tool_result' }> = {
       type: 'tool_result',
-      ...(correlation.mcpIdentities?.get(tool) === undefined ? {} : { mcp: correlation.mcpIdentities.get(tool)! }),
       tool,
       output: { content: block.content },
       toolCallId: block.tool_use_id,

@@ -41,7 +41,8 @@ import { agentPersona } from '../agent-persona.js';
 import { DSH_RUNTIME_CAPABILITIES } from './dsh-capabilities.js';
 import { assertDshModelSelection, assertDshSandboxMode, dshAgentsHome, dshEnvironment, dshPatch, dshRoute, DSH_PROVIDER_KEY_ENV } from './dsh-profile.js';
 import { DSH_VERSION_POLICY, dshVersionToken } from './dsh-version.js';
-import { DshProjection, type DshTurnOutcome } from './projection.js';
+import { DshProjection, dshMcpEventIdentities, type DshTurnOutcome } from './projection.js';
+import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { resolveDshBin } from './resolve-bin.js';
 import { PI_PROVIDER_ENV_KEYS } from '../pi/pi-provider-env.generated.js';
 import { offerSelection } from '../../types.js';
@@ -194,6 +195,7 @@ export class DshAdapter implements RuntimeAdapter {
       ...(byokProviderId === undefined || this.options.model.model === undefined ? {} : { defaultModelModes: ['byok'] }),
       ...(byokProviderId === undefined ? {} : { byokProviderId }),
       supportsEffort: true,
+      requiresMcpToolsetToolObservation: true,
       // dsh ships no win32 build of its native addon (docs/researches/2026-11-01-dsh-adapter.md §1.9).
       platforms: ['darwin', 'linux'],
       capabilities: DSH_RUNTIME_CAPABILITIES,
@@ -339,6 +341,7 @@ export class DshAdapter implements RuntimeAdapter {
     const session = new DshSession(
       input.scratch,
       this.interruptTimeoutMs,
+      dshMcpEventIdentities(input.mcpToolsetTools),
     );
     try {
       // dsh compares the canonical workspace on resume.
@@ -423,6 +426,7 @@ class DshSession implements Session {
   constructor(
     private readonly scratch: ExecutionScratch,
     private readonly interruptMs: number,
+    private readonly identities: McpEventIdentities,
   ) {}
 
   own(child: { dispose(): Promise<void>; kill(): void; observeDescendants(): void; readonly exitedOnItsOwn: boolean }): void {
@@ -442,7 +446,7 @@ class DshSession implements Session {
   }
   ready(id: string): void {
     this.sessionRef = id;
-    this.projection = new DshProjection(id);
+    this.projection = new DshProjection(id, this.identities);
   }
   refuseRoute(): void {
     if (this.turnClosed || this.halted !== undefined) return;
