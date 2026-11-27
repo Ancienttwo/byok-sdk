@@ -71,18 +71,18 @@ function runtimeReaderMethods(adapters: readonly RuntimeAdapter[]): ControlMetho
   }
   return {
     [RUNTIMES_MODELS_METHOD]: (params, signal) => {
-      const { runtimeId, refresh } = parseRuntimeReadParams(params, true);
+      const { runtimeId, flag: refresh } = parseRuntimeReadParams(params, 'refresh');
       const adapter = adapterFor(runtimeId);
       if (!adapter.listModels) return { kind: 'unsupported', reason: 'model listing unavailable' };
       const listModels = adapter.listModels.bind(adapter);
       return boundRuntimeRead(signal, readSignal => listModels({ signal: readSignal, ...(refresh === undefined ? {} : { refresh }) }));
     },
     [RUNTIMES_USAGE_METHOD]: (params, signal) => {
-      const { runtimeId } = parseRuntimeReadParams(params, false);
+      const { runtimeId, flag: allowPrintMode } = parseRuntimeReadParams(params, 'allowPrintMode');
       const adapter = adapterFor(runtimeId);
       if (!adapter.accountUsage) return { kind: 'unsupported', reason: 'capability_unavailable' };
       const accountUsage = adapter.accountUsage.bind(adapter);
-      return boundRuntimeRead(signal, readSignal => accountUsage({ signal: readSignal }));
+      return boundRuntimeRead(signal, readSignal => accountUsage({ signal: readSignal, ...(allowPrintMode === undefined ? {} : { allowPrintMode }) }));
     },
   };
 }

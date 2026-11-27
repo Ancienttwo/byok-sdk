@@ -66,7 +66,8 @@ export declare function codexSession(
     onRecord?: (record: CodexRecord) => void;
     onNativeIdentity?: (method: string, identity: Record<string, unknown>) => void;
     onServerRequest?: (id: string | number, method: string, params: Record<string, unknown>, reply: {
-      respond(value: Record<string, unknown>): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
+      respond(value: Record<string, unknown>, freeTextAnswers?: ReadonlyMap<string, string>): Promise<void>;
+      reject(code: number, message: string): Promise<void>; cancelled(): void;
     }) => void;
     /** Runs on the session's own app-server client before the thread open; returns the open request params. A throw kills the app-server. */
     beforeOpen?: (request: CodexOpenStepRequest, params: Record<string, unknown>) => Promise<Record<string, unknown>>;

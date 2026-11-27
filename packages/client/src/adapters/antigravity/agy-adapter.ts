@@ -1,6 +1,6 @@
 import { resolveInterruptTimeoutMs, resolveMaxRetainedBytes } from '../session-limits.js';
 import { createRuntimeReaders } from '../../runtime/runtime-readers.js';
-import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeAccountUsageOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import { antigravityVersionRefusal } from '../../runtime/oar-version-floors.js';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import os from 'node:os';
@@ -121,10 +121,11 @@ export class AgyAdapter implements RuntimeAdapter {
     });
   }
 
-  accountUsage(options: RuntimeReadOptions = {}): Promise<RuntimeAccountUsage> {
+  async accountUsage(options: RuntimeAccountUsageOptions = {}): Promise<RuntimeAccountUsage> {
+    if (options.allowPrintMode !== true) return { kind: 'unsupported', reason: 'print_mode_disabled' };
     return this.readers.accountUsage(options, async (installation, reader) => {
       const { antigravityAccountUsage } = await import('#byok-oar-readers');
-      return antigravityAccountUsage(installation, reader);
+      return antigravityAccountUsage(installation, { ...reader, allowPrintMode: true });
     });
   }
 

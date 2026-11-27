@@ -5,7 +5,8 @@ import { acpReportedEffort } from "./model.js";
 import { AcpError } from "./errors.js";
 import { UnsupportedOptionError } from "../../contracts/errors.js";
 
-type WaitForConfirmation = (signal: AbortSignal) => Promise<void>;
+/** Resolves with the `config_option_update` that reported the requested value. */
+type WaitForConfirmation = (signal: AbortSignal) => Promise<JsonRecord>;
 
 export interface AcpConfigUpdates {
   observe(notification: unknown): void;
@@ -23,7 +24,7 @@ export function createAcpConfigUpdates(redact?: CredentialRedactor["redactValue"
       for (const listener of listeners) listener(params.sessionId, update, safe);
     },
     async confirm(sessionId, configId, value, run) {
-      const state: { observed: boolean; current: unknown; reported: unknown; effort?: string | null; changed?: () => void } = { observed: false, current: null, reported: null };
+      const state: { observed: boolean; current: unknown; reported: unknown; update?: JsonRecord; effort?: string | null; changed?: () => void } = { observed: false, current: null, reported: null };
       const listener = (id: string, update: JsonRecord, safe: JsonRecord | null): void => {
         if (id !== sessionId) { return; }
         const option = asRecordList(update.configOptions).find(entry => entry.id === configId);
@@ -31,6 +32,7 @@ export function createAcpConfigUpdates(redact?: CredentialRedactor["redactValue"
         const retained = asRecordList(safe?.configOptions).find(entry => entry.id === configId);
         state.observed = true;
         state.current = option.currentValue;
+        state.update = update;
         state.reported = retained?.currentValue;
         state.effort = acpReportedEffort(safe);
         state.changed?.();
@@ -39,7 +41,7 @@ export function createAcpConfigUpdates(redact?: CredentialRedactor["redactValue"
       try {
         return await run(async signal => {
           signal.throwIfAborted();
-          if (state.observed && state.current === value) { return; }
+          if (state.observed && state.current === value && state.update !== undefined) { return state.update; }
           do {
             signal.throwIfAborted();
             const matched = Promise.withResolvers<void>();
@@ -52,7 +54,8 @@ export function createAcpConfigUpdates(redact?: CredentialRedactor["redactValue"
             try { await matched.promise; }
             finally { signal.removeEventListener("abort", aborted); }
           // oxlint-disable-next-line eslint/no-unmodified-loop-condition -- Notifications update the observed state while awaiting.
-          } while (state.current !== value);
+          } while (state.current !== value || state.update === undefined);
+          return state.update;
         });
       } catch (error) {
         // An explicit RPC failure or process exit retains its own classification.

@@ -83,7 +83,7 @@ for (const declaration of ['acp-session-runtime.d.ts', 'oar-readers.d.ts']) {
 for (const name of ['THIRD-PARTY.md', 'third-party-manifest.json']) {
   await copyFile(new URL(`vendor/${name}`, root), new URL(name, assets));
 }
-for (const directory of ['pi-tui/0.85.1', 'get-east-asian-width/1.6.0', 'oar/87c0929']) {
+for (const directory of ['pi-tui/0.85.1', 'get-east-asian-width/1.6.0', 'oar/223703d']) {
   const target = new URL(`provenance/${directory}/`, assets);
   await mkdir(target, { recursive: true });
   for (const name of ['LICENSE', 'PROVENANCE.md', 'source-manifest.json']) {

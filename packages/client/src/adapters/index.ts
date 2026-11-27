@@ -15,7 +15,7 @@ export type {
   RuntimeDetectionRefusalReason,
 } from '../types.js';
 export type {
-  RuntimeAccountUsage, RuntimeAccountUsageUnsupportedReason, RuntimeAccountUsageWindow,
+  RuntimeAccountUsage, RuntimeAccountUsageOptions, RuntimeAccountUsageUnsupportedReason, RuntimeAccountUsageWindow,
   RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeModelEntry, RuntimeReadOptions, RuntimeUnsupportedVersion,
 } from '../runtime/runtime-reader-types.js';
 export { delegateAdmissionDetection, isWireRuntimeId, observeRuntimeDetection, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';

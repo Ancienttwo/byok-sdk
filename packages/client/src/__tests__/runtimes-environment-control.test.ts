@@ -136,7 +136,7 @@ it('sends only name and source, name and rule, whatever else a custom adapter pu
 });
 
 it('forwards on-demand catalog and usage reads on a paired host and keeps them out of SaaS discovery', async () => {
-  const calls: Array<{ operation: string; signal?: AbortSignal; refresh?: boolean }> = [];
+  const calls: Array<{ operation: string; signal?: AbortSignal; refresh?: boolean; allowPrintMode?: boolean }> = [];
   let usage: RuntimeAccountUsage = { kind: 'available', plan: 'test-private-plan', rateLimited: false, windows: [{ label: 'week', usedRatio: 0.37 }] };
   const catalog = { kind: 'ok', models: [{ id: 'model-a', effortLevels: ['low', 'high'], defaultEffort: 'low' },
     { id: 'model-b', effortUnavailableReason: 'Native model selection did not return a confirmed effort menu.' }] } as const;
@@ -162,8 +162,11 @@ it('forwards on-demand catalog and usage reads on a paired host and keeps them o
     usage = { kind: 'unavailable', reason: 'access_token_expired' };
     await expect(requestRuntimeUsage(connection.client, 'claude')).resolves.toEqual(usage);
     await expect(connection.client.request('runtimes.usage', { runtimeId: 'claude', refresh: true })).rejects.toMatchObject({ code: 'bad_request' });
-    expect(calls.map(({ operation, refresh }) => ({ operation, refresh }))).toEqual([
+    await expect(requestRuntimeUsage(connection.client, 'claude', true)).resolves.toEqual(usage);
+    await expect(connection.client.request('runtimes.usage', { runtimeId: 'claude', allowPrintMode: 'true' })).rejects.toMatchObject({ code: 'bad_request' });
+    expect(calls.map(({ signal, ...options }) => options)).toEqual([
       { operation: 'models', refresh: true }, { operation: 'usage' }, { operation: 'usage' }, { operation: 'usage' },
+      { operation: 'usage', allowPrintMode: true },
     ]);
     expect(calls.every(call => call.signal instanceof AbortSignal)).toBe(true);
     expect(JSON.stringify(server.received)).not.toMatch(/test-private-plan|usedRatio|effortLevels|accountUsage/);

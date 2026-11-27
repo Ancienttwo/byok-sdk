@@ -6,7 +6,7 @@ import {
 import { snapshotPlainData } from '../../util/plain-data.js';
 
 export interface CodexNativeReply {
-  respond(value: Record<string, unknown>): Promise<void>;
+  respond(value: Record<string, unknown>, freeTextAnswers?: ReadonlyMap<string, string>): Promise<void>;
   reject(code: number, message: string): Promise<void>;
   cancelled(): void;
 }
@@ -64,10 +64,12 @@ export class CodexNativeInteractions {
         if (response.kind === 'question') {
           // Provider question IDs and option labels remain keys/values; no steer or synthetic prompt.
           const answers: Record<string, { answers: string[] }> = Object.create(null);
+          const freeTextAnswers = new Map<string, string>();
           for (const answer of response.answers) {
             answers[answer.questionId] = { answers: [...answer.selectedOptionIds, ...(answer.text ? [answer.text] : [])] };
+            if (answer.text) freeTextAnswers.set(answer.questionId, answer.text);
           }
-          await reply.respond({ answers });
+          await reply.respond({ answers }, freeTextAnswers);
         }
         } finally { forget(); }
       },

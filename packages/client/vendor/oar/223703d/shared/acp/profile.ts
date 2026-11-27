@@ -34,6 +34,8 @@ export interface AcpSessionProfile extends AcpDerivedSessionHooks, AcpSteerReque
   /** Vendor attribution for forwarded updates. The original notification is always recorded verbatim. */
   readonly attributeUpdate?: (notification: unknown) => { readonly sessionId: string; readonly parent: string } | null;
   readonly args: readonly string[] | ((options: SessionOptions) => readonly string[]);
+  /** Resolve the child process environment; defaults to `sessionEnvironment(options.env)`. */
+  readonly environment?: (options: SessionOptions) => NodeJS.ProcessEnv;
   /** Where SessionOptions.launchArgs join `args` when not after them (grok: before `stdio`); launch-args.ts. */
   readonly withLaunchArgs?: (args: readonly string[], launchArgs: readonly string[]) => readonly string[];
   /** What this runtime's ACP surface lets the adapter carry (docs/spec attribution tier included). */
@@ -82,6 +84,12 @@ export interface AcpSessionProfile extends AcpDerivedSessionHooks, AcpSteerReque
   readonly normalizeListedCwd?: (listedCwd: string) => string;
   /** Whole-history copies via the advertised session/fork method. */
   readonly wholeSessionFork?: boolean;
+  /**
+   * Dispose without the advertised `session/close`: the agent's close ends the
+   * saved session for every client, after which a resume is refused, while
+   * ending the process only detaches this connection.
+   */
+  readonly detachOnDispose?: boolean;
   /** A native resume/load error must positively identify a missing session. */
   readonly isResumeNotFound?: (native: JsonRecord) => boolean;
   readonly sessionMeta?: (options: SessionOptions, initialized: JsonRecord) => JsonRecord | undefined;

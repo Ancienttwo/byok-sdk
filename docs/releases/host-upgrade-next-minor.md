@@ -24,6 +24,12 @@ release first follow the [0.47.0 checklist](host-upgrade-0.47.0.md) and its pred
   `pi_model` configuration and thinking level.
 - Existing pi-durable 1.6.0 SQLite replicas can open in place.
 
+## OAR 0.138.1 (#2521)
+
+- Pass `{ allowPrintMode: true }` to `AgyAdapter.accountUsage()` to continue reading Antigravity quota. For local control IPC, include `allowPrintMode: true` in the `runtimes.usage` request. With the option omitted or false, the call returns `{ kind: 'unsupported', reason: 'print_mode_disabled' }` without starting agy. Opting in runs the `models` authentication check and `/usage` through the SDK-owned reader.
+- Antigravity CLI 1.5.18 is the qualified version. Update to 1.5.18 to clear the default advisory for an older supported version. The SDK sets `AGY_CLI_DISABLE_AUTO_UPDATE=true` for agy subprocesses.
+- Codex still receives the Host's exact structured answer. The SDK scrubs the secret fields from the matching native answer echo before recording or projection.
+
 ## OAR 0.136.0 (#2512, #2513)
 
 - `OpenCodeAdapter.listModels()` on OpenCode 2.x reads the catalog from a private `opencode serve --stdio` loopback listener instead of `opencode models --standalone`. Entries now carry `displayName`, `provider` and `effortLevels`, and a cold catalog no longer comes back id-only. The listener is stopped when the read ends, is cancelled or times out. On OpenCode 1.x and 2.x, `effortLevels` no longer lists the native `default` variant. No Host action.

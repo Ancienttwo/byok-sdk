@@ -1,6 +1,6 @@
-# OAR 87c0929 private runtime fork
+# OAR 223703d private runtime fork
 
-Source: https://github.com/botiverse/oar, version 0.136.0, fixed commit `87c0929cf4ce85a0687cf3ac41390e7a5fa04aa5`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
+Source: https://github.com/botiverse/oar, version 0.138.1, fixed commit `223703d364b8724cdf58691d1770c75eaaa10b9f`. This is SDK-owned source. OAR is not an npm dependency. LICENSE keeps the upstream Apache-2.0 text. Upstream has no root NOTICE file at this commit. Its `packages/oar/assets/brands/NOTICE.md` covers runtime icons. This fork includes none of those resources.
 
 `source-manifest.json` lists every selected upstream path and its original and maintained SHA256. The 221 entries include LICENSE and the upstream `.github/runtime-versions.json` for SDK qualification. Source rows with BYOK changes are marked by `delta`. The selected closure also includes upstream conversation/input-carry projections, the ACP connection-opening and input-draining helpers, the ACP derived-session lineage (`shared/acp/derived-sessions.ts`), the Codex goal-event projection, the manual-compaction operation that the Codex session composes, the typed open refusals (`contracts/model-confirmation-error.ts`, `contracts/resume-cwd-error.ts`), the type-only contracts `contracts/{credentials,model-request,side-question}.ts`, the Codex open configuration (`runtimes/codex/open-config.ts`), the shared usage-ratio helper (`shared/usage-ratio.ts`), the ACP open-readiness wait (`shared/acp/open-readiness.ts`) and the Grok MCP startup readiness it waits on (`runtimes/grok/mcp-startup.ts`). The selected files are the Codex session and its import closure, including type-only contracts, plus `shared/executable/process-tree.ts`, which the SDK process-tree authority calls, plus the shared ACP session stack (`shared/acp/`) the Grok Build session (`runtimes/grok/session.ts`, with its native-turn reader `runtimes/grok/native-turns.ts`) and the Antigravity CLI session (`runtimes/antigravity/{session,options,state-directory,model-selection}.ts`) with their import closure, which includes the shared ACP model configuration (`shared/acp/model-configuration.ts`). The OpenCode session and its prompt, attribution, compaction, steering, startup gate and version helpers are also selected, as is the OpenCode v2 model listing (`runtimes/opencode/{list-models-v2,discovery-server}.ts`, with `shared/inventory.ts`), with shared environment and private-temp helpers. The shared stream-json session (`shared/stream-json/`, 9 files) and the Claude projection with its import closure (`runtimes/claude/{projection,context-usage,failure,service-tier,tasks,token-usage}.ts`) are selected for the Claude adapter; the Claude launch, settings readback, compaction, MCP config and prompt files are not. No Cursor, CLI, arena, executable manager or branded resources are included. The on-demand model, usage and auth-status readers are selected for #2379. The executable manager, login, logout and usage reset operations are excluded.
 
@@ -12,7 +12,7 @@ The SDK typechecks this source with the ES2024 library (`packages/client/tsconfi
 
 ## Authoring path and bump procedure
 
-The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. The commit subjects state the invariants, and the manifest records the selected files that differ from upstream. Current pin: branch `byok/0.136.0`, commit `705e4d6918263c59a25f5b3bb9fa2ab3e4476846` (the manifest's `fork`).
+The BYOK deltas are authored on the fork https://github.com/Ancienttwo/oar as a commit series, one branch per upstream version: `byok/<upstream version>`, cut from the upstream release commit. The commit subjects state the invariants, and the manifest records the selected files that differ from upstream. Current pin: branch `byok/0.138.1`, commit `a5e1eacd4c51c79f824162656695528b556fb249` (the manifest's `fork`).
 
 For #2380, `765b54cc` shares the pre-open `Runtime.sessionCapabilities` declarations and redacts echoed image data before recording native ACP and stream-json output. Native outbound requests still carry the bytes as required by those transports. Upstream: draft D1/D2.
 
@@ -33,11 +33,14 @@ Bump to upstream tag `vX.Y.Z`:
 
 ## Authoritative release binding
 
-`@botiverse/oar@0.136.0` is the public npm release of commit `87c0929cf4ce85a0687cf3ac41390e7a5fa04aa5`, which the peeled upstream `v0.136.0` tag names. The downloaded tarball SHA-512 equals the registry integrity `sha512-6j5xqlswYHAaHeTf4qQgGpS7fyQ3jFpB1XLRQJq/VWt/xwCYYUDJMnmFJGuXh/vKQr24uu5dZtwotUVDydnU7w==`. The npm publish attestation and the SLSA v1 attestation both name that package and tarball digest. As for 0.131.0, the SLSA build is `botiverse/oar/.github/workflows/release.yml@refs/heads/main`, and its resolved dependency pins the commit above. [npm attestations](https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.136.0)
+`@botiverse/oar@0.138.1` is the public npm release of commit `223703d364b8724cdf58691d1770c75eaaa10b9f`, which the peeled upstream `v0.138.1` tag names. The downloaded tarball SHA-512 equals the registry integrity `sha512-C+mJgkwLXXcH6Vfi1bCIZuU6Aj1Lgkq7EfDyECYy1GFt85BcZ6sYAw5I4IZzMqk8MxdPtSSwI5Mx5FpfwbQzjg==`. The npm publish attestation and the SLSA v1 attestation both name that package and tarball digest. As for 0.131.0, the SLSA build is `botiverse/oar/.github/workflows/release.yml@refs/heads/main`, and its resolved dependency pins the commit above. [npm attestations](https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.138.1)
 
 `source-manifest.json` records the release identity and hash for each selected upstream file. The npm identity covers the upstream base. The fork record identifies the BYOK source projection.
 
 ## Maintained deltas
+
+- `runtimes/codex/session.ts` (#2521). Before the caller-owned request hook writes an answer, record the native `itemId` and question classifications, and register the caller's free-text secret answers with the session credential redactor. Selected labels stay out of the credential registry. Reused item IDs retain both requests' classifications until their pending echoes arrive, with secret classification taking precedence. Scrub matching `rawResponseItem/completed` function output before recording or projection, preserving recognized public answers in valid output. Malformed output and output with unknown question IDs are replaced with `[redacted]`. Pending item IDs are cleared on exit or disposal. Upstream: [OAR #1205](https://github.com/botiverse/oar/pull/1205), adapted to BYOK's request hook.
+- `shared/acp/session.ts`, `runtimes/antigravity/{account-usage,auth,list-models,session}.ts` (#2521). The caller supplies the process environment and Antigravity derives its `--gemini-dir` argument from that same environment. The SDK sets `AGY_CLI_DISABLE_AUTO_UPDATE=true`. `account-usage.ts` requires `allowPrintMode: true` before the owned auth and usage commands. Upstream: [OAR #1202](https://github.com/botiverse/oar/pull/1202), [OAR #1207](https://github.com/botiverse/oar/pull/1207).
 
 - `shared/credential-redactor.ts`, `shared/redact-text.ts`, `shared/acp/session.ts`, `runtimes/dsh/{session,projection}.ts`. Register Host-resolved credentials before open. Sanitize decoded string values within the protocol-defined payloads and withhold objects whose keys contain credentials. Decode each complete dsh argument string token, including duplicate members, and preserve unchanged bytes and numeric literals. Derive the projected tool input from the same sanitized JSON. Withhold incomplete argument fragments from live and durable records while credentials are registered. Check the native root route before redaction. Upstream: none (SDK credential custody).
 
@@ -91,11 +94,179 @@ The SDK bridge `src/runtime/dsh-session-runtime.{js,d.ts}` exposes the dsh sessi
 
 The SDK bridge `src/runtime/acp-session-runtime.{js,d.ts}` declares one start signature for every vendored ACP runtime: text-only `prompt` (with an optional `inputId`), `queue` (text and a required `inputId`), optional `withdraw`, `abort`, `records` and `dispose`. The Grok adapter names each prompt with its `inputId` and holds a follow-up through `queue` while Grok runs a turn of its own. It exports `grokSession`, `antigravitySession` and `opencodeSession`; OpenCode requires a probed executable version in the installation. The build emits it as the private `#byok-acp-runtime` entry, so `@agentclientprotocol/sdk` loads only when an ACP session starts, never with `@byok-sdk/client/adapters`. `scripts/api-surface/oar-bridge-types.ts` checks it against these sources.
 
-Hand-diffed at each bump: `shared/acp/session-state.ts` is not selected, because it builds the upstream terminal host without the injected terminal spawn. The `shared/acp/session.ts` delta keeps that state construction inline, so each bump diffs upstream `session-state.ts` against the inline copy and carries every upstream change into it (0.99 added the native-turn tracker; 0.105 passes the profile to the recorder for the derived-session hooks; 0.109, 0.110, 0.111, 0.112 and 0.128.1 change neither file; 0.129 adds the open-readiness observer, carried into the inline copy). `shared/acp/turn-terminals.ts` is not selected either: it implements `endTurnProcessesOnAbort`, which `AcpSessionOptions` omits, so the delta wires no turn-terminal claim into `abort`. Each bump diffs it and the `abort` lines of upstream `session.ts` that call it; a change there has no counterpart while the option stays omitted.
+Hand-diffed at each bump: `shared/acp/session-state.ts` is not selected, because it builds the upstream terminal host without the injected terminal spawn. The `shared/acp/session.ts` delta keeps that state construction inline, so each bump diffs upstream `session-state.ts` against the inline copy and carries every upstream change into it (0.99 added the native-turn tracker; 0.105 passes the profile to the recorder for the derived-session hooks; 0.109, 0.110, 0.111, 0.112 and 0.128.1 change neither file; 0.129 adds the open-readiness observer, carried into the inline copy; 0.138.1 changes neither of the unselected files). `shared/acp/turn-terminals.ts` is not selected either: it implements `endTurnProcessesOnAbort`, which `AcpSessionOptions` omits, so the delta wires no turn-terminal claim into `abort`. Each bump diffs it and the `abort` lines of upstream `session.ts` that call it; a change there has no counterpart while the option stays omitted.
 
 Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared/home-initialization.ts`, the executable manager and its diagnostics, the shared ACP connection pool (`shared/acp/routing.ts`, `shared-session.ts`, `shared-wire.ts`), observe modules outside the selected closure, and all runtimes other than Codex, dsh, the Grok session, the Antigravity session, the OpenCode session and the Claude projection closure (the Claude session, launch, settings readback, compaction, MCP config and prompt files stay out). One upstream npm dependency enters the SDK: `@agentclientprotocol/sdk`, exact pin `1.4.0` (the version in OAR's lockfile at this commit, Apache-2.0), which owns the ACP wire. `cross-spawn` does not enter; the terminal delta replaces it.
 
 ## History
+
+### 0.138.1 re-vendor (#2521)
+
+All 69 BYOK commits from `byok/0.137.0` were replayed on `v0.138.1` (`223703d`). The 221-file selection is unchanged. Upstream updates the selected `contracts/install.ts` types and the shared ACP config confirmation and disposal code. In 0.138.1 the selected `contracts/account-usage.ts` change is a documentation clarification for limit resets. Dim, Claude limit-reset implementation, Cursor, the suggested-version files, and the installer implementation remain outside the selection. The ACP SDK remains pinned at `1.4.0`.
+
+The upstream runtime manifest advances `qwen-aimock` from `0.27.4` to `0.28.7`, outside the SDK's runtime mapping. Upstream uses Pi 1.6.1, already pinned in the SDK by #2528. Antigravity remains at `1.5.18` relative to OAR 0.137.0.
+
+- `shared/acp/session.ts` (`687132d6`): preserve SDK-owned agent and terminal processes with explicit filtered environments, including the existing launch argument handling. Honor upstream's `detachOnDispose` profile before sending `session/close`. The unselected `session-state.ts` and `turn-terminals.ts` have no upstream changes.
+- `shared/acp/config-updates.ts` (`be03ccd9`): take upstream's native confirming `config_option_update` for readback when the RPC answer is stale. Use the same native update for matching and its redacted view for refusals.
+
+| 0.137.0 delta | 0.138.1 delta | Subject |
+| --- | --- | --- |
+| `1d92a5c6` | `bb0f43a2` | The SDK kernel owns current typed records only |
+| `3c966a97` | `b579f993` | Strip-only TypeScript loads the process-table reader; host PATH cannot hide ps |
+| `492374ea` | `9ab054d1` | A failure class that a text rule chose is marked fromText |
+| `2a8da093` | `e3a7d065` | The caller owns the Codex app-server process |
+| `6dc3b56c` | `06a7aad5` | Codex interaction is opt-in through approvalPolicy |
+| `a233279b` | `10aefbba` | The caller owns the Codex process and environment; native facts are retained first; no permissive server-request fallback |
+| `8cbddf6d` | `856e1cdc` | ACP process diagnostics stay with the caller |
+| `7881d1ff` | `2aa1b94e` | The caller owns the ACP agent process |
+| `850ef35e` | `5a1c6468` | Every ACP terminal process is inside the caller's process-tree authority |
+| `4a086ae4` | `3d8ac0d0` | No ACP permission request gets a permissive fallback |
+| `94bb6e99` | `687132d6` | The caller owns ACP processes and environment; the record consumer sees every record |
+| `990c1944` | `a8319429` | A failed prompt reads its frames after earlier notifications; abort records descendants first |
+| `56549722` | `422644c4` | Grok persona injection does not grant folder trust or replace built-in instructions |
+| `b97832de` | `ad9d68aa` | The caller owns the dsh process, its directory and the environment |
+| `8271629f` | `d869d3b2` | One selected OpenCode executable and one version probe |
+| `f109407a` | `dc61af0d` | OpenCode query processes see only the explicit runtime environment |
+| `ccc0733c` | `8a34070d` | Every OpenCode CLI or prompt query uses the caller's process-tree authority |
+| `6a7b1dc7` | `6137001b` | The caller owns the stream-json process; the record consumer sees every record; no runtime request gets a permissive default |
+| `ea7c9870` | `06946d1f` | The caller bounds the stream-json session's retained records |
+| `0a539159` | `8da1dda4` | A failed ACP cancel write leaves the turn as it was |
+| `ce245e5e` | `2d49a10d` | A prompt that ends during a pending cancel write waits for that write before it reads the abort mark |
+| `3f12ad37` | `7d006703` | An abort after the prompt answer is decoded sends no session-wide cancel |
+| `6e70a6d1` | `a58f4b38` | A cancel write that does not complete is bounded, and dispose does not wait for it |
+| `0b9ec68c` | `aceca435` | Stream-json attribution remembers only tool uses inside an agent |
+| `9cbc66b0` | `9fd3b5e7` | One retained-record limit elides request and reply payloads too, and every session takes it |
+| `5e00f210` | `70cb88a8` | A root tool use that reuses a remembered id removes its attribution entry |
+| `068e2ab7` | `a2998332` | Record retention elides requests and replies after the newest frame too |
+| `318ccc48` | `5c363ec0` | A refused or unwritten Claude interrupt leaves the turn as it was |
+| `964f19bc` | `a350c3a6` | A Claude interrupt is written with a bounded acknowledgement, and a root result waits for every pending interrupt to settle |
+| `7ee43b1a` | `3338fa82` | An unacknowledged Claude interrupt write counts as written, and the kill fallback dispatches nothing more |
+| `847156b0` | `96d547a8` | Text and reasoning have their own retained limit, so a task with much text never elides the native frames a failure scan reads |
+| `d5cc2b76` | `d0476030` | A child's own update read after the prompt answer projects nothing |
+| `abd3770d` | `6b2729b6` | On-demand readers use caller-owned processes and explicit environments |
+| `e4ebbdad` | `b2ed98ed` | Reader refusals keep a known floor and omit untrusted native diagnostics |
+| `5e475b43` | `24f4f122` | Codex usage waits for process adoption before sending requests |
+| `d2861487` | `324759b3` | Type native reasoning effort refusals |
+| `11e2a14c` | `3c789aab` | Share pre-open capabilities and redact echoed image inputs |
+| `74bb95a3` | `4645a08a` | Restore isolated Codex turn process cleanup |
+| `7fb8c008` | `3d12184a` | Keep Claude root context across child results |
+| `affce8ee` | `8cbcd73f` | Project linked Grok child turn ledgers independently |
+| `c38520ca` | `b925ce1e` | Keep OAR startup and stream settlement within caller ownership |
+| `b9e79c4f` | `c5c4535e` | Keep caller-resolved credentials inside the session redaction boundary |
+| `12533e6e` | `9f9d212e` | Use the shared OAR disposal lifecycle for caller-owned sessions |
+| `536236c4` | `26f5aeaa` | Use the OAR query deadline with caller-owned native readers |
+| `ad569e9d` | `b8db700a` | Keep native Codex session fork outside the SDK projection |
+| `b18499f8` | `049b733c` | Keep synchronous Codex turn cleanup on the shared disposal path |
+| `cf6f28d1` | `5fd93034` | Keep held-pipe holders in the caller’s process-tree authority |
+| `0d6a0ed6` | `bc0299fb` | Keep native executable launching outside process-table diagnostics |
+| `978f99c8` | `9f03348b` | Preserve protocol structure when redacting resolved credentials |
+| `08824ec4` | `8c71dfbc` | Redact native result text and keep typed model routes |
+| `44c24542` | `7f44a05a` | Redact opaque runtime payloads independently of protocol metadata |
+| `afb6d4d7` | `77bf24e4` | Redact ACP extension metadata and preserve dsh JSON literals |
+| `18ef431f` | `4271e655` | Redact provider credentials as decoded protocol values |
+| `643c15c3` | `be03ccd9` | Complete protocol-aware credential redaction for SDK runtimes |
+| `5a8420bf` | `6ec6339e` | Merge all overlapping credential matches across chunks |
+| `a5b0941b` | `3821743c` | Verify the OAR 0.124.0 BYOK projection and redaction invariants |
+| `883e87f5` | `e3a541c6` | OpenCode prompt options refuse a preset inline configuration |
+| `0f616835` | `5364610b` | The DSH bridge leaves native session files out of open and dispose |
+| `42684b4a` | `0b1e8e6f` | A DSH cold-profile wait ends with the caller's cancellation |
+| `c13e3a8f` | `a427474f` | DSH profile startup loads node:sqlite through process.getBuiltinModule |
+| `8236d68e` | `0775e98f` | Every MCP env and header value is a session credential, with its JSON escaping |
+| `db74cd79` | `982bf24f` | An MCP value under no credential rule is registered only when it is credential-shaped |
+| `8cc5bd89` | `f16fb1e0` | A caller's reply to a stream-json app request is recorded as answered, as upstream records it |
+| `341caa78` | `89deea74` | OpenCode v2 lists its loopback catalog through the caller-owned reader spawn, bounded by the reader's deadline and signal |
+| `9f1b73ea` | `cb30c17e` | Derive Antigravity launch arguments from the caller environment |
+| `ad339d10` | `673851f1` | Scrub Codex secret answer echoes before retention and projection |
+| `5ab2b84c` | `36fe6673` | Keep answer scrubbing in the synchronized Codex session source |
+| `698b66f0` | `d35f51e4` | Keep Codex secret question classifications across reused item IDs |
+| `6884379b` | `a5e1eacd` | Type the sanitized Codex tool output |
+
+
+### 0.137.0 re-vendor (#2521)
+
+All 64 BYOK commits from `byok/0.136.0` were replayed on `v0.137.0` (`f5daeece`). The selected path list stays at 221 files. Upstream's `AccountUsageReadOptions` and `print_mode_disabled` reason are included. Cursor and the suggested-versions files stay outside the projection. The ACP SDK lockfile pin stays at `1.4.0`. The unselected `shared/acp/session-state.ts` and `turn-terminals.ts` have no upstream changes, and the shared ACP session's upstream change is limited to environment resolution.
+
+Conflicts and the invariants that resolved them:
+
+- `runtimes/codex/session.ts` (`a233279b`): the SDK keeps its request hook and raw session. Upstream's host-question implementation is outside the selected closure. The echo scrub is applied to the caller-owned hook in the new delta.
+- `shared/acp/session.ts` (`94bb6e99`): process and terminal spawns use the filtered environment supplied by the caller. The upstream profile environment hook stays unused in the BYOK session.
+- `runtimes/antigravity/{account-usage,auth,list-models}.ts` (`abd3770d`): keep the injected readers and their explicit environment. `account-usage.ts` carries forward the upstream `allowPrintMode` gate.
+- `runtimes/antigravity/session.ts` (`11e2a14c`): keep the shared pre-open capability declaration. BYOK computes launch arguments from the supplied environment in `9f1b73ea`.
+
+| 0.136.0 delta | 0.137.0 delta | Subject |
+| --- | --- | --- |
+| `d85c1bbb` | `1d92a5c6` | The SDK kernel owns current typed records only |
+| `8147810e` | `3c966a97` | Strip-only TypeScript loads the process-table reader; host PATH cannot hide ps |
+| `f5a70625` | `492374ea` | A failure class that a text rule chose is marked fromText |
+| `872a8469` | `2a8da093` | The caller owns the Codex app-server process |
+| `485d3ba2` | `6dc3b56c` | Codex interaction is opt-in through approvalPolicy |
+| `b5f7ea27` | `a233279b` | The caller owns the Codex process and environment; native facts are retained first; no permissive server-request fallback |
+| `8bab5545` | `8cbddf6d` | ACP process diagnostics stay with the caller |
+| `58981c17` | `7881d1ff` | The caller owns the ACP agent process |
+| `003d2ea3` | `850ef35e` | Every ACP terminal process is inside the caller's process-tree authority |
+| `2e63c8d9` | `4a086ae4` | No ACP permission request gets a permissive fallback |
+| `60b27e9e` | `94bb6e99` | The caller owns ACP processes and environment; the record consumer sees every record |
+| `9c70850c` | `990c1944` | A failed prompt reads its frames after earlier notifications; abort records descendants first |
+| `478bcf0d` | `56549722` | Grok persona injection does not grant folder trust or replace built-in instructions |
+| `0a4979b7` | `b97832de` | The caller owns the dsh process, its directory and the environment |
+| `e0a1940c` | `8271629f` | One selected OpenCode executable and one version probe |
+| `07f09148` | `f109407a` | OpenCode query processes see only the explicit runtime environment |
+| `aa09105d` | `ccc0733c` | Every OpenCode CLI or prompt query uses the caller's process-tree authority |
+| `d4db0cfc` | `6a7b1dc7` | The caller owns the stream-json process; the record consumer sees every record; no runtime request gets a permissive default |
+| `11f86104` | `ea7c9870` | The caller bounds the stream-json session's retained records |
+| `e5e4ea14` | `0a539159` | A failed ACP cancel write leaves the turn as it was |
+| `630207b3` | `ce245e5e` | A prompt that ends during a pending cancel write waits for that write before it reads the abort mark |
+| `0d425027` | `3f12ad37` | An abort after the prompt answer is decoded sends no session-wide cancel |
+| `e3e03007` | `6e70a6d1` | A cancel write that does not complete is bounded, and dispose does not wait for it |
+| `56474552` | `0b9ec68c` | Stream-json attribution remembers only tool uses inside an agent |
+| `b00a5c18` | `9cbc66b0` | One retained-record limit elides request and reply payloads too, and every session takes it |
+| `b094af60` | `5e00f210` | A root tool use that reuses a remembered id removes its attribution entry |
+| `6088d6d7` | `068e2ab7` | Record retention elides requests and replies after the newest frame too |
+| `36fdd016` | `318ccc48` | A refused or unwritten Claude interrupt leaves the turn as it was |
+| `89783605` | `964f19bc` | A Claude interrupt is written with a bounded acknowledgement, and a root result waits for every pending interrupt to settle |
+| `9d752ef4` | `7ee43b1a` | An unacknowledged Claude interrupt write counts as written, and the kill fallback dispatches nothing more |
+| `aa2452aa` | `847156b0` | Text and reasoning have their own retained limit, so a task with much text never elides the native frames a failure scan reads |
+| `7873e19f` | `d5cc2b76` | A child's own update read after the prompt answer projects nothing |
+| `aaa9701f` | `abd3770d` | On-demand readers use caller-owned processes and explicit environments |
+| `21cf60a6` | `e4ebbdad` | Reader refusals keep a known floor and omit untrusted native diagnostics |
+| `f748457d` | `5e475b43` | Codex usage waits for process adoption before sending requests |
+| `968c8cca` | `d2861487` | Type native reasoning effort refusals |
+| `960db4c0` | `11e2a14c` | Share pre-open capabilities and redact echoed image inputs |
+| `c7ffc6e4` | `74bb95a3` | Restore isolated Codex turn process cleanup |
+| `bf306987` | `7fb8c008` | Keep Claude root context across child results |
+| `ccd9f686` | `affce8ee` | Project linked Grok child turn ledgers independently |
+| `a8d30a12` | `c38520ca` | Keep OAR startup and stream settlement within caller ownership |
+| `52c3a0b9` | `b9e79c4f` | Keep caller-resolved credentials inside the session redaction boundary |
+| `9d0d8185` | `12533e6e` | Use the shared OAR disposal lifecycle for caller-owned sessions |
+| `7560afd3` | `536236c4` | Use the OAR query deadline with caller-owned native readers |
+| `953810c0` | `ad569e9d` | Keep native Codex session fork outside the SDK projection |
+| `ec61b3f1` | `b18499f8` | Keep synchronous Codex turn cleanup on the shared disposal path |
+| `d02237cb` | `cf6f28d1` | Keep held-pipe holders in the caller’s process-tree authority |
+| `99767c88` | `0d6a0ed6` | Keep native executable launching outside process-table diagnostics |
+| `fb02632b` | `978f99c8` | Preserve protocol structure when redacting resolved credentials |
+| `9c296f4a` | `08824ec4` | Redact native result text and keep typed model routes |
+| `f0a17728` | `44c24542` | Redact opaque runtime payloads independently of protocol metadata |
+| `f82196b1` | `afb6d4d7` | Redact ACP extension metadata and preserve dsh JSON literals |
+| `3d72571a` | `18ef431f` | Redact provider credentials as decoded protocol values |
+| `48bce7ea` | `643c15c3` | Complete protocol-aware credential redaction for SDK runtimes |
+| `3427e208` | `5a8420bf` | Merge all overlapping credential matches across chunks |
+| `90c8f515` | `a5b0941b` | Verify the OAR 0.124.0 BYOK projection and redaction invariants |
+| `fa726468` | `883e87f5` | OpenCode prompt options refuse a preset inline configuration |
+| `c3670a10` | `0f616835` | The DSH bridge leaves native session files out of open and dispose |
+| `c266de5b` | `42684b4a` | A DSH cold-profile wait ends with the caller's cancellation |
+| `1ef2201a` | `c13e3a8f` | DSH profile startup loads node:sqlite through process.getBuiltinModule |
+| `25fcd99f` | `8236d68e` | Every MCP env and header value is a session credential, with its JSON escaping |
+| `30584925` | `db74cd79` | An MCP value under no credential rule is registered only when it is credential-shaped |
+| `a3f49f49` | `8cc5bd89` | A caller's reply to a stream-json app request is recorded as answered, as upstream records it |
+| `705e4d69` | `341caa78` | OpenCode v2 lists its loopback catalog through the caller-owned reader spawn, bounded by the reader's deadline and signal |
+
+New commits:
+
+- `9f1b73ea` Derive Antigravity launch arguments from the caller environment.
+- `ad339d10` Scrub Codex secret answer echoes before retention and projection.
+- `5ab2b84c` Keep answer scrubbing in the synchronized Codex session source.
+- `698b66f0` Keep Codex secret question classifications across reused item IDs.
+- `6884379b` Type the sanitized Codex tool output.
 
 ### 0.136.0 re-vendor (#2512)
 

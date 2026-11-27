@@ -62,8 +62,8 @@ export function requestRuntimeModels(client: ControlClient, runtimeId: string, r
   return client.request(RUNTIMES_MODELS_METHOD, { runtimeId, refresh });
 }
 
-export function requestRuntimeUsage(client: ControlClient, runtimeId: string): Promise<RuntimeAccountUsage> {
-  return client.request(RUNTIMES_USAGE_METHOD, { runtimeId });
+export function requestRuntimeUsage(client: ControlClient, runtimeId: string, allowPrintMode?: boolean): Promise<RuntimeAccountUsage> {
+  return client.request(RUNTIMES_USAGE_METHOD, { runtimeId, allowPrintMode });
 }
 
 export type ConnectControlResult = { ok: true; client: ControlClient } | { ok: false; reason: string };

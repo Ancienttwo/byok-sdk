@@ -92,9 +92,14 @@ function promptText(params) {
 }
 
 let opencodeModel;
+let agyModel;
 let effort = 'low';
 const effortId = agy || process.env.FAKE_ACP_OPENCODE === '1' ? 'thought_level' : 'reasoning_effort';
-const agyModels = () => agy && process.env.FAKE_ACP_MODEL_CATALOG ? [modelCatalog(process.env.FAKE_ACP_MODEL_CATALOG.split(','))] : [];
+const agyModels = () => {
+  if (!agy || !process.env.FAKE_ACP_MODEL_CATALOG) return [];
+  const catalog = modelCatalog(process.env.FAKE_ACP_MODEL_CATALOG.split(','));
+  return [{ ...catalog, currentValue: agyModel ?? catalog.currentValue }];
+};
 const effortMenu = () => process.env.FAKE_ACP_EFFORT_MENU !== '1' ? [] : [
   { id: effortId, category: 'thought_level', name: 'Effort', type: 'select', currentValue: effort, options: ['low', 'high'].map(value => ({ value, name: value })) },
 ];
@@ -433,8 +438,14 @@ async function request(message) {
       if (message.params?.configId === effortId) {
         log({ kind: 'config', params: message.params });
         if (message.params.value === 'refused') { error(message.id, -32602, 'effort refused'); return; }
+        const previousOptions = [...agyModels(), ...effortMenu()];
         effort = message.params.value;
-        const configOptions = effortMenu();
+        const configOptions = [...agyModels(), ...effortMenu()];
+        if (process.env.FAKE_ACP_STALE_EFFORT_REPLY === '1') {
+          result(message.id, { configOptions: previousOptions });
+          setTimeout(() => update({ sessionUpdate: 'config_option_update', configOptions }), 10);
+          return;
+        }
         update({ sessionUpdate: 'config_option_update', configOptions });
         result(message.id, { configOptions }); return;
       }
@@ -443,6 +454,14 @@ async function request(message) {
         if (process.env.FAKE_ACP_REFUSE_MODEL === message.params?.value) { error(message.id, -32602, 'selected model unavailable'); return; }
         opencodeModel = message.params?.value;
         const configOptions = [{ id: 'model', name: 'Model', type: 'select', currentValue: process.env.FAKE_ACP_MODEL_READBACK ?? opencodeModel, options: [{ value: opencodeModel, name: opencodeModel }] }, ...effortMenu()];
+        update({ sessionUpdate: 'config_option_update', configOptions });
+        result(message.id, { configOptions }); return;
+      }
+      if (agy && message.params?.configId === 'model' && process.env.FAKE_ACP_MODEL_CATALOG) {
+        log({ kind: 'config', params: message.params });
+        agyModel = message.params.value;
+        // agy 1.5.18 reports the selected model and its effort menu together.
+        const configOptions = [...agyModels(), ...effortMenu()];
         update({ sessionUpdate: 'config_option_update', configOptions });
         result(message.id, { configOptions }); return;
       }

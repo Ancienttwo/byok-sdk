@@ -249,10 +249,10 @@ async function openAcpRuntimeSession(
     // a list with an empty or repeated name fails before anything starts,
     // and an open that fails reports no credential they carry.
     const withoutCredentials = acpMcpOpenGuard(options.mcpServers, credentials.redact);
-    const args = acpLaunchArgs(profile, options);
-    // BYOK change: explicit environment; nothing ambient is merged.
+    // BYOK change: explicit environment for the process and its launch arguments.
     if (options.env === undefined) throw new Error("ACP session requires an explicit filtered environment");
     const environment = options.env;
+    const args = acpLaunchArgs(profile, options);
     const terminalHost = createAcpTerminalHost(spawnTerminal, options.cwd, environment, {
       shellCommand: profile.terminalShellCommand === true,
     });
@@ -464,7 +464,7 @@ async function openAcpRuntimeSession(
         if (state !== null && !runtime.closed) {
           void turns.abort(state);
         }
-        if (opened.supportsClose && !runtime.closed) {
+        if (opened.supportsClose && profile.detachOnDispose !== true && !runtime.closed) {
           await closeAcpSession(runtime, kernel.sessionId).catch(() => {});
         }
         runtime.kill();

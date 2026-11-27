@@ -3,6 +3,11 @@ export interface RuntimeReadOptions {
   readonly signal?: AbortSignal;
 }
 
+export interface RuntimeAccountUsageOptions extends RuntimeReadOptions {
+  /** Allows a reader to invoke one-shot CLI print mode. Defaults to false. */
+  readonly allowPrintMode?: boolean;
+}
+
 export interface RuntimeListModelsOptions extends RuntimeReadOptions {
   /** Re-read the catalog even when this adapter has a cached result for the installation. */
   readonly refresh?: boolean;
@@ -52,7 +57,8 @@ export interface RuntimeAccountUsageWindow {
 
 export type RuntimeAccountUsageUnsupportedReason =
   | 'version_unsupported' | 'capability_unavailable' | 'unsupported_installation' | 'unsupported_auth_mode'
-  | 'unsupported_auth_storage' | 'auth_configuration_unavailable' | 'endpoint_unavailable' | 'quota_unavailable';
+  | 'unsupported_auth_storage' | 'auth_configuration_unavailable' | 'endpoint_unavailable' | 'quota_unavailable'
+  | 'print_mode_disabled';
 
 /** Explicit local read of account quota. This result is private to the host. */
 export type RuntimeAccountUsage =

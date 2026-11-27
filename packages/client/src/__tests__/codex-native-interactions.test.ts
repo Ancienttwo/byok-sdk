@@ -5,14 +5,18 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { CodexAdapter } from '../adapters/codex/codex-adapter';
 import { CodexNativeInteractions } from '../adapters/codex/native-interactions';
+import { CodexProjection } from '../adapters/codex/projection';
 import type { NativeInteractionChannel, NativeInteractionRequest, NativeInteractionHostOptions } from '../native-interactions';
-import type { Session } from '../types';
+import type { AgentEvent } from '@byok-sdk/protocol';
+import type { MessageDraftDelta, Session } from '../types';
 import { startPreparedOperation } from './fixtures/prepared-operation';
+
+type SessionEvent = AgentEvent | MessageDraftDelta;
 
 const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 const fixture = fileURLToPath(new URL('./fixtures/fake-codex-native-interactions.mjs', import.meta.url));
 const sessions: Session[] = []; const directories: string[] = [];
-afterEach(async () => { await Promise.all(sessions.splice(0).map(s => s.close())); await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); vi.useRealTimers(); vi.unstubAllEnvs(); });
+afterEach(async () => { await Promise.all(sessions.splice(0).map(s => s.close())); await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); vi.useRealTimers(); vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 async function open(scenario = 'question', host?: Partial<NativeInteractionHostOptions>, resume?: string) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'byok-native-codex-')); directories.push(dir); const receipt = path.join(dir, 'frames.jsonl');
   const requests: { request: NativeInteractionRequest; channel: NativeInteractionChannel }[] = [];
@@ -23,7 +27,12 @@ async function open(scenario = 'question', host?: Partial<NativeInteractionHostO
   sessions.push(session);
   return { adapter, session, requests, argv: async () => (await readFile(path.join(dir, 'argv.jsonl'), 'utf8')).trim().split('\n').map(line => JSON.parse(line) as string[]), frames: async () => (await readFile(receipt, 'utf8')).trim().split('\n').map(line => JSON.parse(line)) as Record<string, any>[] };
 }
-async function finish(session: Session) { for await (const event of session.events) if (event.type === 'turn_end') break; }
+async function finish(session: Session, onEvent?: (event: SessionEvent) => void) {
+  for await (const event of session.events) {
+    onEvent?.(event);
+    if (event.type === 'turn_end') break;
+  }
+}
 async function first(f: Awaited<ReturnType<typeof open>>) { await vi.waitFor(() => expect(f.requests.length).toBeGreaterThan(0)); return f.requests[0]!; }
 const answer = (request: NativeInteractionRequest, color = 'Blue') => ({ requestId: request.requestId, kind: 'question' as const, answers: [{ questionId: 'color', selectedOptionIds: [color] }, { questionId: 'note', selectedOptionIds: [], text: 'n' }] });
 const QUESTIONS = { questions: [{ id: 'q', header: '', question: 'Proceed?', isOther: true, isSecret: false, options: null }] };
@@ -61,6 +70,56 @@ describe('Codex native interaction prepared-adapter bridge', () => {
     await finish(f.session); const frames = await f.frames();
     expect(frames.find(frame => frame.id === 'question-1')).toEqual({ id: 'question-1', result: { answers: { color: { answers: ['Blue'] }, note: { answers: ['Keep it brief'] } } } });
     expect(frames.filter(frame => frame.method === 'turn/start')).toHaveLength(1); expect(frames.some(frame => frame.method === 'turn/steer')).toBe(false);
+  });
+  it.each(['json', 'parts', 'malformed', 'nontext', 'wrong-shape', 'mismatched-id', 'reused-item'])('scrubs Codex secret answer echoes (%s)', async format => {
+    const consume = vi.spyOn(CodexProjection.prototype, 'consume');
+    const f = await open(`secret-${format}`);
+    const { channel, request } = await first(f);
+    const pin = '4829';
+    const token = 'fixture-secret-token-7961';
+    const label = 'Shared-option-123';
+    const publicAnswers = { color: { answers: ['Blue'] }, note: { answers: ['Public note'] } };
+    await channel.respond({ requestId: request.requestId, kind: 'question', answers: [
+      { questionId: 'color', selectedOptionIds: ['Blue'] },
+      { questionId: 'note', selectedOptionIds: [], text: 'Public note' },
+      { questionId: 'pin', selectedOptionIds: [], text: pin },
+      { questionId: 'token', selectedOptionIds: [], text: token },
+      { questionId: 'choice', selectedOptionIds: [label] },
+    ] });
+    const backupPin = '2367';
+    if (format === 'reused-item') {
+      await vi.waitFor(() => expect(f.requests).toHaveLength(2));
+      const second = f.requests[1]!;
+      expect(second.request.native.itemId).toBe(request.native.itemId);
+      await second.channel.respond({ requestId: second.request.requestId, kind: 'question', answers: [
+        { questionId: 'backup', selectedOptionIds: [], text: backupPin },
+      ] });
+    }
+    const projected: SessionEvent[] = [];
+    await finish(f.session, event => projected.push(event));
+    expect(projected).toContainEqual(expect.objectContaining({ type: 'progress', text: `Later [redacted] and ${label}` }));
+    expect(JSON.stringify(projected)).not.toContain(token);
+    expect((await f.frames()).find(frame => frame.id === 'question-1')?.result).toEqual({ answers: {
+      ...publicAnswers, pin: { answers: [pin] }, token: { answers: [token] }, choice: { answers: [label] },
+    } });
+    const records = consume.mock.calls.map(([, record]) => record);
+    const json = JSON.stringify({ answers: { ...publicAnswers, pin: { answers: ['[redacted]'] },
+      token: { answers: ['[redacted]'] }, choice: { answers: ['[redacted]'] } } });
+    const output = format === 'json' || format === 'reused-item' ? json : format === 'parts' ? [{ type: 'input_text', text: json }] : '[redacted]';
+    const echo = (output: unknown) => expect.objectContaining({ kind: 'frame', body: expect.objectContaining({
+      type: 'rawResponseItem/completed', origin: 'byok-native',
+      native: expect.objectContaining({ item: { type: 'function_call_output', call_id: 'item-1', output } }),
+    }) });
+    expect(records).toContainEqual(echo(output));
+    if (format === 'reused-item') {
+      expect(records).toContainEqual(echo(JSON.stringify({ answers: { backup: { answers: ['[redacted]'] } } })));
+      expect(JSON.stringify(records)).not.toContain(backupPin);
+    }
+    const serialized = JSON.stringify(records);
+    expect(serialized).toContain('ordinary output');
+    expect(serialized).toContain(`Later [redacted] and ${label}`);
+    expect(serialized).not.toContain(pin);
+    expect(serialized).not.toContain(token);
   });
   it('echoes numeric and string IDs without collisions', async () => {
     const f = await open('numeric-string'); await vi.waitFor(() => expect(f.requests).toHaveLength(2));

@@ -47,7 +47,7 @@ checks the running model's image support before delivery.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.16` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.1` | `1.6.1` |
+| Qualified version (PR CI) | — | `1.5.18` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.1` | `1.6.1` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Image input declared by descriptor | `images` | no | no | no | no | no | no | yes | no |
@@ -621,7 +621,7 @@ task's and the SDK's MCP servers. It changes MCP servers only; the user's
 `AGENTS.md` still loads unless `agentUserContext` is also `excluded`. A run without an `agentRef`, and the default
 `'inherit'`, are unchanged. The adapter works on the session's own
 app server, through two caller-owned steps of the
-[vendored session](../packages/client/vendor/oar/87c0929/PROVENANCE.md):
+[vendored session](../packages/client/vendor/oar/223703d/PROVENANCE.md):
 
 - Before the thread opens, `config/read` for the task cwd lists the servers of
   the user and project `config.toml` layers. Each one that is not a task
@@ -677,7 +677,7 @@ ACP `terminal: false` does not hide Grok 1.0.52's native terminal tool. The SDK
 does not provide a hidden-terminal mode; see the [qualified observation and
 limits](researches/2026-10-28-grok-terminal-capability-boundary.md).
 
-The [vendored launch profile](../packages/client/vendor/oar/87c0929/runtimes/grok/session.ts)
+The [vendored launch profile](../packages/client/vendor/oar/223703d/runtimes/grok/session.ts)
 uses `agent --always-approve --no-leader stdio`; the adapter forwards the task
 environment. `grok agent` 1.0.52 has no flag for rule loading or folder trust.
 Grok's [Project rules guide](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/12-project-rules.md)
@@ -1022,7 +1022,7 @@ What the upstream runtimes offer that the SDK does not use:
 
 - Codex: the 0.164.0 app-server schema has `ephemeral` on `thread/start` (a
   thread that "should not be materialized on disk"), and `codex exec --help`
-  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/87c0929/runtimes/codex/open.ts)
+  lists `--ephemeral`. The [launch](../packages/client/vendor/oar/223703d/runtimes/codex/open.ts)
   does not send it. Inferred: 0.160.0 has the field, and an ephemeral thread
   leaves the other `CODEX_HOME` files alone.
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
@@ -1129,7 +1129,7 @@ and adding persona text alone does not establish isolation.
 
 `GrokAdapter` runs Grok Build over ACP: `grok agent --always-approve
 --no-leader stdio`, through the vendored OAR Grok profile
-(`packages/client/vendor/oar/87c0929`). The ACP stack is a private entry that
+(`packages/client/vendor/oar/223703d`). The ACP stack is a private entry that
 loads at session start, so `@byok-sdk/client/adapters` carries no ACP
 dependency.
 
@@ -1426,14 +1426,17 @@ optional `model` and `versionPolicy`). The other options stay on the
   `auto` is declined before claim.
 - Detection: `agy --version` must be at least 1.5.0, the first with native ACP
   (an older CLI answers `acp` with its help, else `refused: acp_unavailable`),
-  and warns when it is not the qualified `1.5.16`. `authPresent` is not reported,
+  and warns when it is not the qualified `1.5.18`. `authPresent` is not reported,
   because the credential is not in agy.
+- Account usage requires `accountUsage({ allowPrintMode: true })`. The reader
+  checks login through `agy models` before running `/usage`. With the option
+  omitted or false, it returns `print_mode_disabled` without spawning agy.
 - Failures: a failed turn takes its class from the vendored OAR outcome, and a
   class taken from error text stays `unknown`. Resume needs `session/list` to
   confirm the saved cwd, else it fails as `authority`.
 - Steering redirects the active turn through native ACP. agy reports no usage events.
 - Egress: `--disable-telemetry` stops agy's calls to `play.googleapis.com`, and
-  `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always set.
+  `AGY_CLI_DISABLE_AUTO_UPDATE=true` is always set.
 - Platforms: macOS, Linux and Windows.
 
 Evidence: the `AgyAdapter` cases in `grok-adapter.test.ts` (synthetic
@@ -1579,7 +1582,13 @@ receive a new generation and cannot answer the old process's requests.
   with `runtime_unavailable`. Questions preserve native question IDs and answer
   arrays. Exact active-turn and resume-thread checks
   precede Host callbacks. Permissions profiles, dynamic tools and MCP
-  elicitation remain unsupported.
+  elicitation remain unsupported. The SDK removes secret answers from the
+  matching native tool output. For later model text, the session redactor
+  recognizes free-text secrets of at least eight characters that are not
+  path-like. A shorter or path-like secret is removed only from the matching
+  tool output, and a later model repetition can be visible. A resumed
+  session starts with a fresh redactor that has no answers from the earlier
+  session.
 - Native response writes have bounded acknowledged transport ownership.
   Duplicate equal answers join one result; conflicts/late answers cannot send
   another response. Native cancellation, timeouts, interrupts and process exit

@@ -5,10 +5,10 @@ import path from 'node:path';
 import {
   startAppServerClient,
   type LineProcess, type SpawnLineProcess,
-} from '../../vendor/oar/87c0929/runtimes/codex/app-server-client.js';
-import { rpcControl } from '../../vendor/oar/87c0929/runtimes/codex/rpc-control.js';
-import { createSessionKernel } from '../../vendor/oar/87c0929/shared/session-kernel.js';
-import { sessionCredentialRedactor } from '../../vendor/oar/87c0929/shared/credential-redactor.js';
+} from '../../vendor/oar/223703d/runtimes/codex/app-server-client.js';
+import { rpcControl } from '../../vendor/oar/223703d/runtimes/codex/rpc-control.js';
+import { createSessionKernel } from '../../vendor/oar/223703d/shared/session-kernel.js';
+import { sessionCredentialRedactor } from '../../vendor/oar/223703d/shared/credential-redactor.js';
 
 function fakeProcess() {
   const lines: Array<(line: string) => void> = [];
@@ -186,7 +186,7 @@ describe('OAR session kernel record redaction', () => {
 });
 
 it('accounts for every vendored file and the maintained source deltas', () => {
-  const root = path.resolve(import.meta.dirname, '../../vendor/oar/87c0929');
+  const root = path.resolve(import.meta.dirname, '../../vendor/oar/223703d');
   const manifest = JSON.parse(readFileSync(path.join(root, 'source-manifest.json'), 'utf8')) as {
     packageVersion: string;
     commit: string;
@@ -203,14 +203,14 @@ it('accounts for every vendored file and the maintained source deltas', () => {
     if (row.path.endsWith('.ts')) expect(row.sourcePath).toBe(`packages/oar/src/${row.path}`);
   }
   expect(manifest.release).toEqual({
-    ecosystem: 'npm', name: '@botiverse/oar', version: '0.136.0',
-    integrity: 'sha512-6j5xqlswYHAaHeTf4qQgGpS7fyQ3jFpB1XLRQJq/VWt/xwCYYUDJMnmFJGuXh/vKQr24uu5dZtwotUVDydnU7w==',
-    gitCommit: '87c0929cf4ce85a0687cf3ac41390e7a5fa04aa5',
-    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.136.0',
+    ecosystem: 'npm', name: '@botiverse/oar', version: '0.138.1',
+    integrity: 'sha512-C+mJgkwLXXcH6Vfi1bCIZuU6Aj1Lgkq7EfDyECYy1GFt85BcZ6sYAw5I4IZzMqk8MxdPtSSwI5Mx5FpfwbQzjg==',
+    gitCommit: '223703d364b8724cdf58691d1770c75eaaa10b9f',
+    provenance: 'https://registry.npmjs.org/-/npm/v1/attestations/@botiverse%2foar@0.138.1',
   });
   expect(manifest.packageVersion).toBe(manifest.release.version);
   expect(manifest.commit).toBe(manifest.release.gitCommit);
-  expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: 'byok/0.136.0', commit: '705e4d6918263c59a25f5b3bb9fa2ab3e4476846' });
+  expect(manifest.fork).toEqual({ repository: 'https://github.com/Ancienttwo/oar', branch: 'byok/0.138.1', commit: 'a5e1eacd4c51c79f824162656695528b556fb249' });
   expect(manifest.files.filter(row => row.delta).map(row => row.path).sort()).toEqual([
     'contracts/failure.ts',
     'contracts/list-models.ts',

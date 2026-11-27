@@ -2,7 +2,7 @@
 import { antigravityUsesDefaultState } from "./state-directory.js";
 import type { OwnedReaderOptions } from "../../contracts/list-models.js";
 import type { AvailableInstallation } from "../../contracts/installation.js";
-import type { AccountUsageSnapshot, AccountUsageWindow } from "../../contracts/account-usage.js";
+import type { AccountUsageReadOptions, AccountUsageSnapshot, AccountUsageWindow } from "../../contracts/account-usage.js";
 import { withQueryDeadline } from "../../shared/executable/query.js";
 import { remainingMs } from "../../shared/deadline.js";
 import { utcInstantFromDate } from "../../shared/instant.js";
@@ -119,9 +119,12 @@ export function projectAntigravityUsage(
 }
 
 /** Quota through agy's own `/usage` answer, after its login check; no credential read, no HTTP call of OAR's. */
-export async function antigravityAccountUsage(installation: AvailableInstallation, options: OwnedReaderOptions): Promise<AccountUsageSnapshot> {
+export async function antigravityAccountUsage(installation: AvailableInstallation, options: OwnedReaderOptions & Pick<AccountUsageReadOptions, "allowPrintMode">): Promise<AccountUsageSnapshot> {
   if (installation.via !== "executable") {
     return { kind: "unsupported", reason: "unsupported_installation" };
+  }
+  if (options.allowPrintMode !== true) {
+    return { kind: "unsupported", reason: "print_mode_disabled" };
   }
   const { env } = options;
   if (!antigravityUsesDefaultState(env)) { return { kind: "unsupported", reason: "unsupported_auth_storage" }; }
