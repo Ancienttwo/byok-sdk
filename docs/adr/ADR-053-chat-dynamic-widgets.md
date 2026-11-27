@@ -11,7 +11,7 @@ appliesTo:
 
 > **来源与追踪**：总 issue [#2552](https://github.com/Ancienttwo/byok-sdk/issues/2552)，本 ADR 由调研子 issue [#2553](https://github.com/Ancienttwo/byok-sdk/issues/2553) 产出，约束后续子 issue [#2554](https://github.com/Ancienttwo/byok-sdk/issues/2554)（Host 工具、校验、解析、条目投影）、[#2555](https://github.com/Ancienttwo/byok-sdk/issues/2555)（base 目录渲染）、[#2556](https://github.com/Ancienttwo/byok-sdk/issues/2556)（finance 目录渲染）、[#2557](https://github.com/Ancienttwo/byok-sdk/issues/2557)（交互方法）。承接 [ADR-052](./ADR-052-desktop-native-ui-nsh-mixed.md)（NSH Mixed、D2 能力集、D3 Host/UI 边界、D6 UI 层规范）。
 > **依据文档**：[NSH 对话 widget 调研](../researches/2026-11-27-nsh-chat-widgets.md)（下称「调研」），基线 `main@18b963e8a`，NSH pin `2964346`。
-> **状态说明**：`proposed`。晋升 `accepted` 的前提：Owner 回答 §5 的 O1–O4，且 owner 的 artifact 导出落盘后补齐 D7 的 spec v1 组件类型与开放问题裁定。
+> **状态说明**：`proposed`。晋升 `accepted` 的前提：Owner 回答 §5 的 O1–O5，且 owner 的 artifact 导出落盘后补齐 D7 的 spec v1 组件类型与开放问题裁定。
 > **#2552 已定、本 ADR 不再讨论的事项**：widget 是纯数据，由 `nsh-app/src/ui` 的固定目录渲染，不新增 D2 能力；只有一个保留工具 `render_widget`；finance 数值走 snapshotRef，不由模型传数；Host 在所属边界校验一次，非法规格 fail closed；未知组件或版本渲染显式的不支持卡片；条目 kind 为 `widget`，key `w<id>`，带 `rev`；草稿按 widgetId 存在 store；一个交互方法推广 `k8.answer`，带幂等 actionKey；不允许掩码或秘密输入；链接只经 `links.ts`；规格与渲染器无关。
 
 ## 1. 背景
@@ -32,7 +32,7 @@ appliesTo:
 ### D2. 条目接入 transcript：`w<widgetId>` 加 Host 盖章的 `rev`，固定高度
 
 - `ConversationItem` 联合（`src/host/conversation/view.ts:37-43`）新增 `kind: 'widget'`，key 为 `w<widgetId>`，与 `e`、`t`、`q` 前缀互不相交。`rev` 是 Host 盖章的整数，同一 widgetId 单调递增。新 rev 以新对象、同一 key 下发，List 原位替换；nsh-app 的 `Each` 按 `${key}:${kind}` 挂载（`nsh-app/src/features/conversation/Transcript.tsx:226`），rev 变化不换 key、不换 kind，行实例保留。
-- 排序锚点为所属 Turn 的 input `seq + 0.375`：在该 Turn 的 question（`+0.25`）之后、状态行（`+0.5`）之前（`view.ts:117`、`:134`）。同一 Turn 的多个 widget 按 widgetId 顺序排列。
+- 排序锚点为所属 Turn 的 input `seq + 0.625`。现有锚点：状态行（working 或 ended）在 `after(seq) = seq + 0.5`（`view.ts:117`、`:123`、`:128`），question 在 `after(seq) + 0.25` 即 `seq + 0.75`（`view.ts:134`），reply 是之后的整数 `seq`。widget 因此位于状态行之后、question 与 reply 之前：Turn 进行中依次为 input、working 行、widget；回复后依次为 input、widget、reply。同一 Turn 的多个 widget 按 widgetId 顺序排列。
 - NSH List 只对完全位于视口上方的行补偿高度变化，视口内的行变高会推动其下内容（`nsh:crates/nsh-core/src/core/list.rs:1558-1581`，测试 `:2283-2292`）。每个组件的每种状态使用固定的主体高度：`loading` 与 `ready` 等高，`partial`、`degraded`、`failed` 只多一行固定高度的提示。这样视口内的 rev 替换不移动阅读位置。
 - `estimatedItemSize` 仍是整表一个值（NSH 没有逐项尺寸 prop，`nsh:crates/nsh-js/src/list.rs:721`），保持 64。估值偏差只影响测量前的滚动条与远距跳转。
 - 草稿状态（表单值、选择、待确认的 actionKey）存于 `nsh-app/src/store.ts`，以 widgetId 为 key，Host 确认后清除，沿用 `pendingClears` 的做法（`store.ts:278-290`）。行内 signal 不保存草稿；现有 `QuestionRow` 的行内 signal（`Transcript.tsx:105-106`）在 #2557 迁到同一个 store 结构。
@@ -59,10 +59,11 @@ appliesTo:
 
   - `itemKey` 为 `q<questionId>` 时，`action` 只能是 `answer`，`values` 为 `{ answer: string }`，Host 转给 K8 的 `bot.answer`（现路径 `src/host/conversation/service.ts:137-142`）。
   - `itemKey` 为 `w<widgetId>` 时，`action` 必须是该 widget 规格中声明的 actionId，`values` 由 Host 按该 widget 的规格校验一次（表单字段、选项）。通过后，Host 以 `actionKey` 作为 actionId 提交一次 K8 send，消息正文是该动作的确定性投影。返回 `{ turnId }`。
-- actionKey 由 UI 生成，按 widgetId 存在 store，重试时复用，Host 确认后清除。去重沿用现有权威，Host 不另建去重表：
+- actionKey 由 UI 生成，按 widgetId 存在 store，重试时复用，Host 确认后清除。去重沿用现有权威，不另建去重表：
   - question 由 K8 按 questionId 去重（`packages/bot-collaboration/src/rules/commands.ts:297-311`）；
-  - widget 动作由 K8 send 的 actionId 去重（`src/bridge/domains/k8.ts:16`）。
-  - 同一 `(widgetId, action)` 只接受一次。同一 actionKey 重放得到相同结果；不同 actionKey 被拒，与 question 的 `Answer identity conflict` 语义一致。
+  - widget 动作提交的 send 由 Host store 按 actionId 去重（`src/host/k8/conversation.ts:112-118`）；
+  - 同一 `(widgetId, action)` 只接受一次，记录在 D2 的 widget 记录中（每个 action 一个已接受的 actionKey）。同一 actionKey 重放得到相同结果；不同 actionKey 被拒，与 question 的 `Answer identity conflict` 语义一致。
+- Bot 的 Turn 仍在进行时，widget 动作不被拒绝：K8 把 Bot 忙碌期间到达的输入按到达顺序合并进下一个 Turn（`packages/bot-collaboration/src/rules/coalesce.ts:72-96`）。控件在 Turn 进行中保持可用，动作作为 Bot 的下一条输入送达。
 - 错误码沿用现有 `BridgeErrorCode`（`src/bridge/protocol.ts:168-169`）：形状、未知条目或非法 values 为 `invalid_params`，K8 拒绝（冲突、问题不存在）为 `method_failed`。不新增错误码。
 - 不可逆动作（`confirm_action` 以及规格标为不可逆的动作）由 UI 先弹 `role=alertdialog` 确认，再调用 `k8.act`。审批继续走 `activity.approve` / `activity.reject`，不经 `k8.act`。
 - JSON 变化：`rendererMethods` 与 `hostMethods` 各把 `k8.answer` 换成 `k8.act`。`schemaVersion` 保持 2：它标记文件结构，此前因新增 `shellToHostMethods` 键从 1 升到 2，同一提交新增方法时未动 `bridgeVersion`（`git show a85fde7bc`）。`bridgeVersion`（`BRIDGE_VERSION = 2`，`src/bridge/protocol.ts:22`）也保持：契约在编译期嵌入 shell（`native/byok-shell/src/contract.rs:9`），Host 与 shell 同包发布，没有版本协商（ADR-052 S2）。
@@ -75,7 +76,7 @@ appliesTo:
   - 推荐**路径 A**：`@byok-sdk/server` 增加显式开关，声明 `host-mcp-task-context` 并用 cloud 已有的组合验证断言（`packages/cloud/src/auth/device-assertion.ts:95`）。桌面 Host 的 toolset 子进程经 loopback 把参数与断言交给 Host，Host 校验、解析并作答。
   - 备选**路径 B**：在 `packages/client` 增加第五个 SDK 保留 helper，照 `submit_result` 的方式经 daemon control socket 转发（`packages/client/src/bin/agent-result-mcp-server.ts:39-67`）。它不需要该能力，但会把桌面产品工具放进 SDK 保留协议，并在已有的 host toolset 机制旁边形成第二种声明方式。
   - 两条路径都动公开包。路径 A 触及断言验证这一认证路径，由 Owner 裁定（§5 O1），本 ADR 不代为决定。#2554 的范围须相应加入一个公开包切片，或拆出独立子 issue。
-- **snapshotRef 形状**：mock 的 `{ turnId, toolCallId }` 不可行。模型看不到 K8 turnId；`toolCallId` 在事件中是可选字段（`packages/protocol/src/agent-event.ts:86`、`:97`），grok adapter 不设置它；也没有任何引擎承诺把调用 id 作为可复制的内容给模型。v1 采用模型能写出的内容（Owner 确认，§5 O2）：
+- **snapshotRef 形状**：mock 的 `{ turnId, toolCallId }` 不可行。模型看不到 K8 turnId；`toolCallId` 在事件中是可选字段（`packages/protocol/src/agent-event.ts:86`、`:97`）；现有 adapter 都会设置它（claude、codex、pi 各自设置，grok、antigravity、dsh、opencode 经共用的 `adapters/acp-turn-buffer.ts:45-56`），Host 可以据此配对 `tool_use` 与 `tool_result`，但它是运行时元数据，没有任何引擎承诺把它作为可复制的内容给模型。v1 采用模型能写出的内容（Owner 确认，§5 O2）：
 
   ```ts
   snapshotRef: { server: string; tool: string; input: Record<string, unknown>; pointer?: string }
@@ -83,11 +84,11 @@ appliesTo:
 
 - **解析规则**（只在发起调用的同一 task 内）：
   1. 在该 task 的 `tool_use` 事件中找 `mcp` 等于 `{server, tool}` 且 `input` 深相等的那一条。必须恰好一条：零条报 `snapshot_ref_unresolved`，多条报 `snapshot_ref_ambiguous`。
-  2. 按 `toolCallId` 配对 `tool_result`。缺 id、`isError` 或输出被 spill 成预览（`packages/client/src/daemon/event-spill.ts:238`）报 `snapshot_ref_unavailable`。
+  2. 按 `toolCallId` 配对 `tool_result`。缺 id、`isError` 或输出被 spill 成预览报 `snapshot_ref_unavailable`。inline 上限缺省 64 KiB（`packages/client/src/daemon/event-spill.ts:15`、`:238`），并受 server 活动预算限制（`task-runner.ts:663`），超过它的数据工具结果不能作为来源。某个引擎的事件若缺 `toolCallId`，该引擎上的 finance widget 按此规则 fail closed；base widget 不用 snapshotRef，不受影响。
   3. 输出解析为 JSON，取 `pointer`（RFC 6901，缺省为根）处的值，按组件的 snapshot schema 校验，失败报 `snapshot_invalid`。Host 只复制、不做字段映射（§5 O4）。
   - 只有 host toolset（MCP）结果可作来源，数值只来自 Host 声明的数据工具，不来自 shell 等原生工具。
+- **等待**：daemon 每 250 ms 批量上送进度（`packages/client/src/daemon/progress-batcher.ts:65`），`render_widget` 可能早于数据工具的 `tool_result` 到达 server。Host 在 `server.tasks.events(taskId)` 上等待匹配的那一对，最长 5 s，超时报 `snapshot_ref_unresolved`；该 feed 由本实例的提交唤醒（`packages/server/src/index.ts:275-280`）。
 - **记录位置**：工具结果的唯一来源是 SDK 已保存的 task 活动尾部 `server.tasks.activity(taskId)`（`packages/server/src/index.ts:263-269`），Host 的 activity 卡片已在读取它（`src/host/activity/domain.ts:64`）。上限为 1000 条、4 MiB，task 结束后保留 10 分钟（`packages/cloud/src/activity.ts:8-10`）。`render_widget` 与数据工具在同一 Turn 内调用，解析时结果仍在。Host 不新建工具结果表，只把校验后的 snapshot 复制进 D2 的 widget 记录：活动尾部会过期，widget 要比它活得久。跨 Turn 引用不在 v1（§5 O3）。
-- **更新**：模型在参数中给出 `replaces: <widgetId>` 时，Host 校验该 widget 属于同一 Bot、未被 clear 折叠，然后写入新 rev。该字段待与 artifact 导出核对（D7）。
 
 ### D6. 尺寸上限与错误码
 
@@ -113,7 +114,7 @@ appliesTo:
 | `widget_too_large` | 超出任一字节上限 |
 | `widget_unknown_component` | 组件不在 Host 目录中 |
 | `widget_turn_limit` | 本 Turn 已有 8 个 widget，或该 widget 已到 100 个 rev |
-| `widget_not_found` | `replaces` 指向不存在、属于其他 Bot 或已被折叠的 widget |
+| `widget_not_found` | 仅在 D7 的 `replaces` 获确认后启用：指向不存在、属于其他 Bot 或已被折叠的 widget |
 | `widget_task_inactive` | 断言有效，但该 task 的 Turn 已结束或已取消 |
 | `snapshot_ref_unresolved` / `snapshot_ref_ambiguous` / `snapshot_ref_unavailable` / `snapshot_invalid` | 见 D5 解析规则 |
 
@@ -122,6 +123,7 @@ appliesTo:
 ### D7. Spec v1（待 artifact 导出）
 
 - 已确定且只取 `handoff.md` 原文的部分：模型参数 `{ component, props, snapshotRef? }`（snapshotRef 形状按 D5 修改）；Host 条目 `{ kind: "widget", id: "w<id>", rev, component, props, snapshot, state, notice?, source?: { label, asOf } }`；状态 `loading | ready | partial | empty | unavailable | degraded | failed | upgrade_required`；规格带 `specVersion: 1`；两套目录的组件名见 #2552；共享卡片外壳（header、meta、body、notice、audit footer，以及 Chart/Data 标签页的 Expand 面板）。
+- **待定（建议）**：原位更新的模型参数。`handoff.md` 只说 Host 盖章 `rev`，没有给出指向已有 widget 的参数。建议增加 `replaces: <widgetId>`：Host 校验该 widget 属于同一 Bot、未被 clear 折叠，然后写入新 rev（§5 O5）。
 - **待定**：逐组件的 props/snapshot 类型、golden fixtures、mock 开放问题的逐条裁定（接受、修改或否决，各附理由）。三者以 `_ops/widget-mock/artifact/` 的导出为准，本 ADR 不猜测。导出落盘后在本节补齐，补齐前本 ADR 不晋升。
 
 ### D8. 安全边界
@@ -134,7 +136,7 @@ appliesTo:
 
 ### D9. 与 #2462 Electron cutover 的顺序
 
-- widget 子 issue 不等 cutover。cutover 受 #2458、#2461 S6、三端 Mixed release CI 与 #2479 四个条件约束，在此之前不产出桌面发布产物（#2462 正文「Cutover PR」），Electron 上的临时显示不会到达用户。
+- widget 子 issue 不等 cutover。cutover 受 #2458、#2461 S6、三端 Mixed release CI 与 #2479 四个条件约束，在此之前不产出桌面发布产物（#2462 正文「Cutover PR」）。CI 只用一次性证书把 Electron 打包做冒烟，不上传产物（`.github/workflows/ci.yml:2454-2469`），Electron 上的临时显示不会到达用户。
 - **#2554 要改 Electron 一处**：Electron `Row` 对 `item.kind` 的 switch 没有 default（`src/renderer/conversation/transcript.tsx:38-55`），直接引用 Host 联合类型（`:2`），根 tsconfig 为 `strict` 但没有 `noImplicitReturns`（`tsconfig.json:9`）。新增 `widget` kind 能编译通过，但会什么都不渲染，属于 #2552 禁止的静默丢弃。#2554 增加一个 `case 'widget'`，渲染显式的不支持文本（语义同 NSH 的 `upgrade_required` 卡片），cutover 时随 `src/renderer/**` 一起删除。
 - **#2557 不需要 Electron stub**，但要迁移一处调用：删除 `k8.answer` 会使 Electron `QuestionCard`（`transcript.tsx:19`）失效，#2557 在同一 PR 内把它改为 `k8.act`。Electron 不显示 widget 控件，不会发出 widget 动作。
 - 合并顺序维持 2553、2554、2557、2555、2556。若 cutover 先落地，上述两处 Electron 改动随之取消。
@@ -164,5 +166,6 @@ appliesTo:
 - **O1（认证路径）**：嵌入式 `@byok-sdk/server` 是否增加 `host-mcp-task-context` 声明与 task 断言验证（路径 A，推荐），还是在 `packages/client` 新增 SDK 保留的 widget helper（路径 B）。裁定前，#2554 无法把解析错误同步返回模型。
 - **O2**：用 `{ server, tool, input, pointer? }` 取代 mock 的 `{ turnId, toolCallId }`。
 - **O3**：v1 只在发起调用的 task 内解析。跨 Turn 引用需要 Host 另存一份工具结果，会形成第二个记录。
-- **O4**：数据工具的输出约定。Host 只复制、不映射字段，下游 finance 数据工具须返回 snapshot 形状的 JSON，需确认它们当前的输出。
+- **O4**：数据工具的输出约定。Host 只复制、不映射字段，下游 finance 数据工具须返回 snapshot 形状的 JSON，且单个结果小于 64 KiB inline 上限，需确认它们当前的输出。
+- **O5**：原位更新是否采用 `replaces: <widgetId>`（D7），需与 artifact 导出核对。
 - **D7**：spec v1 的组件类型与开放问题，等 artifact 导出。

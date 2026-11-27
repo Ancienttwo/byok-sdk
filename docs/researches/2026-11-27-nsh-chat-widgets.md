@@ -58,7 +58,7 @@ Each mark is a canvas filling the plot. Rows are scaled and drawn in Rust, so no
 - `ConversationItem` is a closed union of six kinds (`examples/desktop-bot-app/src/host/conversation/view.ts:37-43`).
 - Keys are `e<seq>` for input, reply and clear (`view.ts:112-114`), `t<turnId>` for working and ended, and `q<questionId>` (`view.ts:123-135`).
 - `seq` is an `AUTOINCREMENT` column, so keys never collide across kinds (`src/host/store/store.ts:10`).
-- Rows sort by a float anchor: a Turn's status sits at its input `seq + 0.5`, and a question at its Turn `+ 0.25` (`view.ts:117`, `:134`).
+- Rows sort by a float anchor. Entries sit at their own `seq`. A Turn's status row (working or ended) sits at its input `seq + 0.5`, through `after(seq) = seq + 0.5` (`view.ts:117`, `:123`, `:128`). A question sits at `after(seq) + 0.25`, that is `seq + 0.75` (`view.ts:134`). The reply is a later entry with its own integer `seq`.
 - No item carries a revision today. A change arrives as the same key with new fields.
 - The Host returns the whole snapshot on every `k8.view` (`src/host/conversation/service.ts:61-90`). A payload-free state hint tells the UI to read it again (`src/host/supervise.ts:37-39`, `src/main/state-hint.ts:9-17`).
 
@@ -85,7 +85,7 @@ Each cell mounts an `Each` keyed `${key}:${kind}` (`:226`). A rev replacement ke
 - `rev` is an integer stamped by the Host. A newer rev arrives as a new item object under the same key, and the List replaces it in place.
 - A widget above the viewport may change height without moving the reader. One in view pushes the rows below it. A rev replacement moves the reading position only if the body height changes, so each component state has a fixed body height. `loading` takes the height of `ready`, and `partial`, `degraded` and `failed` add one notice line of fixed height. The ADR states this as a restriction (ADR-053 §3).
 - `estimatedItemSize` stays one number per list (`nsh:crates/nsh-js/src/list.rs:721`; there is no per-item size prop). 64 stays. Widgets are taller, but a wrong estimate only affects the scroll bar and jumps to far rows before measurement.
-- A widget's sort anchor is its Turn's input `seq + 0.375`: after the Turn's question (`+0.25`) and before its status row (`+0.5`). Several widgets of one Turn keep the order of their `widgetId`.
+- A widget's sort anchor is its Turn's input `seq + 0.625`: after the Turn's status row (`+0.5`), before its question (`+0.75`) and before its reply (a later `seq`). While the Turn works, the order is input, working row, widgets. Once it has replied, the order is input, widgets, reply. Several widgets of one Turn keep the order of their `widgetId`.
 - Draft state (form values, choice selection, a pending action key) lives in `nsh-app/src/store.ts`, keyed by `widgetId`. This follows `pendingClears`, which keeps an action id per Bot until the Host confirms it (`store.ts:278-290`).
 
 ## 3. Spec home (question 3)
@@ -114,7 +114,8 @@ The renderer-agnostic rule means the spec names no NSH type, class or Plot prop.
 - `k8.answer {questionId, answer} → null` carries no client key (`k8.ts:21`).
 - The Host passes it to K8 (`service.ts:137-142`).
 - K8 dedupes by `questionId`. The same answer again is a no-op, a different answer throws `Answer identity conflict`, an unknown question throws (`packages/bot-collaboration/src/rules/commands.ts:297-311`).
-- `k8.send` and `k8.clear` already carry a client `actionId` that is reused on retry (`k8.ts:16-18`).
+- `k8.send` and `k8.clear` already carry a client `actionId` that is reused on retry (`k8.ts:16-18`). The Host store dedupes a send by that id before K8 sees it (`src/host/k8/conversation.ts:112-118`).
+- A send while the Bot's Turn is still open is not refused. K8 queues it, and inputs that arrive while the Bot is busy coalesce into its next Turn in arrival order (`packages/bot-collaboration/src/rules/coalesce.ts:72-96`).
 
 **Change.** One method, `k8.act`, replaces `k8.answer` in `K8Methods` and in `K8_DOMAIN.renderer`. The JSON diff is one name in `rendererMethods` and one in `hostMethods`. The full shape is in ADR-053 D4. Both renderers call `k8.answer` today (`nsh-app/src/store.ts:299-301`, `src/renderer/conversation/transcript.tsx:19`). Both move to `k8.act` in the PR that deletes `k8.answer`.
 
@@ -154,12 +155,12 @@ The research recommends path A. It reuses the lane the SDK documents for exactly
 
 ### 5.3 Where `snapshotRef` resolves
 
-**The mock's `{ turnId, toolCallId }` cannot be filled by the model on every engine.**
+**The model cannot fill the mock's `{ turnId, toolCallId }`.**
 
 - The model never sees a K8 `turnId`. It is a Host-side id (`src/host/conversation/service.ts:72`).
 - `toolCallId` is optional on both `tool_use` and `tool_result` (`packages/protocol/src/agent-event.ts:86`, `:97`).
-- claude (`adapters/claude/projection.ts:214`, `:300`), codex, opencode (`opencode/projection.ts:55`, `:66`), dsh (`dsh/projection.ts:98`, `:108`) and pi set it. The grok adapter never mentions `toolCallId`.
-- No engine contract puts the runtime's call id in front of the model as something to copy.
+- Every bundled adapter sets it today: claude (`adapters/claude/projection.ts:214`, `:300`), codex (`codex/projection.ts:24`), pi (`pi/mcp-tools.ts:29`), and grok, antigravity, dsh and opencode through the shared `adapters/acp-turn-buffer.ts:45-56`. So the Host can pair a `tool_use` with its `tool_result`.
+- The id is runtime metadata, though. No engine contract puts it in front of the model as something to copy.
 
 **What the model can name** is the tool it called and the arguments it passed. Recommended v1 shape (ADR-053 D5, owner confirmation O2):
 
@@ -171,12 +172,14 @@ The Host resolves it inside the same task:
 
 1. Take the task's `tool_use` events whose `mcp` is `{server, tool}` (`agent-event.ts:79-89`) and whose `input` deep-equals `input`.
 2. There must be exactly one such event. Zero is `snapshot_ref_unresolved`; more than one is `snapshot_ref_ambiguous`.
-3. Pair it with its `tool_result` by `toolCallId`. A missing id, an `isError` result or a spilled output is `snapshot_ref_unavailable`.
+3. Pair it with its `tool_result` by `toolCallId`. A missing id, an `isError` result or a spilled output is `snapshot_ref_unavailable`. On an engine whose events lacked the id, finance widgets would fail closed this way. Base widgets have no `snapshotRef` and are unaffected.
 4. Parse the output as JSON. Take the value at `pointer` (RFC 6901, root by default) and validate it against the component's snapshot schema. Any failure is `snapshot_invalid`.
 
 Only host toolset (MCP) results qualify, so figures come only from Host-declared data tools, never from a native tool such as a shell command.
 
-**The record.** The SDK already keeps each task's events. `server.tasks.activity(taskId)` returns the retained activity tail (`packages/server/src/index.ts:263-269`). The Host's activity cards already read it (`src/host/activity/domain.ts:64`). Its bounds are 1000 entries and 4 MiB, kept 10 minutes after the task ends (`packages/cloud/src/activity.ts:8-10`). An event above the inline limit is replaced by a spill preview (`packages/client/src/daemon/event-spill.ts:238`).
+**The record.** The SDK already keeps each task's events. `server.tasks.activity(taskId)` returns the retained activity tail (`packages/server/src/index.ts:263-269`). The Host's activity cards already read it (`src/host/activity/domain.ts:64`). Its bounds are 1000 entries and 4 MiB, kept 10 minutes after the task ends (`packages/cloud/src/activity.ts:8-10`). An event above the inline limit is replaced by a spill preview (`packages/client/src/daemon/event-spill.ts:238`). The limit defaults to 64 KiB (`event-spill.ts:15`), capped by the server's activity budget (`packages/client/src/daemon/task-runner.ts:663`). A data-tool result above it can never be a snapshot source. This is part of the data-tool contract (O4).
+
+**Ordering.** The daemon sends progress in batches flushed every 250 ms (`packages/client/src/daemon/progress-batcher.ts:65`). The runtime may call `render_widget` before the data tool's `tool_result` reaches the server. So the Host waits on `server.tasks.events(taskId)` for the matching pair, bounded at 5 s, before it answers `snapshot_ref_unresolved`. Commits in the instance wake that feed (`packages/server/src/index.ts:275-280`).
 
 `render_widget` runs inside the Turn that called the data tool, so the result is still retained when it resolves. The Host therefore adds no tool-result table: it resolves from that one source. It copies only the validated snapshot into the widget record, which is the authority for the widget item (Host store, one row per `widgetId` with its current `rev`). The tail expires 10 minutes after the task, and the widget must outlive it.
 
@@ -213,7 +216,7 @@ Pre-existing, not changed here: the conversation `MarkdownView` renders Bot repl
 
 ## 8. Order against the #2462 Electron cutover
 
-The cutover PR deletes `src/main/**`, `src/preload/**` and `src/renderer/**`. It waits for four conditions: #2458 PASS, #2461 S6 evidence, three-OS Mixed release CI and #2479 closed. Until then no desktop release artifact is produced (#2462 body, "Cutover PR"). The widget children do not need to wait for it.
+The cutover PR deletes `src/main/**`, `src/preload/**` and `src/renderer/**`. It waits for four conditions: #2458 PASS, #2461 S6 evidence, three-OS Mixed release CI and #2479 closed. Until then no desktop release artifact is produced (#2462 body, "Cutover PR"). CI packages Electron only as a smoke test with a throwaway certificate, and it uploads nothing (`.github/workflows/ci.yml:2454-2469`). The widget children do not need to wait for it.
 
 - **#2554 touches Electron.** The Electron `Row` switches on `item.kind` with no default (`src/renderer/conversation/transcript.tsx:38-55`) and imports the Host union directly (`:2`). The root tsconfig is `strict` without `noImplicitReturns` (`tsconfig.json:9`), so a new `widget` kind compiles and renders *nothing*. That is a silent drop, which #2552 forbids. #2554 adds one `case 'widget'` that renders the explicit unsupported text, the same meaning as the NSH `upgrade_required` card. The cutover deletes it with the rest of `src/renderer/**`.
 - **#2557 needs no stub**, but it migrates one Electron call. Deleting `k8.answer` breaks the Electron `QuestionCard`, which calls it (`transcript.tsx:19`). #2557 changes that call to `k8.act` in the same PR. Electron never sends a widget action, because it shows no widget controls.
@@ -224,5 +227,6 @@ The cutover PR deletes `src/main/**`, `src/preload/**` and `src/renderer/**`. It
 1. **O1, task binding (authentication path).** Should the embedded `@byok-sdk/server` declare `host-mcp-task-context` and verify task assertions (path A, recommended), or should the SDK add a reserved widget helper (path B)? #2554 cannot return a synchronous resolution error to the model until one lands.
 2. **O2, `snapshotRef` shape.** Replace the mock's `{turnId, toolCallId}` with `{server, tool, input, pointer?}` (section 5.3)?
 3. **O3, cross-Turn references.** v1 resolves only within the calling task. Should a later Turn be able to chart an earlier Turn's data? That would need a Host-side copy of tool results, a second record.
-4. **O4, data-tool output contract.** The Host copies figures without mapping fields, so a finance data tool must return JSON whose value at `pointer` is the component's snapshot shape. Do the downstream finance tools already return that shape?
-5. **Q6** stays open until the artifact export lands in `_ops/widget-mock/artifact/`.
+4. **O4, data-tool output contract.** The Host copies figures without mapping fields, so a finance data tool must return JSON whose value at `pointer` is the component's snapshot shape, in a result under the 64 KiB inline limit. Do the downstream finance tools already return that shape?
+5. **O5, updating a widget in place.** `handoff.md` has the Host stamp `rev` but names no model argument that targets an existing widget. ADR-053 proposes `replaces: <widgetId>`, to be checked against the export.
+6. **Q6** stays open until the artifact export lands in `_ops/widget-mock/artifact/`.
