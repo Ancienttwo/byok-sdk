@@ -34,7 +34,9 @@ export async function createSettingsDomain(context: HostContext): Promise<HostDo
   const store = settingsStore(settingsFile(context.hostStorageRoot));
   // A damaged settings file stops the Host at start, not at the first read.
   await store.read();
-  const device = deviceSettings(context.daemon, context.daemonConfig, context.adapters);
+  const device = deviceSettings(context.daemon, context.daemonConfig, context.adapters, {
+    ...(context.shutdownSignal === undefined ? {} : { shutdownSignal: context.shutdownSignal }),
+  });
   return {
     handlers: {
       'settings.device': async params => device.device(deviceParams(params)),

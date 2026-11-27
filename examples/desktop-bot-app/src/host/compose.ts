@@ -29,6 +29,8 @@ export interface HostCompositionOptions {
   readonly deviceCredentials?: DeviceCredentialBackend;
   /** Called when a bridge domain's views changed (`HostContext.changed`). */
   readonly onChanged: () => void;
+  /** Aborted when Host shutdown begins, before in-flight bridge RPCs settle. */
+  readonly shutdownSignal?: AbortSignal;
 }
 
 /** The running server, daemon and bridge domains of one Host process. */
@@ -212,7 +214,16 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
   });
   let daemon: Daemon | undefined;
   let domains: ComposedDomains | undefined;
+  const shutdown = new AbortController();
+  const forwardShutdown = () => shutdown.abort();
+  if (options.shutdownSignal?.aborted) {
+    shutdown.abort();
+  } else {
+    options.shutdownSignal?.addEventListener('abort', forwardShutdown, { once: true });
+  }
   const close = async () => {
+    shutdown.abort();
+    options.shutdownSignal?.removeEventListener('abort', forwardShutdown);
     late.refuse(new Error('The Host closed before the conversation opened'));
     try {
       await domains?.close();
@@ -245,7 +256,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
     await started.pairEmbedded(server);
     await started.start();
     domains = await composeDomains({
-      daemon: started, daemonConfig, adapters, server, storeDir: options.storeDir, hostStorageRoot: options.hostStorageRoot,
+      daemon: started, daemonConfig, adapters, shutdownSignal: shutdown.signal, server, storeDir: options.storeDir, hostStorageRoot: options.hostStorageRoot,
       consumers: { bind: late.bind },
       changed: options.onChanged,
     });

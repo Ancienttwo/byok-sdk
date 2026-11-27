@@ -28,6 +28,8 @@ export interface HostContext {
   readonly daemonConfig: DaemonConfig;
   /** The runtime adapters `composeHost` built for `createDaemonWithAdapters`, reused by on-demand auth probes. */
   readonly adapters: readonly RuntimeAdapter[];
+  /** Aborted when Host shutdown starts, before in-flight RPCs are drained, so long probes cancel promptly. */
+  readonly shutdownSignal?: AbortSignal;
   readonly server: ByokServer;
   readonly storeDir: string;
   readonly hostStorageRoot: string;

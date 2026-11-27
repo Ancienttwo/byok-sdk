@@ -469,6 +469,48 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
     await app.waitUntil(() => count(calls, "settings.device") === 3);
     expect(calls.filter((call) => call.method === "settings.device")[2]?.params).toBeNull();
   });
+
+  test("a Host that restarts while Settings stays mounted gets the default read without replaying checkAuth", async () => {
+    const calls: Call[] = [];
+    let starts = 0;
+    const app = await open("./restart.fixture.tsx", {
+      platform: "macos",
+      width: 1280,
+      height: 900,
+      modules: {
+        "byok-nsh-adapter": {
+          "ByokShell.start": async () => {
+            starts += 1;
+            return {
+              started: true,
+              alreadyStarted: false,
+              state: { state: "running", pid: starts, activeWork: 0 },
+            };
+          },
+          "ByokShell.call": (method: string, params: any) => {
+            calls.push({ method, params });
+            if (method === "k8.view") return { bots: [], roles: [], models: MODELS, busy: false };
+            if (method === "settings.device") return DEVICE;
+            if (method === "settings.get") return { dreaming: { enabled: true, models: ["m1"] } };
+            if (method === "settings.loginItem") return { supported: true, enabled: false };
+            return null;
+          },
+        },
+      },
+    });
+
+    await app.waitFor("id:settings-agents");
+    expect(calls.filter((call) => call.method === "settings.device").map((call) => call.params)).toEqual([null]);
+
+    await app.press("id:settings-agents-check-again");
+    await app.waitUntil(() => count(calls, "settings.device") === 2);
+    expect(calls.filter((call) => call.method === "settings.device")[1]?.params).toEqual({ checkAuth: true });
+
+    // Host restarts (hostReady: true -> false -> true) while SettingsScreen stays mounted.
+    await app.press("id:fixture-restart");
+    await app.waitUntil(() => starts === 2 && count(calls, "settings.device") === 3);
+    expect(calls.filter((call) => call.method === "settings.device")[2]?.params).toBeNull();
+  });
 });
 
 describe("runtimeStatus shared vocabulary (#2543)", () => {

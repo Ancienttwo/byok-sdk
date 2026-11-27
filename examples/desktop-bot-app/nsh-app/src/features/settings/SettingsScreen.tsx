@@ -26,13 +26,21 @@ const failureText = (error: unknown) => (error === undefined ? null : toBridgeCa
  */
 export function SettingsScreen() {
   const refreshes = signal(0);
-  const deviceQuery = signal<{ readonly seq: number; readonly checkAuth: boolean }>({ seq: 0, checkAuth: false });
+  const deviceReads = signal(0);
+  // Consumed once by the read triggered by "Check again", so a Host restart while mounted gets the default read.
+  let pendingCheckAuth = false;
+  const activeCheckAuth = signal(false);
   const ready = computed(() => hostReady());
   const device = resource(
-    () => (ready() ? deviceQuery() : false),
-    async (query) => await readDevice(query.checkAuth ? { checkAuth: true } : undefined),
+    () => (ready() ? deviceReads() : false),
+    async () => {
+      const checkAuth = pendingCheckAuth;
+      pendingCheckAuth = false;
+      activeCheckAuth.set(checkAuth);
+      return await readDevice(checkAuth ? { checkAuth: true } : undefined);
+    },
   );
-  const checkingAuth = computed(() => device.loading() && deviceQuery().checkAuth);
+  const checkingAuth = computed(() => device.loading() && activeCheckAuth());
   // `load` names the read: a new one mounts a new dreaming form from it, a save keeps the form (`mutate`, same load).
   // A read waits for a running save (also one started before a section switch remounted this screen), so it never
   // mounts the form on the value before the save; Refresh stays disabled meanwhile. A read whose screen went away or
@@ -64,8 +72,9 @@ export function SettingsScreen() {
           loading={device.loading() || settings.loading() || dreamingSaving()}
           disabled={!ready()}
           onPress={() => {
+            pendingCheckAuth = false;
             refreshes.update((n) => n + 1);
-            deviceQuery.update((q) => ({ seq: q.seq + 1, checkAuth: false }));
+            deviceReads.update((n) => n + 1);
           }}
         >
           Refresh
@@ -85,7 +94,11 @@ export function SettingsScreen() {
               size="sm"
               loading={checkingAuth()}
               disabled={!ready() || device.loading()}
-              onPress={() => deviceQuery.update((q) => ({ seq: q.seq + 1, checkAuth: true }))}
+              onPress={() => {
+                if (!ready()) return;
+                pendingCheckAuth = true;
+                deviceReads.update((n) => n + 1);
+              }}
             >
               Check again
             </Button>

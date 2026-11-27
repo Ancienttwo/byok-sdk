@@ -1,8 +1,12 @@
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createInterface } from 'node:readline';
+import { PassThrough } from 'node:stream';
 import type { Daemon, DaemonConfig, DiagnosticsSnapshot, RuntimeAdapter, RuntimeObservation } from '@byok-sdk/client';
 import { describe, expect, it, vi } from 'vitest';
+import { BRIDGE_VERSION, encodeMessage } from '../../bridge/protocol.ts';
+import { serveBridge } from '../../bridge/server.ts';
 import { trayMenu } from '../../main/tray-menu.ts';
 import type { HostContext } from '../domains.ts';
 import { deviceSettings, deviceView } from './device.ts';
@@ -235,6 +239,152 @@ describe('device view', () => {
       present: false,
       outcome: 'timeout',
     });
+  });
+
+  it('skips Pi full detection on checkAuth and keeps its existing observation', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'device-skip-pi-'));
+    const detectPi = vi.fn<RuntimeAdapter['detect']>().mockResolvedValue({
+      kind: 'available',
+      version: '9.9.9',
+      authPresent: true,
+    });
+    const detectClaude = vi.fn<RuntimeAdapter['detect']>().mockResolvedValue({
+      kind: 'available',
+      version: '2.1.0',
+      authPresent: true,
+    });
+    const adapters: RuntimeAdapter[] = [
+      {
+        descriptor: {
+          id: 'pi',
+          selectionModes: ['byok-profile'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: detectPi,
+      } as unknown as RuntimeAdapter,
+      {
+        descriptor: {
+          id: 'claude',
+          selectionModes: ['subscription'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: detectClaude,
+      } as unknown as RuntimeAdapter,
+    ];
+    const daemon = {
+      status: () => ({
+        ...status,
+        runtimes: [
+          { id: 'pi', present: true, outcome: 'available', version: '1.3.0', authPresent: false, steer: true, resume: true },
+          { id: 'claude', present: true, outcome: 'available', version: '2.1.0', authPresent: false, steer: true, resume: true },
+        ],
+      }),
+    } as unknown as Daemon;
+    const config = {
+      productId: 'test',
+      productName: 'Test',
+      deviceName: 'Test',
+      serverUrl: 'http://127.0.0.1:1',
+      storeDir,
+    } as DaemonConfig;
+    const settings = deviceSettings(daemon, config, adapters, {
+      adapters: [],
+      runtimeProbeTimeoutMs: 500,
+    });
+
+    const reprobed = await settings.device({ checkAuth: true });
+    expect(detectPi).not.toHaveBeenCalled();
+    expect(detectClaude).toHaveBeenCalledOnce();
+    expect(reprobed.runtimes).toHaveLength(2);
+    expect(reprobed.runtimes[0]).toEqual({ id: 'pi', present: true, outcome: 'available', version: '1.3.0', authPresent: false });
+    expect(reprobed.runtimes[1]).toMatchObject({ id: 'claude', present: true, outcome: 'available', version: '2.1.0', authPresent: true });
+  });
+
+  it('cancels an in-flight checkAuth recheck on Host shutdown with method_failed before draining RPCs', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'device-shutdown-store-'));
+    const hostStorageRoot = await mkdtemp(path.join(tmpdir(), 'device-shutdown-host-'));
+    let probeStarted!: () => void;
+    const started = new Promise<void>(resolve => { probeStarted = resolve; });
+    let probeAborted = false;
+    const adapters: RuntimeAdapter[] = [
+      {
+        descriptor: {
+          id: 'claude',
+          selectionModes: ['subscription'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: (signal?: AbortSignal) => new Promise((_resolve, reject) => {
+          probeStarted();
+          signal?.addEventListener('abort', () => {
+            probeAborted = true;
+            reject(new Error('aborted'));
+          });
+        }),
+      } as unknown as RuntimeAdapter,
+    ];
+    const daemon = {
+      status: () => ({
+        ...status,
+        runtimes: [
+          { id: 'claude', present: true, outcome: 'available', version: '2.1.0', authPresent: false, steer: true, resume: true },
+        ],
+      }),
+    } as unknown as Daemon;
+    const daemonConfig: DaemonConfig = {
+      productId: 'test',
+      productName: 'Test',
+      deviceName: 'Test',
+      serverUrl: 'http://127.0.0.1:1',
+      storeDir,
+      runtimeAllowlist: [],
+      localAgentRelease: { version: '0.0.1' },
+    };
+    const shutdown = new AbortController();
+    const domain = await createSettingsDomain({
+      daemon,
+      daemonConfig,
+      adapters,
+      shutdownSignal: shutdown.signal,
+      hostStorageRoot,
+    } as unknown as HostContext);
+
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const replies: Array<{ id: number; result?: unknown; error?: { code: string; message: string } }> = [];
+    const lines = createInterface({ input: output });
+    lines.on('line', line => replies.push(JSON.parse(line) as (typeof replies)[number]));
+
+    const inflight = new Set<Promise<unknown>>();
+    const track = (handler: (params: unknown) => unknown) => (params: unknown) => {
+      const call = Promise.resolve().then(() => handler(params));
+      inflight.add(call);
+      call.then(() => inflight.delete(call), () => inflight.delete(call));
+      return call;
+    };
+    const serving = serveBridge({
+      greeted: () => {},
+      methods: {
+        'settings.device': track(domain.handlers['settings.device'] as (params: unknown) => unknown),
+      } as never,
+      shutdown: async () => {
+        shutdown.abort();
+        await Promise.allSettled(inflight);
+      },
+    }, { input, output });
+
+    input.write(encodeMessage({ id: 1, method: 'hello', params: { bridgeVersion: BRIDGE_VERSION } }));
+    input.write(encodeMessage({ id: 2, method: 'settings.device', params: { checkAuth: true } }));
+    await started;
+
+    input.write(encodeMessage({ id: 3, method: 'shutdown' }));
+    await serving;
+
+    expect(probeAborted).toBe(true);
+    expect(replies.find(reply => reply.id === 2)).toEqual({
+      id: 2,
+      error: { code: 'method_failed', message: 'Host is shutting down' },
+    });
+    expect(replies.find(reply => reply.id === 3)).toEqual({ id: 3, result: null });
   });
 });
 
