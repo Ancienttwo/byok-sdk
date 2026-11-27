@@ -22,7 +22,7 @@ NSH has two native vector layers. A TSX app can use both under the D2 capability
 - `fontVariantNumeric: "tabular-nums"` (`:141`);
 - gradients (`:192`).
 
-`canvas` is a plain module of `nsh-core` (`nsh:crates/nsh-core/src/lib.rs:17`). Only `svg` is a cargo feature there (`nsh:crates/nsh-core/Cargo.toml:52`).
+`canvas` is a plain module of `nsh-core` (`nsh:crates/nsh-core/src/lib.rs:17`). `canvas` is not behind any cargo feature; the crate's features (`svg`, `animation`, `loader`, `shader`, `websocket`, `updater` and others) gate other modules (`nsh:crates/nsh-core/Cargo.toml:52`).
 
 The recording is replayed by each desktop platform's own 2D engine:
 
@@ -41,7 +41,7 @@ Drawing needs no capability. The only capability gate on a canvas is the source 
 - `Sankey`, `Treemap`;
 - `PlotAxis` and `PlotLabel`.
 
-Each mark is a canvas filling the plot. Rows are scaled and drawn in Rust, so no JS runs per point. Line, area and grid take `stroke`, `strokeWidth` and `strokeDasharray` (`nsh:website/elements/plot.md:210-212`), so a dashed benchmark line is a prop. A plot has `accessibilityLabel` and `accessibilityValue` (`plot.md:109-110`). The upstream gallery imports the whole set from TSX (`nsh:examples/gallery/demos/Charts.tsx:3`).
+Marks draw on canvases: a line, area or bar mark is a canvas filling the plot, while a pie uses one canvas per slice and a sankey or treemap one per part (`mod.rs:5-13`). Rows are scaled and drawn in Rust, so no JS runs per point. Line, area and grid take `stroke`, `strokeWidth` and `strokeDasharray` (`nsh:website/elements/plot.md:210-212`), so a dashed benchmark line is a prop. A plot has `accessibilityLabel` and `accessibilityValue` (`plot.md:109-110`). The upstream gallery imports the whole set from TSX (`nsh:examples/gallery/demos/Charts.tsx:3`).
 
 `plot` is a cargo feature of `nsh-base` and is in its default set (`nsh:crates/nsh-base/Cargo.toml:15`, `:23`; `nsh:crates/nsh-base/src/lib.rs:54-55`). It is also in the default set of the three desktop app crates (`nsh:crates/nsh-macos-app/Cargo.toml:16`; the same line in the Windows and Linux app crates). `nsh package` keeps a runner feature only when the bundle imports it. `plot` is kept by the `nsh_part_plot` gate (`nsh:crates/nsh-cli/src/native_features.rs:16-21`). nsh-app imports `nsh/base` today but not `nsh/base/plot` (`examples/desktop-bot-app/nsh-app/src/ui/*.tsx`), so the first chart widget adds the feature to the release runner. Its size delta has to be measured when that happens.
 
@@ -83,9 +83,10 @@ Each cell mounts an `Each` keyed `${key}:${kind}` (`:226`). A rev replacement ke
 
 - A widget is one more `ConversationItem` kind with key `w<widgetId>`. The `w` prefix keeps it disjoint from `e`, `t` and `q`.
 - `rev` is an integer stamped by the Host. A newer rev arrives as a new item object under the same key, and the List replaces it in place.
-- A widget above the viewport may change height without moving the reader. One in view pushes the rows below it. A rev replacement moves the reading position only if the body height changes, so each component state has a fixed body height. `loading` takes the height of `ready`, and `partial`, `degraded` and `failed` add one notice line of fixed height. The ADR states this as a restriction (ADR-053 §3).
+- A widget above the viewport may change height without moving the reader. One in view pushes the rows below it. A rev replacement or a state change moves the reading position whenever the row height changes. So each component keeps one total height in every state: the notice line is reserved in every state (blank when there is no notice), and `loading` takes the body height of `ready`. Acceptance compares the card's and the next row's Y position before and after an in-view state change in a real NSH List. The ADR states this as a restriction (ADR-053 §3).
 - `estimatedItemSize` stays one number per list (`nsh:crates/nsh-js/src/list.rs:721`; there is no per-item size prop). 64 stays. Widgets are taller, but a wrong estimate only affects the scroll bar and jumps to far rows before measurement.
 - A widget's sort anchor is its Turn's input `seq + 0.625`: after the Turn's status row (`+0.5`), before its question (`+0.75`) and before its reply (a later `seq`). While the Turn works, the order is input, working row, widgets. Once it has replied, the order is input, widgets, reply. Several widgets of one Turn keep the order of their `widgetId`.
+- Some Turns have no input entry. The Turn K8 starts after an answer has id `hash(['answer', questionId])` (`packages/bot-collaboration/src/rules/commands.ts:309-311`), and delegated Turns are not recorded through `recordInput` either; their working row falls back to `Number.MAX_SAFE_INTEGER` (`view.ts:128`). So the widget record fixes its anchor base when the first rev is written and never recomputes it: the input `seq` when there is one, otherwise the Bot's highest entry `seq` at that moment.
 - Draft state (form values, choice selection, a pending action key) lives in `nsh-app/src/store.ts`, keyed by `widgetId`. This follows `pendingClears`, which keeps an action id per Bot until the Host confirms it (`store.ts:278-290`).
 
 ## 3. Spec home (question 3)
@@ -115,15 +116,16 @@ The renderer-agnostic rule means the spec names no NSH type, class or Plot prop.
 - The Host passes it to K8 (`service.ts:137-142`).
 - K8 dedupes by `questionId`. The same answer again is a no-op, a different answer throws `Answer identity conflict`, an unknown question throws (`packages/bot-collaboration/src/rules/commands.ts:297-311`).
 - `k8.send` and `k8.clear` already carry a client `actionId` that is reused on retry (`k8.ts:16-18`). The Host store dedupes a send by that id before K8 sees it (`src/host/k8/conversation.ts:112-118`).
-- A send while the Bot's Turn is still open is not refused. K8 queues it, and inputs that arrive while the Bot is busy coalesce into its next Turn in arrival order (`packages/bot-collaboration/src/rules/coalesce.ts:72-96`).
+- A send while the Bot's Turn is still open is not refused; it is queued input. The desktop Host builds K8 without a coalescing policy (`src/host/k8/conversation.ts:73-82`), and without one each input becomes its own queued Turn (`packages/bot-collaboration/src/rules/coalesce.ts:131`). Coalescing several inputs into one Turn is an opt-in K8 policy that the desktop Host does not enable.
+- K8 identifies an input by its actionId and botId, so it cannot enforce "once per `(widgetId, action)`". The Host does: it writes the `(widgetId, action) → actionKey` binding into the widget record and the input entry in one `store.sqlite` transaction before `bot.input`, and refuses a different key for a bound pair (ADR-053 D4).
 
 **Change.** One method, `k8.act`, replaces `k8.answer` in `K8Methods` and in `K8_DOMAIN.renderer`. The JSON diff is one name in `rendererMethods` and one in `hostMethods`. The full shape is in ADR-053 D4. Both renderers call `k8.answer` today (`nsh-app/src/store.ts:299-301`, `src/renderer/conversation/transcript.tsx:19`). Both move to `k8.act` in the PR that deletes `k8.answer`.
 
 **Versions.**
 
-- `schemaVersion` versions the file's shape. It went 1 → 2 when #2465 added the `shellToHostMethods` key. That same commit added a method without touching `bridgeVersion` (`git show a85fde7bc -- examples/desktop-bot-app/src/bridge/bridge-contract.json`).
+- `schemaVersion` versions the file's shape. It went 1 → 2 when #2465 added the `shellToHostMethods` key.
 - Renaming one method name changes neither key, so `schemaVersion` stays 2.
-- `bridgeVersion` (`BRIDGE_VERSION = 2`, `src/bridge/protocol.ts:22`) also stays. The shell embeds the contract at compile time (`native/byok-shell/src/contract.rs:9`), and the Host and both shells ship in one package with no version negotiation (ADR-052 S2).
+- `bridgeVersion` (`BRIDGE_VERSION = 2`, `src/bridge/protocol.ts:22`) goes to 3. FORKING.md requires raising it whenever the bridge changes, so that a shell and a Host of different versions refuse each other (`examples/desktop-bot-app/FORKING.md:67`). With equal versions, an old Host and a new shell pass `hello` and fail only at the first `k8.act`; an NSH dev run can also reuse an older Host bundle. #2557 bumps `BRIDGE_VERSION`, the Rust `EXPECTED_BRIDGE_VERSION` (`native/byok-shell/src/contract.rs:15`) and the version fixtures together.
 
 ## 5. Host resolution (question 5)
 
@@ -145,13 +147,17 @@ The parent requires an invalid spec to fail closed *with an error to the model*.
 
 A host toolset server is a child process that the runtime starts. It learns its task only through the task-context lane: the daemon appends a context file, the child exchanges it for a short-lived task assertion through `requestTaskAssertion`, and the Host verifies it (`docs/spec.md:2575-2618`; `packages/client/src/daemon/task-runner/mcp-contexts.ts:116-175`). The daemon mints a nonce only when the deployment declares `host-mcp-task-context` (`docs/spec.md:2609-2618`). The embedded `@byok-sdk/server` builds its declaration with `capabilityDeclarationForPorts(ports)` (`packages/server/src/index.ts:455`). That function never includes `host-mcp-task-context` (`packages/cloud/src/capabilities.ts:191-196`). Cloud can declare it (`includeHostMcpTaskContext`, `capabilities.ts:149`, `:222-223`) and ships the verification (`packages/cloud/src/auth/device-assertion.ts:95`). So in the desktop Host today a widget child would get no nonce, and `requestTaskAssertion` would refuse with `context_token_invalid` (`docs/spec.md:2615-2618`).
 
+The declaration alone is not enough. The desktop daemon config sets no `deviceAssertion.audiences` (`examples/desktop-bot-app/src/host/compose.ts:147-163`). Without it the task-context capability is false (`packages/client/src/daemon/create-daemon/presence.ts:32-36`), `task_assertion.issue` refuses with `assertion_disabled` (`create-daemon/control-methods.ts:565-570`), and the child's context file does not exist, so `requestTaskAssertion` returns `context_token_invalid` (`packages/client/src/daemon/assertion-client.ts:199-203`). The fix is one fixed audience constant, `byok-desktop-widgets`, used in three places: the only entry of the Host's `deviceAssertion.audiences`, the child's `requestTaskAssertion` call, and the Host's verification. A missing context still makes the child refuse.
+
+Verification is per call. Every `tools/call` and every retry takes a fresh assertion with a fresh JTI, and the Host's own cancel or End commit is the point after which no new call is admitted (`docs/spec.md:2590-2595`). The SDK verifier proves only that the claims are authentic and spent once. Whether the task, AgentRef and toolset belong to a still-authorized execution is the host's decision (`docs/spec.md:2597-2607`). #2559 exposes one verification entry that proves both, and #2554 consumes only that entry.
+
 | Path | What changes | Cost |
 |---|---|---|
 | **A. Host toolset plus the task-context lane** | `@byok-sdk/server` gains an opt-in to declare `host-mcp-task-context` and to verify a task assertion with the composition cloud already ships. The desktop Host adds the `render_widget` toolset: the Host binary in an argv mode as the stdio server, a loopback route that verifies the assertion and answers. | A public `packages/server` change (api-surface golden and budget) on an authentication path. The widget semantics stay in the desktop app. Any embedded host gains the lane. |
 | B. SDK-reserved helper on the `submit_result` model | A fifth reserved server in `packages/client/src/sdk-reserved-mcp.ts:30-48`, a helper bin like `bin/agent-result-mcp-server.ts:39-67` that forwards raw arguments over the daemon's control socket, and a `DaemonConfig` port through which the Host validates and resolves. | Needs no capability, because the daemon-local token is enough. But it puts a desktop product tool into the SDK's reserved protocol set, grows the `@byok-sdk/client` surface (`DaemonConfig`, the reserved-name tuple) and adds a second way to declare host tools next to the documented one. |
 | C. Host toolset without binding | The child validates locally and the Host projects from the observed `tool_use`. | Cannot resolve `snapshotRef` synchronously. The Host must validate again at projection because a runtime-reported `tool_use` is not proof the child saw it. Rejected. |
 
-The research recommends path A. It reuses the lane the SDK documents for exactly this case and keeps the widget catalog out of `packages/*`. It touches assertion verification, so it went to the owner. The owner chose path A on 2026-11-27 ([decision record](https://github.com/Ancienttwo/byok-sdk/issues/2553#issuecomment-7219557886)). The `@byok-sdk/server` slice is its own High-tier child, [#2559](https://github.com/Ancienttwo/byok-sdk/issues/2559), and it blocks #2554.
+The research recommends path A. It reuses the lane the SDK documents for exactly this case and keeps the widget catalog out of `packages/*`. It touches assertion verification, so it went to the owner. The owner chose path A on 2026-11-27 ([decision record](https://github.com/Ancienttwo/byok-sdk/issues/2553#issuecomment-7219557886)). The `@byok-sdk/server` slice is its own High-tier child, [#2559](https://github.com/Ancienttwo/byok-sdk/issues/2559), and it blocks #2554. The audience setting and the single verification entry belong to it.
 
 ### 5.3 Where `snapshotRef` resolves
 
@@ -159,7 +165,7 @@ The research recommends path A. It reuses the lane the SDK documents for exactly
 
 - The model never sees a K8 `turnId`. It is a Host-side id (`src/host/conversation/service.ts:72`).
 - `toolCallId` is optional on both `tool_use` and `tool_result` (`packages/protocol/src/agent-event.ts:86`, `:97`).
-- Every bundled adapter sets it today: claude (`adapters/claude/projection.ts:214`, `:300`), codex (`codex/projection.ts:24`), pi (`pi/mcp-tools.ts:29`), and grok, antigravity, dsh and opencode through the shared `adapters/acp-turn-buffer.ts:45-56`. So the Host can pair a `tool_use` with its `tool_result`.
+- Every bundled adapter sets it today: claude (`adapters/claude/projection.ts:214`, `:300`), codex (`codex/projection.ts:283`, `:300`), pi (`pi/events.ts:147`, `:154-161`), dsh (`dsh/projection.ts:98`, `:108`) and opencode (`opencode/projection.ts:55`, `:66`) in their own projections, grok and antigravity through the shared `adapters/acp-turn-buffer.ts:45-56`. So the Host can pair a `tool_use` with its `tool_result`.
 - The id is runtime metadata, though. No engine contract puts it in front of the model as something to copy.
 
 **What the model can name** is the tool it called and the arguments it passed. v1 shape (ADR-053 D5; the owner accepted it as O2):
@@ -168,26 +174,49 @@ The research recommends path A. It reuses the lane the SDK documents for exactly
 snapshotRef: { server: string; tool: string; input: Record<string, unknown>; pointer?: string }
 ```
 
-The Host resolves it inside the same task:
+**The adapters project MCP tool events differently**, so the resolver needs one canonical observation:
 
-1. Take the task's `tool_use` events whose `mcp` is `{server, tool}` (`agent-event.ts:79-89`) and whose `input` deep-equals `input`.
-2. There must be exactly one such event. Zero is `snapshot_ref_unresolved`; more than one is `snapshot_ref_ambiguous`.
-3. Pair it with its `tool_result` by `toolCallId`. A missing id, an `isError` result or a spilled output is `snapshot_ref_unavailable`. On an engine whose events lacked the id, finance widgets would fail closed this way. Base widgets have no `snapshotRef` and are unaffected.
-4. Parse the output as JSON. Take the value at `pointer` (RFC 6901, root by default) and validate it against the component's snapshot schema. Any failure is `snapshot_invalid`.
+1. **Identity.** Both events carry `mcp: {server, tool}`, and `server` is a server of the task's frozen `requiredToolsets`. It is the adapter's configured identity, not the model-visible tool name.
+2. **Arguments.** `tool_use.input` is the raw MCP arguments object.
+3. **Success.** `tool_result.isError !== true` and protocol-level success.
+4. **Payload.** `tool_result.output` is the MCP `CallToolResult` `{ content, structuredContent? }`. Take `structuredContent` when present. Otherwise there must be exactly one `text` content item, parsed as JSON.
+
+What each adapter emits today:
+
+| Adapter | Identity | Arguments | Result | Canonical? |
+|---|---|---|---|---|
+| claude | yes (`claude/projection.ts:213-214`) | raw `block.input` | `{ content }` (`:294-302`) | yes |
+| antigravity | yes (`antigravity/projection.ts:58-59`) | mapped by `toolInput` | `{ content, exitCode? }` (`acp-turn-buffer.ts:63`) | to verify |
+| pi | yes (`pi/events.ts:146-147`) | raw `msg.args` | `{ result }` (`pi/events.ts:154-161`); `structuredContent` re-serialized as an extra text block (`pi/mcp-tools.ts:96-97`) | no |
+| codex | yes (`codex/projection.ts:278-280`) | nested `{ server, tool, arguments }` (`:271-276`) | `{ result, error, status }` (`:296-297`) | no |
+| grok | no (`grok/projection.ts:78-80` passes no `mcp`) | | | no |
+| dsh | no (`dsh/projection.ts:92-110`) | | | no |
+| opencode | no (`opencode/projection.ts:51-68`) | | | no |
+
+The projection is owned by the adapters in `packages/client`. A Host that decoded each adapter's shape would become a second projection authority. Bringing pi, codex, grok, dsh and opencode to the canonical shape, and checking antigravity, is a new SDK adapter child. It is not part of #2554 or #2559, and it must check the other consumers of those fields. Until it lands, the resolver accepts only canonical events and answers `snapshot_ref_unavailable` for the rest. Finance widgets therefore fail closed on those engines. Base widgets have no `snapshotRef` and are unaffected.
+
+The Host resolves a ref inside the same task:
+
+1. Take the canonical `tool_use` whose identity is `{server, tool}` and whose arguments deep-equal `input`.
+2. There must be exactly one. Zero is `snapshot_ref_unresolved`; more than one is `snapshot_ref_ambiguous`. Two calls with identical arguments in one task are always ambiguous; #2554 adds a golden fixture for that case.
+3. Pair it with its `tool_result` by `toolCallId`. A missing id, a failed result or a spilled output is `snapshot_ref_unavailable`.
+4. Apply `pointer` (RFC 6901, root by default) to the decoded payload, then validate against the component's snapshot schema. Any failure is `snapshot_invalid`. The snapshot fields are copied unchanged.
+
+A possible follow-up, not a v1 decision: a compatibility test in which a Host-controlled data tool puts a Host-issued handle in its model-visible result, to see whether each engine keeps it and can select the second of two same-argument results.
 
 Only host toolset (MCP) results qualify, so figures come only from Host-declared data tools, never from a native tool such as a shell command.
 
-**The record.** The SDK already keeps each task's events. `server.tasks.activity(taskId)` returns the retained activity tail (`packages/server/src/index.ts:263-269`). The Host's activity cards already read it (`src/host/activity/domain.ts:64`). Its bounds are 1000 entries and 4 MiB, kept 10 minutes after the task ends (`packages/cloud/src/activity.ts:8-10`). An event above the inline limit is replaced by a spill preview (`packages/client/src/daemon/event-spill.ts:238`). The limit defaults to 64 KiB (`event-spill.ts:15`), capped by the server's activity budget (`packages/client/src/daemon/task-runner.ts:663`). A data-tool result above it can never be a snapshot source. This is part of the data-tool contract (O4).
+**The record.** The SDK already keeps each task's events. `server.tasks.activity(taskId)` returns the retained activity tail (`packages/server/src/index.ts:263-269`). The Host's activity cards already read it (`src/host/activity/domain.ts:64`). Its bounds are 1000 entries and 4 MiB, kept 10 minutes after the task ends (`packages/cloud/src/activity.ts:8-10`). An event above the inline limit is replaced by a spill preview (`packages/client/src/daemon/event-spill.ts:238`). The limit defaults to 64 KiB (`event-spill.ts:15`), capped by the server's activity budget (`packages/client/src/daemon/task-runner.ts:663`), and it measures the whole serialized event, wrappers and metadata included (`event-spill.ts:231-238`). A data-tool result whose event exceeds it can never be a snapshot source. This is part of the data-tool contract (O4).
 
-**Ordering.** The daemon sends progress in batches flushed every 250 ms (`packages/client/src/daemon/progress-batcher.ts:65`). The runtime may call `render_widget` before the data tool's `tool_result` reaches the server. So the Host waits on `server.tasks.events(taskId)` for the matching pair, bounded at 5 s, before it answers `snapshot_ref_unresolved`. Commits in the instance wake that feed (`packages/server/src/index.ts:275-280`).
+**Ordering.** The daemon sends progress in batches flushed every 250 ms (`packages/client/src/daemon/progress-batcher.ts:65`). The runtime may call `render_widget` before the data tool's `tool_result` reaches the server. So the Host waits on `server.tasks.events(taskId)` for the matching pair, bounded at 5 s, before it answers `snapshot_ref_unresolved`. A first miss is not final. Commits in the instance wake that feed (`packages/server/src/index.ts:275-280`).
 
-`render_widget` runs inside the Turn that called the data tool, so the result is still retained when it resolves. The Host therefore adds no tool-result table: it resolves from that one source. It copies only the validated snapshot into the widget record, which is the authority for the widget item (Host store, one row per `widgetId` with its current `rev`). The tail expires 10 minutes after the task, and the widget must outlive it.
+`render_widget` runs inside the Turn that called the data tool, so the result is normally still retained when it resolves. Retention is bounded even while the task runs: the store evicts the oldest entries at the count and byte caps and moves the tail's `floor` (`packages/server/src/stores/sqlite/activity.ts:204-212`). If one of two equal calls was evicted, the other would look unique. So once a task's tail has evicted anything, the resolver cannot prove uniqueness and answers `snapshot_ref_unavailable`; the model fetches again and renders in a fresh task. The Host therefore adds no tool-result table: it resolves from that one source. It copies only the validated snapshot into the widget record, which is the authority for the widget item (Host store, one row per `widgetId` with its current `rev`). The tail expires 10 minutes after the task, and the widget must outlive it.
 
 A reference to an earlier Turn's result would read a tail that may already be gone. v1 resolves within the calling task only (O3, accepted by the owner).
 
 ### 5.4 Size limits and error codes
 
-The precedent is `submit_result`. A rejection is a tool *result* with `isError: true` and a bounded issue list, so the model can correct itself. A transport or authentication fault is a JSON-RPC error (`packages/client/src/bin/agent-result-mcp-server.ts:39-67`). Its outcome ceiling is 64 KiB (`docs/spec.md:4262`). ADR-053 D6 fixes the values, codes and issue format.
+The precedent is `submit_result`. A rejection is a tool *result* with `isError: true` and a bounded issue list, so the model can correct itself. A transport or authentication fault is a JSON-RPC error (`packages/client/src/bin/agent-result-mcp-server.ts:39-67`). Its rejection body is `{ error, reason, issues, truncated }` with issues `{ pointer, keyword, message }` (`agent-result-mcp-server.ts:60-66`, `packages/client/src/daemon/control-protocol.ts:603-617`), and its outcome ceiling is 64 KiB (`docs/spec.md:4262`). ADR-053 D6 adopts that body and fixes the values and codes.
 
 ## 6. Spec v1 (question 6), pending the artifact export
 
@@ -206,21 +235,21 @@ The per-component TypeScript types, the golden fixtures and the open-question li
 
 | Threat | Where it could enter | What stops it |
 |---|---|---|
-| Secret input | A `form` field | The field type enum is `text \| number \| select \| toggle \| date` (`handoff.md`, Catalog). The schema has no `masked`, `password` or `secret` member and no free-form field type. The validator rejects unknown members. nsh-app's `ui/Input` `masked` variant stays reachable only from the keys screens (ADR-052 D2, Plan A). The widget catalog never passes it. |
-| Non-allowlisted link | A link prop, or a link inside `text` markdown | Links render through `MarkdownView`, which sets `links="report"` (`nsh-app/src/ui/MarkdownView.tsx:29`), and through `LinkText`. A press goes to `openAllowedExternalUrl`, which allows only `https:` URLs whose origin is in `brand.externalOrigins` (`nsh-app/src/links.ts:10-38`). The list is empty by default (`brand.config.ts:16`). `nsh.json` grants `openUrl` for `https` only (`nsh-app/nsh.json:9-11`). The spec adds no other way to open a URL. |
+| Secret input (I1) | A `form` field | A type enum cannot stop a plain text field labelled "API key"; the value would reach the Bot through the K8 send (`src/host/k8/conversation.ts:112-118`). So a model-defined `form` carries only predefined-choice fields (`select`, `toggle`), and its submitted values must be listed options. Free-entry fields (`text`, `number`, `date`) and their labels come only from Host-owned, non-secret form definitions that the model references by id; v1 defines none. Credentials stay in the Keys flow. This narrows the handoff's field list (`text \| number \| select \| toggle \| date`). nsh-app's `ui/Input` `masked` variant stays reachable only from the keys screens (ADR-052 D2, Plan A). |
+| Non-allowlisted link | A link prop, or a link inside `text` markdown | A check on press alone would still leave a focusable control for a refused URL. So the shared predicate `parseAllowedExternalUrl` (`https:` and an origin in `brand.externalOrigins`, `nsh-app/src/links.ts:10-22`) runs before a link control is built: an allowed `{label, url}` becomes `LinkText` whose press goes to `openAllowedExternalUrl` (`links.ts:28-38`); a refused one is plain text. The `text` component passes `links: false` to `TextView` (`nsh:website/elements/text-view.md:650`), so markdown never builds a link control. The allowlist is empty by default (`brand.config.ts:16`). `nsh.json` grants `openUrl` for `https` only (`nsh-app/nsh.json:9-11`). |
 | Script | Any string | QuickJS evaluates nothing from data. The catalog is fixed code that switches on `component` (#2552). The spec has no expression, template or code member. |
-| Markup and images | `text` markdown, or any image-like prop | `TextView` reads raw HTML and images by default: `html: true` and `images: true` (`nsh:website/elements/text-view.md:648`, `:651`). Markdown images become `Inline::Image` with the model's `src` (`nsh:crates/nsh-base/src/text_view/markdown/mod.rs:930-935`). A `data:image/svg+xml` source is not capability-gated (`nsh:crates/nsh-core/src/access.rs:2233-2238`) and would be rasterized by resvg inside the process that holds spawn and custody. So the spec has no image member. The catalog's `text` renderer passes `options={{ html: false, images: false }}`, which shows HTML as text and images as their alt text. The Host does not parse markdown. A second markdown parser would be a shadow parser. |
+| Markup and images | `text` markdown, or any image-like prop | `TextView` reads raw HTML and images by default: `html: true` and `images: true` (`nsh:website/elements/text-view.md:648`, `:651`). Markdown images become `Inline::Image` with the model's `src` (`nsh:crates/nsh-base/src/text_view/markdown/mod.rs:930-935`). A `data:image/svg+xml` source is not capability-gated (`nsh:crates/nsh-core/src/access.rs:2233-2238`) and would be rasterized by resvg inside the process that holds spawn and custody. So the spec has no image member. The catalog's `text` renderer passes `options={{ html: false, images: false, links: false }}`, which shows HTML as text, images as their alt text and links as text. The Host does not parse markdown. A second markdown parser would be a shadow parser. |
 | Colours, fonts and styles | Any prop | The spec carries only `variant` (`default \| muted \| positive \| negative \| warning`), `size` and a layout hint (`handoff.md`, Hard rules). Literals are rejected by the schema. |
 
 Pre-existing, not changed here: the conversation `MarkdownView` renders Bot replies with `TextView`'s default `html` and `images` (`nsh-app/src/ui/MarkdownView.tsx:24-39`). A reply can carry a `data:` image today. ADR-052 D2 accepted the parser attack surface. Whether replies should also turn the two options off is a separate decision for the NSH UI owner.
 
 ## 8. Order against the #2462 Electron cutover
 
-The cutover PR deletes `src/main/**`, `src/preload/**` and `src/renderer/**`. It waits for four conditions: #2458 PASS, #2461 S6 evidence, three-OS Mixed release CI and #2479 closed. Until then no desktop release artifact is produced (#2462 body, "Cutover PR"). CI packages Electron only as a smoke test with a throwaway certificate, and it uploads nothing (`.github/workflows/ci.yml:2454-2469`). The widget children do not need to wait for it.
+The cutover PR deletes `src/main/**`, `src/preload/**` and `src/renderer/**`. It waits for four conditions: #2458 PASS, #2461 S6 evidence, three-OS Mixed release CI and #2479 closed. Until then no desktop release artifact is produced (#2462 body, "Cutover PR"). The desktop CI job packages Electron for its runner and smoke-checks it, and nothing is uploaded (`.github/workflows/ci.yml:2416-2420`); the throwaway certificate is a Windows-only signing pass (`:2456-2469`). The widget children do not need to wait for it.
 
 - **#2554 touches Electron.** The Electron `Row` switches on `item.kind` with no default (`src/renderer/conversation/transcript.tsx:38-55`) and imports the Host union directly (`:2`). The root tsconfig is `strict` without `noImplicitReturns` (`tsconfig.json:9`), so a new `widget` kind compiles and renders *nothing*. That is a silent drop, which #2552 forbids. #2554 adds one `case 'widget'` that renders the explicit unsupported text, the same meaning as the NSH `upgrade_required` card. The cutover deletes it with the rest of `src/renderer/**`.
 - **#2557 needs no stub**, but it migrates one Electron call. Deleting `k8.answer` breaks the Electron `QuestionCard`, which calls it (`transcript.tsx:19`). #2557 changes that call to `k8.act` in the same PR. Electron never sends a widget action, because it shows no widget controls.
-- The merge order from the plan (2553, 2554, 2557, 2555, 2556) holds. A cutover that lands before #2554 or #2557 only removes their Electron lines.
+- The merge order is 2553, 2559, 2554, 2557, 2555, 2556; #2559 came out of O1 and blocks #2554. A cutover that lands before #2554 or #2557 only removes their Electron lines.
 
 ## 9. Owner questions and decisions
 
