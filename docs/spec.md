@@ -1490,6 +1490,16 @@ and doctor show a required upgrade for a compatibility refusal, or an available
 upgrade when the installed version is usable and below the qualified release.
 At and above the qualified release, the Host version policy still applies.
 
+Hosts can check OAR's suggested minimums for recent model support with
+`checkSuggestedRuntimeVersion`. The check accepts and returns SDK runtime IDs,
+including `agy` for the OAR manifest's `antigravity` entry. It uses the bundled
+`suggestedRuntimeVersions` snapshot by default. A Host can refresh on its own
+schedule from
+`SUGGESTED_RUNTIME_VERSIONS_URL`, validate the decoded JSON with
+`parseSuggestedRuntimeVersions`, and pass the resulting manifest to the check.
+The SDK computes this advice offline. The suggestion is informational and
+carries no authority over admission or local upgrade state.
+
 The Host can call `upgradeRuntime` explicitly against the SDK install root.
 The operation stages the exact qualified CLI release, probes its version and
 liveness, and publishes the result atomically. The daemon checks this managed

@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "3f2f34f99ff45fcd3997772e54ef26b76ec032cdce62c8fcf45f943b54f89ec0"
+    "snapshotSha256": "304ddf3e3d29f941adcb9a080026fb23ad3b9d6bb0de3b8145a10e61ffef6dc7"
   },
   "configFields": {
     "status": "tracked",
@@ -58,6 +58,21 @@
         "export:@byok-sdk/client/adapters#RuntimeAccountUsageUnsupportedReason",
         "export:@byok-sdk/client/adapters#RuntimeAdapter"
       ]
+    },
+    {
+      "id": "suggested-runtime-versions",
+      "impact": "additive",
+      "summary": "Hosts can compare installed runtimes against OAR's bundled suggested minimums or validate a live manifest fetched on the Host's schedule.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#suggested-runtime-versions-2524",
+      "items": [
+        "export:@byok-sdk/client#SUGGESTED_RUNTIME_VERSIONS_URL",
+        "export:@byok-sdk/client#SuggestedRuntimeVersionAdvice",
+        "export:@byok-sdk/client#SuggestedRuntimeVersionEntry",
+        "export:@byok-sdk/client#SuggestedRuntimeVersionsManifest",
+        "export:@byok-sdk/client#checkSuggestedRuntimeVersion",
+        "export:@byok-sdk/client#parseSuggestedRuntimeVersions",
+        "export:@byok-sdk/client#suggestedRuntimeVersions"
+      ]
     }
   ],
   "changes": [
@@ -72,9 +87,44 @@
       "entry": "antigravity-account-usage-options"
     },
     {
+      "item": "export:@byok-sdk/client#SUGGESTED_RUNTIME_VERSIONS_URL",
+      "change": "added",
+      "entry": "suggested-runtime-versions"
+    },
+    {
+      "item": "export:@byok-sdk/client#SuggestedRuntimeVersionAdvice",
+      "change": "added",
+      "entry": "suggested-runtime-versions"
+    },
+    {
+      "item": "export:@byok-sdk/client#SuggestedRuntimeVersionEntry",
+      "change": "added",
+      "entry": "suggested-runtime-versions"
+    },
+    {
+      "item": "export:@byok-sdk/client#SuggestedRuntimeVersionsManifest",
+      "change": "added",
+      "entry": "suggested-runtime-versions"
+    },
+    {
       "item": "export:@byok-sdk/client#UpgradeableRuntimeId",
       "change": "changed",
       "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client#checkSuggestedRuntimeVersion",
+      "change": "added",
+      "entry": "suggested-runtime-versions"
+    },
+    {
+      "item": "export:@byok-sdk/client#parseSuggestedRuntimeVersions",
+      "change": "added",
+      "entry": "suggested-runtime-versions"
+    },
+    {
+      "item": "export:@byok-sdk/client#suggestedRuntimeVersions",
+      "change": "added",
+      "entry": "suggested-runtime-versions"
     },
     {
       "item": "export:@byok-sdk/client/adapters#AgyAdapter",

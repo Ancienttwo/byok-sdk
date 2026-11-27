@@ -8,6 +8,7 @@
 // packages/client/src/runtime/dsh-session-runtime.js,
 // packages/client/src/runtime/claude-session-runtime.js,
 // packages/client/src/runtime/oar-failure-runtime.js,
+// packages/client/src/runtime/oar-suggested-versions.js,
 // packages/client/src/runtime/compare-runtime-semver.js, this test, and
 // scripts/api-surface/oar-bridge-types.ts.
 // The bridge is outside the API golden. New type exports need explicit checks.
@@ -53,6 +54,22 @@ test('the OAR SemVer bridge loads in strip-only Node', () => {
   ], { cwd: repoRoot, encoding: 'utf8' });
   assert.ifError(result.error);
   assert.equal(result.status, 0, result.stderr);
+});
+
+test('OAR suggested-versions bridge re-exports the checked vendored API', () => {
+  const source = readFileSync(path.join(repoRoot, 'packages/client/src/runtime/oar-suggested-versions.js'), 'utf8');
+  const { body } = parse(source, { ecmaVersion: 'latest', sourceType: 'module' });
+  assert.deepEqual(body.map(statement => {
+    assert.equal(statement.type, 'ExportNamedDeclaration');
+    return [statement.source?.value, statement.specifiers.map(({ local, exported }) => [local.name, exported.name])];
+  }), [
+    ['../../vendor/oar/223703d/suggested-versions.js', [
+      ['SUGGESTED_VERSIONS_URL', 'SUGGESTED_RUNTIME_VERSIONS_URL'],
+      ['suggestedVersions', 'suggestedRuntimeVersions'],
+      ['parseSuggestedVersions', 'parseSuggestedRuntimeVersions'],
+      ['checkSuggestedVersion', 'checkSuggestedVersion'],
+    ]],
+  ]);
 });
 
 test('OAR process-tree JS bridge re-exports the checked vendored functions', () => {

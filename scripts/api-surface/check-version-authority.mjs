@@ -22,6 +22,7 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { OAR_RUNTIME_IDS } from '../../packages/client/src/runtime/oar-runtime-ids.ts';
 import { qualifiedVersions } from '../ci/runtime-contract-install.mjs';
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -127,17 +128,9 @@ function checkSpecPhrase(errors, relative, source, pattern, expected, label) {
   }
 }
 
-// OpenCode's two native lines have independent contract pins under one adapter.
-const OAR_RUNTIME_TO_SDK = Object.freeze({
-  'claude-aimock': 'claude',
-  'codex-aimock': 'codex',
-  'antigravity-aimock': 'agy',
-  'grok-aimock': 'grok',
-  'dsh-aimock': 'dsh',
-  'pi-rpc-minimum': 'pi',
-  'opencode-aimock': 'opencode1',
-  'opencode-cleanup': 'opencode2',
-});
+const qualificationPins = Object.fromEntries(
+  [...OAR_RUNTIME_IDS.values()].flatMap(({ qualification }) => Object.entries(qualification)),
+);
 
 function versionParts(version) {
   const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/.exec(version);
@@ -166,7 +159,7 @@ function isOlder(version, floor) {
   return a.prerelease.length < b.prerelease.length;
 }
 
-export async function checkOarVersions(errors, root, mapping = OAR_RUNTIME_TO_SDK) {
+export async function checkOarVersions(errors, root, mapping = qualificationPins) {
   const vendor = 'packages/client/vendor/oar';
   const snapshots = readdirSync(path.join(root, vendor), { withFileTypes: true })
     .filter(entry => entry.isDirectory() && /^[a-f0-9]{7,40}$/.test(entry.name));

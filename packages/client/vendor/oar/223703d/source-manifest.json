@@ -1421,6 +1421,18 @@
       "sourcePath": "packages/oar/src/shared/user-configuration.ts",
       "upstreamSha256": "f34383ac14e0542910b78c497ff7199cf07093b76579586a257384b9913e9cff",
       "vendoredSha256": "f34383ac14e0542910b78c497ff7199cf07093b76579586a257384b9913e9cff"
+    },
+    {
+      "path": "suggested-versions.generated.ts",
+      "sourcePath": "packages/oar/src/suggested-versions.generated.ts",
+      "upstreamSha256": "f71861b53725e4894de1f17661eef500abc40fc0ca0b86845b59d921d0663dec",
+      "vendoredSha256": "f71861b53725e4894de1f17661eef500abc40fc0ca0b86845b59d921d0663dec"
+    },
+    {
+      "path": "suggested-versions.ts",
+      "sourcePath": "packages/oar/src/suggested-versions.ts",
+      "upstreamSha256": "c983ed413863fec33047c07514a23a0fc387304c567ddac41aa54298f9044eb5",
+      "vendoredSha256": "c983ed413863fec33047c07514a23a0fc387304c567ddac41aa54298f9044eb5"
     }
   ]
 }

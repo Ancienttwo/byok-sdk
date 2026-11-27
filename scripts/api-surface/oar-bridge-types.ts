@@ -383,3 +383,13 @@ export type CheckReaderEnvironment = Assert<Assignable<SdkReaderOptions, VendorR
 export type CheckModelCatalog = Assert<Equal<RuntimeModelCatalog, ListModelsResult>>;
 export type CheckUsageSnapshot = Assert<Assignable<AccountUsageSnapshot, RuntimeAccountUsage>>;
 export type CheckUsageKinds = Assert<Equal<AccountUsageSnapshot['kind'], RuntimeAccountUsage['kind']>>;
+
+import type * as VendorSuggestions from '../../packages/client/vendor/oar/223703d/suggested-versions.js';
+import type * as Suggestions from '../../packages/client/src/runtime/oar-suggested-versions.js';
+export type CheckSuggestedManifestUrl = Assert<Assignable<typeof VendorSuggestions.SUGGESTED_VERSIONS_URL, typeof Suggestions.SUGGESTED_RUNTIME_VERSIONS_URL>>;
+export type CheckSuggestedEntry = Assert<Equal<VendorSuggestions.SuggestedVersionEntry, Suggestions.SuggestedRuntimeVersionEntry>>;
+export type CheckSuggestedManifest = Assert<Equal<VendorSuggestions.SuggestedVersionsManifest, Suggestions.SuggestedRuntimeVersionsManifest>>;
+export type CheckSuggestedAdvice = Assert<Equal<VendorSuggestions.SuggestedVersionAdvice, Suggestions.SuggestedRuntimeVersionAdvice>>;
+export type CheckSuggestedSnapshot = Assert<Equal<typeof VendorSuggestions.suggestedVersions, typeof Suggestions.suggestedRuntimeVersions>>;
+export type CheckParseSuggested = Assert<Equal<typeof VendorSuggestions.parseSuggestedVersions, typeof Suggestions.parseSuggestedRuntimeVersions>>;
+export type CheckSuggestedLookup = Assert<Equal<typeof VendorSuggestions.checkSuggestedVersion, typeof Suggestions.checkSuggestedVersion>>;
