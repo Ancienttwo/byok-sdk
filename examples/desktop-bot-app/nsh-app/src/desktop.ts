@@ -1,4 +1,4 @@
-import { platform } from "nsh";
+import { effect, platform, type Bounds } from "nsh";
 import {
   Application,
   isAvailable,
@@ -18,11 +18,13 @@ import {
   showMainWindow,
   trayStatusLabel,
   type AppearanceMode,
+  type ShellStart,
   type WorkspaceSection,
 } from "./store.ts";
 
 export interface TrayMenuBuildOptions {
   readonly host: SupervisedHostState | null;
+  readonly start: ShellStart;
   readonly quitting: boolean;
   readonly recoveryBusy: boolean;
   readonly productName: string;
@@ -38,8 +40,10 @@ export interface ApplicationMenuBuildOptions extends TrayMenuBuildOptions {
   readonly onSelectAppearance: (mode: AppearanceMode) => void;
 }
 
+// No Host state means no supervisor yet (start pending) or none at all (start failed): a restart could only refuse
+// with host_exited, so the menu disables it as the sidebar hides its button.
 function canRestartFromMenu(options: TrayMenuBuildOptions): boolean {
-  return !options.quitting && !options.recoveryBusy && options.host?.state !== "starting";
+  return !options.quitting && !options.recoveryBusy && options.host !== null && options.host.state !== "starting";
 }
 
 /**
@@ -50,7 +54,7 @@ export function buildTrayMenuItems(options: TrayMenuBuildOptions): MenuItem[] {
   const canRestart = canRestartFromMenu(options);
   return [
     { label: `Show ${options.productName}`, onSelect: options.onShow },
-    { label: trayStatusLabel(options.host), disabled: true },
+    { label: trayStatusLabel(options.host, options.start), disabled: true },
     { type: "separator" },
     { label: "Restart Host", disabled: !canRestart, onSelect: options.onRestartHost },
     { type: "separator" },
@@ -170,6 +174,44 @@ export function syncDesktopChrome(options: Omit<ApplicationMenuBuildOptions, "pr
     onClick: options.onShow,
   });
   Menu.setApplicationMenu(buildApplicationMenuItems(fullOptions));
+}
+
+/**
+ * The window bounds moved and shrunk into the display's work area (`visibleBounds`), or null when they already fit.
+ * Both are in screen points.
+ */
+export function fitIntoWorkArea(bounds: Bounds, area: Bounds): Bounds | null {
+  const width = Math.min(bounds.size.width, area.size.width);
+  const height = Math.min(bounds.size.height, area.size.height);
+  const x = Math.min(Math.max(bounds.origin.x, area.origin.x), area.origin.x + area.size.width - width);
+  const y = Math.min(Math.max(bounds.origin.y, area.origin.y), area.origin.y + area.size.height - height);
+  if (x === bounds.origin.x && y === bounds.origin.y && width === bounds.size.width && height === bounds.size.height) {
+    return null;
+  }
+  return { origin: { x, y }, size: { width, height } };
+}
+
+/**
+ * Fits the first window into its display's work area, once. NSH opens it at the hidden host's size (1200 × 800 pt)
+ * and origin and does not clamp it to the work area, so at 150 % on a 1920 × 1080 display it opens partly off-screen
+ * (#2532). Later moves are the user's and stay as they are.
+ */
+export function fitFirstWindow(win: WindowRef): void {
+  let fitted = false;
+  effect(() => {
+    if (fitted) {
+      return;
+    }
+    const state = win.state();
+    if (!state?.display) {
+      return;
+    }
+    fitted = true;
+    const bounds = state.mode === "normal" ? fitIntoWorkArea(state.bounds, state.display.visibleBounds) : null;
+    if (bounds) {
+      win.setBounds(bounds);
+    }
+  });
 }
 
 /**

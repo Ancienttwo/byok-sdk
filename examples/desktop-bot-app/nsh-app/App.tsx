@@ -1,7 +1,7 @@
 import { cleanup, effect, mount, platform, Scroll, signal, Text, View } from "nsh";
 import { currentWindow, isAvailable } from "nsh/desktop";
 import brand from "../brand.config.ts";
-import { installDesktopShell, syncDesktopChrome } from "./src/desktop.ts";
+import { fitFirstWindow, installDesktopShell, syncDesktopChrome } from "./src/desktop.ts";
 import { ActivityScreen } from "./src/features/activity/ActivityScreen.tsx";
 import { ConversationScreen } from "./src/features/conversation/ConversationScreen.tsx";
 import { GalleryScreen } from "./src/features/gallery/GalleryScreen.tsx";
@@ -21,6 +21,7 @@ import {
   restartHost,
   setActiveSection,
   setAppearance,
+  shellStart,
   showMainWindow,
   startShell,
   stateHintCount,
@@ -39,6 +40,9 @@ const SECTION_TITLES: Record<WorkspaceSection, string> = {
 
 export function App() {
   const win = isAvailable ? currentWindow() : null;
+  if (win) {
+    fitFirstWindow(win);
+  }
 
   effect(() => {
     if (win) {
@@ -62,6 +66,7 @@ export function App() {
   effect(() => {
     syncDesktopChrome({
       host: hostState(),
+      start: shellStart(),
       quitting: isQuitting(),
       recoveryBusy: isRecoveryBusy(),
       activeSection: activeSection(),
