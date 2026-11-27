@@ -67,7 +67,7 @@ const K8_PUBLISHED = Object.freeze({
   repository: { type: 'git', url: 'git+https://github.com/Ancienttwo/byok-sdk.git', directory: 'packages/bot-collaboration' },
   bugs: { url: 'https://github.com/Ancienttwo/byok-sdk/issues' },
   homepage: 'https://github.com/Ancienttwo/byok-sdk#readme',
-  engines: { node: '>=24.22.1' },
+  engines: { node: '>=24.22.3' },
   files: ['dist', 'README.md', 'LICENSE'],
   publishConfig: { access: 'public' },
 });
@@ -455,6 +455,13 @@ export function verifyReviewedContent(path, { base, cwd = process.cwd(), workspa
   } else {
     if (!version(before.version) || !version(after.version)) throw new Error('Invalid package version');
     delete before.version; delete after.version;
+    // #2533: admit the exact public Node floor raise. Remove this once the
+    // release containing it is the comparison base.
+    if (publicManifests.includes(path)
+      && before.engines?.node === '>=24.22.1'
+      && after.engines?.node === '>=24.22.3') {
+      after.engines.node = before.engines.node;
+    }
     if (publicManifests.includes(path) && admitPrivateDistImports(before, after)) {
       qualify.push(path.slice(0, -'/package.json'.length));
     }

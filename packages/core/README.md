@@ -49,6 +49,6 @@ refused if source files change while copying or a rollback journal may be hot;
 stop the writer or recover the database before retrying. For a main-file-only
 immutable format check, use `readSqliteFileUnchanged` instead.
 
-MIT licensed. Node.js 24.22.1 or newer.
+MIT licensed. Node.js 24.22.3 or newer.
 
 Runtime dependencies and size budgets: [entry dependency contract](../../README.md#entry-dependencies).

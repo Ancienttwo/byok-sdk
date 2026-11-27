@@ -16,6 +16,15 @@
   },
   "entries": [
     {
+      "id": "node-24-22-3-floor",
+      "impact": "breaking",
+      "summary": "The public SDK packages require Node.js 24.22.3 or later via engines.node. Upgrade the Node runtime on Hosts and daemon machines before installing the new SDK.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#nodejs-24223-minimum",
+      "items": [
+        "behavior:node-24-22-3-floor"
+      ]
+    },
+    {
       "id": "pi-161-closure",
       "impact": "breaking",
       "acceptance": "accept",

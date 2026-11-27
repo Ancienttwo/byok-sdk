@@ -71,7 +71,7 @@ if (result === undefined) {
 stored body is not a terminal envelope throws `ByokCloudError` rather than
 returning a best-effort shape.
 
-MIT licensed. Node.js 24.22.1 or newer.
+MIT licensed. Node.js 24.22.3 or newer.
 
 
 ## Immutable offer readback

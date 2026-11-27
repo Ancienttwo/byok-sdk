@@ -115,7 +115,7 @@ describe('the CI dataplane job', () => {
   it('uses the repository Node pin except for the explicit forward-compatible leg', () => {
     const setups = workflow.match(/^\s+(?:- )?uses: actions\/setup-node@[0-9a-f]{40} # v7\.\d+\.\d+$/gm) ?? [];
     const versionFiles = workflow.match(/node-version-file: \.node-version/g) ?? [];
-    expect(repoFile('.node-version').trim()).toBe('24.22.1');
+    expect(repoFile('.node-version').trim()).toBe('24.22.3');
     expect(setups.length).toBeGreaterThan(0);
     expect(versionFiles).toHaveLength(setups.length - 1);
     expect(workflow.match(/node-version: '26'/g)).toHaveLength(1);

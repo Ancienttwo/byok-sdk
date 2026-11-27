@@ -3,6 +3,12 @@
 This checklist starts after the published 0.47.1 release. Hosts on an earlier
 release first follow the [0.47.0 checklist](host-upgrade-0.47.0.md) and its predecessors.
 
+## Node.js 24.22.3 minimum
+
+The public SDK packages declare `engines.node` as `>=24.22.3`. Upgrade Node
+to 24.22.3 or later on Hosts and daemon machines before installing the new
+SDK. Rebuild Node SEA launchers with a supported Node executable.
+
 ## Pi 1.6.1 closure
 
 - Re-prepare Pi inputs compiled with 1.6.0 before dispatch. The new closure
