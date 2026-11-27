@@ -13,6 +13,7 @@ import {
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Spinner } from "../../ui/index.ts";
 import { LoginItemControl } from "../shell/LoginItemControl.tsx";
 import { DiagnosticsExportButton } from "../shell/RecoveryPanel.tsx";
+import { AgentsPanel } from "./AgentsPanel.tsx";
 import { DevicePanel } from "./DevicePanel.tsx";
 import { DreamingForm } from "./DreamingForm.tsx";
 
@@ -25,11 +26,13 @@ const failureText = (error: unknown) => (error === undefined ? null : toBridgeCa
  */
 export function SettingsScreen() {
   const refreshes = signal(0);
+  const deviceQuery = signal<{ readonly seq: number; readonly checkAuth: boolean }>({ seq: 0, checkAuth: false });
   const ready = computed(() => hostReady());
   const device = resource(
-    () => (ready() ? refreshes() : false),
-    async () => await readDevice(),
+    () => (ready() ? deviceQuery() : false),
+    async (query) => await readDevice(query.checkAuth ? { checkAuth: true } : undefined),
   );
+  const checkingAuth = computed(() => device.loading() && deviceQuery().checkAuth);
   // `load` names the read: a new one mounts a new dreaming form from it, a save keeps the form (`mutate`, same load).
   // A read waits for a running save (also one started before a section switch remounted this screen), so it never
   // mounts the form on the value before the save; Refresh stays disabled meanwhile. A read whose screen went away or
@@ -60,11 +63,50 @@ export function SettingsScreen() {
           size="sm"
           loading={device.loading() || settings.loading() || dreamingSaving()}
           disabled={!ready()}
-          onPress={() => refreshes.update((n) => n + 1)}
+          onPress={() => {
+            refreshes.update((n) => n + 1);
+            deviceQuery.update((q) => ({ seq: q.seq + 1, checkAuth: false }));
+          }}
         >
           Refresh
         </Button>
       </View>
+
+      <Card testID="settings-agents-card">
+        <CardHeader>
+          <View class="flex-row items-center gap-3">
+            <View class="flex-1 min-w-0 gap-1">
+              <CardTitle>Agents</CardTitle>
+              <CardDescription>Detected local agent runtimes, version policy, and sign-in state.</CardDescription>
+            </View>
+            <Button
+              testID="settings-agents-check-again"
+              variant="outline"
+              size="sm"
+              loading={checkingAuth()}
+              disabled={!ready() || device.loading()}
+              onPress={() => deviceQuery.update((q) => ({ seq: q.seq + 1, checkAuth: true }))}
+            >
+              Check again
+            </Button>
+          </View>
+        </CardHeader>
+        <CardContent>
+          <If when={deviceFailure()}>
+            {(message) => (
+              <View testID="settings-agents-error" role="alert">
+                <Text class="text-xs text-destructive">{`Agents unavailable: ${message()}`}</Text>
+              </View>
+            )}
+          </If>
+          <If when={deviceFailure() === null ? device() : undefined}>
+            {(view) => <AgentsPanel runtimes={view().runtimes} />}
+          </If>
+          <If when={ready() && device() === undefined && deviceFailure() === null}>
+            <Spinner label="Checking agents…" />
+          </If>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

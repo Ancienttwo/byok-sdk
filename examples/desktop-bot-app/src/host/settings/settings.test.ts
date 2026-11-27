@@ -1,20 +1,89 @@
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import type { DiagnosticsSnapshot } from '@byok-sdk/client';
+import type { Daemon, DaemonConfig, DiagnosticsSnapshot, RuntimeAdapter, RuntimeObservation } from '@byok-sdk/client';
 import { describe, expect, it, vi } from 'vitest';
 import { trayMenu } from '../../main/tray-menu.ts';
 import type { HostContext } from '../domains.ts';
-import { deviceView } from './device.ts';
+import { deviceSettings, deviceView } from './device.ts';
 import { createSettingsDomain } from './domain.ts';
 import { DEFAULT_SETTINGS, dreamingOption, SettingsDamagedError, settingsStore } from './store.ts';
 
 const status = {
   paired: true, deviceId: 'dev-1', lifecycle: { phase: 'running', connection: 'open' }, activeTaskCount: 2, pendingTerminalCommits: 0,
   runtimes: [
-    { id: 'pi', present: true, outcome: 'available', version: '1.3.0', versionVerdict: { state: 'warn', qualifiedVersion: '1.3.0' } },
-    { id: 'codex', present: false, outcome: 'unavailable', reason: 'not_found' },
-  ],
+    {
+      id: 'claude',
+      present: true,
+      outcome: 'available',
+      version: '2.1.0',
+      authPresent: true,
+      executablePath: '/usr/local/bin/claude',
+      executableSource: 'path',
+      versionVerdict: { state: 'allow', qualifiedVersion: '2.1.0' },
+      steer: true,
+      resume: true,
+    },
+    {
+      id: 'codex',
+      present: true,
+      outcome: 'available',
+      version: '0.50.0',
+      authPresent: false,
+      steer: true,
+      resume: true,
+    },
+    {
+      id: 'opencode',
+      present: true,
+      outcome: 'available',
+      version: '0.9.0',
+      steer: false,
+      resume: true,
+    },
+    {
+      id: 'grok',
+      present: false,
+      outcome: 'timeout',
+      steer: false,
+      resume: true,
+    },
+    {
+      id: 'pi',
+      present: true,
+      outcome: 'available',
+      version: '1.3.0',
+      qualifiedVersion: '1.2.0',
+      versionVerdict: { state: 'warn', qualifiedVersion: '1.2.0' },
+      upgrade: { state: 'available', installedVersion: '1.3.0', qualifiedVersion: '1.4.0', command: 'npm i -g pi' },
+      steer: true,
+      resume: true,
+    },
+    {
+      id: 'dsh',
+      present: true,
+      outcome: 'available',
+      version: '0.1.0',
+      versionVerdict: { state: 'block', qualifiedVersion: '0.2.0', matched: '0.1.0' },
+      steer: false,
+      resume: false,
+    },
+    {
+      id: 'agy',
+      present: false,
+      outcome: 'not-found',
+      steer: false,
+      resume: false,
+    },
+    {
+      id: 'refused-rt',
+      present: false,
+      outcome: 'refused',
+      reason: 'app_server_unavailable',
+      steer: false,
+      resume: false,
+    },
+  ] satisfies RuntimeObservation[],
 } as unknown as Parameters<typeof deviceView>[0];
 const doctor = {
   generatedAt: '2026-11-11T00:00:00Z',
@@ -23,12 +92,149 @@ const doctor = {
 } as unknown as DiagnosticsSnapshot;
 
 describe('device view', () => {
-  it('projects status and doctor without inferring a missing verdict', () => {
+  it('projects every RuntimeObservation branch without inferring absent fields', () => {
     const view = deviceView(status, doctor);
     expect(view.doctor.worst).toBe('warn');
     expect(view.clockSkew).toEqual(doctor.clockSkew);
-    expect(view.runtimes.map(runtime => runtime.verdict)).toEqual(['warn', undefined]);
-    expect(view.runtimes[1]).toMatchObject({ present: false, reason: 'not_found' });
+
+    const byId = Object.fromEntries(view.runtimes.map(runtime => [runtime.id, runtime]));
+    expect(byId.claude).toEqual({
+      id: 'claude',
+      present: true,
+      outcome: 'available',
+      version: '2.1.0',
+      verdict: 'allow',
+      authPresent: true,
+      executablePath: '/usr/local/bin/claude',
+      executableSource: 'path',
+    });
+    expect(byId.codex).toEqual({
+      id: 'codex',
+      present: true,
+      outcome: 'available',
+      version: '0.50.0',
+      authPresent: false,
+    });
+    expect('verdict' in byId.codex!).toBe(false);
+    expect(byId.opencode).toEqual({
+      id: 'opencode',
+      present: true,
+      outcome: 'available',
+      version: '0.9.0',
+    });
+    expect('authPresent' in byId.opencode!).toBe(false);
+    expect(byId.grok).toEqual({
+      id: 'grok',
+      present: false,
+      outcome: 'timeout',
+    });
+    expect('authPresent' in byId.grok!).toBe(false);
+    expect(byId.pi).toEqual({
+      id: 'pi',
+      present: true,
+      outcome: 'available',
+      version: '1.3.0',
+      verdict: 'warn',
+      qualifiedVersion: '1.2.0',
+      upgrade: { state: 'available', installedVersion: '1.3.0', qualifiedVersion: '1.4.0', command: 'npm i -g pi' },
+    });
+    expect(byId.dsh).toEqual({
+      id: 'dsh',
+      present: true,
+      outcome: 'available',
+      version: '0.1.0',
+      verdict: 'block',
+    });
+    expect(byId.agy).toEqual({
+      id: 'agy',
+      present: false,
+      outcome: 'not-found',
+    });
+    expect(byId['refused-rt']).toEqual({
+      id: 'refused-rt',
+      present: false,
+      outcome: 'refused',
+      reason: 'app_server_unavailable',
+    });
+  });
+
+  it('re-probes configured adapters only when checkAuth is true and keeps timeout distinct', async () => {
+    const storeDir = await mkdtemp(path.join(tmpdir(), 'device-check-auth-'));
+    const detectClaude = vi.fn<RuntimeAdapter['detect']>().mockResolvedValue({
+      kind: 'available',
+      version: '2.1.0',
+      authPresent: true,
+      executablePath: '/opt/bin/claude',
+      executableSource: 'path',
+    });
+    const detectSlow = vi.fn<RuntimeAdapter['detect']>(
+      (signal?: AbortSignal) => new Promise((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(new Error('aborted')));
+      }),
+    );
+    const adapters: RuntimeAdapter[] = [
+      {
+        descriptor: {
+          id: 'claude',
+          selectionModes: ['subscription'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: detectClaude,
+      } as unknown as RuntimeAdapter,
+      {
+        descriptor: {
+          id: 'codex',
+          selectionModes: ['subscription'],
+          capabilities: { steer: true, resume: true, approvalInteractive: false },
+        },
+        detect: detectSlow,
+      } as unknown as RuntimeAdapter,
+    ];
+    const daemon = {
+      status: () => ({
+        ...status,
+        runtimes: [
+          { id: 'claude', present: true, outcome: 'available', version: '2.1.0', authPresent: false, steer: true, resume: true },
+          { id: 'codex', present: true, outcome: 'available', version: '0.50.0', authPresent: false, steer: true, resume: true },
+        ],
+      }),
+    } as unknown as Daemon;
+    const config = {
+      productId: 'test',
+      productName: 'Test',
+      deviceName: 'Test',
+      serverUrl: 'http://127.0.0.1:1',
+      storeDir,
+    } as DaemonConfig;
+    const settings = deviceSettings(daemon, config, adapters, {
+      adapters: [],
+      runtimeProbeTimeoutMs: 40,
+    });
+
+    const initial = await settings.device();
+    expect(detectClaude).not.toHaveBeenCalled();
+    expect(detectSlow).not.toHaveBeenCalled();
+    expect(initial.runtimes.find(r => r.id === 'claude')?.authPresent).toBe(false);
+
+    const noProbe = await settings.device({ checkAuth: false });
+    expect(detectClaude).not.toHaveBeenCalled();
+    expect(noProbe.runtimes.find(r => r.id === 'claude')?.authPresent).toBe(false);
+
+    const reprobed = await settings.device({ checkAuth: true });
+    expect(detectClaude).toHaveBeenCalledOnce();
+    expect(detectSlow).toHaveBeenCalledOnce();
+    expect(reprobed.runtimes.find(r => r.id === 'claude')).toMatchObject({
+      present: true,
+      outcome: 'available',
+      authPresent: true,
+      executablePath: '/opt/bin/claude',
+      executableSource: 'path',
+    });
+    expect(reprobed.runtimes.find(r => r.id === 'codex')).toEqual({
+      id: 'codex',
+      present: false,
+      outcome: 'timeout',
+    });
   });
 });
 
@@ -69,8 +275,11 @@ describe('tray menu', () => {
 describe('settings domain', () => {
   it('validates renderer params and persists dreaming under the Host directory', async () => {
     const hostStorageRoot = await mkdtemp(path.join(tmpdir(), 'settings-domain-'));
-    const { handlers } = await createSettingsDomain({ hostStorageRoot } as HostContext);
+    const { handlers } = await createSettingsDomain({ hostStorageRoot, adapters: [] } as unknown as HostContext);
     expect(await handlers['settings.get'](undefined)).toEqual(DEFAULT_SETTINGS);
+    await expect(handlers['settings.device']({ checkAuth: 'yes' } as unknown as undefined)).rejects.toMatchObject({ code: 'invalid_params' });
+    await expect(handlers['settings.device']({ extra: true } as unknown as undefined)).rejects.toMatchObject({ code: 'invalid_params' });
+    await expect(handlers['settings.device'](['bad'] as unknown as undefined)).rejects.toMatchObject({ code: 'invalid_params' });
     await expect(handlers['settings.setDreaming']({ enabled: 'on', models: [] })).rejects.toMatchObject({ code: 'invalid_params' });
     await expect(handlers['settings.setDreaming']({ enabled: true, models: ['a', 'a'] })).rejects.toMatchObject({ code: 'invalid_params' });
     await handlers['settings.setDreaming']({ enabled: false, models: ['cheap'] });

@@ -245,7 +245,7 @@ export async function composeHost(options: HostCompositionOptions): Promise<Comp
     await started.pairEmbedded(server);
     await started.start();
     domains = await composeDomains({
-      daemon: started, daemonConfig, server, storeDir: options.storeDir, hostStorageRoot: options.hostStorageRoot,
+      daemon: started, daemonConfig, adapters, server, storeDir: options.storeDir, hostStorageRoot: options.hostStorageRoot,
       consumers: { bind: late.bind },
       changed: options.onChanged,
     });

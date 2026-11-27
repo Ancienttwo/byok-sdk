@@ -4,7 +4,7 @@
  * (`src/host/<domain>/domain.ts`); this file only composes them. A signal one
  * domain gives another meets here, so no domain imports another.
  */
-import type { Daemon, DaemonConfig } from '@byok-sdk/client';
+import type { Daemon, DaemonConfig, RuntimeAdapter } from '@byok-sdk/client';
 import type { AgentMessageInput, BotCollaboration } from '@byok-sdk/bot-collaboration';
 import type { ByokServer, DueWake } from '@byok-sdk/server';
 import { joinHandlers, type MethodHandlers, type MethodTable } from '../bridge/domain.ts';
@@ -26,6 +26,8 @@ export interface ServerConsumers {
 export interface HostContext {
   readonly daemon: Daemon;
   readonly daemonConfig: DaemonConfig;
+  /** The runtime adapters `composeHost` built for `createDaemonWithAdapters`, reused by on-demand auth probes. */
+  readonly adapters: readonly RuntimeAdapter[];
   readonly server: ByokServer;
   readonly storeDir: string;
   readonly hostStorageRoot: string;

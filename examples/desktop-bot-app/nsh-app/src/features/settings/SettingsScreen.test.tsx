@@ -1,5 +1,11 @@
 import { describe, expect, open, test } from "nsh/test";
-import type { DeviceView, DreamingSetting } from "../../../../src/host/settings/types.ts";
+import type { DeviceView, DreamingSetting, RuntimeView } from "../../../../src/host/settings/types.ts";
+import {
+  runtimeSignInGuidance,
+  runtimeStatus,
+  runtimeStatusMeta,
+  UNKNOWN_SIGN_IN_NOTE,
+} from "./runtimeStatus.ts";
 
 type Call = { method: string; params: any };
 
@@ -36,6 +42,7 @@ const DEVICE: DeviceView = {
 function settingsShell(
   calls: Call[],
   options: {
+    device?: (params: any) => DeviceView | Promise<DeviceView>;
     dreaming?: () => DreamingSetting;
     save?: (setting: DreamingSetting) => unknown;
     host?: { state: string };
@@ -52,7 +59,7 @@ function settingsShell(
         calls.push({ method, params });
         if (method === "keys.list") return [];
         if (method === "k8.view") return { bots: [], roles: [], models: MODELS, busy: false };
-        if (method === "settings.device") return DEVICE;
+        if (method === "settings.device") return options.device ? options.device(params) : DEVICE;
         if (method === "settings.get") return { dreaming: (options.dreaming ?? (() => ({ enabled: true, models: ["m1"] })))() };
         if (method === "settings.setDreaming") return options.save?.(params) ?? { dreaming: params };
         if (method === "settings.loginItem") return { supported: true, enabled: false };
@@ -322,7 +329,7 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
     expect(count(calls, "settings.exportDiagnostics")).toBe(0);
   });
 
-  test("at the 840 px minimum window width, the version policy badges stay inside their runtime rows", async () => {
+  test("at the 840 px minimum window width, the version policy and agent status badges stay inside their rows", async () => {
     const calls: Call[] = [];
     const app = await open("../../../App.tsx", { platform: "linux", width: 840, height: 560, modules: settingsShell(calls) });
     await app.press("id:nav-settings");
@@ -331,6 +338,167 @@ describe("SettingsScreen (#2461 Slice 5)", () => {
       const row = app.layout(`id:settings-runtime-${id}`)!;
       const badge = app.layout(`id:settings-runtime-${id}-verdict`)!;
       expect(badge.x + badge.width <= row.x + row.width).toBe(true);
+
+      const agentRow = app.layout(`id:settings-agent-${id}`)!;
+      const agentBadge = app.layout(`id:settings-agent-${id}-status`)!;
+      expect(agentBadge.x + agentBadge.width <= agentRow.x + agentRow.width).toBe(true);
+    }
+  });
+
+  test("AgentsPanel renders every runtime state, sign-in guidance without copy buttons, and Check again sends checkAuth: true", async () => {
+    const calls: Call[] = [];
+    const initialRuntimes: RuntimeView[] = [
+      {
+        id: "claude",
+        present: true,
+        outcome: "available",
+        version: "2.1.0",
+        verdict: "allow",
+        authPresent: false,
+        executablePath: "/usr/local/bin/claude",
+        executableSource: "path",
+      },
+      {
+        id: "codex",
+        present: true,
+        outcome: "available",
+        version: "0.50.0",
+        verdict: "warn",
+        qualifiedVersion: "0.49.0",
+        authPresent: false,
+        upgrade: {
+          state: "available",
+          installedVersion: "0.50.0",
+          qualifiedVersion: "0.51.0",
+          command: "upgradeRuntime({ installRoot, runtimeId: 'codex' })",
+        },
+      },
+      {
+        id: "opencode",
+        present: true,
+        outcome: "available",
+        version: "0.9.0",
+      },
+      {
+        id: "grok",
+        present: false,
+        outcome: "timeout",
+      },
+      {
+        id: "dsh",
+        present: true,
+        outcome: "available",
+        version: "0.1.0",
+        verdict: "block",
+      },
+      {
+        id: "agy",
+        present: false,
+        outcome: "not-found",
+      },
+      {
+        id: "pi",
+        present: false,
+        outcome: "refused",
+        reason: "runtime_environment_unavailable",
+      },
+    ];
+    let checked = false;
+    const app = await open("../../../App.tsx", {
+      platform: "macos",
+      width: 1280,
+      height: 900,
+      modules: settingsShell(calls, {
+        device: (params) => {
+          if (params?.checkAuth === true) {
+            checked = true;
+            return {
+              ...DEVICE,
+              runtimes: initialRuntimes.map((rt) =>
+                rt.id === "claude" ? { ...rt, authPresent: true } : rt,
+              ),
+            };
+          }
+          return { ...DEVICE, runtimes: initialRuntimes };
+        },
+      }),
+    });
+
+    await app.press("id:nav-settings");
+    await app.waitFor("id:settings-agents");
+
+    expect(app.accessibility("id:settings-agent-claude-status")?.label).toBe("signed out");
+    expect(app.shows("id:settings-agent-claude-signin-cmd")).toBe(true);
+    expect(app.shows("text:claude auth login")).toBe(true);
+    expect(app.shows("text:Executable (path)")).toBe(true);
+    expect(app.shows("id:settings-agent-claude-executable")).toBe(true);
+    expect(app.accessibility("id:settings-agent-claude-executable")?.label).toBe("Executable (path): /usr/local/bin/claude");
+    expect(app.shows("text:Copy")).toBe(false);
+
+    expect(app.accessibility("id:settings-agent-codex-status")?.label).toBe("signed out");
+    expect(app.shows("text:codex login")).toBe(true);
+    expect(app.shows("id:settings-agent-codex-qualified")).toBe(true);
+    expect(app.shows("id:settings-agent-codex-upgrade")).toBe(true);
+
+    expect(app.accessibility("id:settings-agent-opencode-status")?.label).toBe("not checked");
+    expect(app.shows("id:settings-agent-opencode-signin-cmd")).toBe(false);
+    expect(app.shows(`text:${UNKNOWN_SIGN_IN_NOTE}`)).toBe(true);
+
+    expect(app.accessibility("id:settings-agent-grok-status")?.label).toBe("check timed out");
+    expect(app.accessibility("id:settings-agent-dsh-status")?.label).toBe("version blocked");
+    expect(app.accessibility("id:settings-agent-agy-status")?.label).toBe("not installed");
+    expect(app.accessibility("id:settings-agent-pi-status")?.label).toBe("can't run");
+    expect(app.shows("text:refused: runtime_environment_unavailable")).toBe(true);
+
+    // Initial load sends default (no checkAuth: true).
+    const initialCalls = calls.filter((call) => call.method === "settings.device");
+    expect(initialCalls).toHaveLength(1);
+    expect(initialCalls[0]?.params).toBeNull();
+
+    // Check again sends { checkAuth: true } without reloading settings.get.
+    await app.press("id:settings-agents-check-again");
+    await app.waitUntil(() => checked && app.accessibility("id:settings-agent-claude-status")?.label === "signed in");
+    expect(app.shows("id:settings-agent-claude-signin")).toBe(false);
+    expect(count(calls, "settings.get")).toBe(1);
+    const deviceCalls = calls.filter((call) => call.method === "settings.device");
+    expect(deviceCalls).toHaveLength(2);
+    expect(deviceCalls[1]?.params).toEqual({ checkAuth: true });
+
+    // Refresh stays on the default no-probe call.
+    await app.press("id:settings-refresh");
+    await app.waitUntil(() => count(calls, "settings.device") === 3);
+    expect(calls.filter((call) => call.method === "settings.device")[2]?.params).toBeNull();
+  });
+});
+
+describe("runtimeStatus shared vocabulary (#2543)", () => {
+  test("maps every runtime state to its unique vocabulary entry with symbol and label", () => {
+    const cases: Array<[Parameters<typeof runtimeStatus>[0], Parameters<typeof runtimeStatus>[1], string, string]> = [
+      [{ outcome: "available", verdict: "allow", authPresent: true }, undefined, "signed-in", "signed in"],
+      [{ outcome: "available", verdict: "allow", authPresent: false }, undefined, "signed-out", "signed out"],
+      [{ outcome: "available", verdict: "allow", authPresent: undefined }, undefined, "not-checked", "not checked"],
+      [{ outcome: "timeout" }, undefined, "check-timed-out", "check timed out"],
+      [{ outcome: "available", verdict: "warn", authPresent: true }, undefined, "untested-version", "untested version"],
+      [{ outcome: "available", verdict: "block", authPresent: true }, undefined, "version-blocked", "version blocked"],
+      [{ outcome: "not-found" }, undefined, "not-installed", "not installed"],
+      [{ outcome: "refused" }, undefined, "cant-run", "can't run"],
+      [{ outcome: "available", verdict: "allow", authPresent: true }, { rejectedDuringTurn: true }, "rejected-during-turn", "rejected during a turn"],
+    ];
+    for (const [input, options, expectedKey, expectedLabel] of cases) {
+      const meta = runtimeStatus(input, options);
+      expect(meta.key).toBe(expectedKey);
+      expect(meta.label).toBe(expectedLabel);
+      expect(meta.symbol.length).toBeGreaterThan(0);
+      expect(runtimeStatusMeta(meta.key)).toEqual(meta);
+    }
+  });
+
+  test("returns known login commands only for claude and codex and the generic note for other CLIs", () => {
+    expect(runtimeSignInGuidance("claude")).toMatchObject({ kind: "command", command: "claude auth login" });
+    expect(runtimeSignInGuidance("codex")).toMatchObject({ kind: "command", command: "codex login" });
+    expect(runtimeSignInGuidance("pi")).toMatchObject({ kind: "byok" });
+    for (const id of ["grok", "agy", "opencode", "dsh"]) {
+      expect(runtimeSignInGuidance(id)).toEqual({ kind: "cli-unknown", note: UNKNOWN_SIGN_IN_NOTE });
     }
   });
 });
