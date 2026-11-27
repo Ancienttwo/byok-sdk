@@ -12,6 +12,7 @@ import {
   restartHost,
   setActiveSection,
   setAppearance,
+  shellStart,
   type WorkspaceSection,
 } from "../../store.ts";
 import { Button, HostStateBadge, ListItem, Separator, Tab, Tabs } from "../../ui/index.ts";
@@ -87,7 +88,7 @@ export function ShellSidebar() {
         <View class="gap-1.5">
           <HostStateBadge testID="host-state-badge" state={badgeState()} />
           <Text testID="sidebar-host-status" class="text-xs text-muted-foreground">
-            {describeHostState(hostState())}
+            {describeHostState(hostState(), shellStart())}
           </Text>
         </View>
         <If when={canRestartHost()}>

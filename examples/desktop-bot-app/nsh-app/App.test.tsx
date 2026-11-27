@@ -199,6 +199,9 @@ describe("BYOK NSH Foundations Gallery", () => {
 
     await app.waitFor("id:keys-list-refusal");
     expect(calls).toEqual(["start"]);
+    // The sidebar reads the same start refusal: no supervisor runs, so it never reports "Host starting".
+    expect(app.shows("text:Host stopped: No packaged Host binary")).toBe(true);
+    expect(app.shows("text:Host starting")).toBe(false);
 
     // A valid draft still cannot be saved: keys.submit would only refuse with host_exited.
     await app.type("id:keys-field-profile_ref", "zai-ui");

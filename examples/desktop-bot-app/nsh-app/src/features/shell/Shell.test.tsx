@@ -1,10 +1,17 @@
 import type { ProviderStatus } from "@byok-sdk/keys";
 import { describe, expect, open, test } from "nsh/test";
 import type { SupervisedHostState } from "../../../../src/bridge/protocol.ts";
-import { buildApplicationMenuItems, buildTrayMenuItems } from "../../desktop.ts";
-import { describeHostState, trayStatusLabel } from "../../store.ts";
+import { buildApplicationMenuItems, buildTrayMenuItems, fitIntoWorkArea } from "../../desktop.ts";
+import { BridgeCallError } from "../../bridge.ts";
+import { describeHostState, trayStatusLabel, type ShellStart } from "../../store.ts";
 
 const RUNNING_HOST: SupervisedHostState = { state: "running", pid: 4100, activeWork: 0 };
+const PENDING: ShellStart = { status: "pending" };
+const STARTED: ShellStart = { status: "started" };
+const START_FAILED: ShellStart = {
+  status: "failed",
+  error: new BridgeCallError("host_exited", "No packaged Host binary"),
+};
 
 function makeStoredStatus(overrides: Partial<ProviderStatus> = {}): ProviderStatus {
   return {
@@ -456,33 +463,36 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
   });
 
   test("trayStatusLabel, describeHostState, buildTrayMenuItems, and buildApplicationMenuItems map all Host states", () => {
-    expect(trayStatusLabel(null)).toBe("Host starting");
-    expect(trayStatusLabel({ state: "starting", pid: 7 })).toBe("Host starting");
-    expect(trayStatusLabel({ state: "running", pid: 7, activeWork: 2 })).toBe("Active tasks: 2");
-    expect(trayStatusLabel({ state: "restarting", inMs: 1200, reason: "crash" })).toBe(
+    expect(trayStatusLabel(null, PENDING)).toBe("Host starting");
+    expect(trayStatusLabel(null, START_FAILED)).toBe("Host stopped: No packaged Host binary");
+    expect(trayStatusLabel({ state: "starting", pid: 7 }, STARTED)).toBe("Host starting");
+    expect(trayStatusLabel({ state: "running", pid: 7, activeWork: 2 }, STARTED)).toBe("Active tasks: 2");
+    expect(trayStatusLabel({ state: "restarting", inMs: 1200, reason: "crash" }, STARTED)).toBe(
       "Host restarting: crash",
     );
-    expect(trayStatusLabel({ state: "stopped", pid: 7, reason: "schema mismatch", storeRefused: true })).toBe(
+    expect(trayStatusLabel({ state: "stopped", pid: 7, reason: "schema mismatch", storeRefused: true }, STARTED)).toBe(
       "Host stopped: schema mismatch",
     );
-    expect(trayStatusLabel({ state: "failed", reason: "exit 1" })).toBe("Host failed: exit 1");
+    expect(trayStatusLabel({ state: "failed", reason: "exit 1" }, STARTED)).toBe("Host failed: exit 1");
 
-    expect(describeHostState(null)).toBe("Host starting");
-    expect(describeHostState({ state: "starting", pid: 7 })).toBe("Host starting");
-    expect(describeHostState({ state: "running", pid: 7, activeWork: 0 })).toBe("Host running");
-    expect(describeHostState({ state: "restarting", inMs: 1200, reason: "oops" })).toBe(
+    expect(describeHostState(null, PENDING)).toBe("Host starting");
+    expect(describeHostState(null, START_FAILED)).toBe("Host stopped: No packaged Host binary");
+    expect(describeHostState({ state: "starting", pid: 7 }, STARTED)).toBe("Host starting");
+    expect(describeHostState({ state: "running", pid: 7, activeWork: 0 }, STARTED)).toBe("Host running");
+    expect(describeHostState({ state: "restarting", inMs: 1200, reason: "oops" }, STARTED)).toBe(
       "Host restarting in 2 s: oops",
     );
-    expect(describeHostState({ state: "stopped", pid: 7, reason: "halted", storeRefused: false })).toBe(
+    expect(describeHostState({ state: "stopped", pid: 7, reason: "halted", storeRefused: false }, STARTED)).toBe(
       "Host stopped: halted",
     );
-    expect(describeHostState({ state: "failed", reason: "boom" })).toBe("Host failed: boom");
+    expect(describeHostState({ state: "failed", reason: "boom" }, STARTED)).toBe("Host failed: boom");
 
     let shown = 0;
     let restarted = 0;
     let quit = 0;
     const trayRunning = buildTrayMenuItems({
       host: { state: "running", pid: 7, activeWork: 2 },
+      start: STARTED,
       quitting: false,
       recoveryBusy: false,
       productName: "BYOK Bots",
@@ -519,6 +529,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
 
     const trayStarting = buildTrayMenuItems({
       host: { state: "starting", pid: 7 },
+      start: STARTED,
       quitting: false,
       recoveryBusy: false,
       productName: "BYOK Bots",
@@ -528,8 +539,23 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     });
     expect((trayStarting[3] as { disabled?: boolean }).disabled).toBe(true);
 
+    // A failed start leaves no supervisor: the menu disables Restart Host, as the sidebar hides its button.
+    const trayStartFailed = buildTrayMenuItems({
+      host: null,
+      start: START_FAILED,
+      quitting: false,
+      recoveryBusy: false,
+      productName: "BYOK Bots",
+      onShow: () => {},
+      onRestartHost: () => {},
+      onQuit: () => {},
+    });
+    expect((trayStartFailed[1] as { label?: string }).label).toBe("Host stopped: No packaged Host binary");
+    expect((trayStartFailed[3] as { disabled?: boolean }).disabled).toBe(true);
+
     const trayQuitting = buildTrayMenuItems({
       host: { state: "failed", reason: "exit" },
+      start: STARTED,
       quitting: true,
       recoveryBusy: false,
       productName: "BYOK Bots",
@@ -541,6 +567,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
 
     const trayRecoveryBusy = buildTrayMenuItems({
       host: { state: "stopped", pid: 7, reason: "halted", storeRefused: true },
+      start: STARTED,
       quitting: false,
       recoveryBusy: true,
       productName: "BYOK Bots",
@@ -554,6 +581,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
     const selectedAppearances: string[] = [];
     const appMenu = buildApplicationMenuItems({
       host: { state: "running", pid: 7, activeWork: 0 },
+      start: STARTED,
       quitting: false,
       recoveryBusy: false,
       productName: "BYOK Bots",
@@ -579,6 +607,7 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
 
     const appMenuRecoveryBusy = buildApplicationMenuItems({
       host: { state: "failed", reason: "exit" },
+      start: STARTED,
       quitting: false,
       recoveryBusy: true,
       productName: "BYOK Bots",
@@ -594,5 +623,14 @@ describe("BYOK NSH Shell, Recovery, Tray & Login Item (Slice 3)", () => {
       (item) => "label" in item && item.label === "BYOK Bots",
     ) as { submenu: { label?: string; disabled?: boolean }[] };
     expect(appSubmenu.submenu.find((entry) => entry.label === "Restart Host")?.disabled).toBe(true);
+  });
+
+  test("fitIntoWorkArea moves and shrinks a first window that overflows the work area, and leaves one that fits", () => {
+    // #2516 win2: 1920 × 1080 at 150 % with a 48 px taskbar is a 1280 × 688 pt work area; the window opened at
+    // 190,190 px with 1822 × 1106 px outer bounds.
+    const workArea = { origin: { x: 0, y: 0 }, size: { width: 1280, height: 688 } };
+    const opened = { origin: { x: 190 / 1.5, y: 190 / 1.5 }, size: { width: 1822 / 1.5, height: 1106 / 1.5 } };
+    expect(fitIntoWorkArea(opened, workArea)).toEqual({ origin: { x: 1280 - 1822 / 1.5, y: 0 }, size: { width: 1822 / 1.5, height: 688 } });
+    expect(fitIntoWorkArea({ origin: { x: 40, y: 30 }, size: { width: 900, height: 600 } }, workArea)).toBeNull();
   });
 });

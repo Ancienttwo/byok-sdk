@@ -346,10 +346,18 @@ export function hideMainWindow(): void {
   mainWindowRef?.hide();
 }
 
+/**
+ * The status of a Host with no state yet. A failed `ByokShell.start` leaves no supervisor, so no Host state ever
+ * arrives: the status shows the start refusal that Keys shows (`shellStart`), not "Host starting".
+ */
+function hostlessStatus(start: ShellStart): string {
+  return start.status === "failed" ? `Host stopped: ${start.error.message}` : "Host starting";
+}
+
 /** Human-readable status text matching Electron `HostStatus` copy. */
-export function describeHostState(host: SupervisedHostState | null): string {
+export function describeHostState(host: SupervisedHostState | null, start: ShellStart): string {
   if (host === null) {
-    return "Host starting";
+    return hostlessStatus(start);
   }
   switch (host.state) {
     case "starting":
@@ -366,9 +374,9 @@ export function describeHostState(host: SupervisedHostState | null): string {
 }
 
 /** Concise tray status line matching Electron `trayMenu`. */
-export function trayStatusLabel(state: SupervisedHostState | null): string {
+export function trayStatusLabel(state: SupervisedHostState | null, start: ShellStart): string {
   if (state === null) {
-    return "Host starting";
+    return hostlessStatus(start);
   }
   switch (state.state) {
     case "running":
