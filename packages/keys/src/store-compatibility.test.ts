@@ -12,6 +12,31 @@ import { inspectProviderProfileStore } from './store-compatibility';
 import { SqliteProviderProfileStore } from './sqlite-profile-store';
 import { isSqliteAvailable, loadSqliteModule } from './sqlite-support';
 
+/** #2530: hooks into the precheck's file reads, so a store file can vanish at an exact step. */
+const fsHooks = vi.hoisted(() => ({
+  afterStat: undefined as ((path: string) => void) | undefined,
+  beforeCopy: undefined as ((source: string, destination: string) => void) | undefined,
+  copyError: undefined as unknown,
+}));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  const statSync = ((...args: Parameters<typeof actual.statSync>) => {
+    const stat = actual.statSync(...args);
+    fsHooks.afterStat?.(String(args[0]));
+    return stat;
+  }) as typeof actual.statSync;
+  const copyFileSync: typeof actual.copyFileSync = (source, destination, mode) => {
+    fsHooks.beforeCopy?.(String(source), String(destination));
+    try {
+      actual.copyFileSync(source, destination, mode);
+    } catch (error) {
+      fsHooks.copyError = error;
+      throw error;
+    }
+  };
+  return { ...actual, default: { ...actual, statSync, copyFileSync }, statSync, copyFileSync };
+});
+
 /** #1102: the provider profile store precheck, over checked-in stores written by released builds. */
 
 const describeSqlite = (isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1') ? describe : describe.skip;
@@ -32,6 +57,9 @@ const ACCEPTANCE_VERDICT: Record<string, string> = { accept: 'accepted', migrate
 
 const scratch: string[] = [];
 afterEach(() => {
+  fsHooks.afterStat = undefined;
+  fsHooks.beforeCopy = undefined;
+  fsHooks.copyError = undefined;
   for (const directory of scratch.splice(0)) rmSync(directory, { recursive: true, force: true });
 });
 
@@ -127,6 +155,36 @@ describeSqlite('inspectProviderProfileStore', () => {
     const before = directoryState(directory);
     expect(await inspectProviderProfileStore(file)).toMatchObject({ verdict: 'accepted' });
     expect(directoryState(directory)).toEqual(before);
+  });
+
+  it('refuses a WAL that vanishes between its fingerprint and its copy (#2530)', async () => {
+    const file = join(tempDir(), 'profiles.db');
+    await new SqliteProviderProfileStore({ path: file }).close();
+    writeFileSync(`${file}-wal`, '');
+    fsHooks.beforeCopy = (source) => {
+      if (source === `${file}-wal`) rmSync(source);
+    };
+    await expect(inspectProviderProfileStore(file)).rejects.toThrow(`${file} changed while it was being checked`);
+  });
+
+  it('refuses a main file that vanishes after the first stat instead of checking a fresh copy (#2530)', async () => {
+    const file = join(tempDir(), 'profiles.db');
+    await new SqliteProviderProfileStore({ path: file }).close();
+    fsHooks.afterStat = (path) => {
+      if (path !== file) return;
+      fsHooks.afterStat = undefined;
+      rmSync(file);
+    };
+    await expect(inspectProviderProfileStore(file)).rejects.toThrow(`${file} changed while it was being checked`);
+  });
+
+  it('lets a copy failure with the source intact propagate as itself (#2530)', async () => {
+    const file = join(tempDir(), 'profiles.db');
+    await new SqliteProviderProfileStore({ path: file }).close();
+    fsHooks.beforeCopy = (_source, destination) => rmSync(dirname(destination), { recursive: true, force: true });
+    const error = await inspectProviderProfileStore(file).catch((caught: unknown) => caught);
+    expect(error).toBe(fsHooks.copyError);
+    expect(error).toMatchObject({ code: 'ENOENT' });
   });
 });
 

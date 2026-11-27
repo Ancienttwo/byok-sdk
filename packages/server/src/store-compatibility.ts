@@ -30,7 +30,7 @@ export async function inspectSqliteStore(path: string): Promise<StoreCompatibili
   if (!stat.isFile()) return { store: 'server-sqlite', path: file, verdict: 'rejected', reason: 'The store path is not a regular file' };
   const directory = mkdtempSync(join(tmpdir(), 'byok-store-check-'));
   try {
-    const copy = copyStoreFiles(file, directory);
+    const copy = copyStoreFiles(file, stat, directory);
     try {
       const stores = createSqliteEmbeddedStores(
         { path: copy },
@@ -75,21 +75,41 @@ function statOrUndefined(file: string): Stats | undefined {
   }
 }
 
-/** Copy the store files into `directory`; fail when one of them changes during the copy. */
-function copyStoreFiles(file: string, directory: string): string {
+/**
+ * Copy the store files into `directory`; fail when one of them changes during the copy.
+ *
+ * `main` is the first observation of the main file and the snapshot baseline. The main
+ * file must keep that fingerprint before and after the copy: once it is gone, nothing is
+ * copied and the writable open would create a fresh store in `directory`, so the verdict
+ * would describe a store that was never checked.
+ */
+function copyStoreFiles(file: string, main: Stats, directory: string): string {
   const copy = join(directory, basename(file));
+  const changed = (): Error => new Error(`${file} changed while it was being checked; stop the server that owns it and check again`);
   const before = SQLITE_FILE_SUFFIXES.map((suffix) => fingerprint(`${file}${suffix}`));
+  if (before[0] !== fingerprintOf(main)) throw changed();
   SQLITE_FILE_SUFFIXES.forEach((suffix, index) => {
-    if (before[index] !== undefined) copyFileSync(`${file}${suffix}`, `${copy}${suffix}`);
+    if (before[index] === undefined) return;
+    const source = `${file}${suffix}`;
+    try {
+      copyFileSync(source, `${copy}${suffix}`);
+    } catch (error) {
+      // A source that vanished after its fingerprint (a WAL checkpoint) is a change. An ENOENT
+      // while the source is intact, or any other error, is the copy's own failure.
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT' && fingerprint(source) !== before[index]) throw changed();
+      throw error;
+    }
   });
   const after = SQLITE_FILE_SUFFIXES.map((suffix) => fingerprint(`${file}${suffix}`));
-  if (after.some((value, index) => value !== before[index])) {
-    throw new Error(`${file} changed while it was being checked; stop the server that owns it and check again`);
-  }
+  if (after.some((value, index) => value !== before[index])) throw changed();
   return copy;
 }
 
 function fingerprint(file: string): string | undefined {
   const stat = statOrUndefined(file);
-  return stat === undefined ? undefined : `${stat.size}:${stat.mtimeMs}:${stat.ino}`;
+  return stat === undefined ? undefined : fingerprintOf(stat);
+}
+
+function fingerprintOf(stat: Stats): string {
+  return `${stat.size}:${stat.mtimeMs}:${stat.ino}`;
 }
