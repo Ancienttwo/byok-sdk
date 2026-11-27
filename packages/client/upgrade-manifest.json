@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "fc7f46327cc9741ef77f09af9580a444259d9312cef8d6e7f175afca40856eee"
+    "snapshotSha256": "d896f28d3609baaacfcdac4bf9f7ee1729b4a9e166e4f9dcf2012c21d20bc4ae"
   },
   "configFields": {
     "status": "tracked",
@@ -150,9 +150,26 @@
   ],
   "changes": [
     {
+      "item": "config:runtimes",
+      "change": "changed",
+      "before": "optional schema-sha256=18d06e34b46dd3d1",
+      "after": "optional schema-sha256=553ef9189423bdfc",
+      "entry": "cursor-agent-cli"
+    },
+    {
       "item": "export:@byok-sdk/client#AgyAdapter",
       "change": "changed",
       "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client#CursorAdapter",
+      "change": "added",
+      "entry": "cursor-agent-cli"
+    },
+    {
+      "item": "export:@byok-sdk/client#CursorAdapterOptions",
+      "change": "added",
+      "entry": "cursor-agent-cli"
     },
     {
       "item": "export:@byok-sdk/client#RuntimeAdapter",
@@ -220,6 +237,16 @@
       "entry": "antigravity-account-usage-options"
     },
     {
+      "item": "export:@byok-sdk/client/adapters#CursorAdapter",
+      "change": "added",
+      "entry": "cursor-agent-cli"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#CursorAdapterOptions",
+      "change": "added",
+      "entry": "cursor-agent-cli"
+    },
+    {
       "item": "export:@byok-sdk/client/adapters#RuntimeAccountUsageOptions",
       "change": "added",
       "entry": "antigravity-account-usage-options"
@@ -238,6 +265,11 @@
       "item": "export:@byok-sdk/client/adapters#RuntimeAdapterDescriptor",
       "change": "changed",
       "entry": "harness-service-tier"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdaptersRuntimes",
+      "change": "changed",
+      "entry": "cursor-agent-cli"
     },
     {
       "item": "export:@byok-sdk/client/adapters#RuntimeOperationManifest",
