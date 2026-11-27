@@ -25,7 +25,13 @@ interface SpawnDependencies {
 export function createOwnedTerminalSpawn(deps: SpawnDependencies = {}) {
   return (command: string, args: readonly string[], options: { readonly cwd: string; readonly env: Readonly<Record<string, string>>; readonly shell: boolean }) => {
     if (options.env === undefined) throw new Error('owned terminal process requires an explicit environment');
-    assertNoNulSpawnInput(command, args, options.env, options.cwd);
+    // Drop separators before validating values, since that diagnostic names the variable.
+    // Keep the validator's NUL refusal for names, values, and inherited inputs.
+    const validationEnv: Record<string, string | undefined> = Object.create(null);
+    for (const name in options.env) {
+      if (name && !name.includes('=')) validationEnv[name] = options.env[name];
+    }
+    assertNoNulSpawnInput(command, args, validationEnv, options.cwd);
     const env = withoutProviderCredentials(options.env);
     let child: ChildProcess;
     try {
