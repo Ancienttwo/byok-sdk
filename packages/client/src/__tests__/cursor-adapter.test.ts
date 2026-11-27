@@ -1,3 +1,4 @@
+import { observeOwnedProcessTable } from '../adapters/process-tree';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,16 +8,18 @@ import { dshEnvironment } from '../adapters/dsh/dsh-profile';
 import { projectPiMcpEnvironment } from '../adapters/pi/mcp-environment';
 import { CursorAdapter, type CursorAdapterOptions } from '../adapters/cursor/cursor-adapter';
 import { resolveCursorBin } from '../adapters/cursor/resolve-bin';
-import { CURSOR_AUTH_ENV_NAMES, withoutProviderCredentials } from '../adapters/provider-credential-environment';
+import { CURSOR_AUTH_ENV_NAMES, isCursorAuthEnvironmentName, withoutProviderCredentials } from '../adapters/provider-credential-environment';
 import { createRuntimeAdapters } from '../adapters/runtime-adapters';
+import { cursorSession } from '../runtime/cursor-acp-profile';
+import { buildAllowlistedEnv } from '../runtime/environment';
 import { observeAdmissionDetection } from '../runtime-detection';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
-import { spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { SteerUnsupportedError, type Session, type RuntimeOperationStartInput, type RuntimeOperationInstructionStartInput, type RuntimeTaskInput } from '../types';
 import { testExecutionScratch } from './fixtures/execution-scratch';
 import { startPreparedOperation, type PreparedOperationResources } from './fixtures/prepared-operation';
 import { captureProcessIdentity, expectProcessNotLive } from './support/process-liveness';
 
+const AUTO = { lane: 'auto' } as const;
 const TARGET = { lane: 'harness', harnessId: 'cursor', selection: { mode: 'device-default' } } as const;
 const MODEL = { lane: 'harness', harnessId: 'cursor', selection: { mode: 'adapter-model', modelId: 'fixture-model' } } as const;
 const VERSION = '2026.09.18-9a7762b';
@@ -44,6 +47,7 @@ interface Fact {
   descendant?: number;
   permission?: unknown;
   refusals?: number[];
+  terminal?: { result?: unknown; error?: { code: number } };
 }
 
 function setup(extra: Record<string, string> = {}, options: CursorAdapterOptions = {}) {
@@ -100,12 +104,14 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
     copyFileSync(bin, installer);
     copyFileSync(bin, path.join(cwd, 'agent'));
     const runtimeEnv = { ...env, PATH: cwd };
-    vi.stubEnv('BYOK_CURSOR_BIN', path.join(cwd, 'agent'));
+    vi.stubEnv('BYOK_CURSOR_BIN', `  ${path.join(cwd, 'agent')}  `);
     expect(resolveCursorBin(runtimeEnv)).toEqual({ command: path.join(cwd, 'agent'), source: 'env' });
-    vi.stubEnv('BYOK_CURSOR_BIN', undefined);
+    vi.stubEnv('BYOK_CURSOR_BIN', '   ');
     expect(resolveCursorBin(runtimeEnv)).toEqual({ command: bin, source: 'path' });
     rmSync(bin);
     expect(resolveCursorBin(runtimeEnv)).toEqual({ command: installer, source: 'path' });
+    vi.stubEnv('HOME', cwd);
+    expect(resolveCursorBin({ ...runtimeEnv, HOME: '' })).toEqual({ command: installer, source: 'path' });
     rmSync(installer);
     expect(() => resolveCursorBin(runtimeEnv)).toThrow(expect.objectContaining({ code: 'ENOENT' }));
   });
@@ -152,6 +158,28 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
     expect(box.facts().some(({ method }) => method === 'authenticate')).toBe(false);
   });
 
+  it('opens and follows up on auto-lane offers with the configured device default', async () => {
+    const box = setup({}, { model: 'fixture-model' });
+    const session = await box.start({ target: AUTO });
+    expect(await turn(session)).toContainEqual({ type: 'turn_end' });
+    await session.followUp({ target: AUTO, instruction: 'auto follow-up' });
+    expect(await turn(session)).toContainEqual({ type: 'turn_end' });
+    expect(box.facts().filter(({ method }) => method === 'session/set_config_option').map(({ params }) => params)).toEqual([
+      { sessionId: SESSION, configId: 'model', value: 'fixture-model' },
+    ]);
+  });
+
+  it('refuses unsupported platforms before resolving a binary', async () => {
+    const resolveBin = vi.fn();
+    const { adapter } = setup({}, { resolveBin });
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
+    try {
+      await expect(adapter.detect()).resolves.toEqual({ kind: 'refused', reason: 'platform_unsupported' });
+      expect(resolveBin).not.toHaveBeenCalled();
+    } finally { Object.defineProperty(process, 'platform', platform); }
+  });
+
   it('refuses image input when the CLI omits image capability', async () => {
     const box = setup({ FAKE_CURSOR_NO_IMAGES: '1' });
     const imagePath = path.join(box.cwd, 'fixture.png');
@@ -186,10 +214,13 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
     expect(box.facts().some(({ method }) => method === 'session/prompt')).toBe(false);
   });
 
-  it('reads the catalog through owned ACP and strips all seven names from every Cursor subprocess', async () => {
+  it('reads the catalog through owned ACP and strips Cursor credential and endpoint names from every subprocess', async () => {
     const credentials = Object.fromEntries(CURSOR_AUTH_ENV_NAMES.flatMap(name => [[name, 'ambient'], [name.toLowerCase(), 'alias']]));
     const box = setup(credentials);
-    expect(withoutProviderCredentials({ ...credentials, CURSOR_CONFIG_DIR: '/cli-config' })).toEqual({ CURSOR_CONFIG_DIR: '/cli-config' });
+    expect(CURSOR_AUTH_ENV_NAMES).toContain('CURSOR_WEBSITE_URL');
+    const malformed = { 'CURSOR_API_KEY=alias': 'dummy', 'OPENAI_API_KEY=alias': 'dummy' };
+    expect(withoutProviderCredentials({ ...credentials, ...malformed, CURSOR_CONFIG_DIR: '/cli-config' })).toEqual({ CURSOR_CONFIG_DIR: '/cli-config' });
+    expect(buildAllowlistedEnv({ ambient: malformed, allow: ['CURSOR_*', 'OPENAI_*'] })).toEqual({});
     const { env, report } = await box.adapter.runtimeEnvironment();
     expect(report.removed).toEqual(expect.arrayContaining(Object.keys(credentials).map(name => ({ name, rule: 'deny' }))));
     for (const filtered of [env, agyEnvironment(credentials, box.cwd), dshEnvironment(credentials, box.cwd, 'read-only'), projectPiMcpEnvironment(credentials)]) {
@@ -200,16 +231,21 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
       { id: 'default', displayName: 'Auto' },
       { id: 'fixture-model', displayName: 'Fixture', effortLevels: ['medium', 'high'], defaultEffort: 'medium' },
     ] });
-    await box.start();
-    expect(box.facts().filter(({ argv }) => argv).every(({ credentialNames }) => credentialNames?.length === 0)).toBe(true);
+    await box.start({}, { env: { ...box.env, ...malformed } });
+    const launches = box.facts().filter(({ argv }) => argv !== undefined);
+    expect(launches.map(({ argv }) => argv)).toEqual([
+      ['--version'], ['acp', '--help'], ['status', '--format', 'json'], ['--version'], ['--force', 'acp'],
+      ['--version'], ['acp', '--help'], ['--force', 'acp'],
+    ]);
+    expect(launches.flatMap(({ credentialNames }) => credentialNames ?? []).filter(name => isCursorAuthEnvironmentName(name))).toEqual([]);
     expect(box.facts().some(({ method }) => method === 'authenticate')).toBe(false);
   });
 
-  it('returns typed login failures for create, resume and model discovery without starting authentication', async () => {
+  it('reports missing login for create, resume and model discovery without starting authentication', async () => {
     const box = setup({ FAKE_CURSOR_LOGGED_OUT: '1' });
     await expect(box.start()).rejects.toMatchObject(LOGIN_FAILURE);
     await expect(box.start({ sessionRef: SESSION })).rejects.toMatchObject(LOGIN_FAILURE);
-    await expect(box.adapter.listModels()).rejects.toMatchObject(LOGIN_FAILURE);
+    await expect(box.adapter.listModels()).resolves.toEqual({ kind: 'unauthenticated' });
     expect(box.facts().some(({ method }) => method === 'authenticate')).toBe(false);
   });
 
@@ -218,6 +254,15 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
     const session = await box.start({ instruction: 'extensions' });
     expect(await turn(session)).toContainEqual({ type: 'turn_end' });
     expect(box.facts()).toContainEqual({ refusals: [-32601, -32601, -32601, -32601, -32601] });
+  });
+
+  it('refuses a reverse terminal request without spawning a terminal', async () => {
+    const box = setup();
+    const session = await box.start({ instruction: 'terminal' });
+    expect(await turn(session)).toContainEqual({ type: 'turn_end' });
+    const terminal = box.facts().find(fact => fact.terminal)?.terminal;
+    expect(terminal?.error?.code).toBe(-32601);
+    expect(terminal?.result).toBeUndefined();
   });
 
   it('cancels unexpected permissions and surfaces a turn failure', async () => {
@@ -248,6 +293,23 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
     expectProcessNotLive(cli);
   });
 
+  it('remembers a detached child before native session close reparents it', async () => {
+    const box = setup({ FAKE_CURSOR_SESSION_CLOSE: '1' });
+    const session = await box.start({ instruction: 'detached-tree' });
+    await turn(session);
+    const child = captureProcessIdentity(box.facts().find(({ descendant }) => descendant)!.descendant!);
+    const cli = box.facts().find(({ argv }) => argv?.join(' ') === '--force acp')!.pid!;
+    try {
+      expect(observeOwnedProcessTable().table.get(child.pid)).toMatchObject({ ppid: cli, pgid: child.pid });
+      await session.close();
+      expect(box.facts().some(({ method }) => method === 'session/close')).toBe(true);
+      expectProcessNotLive(child);
+    } finally {
+      const current = observeOwnedProcessTable().table.get(child.pid);
+      if (current !== undefined && current.start === child.start && current.zombie !== true) process.kill(child.pid, 'SIGKILL');
+    }
+  });
+
   it('uses the shared 10 second ACP cancel fallback if the child ignores cancel', async () => {
     const box = setup({ FAKE_CURSOR_IGNORE_CANCEL: '1' });
     const session = await box.start({ instruction: 'wait' });
@@ -265,8 +327,7 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
   it('reuses shared ACP queue and withdraw without sending a withdrawn prompt', async () => {
     const box = setup();
     const scratch = await testExecutionScratch();
-    const { cursorSession } = await import('#byok-acp-runtime');
-    const raw = await cursorSession(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: box.bin },
+    const raw = await cursorSession(spawnOwnedLineProcess, { kind: 'available', via: 'executable', command: box.bin },
       { cwd: box.cwd, env: { ...box.env, ...scratch.env }, retainedBytes: 1_000_000 });
     try {
       await raw.prompt('wait');

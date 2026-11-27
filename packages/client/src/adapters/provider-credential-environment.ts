@@ -34,6 +34,7 @@ export const CURSOR_AUTH_ENV_NAMES = Object.freeze([
   'CURSOR_API_KEY',
   'CURSOR_AUTH_TOKEN',
   'CURSOR_API_ENDPOINT',
+  'CURSOR_WEBSITE_URL',
   'CURSOR_API_BASE_URL',
   'CURSOR_API_URL',
   'CURSOR_BACKEND_URL',
@@ -63,6 +64,11 @@ export function isCursorAuthEnvironmentName(name: string): boolean {
   return cursorAuthNames.has(name.toUpperCase());
 }
 
+/** Node serializes environment entries as name=value, so separators in names are unsafe. */
+export function isChildEnvironmentName(name: string): boolean {
+  return name.length !== 0 && !/[=\0]/u.test(name);
+}
+
 /** Return a copy that cannot pass ambient provider credentials to a child. */
 export function withoutProviderCredentials(env: Readonly<Record<string, string>>): Record<string, string>;
 export function withoutProviderCredentials(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv;
@@ -70,7 +76,7 @@ export function withoutProviderCredentials(env: NodeJS.ProcessEnv): NodeJS.Proce
   const sanitized = { ...env };
   // Match Windows case aliases too.
   for (const name of Object.keys(sanitized)) {
-    if (credentialNames.has(name.toUpperCase())) delete sanitized[name];
+    if (!isChildEnvironmentName(name) || credentialNames.has(name.toUpperCase())) delete sanitized[name];
   }
   return sanitized;
 }

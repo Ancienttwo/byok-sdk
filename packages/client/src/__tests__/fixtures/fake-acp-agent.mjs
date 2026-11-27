@@ -355,6 +355,19 @@ async function prompt(message) {
     log({ kind: 'terminal', created });
     pending.set(message.id, 'silent'); return;
   }
+  if (input === 'terminal-env') {
+    const created = await ask('terminal/create', { sessionId: SESSION, command: process.execPath,
+      args: ['-e', 'console.log(JSON.stringify([process.env.FAKE_TERMINAL_MARK, process.env.CURSOR_API_KEY, process.env.cursor_website_url, process.env.OPENAI_API_KEY, process.env.FAKE_MALFORMED]))'],
+      env: [{ name: 'FAKE_TERMINAL_MARK', value: 'peer' }, { name: 'CURSOR_API_KEY', value: 'peer-key' },
+        { name: 'cursor_website_url', value: 'peer-website' }, { name: 'OPENAI_API_KEY', value: 'peer-openai' },
+        { name: 'FAKE_MALFORMED=alias', value: 'peer-value' }] });
+    await ask('terminal/wait_for_exit', { sessionId: SESSION, terminalId: created.terminalId });
+    const { output } = await ask('terminal/output', { sessionId: SESSION, terminalId: created.terminalId });
+    await ask('terminal/release', { sessionId: SESSION, terminalId: created.terminalId });
+    log({ kind: 'terminal-env', output });
+    result(message.id, answer());
+    return;
+  }
   if (input === 'terminal' || input === 'terminal-hang' || input === 'terminal-compat') {
     // Grok sends one quoted shell line as `command` with no `args`.
     const command = input === 'terminal'

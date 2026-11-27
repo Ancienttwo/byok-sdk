@@ -109,7 +109,7 @@ export class CursorAdapter implements RuntimeAdapter {
 
   private async probe(checkAuth: boolean, signal?: AbortSignal): Promise<RuntimeDetectResult> {
     signal?.throwIfAborted();
-    if (process.platform !== 'darwin' && process.platform !== 'linux') return { kind: 'refused', reason: 'acp_unavailable' };
+    if (process.platform !== 'darwin' && process.platform !== 'linux') return { kind: 'refused', reason: 'platform_unsupported' };
     try {
       const env = withoutProviderCredentials((await this.runtimeEnvironment()).env);
       const resolved = this.resolveCommand(env);
@@ -138,14 +138,14 @@ export class CursorAdapter implements RuntimeAdapter {
     input.signal?.throwIfAborted();
     const { target, effort } = input.offer;
     const selection = offerSelection(target);
-    if (target.lane !== 'harness' || target.harnessId !== 'cursor' || (selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model')) {
+    if (target.lane === 'harness' && (target.harnessId !== 'cursor' || (selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model'))) {
       return reject('Cursor does not support the requested selection');
     }
     const unsupported = unsupportedCursorOption(input.offer);
     if (unsupported !== undefined) return reject(`Cursor does not support ${unsupported}`);
-    const offeredModel = selection.mode === 'adapter-model' ? selection.modelId : undefined;
+    const offeredModel = selection?.mode === 'adapter-model' ? selection.modelId : undefined;
     const model = offeredModel ?? this.options.model;
-    if (selection.mode === 'adapter-model' && (model === undefined || !model.trim())) {
+    if (selection?.mode === 'adapter-model' && (model === undefined || !model.trim())) {
       return { ...reject('Cursor requires a model ID when no default is configured'), code: 'invalid_request' };
     }
     const refusal = mcpRefusal(input.mcpServers);
@@ -159,7 +159,7 @@ export class CursorAdapter implements RuntimeAdapter {
     const { version, executableSource, versionVerdict } = detected;
     return { kind: 'prepared', detected: { version, executableSource, versionVerdict }, operation: { start: start => {
       const actual = start.manifest.selection;
-      if (actual?.mode !== selection.mode || (actual.mode === 'adapter-model' && actual.modelId !== offeredModel) || start.manifest.effort !== effort) {
+      if (actual?.mode !== selection?.mode || (actual?.mode === 'adapter-model' && actual.modelId !== offeredModel) || start.manifest.effort !== effort) {
         throw authority('prepared Cursor operation received a manifest with different runtime selection');
       }
       return this.start(start, command, model, effort);

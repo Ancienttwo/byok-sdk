@@ -3,6 +3,7 @@ import {
   adoptOwnedProcessTree, disposeOwnedProcessTree, requestOwnedProcessTreeTermination, withOwnedProcessTree,
 } from '../adapters/process-tree.js';
 import { assertNoNulSpawnInput, spawnStartError } from '@byok-sdk/core/system-tool';
+import { withoutProviderCredentials } from '../adapters/provider-credential-environment.js';
 
 const LABEL = 'acp terminal';
 
@@ -17,17 +18,19 @@ interface SpawnDependencies {
  * A command an ACP agent asks its client to run (`terminal/create`), inside
  * the same owned-tree authority as the agent process: its own POSIX process
  * group or Windows job, the host-exit backstop and the durable group ledger.
- * Callers supply the agent session's filtered environment; nothing ambient is merged.
+ * The ACP host supplies the session environment overlaid with peer entries.
+ * Strip provider credentials from that final environment before spawning.
  */
 // Structural return types keep the BYOK source declaration build independent of the unconnected vendor tree.
 export function createOwnedTerminalSpawn(deps: SpawnDependencies = {}) {
   return (command: string, args: readonly string[], options: { readonly cwd: string; readonly env: Readonly<Record<string, string>>; readonly shell: boolean }) => {
-    if (options.env === undefined) throw new Error('owned terminal process requires an explicit filtered environment');
+    if (options.env === undefined) throw new Error('owned terminal process requires an explicit environment');
     assertNoNulSpawnInput(command, args, options.env, options.cwd);
+    const env = withoutProviderCredentials(options.env);
     let child: ChildProcess;
     try {
       child = (deps.spawnFn ?? spawn)(command, [...args], withOwnedProcessTree({
-        cwd: options.cwd, env: options.env, shell: options.shell, stdio: ['ignore', 'pipe', 'pipe'],
+        cwd: options.cwd, env, shell: options.shell, stdio: ['ignore', 'pipe', 'pipe'],
       }));
     } catch (error) {
       throw spawnStartError(error);

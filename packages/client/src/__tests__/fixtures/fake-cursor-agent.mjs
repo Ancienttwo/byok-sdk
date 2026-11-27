@@ -50,10 +50,12 @@ async function prompt({ id, params }) {
   text('working', 'agent_thought_chunk');
   text('hello ');
   if (instruction === 'exit') process.exit(7);
-  if (instruction === 'tree') {
-    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  if (instruction === 'tree' || instruction === 'detached-tree') {
+    const detached = instruction === 'detached-tree';
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30_000)'], { stdio: 'ignore', detached });
     log({ descendant: child.pid });
-    return;
+    if (!detached) return;
+    child.unref();
   }
   if (instruction === 'wait') return;
   if (instruction === 'extensions') {
@@ -61,6 +63,11 @@ async function prompt({ id, params }) {
     const replies = await Promise.all(names.map(method => ask(method, { sessionId })));
     log({ refusals: replies.map(reply => reply.error?.code) });
     if (replies.some(reply => reply.error?.code !== -32601)) throw new Error('the client did not refuse the Cursor extensions');
+  }
+  if (instruction === 'terminal') {
+    const terminal = await ask('terminal/create', { sessionId, command: process.execPath, args: ['-e', ''] });
+    log({ terminal });
+    if (terminal.result?.terminalId) await ask('terminal/release', { sessionId, terminalId: terminal.result.terminalId });
   }
   if (instruction === 'permission') {
     const reply = await ask('session/request_permission', { sessionId, toolCall: { toolCallId: 'shell', kind: 'execute' },
@@ -94,7 +101,8 @@ for await (const line of rl) {
   }
   switch (method) {
     case 'initialize': result(id, {
-      protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: !process.env.FAKE_CURSOR_NO_IMAGES } },
+      protocolVersion: 1, agentCapabilities: { loadSession: true, promptCapabilities: { image: !process.env.FAKE_CURSOR_NO_IMAGES },
+        ...(process.env.FAKE_CURSOR_SESSION_CLOSE ? { sessionCapabilities: { close: {} } } : {}) },
       authMethods: [{ id: 'cursor_login', name: 'Cursor Login' }],
     }); break;
     case 'authenticate': throw new Error('SDK attempted to start Cursor login');
@@ -103,6 +111,9 @@ for await (const line of rl) {
       result(id, { configOptions: configOptions() });
       break;
     case 'session/new': result(id, { sessionId, configOptions: configOptions() }); break;
+    case 'session/close':
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result: {} }) + '\n', () => process.exit(0));
+      break;
     case 'session/set_config_option':
       if (params.configId === 'model' && params.value === 'fixture-model') {
         model = process.env.FAKE_CURSOR_WRONG_MODEL ? 'default' : params.value;

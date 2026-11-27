@@ -2,7 +2,6 @@ import { client, methods, PROTOCOL_VERSION, RequestError } from '@agentclientpro
 import { asRecord, asRecordList } from '../../vendor/oar/223703d/shared/json.js';
 import { acpThoughtLevelOption } from '../../vendor/oar/223703d/shared/acp/model.js';
 import { startAcpProcess, withAcpDeadline } from '../../vendor/oar/223703d/shared/acp/process.js';
-import { cursorAuthFailure } from '../adapters/cursor/cursor-policy.js';
 import { CURSOR_ACP_ARGS, CURSOR_ACP_CLIENT_META } from './cursor-acp-profile.js';
 import type { ModelReader } from './oar-reader-contract.js';
 import type { RuntimeModelEntry } from './runtime-reader-types.js';
@@ -35,7 +34,7 @@ export const cursorListModels: ModelReader = async (installation, reader) => {
       options => runtime.connection.agent.request(LIST_MODELS, {}, options));
     return { kind: 'ok', models: asRecordList(asRecord(result)?.models).flatMap(modelEntry) };
   } catch (error) {
-    if (error instanceof RequestError && error.code === -32_000) throw cursorAuthFailure();
+    if (error instanceof RequestError && error.code === -32_000) return { kind: 'unauthenticated' };
     if (error instanceof RequestError && error.code === -32_601) return { kind: 'unsupported', reason: 'Cursor ACP model catalog unavailable' };
     throw error;
   }

@@ -119,11 +119,12 @@ by supplying a `CursorAdapter` to an embedded Host. Install Cursor Agent CLI
 and run `cursor-agent login` as the device user. The SDK looks for a Host
 executable override, then `BYOK_CURSOR_BIN`, `cursor-agent` on the runtime
 `PATH`, and `~/.local/bin/cursor-agent`. It starts
-`cursor-agent --force acp` with provider credentials and the seven Cursor
-auth and endpoint overrides stripped. It uses the CLI's existing login and
+`cursor-agent --force acp` with provider credentials and Cursor auth and
+endpoint overrides stripped, including `CURSOR_WEBSITE_URL`. It uses the CLI's existing login and
 never sends the ACP `authenticate` request. The `device-default` and
 `adapter-model` selections use CLI model configuration and native effort
-readback. Images are negotiated at session open.
+readback. Images are negotiated at session open. An unauthenticated model
+read returns `{ kind: 'unauthenticated' }`.
 
 Phase 1 covers macOS and Linux with a fake Cursor CLI. Windows native
 `.exe` and staged-promotion `.cmd` launchers need separate qualification.
@@ -135,7 +136,9 @@ configuration directory holds the session state used for resume. The CLI's
 own configuration governs auto-update.
 
 Only tool authorization `all` is admitted. Unexpected ACP permission
-requests are cancelled. Task-scoped stdio MCP servers are forwarded on
+requests are cancelled. Cursor runs shell tools in its CLI process tree.
+Reverse terminal requests cannot start an SDK-hosted process. Task-scoped
+stdio MCP servers are forwarded on
 session creation and resume when their environment is empty. Any task MCP
 credentials are refused before launch. Per-tool grants and MCP search
 remain unavailable. Cursor todo, task, and image-generation updates are

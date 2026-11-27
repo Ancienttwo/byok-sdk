@@ -259,6 +259,15 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     expect(done?.exit.exitCode).toBe(0);
   });
 
+  it('filters provider credentials and malformed names after the terminal env overlay', async () => {
+    const { dir, log } = workspace();
+    const records: RawEvent[] = [];
+    const session = await open({ PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log,
+      FAKE_TERMINAL_MARK: 'session', CURSOR_API_KEY: 'session-key' }, dir, { onRecord: record => records.push(record) });
+    await turn(session, records, 'terminal-env');
+    expect(JSON.parse(facts(log).find(fact => fact.kind === 'terminal-env')?.output)).toEqual(['peer', null, null, null, null]);
+  });
+
   it('answers every permission request cancelled and records the request and answer', async () => {
     const { dir, log } = workspace();
     const records: RawEvent[] = [];

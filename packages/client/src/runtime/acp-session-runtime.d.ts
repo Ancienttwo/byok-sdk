@@ -120,8 +120,14 @@ export declare const antigravitySession: StartAcpSession;
 
 /** Native OpenCode 1 and 2 ACP; requires the installation's probed version. */
 export declare const opencodeSession: StartAcpSession;
-/** BYOK's Cursor profile: `cursor-agent --force acp` using existing CLI login. */
-export declare const cursorSession: StartAcpSession;
+/** BYOK's Cursor profile uses existing CLI login and refuses hosted terminals. */
+export type StartCursorAcpSession = (
+  spawn: Parameters<StartAcpSession>[0],
+  installation: Parameters<StartAcpSession>[2],
+  options: Parameters<StartAcpSession>[3],
+  hooks?: Parameters<StartAcpSession>[4],
+) => ReturnType<StartAcpSession>;
+export declare const cursorSession: StartCursorAcpSession;
 
 export declare class SessionUnavailableError extends Error {
   readonly name: 'SessionUnavailableError';

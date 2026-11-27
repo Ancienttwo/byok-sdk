@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { loginShellSnapshot, pinLiveHome, type LoginShellSnapshot, type ServiceEnvironmentUnavailableCode } from '../login-shell-environment.js';
-import { isCursorAuthEnvironmentName } from '../adapters/provider-credential-environment.js';
+import { isChildEnvironmentName, isCursorAuthEnvironmentName } from '../adapters/provider-credential-environment.js';
 import { PI_PROVIDER_ENV_KEY_NAMES } from '../adapters/pi/pi-provider-env.generated.js';
 
 /**
@@ -215,7 +215,7 @@ function admitNames(
   for (const name of names) {
     const value = source[name];
     if (value === undefined || !admitted(name)) continue;
-    if (matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive) || isCursorAuthEnvironmentName(name)) denied?.add(name);
+    if (!isChildEnvironmentName(name) || matchesAny(name, HARD_DENY_PATTERNS, caseInsensitive) || isCursorAuthEnvironmentName(name)) denied?.add(name);
     else {
       // Use canonical names for SDK reads as well as child lookups.
       // Prefix entries (LC_*, XDG_*) canonicalize the whole name to upper case.

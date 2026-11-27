@@ -1,9 +1,8 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
-import type { StartAcpSession, RawAcpSession, AcpRecord } from '../../runtime/acp-session-runtime.js';
+import type { StartCursorAcpSession, RawAcpSession, AcpRecord } from '../../runtime/acp-session-runtime.js';
 import { RuntimeExecutionFailure, isRuntimeDisposalFailure, isRuntimeExecutionFailure, runtimeFailureClassOf } from '../../runtime-failure.js';
 import { sessionCredentialRedactor } from '../../runtime/claude-session-runtime.js';
 import { createOwnedLineProcessSpawn } from '../../runtime/owned-line-process.js';
-import { createOwnedTerminalSpawn } from '../../runtime/owned-terminal-process.js';
 import { SteerUnsupportedError, PolicyUnsupportedError, offerSelection, type MessageDraftDelta, type RuntimeInputImage,
   type RuntimeOperationInstructionStartInput, type RuntimeTaskInput, type Session } from '../../types.js';
 import { AsyncQueue } from '../../util/async-queue.js';
@@ -37,13 +36,12 @@ export class CursorSession implements Session {
   get capabilities() { return { images: this.raw?.capabilities.images === true }; }
   get exitedOnItsOwn() { return this.child?.exitedOnItsOwn === true; }
 
-  async open(start: StartAcpSession, command: string, options: CursorAdapterOptions, retainedBytes: number): Promise<void> {
+  async open(start: StartCursorAcpSession, command: string, options: CursorAdapterOptions, retainedBytes: number): Promise<void> {
     const { manifest, mcpServers, signal } = this.input;
     const env = withoutProviderCredentials({ ...this.input.env, ...this.input.scratch.env });
     const servers = Object.entries(mcpServers ?? {}).map(([name, server]) => ({ name, command: server.command, args: server.args }));
     const redactor = sessionCredentialRedactor({ env, mcpServers: servers });
     const spawn = createOwnedLineProcessSpawn({ nativeAssetRoot: options.nativeAssetRoot, spawnFn: options.spawnFn, label: 'cursor acp', stderrRedactor: redactor });
-    const spawnTerminal = createOwnedTerminalSpawn({ nativeAssetRoot: options.nativeAssetRoot, spawnFn: options.spawnFn });
     this.raw = await start((bin, args, opts) => {
       signal?.throwIfAborted();
       const invocation = resolveRuntimeInvocation(bin, runtimeInvocationHost(opts.env));
@@ -55,7 +53,7 @@ export class CursorSession implements Session {
       // Owned disposal retains retryable failures. ACP only observes the process exit.
       const exited = new Promise<number | null>(resolve => child.onExit(resolve));
       return { ...haltGate(child, () => this.failed !== undefined), exited };
-    }, spawnTerminal, { kind: 'available', via: 'executable', command }, {
+    }, { kind: 'available', via: 'executable', command }, {
       cwd: this.cwd, env, retainedBytes, model: this.model, effort: this.effort, resume: manifest.sessionRef, mcpServers: servers,
     }, {
       startupSignal: signal,
@@ -138,11 +136,11 @@ export class CursorSession implements Session {
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('Cursor requires a string instruction');
     const selection = offerSelection(task.target);
-    if (task.target.lane !== 'harness' || task.target.harnessId !== 'cursor' ||
-      (selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model')) {
+    if (task.target.lane === 'harness' && (task.target.harnessId !== 'cursor' ||
+      (selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model'))) {
       throw new PolicyUnsupportedError('Cursor cannot change the session runtime or credential source');
     }
-    const model = selection.mode === 'adapter-model' ? selection.modelId : undefined;
+    const model = selection?.mode === 'adapter-model' ? selection.modelId : undefined;
     if ((model !== undefined && model !== this.model) || (task.modelId !== undefined && task.modelId !== this.model) ||
       (task.effort !== undefined && task.effort !== this.effort)) {
       throw new PolicyUnsupportedError('Cursor cannot change model or effort on a persistent session');
@@ -173,8 +171,11 @@ export class CursorSession implements Session {
     this.closing = true;
     return this.disposal.run(async () => {
       try {
-        try { await this.raw?.dispose(); }
-        catch (error) { if (!this.failed || isRuntimeDisposalFailure(error)) throw error; }
+        try {
+          // Native close can reparent a shell that left the CLI's process group.
+          try { this.child?.observeDescendants(); }
+          finally { await this.raw?.dispose(); }
+        } catch (error) { if (!this.failed || isRuntimeDisposalFailure(error)) throw error; }
         finally { await this.child?.dispose(); }
         await this.input.scratch.release();
         this.raw = undefined;
