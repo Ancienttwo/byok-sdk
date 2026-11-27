@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Synthetic Codex 0.169.0 stdio only. No provider, credentials, MCP or command execution.
+// Synthetic Codex stdio only. No provider, credentials, MCP or command execution.
 import readline from 'node:readline';
 import { appendFileSync } from 'node:fs';
 const args = process.argv.slice(2);
-if (args.includes('--version')) { console.log('codex-cli 0.169.0'); process.exit(0); }
+if (args.includes('--version')) { console.log('codex-cli ' + (process.env.FAKE_NATIVE_VERSION ?? '0.169.0')); process.exit(0); }
 if (args[0] === 'login') { console.log('Not logged in'); process.exit(1); }
 if (args.includes('--help')) { console.log('app-server --listen stdio://'); process.exit(0); }
 if (process.env.FAKE_NATIVE_ARGV) appendFileSync(process.env.FAKE_NATIVE_ARGV, `${JSON.stringify(args)}\n`);
@@ -22,13 +22,14 @@ function run() {
     { id: 'color', header: 'Color', question: 'Pick a color', isOther: false, isSecret: false, options: [{ label: 'Blue', description: 'Blue option' }, { label: 'Red', description: 'Red option' }] },
     { id: 'note', header: 'Note', question: 'Any details?', isOther: true, isSecret: false, options: null },
   ] };
-  // Only `approval` sends a native permission request; the SDK must refuse it.
+  // Default mode only sends native questions with the opt-in flag. Approval is independent.
+  if (scenario !== 'approval' && !args.includes('features.default_mode_request_user_input=true')) { complete(); return; }
   if (scenario === 'approval') request('approval-'+sequence, 'item/commandExecution/requestApproval', approval);
   else if (scenario === 'numeric-string') { request(7, 'item/tool/requestUserInput', question); request('7', 'item/tool/requestUserInput', { ...question, itemId: 'item-2' }); }
   else if (scenario === 'unknown') request('unknown', 'item/tool/call', base);
   else if (scenario === 'malformed') request('malformed', 'item/tool/requestUserInput', { ...question, threadId: 'other-thread' });
   else request('question-'+sequence, 'item/tool/requestUserInput', question);
-  if (scenario === 'cancel') setTimeout(() => { const id = [...pending.values()][0]; pending.clear(); notify('serverRequest/resolved', { threadId: session, requestId: id }); complete(); }, 10);
+  if (scenario === 'cancel') setTimeout(() => { const id = [...pending.values()][0]; pending.clear(); notify('serverRequest/resolved', { threadId: session, requestId: id }); }, 10);
   if (scenario === 'exit') setTimeout(() => process.exit(1), 10);
 }
 readline.createInterface({ input: process.stdin }).on('line', line => {

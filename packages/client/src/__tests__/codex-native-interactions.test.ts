@@ -12,11 +12,11 @@ import { startPreparedOperation } from './fixtures/prepared-operation';
 const CODEX_TARGET = { lane: 'harness', harnessId: 'codex', selection: { mode: 'device-default' } } as const;
 const fixture = fileURLToPath(new URL('./fixtures/fake-codex-native-interactions.mjs', import.meta.url));
 const sessions: Session[] = []; const directories: string[] = [];
-afterEach(async () => { await Promise.all(sessions.splice(0).map(s => s.close())); await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); vi.useRealTimers(); });
+afterEach(async () => { await Promise.all(sessions.splice(0).map(s => s.close())); await Promise.all(directories.splice(0).map(dir => rm(dir, { recursive: true, force: true }))); vi.useRealTimers(); vi.unstubAllEnvs(); });
 async function open(scenario = 'question', host?: Partial<NativeInteractionHostOptions>, resume?: string) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'byok-native-codex-')); directories.push(dir); const receipt = path.join(dir, 'frames.jsonl');
   const requests: { request: NativeInteractionRequest; channel: NativeInteractionChannel }[] = [];
-  const adapter = new CodexAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }), nativeInteractions: { timeoutMs: 1000, onRequest: (request, channel) => { requests.push({ request, channel }); }, ...host } });
+  const adapter = new CodexAdapter({ resolveBin: () => ({ command: fixture, source: 'path' }), runtimeEnvironment: { base: 'allowlist', allow: ['FAKE_NATIVE_VERSION'] }, nativeInteractions: { timeoutMs: 1000, onRequest: (request, channel) => { requests.push({ request, channel }); }, ...host } });
   const session = await startPreparedOperation(adapter, { target: CODEX_TARGET, instruction: 'fixture', ...(resume ? { sessionRef: resume } : {}) }, {
     workspaceDir: dir, env: { PATH: process.env.PATH, FAKE_NATIVE_SCENARIO: scenario, FAKE_NATIVE_RECEIPT: receipt, FAKE_NATIVE_ARGV: path.join(dir, 'argv.jsonl') },
   });
@@ -29,7 +29,8 @@ const answer = (request: NativeInteractionRequest, color = 'Blue') => ({ request
 const QUESTIONS = { questions: [{ id: 'q', header: '', question: 'Proceed?', isOther: true, isSecret: false, options: null }] };
 const approve = (request: NativeInteractionRequest) => ({ requestId: request.requestId, kind: 'question' as const, answers: [{ questionId: 'q', selectedOptionIds: [], text: 'yes' }] });
 describe('Codex native interaction prepared-adapter bridge', () => {
-  it('advertises questions only and keeps every session on approvalPolicy never', async () => {
+  it.each(['0.107.0', '0.169.0'])('starts Codex %s with Default mode questions and approvalPolicy never', async version => {
+    vi.stubEnv('FAKE_NATIVE_VERSION', version);
     expect(new CodexAdapter().descriptor.capabilities.nativeInteractions).toBeUndefined();
     const f = await open();
     expect(f.adapter.descriptor.capabilities).toMatchObject({ approvalInteractive: false, nativeInteractions: { approvalDecisions: [], structuredQuestions: true } });
@@ -68,7 +69,9 @@ describe('Codex native interaction prepared-adapter bridge', () => {
     expect((await f.frames()).filter(frame => 'result' in frame && frame.id !== undefined && (frame.id === 7 || frame.id === '7'))).toEqual([{ id: 7, result }, { id: '7', result }]);
   });
   it('provider resolution withdraws pending requests without a fabricated response', async () => {
-    const f = await open('cancel'); const r = await first(f); await finish(f.session);
+    vi.stubEnv('FAKE_NATIVE_VERSION', '0.107.0');
+    const f = await open('cancel'); const r = await first(f);
+    await vi.waitFor(() => expect(r.channel.pending()).toHaveLength(0));
     await expect(r.channel.respond(answer(r.request))).rejects.toMatchObject({ code: 'request_settled' });
     expect((await f.frames()).some(frame => frame.id === 'question-1')).toBe(false);
   });
