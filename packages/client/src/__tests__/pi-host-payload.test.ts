@@ -66,7 +66,7 @@ describe('copyPiRuntimeAssets', () => {
     expect(written.filter(entry => entry.isFile()).map(entry => path.relative(outDir, path.join(entry.parentPath, entry.name)).split(path.sep).join('/')).sort())
       .toEqual(files);
     const pinned = JSON.parse(await fs.readFile(path.join(outDir, 'package.json'), 'utf8'));
-    expect([pinned.name, pinned.version]).toEqual([sdk.PI_PACKAGE_NAME, '1.6.0']);
+    expect([pinned.name, pinned.version]).toEqual([sdk.PI_PACKAGE_NAME, '1.6.1']);
   });
 
   it('pins the published 0.88.1 bootstrap paths and both runner argv shapes', { timeout: 60_000 }, async () => {
@@ -766,8 +766,8 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
       expect(report.defaultDetect).toEqual({ kind: 'probe-failed' });
       // The default provider's models.json apiKey is pi's login (#345).
       expect(report.detect).toEqual({
-        kind: 'available', version: '1.6.0', authPresent: true,
-        versionVerdict: { state: 'allow', qualifiedVersion: '1.6.0' },
+        kind: 'available', version: '1.6.1', authPresent: true,
+        versionVerdict: { state: 'allow', qualifiedVersion: '1.6.1' },
       });
       expect(report.pathPreserved).toBe(true);
       if (!background) {
@@ -845,7 +845,7 @@ describe('official Pi in a host payload (sdkHelperHost + copyPiRuntimeAssets)', 
         expect(existsSync(marker)).toBe(false);
       }
       // The user's extension loaded against the Pi runtime in the bundle.
-      expect(JSON.parse(await fs.readFile(extensionMarker, 'utf8'))).toEqual({ version: '1.6.0', schema: 'object', api: 'function' });
+      expect(JSON.parse(await fs.readFile(extensionMarker, 'utf8'))).toEqual({ version: '1.6.1', schema: 'object', api: 'function' });
     } finally {
       provider.closeAllConnections();
       await new Promise<void>(resolve => provider.close(() => resolve()));

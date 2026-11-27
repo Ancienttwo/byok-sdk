@@ -1410,7 +1410,7 @@ function piPromptDisposition(response: PiRpcMessage): 'started' | 'queued' | 'ha
  * `prompt` response to the first `agent_settled` read after it; frames outside
  * that window belong to another run and are not the task's.
  *
- * The window depends on the implementation order in Pi 1.6.0.
+ * The window depends on the pinned Pi implementation order.
  * `pi-rpc-bootstrap.test.ts` verifies it against the installed Pi.
  * - `AgentSession.isStreaming` reads `_isAgentRunActive`. While active,
  *   `prompt()` queues into the run or refuses it. During settlement, `prompt()`

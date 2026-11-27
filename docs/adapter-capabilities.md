@@ -47,7 +47,7 @@ checks the running model's image support before delivery.
 <!-- generated:capability-matrix:start -->
 | Capability | Wire field | agy | Claude | Codex | dsh | Grok | OpenCode | Pi | Pi (`durableLane`) |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Qualified version (PR CI) | — | `1.5.16` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.0` | `1.6.0` |
+| Qualified version (PR CI) | — | `1.5.16` | `2.1.326` | `0.169.0` | `0.2.2-rc.1` | `1.0.77` | `2.3.0` | `1.6.1` | `1.6.1` |
 | Resume a known native session | `resume` | yes | yes | yes | yes | yes | yes | yes | no |
 | Redirect the active turn | `steer` | yes | no | yes | yes | no | no | yes | no |
 | Image input declared by descriptor | `images` | no | no | no | no | no | no | yes | no |
@@ -75,7 +75,7 @@ adapter's support for task-scoped toolsets.
 | Runtime | Ordinary search qualification |
 | --- | --- |
 | dsh | `0.2.2-rc.1` on macOS arm64, SDK-built, `sandbox: 'danger-full-access'`, `BYOK_DSH_BIN` executable source, Node distribution helper and SDK authorization `all` |
-| Pi | `1.6.0` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
+| Pi | `1.6.1` on macOS arm64, SDK-built, `agentUserContext: 'inherit'`, default SDK launcher and bundled Pi entry, Node distribution helper and SDK authorization `auto` or `all` |
 | Claude, Codex, Grok, agy, OpenCode 1.x and 2.x | Closed |
 
 The [runtime evidence](researches/2026-11-19-mcp-search-runtime-qualification.md)
@@ -862,7 +862,7 @@ file does not disable the normal resource loader or all ambient context sources.
 Credential custody and environment filtering also do not establish prompt
 isolation: the allowlisted environment retains home/config discovery paths.
 
-Pi 1.6.0 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
+Pi 1.6.1 reads its agent directory, `$PI_CODING_AGENT_DIR` or else
 `~/.pi/agent`. From it, Pi loads a context file (`AGENTS.override.md`,
 `AGENTS.md` or `CLAUDE.md`), `SYSTEM.md`, `APPEND_SYSTEM.md`, extensions,
 prompts, themes and skills. It also loads skills from `~/.agents/skills`. The
@@ -881,7 +881,7 @@ same rule as Claude. Under `excluded` the settings are not project-trusted
 `.pi/SYSTEM.md` does not load either.
 
 On the ordinary RPC lane Pi declares all five user-context bits for
-`excluded`. The runtime contract suite checks three at Pi 1.6.0 with markers
+`excluded`. The runtime contract suite checks three at Pi 1.6.1 with markers
 that appear when inherited and are absent under `excluded`:
 
 - `userInstructions`: `AGENTS.md`, `SYSTEM.md` and `APPEND_SYSTEM.md` in the
@@ -891,7 +891,7 @@ that appear when inherited and are absent under `excluded`:
 - `userHookContext`: a user extension in `<agentDir>/extensions/` that adds a
   `before_agent_start` message.
 
-`userOutputStyle` and `userMemory` read `yes (no source)`: Pi 1.6.0 has a fixed
+`userOutputStyle` and `userMemory` read `yes (no source)`: Pi 1.6.1 has a fixed
 system-prompt preamble with no style setting (themes only color the UI and the
 HTML export), and no native memory. The same cases show that Host-authorized
 `agentSkillPaths` and `agentExtensionPaths` still reach the model under
@@ -1028,7 +1028,7 @@ What the upstream runtimes offer that the SDK does not use:
 - Grok: `grok` 1.0.62 has no persistence flag, and the `session/new` `_meta`
   keys of its agent-mode guide have none. From the 1.0.62 guide and local
   folders; not probed with an SDK session or on 1.0.52.
-- Pi: Pi 1.6.0 has `SessionManager.inMemory` and the CLI flag `--no-session`
+- Pi: Pi 1.6.1 has `SessionManager.inMemory` and the CLI flag `--no-session`
   ("Don't save session (ephemeral)"). The SDK
   [host](../packages/client/src/bin/pi-session-runtime.ts) opens a saved session
   and accepts no such flag.

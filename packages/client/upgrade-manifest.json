@@ -7,13 +7,38 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "777d9649287a5d436026c0a9668cbe76c2004aa2abf92007ed866c9bd59ea901"
+    "snapshotSha256": "36c9ee9d74c6d5a9f0ae01d7c0bb029c89cb3ca7cef4a0440c949f4142ca8d0a"
   },
   "configFields": {
     "status": "tracked",
     "source": "packages/client/daemon-config.schema.json",
     "owner": "#1094"
   },
-  "entries": [],
-  "changes": []
+  "entries": [
+    {
+      "id": "pi-161-closure",
+      "impact": "breaking",
+      "acceptance": "accept",
+      "summary": "Re-prepare Pi inputs for the 1.6.1 closure and replace removed model IDs in the pinned keys catalog. Pi-durable 1.6.0 SQLite replicas open in place.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#pi-161-closure",
+      "items": [
+        "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+        "store:pi-durable"
+      ]
+    }
+  ],
+  "changes": [
+    {
+      "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
+      "change": "changed",
+      "entry": "pi-161-closure"
+    },
+    {
+      "item": "store:pi-durable",
+      "change": "changed",
+      "before": "@earendil-works/pi-durable@1.6.0",
+      "after": "@earendil-works/pi-durable@1.6.1",
+      "entry": "pi-161-closure"
+    }
+  ]
 }
