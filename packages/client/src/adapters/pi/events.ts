@@ -5,26 +5,25 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
 import type { PiRpcMessage } from './rpc-client.js';
 import { servedModelName } from '../served-model.js';
-import { objectRecord } from '../shared-rules.js';
+import { mcpCallToolResultOutput, objectRecord } from '../shared-rules.js';
 
 function projectPiMcpToolResult(
   msgResult: unknown,
   msgIsError: boolean,
-): { output: unknown; isError: boolean } {
+): { output: Record<string, unknown>; isError: boolean } {
   const result = objectRecord(msgResult);
   const details = objectRecord(result?.details);
-  const isError = msgIsError || result?.isError === true || details?.isError === true;
-  if (result === undefined) return { output: msgResult, isError };
-  const content = Array.isArray(details?.rawContent) ? details.rawContent : result.content;
-  const rawStructured = result.structuredContent !== undefined
+  let rawContent: unknown[] | undefined;
+  if (Array.isArray(details?.rawContent)) rawContent = details.rawContent;
+  else if (Array.isArray(result?.content)) rawContent = result.content;
+  const rawStructured = result?.structuredContent !== undefined
     ? result.structuredContent
     : details?.structuredContent;
   const structuredContent = rawStructured === null ? undefined : rawStructured;
+  const hasPayload = rawContent !== undefined || structuredContent !== undefined;
+  const isError = msgIsError || result?.isError === true || details?.isError === true || !hasPayload;
   return {
-    output: {
-      ...(content === undefined ? {} : { content }),
-      ...(structuredContent === undefined ? {} : { structuredContent }),
-    },
+    output: mcpCallToolResultOutput(rawContent, structuredContent),
     isError,
   };
 }

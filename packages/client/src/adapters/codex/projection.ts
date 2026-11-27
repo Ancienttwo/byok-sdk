@@ -1,4 +1,4 @@
-import { BASE_CONTENT_TYPES as contentTypes, objectRecord as record, projectedServiceTier } from '../shared-rules.js';
+import { BASE_CONTENT_TYPES as contentTypes, mcpCallToolResultOutput, objectRecord as record, projectedServiceTier } from '../shared-rules.js';
 import path from 'node:path';
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { RuntimeExecutionFailure } from '../../runtime-failure.js';
@@ -196,16 +196,24 @@ export class CodexProjection {
       const events: AgentEvent[] = [];
       if (status === 'interrupted') {
         for (const active of state.active.values())
-          events.push({
-            type: 'tool_result',
-            ...active,
-            ...(active.mcp === undefined ? {} : { isError: true }),
-            output: {
-              status: 'interrupted',
-              reason:
-                'closed after turn interruption; runtime did not report item completion',
-            },
-          });
+          events.push(
+            active.mcp !== undefined || active.tool === 'mcp_tool_call'
+              ? {
+                  type: 'tool_result',
+                  ...active,
+                  isError: true,
+                  output: mcpCallToolResultOutput(undefined),
+                }
+              : {
+                  type: 'tool_result',
+                  ...active,
+                  output: {
+                    status: 'interrupted',
+                    reason:
+                      'closed after turn interruption; runtime did not report item completion',
+                  },
+                },
+          );
       }
       state.active.clear();
       if (state.lastUsage) events.push(state.lastUsage);
@@ -287,27 +295,21 @@ export class CodexProjection {
     state.active.delete(activeKey);
     if (item.type === 'mcpToolCall') {
       const result = record(item.result);
+      const content = Array.isArray(result?.content) ? result.content : undefined;
+      const structuredContent =
+        result?.structuredContent !== undefined && result.structuredContent !== null
+          ? result.structuredContent
+          : undefined;
+      const hasPayload = content !== undefined || structuredContent !== undefined;
       const isError = item.status !== 'completed'
         || (item.error !== undefined && item.error !== null)
-        || result?.isError === true;
-      let output: unknown;
-      if (result !== undefined && (result.content !== undefined || result.structuredContent !== undefined)) {
-        output = {
-          ...(result.content === undefined ? {} : { content: result.content }),
-          ...(result.structuredContent === undefined || result.structuredContent === null
-            ? {}
-            : { structuredContent: result.structuredContent }),
-        };
-      } else if (item.result !== undefined && item.result !== null) {
-        output = item.result;
-      } else if (item.error !== undefined && item.error !== null) {
-        output = { error: item.error };
-      }
+        || result?.isError === true
+        || !hasPayload;
       return [{
         type: 'tool_result',
         tool,
         toolCallId,
-        ...(output === undefined ? {} : { output }),
+        output: mcpCallToolResultOutput(content, structuredContent),
         isError,
         ...identity,
       }];

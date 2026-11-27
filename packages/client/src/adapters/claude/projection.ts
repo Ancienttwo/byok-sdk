@@ -1,4 +1,4 @@
-import { BASE_CONTENT_TYPES, objectRecord as object, projectProviderContext, projectedServiceTier } from '../shared-rules.js';
+import { BASE_CONTENT_TYPES, mcpCallToolResultOutput, objectRecord as object, projectProviderContext, projectedServiceTier } from '../shared-rules.js';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
@@ -272,10 +272,10 @@ function mapAssistant(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation)
  * as `unknown` regardless, so a future array shape still round-trips
  * correctly without a mapping change.
  */
-function normalizeClaudeMcpContent(blockContent: unknown): unknown[] {
+function normalizeClaudeMcpContent(blockContent: unknown): unknown[] | undefined {
   if (Array.isArray(blockContent)) return blockContent;
   if (typeof blockContent === 'string') return [{ type: 'text', text: blockContent }];
-  return [];
+  return undefined;
 }
 
 function projectClaudeMcpToolResult(
@@ -284,20 +284,19 @@ function projectClaudeMcpToolResult(
   blockIsError: boolean | undefined,
 ): { output: Record<string, unknown>; isError: boolean | undefined } {
   const result = object(toolUseResult);
-  if (result !== undefined && (Array.isArray(result.content) || result.structuredContent !== undefined)) {
-    const content = Array.isArray(result.content) ? result.content : normalizeClaudeMcpContent(blockContent);
-    const structuredContent = result.structuredContent === null ? undefined : result.structuredContent;
-    const isError = blockIsError === true || result.isError === true ? true : blockIsError;
-    return {
-      output: {
-        content,
-        ...(structuredContent === undefined ? {} : { structuredContent }),
-      },
-      isError,
-    };
-  }
-  const content = Array.isArray(toolUseResult) ? toolUseResult : normalizeClaudeMcpContent(blockContent);
-  return { output: { content }, isError: blockIsError };
+  let content: unknown[] | undefined;
+  if (Array.isArray(result?.content)) content = result.content;
+  else if (Array.isArray(toolUseResult)) content = toolUseResult;
+  else content = normalizeClaudeMcpContent(blockContent);
+  const structuredContent = result?.structuredContent !== undefined && result.structuredContent !== null
+    ? result.structuredContent
+    : undefined;
+  const hasPayload = content !== undefined || structuredContent !== undefined;
+  const isError = blockIsError === true || result?.isError === true || !hasPayload ? true : blockIsError;
+  return {
+    output: mcpCallToolResultOutput(content, structuredContent),
+    isError,
+  };
 }
 
 function mapUser(msg: ClaudeStreamMessage, correlation: ToolUseCorrelation, options: MapClaudeMessageOptions): MapClaudeMessageResult {

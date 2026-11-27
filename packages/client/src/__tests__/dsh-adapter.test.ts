@@ -97,7 +97,7 @@ describe('DshAdapter construction and descriptor', () => {
 
   it('declares the dsh descriptor', () => {
     const descriptor = new DshAdapter({ resolveKey: async () => 'sdk-test-dsh-resolver-key', home: '/tmp/byok-dsh-x', model: MODEL }).descriptor;
-    expect(descriptor).toMatchObject({ id: 'dsh', selectionModes: ['byok'], byokProviderId: 'openai', requiresMcpToolsetToolObservation: true, platforms: ['darwin', 'linux'], progressMessageBoundary: 'event' });
+    expect(descriptor).toMatchObject({ id: 'dsh', selectionModes: ['byok'], byokProviderId: 'openai', platforms: ['darwin', 'linux'], progressMessageBoundary: 'event' });
     expect(descriptor.capabilities).toEqual(DSH_RUNTIME_CAPABILITIES);
     expect(descriptor.versionPolicy).toEqual({ qualifiedVersion: QUALIFIED_DSH_VERSION, unqualified: 'warn' });
   });

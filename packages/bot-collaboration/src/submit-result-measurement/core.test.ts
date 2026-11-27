@@ -58,8 +58,8 @@ it('reads the helper body from canonical MCP output and ignores a spilled previe
   expect(findHelperBody('plain text')).toBeUndefined();
   const spilled: ObservedEvent[] = [{ at, event: { type: 'tool_result', tool: 'submit_result', toolCallId: 's', output: staged('r3'), spill: { totalBytes: 1 } } }];
   expect(extractSubmissions(spilled, confirmed, null)).toEqual([expect.objectContaining({ validation: 'unknown' })]);
-  // A canonical Codex MCP error call: the result carries `mcp` and `isError: true`; no tool_use is required.
-  const codex: ObservedEvent[] = [{ at, event: { type: 'tool_result', tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' }, toolCallId: 'c', isError: true, output: { error: { message: 'refused' } } } }];
+  // A canonical Codex MCP error call: the result carries `mcp`, `isError: true`, and an empty `content` array; no tool_use is required.
+  const codex: ObservedEvent[] = [{ at, event: { type: 'tool_result', tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' }, toolCallId: 'c', isError: true, output: { content: [] } } }];
   const codexPredicate: CallPredicate = { confirmed: true, label: { tool: 'mcp_tool_call', mcp: { server: 'byokagentresult', tool: 'submit_result' } }, source: 'test' };
   expect(extractSubmissions(codex, codexPredicate, null)).toEqual([expect.objectContaining({ validation: 'error', label: codexPredicate.label })]);
   expect(extractSubmissions(codex, confirmed, null)).toEqual([]);

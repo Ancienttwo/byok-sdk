@@ -78,7 +78,7 @@ describe('required Codex native projection', () => {
     ]);
     expect(output).toMatchObject([
       { type: 'tool_use', toolCallId: 'tool-call', mcp: { server: 'host', tool: 'lookup' }, input: expected },
-      { type: 'tool_result', toolCallId: 'tool-call', mcp: { server: 'host', tool: 'lookup' }, isError: false, output: { structuredContent: expected } },
+      { type: 'tool_result', toolCallId: 'tool-call', mcp: { server: 'host', tool: 'lookup' }, isError: false, output: { content: [], structuredContent: expected } },
     ]);
   });
 

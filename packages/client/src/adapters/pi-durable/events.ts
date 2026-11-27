@@ -2,6 +2,7 @@ import type { AgentEvent } from '@byok-sdk/protocol';
 import type { ConversationView, EntryRecord, LiveState, ToolSlot } from '@earendil-works/pi-durable';
 import type { McpEventIdentities } from '../../mcp/event-identity.js';
 import { servedModelName } from '../served-model.js';
+import { mcpCallToolResultOutput } from '../shared-rules.js';
 
 /** What the durable lane reports from one change of the conversation view. */
 export type DurableEvent =
@@ -126,16 +127,16 @@ export function withMcpIdentity(event: AgentEvent, identities: McpEventIdentitie
   if (event.type === 'tool_use') return { ...event, mcp };
   const message = object(event.output);
   const details = object(message.details);
-  const content = Array.isArray(details.rawContent) ? details.rawContent : message.content;
-  const structuredContent = details.structuredContent === null ? undefined : details.structuredContent;
-  const isError = event.isError === true || details.isError === true;
-  const output = content === undefined && structuredContent === undefined
-    ? event.output
-    : {
-      ...(content === undefined ? {} : { content }),
-      ...(structuredContent === undefined ? {} : { structuredContent }),
-    };
-  return { ...event, mcp, output, isError };
+  let rawContent: unknown[] | undefined;
+  if (Array.isArray(details.rawContent)) rawContent = details.rawContent;
+  else if (Array.isArray(message.content)) rawContent = message.content;
+  const rawStructured = message.structuredContent !== undefined
+    ? message.structuredContent
+    : details.structuredContent;
+  const structuredContent = rawStructured === null ? undefined : rawStructured;
+  const hasPayload = rawContent !== undefined || structuredContent !== undefined;
+  const isError = event.isError === true || message.isError === true || details.isError === true || !hasPayload;
+  return { ...event, mcp, output: mcpCallToolResultOutput(rawContent, structuredContent), isError };
 }
 /** Run boundaries never complete a BYOK execution; the engine decides that after idle. */
 export function projectDurableEvent(event: DurableEvent): AgentEvent[] {

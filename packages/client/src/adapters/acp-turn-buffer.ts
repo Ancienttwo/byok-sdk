@@ -1,10 +1,26 @@
 import type { AgentEvent } from '@byok-sdk/protocol';
 import { BufferedToolUse } from './buffered-tool-use.js';
-import { accumulateUsage, normalizeOarToolContent, objectRecord as record, projectProviderContext } from './shared-rules.js';
+import { accumulateUsage, mcpCallToolResultOutput, objectRecord as record, projectProviderContext } from './shared-rules.js';
 
 type Usage = Extract<AgentEvent, { type: 'usage' }>;
 type Emit = (event: AgentEvent) => void;
 type McpIdentity = { server: string; tool: string };
+
+/** Convert OAR's normalized `ToolOutputPart[]` back to MCP `CallToolResult.content` items. */
+function normalizeOarToolContent(content: unknown): unknown[] {
+  if (!Array.isArray(content)) return [];
+  return content.map((item) => {
+    const part = record(item);
+    if (part === undefined) return item;
+    if (part.type === 'image' && typeof part.data === 'string' && typeof part.mediaType === 'string') {
+      return { type: 'image', data: part.data, mimeType: part.mediaType };
+    }
+    if (part.type === 'other' && Object.hasOwn(part, 'value')) {
+      return part.value;
+    }
+    return item;
+  });
+}
 
 function unwrapAcpContentItems(items: readonly unknown[]): unknown[] {
   return items.map((item) => {
@@ -38,14 +54,9 @@ function projectAcpMcpToolResult(
     content = normalizeOarToolContent(event.content);
   }
 
-  const structuredContent = rawIsCallResult && rawOutput.structuredContent !== null
-    ? rawOutput.structuredContent
-    : undefined;
+  const structuredContent = rawIsCallResult ? rawOutput.structuredContent : undefined;
   return {
-    output: {
-      content,
-      ...(structuredContent === undefined ? {} : { structuredContent }),
-    },
+    output: mcpCallToolResultOutput(content, structuredContent),
     isError,
   };
 }
@@ -141,9 +152,17 @@ export class AcpTurnBuffer {
     this.flushText(emit);
     for (const [toolCallId, tracked] of this.tools) {
       this.buffered.finish(toolCallId, emit);
+      if (tracked.mcp !== undefined) {
+        emit({
+          type: 'tool_result', tool: tracked.tool, toolCallId, ...this.attribution,
+          mcp: tracked.mcp,
+          isError: true,
+          output: mcpCallToolResultOutput(undefined),
+        });
+        continue;
+      }
       emit({
         type: 'tool_result', tool: tracked.tool, toolCallId, ...this.attribution,
-        ...(tracked.mcp === undefined ? {} : { mcp: tracked.mcp, isError: true }),
         output: { status: interrupted ? 'interrupted' : 'ended', reason: 'closed at turn end; runtime did not report the call ended' },
       });
     }

@@ -14,7 +14,7 @@ import { createPiMcpTools } from '../adapters/pi/mcp-tools';
 import { projectDurableEvent, withMcpIdentity } from '../adapters/pi-durable/events';
 import { CodexProjection } from '../adapters/codex/projection';
 import { AgyProjection, agyMcpEventIdentities } from '../adapters/antigravity/projection';
-import { DshProjection, dshMcpEventIdentities } from '../adapters/dsh/projection';
+import { DshProjection } from '../adapters/dsh/projection';
 import { GrokProjection } from '../adapters/grok/projection';
 import { OpenCodeProjection } from '../adapters/opencode/projection';
 import { createSessionKernel } from '../../vendor/oar/223703d/shared/session-kernel';
@@ -147,10 +147,11 @@ it('projects canonical Claude MCP observations with structuredContent while leav
     { type: 'tool_use', id: 'c1', name, input: { symbol: 'NVDA' } },
     { type: 'tool_use', id: 'c2', name, input: { symbol: 'AMD' } },
     { type: 'tool_use', id: 'c3', name, input: { symbol: 'INTC' } },
+    { type: 'tool_use', id: 'c4', name, input: { symbol: 'ERR' } },
     { type: 'tool_use', id: 'b1', name: 'Bash', input: { command: 'echo ok' } },
   ] } }, correlation, { workspaceDir: '/tmp' }).events;
   expect(use[0]).toEqual({ type: 'tool_use', mcp, tool: name, input: { symbol: 'NVDA' }, toolCallId: 'c1' });
-  expect(use[3]).toEqual({ type: 'tool_use', tool: 'Bash', input: { command: 'echo ok' }, toolCallId: 'b1' });
+  expect(use[4]).toEqual({ type: 'tool_use', tool: 'Bash', input: { command: 'echo ok' }, toolCallId: 'b1' });
 
   // Single tool_result with structuredContent in tool_use_result.
   const structured = mapClaudeMessageToAgentEvents({
@@ -173,6 +174,17 @@ it('projects canonical Claude MCP observations with structuredContent while leav
   expect(failed).toEqual({
     type: 'tool_result', mcp, tool: name, toolCallId: 'c2', isError: true,
     output: { content: [{ type: 'text', text: 'not found' }] },
+  });
+
+  // Failure without any MCP payload emits canonical empty content array with isError: true.
+  const emptyFailure = mapClaudeMessageToAgentEvents({
+    type: 'user',
+    tool_use_result: { isError: true },
+    message: { content: [{ type: 'tool_result', tool_use_id: 'c4', is_error: false }] },
+  }, correlation, { workspaceDir: '/tmp' }).events[0];
+  expect(emptyFailure).toEqual({
+    type: 'tool_result', mcp, tool: name, toolCallId: 'c4', isError: true,
+    output: { content: [] },
   });
 
   // Multi-block user message ignores msg.tool_use_result, normalizes MCP string content, and leaves non-MCP Bash untouched.
@@ -265,6 +277,30 @@ it('projects canonical Pi and durable Pi MCP observations without leaking render
     isError: true, output: { content: [{ type: 'text', text: 'denied' }] },
   });
 
+  // Missing or unrecognized Pi / durable Pi MCP results emit { content: [] } with isError: true.
+  for (const badResult of [undefined, 'plain error', {}, { content: 'not-array' }]) {
+    const missingPi = mapPiMessageToAgentEvent({
+      type: 'tool_execution_end', toolName: name, toolCallId: 'pi-bad', result: badResult, isError: false,
+    }, identities);
+    expect(missingPi).toEqual({
+      type: 'tool_result', mcp, tool: name, toolCallId: 'pi-bad', isError: true, output: { content: [] },
+    });
+  }
+  const missingDurableEntry = withMcpIdentity(
+    projectDurableEvent({ type: 'tool_end', callId: 'dur-missing', tool: name })[0]!,
+    identities,
+  );
+  expect(missingDurableEntry).toEqual({
+    type: 'tool_result', mcp, tool: name, toolCallId: 'dur-missing', isError: true, output: { content: [] },
+  });
+  const malformedDurable = withMcpIdentity(
+    projectDurableEvent({ type: 'tool_end', callId: 'dur-bad', tool: name, entry: { id: 8, kind: 'pi.tool-result', model: [{ role: 'toolResult', isError: true }], data: {} } as never })[0]!,
+    identities,
+  );
+  expect(malformedDurable).toEqual({
+    type: 'tool_result', mcp, tool: name, toolCallId: 'dur-bad', isError: true, output: { content: [] },
+  });
+
   // Non-MCP tools keep their existing wrapper in both Pi and durable Pi.
   expect(mapPiMessageToAgentEvent({ type: 'tool_execution_end', toolName: 'bash', toolCallId: 'b1', result: { stdout: 'hi' }, isError: false }, identities))
     .toEqual({ type: 'tool_result', tool: 'bash', toolCallId: 'b1', isError: false, output: { result: { stdout: 'hi' } } });
@@ -293,6 +329,8 @@ it('projects canonical Codex MCP observations while keeping non-MCP Codex branch
   feed('item/completed', { item: { id: 'm2', type: 'mcpToolCall', server: 'market', tool: 'quote', status: 'failed', result: null, error: { message: 'refused' } } });
   feed('item/started', { item: { id: 'm3', type: 'mcpToolCall', server: 'market', tool: 'quote', arguments: { symbol: 'ERR' } } });
   feed('item/completed', { item: { id: 'm3', type: 'mcpToolCall', server: 'market', tool: 'quote', status: 'completed', result: { content: [{ type: 'text', text: 'bad' }], isError: true } } });
+  feed('item/started', { item: { id: 'm3b', type: 'mcpToolCall', server: 'market', tool: 'quote', arguments: { symbol: 'RED' } } });
+  feed('item/completed', { item: { id: 'm3b', type: 'mcpToolCall', server: 'market', tool: 'quote', status: 'completed', result: '[redacted]' } });
   feed('item/started', { item: { id: 'm4', type: 'mcpToolCall', server: 'market', tool: 'quote', arguments: { symbol: 'INT' } } });
   feed('item/started', { item: { id: 'c1', type: 'commandExecution', command: 'sleep 9' } });
   feed('turn/completed', { turn: { status: 'interrupted' } });
@@ -301,12 +339,14 @@ it('projects canonical Codex MCP observations while keeping non-MCP Codex branch
     { type: 'tool_use', tool: 'mcp_tool_call', toolCallId: 'm1', mcp: { server: 'market', tool: 'quote' }, input: { symbol: 'NVDA' } },
     { type: 'tool_result', tool: 'mcp_tool_call', toolCallId: 'm1', mcp: { server: 'market', tool: 'quote' }, isError: false, output: { content: [{ type: 'text', text: '142.50' }] } },
     { type: 'tool_use', tool: 'mcp_tool_call', toolCallId: 'm2', mcp: { server: 'market', tool: 'quote' }, input: { symbol: 'BAD' } },
-    { type: 'tool_result', tool: 'mcp_tool_call', toolCallId: 'm2', mcp: { server: 'market', tool: 'quote' }, isError: true, output: { error: { message: 'refused' } } },
+    { type: 'tool_result', tool: 'mcp_tool_call', toolCallId: 'm2', mcp: { server: 'market', tool: 'quote' }, isError: true, output: { content: [] } },
     { type: 'tool_use', tool: 'mcp_tool_call', toolCallId: 'm3', mcp: { server: 'market', tool: 'quote' }, input: { symbol: 'ERR' } },
     { type: 'tool_result', tool: 'mcp_tool_call', toolCallId: 'm3', mcp: { server: 'market', tool: 'quote' }, isError: true, output: { content: [{ type: 'text', text: 'bad' }] } },
+    { type: 'tool_use', tool: 'mcp_tool_call', toolCallId: 'm3b', mcp: { server: 'market', tool: 'quote' }, input: { symbol: 'RED' } },
+    { type: 'tool_result', tool: 'mcp_tool_call', toolCallId: 'm3b', mcp: { server: 'market', tool: 'quote' }, isError: true, output: { content: [] } },
     { type: 'tool_use', tool: 'mcp_tool_call', toolCallId: 'm4', mcp: { server: 'market', tool: 'quote' }, input: { symbol: 'INT' } },
     { type: 'tool_use', tool: 'command_execution', toolCallId: 'c1', input: { command: 'sleep 9' } },
-    { type: 'tool_result', tool: 'mcp_tool_call', toolCallId: 'm4', mcp: { server: 'market', tool: 'quote' }, isError: true, output: { status: 'interrupted', reason: 'closed after turn interruption; runtime did not report item completion' } },
+    { type: 'tool_result', tool: 'mcp_tool_call', toolCallId: 'm4', mcp: { server: 'market', tool: 'quote' }, isError: true, output: { content: [] } },
     { type: 'tool_result', tool: 'command_execution', toolCallId: 'c1', output: { status: 'interrupted', reason: 'closed after turn interruption; runtime did not report item completion' } },
     { type: 'turn_end' },
   ]);
@@ -357,22 +397,36 @@ it('projects canonical Antigravity ACP MCP observations without truncation or OA
     events: [{ kind: 'tool_call_ended', callId: 'a2b', content: [{ type: 'image', data: 'BBBB', mediaType: 'image/webp' }, { type: 'other', value: { type: 'resource_link', uri: 'file:///a' } }] }],
   });
 
-  // 4. Non-MCP run_command keeps its CommandLine -> command normalization and { content, exitCode }.
+  // 3b. Failed MCP call with no payload emits canonical { content: [] } with isError: true.
   feed(7, {
+    native: { update: { toolCallId: 'a2c', status: 'in_progress', rawInput: { symbol: 'ERR' } } },
+    events: [{ kind: 'tool_call_started', callId: 'a2c', tool: agyName }],
+  });
+  feed(8, {
+    native: { update: { toolCallId: 'a2c', status: 'failed' } },
+    events: [{ kind: 'tool_call_ended', callId: 'a2c', result: 'failed' }],
+  });
+
+  // 4. Non-MCP run_command keeps its CommandLine -> command normalization and { content, exitCode }.
+  feed(9, {
     native: { update: { toolCallId: 'r1', status: 'in_progress', rawInput: { CommandLine: 'echo hi' } } },
     events: [{ kind: 'tool_call_started', callId: 'r1', tool: 'run_command' }],
   });
-  feed(8, {
+  feed(10, {
     native: { update: { toolCallId: 'r1', status: 'completed' } },
     events: [{ kind: 'tool_call_ended', callId: 'r1', result: 'completed', exitCode: 0, content: [{ type: 'text', text: 'hi' }] }],
   });
 
-  // 5. Unclosed MCP call at turn_ended gets mcp and isError: true.
-  feed(9, {
+  // 5. Unclosed MCP call at turn_ended gets canonical { content: [] } + isError: true; unclosed non-MCP keeps status/reason.
+  feed(11, {
     native: { update: { toolCallId: 'a3', status: 'in_progress', rawInput: { symbol: 'INT' } } },
     events: [{ kind: 'tool_call_started', callId: 'a3', tool: agyName }],
   });
-  feed(10, { events: [{ kind: 'turn_ended', outcome: { kind: 'aborted' } }] });
+  feed(12, {
+    native: { update: { toolCallId: 'r2', status: 'in_progress', rawInput: { CommandLine: 'sleep 9' } } },
+    events: [{ kind: 'tool_call_started', callId: 'r2', tool: 'run_command' }],
+  });
+  feed(13, { events: [{ kind: 'turn_ended', outcome: { kind: 'aborted' } }] });
 
   expect(out).toEqual([
     { type: 'tool_use', tool: agyName, toolCallId: 'a1', mcp, input: { symbol: 'NVDA' } },
@@ -381,79 +435,35 @@ it('projects canonical Antigravity ACP MCP observations without truncation or OA
     { type: 'tool_result', tool: agyName, toolCallId: 'a2', mcp, isError: true, output: { content: [{ type: 'text', text: 'rate limited' }] } },
     { type: 'tool_use', tool: agyName, toolCallId: 'a2b', mcp, input: { symbol: 'INTC' } },
     { type: 'tool_result', tool: agyName, toolCallId: 'a2b', mcp, isError: true, output: { content: [{ type: 'image', data: 'BBBB', mimeType: 'image/webp' }, { type: 'resource_link', uri: 'file:///a' }] } },
+    { type: 'tool_use', tool: agyName, toolCallId: 'a2c', mcp, input: { symbol: 'ERR' } },
+    { type: 'tool_result', tool: agyName, toolCallId: 'a2c', mcp, isError: true, output: { content: [] } },
     { type: 'tool_use', tool: 'run_command', toolCallId: 'r1', input: { CommandLine: 'echo hi', command: 'echo hi' } },
     { type: 'tool_result', tool: 'run_command', toolCallId: 'r1', output: { content: [{ type: 'text', text: 'hi' }], exitCode: 0 } },
     { type: 'tool_use', tool: agyName, toolCallId: 'a3', mcp, input: { symbol: 'INT' } },
-    { type: 'tool_result', tool: agyName, toolCallId: 'a3', mcp, isError: true, output: { status: 'interrupted', reason: 'closed at turn end; runtime did not report the call ended' } },
+    { type: 'tool_use', tool: 'run_command', toolCallId: 'r2', input: { CommandLine: 'sleep 9', command: 'sleep 9' } },
+    { type: 'tool_result', tool: agyName, toolCallId: 'a3', mcp, isError: true, output: { content: [] } },
+    { type: 'tool_result', tool: 'run_command', toolCallId: 'r2', output: { status: 'interrupted', reason: 'closed at turn end; runtime did not report the call ended' } },
   ]);
   for (const event of out) expect(AgentEventSchema.parse(event)).toEqual(event);
 });
 
-it('projects canonical DSH MCP observations, omits >64-char or colliding names, and keeps non-MCP tools unchanged', () => {
-  const server = { toolsetId: 'market', serverName: 'ignored', serverInfo: { name: 'fixture', version: '1' }, protocolVersion: '2025-03-26' };
-  const toolDef = { description: '', inputSchema: { type: 'object' } };
-  const dshIdentities = dshMcpEventIdentities({
-    market__feed: { ...server, tools: [{ ...toolDef, name: 'get__quote' }, { ...toolDef, name: 'x'.repeat(60) }] },
-    a__b: { ...server, tools: [{ ...toolDef, name: 'c' }] },
-    a: { ...server, tools: [{ ...toolDef, name: 'b__c' }] },
-  });
-  expect(dshIdentities.get(name)).toEqual(mcp);
-  expect(dshIdentities.has(`mcp__market__feed__${'x'.repeat(60)}`)).toBe(false);
-  expect(dshIdentities.has('mcp__a__b__c')).toBe(false);
-
-  const projection = new DshProjection('root', dshIdentities);
+it('assigns DSH no MCP identity because its bridge emits model-rendered tool results rather than CallToolResult', () => {
+  const projection = new DshProjection('root');
   const out: AgentEvent[] = [];
-  const feed = (seq: number, body: Record<string, unknown>) =>
-    projection.consume({ seq, sessionId: 'root', agentPath: [], kind: 'frame', body: { byokRoot: true, ...body } }, event => out.push(event), () => {});
-
-  // 1. Canonical native message with structuredContent.
-  feed(1, {
-    native: { data: { arguments: '{"symbol":"NVDA"}' } },
-    events: [{ kind: 'tool_call_started', callId: 'd1', tool: name }],
-  });
-  feed(2, {
-    native: { data: { message: { content: [{ type: 'text', text: '142.50' }], structuredContent: { price: 142.5 }, isError: false } } },
-    events: [{ kind: 'tool_call_ended', callId: 'd1', result: 'completed', content: [{ type: 'text', text: '142.50' }] }],
-  });
-
-  // 2. Redacted native falls back to normalized OAR content + error propagation.
-  feed(3, {
-    native: { data: { arguments: '{"symbol":"ERR"}' } },
-    events: [{ kind: 'tool_call_started', callId: 'd2', tool: name }],
-  });
-  feed(4, {
-    native: '[redacted]',
-    events: [{ kind: 'tool_call_ended', callId: 'd2', result: 'failed', content: [{ type: 'image', data: 'CCCC', mediaType: 'image/png' }] }],
-  });
-
-  // 3. Non-MCP bash keeps existing projection unchanged.
-  feed(5, {
-    native: { data: { arguments: '{"command":"pwd"}' } },
-    events: [{ kind: 'tool_call_started', callId: 'b1', tool: 'bash' }],
-  });
-  feed(6, {
-    native: { data: { message: { content: [{ type: 'text', text: '/tmp' }] } } },
-    events: [{ kind: 'tool_call_ended', callId: 'b1', result: 'completed', content: [{ type: 'text', text: '/tmp' }] }],
-  });
-
-  // 4. Unclosed MCP call at turn_ended gets mcp and isError: true.
-  feed(7, {
-    native: { data: { arguments: '{"symbol":"INT"}' } },
-    events: [{ kind: 'tool_call_started', callId: 'd3', tool: name }],
-  });
-  feed(8, { events: [{ kind: 'turn_ended', outcome: { kind: 'aborted' } }] });
-
-  expect(out).toEqual([
-    { type: 'tool_use', tool: name, toolCallId: 'd1', mcp, input: { symbol: 'NVDA' } },
-    { type: 'tool_result', tool: name, toolCallId: 'd1', mcp, output: { content: [{ type: 'text', text: '142.50' }], structuredContent: { price: 142.5 } } },
-    { type: 'tool_use', tool: name, toolCallId: 'd2', mcp, input: { symbol: 'ERR' } },
-    { type: 'tool_result', tool: name, toolCallId: 'd2', mcp, isError: true, output: { content: [{ type: 'image', data: 'CCCC', mimeType: 'image/png' }] } },
-    { type: 'tool_use', tool: 'bash', toolCallId: 'b1', input: { command: 'pwd' } },
-    { type: 'tool_result', tool: 'bash', toolCallId: 'b1', output: { content: [{ type: 'text', text: '/tmp' }] } },
-    { type: 'tool_use', tool: name, toolCallId: 'd3', mcp, input: { symbol: 'INT' } },
-    { type: 'tool_result', tool: name, toolCallId: 'd3', mcp, isError: true, output: { status: 'interrupted', reason: 'closed at turn end; runtime did not report the call ended' } },
-  ]);
-  for (const event of out) expect(AgentEventSchema.parse(event)).toEqual(event);
+  const tools = [name, 'bash'];
+  for (const [index, tool] of tools.entries()) {
+    const callId = `dsh-${index}`;
+    projection.consume({
+      seq: index * 2 + 1, sessionId: 'root', agentPath: [], kind: 'frame',
+      body: { byokRoot: true, native: { data: { arguments: JSON.stringify({ x: index }) } }, events: [{ kind: 'tool_call_started', callId, tool }] },
+    }, event => out.push(event), () => {});
+    projection.consume({
+      seq: index * 2 + 2, sessionId: 'root', agentPath: [], kind: 'frame',
+      body: { byokRoot: true, native: { data: { message: { content: [{ type: 'text', text: 'ok' }], isError: false } } }, events: [{ kind: 'tool_call_ended', callId, result: 'completed', content: [{ type: 'text', text: 'ok' }] }] },
+    }, event => out.push(event), () => {});
+  }
+  expect(out.map(event => event.type)).toEqual(tools.flatMap(() => ['tool_use', 'tool_result']));
+  for (const event of out) expect(event).not.toHaveProperty('mcp');
 });
 
 it('assigns OpenCode no MCP identity from v1 tool names or v2 sandbox execute calls', () => {
