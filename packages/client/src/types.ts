@@ -1,6 +1,6 @@
 import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 import type { RuntimeEnvironment } from './runtime/environment.js';
-import type { RuntimeAccountUsage, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
+import type { RuntimeAccountUsage, RuntimeAccountUsageOptions, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
 import type { ExecutionScratch } from './daemon/retention/scratch.js';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions.js';
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
@@ -740,7 +740,7 @@ export interface RuntimeAdapter {
   /** Explicit native catalog read. Absent when the adapter does not support it. */
   listModels?(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
   /** Explicit local account quota read. Absent when the adapter does not support it. */
-  accountUsage?(options?: RuntimeReadOptions): Promise<RuntimeAccountUsage>;
+  accountUsage?(options?: RuntimeAccountUsageOptions): Promise<RuntimeAccountUsage>;
   prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
   /**
    * The environment every child process of this runtime's tasks receives

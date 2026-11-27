@@ -236,12 +236,22 @@ readline.createInterface({ input: process.stdin }).on('line', line => {
   await expect(adapter.listModels()).resolves.toMatchObject({ kind: 'ok' });
   expect(argsSeen).toEqual(['--version', 'acp', '--version']);
   expect(resolveKey).toHaveBeenCalledTimes(1);
-  await expect(adapter.accountUsage()).resolves.toEqual({ kind: 'reauth_required', reason: 'not_authenticated' });
+  await expect(adapter.accountUsage({ allowPrintMode: true })).resolves.toEqual({ kind: 'reauth_required', reason: 'not_authenticated' });
   expect(argsSeen).toEqual(['--version', 'acp', '--version', '--version', 'models']);
   expect(resolveKey).toHaveBeenCalledTimes(2);
   expect(new Set(tokens).size).toBe(2);
   for (const url of proxies) await expect(fetch(url)).rejects.toThrow();
   expect(process.env.GEMINI_API_KEY).toBe('ambient-gemini-key');
+});
+
+it.each([undefined, false])('skips all Antigravity usage processes when allowPrintMode is %s', async allowPrintMode => {
+  const resolveKey = vi.fn(async () => 'unused-fixture-key');
+  const spawnFn = vi.fn((): never => { throw new Error('unexpected Antigravity spawn'); });
+  const adapter = new AgyAdapter({ home: path.join(await tempDir(), 'owned'), resolveKey, spawnFn });
+  const options = allowPrintMode === undefined ? undefined : { allowPrintMode };
+  await expect(adapter.accountUsage(options)).resolves.toEqual({ kind: 'unsupported', reason: 'print_mode_disabled' });
+  expect(spawnFn).not.toHaveBeenCalled();
+  expect(resolveKey).not.toHaveBeenCalled();
 });
 
 it.each([false, true])('resolves a fresh agy key per quota command (exhausted=%s)', async exhausted => {
@@ -276,7 +286,7 @@ fetch(process.env.GOOGLE_GEMINI_BASE_URL + '/v1beta/models', { headers: { 'x-goo
     }) as typeof spawn,
   }), provider.origin);
   try {
-    const usage = await adapter.accountUsage();
+    const usage = await adapter.accountUsage({ allowPrintMode: true });
     expect(usage).toMatchObject({ kind: 'available', rateLimited: exhausted });
     // agy names buckets by what remains; the window carries a used ratio, so the label drops "Remaining".
     expect(usage.kind === 'available' && usage.windows.map(window => window.label)).toEqual(['Shared · Weekly Limit', 'Shared · Limit']);

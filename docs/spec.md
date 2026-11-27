@@ -1386,7 +1386,7 @@ root ran ([#1269](https://github.com/Ancienttwo/byok-sdk/issues/1269)).
 The agy adapter runs `agy acp --dangerously-skip-permissions
 --process-per-session --gemini-dir <home>/.gemini --disable-telemetry` in an OS home the SDK owns: `HOME`,
 `USERPROFILE`, `APPDATA`, `LOCALAPPDATA` and `GEMINI_HOME` point into
-`DaemonConfig.runtimes.agy.home`, and `AGY_CLI_DISABLE_AUTO_UPDATE=1` is always
+`DaemonConfig.runtimes.agy.home`, and `AGY_CLI_DISABLE_AUTO_UPDATE=true` is always
 set. It drops every inherited `GEMINI_*`, `GOOGLE_*`, `AGY_*` and
 `ANTIGRAVITY_*` name and the `XDG_*` directory names, because agy reads and
 removes `antigravity/credential-user-scope` in the user config directory.
@@ -1395,7 +1395,9 @@ agy's look for the session bus fails as on a host with no bus. agy passes its wh
 environment to `run_command` and stdio MCP children, so no real key may enter
 it. The embedded Host's `resolveKey` callback supplies the key fresh for each
 authenticated spawn, including resume, an uncached catalog read and each
-command in a quota read. The real key stays in the SDK process. An invalid
+command in a quota read. agy quota reads require `allowPrintMode: true` on
+`AgyAdapter.accountUsage()` or the local `runtimes.usage` request. Omitted or
+false returns `print_mode_disabled` before spawning any process. The real key stays in the SDK process. An invalid
 key or a resolver failure stops the attempt before authentication with a
 non-retryable `auth` failure. Installation detection leaves `authPresent`
 unset.
@@ -1495,7 +1497,7 @@ copy before consulting PATH. AGY and Grok provide vendor upgrade instructions.
 Pi is distributed with the SDK.
 
 Claude Code, Codex and Antigravity are qualified at `2.1.326`, `0.169.0`
-and `1.5.16`, respectively. `check:version-authority` maps SDK adapter pins
+and `1.5.18`, respectively. `check:version-authority` maps SDK adapter pins
 explicitly to entries in the vendored OAR `.github/runtime-versions.json`.
 For each mapped entry marked `accepted` or `minimum`, the SDK qualified
 version must be at least the OAR version. This lets SDK qualification follow
@@ -4337,7 +4339,7 @@ Prepared child environment is rebuilt through an explicit EnvironmentBuilder all
 
 A1'' compile uses only a placeholder key and injected capture-and-throw fetch against the actual baseUrl. The official OpenAI client reads exactly OPENAI_ADMIN_KEY, OPENAI_ORG_ID, OPENAI_PROJECT_ID, OPENAI_WEBHOOK_SECRET, OPENAI_LOG and OPENAI_CUSTOM_HEADERS. The approved purity contract is D independence plus this exact read set, not zero reads; an upgrade changing the set requires a fresh ruling. Poisoning these variables must leave D unchanged. OPENAI_LOG may cause a local request log during compile: the device owner deliberately enabled this debug setting; the accepted side effect remains local, does not change D and is not sent externally. No global env or transport monkey-patch is permitted.
 
-Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.6.1 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.136.0 source at `packages/client/vendor/oar/87c0929/`, from upstream commit `87c0929cf4ce85a0687cf3ac41390e7a5fa04aa5`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
+Client direct Pi dependencies are exactly coding-agent, pi-ai, pi-agent-core, pi-durable and chord at 1.6.1 (exact pins), and retain the existing direct-dependency purity guard. The authoritative direct-dependency set is whatever `collect-official-pi-closure` reports for the pinned release; a mismatch fails the purity guard. pi-durable is experimental upstream: it is pinned exactly, and every version change requires a freshly collected provenance record and a fresh ruling. pi-codemode, pi-mcp, pi-schema, pi-telemetry and pi-tui remain transitive: their installed version is read, not gated. Measured for the local Pi 1.0.3 install: upstream commit `d78dc83d633229d12f8b79631384c4c2717c399f`, closureDigest `1e7176b8968e7a17ec8caf87988fdc2ea4ab7d99d8f6154d7f8dc24f4b2ffdff`, nine official package names in the closure inventory, eleven Bun-resolved official package instances on the collecting host (duplicate peer instances remain exact 1.0.3). Codex uses SDK-owned OAR 0.138.1 source at `packages/client/vendor/oar/223703d/`, from upstream commit `223703d364b8724cdf58691d1770c75eaaa10b9f`. OAR is not an npm dependency. BYOK owns process creation, the filtered environment, deadlines and record budgets. The SDK event projection reads frames with `origin=byok-native`. The raw Codex session retains callable `steer` and has no `withdraw` or derived `deliver` surface. Official pi-tui includes `native/win32/prebuilds/win32-x64/win32-platform.node`: the client installation tree is not native-free. An arbitrary npm installation cannot therefore be treated as a portable SEA/single-file payload. SDK sealed headless entries bundle their JS closure and resource inventory; the Win32 terminal addon is not silently copied or loaded as an external addon by those entries. Platform-specific interactive Pi behavior is outside this headless packaging claim and requires its own packaging proof.
 
 pi-durable 1.0.1 ruling (2026-10-04, approved by Aimpact): admitted at exactly 1.0.1. Its shipped code is byte-identical to 1.0.0 (version-only change), and the closure was freshly attested at closureDigest `c954b59594650ce35affbcefd0c4c00aa9ce0827573b48c3200e5f4eb3ee4628`.
 
@@ -4780,7 +4782,9 @@ With native opt-in the session launches with
 `-c features.default_mode_request_user_input=true`, so Codex 0.107.0 or later
 asks outside plan mode too. Only `item/tool/requestUserInput` is mapped; a command/file approval request
 is refused as an unsupported native interaction and never reaches the Host.
-Structured questions keep native question IDs and answer arrays. User-input
+Structured questions keep native question IDs and answer arrays. The SDK scrubs
+secret answers from the matching native function output before recording and
+projection. User-input
 cancellation rejects that RPC rather than manufacturing an empty answer.
 Permissions-profile requests, dynamic tools and MCP elicitation are not
 implemented and never get an allow fallback.

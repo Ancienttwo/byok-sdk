@@ -21,7 +21,7 @@ import type {
 import { createAbortFallback } from "../../shared/abort-fallback.js";
 import { acceptCodexSteer, codexUserInput, codexQueueRefusal } from "./input-delivery.js";
 import { inputImagesRefusal } from "../../shared/input-images.js";
-import { asRecord, type JsonRecord } from "../../shared/json.js";
+import { asRecord, parseJson, type JsonRecord } from "../../shared/json.js";
 // BYOK change: Return the raw adapter contract without best-effort observer projections.
 // BYOK change: Build the session credential redactor directly; upstream withSessionCredentials imports sealSession.
 import { isProjectedToolInput, redactRuntimeRecord, sessionCredentialRedactor, type CredentialRedactor, type CredentialRedactionTail } from "../../shared/credential-redactor.js";
@@ -45,6 +45,79 @@ import { codexControlRefusal, codexVersion } from "./refusal.js";
  * Native mappings and live evidence: docs/runtimes/codex.md.
  * BYOK change: server requests go to an explicit caller-owned native interaction handler, or are declined/rejected immediately when absent.
  */
+
+// BYOK change: OAR #1205 adapted to the caller-owned native request hook. An
+// item shared by multiple requests keeps every question classification until
+// its pending echoes are read. Secret classification wins on a reused ID.
+const REDACTED = "[redacted]";
+
+interface PendingUserInput {
+  readonly secretById: Map<string, boolean>;
+  hasSecret: boolean;
+  awaitingEchoes: number;
+}
+
+function scrubOutputJson(raw: string, secretById: ReadonlyMap<string, boolean>): string | undefined {
+  const answers = asRecord(asRecord(parseJson(raw))?.answers);
+  if (answers === null) return undefined;
+  const entries: [string, { answers: string[] }][] = [];
+  for (const [id, entry] of Object.entries(answers)) {
+    const secret = secretById.get(id);
+    const values = asRecord(entry)?.answers;
+    // An unrecognized ID could carry a secret under a different key.
+    if (secret === undefined || !Array.isArray(values) || !values.every((value): value is string => typeof value === "string")) return undefined;
+    entries.push([id, { answers: secret ? values.map(() => REDACTED) : values }]);
+  }
+  return JSON.stringify({ answers: Object.fromEntries(entries) });
+}
+
+function scrubOutput(output: unknown, secretById: ReadonlyMap<string, boolean>): string | JsonRecord[] {
+  if (typeof output === "string") return scrubOutputJson(output, secretById) ?? REDACTED;
+  if (!Array.isArray(output) || output.length === 0) return REDACTED;
+  const parts: JsonRecord[] = [];
+  for (const part of output) {
+    const record = asRecord(part);
+    if (record === null || (record.type !== "input_text" && record.type !== "output_text") || typeof record.text !== "string") return REDACTED;
+    const text = scrubOutputJson(record.text, secretById);
+    if (text === undefined) return REDACTED;
+    parts.push({ type: record.type, text });
+  }
+  return parts;
+}
+
+function createCodexSecretAnswers(addCredential: (value: string) => void) {
+  const pending = new Map<string, PendingUserInput>();
+  return {
+    recordAnswer(params: JsonRecord, freeTextAnswers?: ReadonlyMap<string, string>): void {
+      const { itemId, questions } = params;
+      if (typeof itemId !== "string" || itemId === "" || !Array.isArray(questions)) return;
+      const item = pending.get(itemId) ?? { secretById: new Map<string, boolean>(), hasSecret: false, awaitingEchoes: 0 };
+      for (const question of questions) {
+        const native = asRecord(question);
+        if (typeof native?.id !== "string" || typeof native.isSecret !== "boolean") continue;
+        item.secretById.set(native.id, native.isSecret || item.secretById.get(native.id) === true);
+        if (!native.isSecret) continue;
+        item.hasSecret = true;
+        const freeText = freeTextAnswers?.get(native.id);
+        if (freeText !== undefined && freeText !== "") addCredential(freeText);
+      }
+      item.awaitingEchoes += 1;
+      pending.set(itemId, item);
+    },
+    scrubNotification(method: string, params: JsonRecord): JsonRecord {
+      if (method !== "rawResponseItem/completed" || pending.size === 0) return params;
+      const item = asRecord(params.item);
+      if (item?.type !== "function_call_output" || typeof item.call_id !== "string") return params;
+      const request = pending.get(item.call_id);
+      if (request === undefined) return params;
+      request.awaitingEchoes -= 1;
+      if (request.awaitingEchoes === 0) pending.delete(item.call_id);
+      if (!request.hasSecret) return params;
+      return { ...params, item: { ...item, output: scrubOutput(item.output, request.secretById) } };
+    },
+    clear(): void { pending.clear(); },
+  };
+}
 
 interface CodexSessionState {
   /** The prompt request whose turn is running; null while idle or during a spontaneous turn. */
@@ -83,7 +156,8 @@ export async function codexSession(
     readonly onNativeIdentity?: (method: string, identity: JsonRecord) => void;
     // BYOK change: caller-owned, bounded native request lifecycle; no permissive fallback.
     readonly onServerRequest?: (id: string | number, method: string, params: JsonRecord, reply: {
-      respond(value: JsonRecord): Promise<void>; reject(code: number, message: string): Promise<void>; cancelled(): void;
+      respond(value: JsonRecord, freeTextAnswers?: ReadonlyMap<string, string>): Promise<void>;
+      reject(code: number, message: string): Promise<void>; cancelled(): void;
     }) => void;
     // BYOK change: caller-owned steps on this app-server client, before the thread open request and after its read-back.
     readonly beforeOpen?: (request: CodexOpenStepRequest, params: JsonRecord) => Promise<JsonRecord>;
@@ -407,8 +481,11 @@ async function openCodexSession(
   // transport-only turn id and the control decisions (busy, spontaneous).
   let lastNotifiedRootTurnId: string | undefined;
   const draftTails = new Map<string, Map<string | undefined, Map<string, CredentialRedactionTail>>>();
+  const secretAnswers = createCodexSecretAnswers(credentials.add);
   const onNotification = (method: string, params: JsonRecord): void => {
-    // BYOK change: Retain the exact native notification before any potentially throwing fold.
+    // BYOK change: Short secrets and selected labels need structural scrubbing before retention and projection.
+    params = secretAnswers.scrubNotification(method, params);
+    // BYOK change: Retain the scrubbed native notification before any potentially throwing fold.
     // The record envelope's sessionId puts a foreign thread in the graph (observe/graph.ts); no out-of-band node.
     const notificationSession = typeof params.threadId === "string" ? params.threadId : threadId;
     const isRoot = notificationSession === threadId;
@@ -573,7 +650,10 @@ async function openCodexSession(
       };
       try {
         hooks.onServerRequest(id, method, params, {
-          respond: value => send(() => client.respond(id, value), { kind: "accepted" }),
+          respond: (value, freeTextAnswers) => send(() => {
+            if (method === "item/tool/requestUserInput") secretAnswers.recordAnswer(params, freeTextAnswers);
+            return client.respond(id, value);
+          }, { kind: "accepted" }),
           cancelled() {
             claimed = true; record({ kind: "rejected", code: "error", reason: "native request cancelled" });
           },
@@ -611,6 +691,7 @@ async function openCodexSession(
   // the reply), then whatever codex wrote after the reply.
   client.handle({ onNotification, onServerRequest });
   client.onExit((code, reason) => {
+    secretAnswers.clear();
     abortFallback.clear();
     turnProcesses.exited();
     // The exit is an outcome only oar observes: it answers our dispose when
@@ -747,7 +828,7 @@ async function openCodexSession(
     dispose: guard(() => kernel.dispose(async () => {
       client.kill();
       // Wait for release of the process and its resources. Turn cleanup is synchronous.
-      await client.exited;
+      try { await client.exited; } finally { secretAnswers.clear(); }
     })),
   };
   return session;

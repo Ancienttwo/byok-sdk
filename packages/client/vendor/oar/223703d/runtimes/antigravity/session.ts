@@ -1,3 +1,4 @@
+// BYOK change: The caller supplies the complete environment for launch arguments (Apache-2.0).
 /* oxlint-disable import/max-dependencies -- The ACP profile composes Antigravity launch, configuration, token and outcome readers. */
 import { antigravityQuotaError, antigravityQuotaNotice } from "./quota.js";
 import { wholePromptTokenUsage } from "../../shared/acp/token-usage.js";
@@ -16,7 +17,7 @@ import { asRecord, type JsonRecord } from "../../shared/json.js";
 import { refuseSessionOptions } from "../../shared/session-options.js";
 
 /** Native CLI ACP; a per-session worker is the vendor's required channel for HTTP MCP. */
-export function antigravityAcpArgs(env: Readonly<NodeJS.ProcessEnv> = process.env): readonly string[] {
+export function antigravityAcpArgs(env: Readonly<NodeJS.ProcessEnv>): readonly string[] {
   return ["acp", "--dangerously-skip-permissions", "--process-per-session", ...antigravityStateArgs(env)];
 }
 
@@ -51,7 +52,7 @@ export function normalizeAntigravityListedCwd(listedCwd: string, platform: NodeJ
 }
 
 export const antigravityAcpProfile: AcpSessionProfile = {
-  args: (options) => antigravityAcpArgs(sessionEnvironment(options.env)),
+  args: (options) => antigravityAcpArgs(sessionEnvironment(options.env, {})),
   resumeKeepsSessionCwd: true,
   normalizeListedCwd: normalizeAntigravityListedCwd,
   // Subagent transport attribution remains unverified. A second native

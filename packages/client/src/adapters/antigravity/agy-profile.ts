@@ -52,7 +52,7 @@ export function agyEnvironment(base: Readonly<Record<string, string | undefined>
   env.LOCALAPPDATA = path.join(home, 'AppData', 'Local');
   env.DBUS_SESSION_BUS_ADDRESS = `unix:path=${path.join(home, 'no-session-bus')}`;
   env.GEMINI_HOME = agyNativeHome(home);
-  env.AGY_CLI_DISABLE_AUTO_UPDATE = '1';
+  env.AGY_CLI_DISABLE_AUTO_UPDATE = 'true';
   if (proxy !== undefined) {
     env.GEMINI_API_KEY = proxy.token;
     env.GOOGLE_GEMINI_BASE_URL = proxy.url;

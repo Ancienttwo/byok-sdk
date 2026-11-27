@@ -4,19 +4,19 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { expectProcessNotLive } from './support/process-liveness';
-import { acpSession, type AcpSessionHooks } from '../../vendor/oar/87c0929/shared/acp/session';
-import type { AcpSessionProfile } from '../../vendor/oar/87c0929/shared/acp/profile';
-import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/87c0929/contracts/session';
-import { grokFailureOutcome } from '../../vendor/oar/87c0929/runtimes/grok/failure';
+import { acpSession, type AcpSessionHooks } from '../../vendor/oar/223703d/shared/acp/session';
+import type { AcpSessionProfile } from '../../vendor/oar/223703d/shared/acp/profile';
+import type { AdapterSession, RawEvent, RequestRecord } from '../../vendor/oar/223703d/contracts/session';
+import { grokFailureOutcome } from '../../vendor/oar/223703d/runtimes/grok/failure';
 import { spawnOwnedLineProcess } from '../runtime/owned-line-process';
 import { createOwnedTerminalSpawn, spawnOwnedTerminalProcess } from '../runtime/owned-terminal-process';
 import { __hostExitBackstopForTests } from '../adapters/process-tree';
-import { createAcpTurns } from '../../vendor/oar/87c0929/shared/acp/turns';
-import { createUsageUpdateGate } from '../../vendor/oar/87c0929/shared/acp/profile';
-import type { AcpProcess } from '../../vendor/oar/87c0929/shared/acp/process';
-import { createSessionKernel } from '../../vendor/oar/87c0929/shared/session-kernel';
-import { recordRetention } from '../../vendor/oar/87c0929/shared/record-retention';
-import { antigravityAcpProfile } from '../../vendor/oar/87c0929/runtimes/antigravity/session';
+import { createAcpTurns } from '../../vendor/oar/223703d/shared/acp/turns';
+import { createUsageUpdateGate } from '../../vendor/oar/223703d/shared/acp/profile';
+import type { AcpProcess } from '../../vendor/oar/223703d/shared/acp/process';
+import { createSessionKernel } from '../../vendor/oar/223703d/shared/session-kernel';
+import { recordRetention } from '../../vendor/oar/223703d/shared/record-retention';
+import { antigravityAcpProfile } from '../../vendor/oar/223703d/runtimes/antigravity/session';
 
 const FAKE = path.join(import.meta.dirname, 'fixtures/fake-acp-agent.mjs');
 // A runtime-neutral profile: the shared stack under test, not a vendor's.
@@ -58,6 +58,14 @@ async function turn(session: AdapterSession, records: RawEvent[], input: string)
 }
 
 describe('vendored OAR ACP session over SDK-owned processes', () => {
+  it('derives Antigravity launch arguments only from the explicit environment', () => {
+    vi.stubEnv('GEMINI_HOME', '/ambient-gemini');
+    const launchArgs = antigravityAcpProfile.args;
+    if (typeof launchArgs !== 'function') throw new Error('expected an environment-dependent launch profile');
+    expect(launchArgs({ cwd: '/fixture', env: {} })).not.toContain('--gemini-dir');
+    expect(launchArgs({ cwd: '/fixture', env: { GEMINI_HOME: '/owned-gemini' } }).slice(-2))
+      .toEqual(['--gemini-dir', '/owned-gemini']);
+  });
   it.each([true, false])('enforces opened image support and records paths only (images=%s)', async imagesSupported => {
     const { dir, log } = workspace();
     const pathToImage = path.join(dir, 'fixture.png');
@@ -413,6 +421,28 @@ describe('vendored OAR ACP session over SDK-owned processes', () => {
     const session = await startConfirming(spawnOwnedLineProcess, spawnOwnedTerminalProcess, { kind: 'available', via: 'executable', command: FAKE }, { cwd: dir, env: { PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log }, model: 'fake-model' });
     live.push(session);
     expect(facts(log).find(fact => fact.kind === 'config')?.params).toMatchObject({ configId: 'model', value: 'fake-model' });
+  });
+
+  it('uses a confirming effort notification after a stale RPC answer and preserves their wire order', async () => {
+    const { dir, log } = workspace();
+    const startConfirming = acpSession({ ...profile, confirmConfigOptionUpdates: true });
+    const session = await startConfirming(spawnOwnedLineProcess, spawnOwnedTerminalProcess,
+      { kind: 'available', via: 'executable', command: FAKE }, {
+        cwd: dir, effort: 'high', env: {
+          PATH: process.env.PATH ?? '', FAKE_ACP_LOG: log, FAKE_ACP_EFFORT_MENU: '1', FAKE_ACP_STALE_EFFORT_REPLY: '1',
+        },
+      });
+    live.push(session);
+    const config = session.records().filter(record => record.kind === 'frame'
+      && ['session/set_config_option', 'config_option_update'].includes(record.body.type));
+    expect(config).toEqual([
+      expect.objectContaining({ body: expect.objectContaining({ type: 'session/set_config_option', native: {
+        configOptions: [expect.objectContaining({ currentValue: 'low' })],
+      } }) }),
+      expect.objectContaining({ body: expect.objectContaining({ type: 'config_option_update', native: expect.objectContaining({
+        update: expect.objectContaining({ configOptions: [expect.objectContaining({ currentValue: 'high' })] }),
+      }) }) }),
+    ]);
   });
 
   it('settles a superseding steer on the latest prompt answer, not on the early answer to the first', async () => {

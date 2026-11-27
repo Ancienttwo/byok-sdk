@@ -7,7 +7,7 @@
   },
   "to": {
     "version": "0.47.1",
-    "snapshotSha256": "36c9ee9d74c6d5a9f0ae01d7c0bb029c89cb3ca7cef4a0440c949f4142ca8d0a"
+    "snapshotSha256": "3f2f34f99ff45fcd3997772e54ef26b76ec032cdce62c8fcf45f943b54f89ec0"
   },
   "configFields": {
     "status": "tracked",
@@ -25,9 +25,68 @@
         "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
         "store:pi-durable"
       ]
+    },
+    {
+      "id": "antigravity-print-mode-opt-in",
+      "impact": "breaking",
+      "summary": "@byok-sdk/client AgyAdapter.accountUsage requires allowPrintMode: true to read Antigravity quota. Pass it in the options or in the local runtimes.usage request to retain quota reads.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#oar-01381-2521",
+      "items": [
+        "behavior:antigravity-print-mode-opt-in"
+      ]
+    },
+    {
+      "id": "antigravity-account-usage-options",
+      "impact": "additive",
+      "summary": "AgyAdapter.accountUsage and RuntimeAdapter.accountUsage accept RuntimeAccountUsageOptions. Handle print_mode_disabled when print mode is omitted or disabled. The qualified Antigravity CLI version is 1.5.18.",
+      "migration": "docs/releases/host-upgrade-next-minor.md#oar-01381-2521",
+      "items": [
+        "export:@byok-sdk/client#AgyAdapter",
+        "export:@byok-sdk/client#RuntimeAdapter",
+        "export:@byok-sdk/client#UpgradeableRuntimeId",
+        "export:@byok-sdk/client/adapters#AgyAdapter",
+        "export:@byok-sdk/client/adapters#RuntimeAccountUsageOptions",
+        "export:@byok-sdk/client/adapters#RuntimeAccountUsageUnsupportedReason",
+        "export:@byok-sdk/client/adapters#RuntimeAdapter"
+      ]
     }
   ],
   "changes": [
+    {
+      "item": "export:@byok-sdk/client#AgyAdapter",
+      "change": "changed",
+      "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client#RuntimeAdapter",
+      "change": "changed",
+      "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client#UpgradeableRuntimeId",
+      "change": "changed",
+      "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#AgyAdapter",
+      "change": "changed",
+      "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAccountUsageOptions",
+      "change": "added",
+      "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAccountUsageUnsupportedReason",
+      "change": "changed",
+      "entry": "antigravity-account-usage-options"
+    },
+    {
+      "item": "export:@byok-sdk/client/adapters#RuntimeAdapter",
+      "change": "changed",
+      "entry": "antigravity-account-usage-options"
+    },
     {
       "item": "export:@byok-sdk/keys/pi-catalog#PI_MODEL_CATALOG_PI_AI_VERSION",
       "change": "changed",

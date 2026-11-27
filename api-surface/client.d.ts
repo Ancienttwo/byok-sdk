@@ -647,6 +647,7 @@
 //   PiRuntimeConfig -> dist/adapters/runtime-adapters.d.ts
 //   PreparedRuntimeOperation -> dist/types.d.ts
 //   RuntimeAccountUsage -> dist/runtime/runtime-reader-types.d.ts
+//   RuntimeAccountUsageOptions -> dist/runtime/runtime-reader-types.d.ts
 //   RuntimeAccountUsageUnsupportedReason -> dist/runtime/runtime-reader-types.d.ts
 //   RuntimeAccountUsageWindow -> dist/runtime/runtime-reader-types.d.ts
 //   RuntimeAdapter -> dist/types.d.ts
@@ -780,7 +781,7 @@
 //   InMemoryDeviceCredentialBackend -> dist/testing/device-credentials.d.ts
 //   fakeRuntimeAdapter -> dist/testing/index.d.ts
 // ==== @byok-sdk/client dist/adapters/antigravity/agy-adapter.d.ts ====
-import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
+import type { RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeAccountUsageOptions, RuntimeAccountUsage } from '../../runtime/runtime-reader-types.js';
 import type { spawn as nodeSpawn } from 'node:child_process';
 import { type RuntimeAdapter, type RuntimeAdapterPrepareInput, type RuntimeAdapterPrepareResult, type RuntimeDetectResult, type RuntimeVersionPolicy } from '../../types.js';
 import { type RuntimeEnvironment, type RuntimeEnvironmentPolicy } from '../../runtime/environment.js';
@@ -801,7 +802,7 @@ export declare class AgyAdapter implements RuntimeAdapter {
     #private;
     private get readers();
     listModels(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
-    accountUsage(options?: RuntimeReadOptions): Promise<RuntimeAccountUsage>;
+    accountUsage(options?: RuntimeAccountUsageOptions): Promise<RuntimeAccountUsage>;
     private readonly root;
     private readonly options;
     private readonly environmentPolicy;
@@ -1007,7 +1008,7 @@ export declare class GrokAdapter implements RuntimeAdapter {
 export declare function grokVersionToken(output: string): string;
 // ==== @byok-sdk/client dist/adapters/index.d.ts ====
 export type { RuntimeAdapter, RuntimeAdapterDescriptor, RuntimeAdapterPrepareInput, RuntimeAdapterPrepareResult, RuntimeAdapterRejectedOperation, RuntimeAdapterPreparedOperation, PreparedRuntimeOperation, RuntimeSessionLease, RuntimeOperationManifest, RuntimeOperationStartInput, RuntimeLaunchResources, RuntimeCapabilities, RuntimeDetectResult, RuntimeDetectionRefusalReason, } from '../types.js';
-export type { RuntimeAccountUsage, RuntimeAccountUsageUnsupportedReason, RuntimeAccountUsageWindow, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeModelEntry, RuntimeReadOptions, RuntimeUnsupportedVersion, } from '../runtime/runtime-reader-types.js';
+export type { RuntimeAccountUsage, RuntimeAccountUsageOptions, RuntimeAccountUsageUnsupportedReason, RuntimeAccountUsageWindow, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeModelEntry, RuntimeReadOptions, RuntimeUnsupportedVersion, } from '../runtime/runtime-reader-types.js';
 export { delegateAdmissionDetection, isWireRuntimeId, observeRuntimeDetection, taskRuntimeTarget, validateRuntimeDetectResult } from '../runtime-detection.js';
 export { projectRuntimeObservationWithUpgrade as projectRuntimeObservation } from '../runtime/runtime-releases.js';
 export type { RuntimeObservation } from '../runtime-detection.js';
@@ -5594,6 +5595,9 @@ export declare function buildRuntimeEnvironment(policy: RuntimeEnvironmentPolicy
 export interface RuntimeReadOptions {
     readonly signal?: AbortSignal;
 }
+export interface RuntimeAccountUsageOptions extends RuntimeReadOptions {
+    readonly allowPrintMode?: boolean;
+}
 export interface RuntimeListModelsOptions extends RuntimeReadOptions {
     readonly refresh?: boolean;
 }
@@ -5650,7 +5654,7 @@ export interface RuntimeAccountUsageWindow {
         readonly name: string;
     };
 }
-export type RuntimeAccountUsageUnsupportedReason = 'version_unsupported' | 'capability_unavailable' | 'unsupported_installation' | 'unsupported_auth_mode' | 'unsupported_auth_storage' | 'auth_configuration_unavailable' | 'endpoint_unavailable' | 'quota_unavailable';
+export type RuntimeAccountUsageUnsupportedReason = 'version_unsupported' | 'capability_unavailable' | 'unsupported_installation' | 'unsupported_auth_mode' | 'unsupported_auth_storage' | 'auth_configuration_unavailable' | 'endpoint_unavailable' | 'quota_unavailable' | 'print_mode_disabled';
 export type RuntimeAccountUsage = {
     readonly kind: 'unavailable';
     readonly reason: 'access_token_expired';
@@ -5716,7 +5720,7 @@ declare const RUNTIME_RELEASES: {
     };
     readonly agy: {
         readonly kind: 'vendor';
-        readonly qualifiedVersion: "1.5.16";
+        readonly qualifiedVersion: "1.5.18";
         readonly token: typeof agyVersionToken;
         readonly command: 'agy update';
         readonly reason: 'Use the Antigravity vendor installer to update the standalone CLI.';
@@ -6068,7 +6072,7 @@ export interface ToolReminder {
 // ==== @byok-sdk/client dist/types.d.ts ====
 import type { ServiceEnvironmentUnavailableCode } from './login-shell-environment.js';
 import type { RuntimeEnvironment } from './runtime/environment.js';
-import type { RuntimeAccountUsage, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeReadOptions, RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
+import type { RuntimeAccountUsage, RuntimeAccountUsageOptions, RuntimeListModelsOptions, RuntimeModelCatalog, RuntimeUnsupportedVersion } from './runtime/runtime-reader-types.js';
 import type { ExecutionScratch } from './daemon/retention/scratch.js';
 import type { NativeInteractionCapabilities, NativeInteractionChannel } from './native-interactions.js';
 import type { ToolAuthorizationGate, ToolAuthorizationLane } from './tool-authorization.js';
@@ -6401,7 +6405,7 @@ export interface RuntimeAdapter {
     readonly descriptor: RuntimeAdapterDescriptor;
     detect(signal?: AbortSignal): Promise<RuntimeDetectResult>;
     listModels?(options?: RuntimeListModelsOptions): Promise<RuntimeModelCatalog>;
-    accountUsage?(options?: RuntimeReadOptions): Promise<RuntimeAccountUsage>;
+    accountUsage?(options?: RuntimeAccountUsageOptions): Promise<RuntimeAccountUsage>;
     prepare(input: RuntimeAdapterPrepareInput): Promise<RuntimeAdapterPrepareResult>;
     runtimeEnvironment(): Promise<RuntimeEnvironment>;
     projectMcpEnvironment?(env: Readonly<Record<string, string>>): Readonly<Record<string, string>>;

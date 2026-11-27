@@ -367,13 +367,14 @@ export const RUNTIMES_ENVIRONMENT_METHOD = 'runtimes.environment';
 export const RUNTIMES_MODELS_METHOD = 'runtimes.models';
 export const RUNTIMES_USAGE_METHOD = 'runtimes.usage';
 
-export function parseRuntimeReadParams(value: unknown, allowRefresh: boolean): { runtimeId: string; refresh?: boolean } {
+export function parseRuntimeReadParams(value: unknown, option: 'refresh' | 'allowPrintMode'): { runtimeId: string; flag?: boolean } {
   if (!isRecord(value) || typeof value.runtimeId !== 'string' || value.runtimeId.length === 0 || value.runtimeId.length > 128
-    || Object.keys(value).some(key => key !== 'runtimeId' && !(allowRefresh && key === 'refresh'))
-    || (value.refresh !== undefined && typeof value.refresh !== 'boolean')) {
-    throw new ControlError('bad_request', allowRefresh ? 'runtimes.models requires {runtimeId, refresh?}' : 'runtimes.usage requires {runtimeId}');
+    || Object.keys(value).some(key => key !== 'runtimeId' && key !== option)
+    || (value[option] !== undefined && typeof value[option] !== 'boolean')) {
+    throw new ControlError('bad_request', `runtime read requires {runtimeId, ${option}?}`);
   }
-  return { runtimeId: value.runtimeId, ...(value.refresh === undefined ? {} : { refresh: value.refresh }) };
+  const flag = value[option];
+  return { runtimeId: value.runtimeId, ...(flag === undefined ? {} : { flag }) };
 }
 
 /**

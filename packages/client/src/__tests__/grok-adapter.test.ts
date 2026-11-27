@@ -811,7 +811,7 @@ describe('AgyAdapter', () => {
   });
 
   it('#2469: prepare() launches the command its observation probed, even when the resolver now answers another', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     let calls = 0;
     const resolveBin = () => ({ command: calls++ % 2 === 0 ? fixture : path.join(os.tmpdir(), 'byok-no-such-agy-b'), source: 'path' as const });
     const runtime = agy(home, { resolveBin });
@@ -826,7 +826,7 @@ describe('AgyAdapter', () => {
 
   it('#2469: a plain object never skips the version refusal', async () => {
     const home = await agyVersion('1.4.9');
-    expect(await agy(home).prepare({ offer: { target: AGY_TARGET, instruction: 'x' }, descriptor: agy(home).descriptor, requiredToolsetIds: [], detected: { kind: 'available', version: '1.5.16' } }))
+    expect(await agy(home).prepare({ offer: { target: AGY_TARGET, instruction: 'x' }, descriptor: agy(home).descriptor, requiredToolsetIds: [], detected: { kind: 'available', version: '1.5.18' } }))
       .toEqual({ kind: 'reject', reason: 'agy installation refused: acp_unavailable', retryable: false });
   });
 
@@ -863,7 +863,7 @@ describe('AgyAdapter', () => {
   });
 
   it('projects the native Antigravity quota reset into the runtime failure', async () => {
-    const adapter = agy(await agyVersion('1.5.16'));
+    const adapter = agy(await agyVersion('1.5.18'));
     const before = Date.now();
     const error = await failureOf(await open(adapter, { target: AGY_TARGET, instruction: 'agy-quota' }, await agyCtx()));
     expect(error).toBeInstanceOf(RuntimeExecutionFailure);
@@ -876,7 +876,7 @@ describe('AgyAdapter', () => {
   });
 
   it('runs agy on the owned home behind the local proxy, with a session token in place of the key', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     vi.stubEnv('GEMINI_API_KEY', 'host-key');
     vi.stubEnv('GOOGLE_API_KEY', 'host-key-2');
     vi.stubEnv('GOOGLE_GEMINI_BASE_URL', 'https://elsewhere.test');
@@ -887,7 +887,7 @@ describe('AgyAdapter', () => {
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
     expect(start.argv).toEqual(['acp', '--dangerously-skip-permissions', '--process-per-session', '--gemini-dir', path.join(home, '.gemini'), '--disable-telemetry']);
     expect(start.env).toMatchObject({
-      HOME: home, USERPROFILE: home, GEMINI_HOME: path.join(home, '.gemini'), AGY_CLI_DISABLE_AUTO_UPDATE: '1',
+      HOME: home, USERPROFILE: home, GEMINI_HOME: path.join(home, '.gemini'), AGY_CLI_DISABLE_AUTO_UPDATE: 'true',
     });
     expect(start.env.GOOGLE_GEMINI_BASE_URL).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
     expect(start.env.GEMINI_API_KEY).toMatch(/^[\w-]{43}$/);
@@ -905,7 +905,7 @@ describe('AgyAdapter', () => {
   });
 
   it('projects native tool names, the classified command and path keys, and an exact MCP identity', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const s = await open(agy(home), { target: AGY_TARGET, instruction: 'agy-tools' }, { ...await agyCtx(), mcpToolsetTools: { 'market.feed': mcpServer('market.feed', 'quote') } });
     const events = await turn(s);
     expect(events.find(event => event.type === 'tool_use' && event.tool === 'run_command')).toMatchObject({ input: { command: 'rm -rf build', CommandLine: 'rm -rf build' } });
@@ -927,14 +927,14 @@ describe('AgyAdapter', () => {
   });
 
   it('refuses an MCP entry carrying env as a non-retryable authority failure', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const failure = await open(agy(home), { target: AGY_TARGET, instruction: 'hello' }, { ...await agyCtx(), mcpServers: { host: { command: 'server', env: { TOKEN: 'x' } } } }).catch(error => error);
     expect(failure).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     expect(String(failure.message)).toContain('it attaches no entry with env or headers');
   });
 
   it.each([undefined, 'fake-grok-session'])('uses the per-task Antigravity model and effort (resume=%s)', async sessionRef => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const resources = await agyCtx({ FAKE_ACP_MODEL_CATALOG: 'boot-model,task-model', FAKE_ACP_EFFORT_MENU: '1' });
     resources.env.FAKE_ACP_LISTED_CWD = resources.workspaceDir;
     const runtime = agy(home, { model: 'boot-model' });
@@ -944,7 +944,7 @@ describe('AgyAdapter', () => {
   });
 
   it('resumes only on a listed saved cwd', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const unlisted = await open(agy(home), { target: AGY_TARGET, instruction: 'again', sessionRef: 'fake-grok-session' }, await agyCtx()).catch(error => error);
     expect(unlisted).toMatchObject({ phase: 'start', retry: 'non-retryable' });
     const resources = await agyCtx();
@@ -954,7 +954,7 @@ describe('AgyAdapter', () => {
   });
 
   it('appends the persona only for a reader, and again on resume, because agy replaces its append on every open', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const agentHome = await fs.realpath(await tempDir('byok-agy-home-'));
     await fs.writeFile(path.join(agentHome, 'AGENTS.md'), 'Persona rules');
     const run = path.join(agentHome, '.byok', 'runs', 'run-1');
@@ -970,7 +970,7 @@ describe('AgyAdapter', () => {
   });
 
   it('fails a task without a key as authority, and one whose proxy cannot start as retryable, before agy runs', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const resources = await agyCtx();
     expect(await open(agy(home, { resolveKey: async () => '' }), { target: AGY_TARGET, instruction: 'hello' }, resources).catch(error => error)).toMatchObject({
       phase: 'start', retry: 'non-retryable', failure: { class: 'auth' }, message: expect.stringContaining('at least 20 characters'),
@@ -986,7 +986,7 @@ describe('AgyAdapter', () => {
   });
 
   it('rejects a key Node cannot send as an HTTP header before allocating the proxy', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const resources = await agyCtx();
     const listen = vi.spyOn(Server.prototype, 'listen');
     try {
@@ -1001,7 +1001,7 @@ describe('AgyAdapter', () => {
   });
 
   it('closes a proxy whose listener opens after startup is cancelled', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const resources = await agyCtx();
     const controller = new AbortController();
     const closing = vi.spyOn(Server.prototype, 'close');
@@ -1022,13 +1022,13 @@ describe('AgyAdapter', () => {
 
   it('closes the proxy when agy exits', async () => {
     const resources = await agyCtx();
-    await turn(await open(agy(await agyVersion('1.5.16')), { target: AGY_TARGET, instruction: 'hello' }, resources));
+    await turn(await open(agy(await agyVersion('1.5.18')), { target: AGY_TARGET, instruction: 'hello' }, resources));
     const start = facts(resources.log).find(fact => fact.kind === 'start')!;
     await expect(fetch(start.env.GOOGLE_GEMINI_BASE_URL)).rejects.toThrow();
   });
 
   it('still sends session/close and disposes the process and proxy when the process table cannot be read at the stop, and stops again on the close', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const observe = vi.spyOn(processTree, 'rememberOwnedDescendants').mockImplementation(() => { throw new Error('Process table ps: timeout after 5000 ms'); });
     const resources = await agyCtx();
     const s = await open(agy(home), { target: AGY_TARGET, instruction: 'hello' }, resources);
@@ -1042,7 +1042,7 @@ describe('AgyAdapter', () => {
   });
 
   it('leases a resumed session against the store sweep, and only that session', async () => {
-    const adapter = agy(await agyVersion('1.5.16'));
+    const adapter = agy(await agyVersion('1.5.18'));
     const store = agySessionStoreOf(adapter)!;
     const prepared = await adapter.prepare({ offer: { target: AGY_TARGET, instruction: 'x' } } as never);
     if (prepared.kind !== 'prepared') throw new Error('agy did not prepare');
@@ -1053,7 +1053,7 @@ describe('AgyAdapter', () => {
   });
 
   it('kills a daemon that left the process group before it reports turn_end', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const resources = await agyCtx();
     const pidFile = path.join(resources.workspaceDir, 'daemon.pid');
     const remember = processTree.rememberOwnedDescendants;
@@ -1074,7 +1074,7 @@ describe('AgyAdapter', () => {
   });
 
   it('answers a writer with allow_once, and fails a reader the model never answered after a reject_once', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const outside = path.join(os.tmpdir(), 'byok-agy-outside.txt');
     const writer = await agyCtx();
     await turn(await open(agy(home), { target: AGY_TARGET, instruction: `agy-ask:edit:${outside}` }, writer));
@@ -1093,7 +1093,7 @@ describe('AgyAdapter', () => {
   });
 
   it('steers the active turn through ACP', async () => {
-    const home = await agyVersion('1.5.16');
+    const home = await agyVersion('1.5.18');
     const resources = await agyCtx();
     const s = await open(agy(home), { target: AGY_TARGET, instruction: 'steer-first' }, resources);
     await s.steer('steer-second');
@@ -1104,7 +1104,7 @@ describe('AgyAdapter', () => {
   it('refuses an input past agy\'s 185,000-byte bound before the call, with OAR\'s input_too_large class', async () => {
     const resources = await agyCtx();
     const instruction = 'x'.repeat(185_001);
-    await expect(startPreparedOperation(agy(await agyVersion('1.5.16')), { target: AGY_TARGET, instruction }, resources)).rejects.toMatchObject({
+    await expect(startPreparedOperation(agy(await agyVersion('1.5.18')), { target: AGY_TARGET, instruction }, resources)).rejects.toMatchObject({
       phase: 'start', retry: 'non-retryable', failure: { class: 'input_too_large' },
       message: "input is 185001 bytes, over OAR's 185000-byte bound for one input to this runtime, which cuts a longer one without saying so",
     });
@@ -1112,7 +1112,7 @@ describe('AgyAdapter', () => {
   });
 
   it('refuses a steer after the turn ends as an infrastructure failure', async () => {
-    const s = await open(agy(await agyVersion('1.5.16')), { target: AGY_TARGET, instruction: 'hello' }, await agyCtx());
+    const s = await open(agy(await agyVersion('1.5.18')), { target: AGY_TARGET, instruction: 'hello' }, await agyCtx());
     await turn(s);
     await expect(s.steer('late')).rejects.toMatchObject({ message: 'runtime exited' });
   });
