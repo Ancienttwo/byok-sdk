@@ -201,12 +201,37 @@ describe("iOS-native theme tokens and src/ui variants (#2540)", () => {
       expect(app.viewStyle(selector)?.backgroundColor).toBeTruthy();
     }
 
-    // Semantic Badge variants resolve to their iOS system colors.
-    expect(app.viewStyle("id:badge-primary")?.backgroundColor).toBe("#007affff");
-    expect(app.viewStyle("id:badge-success")?.backgroundColor).toBe("#34c759ff");
-    expect(app.viewStyle("id:badge-warning")?.backgroundColor).toBe("#ff9500ff");
-    expect(app.viewStyle("id:badge-danger")?.backgroundColor).toBe("#ff3b30ff");
-    expect(app.viewStyle("id:badge-neutral")?.backgroundColor).toBeTruthy();
+    // Semantic Badge variants use the Host badge pattern: system-color tint with label text (light and dark).
+    const lightBadges = [
+      ["id:badge-neutral", null, "Neutral", "#78788033"],
+      ["id:badge-primary", null, "Primary", "#007aff29"],
+      ["id:badge-success", "✓", "Success", "#34c75929"],
+      ["id:badge-warning", "!", "Warning", "#ff950029"],
+      ["id:badge-danger", "×", "Danger", "#ff3b3029"],
+    ] as const;
+    for (const [selector, glyph, label, bg] of lightBadges) {
+      expect(app.viewStyle(selector)?.backgroundColor).toBe(bg);
+      expect(app.spanStyle(`${selector} >> text:${label}`).color).toBe("#000000ff");
+      if (glyph) {
+        expect(app.spanStyle(`${selector} >> text:${glyph}`).color).toBe("#000000ff");
+      }
+    }
+
+    await app.setColorScheme("dark");
+    const darkBadges = [
+      ["id:badge-neutral", null, "Neutral", "#7878805c"],
+      ["id:badge-primary", null, "Primary", "#0a84ff3d"],
+      ["id:badge-success", "✓", "Success", "#30d1583d"],
+      ["id:badge-warning", "!", "Warning", "#ff9f0a3d"],
+      ["id:badge-danger", "×", "Danger", "#ff453a3d"],
+    ] as const;
+    for (const [selector, glyph, label, bg] of darkBadges) {
+      expect(app.viewStyle(selector)?.backgroundColor).toBe(bg);
+      expect(app.spanStyle(`${selector} >> text:${label}`).color).toBe("#ffffffff");
+      if (glyph) {
+        expect(app.spanStyle(`${selector} >> text:${glyph}`).color).toBe("#ffffffff");
+      }
+    }
   });
 
   test("App cold start in OS dark mode selects System Appearance in the sidebar", async () => {

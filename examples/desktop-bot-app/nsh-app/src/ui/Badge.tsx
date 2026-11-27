@@ -4,10 +4,10 @@ import { cx, HOST_STATE_META, type BadgeVariant } from "./tokens.ts";
 
 const VARIANT_CLASSES: Readonly<Record<BadgeVariant, string>> = {
   neutral: "bg-secondary",
-  primary: "bg-primary",
-  success: "bg-success",
-  warning: "bg-warning",
-  danger: "bg-destructive",
+  primary: "bg-badge-primary",
+  success: "bg-badge-success",
+  warning: "bg-badge-warning",
+  danger: "bg-badge-danger",
   hostStarting: "bg-host-starting",
   hostRunning: "bg-host-running",
   hostRestarting: "bg-host-restarting",
@@ -17,10 +17,10 @@ const VARIANT_CLASSES: Readonly<Record<BadgeVariant, string>> = {
 
 const TEXT_CLASSES: Readonly<Record<BadgeVariant, string>> = {
   neutral: "text-secondary-foreground",
-  primary: "text-primary-foreground",
-  success: "text-success-foreground",
-  warning: "text-warning-foreground",
-  danger: "text-destructive-foreground",
+  primary: "text-foreground",
+  success: "text-foreground",
+  warning: "text-foreground",
+  danger: "text-foreground",
   hostStarting: "text-host-starting-foreground",
   hostRunning: "text-host-running-foreground",
   hostRestarting: "text-host-restarting-foreground",
