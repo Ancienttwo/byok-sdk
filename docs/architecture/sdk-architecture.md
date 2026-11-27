@@ -108,7 +108,7 @@ flowchart LR
 
 ### 1.2 Monorepo 与依赖图
 
-仓库以 Bun 1.4.4 管理 workspace 与 lockfile，Node `>=24.22.1` 仍是 dispatch/runtime authority。当前有二十三个 workspace package：十个随同一 train 版本发布的 public npm manifest（包括 `@byok-sdk/bot-collaboration` 和 `@byok-sdk/keys`；support package `@byok-sdk/implementation-identity` 已按 ADR-037 退役，见 `check:release-graph` 的 `retiredPublicNames`）、十一个 private examples，以及两个只供测试使用的 private package：`@byok-sdk/conformance` 与只被 conformance 消费的 device simulator `@byok-sdk/testkit`。ADR-035 保留有独立 Node/Hono 部署职责的 `@byok-sdk/server`，并退出无独立能力的 `byok-sdk` umbrella：0.21.0 删除 `packages/sdk`，同一 release 把 `@byok-sdk/testkit` 转为 private，public artifacts 当时由 11 降为 9。`check:release-graph` 要求 `packages/` 下除这十个之外的 manifest 全部 private，并拒绝 `byok-sdk` 重新出现。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画当前 runtime、release 与 test-only edges，并选取两个示例。
+仓库以 Bun 1.4.4 管理 workspace 与 lockfile，Node `>=24.22.3` 仍是 dispatch/runtime authority。当前有二十三个 workspace package：十个随同一 train 版本发布的 public npm manifest（包括 `@byok-sdk/bot-collaboration` 和 `@byok-sdk/keys`；support package `@byok-sdk/implementation-identity` 已按 ADR-037 退役，见 `check:release-graph` 的 `retiredPublicNames`）、十一个 private examples，以及两个只供测试使用的 private package：`@byok-sdk/conformance` 与只被 conformance 消费的 device simulator `@byok-sdk/testkit`。ADR-035 保留有独立 Node/Hono 部署职责的 `@byok-sdk/server`，并退出无独立能力的 `byok-sdk` umbrella：0.21.0 删除 `packages/sdk`，同一 release 把 `@byok-sdk/testkit` 转为 private，public artifacts 当时由 11 降为 9。`check:release-graph` 要求 `packages/` 下除这十个之外的 manifest 全部 private，并拒绝 `byok-sdk` 重新出现。npm registry tarball 仍由 isolated npm install + Node import smoke 验证；下图画当前 runtime、release 与 test-only edges，并选取两个示例。
 
 ```mermaid
 flowchart LR
@@ -210,7 +210,7 @@ find "$SDK_SRC" -type f \( -name '*.test.ts' -o -name '*.spec.ts' -o -path '*/__
 | `templates/packaging/sea` | Node SEA + esbuild/postject recipe | 已实现；含跨平台边界说明与 smoke |
 | `templates/service` | launchd/systemd/WinSW reference recipes | 已实现；真正执行逻辑在 `packages/client/src/lifecycle/*` |
 | `deploy/` | env/runbook/scripts/sql production composition surface | 已实现 Postgres migrations、R2 dataplane env（测试基底为 SeaweedFS）、迁移与 hosted/self-hosted/release-responsibility runbook；host deployment 仍由集成方负责 |
-| `.github/workflows/ci.yml` | Node 24.22.1 基线 + Node 26 forward-compatibility build/typecheck/test；专项 smoke/audit | tarball pack/install 与 packageability job 使用 `.node-version` 基线；Linux/macOS/Windows 由各 job 的 OS matrix 决定 |
+| `.github/workflows/ci.yml` | Node 24.22.3 基线 + Node 26 forward-compatibility build/typecheck/test；专项 smoke/audit | tarball pack/install 与 packageability job 使用 `.node-version` 基线；Linux/macOS/Windows 由各 job 的 OS matrix 决定 |
 
 ## 2. `@byok-sdk/protocol`：唯一 wire 契约
 
@@ -1056,7 +1056,7 @@ SDK 只交付 npm library 与 reference recipes。host product 拥有 binary sig
 
 CI 验证层次：
 
-1. Node 24.22.1 基线与 Node 26 forward-compatibility leg：build → typecheck → test；build 必须先跑，因为 workspace exports 指向 `dist`。
+1. Node 24.22.3 基线与 Node 26 forward-compatibility leg：build → typecheck → test；build 必须先跑，因为 workspace exports 指向 `dist`。
 2. Windows client tests（job `windows-client`）：特殊字符路径下的 secure-dir，diagnostics、support-bundle、daemon-auth、daemon 停止流程，Agent-home 文件写入崩溃测试。
 3. Bun/SEA packageability smoke。
 4. WinSW real service install/start/stop/uninstall smoke。

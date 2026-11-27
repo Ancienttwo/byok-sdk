@@ -14,7 +14,7 @@ release pipeline.
   or see bun's own install docs for your platform). Bun 1.4.2 keeps closed
   SQLite files open on Windows, so deleting a store after closing it fails
   with `EBUSY` (#2347).
-- Node.js 24.22.1 or newer for the external pi CLI sidecar. `bun install`
+- Node.js 24.22.3 or newer for the external pi CLI sidecar. `bun install`
   may install the npm graph, but pi's supported production runtime is Node.
 - Your product's launcher entry point built against `@byok-sdk/client` (see
   `examples/packaging/launcher.ts` in this repo for a minimal reference —
@@ -35,7 +35,7 @@ recipe (`../sea/`): bun's bundler already understands ESM and
 
 This is a packageability smoke, not a declaration that the complete BYOK
 daemon is supported under Bun's JavaScript runtime. Downstream projects may
-use `bun install`; published library/CLI APIs use Node 24.22.1+ as their baseline.
+use `bun install`; published library/CLI APIs use Node 24.22.3+ as their baseline.
 The optional Bun-compiled daemon path must inject the Node-executed Pi sidecar with
 `BYOK_PI_BIN`.
 
@@ -64,7 +64,7 @@ Empirically confirmed while building this recipe (see
   treats this as a missing core deployment dependency, not as a supported steady state.
 - **pi picked up via override**: `BYOK_PI_BIN=/path/to/pi` short-circuits
   resolve-bin.ts straight past `import.meta.resolve` entirely, so a stub or
-  the version-matched Node 24.22.1+ pi binary at that path is detected correctly
+  the version-matched Node 24.22.3+ pi binary at that path is detected correctly
   (`kind: 'available'`) even inside the compiled executable.
 
 **claude and codex are never a hazard here.** Both adapters'

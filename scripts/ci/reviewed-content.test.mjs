@@ -177,25 +177,49 @@ test('the Node pin admits one exact X.Y.Z and selects every routine family, neve
   const f = fixture(t);
   f.write('.node-version', '24.21.0\n'); commit(f, 'node pin');
   const routine = knownFamilies.filter(id => id !== 'build-test' && id !== 'macos-client').sort();
-  for (const value of ['24.22.1\n', '24.22.1', '26.0.0\n']) {
+  for (const value of ['24.22.3\n', '24.22.3', '26.0.0\n']) {
     f.write('.node-version', value);
     assert.deepEqual(selectImpact(['.node-version'], f), { dirs: [], files: ['.node-version'], families: routine, reason: 'impacted' });
   }
-  f.write('.node-version', '24.22.1\n');
+  f.write('.node-version', '24.22.3\n');
   const plan = planCi({ event: 'push', sha: f.base, paths: ['.node-version'], ...f });
   assert.deepEqual(plan.families, routine);
   const needs = Object.fromEntries(['select', 'release-bookkeeping', 'targeted', ...knownFamilies].map(id => [id, { result: ['build-test', 'macos-client'].includes(id) ? 'skipped' : 'success' }]));
   assert.doesNotThrow(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd));
   needs['build-test'] = { result: 'success' };
   assert.throws(() => requireCiPlan(needs, plan, 'push', f.base, f.base, f.cwd), /unexpectedly ran: build-test/);
-  for (const value of ['', '24.22\n', 'v24.22.1\n', '24.22.1-rc.1\n', '>=24.22.1\n', '24.x\n', 'lts/*\n', '24.022.1\n',
-    ' 24.22.1\n', '24.22.1 \n', '24.22.1\r\n', '﻿24.22.1\n', '24.22.1\n\n', '24.22.1\n24.22.0\n']) {
+  for (const value of ['', '24.22\n', 'v24.22.3\n', '24.22.3-rc.1\n', '>=24.22.3\n', '24.x\n', 'lts/*\n', '24.022.3\n',
+    ' 24.22.3\n', '24.22.3 \n', '24.22.3\r\n', '﻿24.22.3\n', '24.22.3\n\n', '24.22.3\n24.22.0\n']) {
     f.write('.node-version', value);
     assert.throws(() => selectImpact(['.node-version'], f), /one exact X\.Y\.Z/, JSON.stringify(value));
   }
   assert.throws(() => selectImpact(['.node-version']), /requires exact CI_BASE/);
   rmSync(join(f.cwd, '.node-version'));
   assert.throws(() => selectImpact(['.node-version'], f));
+});
+
+test('the Node floor raise admits only the exact public engine change', t => {
+  const f = fixture(t);
+  const publicPath = 'packages/client/package.json';
+  const privatePath = 'packages/testkit/package.json';
+  const before = { ...f.manifest, engines: { node: '>=24.22.1' } };
+  const privateManifest = { ...before, name: '@byok-sdk/testkit', private: true };
+  f.write(publicPath, before);
+  f.write(privatePath, privateManifest);
+  commit(f, 'previous Node floor');
+  const engines = { node: '>=24.22.3' };
+  f.write(publicPath, { ...before, engines });
+  assert.deepEqual(selectImpact([publicPath], f).families, ['npm-release-pack']);
+  for (const manifest of [
+    { ...before, engines: { node: '>=24.22.4' } },
+    { ...before, engines: { ...engines, npm: '>=11.0.0' } },
+    { ...before, engines, description: 'unreviewed change' },
+  ]) {
+    f.write(publicPath, manifest);
+    assert.throws(() => selectImpact([publicPath], f), /more than the reviewed fields/);
+  }
+  f.write(privatePath, { ...privateManifest, engines });
+  assert.throws(() => selectImpact([privatePath], f), /more than the reviewed fields/);
 });
 
 test('the public manifest list equals the non-private packages in the repository', () => {
@@ -313,7 +337,7 @@ function k8Fixture(t) {
   const manifest = { name, version: '0.28.0', type: 'module', description: 'K8', license: 'MIT',
     repository: { type: 'git', url: 'git+https://github.com/Ancienttwo/byok-sdk.git', directory: dir },
     bugs: { url: 'https://github.com/Ancienttwo/byok-sdk/issues' }, homepage: 'https://github.com/Ancienttwo/byok-sdk#readme',
-    engines: { node: '>=24.22.1' }, sideEffects: false, main: './dist/index.js', module: './dist/index.js', types: './dist/index.d.ts',
+    engines: { node: '>=24.22.3' }, sideEffects: false, main: './dist/index.js', module: './dist/index.js', types: './dist/index.d.ts',
     exports: { '.': { types: './dist/index.d.ts', import: './dist/index.js' }, './host-kit': { types: './dist/host-kit.d.ts', import: './dist/host-kit.js' },
       './rules': { types: './dist/rules/index.d.ts', import: './dist/rules/index.js' },
       './testing': { types: './dist/testing.d.ts', import: './dist/testing.js' }, './package.json': './package.json' },

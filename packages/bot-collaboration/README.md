@@ -9,7 +9,7 @@ adapter with the real SDK, daemon, HTTP transport, SQLite stores, and
 
 ## Entries
 
-Each symbol has one entry (#1845). K4 needs Node 24.22.1 or later, because its ledger uses `node:sqlite`.
+Each symbol has one entry (#1845). K4 needs Node 24.22.3 or later, because its ledger uses `node:sqlite`.
 
 | Entry | Contents | Loads where |
 | --- | --- | --- |
@@ -25,7 +25,7 @@ The fixture passes that backend to its daemon; it supplies no default.
 
 ## Run
 
-Use Node 24.15 or later and Bun. From the repository root:
+Use Node 24.22.3 or later and Bun. From the repository root:
 
 ```sh
 bun install --frozen-lockfile
