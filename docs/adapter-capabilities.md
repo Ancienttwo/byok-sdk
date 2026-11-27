@@ -124,7 +124,8 @@ endpoint overrides stripped, including `CURSOR_WEBSITE_URL`. It uses the CLI's e
 never sends the ACP `authenticate` request. The `device-default` and
 `adapter-model` selections use CLI model configuration and native effort
 readback. Images are negotiated at session open. An unauthenticated model
-read returns `{ kind: 'unauthenticated' }`.
+read returns `{ kind: 'unauthenticated' }`. Cursor refuses Host-selected
+service tiers and fallback in phase 1.
 
 Phase 1 covers macOS and Linux with a fake Cursor CLI. Windows native
 `.exe` and staged-promotion `.cmd` launchers need separate qualification.
@@ -1537,8 +1538,8 @@ advertises `device-default`, `taskRuntimeTarget(descriptor)` from
 `{ lane: 'harness', harnessId: descriptor.id, selection: { mode: 'device-default' } }`.
 For other advertised modes, the Host supplies the matching selection.
 `descriptor.platforms` lists the supported `process.platform` values:
-Claude, Codex, Pi and agy declare macOS, Linux and Windows; Grok, dsh
-and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
+Claude, Codex, Pi and agy declare macOS, Linux and Windows. Cursor, Grok,
+dsh and durable Pi declare macOS and Linux. A descriptor without `platforms` has no platform
 restriction. `observeRuntimeDetection` refuses an unsupported platform with
 `platform_unsupported` before `detect()` runs, and `projectRuntimeObservation`
 gives the same fields the daemon emits in its `runtimes-detected` event. Both

@@ -169,6 +169,28 @@ describe.skipIf(process.platform === 'win32')('Cursor fake CLI', () => {
     ]);
   });
 
+  it('refuses service tier and fallback in offers, sealed starts, and follow-ups', async () => {
+    const box = setup();
+    const { descriptor } = box.adapter;
+    expect(descriptor).not.toHaveProperty('supportsServiceTier');
+    expect(descriptor).not.toHaveProperty('supportsServiceTierFallback');
+    const offer = { target: TARGET, instruction: 'go' };
+    const tier = { serviceTier: 'fast', serviceTierFallback: 'default' } as const;
+    const prepare = (requested: RuntimeTaskInput) => box.adapter.prepare({ offer: requested, descriptor, requiredToolsetIds: [] });
+    for (const request of [{ ...offer, ...tier }, { ...offer, target: { ...TARGET, ...tier } }]) {
+      await expect(prepare(request)).resolves.toMatchObject({ kind: 'reject', reason: 'Cursor does not support serviceTier', retryable: false });
+    }
+    expect(box.facts()).toHaveLength(0);
+    await expect(box.start({}, { startTierOptions: tier })).rejects.toMatchObject({
+      phase: 'start', retry: 'non-retryable', message: 'Cursor does not support serviceTier',
+    });
+    expect(box.facts().some(({ method }) => method === 'initialize')).toBe(false);
+    const session = await box.start();
+    await turn(session);
+    await expect(session.followUp({ ...offer, ...tier })).rejects.toThrow('Cursor does not support serviceTier');
+    expect(box.facts().filter(({ method }) => method === 'session/prompt')).toHaveLength(1);
+  });
+
   it('refuses unsupported platforms before resolving a binary', async () => {
     const resolveBin = vi.fn();
     const { adapter } = setup({}, { resolveBin });

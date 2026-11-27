@@ -141,7 +141,7 @@ export class CursorAdapter implements RuntimeAdapter {
     if (target.lane === 'harness' && (target.harnessId !== 'cursor' || (selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model'))) {
       return reject('Cursor does not support the requested selection');
     }
-    const unsupported = unsupportedCursorOption(input.offer);
+    const unsupported = unsupportedCursorOption(input.offer) ?? unsupportedCursorOption(target);
     if (unsupported !== undefined) return reject(`Cursor does not support ${unsupported}`);
     const offeredModel = selection?.mode === 'adapter-model' ? selection.modelId : undefined;
     const model = offeredModel ?? this.options.model;

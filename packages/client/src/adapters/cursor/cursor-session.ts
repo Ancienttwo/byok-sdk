@@ -13,7 +13,7 @@ import { resolveRuntimeInvocation, runtimeInvocationHost } from '../runtime-invo
 import { haltGate, oarCancelSettled, raceDeadline, RetryableOnce } from '../session-kit.js';
 import { objectRecord } from '../shared-rules.js';
 import type { CursorAdapterOptions } from './cursor-adapter.js';
-import { CURSOR_LOGIN_REQUIRED } from './cursor-policy.js';
+import { CURSOR_LOGIN_REQUIRED, unsupportedCursorOption } from './cursor-policy.js';
 
 type OwnedChild = ReturnType<ReturnType<typeof createOwnedLineProcessSpawn>>;
 const failure = (reason: string) => new RuntimeExecutionFailure({ phase: 'run', retry: 'non-retryable', reason });
@@ -135,6 +135,8 @@ export class CursorSession implements Session {
 
   async followUp(task: RuntimeTaskInput): Promise<void> {
     if (typeof task.instruction !== 'string') throw new PolicyUnsupportedError('Cursor requires a string instruction');
+    const unsupported = unsupportedCursorOption(task) ?? unsupportedCursorOption(task.target);
+    if (unsupported !== undefined) throw new PolicyUnsupportedError(`Cursor does not support ${unsupported}`);
     const selection = offerSelection(task.target);
     if (task.target.lane === 'harness' && (task.target.harnessId !== 'cursor' ||
       (selection?.mode !== 'device-default' && selection?.mode !== 'adapter-model'))) {
