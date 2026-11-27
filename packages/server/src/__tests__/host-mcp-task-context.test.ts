@@ -2,9 +2,10 @@ import type { Server as HttpServer } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEVICE_ASSERTION_SCHEMA_ID,
+  InMemoryDeviceAssertionReplayAuthority,
   TASK_ASSERTION_SCHEMA_ID,
   deviceAssertionSigningInput,
   taskAssertionSigningInput,
@@ -21,6 +22,7 @@ import {
   type ByokServer,
   type CreateByokServerOptions,
 } from '../index';
+import { resolveHostMcpTaskContext } from '../task-assertion';
 import { isSqliteAvailable } from '../sqlite-support';
 import {
   connectFakeDaemonLongPoll,
@@ -61,7 +63,7 @@ function signTaskAssertion(
     productId: PRODUCT_ID,
     audience: AUDIENCE,
     jti: nextJti(),
-    issuedAt: new Date(now - 5_000).toISOString(),
+    issuedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 60_000).toISOString(),
     agentRef: TEST_AGENT_REF,
     toolsetId: WIDGET_TOOLSET,
@@ -88,7 +90,7 @@ function signDeviceAssertion(
     productId: PRODUCT_ID,
     audience: AUDIENCE,
     jti: nextJti(),
-    issuedAt: new Date(now - 5_000).toISOString(),
+    issuedAt: new Date(now).toISOString(),
     expiresAt: new Date(now + 60_000).toISOString(),
     ...overrides,
   };
@@ -109,6 +111,7 @@ describe('host-mcp-task-context verification (§8.2)', () => {
     for (const instance of byoks.splice(0)) await instance.close();
     for (const http of servers.splice(0)) await stopServer(http);
     for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
+    vi.useRealTimers();
   });
 
   async function boot(
@@ -638,5 +641,320 @@ describe('host-mcp-task-context verification (§8.2)', () => {
     expect(error).toBeInstanceOf(HostMcpTaskAssertionError);
     expect((error as HostMcpTaskAssertionError).code).toBe('replay_store_unavailable');
     expect((error as HostMcpTaskAssertionError).cause).toBe(cause);
+  });
+
+  it('rejects issuedAt <= server start instant with assertion_predates_server only after authentication succeeds (Rules 1 & 3)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const startMs = Date.parse('2026-08-12T04:45:00.000Z');
+    vi.setSystemTime(startMs);
+
+    const started = await boot();
+    const daemon = await connectDaemon(started);
+    const impostor = generateFakeDeviceIdentity();
+    const taskId = await startActiveTask(started, daemon, { requiredToolsets: [WIDGET_TOOLSET] });
+
+    vi.setSystemTime(startMs + 5_000);
+
+    // Rule 1: strictly earlier than start instant -> assertion_predates_server
+    await expect(
+      verifyHostMcpTaskAssertion(started.byok, {
+        assertion: signTaskAssertion(daemon.identity, {
+          issuer: started.issuer,
+          deviceId: daemon.deviceId,
+          taskId,
+          issuedAt: new Date(startMs - 1).toISOString(),
+          expiresAt: new Date(startMs + 60_000).toISOString(),
+        }),
+        issuer: started.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).rejects.toMatchObject({ name: 'HostMcpTaskAssertionError', code: 'assertion_predates_server' });
+
+    // Rule 1: equal to start instant (<= boundary, closing same-millisecond reopen) -> assertion_predates_server
+    await expect(
+      verifyHostMcpTaskAssertion(started.byok, {
+        assertion: signTaskAssertion(daemon.identity, {
+          issuer: started.issuer,
+          deviceId: daemon.deviceId,
+          taskId,
+          issuedAt: new Date(startMs).toISOString(),
+          expiresAt: new Date(startMs + 60_000).toISOString(),
+        }),
+        issuer: started.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).rejects.toMatchObject({ name: 'HostMcpTaskAssertionError', code: 'assertion_predates_server' });
+
+    // Rule 1: 1 ms after start instant -> accepted
+    await expect(
+      verifyHostMcpTaskAssertion(started.byok, {
+        assertion: signTaskAssertion(daemon.identity, {
+          issuer: started.issuer,
+          deviceId: daemon.deviceId,
+          taskId,
+          issuedAt: new Date(startMs + 1).toISOString(),
+          expiresAt: new Date(startMs + 60_000).toISOString(),
+        }),
+        issuer: started.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).resolves.toMatchObject({ taskId, toolsetId: WIDGET_TOOLSET });
+
+    // Rule 3: forged or expired envelopes predating server start still fail as assertion_invalid (no start-instant oracle)
+    await expect(
+      verifyHostMcpTaskAssertion(started.byok, {
+        assertion: signTaskAssertion(impostor, {
+          issuer: started.issuer,
+          deviceId: daemon.deviceId,
+          taskId,
+          issuedAt: new Date(startMs - 1_000).toISOString(),
+          expiresAt: new Date(startMs + 60_000).toISOString(),
+        }),
+        issuer: started.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).rejects.toMatchObject({ name: 'HostMcpTaskAssertionError', code: 'assertion_invalid' });
+
+    await expect(
+      verifyHostMcpTaskAssertion(started.byok, {
+        assertion: signTaskAssertion(daemon.identity, {
+          issuer: started.issuer,
+          deviceId: daemon.deviceId,
+          taskId,
+          issuedAt: new Date(startMs - 10_000).toISOString(),
+          expiresAt: new Date(startMs - 1_000).toISOString(),
+        }),
+        issuer: started.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).rejects.toMatchObject({ name: 'HostMcpTaskAssertionError', code: 'assertion_invalid' });
+
+    // Revoked device with predating issuedAt also stays assertion_invalid
+    await started.byok.devices.revoke(daemon.deviceId);
+    await expect(
+      verifyHostMcpTaskAssertion(started.byok, {
+        assertion: signTaskAssertion(daemon.identity, {
+          issuer: started.issuer,
+          deviceId: daemon.deviceId,
+          taskId,
+          issuedAt: new Date(startMs - 1_000).toISOString(),
+          expiresAt: new Date(startMs + 60_000).toISOString(),
+        }),
+        issuer: started.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).rejects.toMatchObject({ name: 'HostMcpTaskAssertionError', code: 'assertion_invalid' });
+  });
+
+  const itSqlite = isSqliteAvailable() || process.env.BYOK_REQUIRE_SQLITE === '1' ? it : it.skip;
+
+  itSqlite('rejects a pre-restart assertion after SQLite close/reopen with assertion_predates_server and admits a fresh one', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'byok-task-ctx-restart-'));
+    directories.push(dir);
+    const storage: CreateByokServerOptions['storage'] = { kind: 'sqlite', path: join(dir, 'server.sqlite') };
+
+    const first = await boot({ storage });
+    const daemon = await connectDaemon(first);
+    const dispatchedTaskId = await startActiveTask(first, daemon, { requiredToolsets: [WIDGET_TOOLSET] });
+    const submittedTaskId = await startActiveTask(first, daemon, {
+      requiredToolsets: [WIDGET_TOOLSET],
+      viaExecutionSubmit: true,
+    });
+
+    const spentBeforeRestart = signTaskAssertion(daemon.identity, {
+      issuer: first.issuer,
+      deviceId: daemon.deviceId,
+      taskId: dispatchedTaskId,
+    });
+    const spentSubmittedBeforeRestart = signTaskAssertion(daemon.identity, {
+      issuer: first.issuer,
+      deviceId: daemon.deviceId,
+      taskId: submittedTaskId,
+    });
+    await expect(
+      verifyHostMcpTaskAssertion(first.byok, {
+        assertion: spentBeforeRestart,
+        issuer: first.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).resolves.toMatchObject({ taskId: dispatchedTaskId, jti: spentBeforeRestart.protected.jti });
+    await expect(
+      verifyHostMcpTaskAssertion(first.byok, {
+        assertion: spentSubmittedBeforeRestart,
+        issuer: first.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).resolves.toMatchObject({ taskId: submittedTaskId, jti: spentSubmittedBeforeRestart.protected.jti });
+
+    // Server-only restart over the same SQLite file (leaving both tasks active in SQLite)
+    await first.byok.close();
+    byoks.splice(byoks.indexOf(first.byok), 1);
+
+    const reopened = await boot({ storage });
+    // Even if close + reopen landed in the same millisecond, <= rejects both pre-restart envelopes.
+    for (const envelope of [spentBeforeRestart, spentSubmittedBeforeRestart]) {
+      await expect(
+        verifyHostMcpTaskAssertion(reopened.byok, {
+          assertion: envelope,
+          issuer: first.issuer,
+          audience: AUDIENCE,
+          toolset: WIDGET_TOOLSET,
+        }),
+      ).rejects.toMatchObject({ name: 'HostMcpTaskAssertionError', code: 'assertion_predates_server' });
+    }
+
+    // Ensure at least 1 ms has elapsed since reopened constructed, then mint fresh assertions.
+    const reopenedAt = Date.now();
+    while (Date.now() <= reopenedAt) {
+      await new Promise((resolve) => setTimeout(resolve, 2));
+    }
+    const freshDispatched = signTaskAssertion(daemon.identity, {
+      issuer: first.issuer,
+      deviceId: daemon.deviceId,
+      taskId: dispatchedTaskId,
+    });
+    const freshSubmitted = signTaskAssertion(daemon.identity, {
+      issuer: first.issuer,
+      deviceId: daemon.deviceId,
+      taskId: submittedTaskId,
+    });
+    await expect(
+      verifyHostMcpTaskAssertion(reopened.byok, {
+        assertion: freshDispatched,
+        issuer: first.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).resolves.toMatchObject({ taskId: dispatchedTaskId, jti: freshDispatched.protected.jti });
+    await expect(
+      verifyHostMcpTaskAssertion(reopened.byok, {
+        assertion: freshSubmitted,
+        issuer: first.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).resolves.toMatchObject({ taskId: submittedTaskId, jti: freshSubmitted.protected.jti });
+
+    await expect(
+      verifyHostMcpTaskAssertion(reopened.byok, {
+        assertion: freshDispatched,
+        issuer: first.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).rejects.toMatchObject({ name: 'HostMcpTaskAssertionError', code: 'assertion_replayed' });
+  });
+
+  itSqlite('honors an explicit replay authority as given across SQLite close/reopen with no start-instant floor (Rule 2)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const startMs = Date.parse('2026-08-12T04:45:00.000Z');
+    vi.setSystemTime(startMs);
+
+    const dir = mkdtempSync(join(tmpdir(), 'byok-task-ctx-explicit-replay-'));
+    directories.push(dir);
+    const storage: CreateByokServerOptions['storage'] = { kind: 'sqlite', path: join(dir, 'server.sqlite') };
+
+    const backing = new InMemoryDeviceAssertionReplayAuthority();
+    let consumeCalls = 0;
+    let collectExpiredCalls = 0;
+    const sharedReplay: DeviceAssertionReplayAuthority = {
+      consume: async (input) => {
+        consumeCalls += 1;
+        return backing.consume(input);
+      },
+      collectExpired: async (tenant, input) => {
+        collectExpiredCalls += 1;
+        return backing.collectExpired(tenant, input);
+      },
+    };
+
+    const first = await boot({ storage, hostMcpTaskContext: { enabled: true, replay: sharedReplay } });
+    const daemon = await connectDaemon(first);
+    const taskId = await startActiveTask(first, daemon, { requiredToolsets: [WIDGET_TOOLSET] });
+
+    vi.setSystemTime(startMs + 1_000);
+    const spentBeforeRestart = signTaskAssertion(daemon.identity, {
+      issuer: first.issuer,
+      deviceId: daemon.deviceId,
+      taskId,
+    });
+    const unspentBeforeRestart = signTaskAssertion(daemon.identity, {
+      issuer: first.issuer,
+      deviceId: daemon.deviceId,
+      taskId,
+    });
+
+    vi.setSystemTime(startMs + 2_000);
+    await expect(
+      verifyHostMcpTaskAssertion(first.byok, {
+        assertion: spentBeforeRestart,
+        issuer: first.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).resolves.toMatchObject({ taskId, jti: spentBeforeRestart.protected.jti });
+    expect(consumeCalls).toBe(1);
+
+    await first.byok.close();
+    byoks.splice(byoks.indexOf(first.byok), 1);
+
+    // Reopen at a later instant with the same explicit replay authority
+    vi.setSystemTime(startMs + 10_000);
+    const reopened = await boot({ storage, hostMcpTaskContext: { enabled: true, replay: sharedReplay } });
+    vi.setSystemTime(startMs + 11_000);
+
+    // Previously spent assertion is rejected by the explicit ledger as assertion_replayed (not assertion_predates_server)
+    await expect(
+      verifyHostMcpTaskAssertion(reopened.byok, {
+        assertion: spentBeforeRestart,
+        issuer: first.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).rejects.toMatchObject({ name: 'HostMcpTaskAssertionError', code: 'assertion_replayed' });
+    expect(consumeCalls).toBe(2);
+
+    // Valid unspent assertion minted before reopen still verifies under the explicit durable ledger
+    await expect(
+      verifyHostMcpTaskAssertion(reopened.byok, {
+        assertion: unspentBeforeRestart,
+        issuer: first.issuer,
+        audience: AUDIENCE,
+        toolset: WIDGET_TOOLSET,
+      }),
+    ).resolves.toMatchObject({ taskId, jti: unspentBeforeRestart.protected.jti });
+    expect(consumeCalls).toBe(3);
+
+    // Cloud maintenance invokes collectExpired on the same explicit replay instance
+    const maintenance = await reopened.byok.maintenance.runNow();
+    expect(maintenance.steps.find((step) => step.step === 'deviceAssertionReplay')).toMatchObject({
+      step: 'deviceAssertionReplay',
+      status: 'ok',
+    });
+    expect(collectExpiredCalls).toBe(1);
+  });
+
+  it('reuses an existing cloud composition replay authority when present and lets explicit replay win', () => {
+    const cloudReplay = new InMemoryDeviceAssertionReplayAuthority();
+    const explicitReplay = new InMemoryDeviceAssertionReplayAuthority();
+
+    const defaultResolved = resolveHostMcpTaskContext({ enabled: true });
+    expect(defaultResolved?.enforceStartFloor).toBe(true);
+
+    const reused = resolveHostMcpTaskContext({ enabled: true }, cloudReplay);
+    expect(reused?.replay).toBe(cloudReplay);
+    expect(reused?.enforceStartFloor).toBe(false);
+
+    const overridden = resolveHostMcpTaskContext({ enabled: true, replay: explicitReplay }, cloudReplay);
+    expect(overridden?.replay).toBe(explicitReplay);
+    expect(overridden?.enforceStartFloor).toBe(false);
   });
 });

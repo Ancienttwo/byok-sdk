@@ -2,6 +2,7 @@ import {
   tenantId,
   type Clock,
   type CoreStores,
+  type DeviceAssertionReplayAuthority,
   type MailboxStore,
   type PresenceStore,
   type TenantId,
@@ -88,6 +89,8 @@ export interface FacadeStoreComposition {
   readonly blobContentProxy: BlobContentProxy;
   readonly embeddedBlobs: EmbeddedBlobAccess;
   readonly proofReceiptAuthority: ProofReceiptRetentionAuthority;
+  /** Optional cloud-level assertion replay authority when a composition supplies one. */
+  readonly deviceAssertionReplay?: DeviceAssertionReplayAuthority;
   readonly clock: Clock;
   readonly crypto: CloudCrypto;
   readonly counters: FacadeCounters;

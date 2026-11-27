@@ -31,10 +31,17 @@ export interface HostMcpTaskContextOptions {
   /** Must be `true`; omit the option to keep the lane disabled. */
   readonly enabled: true;
   /**
-   * Single-use JTI replay authority for `byok-task-assertion-v1`. Defaults to
-   * a process-local {@link InMemoryDeviceAssertionReplayAuthority}. Embedders
-   * that need replay protection across server restarts supply a durable
-   * authority.
+   * Single-use JTI replay authority for `byok-task-assertion-v1`.
+   *
+   * When omitted, defaults to a process-local
+   * {@link InMemoryDeviceAssertionReplayAuthority} paired with a server-start
+   * `issuedAt` floor (`issuedAt <= startInstant` rejected with
+   * `assertion_predates_server`). That default covers a single server instance
+   * across restarts when the host clock is non-decreasing.
+   *
+   * Multi-instance deployments sharing a store must pass one shared atomic
+   * replay authority; an explicit `replay` authority is used as given with no
+   * server-start floor so rolling restarts keep valid unspent assertions.
    */
   readonly replay?: DeviceAssertionReplayAuthority;
 }
@@ -62,6 +69,7 @@ export type HostMcpTaskAssertionErrorCode =
   | 'assertion_missing'
   | 'assertion_invalid'
   | 'assertion_audience_mismatch'
+  | 'assertion_predates_server'
   | 'assertion_replayed'
   | 'replay_store_unavailable'
   | 'task_inactive'
@@ -81,6 +89,8 @@ export class HostMcpTaskAssertionError extends Error {
 export interface ResolvedHostMcpTaskContext {
   readonly enabled: true;
   readonly replay: DeviceAssertionReplayAuthority;
+  /** True only when the default process-local in-memory replay authority is in use. */
+  readonly enforceStartFloor: boolean;
 }
 
 export interface HostMcpTaskContextBinding {
@@ -90,6 +100,13 @@ export interface HostMcpTaskContextBinding {
   readonly crypto: CloudCrypto;
   readonly clock: Clock;
   readonly replay: DeviceAssertionReplayAuthority;
+  /**
+   * Composition-clock construction instant (ms since epoch) enforced as an
+   * inclusive lower bound (`issuedAt <= serverStartedAtMs` rejected) when the
+   * default process-local in-memory replay authority is in use. Omitted when
+   * an explicit replay authority is supplied.
+   */
+  readonly serverStartedAtMs?: number;
   readonly cloud: ByokCloud;
   isClosed(): boolean;
   track<T>(operation: Promise<T>): Promise<T>;
@@ -97,29 +114,52 @@ export interface HostMcpTaskContextBinding {
 
 const serverBindings = new WeakMap<ByokServer, HostMcpTaskContextBinding>();
 
-export function resolveHostMcpTaskContext(
-  option: HostMcpTaskContextOptions | undefined,
-): ResolvedHostMcpTaskContext | undefined {
-  if (option === undefined) return undefined;
-  if (option === null || typeof option !== 'object' || Array.isArray(option) || option.enabled !== true) {
-    throw new ByokCloudError(
-      'coordination_input_invalid',
-      'hostMcpTaskContext must be omitted or { enabled: true, replay? }.',
-    );
-  }
-  const replay = option.replay ?? new InMemoryDeviceAssertionReplayAuthority();
+function assertReplayAuthority(replay: unknown): DeviceAssertionReplayAuthority {
   if (
     replay === null ||
     typeof replay !== 'object' ||
-    typeof replay.consume !== 'function' ||
-    typeof replay.collectExpired !== 'function'
+    typeof (replay as DeviceAssertionReplayAuthority).consume !== 'function' ||
+    typeof (replay as DeviceAssertionReplayAuthority).collectExpired !== 'function'
   ) {
     throw new ByokCloudError(
       'coordination_input_invalid',
       'hostMcpTaskContext.replay must implement DeviceAssertionReplayAuthority.',
     );
   }
-  return { enabled: true, replay };
+  return replay as DeviceAssertionReplayAuthority;
+}
+
+/** Validate `CreateByokServerOptions.hostMcpTaskContext` before allocating stores. */
+export function validateHostMcpTaskContextOption(option: HostMcpTaskContextOptions | undefined): void {
+  if (option === undefined) return;
+  if (option === null || typeof option !== 'object' || Array.isArray(option) || option.enabled !== true) {
+    throw new ByokCloudError(
+      'coordination_input_invalid',
+      'hostMcpTaskContext must be omitted or { enabled: true, replay? }.',
+    );
+  }
+  if (option.replay !== undefined) {
+    assertReplayAuthority(option.replay);
+  }
+}
+
+export function resolveHostMcpTaskContext(
+  option: HostMcpTaskContextOptions | undefined,
+  existingCloudReplay?: DeviceAssertionReplayAuthority,
+): ResolvedHostMcpTaskContext | undefined {
+  validateHostMcpTaskContextOption(option);
+  if (option === undefined) return undefined;
+  if (option.replay !== undefined) {
+    return { enabled: true, replay: assertReplayAuthority(option.replay), enforceStartFloor: false };
+  }
+  if (existingCloudReplay !== undefined) {
+    return { enabled: true, replay: assertReplayAuthority(existingCloudReplay), enforceStartFloor: false };
+  }
+  return {
+    enabled: true,
+    replay: new InMemoryDeviceAssertionReplayAuthority(),
+    enforceStartFloor: true,
+  };
 }
 
 export function registerHostMcpTaskContext(server: ByokServer, binding: HostMcpTaskContextBinding): void {
@@ -190,9 +230,12 @@ async function isAudienceMismatchOnly(
  * - §8.2(2): calls `authenticateHostedTaskAssertion` to verify the
  *   `byok-task-assertion-v1` envelope against the current non-revoked device
  *   row, time window/TTL, signature, exact `issuer`, server `productId`, and
- *   required `audience`, then atomically spends `jti` once. Replay-store
- *   errors reject with `replay_store_unavailable` and never downgrade to
- *   signature-only acceptance.
+ *   required `audience`, then atomically spends `jti` once. When the default
+ *   process-local in-memory replay authority is used, an authentic assertion
+ *   whose `issuedAt` is at or before this server instance's construction time
+ *   is rejected with `assertion_predates_server`. Replay-store errors reject
+ *   with `replay_store_unavailable` and never downgrade to signature-only
+ *   acceptance.
  * - §8.2(3): verifies that the claimed `taskId`, owning device, and frozen
  *   `agentRef` belong to an active (`claimed` or `running`, non-cancelled)
  *   Execution on this server whose frozen `requiredToolsets` includes the
@@ -334,6 +377,23 @@ async function verifyAgainstBinding(
       'assertion_invalid',
       'Task assertion tenant does not match this server.',
     );
+  }
+
+  // Default in-memory replay only observes JTIs spent since this server
+  // instance was constructed; reject authentic assertions minted at or before
+  // that instant so a server restart cannot replay a previously spent JTI.
+  if (binding.serverStartedAtMs !== undefined) {
+    const issuedAtMs = Date.parse(authenticated.issuedAt);
+    if (
+      !Number.isFinite(binding.serverStartedAtMs) ||
+      !Number.isFinite(issuedAtMs) ||
+      issuedAtMs <= binding.serverStartedAtMs
+    ) {
+      throw new HostMcpTaskAssertionError(
+        'assertion_predates_server',
+        'Task assertion was issued at or before this server instance started.',
+      );
+    }
   }
 
   // §8.2(3): confirm the claimed task, owning device, and frozen AgentRef

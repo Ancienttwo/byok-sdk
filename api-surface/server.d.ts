@@ -1123,7 +1123,7 @@ export interface VerifyHostMcpTaskAssertionInput {
     readonly audience: string;
     readonly toolset: ToolsetId;
 }
-export type HostMcpTaskAssertionErrorCode = 'task_context_disabled' | 'assertion_missing' | 'assertion_invalid' | 'assertion_audience_mismatch' | 'assertion_replayed' | 'replay_store_unavailable' | 'task_inactive' | 'toolset_not_offered';
+export type HostMcpTaskAssertionErrorCode = 'task_context_disabled' | 'assertion_missing' | 'assertion_invalid' | 'assertion_audience_mismatch' | 'assertion_predates_server' | 'assertion_replayed' | 'replay_store_unavailable' | 'task_inactive' | 'toolset_not_offered';
 export declare class HostMcpTaskAssertionError extends Error {
     readonly code: HostMcpTaskAssertionErrorCode;
     constructor(code: HostMcpTaskAssertionErrorCode, message: string, options?: {
