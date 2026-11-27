@@ -22,7 +22,7 @@ export function Disclosure(props: DisclosureProps) {
     <Collapsible
       open={props.open}
       reveal={!reduceMotion()}
-      class="rounded-(--radius) border border-border bg-card p-3 gap-2"
+      class="rounded-(--radius) bg-card p-3 gap-2"
       content={<View class="pt-2 border-t border-border gap-2">{props.children}</View>}
     >
       <View class="flex-row items-center justify-between gap-2">
@@ -37,7 +37,7 @@ export function Disclosure(props: DisclosureProps) {
             accessibilityState={{ expanded: props.open }}
             onPress={() => props.onToggle(!props.open)}
             class={cx(
-              "flex-row items-center gap-1.5 rounded-sm px-1.5 py-1 hover:bg-accent active:bg-accent/80",
+              "flex-row items-center gap-1.5 rounded-md px-1.5 py-1 hover:bg-accent active:opacity-80",
               MOTION_CLASSES.interactiveColor,
               FOCUS_RING_CLASS,
             )}

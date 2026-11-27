@@ -3,16 +3,16 @@ import type { SupervisedHostState } from "../../../src/bridge/protocol.ts";
 import { cx, HOST_STATE_META, type BadgeVariant } from "./tokens.ts";
 
 const VARIANT_CLASSES: Readonly<Record<BadgeVariant, string>> = {
-  neutral: "bg-secondary border-border",
-  primary: "bg-primary border-primary",
-  success: "bg-success border-success",
-  warning: "bg-warning border-warning",
-  danger: "bg-destructive border-destructive",
-  hostStarting: "bg-host-starting border-border",
-  hostRunning: "bg-host-running border-border",
-  hostRestarting: "bg-host-restarting border-border",
-  hostStopped: "bg-host-stopped border-border",
-  hostFailed: "bg-host-failed border-border",
+  neutral: "bg-secondary",
+  primary: "bg-primary",
+  success: "bg-success",
+  warning: "bg-warning",
+  danger: "bg-destructive",
+  hostStarting: "bg-host-starting",
+  hostRunning: "bg-host-running",
+  hostRestarting: "bg-host-restarting",
+  hostStopped: "bg-host-stopped",
+  hostFailed: "bg-host-failed",
 };
 
 const TEXT_CLASSES: Readonly<Record<BadgeVariant, string>> = {
@@ -46,7 +46,7 @@ export function Badge(props: BadgeProps) {
       accessible
       accessibilityLabel={props.label}
       class={cx(
-        "flex-row items-center rounded-full border",
+        "flex-row items-center rounded-full",
         size() === "sm" ? "h-5 px-2 gap-1" : "h-6 px-2.5 gap-1.5",
         VARIANT_CLASSES[variant()],
       )}

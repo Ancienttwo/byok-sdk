@@ -23,8 +23,14 @@ This document defines the design system for the NSH Mixed desktop frontend of `e
 
 ## 2. Visual Language, Alignment & Geometry
 
-- **Flat native hierarchy**: Base application surfaces stay flat (`bg-background`, `bg-card`, `bg-sidebar`), separated by hairline `border-border` borders and tonal contrast. Do not stack cards with drop shadows inside panels.
-- **Concentric radii**: Base `--radius` is `0.375rem` (`6` pt). Nested inset controls use tighter radii (`rounded-sm`, `4` pt) so concentric corners remain visually even. Circular badges/status dots/avatars use `rounded-full`.
+- **iOS inset grouped hierarchy (no brand color)**: The public desktop edition carries no brand palette. The canvas uses `systemGroupedBackground` (`bg-background`), and inset grouped sections (`Card` / `Surface` / `Disclosure`) sit flat on `secondarySystemGroupedBackground` (`bg-card`) with **no outer stroke** and no drop shadows. Hairline `separator` (`border-border`) dividers apply only inside sections, along sidebar edges, on input frames, and around elevated overlays (`Popover`, `Menu`, `Dialog`, `Sheet`, `Toast`).
+- **iOS component defaults & concentric radii**:
+  - Base `--radius` is `0.625rem` (`10` pt) for inset grouped sections (`Card`, `Surface`, `Disclosure`, `Empty`), standard/large buttons, inputs, and overlays.
+  - Nested inset controls use concentric tighter radii (`rounded-lg`, `8` pt for list rows and segmented-control track; `rounded-md`, `6` pt for segmented-control thumb, menu/select rows, and compact `sm` buttons). Circular switches, badges, and avatars use `rounded-full`.
+  - Grouped list rows (`ListItem`) keep a `44` pt minimum height (`min-h-11`).
+  - Toggle switches (`Switch`) render borderless pills with `systemFill` off tracks, `systemGreen` (`bg-success`) on tracks, and white thumbs (`bg-success-foreground`).
+  - Segmented controls (`Tabs`) render borderless `systemFill` (`bg-muted`) tracks with a sliding `bg-segmented-thumb` (`#ffffff` light / `#636366` `systemGray2` dark) indicator and semibold active labels.
+  - Filled buttons (`Button` `primary` in `systemBlue`, `danger` in `systemRed`) render borderless with the iOS filled-button text weight (`font-semibold`).
 - **Semantic spacing scale**: Use Tailwind spacing steps exclusively (`gap-0.5` = `2` pt, `gap-1` = `4` pt, `gap-2` = `8` pt, `gap-3` = `12` pt, `gap-4` = `16` pt, `gap-6` = `24` pt, `gap-8` = `32` pt). No arbitrary point classes (`p-[13px]`, `text-[15px]`) in components or pages.
 - **Alignment spines**: Sibling sections share leading content insets (`p-6` page canvas, `p-4` card/panel padding). Form fields align along a consistent label -> control -> helper/error vertical spine.
 - **Fit at the minimum width**: Every row fits its card at the `840` pt minimum window. In a row of text next to actions or a badge, the text side takes `flex-1` (a text column also takes `min-w-0`) so its text wraps and the actions keep their natural width. A table column that holds a badge takes a fixed Tailwind width with `shrink-0` (`w-36 shrink-0`) on its header and on every cell, so the badge fits and the columns stay aligned.
@@ -34,27 +40,33 @@ This document defines the design system for the NSH Mixed desktop frontend of `e
 
 ## 3. Semantic Theme Tokens (`nsh.json` `"theme"`)
 
-All colors below are declared once in `nsh.json` (`theme.cssVars`) for `light` and `dark` appearances and consumed strictly via semantic tokens (`bg-*`, `text-*`, `border-*`, `ring-*`, `token(...)`). State never relies on color alone — every status indicator pairs color with an explicit text label and distinct symbol/glyph.
+All colors below are declared once in `nsh.json` (`theme.cssVars`) as static `light` and `dark` iOS system-palette sets — no brand hexes, no custom tweaks, and no runtime system-accent lookup — and consumed strictly via semantic tokens (`bg-*`, `text-*`, `border-*`, `ring-*`, `token(...)`). Appearance defaults to `"system"` (`store.ts`) and switches exclusively through `store.setAppearance` → NSH `setColorScheme(mode)`. State never relies on color alone — every status indicator pairs color with an explicit text label and distinct symbol/glyph.
 
-| Token Role | Usage | Light | Dark |
-| --- | --- | --- | --- |
-| `background` / `foreground` | Primary app canvas & text | `#ffffff` / `#18181b` | `#18181b` / `#fafafa` |
-| `card` / `card-foreground` | Contained regions & surfaces | `#ffffff` / `#18181b` | `#1f1f23` / `#fafafa` |
-| `popover` / `popover-foreground` | Elevated menus, popovers, dialogs, tooltips | `#ffffff` / `#18181b` | `#27272a` / `#fafafa` |
-| `primary` / `primary-foreground` | Primary CTAs, active selection emphasis | `#2563eb` / `#ffffff` | `#2563eb` / `#ffffff` |
-| `secondary` / `secondary-foreground` | Quiet actions, secondary pills | `#f4f4f5` / `#18181b` | `#27272a` / `#fafafa` |
-| `muted` / `muted-foreground` | Subtle wells, captions, metadata | `#f4f4f5` / `#52525b` | `#27272a` / `#a1a1aa` |
-| `accent` / `accent-foreground` | Hovered / focused rows & menu items | `#f4f4f5` / `#18181b` | `#27272a` / `#fafafa` |
-| `destructive` / `destructive-foreground` | Destructive actions & validation errors | `#dc2626` / `#ffffff` | `#dc2626` / `#ffffff` |
-| `success` / `success-foreground` | Verified / approved confirmations | `#15803d` / `#ffffff` | `#15803d` / `#ffffff` |
-| `warning` / `warning-foreground` | Cautions & degraded states | `#b45309` / `#ffffff` | `#b45309` / `#ffffff` |
-| `border` / `input` / `ring` | Hairline dividers, control frames, focus ring | `#e4e4e7` / `#d4d4d8` / `#2563eb` | `#3f3f46` / `#52525b` / `#60a5fa` |
-| `sidebar*` | Persistent sidebar chrome & active item | `#fafafa` / `#18181b` / `#e4e4e7` | `#141417` / `#fafafa` / `#27272a` |
-| `host-starting` / `-foreground` | Host `starting` state (`◐ Starting`) | `#dbeafe` / `#1e40af` | `#1e3a8a` / `#dbeafe` |
-| `host-running` / `-foreground` | Host `running` state (`● Running`) | `#dcfce7` / `#166534` | `#14532d` / `#dcfce7` |
-| `host-restarting` / `-foreground` | Host `restarting` state (`↻ Restarting`) | `#fef3c7` / `#92400e` | `#78350f` / `#fef3c7` |
-| `host-stopped` / `-foreground` | Host `stopped` state (`■ Stopped`) | `#f4f4f5` / `#3f3f46` | `#27272a` / `#d4d4d8` |
-| `host-failed` / `-foreground` | Host `failed` state (`▲ Failed`) | `#fee2e2` / `#991b1b` | `#7f1d1d` / `#fee2e2` |
+| Token Role | iOS Semantic Source | Usage | Light | Dark |
+| --- | --- | --- | --- | --- |
+| `radius` | Inset grouped default | Base section / control radius | `0.625rem` (`10` pt) | `0.625rem` (`10` pt) |
+| `background` / `foreground` | `systemGroupedBackground` / `label` | Primary app canvas & primary text | `#f2f2f7` / `#000000` | `#000000` / `#ffffff` |
+| `card` / `card-foreground` | `secondarySystemGroupedBackground` / `label` | Inset grouped sections & cards (no stroke) | `#ffffff` / `#000000` | `#1c1c1e` / `#ffffff` |
+| `popover` / `popover-foreground` | `secondarySystemGroupedBackground` (elevated) / `label` | Elevated menus, popovers, dialogs, tooltips | `#ffffff` / `#000000` | `#2c2c2e` / `#ffffff` |
+| `primary` / `primary-foreground` | `systemBlue` / white | Filled primary CTAs, active tint, focus ring | `#007aff` / `#ffffff` | `#0a84ff` / `#ffffff` |
+| `secondary` / `secondary-foreground` | `systemFill` / `label` | Quiet actions, neutral pills | `rgba(120, 120, 128, 0.2)` / `#000000` | `rgba(120, 120, 128, 0.36)` / `#ffffff` |
+| `muted` / `muted-foreground` | `systemFill` / `secondaryLabel` | Subtle wells, switch off track, captions | `rgba(120, 120, 128, 0.2)` / `rgba(60, 60, 67, 0.6)` | `rgba(120, 120, 128, 0.36)` / `rgba(235, 235, 245, 0.6)` |
+| `tertiary-foreground` | `tertiaryLabel` | Input & select placeholder text | `rgba(60, 60, 67, 0.3)` | `rgba(235, 235, 245, 0.3)` |
+| `accent` / `accent-foreground` | `systemFill` / `label` | Hovered / focused rows & menu items | `rgba(120, 120, 128, 0.2)` / `#000000` | `rgba(120, 120, 128, 0.36)` / `#ffffff` |
+| `destructive` / `destructive-foreground` | `systemRed` / white | Destructive actions & validation errors | `#ff3b30` / `#ffffff` | `#ff453a` / `#ffffff` |
+| `success` / `success-foreground` | `systemGreen` / white | Switch on track, verified confirmations | `#34c759` / `#ffffff` | `#30d158` / `#ffffff` |
+| `warning` / `warning-foreground` | `systemOrange` / white | Cautions & degraded states | `#ff9500` / `#ffffff` | `#ff9f0a` / `#ffffff` |
+| `border` / `input` / `ring` | `separator` / `separator` / `systemBlue` | Hairline dividers, control frames, focus ring | `rgba(60, 60, 67, 0.29)` / `rgba(60, 60, 67, 0.29)` / `#007aff` | `rgba(84, 84, 88, 0.6)` / `rgba(84, 84, 88, 0.6)` / `#0a84ff` |
+| `segmented-thumb` | `secondarySystemGroupedBackground` / `systemGray2` | Native segmented-control sliding thumb | `#ffffff` | `#636366` |
+| `chart-1` .. `chart-5` | `systemBlue` / `systemGreen` / `systemOrange` / `systemRed` / `secondaryLabel` | Data series tokens (iOS semantic) | `#007aff` / `#34c759` / `#ff9500` / `#ff3b30` / `rgba(60, 60, 67, 0.6)` | `#0a84ff` / `#30d158` / `#ff9f0a` / `#ff453a` / `rgba(235, 235, 245, 0.6)` |
+| `sidebar*` | `secondarySystemGroupedBackground` / `label` / `systemBlue` / `systemFill` / `separator` | Persistent sidebar chrome & active item | `#ffffff` / `#000000` / `#007aff` / `rgba(120, 120, 128, 0.2)` / `rgba(60, 60, 67, 0.29)` | `#1c1c1e` / `#ffffff` / `#0a84ff` / `rgba(120, 120, 128, 0.36)` / `rgba(84, 84, 88, 0.6)` |
+| `host-starting` / `-foreground` | `systemBlue` tint / `label` | Host `starting` state (`◐ Starting`) | `color-mix(in srgb, var(--primary) 16%, transparent)` / `#000000` | `color-mix(in srgb, var(--primary) 24%, transparent)` / `#ffffff` |
+| `host-running` / `-foreground` | `systemGreen` tint / `label` | Host `running` state (`● Running`) | `color-mix(in srgb, var(--success) 16%, transparent)` / `#000000` | `color-mix(in srgb, var(--success) 24%, transparent)` / `#ffffff` |
+| `host-restarting` / `-foreground` | `systemOrange` tint / `label` | Host `restarting` state (`↻ Restarting`) | `color-mix(in srgb, var(--warning) 16%, transparent)` / `#000000` | `color-mix(in srgb, var(--warning) 24%, transparent)` / `#ffffff` |
+| `host-stopped` / `-foreground` | `systemFill` / `label` | Host `stopped` state (`■ Stopped`) | `rgba(120, 120, 128, 0.2)` / `#000000` | `rgba(120, 120, 128, 0.36)` / `#ffffff` |
+| `host-failed` / `-foreground` | `systemRed` tint / `label` | Host `failed` state (`▲ Failed`) | `color-mix(in srgb, var(--destructive) 16%, transparent)` / `#000000` | `color-mix(in srgb, var(--destructive) 24%, transparent)` / `#ffffff` |
+
+**Accepted contrast trade-off (#2540)**: Using the iOS system values as-is leaves white labels on `systemBlue` filled buttons below WCAG 4.5:1 (`4.0:1` light `#007aff`, `3.65:1` dark `#0a84ff`), and `systemOrange` / `systemGreen` status text lighter on light backgrounds. This is accepted to match iOS: status never relies on color alone (glyph + label), and `host-*` pills use `label` text (`#000000` / `#ffffff`) on a system-color tint. If a target later requires WCAG AA, adopt Apple's iOS Increase Contrast variants rather than custom hexes.
 
 ---
 

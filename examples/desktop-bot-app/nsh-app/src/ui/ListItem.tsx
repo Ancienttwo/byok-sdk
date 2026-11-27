@@ -14,7 +14,7 @@ export interface ListItemProps {
   onPress?: () => void;
 }
 
-/** Compact desktop row supporting leading/trailing slots and interactive/static modes. */
+/** Inset grouped row (44 pt minimum height) supporting leading/trailing slots and interactive/static modes. */
 export function ListItem(props: ListItemProps) {
   return (
     <View
@@ -30,9 +30,9 @@ export function ListItem(props: ListItemProps) {
       }}
       onPress={props.disabled ? undefined : props.onPress}
       class={cx(
-        "min-h-8 px-3 py-1.5 rounded-sm flex-row items-center justify-between gap-3",
+        "min-h-11 px-3 py-2 rounded-lg flex-row items-center justify-between gap-3",
         MOTION_CLASSES.interactiveColor,
-        props.onPress ? cx("hover:bg-accent", FOCUS_RING_CLASS) : "",
+        props.onPress ? cx("hover:bg-accent active:opacity-80", FOCUS_RING_CLASS) : "",
         props.selected ? "bg-sidebar-accent text-sidebar-accent-foreground" : "bg-transparent",
         props.disabled ? "opacity-50" : "",
       )}

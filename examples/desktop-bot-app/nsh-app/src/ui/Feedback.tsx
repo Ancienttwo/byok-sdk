@@ -11,7 +11,7 @@ export interface EmptyProps {
 /** Empty state region with clear next-action slot. */
 export function Empty(props: EmptyProps) {
   return (
-    <View class="p-6 rounded-(--radius) border border-border bg-muted/50 items-center justify-center gap-2">
+    <View class="p-6 rounded-(--radius) bg-muted items-center justify-center gap-2">
       <Icon name="info" size="lg" class="text-muted-foreground" />
       <Text class="text-sm font-medium text-foreground">{props.title}</Text>
       <If when={Boolean(props.description)}>

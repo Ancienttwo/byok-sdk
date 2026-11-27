@@ -62,7 +62,7 @@ export function Input(props: UiInputProps) {
       onFocus={props.onFocus}
       onBlur={props.onBlur}
       class={cx(
-        "rounded-(--radius) border bg-background text-foreground placeholder:text-muted-foreground",
+        "rounded-(--radius) border bg-card text-foreground placeholder:text-tertiary-foreground",
         MOTION_CLASSES.interactiveColor,
         FOCUS_RING_CLASS,
         SIZE_CLASSES[size()],
@@ -124,7 +124,7 @@ export function Textarea(props: UiTextareaProps) {
       onFocus={props.onFocus}
       onBlur={props.onBlur}
       class={cx(
-        "min-h-20 p-2.5 text-sm rounded-(--radius) border bg-background text-foreground placeholder:text-muted-foreground",
+        "min-h-20 p-2.5 text-sm rounded-(--radius) border bg-card text-foreground placeholder:text-tertiary-foreground",
         MOTION_CLASSES.interactiveColor,
         FOCUS_RING_CLASS,
         props.invalid ? "border-destructive" : "border-input",

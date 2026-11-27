@@ -13,7 +13,7 @@ export interface UiSwitchProps {
   onChange?: (checked: boolean) => void;
 }
 
-/** Controlled desktop toggle switch with semantic track/thumb styling and keyboard focus ring. */
+/** Controlled toggle switch using iOS `systemGreen` checked track, `systemFill` off track, and white thumb. */
 export function Switch(props: UiSwitchProps) {
   return (
     <BaseSwitch
@@ -28,11 +28,11 @@ export function Switch(props: UiSwitchProps) {
         FOCUS_RING_CLASS,
       )}
       trackClass={cx(
-        "w-9 h-5 p-0.5 rounded-full border border-input bg-muted checked:bg-primary checked:border-primary flex-row items-center",
+        "w-11 h-6 p-0.5 rounded-full bg-muted checked:bg-success flex-row items-center",
         MOTION_CLASSES.interactiveColor,
       )}
       thumbClass={cx(
-        "w-3.5 h-3.5 rounded-full bg-background checked:translate-x-4",
+        "w-5 h-5 rounded-full bg-success-foreground checked:translate-x-5",
         MOTION_CLASSES.switchThumb,
       )}
     >
