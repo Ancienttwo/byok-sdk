@@ -30,6 +30,7 @@ const shellStartSignal = signal<ShellStart>({ status: "pending" });
 const selectedBotIdSignal = signal<string | null>(null);
 const k8ReloadSignal = signal(0);
 const k8BusyRereadSignal = signal(0);
+const botMemoryReloadSignal = signal(0);
 const unfoldedBotsSignal = signal<ReadonlySet<string>>(new Set());
 const activityReloadSignal = signal(0);
 const expandedCardsSignal = signal<ReadonlySet<string>>(new Set());
@@ -126,6 +127,26 @@ export function selectBot(id: string | null): void {
 /** Reads `k8.view` again (the Retry of a failed read). */
 export function reloadK8View(): void {
   k8ReloadSignal.update((n) => n + 1);
+}
+
+/**
+ * The selected Bot's one `k8.memory` read. It runs only while the Conversation section shows that Bot (its header
+ * summary, or the Memory tab of its profile editor), and again on each Host state hint and on `reloadBotMemory`. The
+ * value names its Bot: the resource keeps the last value while the next Bot's read runs.
+ */
+export const botMemory = resource(
+  () => {
+    const botId = selectedBotIdSignal();
+    return hostReady() && activeSectionSignal() === "conversation" && botId !== null
+      ? { botId, tick: stateHintCount() + botMemoryReloadSignal() }
+      : false;
+  },
+  async (source) => ({ botId: source.botId, memory: await bridge.call("k8.memory", { botId: source.botId }) }),
+);
+
+/** Reads `k8.memory` again (the Retry of a failed read). */
+export function reloadBotMemory(): void {
+  botMemoryReloadSignal.update((n) => n + 1);
 }
 
 /** Whether the rows above the latest clear show for `botId`; kept per Bot across Bot and section switches. */

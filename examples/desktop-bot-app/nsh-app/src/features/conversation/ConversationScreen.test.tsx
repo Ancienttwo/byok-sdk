@@ -1,5 +1,5 @@
 import { describe, expect, open, test } from "nsh/test";
-import type { ConversationSnapshot } from "../../../../src/host/conversation/types.ts";
+import type { BotMemory, ConversationSnapshot } from "../../../../src/host/conversation/types.ts";
 import type { BotView, ConversationItem } from "../../../../src/host/conversation/view.ts";
 
 type Call = { method: string; params: any };
@@ -25,14 +25,23 @@ function snapshot(
   };
 }
 
+const MEMORY: BotMemory = {
+  resident: { byteCount: 100, limitBytes: 8192, overLimit: false },
+  notes: { count: 2, bytes: 30 },
+  lastDream: { outcome: "succeeded", template: "cheap", fallback: false, at: "2026-11-27T19:00:00.000Z" },
+  nextDream: null,
+};
+
 /**
- * A started shell whose Host runs; `view` answers `k8.view`, `command` the other k8 methods (null by default).
+ * A started shell whose Host runs; `view` answers `k8.view`, `memory` `k8.memory`, `command` the other k8 methods (null by
+ * default).
  * Every bridge call lands in `calls`.
  */
 function conversationShell(
   calls: Call[],
   view: (params: { botId: string | null }) => unknown,
   command: (method: string, params: any) => unknown = () => null,
+  memory: (params: { botId: string }) => unknown = () => MEMORY,
 ) {
   return {
     "byok-nsh-adapter": {
@@ -41,6 +50,7 @@ function conversationShell(
         calls.push({ method, params });
         if (method === "keys.list") return [];
         if (method === "k8.view") return view(params);
+        if (method === "k8.memory") return memory(params);
         return command(method, params);
       },
     },
@@ -54,6 +64,7 @@ async function openConversation(modules: ReturnType<typeof conversationShell>, p
 }
 
 const views = (calls: Call[]) => calls.filter((call) => call.method === "k8.view");
+const memories = (calls: Call[]) => calls.filter((call) => call.method === "k8.memory");
 
 describe("ConversationScreen (#2461 Slice 4)", () => {
   test("one k8.view serves Keys and Conversation: section switches never read it again", async () => {
@@ -571,5 +582,104 @@ describe("ConversationScreen (#2461 Slice 4)", () => {
     await app.waitFor("id:conv-composer-input");
     await app.type("id:conv-composer-input", "你好，机器人");
     expect(app.value("id:conv-composer-input")).toBe("你好，机器人");
+  });
+  test("Memory: the selected Bot's summary and Memory tab read k8.memory only once that Bot shows", async () => {
+    const calls: Call[] = [];
+    const app = await openConversation(conversationShell(calls, (params) => snapshot([bot("a")], params.botId === null ? undefined : { botId: params.botId, items: [] })));
+    await app.waitFor("id:conv-bot-a");
+    expect(memories(calls)).toEqual([]);
+    await app.press("id:conv-bot-a");
+    await app.waitFor("text:Memory: 100 B of 8 KiB · 2 notes");
+    await app.press("id:conv-edit-profile");
+    await app.press("id:conv-profile-tab-memory");
+    await app.waitFor("id:conv-memory-resident");
+    for (const text of ["100 B of 8 KiB", "2 files · 30 B", "Unavailable"]) {
+      expect(app.texts()).toContain(text);
+    }
+    expect(app.texts().some((text) => text.startsWith("Succeeded · ") && text.endsWith(" · cheap"))).toBe(true);
+    expect(app.shows("id:conv-memory-over-limit")).toBe(false);
+    expect(memories(calls).every((call) => call.params.botId === "a")).toBe(true);
+  });
+
+  test("Memory: a new Bot's editor has no Memory tab", async () => {
+    const calls: Call[] = [];
+    const app = await openConversation(conversationShell(calls, () => snapshot([])));
+    await app.press("id:conv-new-by-role");
+    await app.press("id:conv-new-writer");
+    await app.waitFor("id:conv-profile");
+    expect(app.shows("id:conv-profile-tabs")).toBe(false);
+  });
+
+  test("Memory: loading shows in the summary and the tab, and a failed read shows in both and offers Retry", async () => {
+    const calls: Call[] = [];
+    const loadingSeen: string[] = [];
+    let app: Awaited<ReturnType<typeof openConversation>> | undefined;
+    const delayed = (record: string, settle: (resolve: (value: unknown) => void, reject: (error: Error) => void) => void) =>
+      new Promise((resolve, reject) =>
+        setTimeout(() => {
+          if (app?.shows(`text:${record}`)) {
+            loadingSeen.push(record);
+          }
+          settle(resolve, reject);
+        }, 50),
+      );
+    app = await openConversation(
+      conversationShell(
+        calls,
+        (params) => snapshot([bot("a")], params.botId === null ? undefined : { botId: params.botId, items: [] }),
+        () => null,
+        () =>
+          memories(calls).length === 1
+            ? delayed("Memory: loading…", (_, reject) => reject(Object.assign(new Error("Host busy"), { code: "method_failed" })))
+            : delayed("Loading memory…", (resolve) => resolve(MEMORY)),
+      ),
+    );
+    await app.press("id:conv-bot-a");
+    await app.waitFor("text:Memory: unavailable");
+    await app.press("id:conv-edit-profile");
+    await app.press("id:conv-profile-tab-memory");
+    await app.waitFor("id:conv-memory-error");
+    expect(app.accessibility("id:conv-memory-error")?.role).toBe("alert");
+    expect(app.shows("text:Memory unavailable: Host busy")).toBe(true);
+
+    await app.press("id:conv-memory-retry");
+    await app.waitFor("id:conv-memory-resident");
+    expect(app.shows("id:conv-memory-error")).toBe(false);
+    expect(loadingSeen).toEqual(["Memory: loading…", "Loading memory…"]);
+  });
+
+  test("Memory: over the limit says that tasks fail before they start, with a symbol, in the summary and the tab", async () => {
+    const calls: Call[] = [];
+    const over = { ...MEMORY, resident: { byteCount: 9000, limitBytes: 8192, overLimit: true } };
+    const app = await openConversation(
+      conversationShell(calls, (params) => snapshot([bot("a")], params.botId === null ? undefined : { botId: params.botId, items: [] }), () => null, () => over),
+    );
+    await app.press("id:conv-bot-a");
+    await app.waitFor("text:▲ Memory over limit: 8.8 KiB of 8 KiB, tasks fail before they start");
+    expect(app.accessibility("id:conv-memory-summary")?.role).toBe("alert");
+    await app.press("id:conv-edit-profile");
+    await app.press("id:conv-profile-tab-memory");
+    await app.waitFor("id:conv-memory-over-limit");
+    expect(app.accessibility("id:conv-memory-over-limit")?.role).toBe("alert");
+    expect(app.shows("text:▲ MEMORY.md is over the 8 KiB limit (9000 bytes): tasks fail before they start until it is back within the limit.")).toBe(true);
+  });
+
+  test("Memory: values the Host cannot read show as unavailable, never 0", async () => {
+    const calls: Call[] = [];
+    const app = await openConversation(
+      conversationShell(
+        calls,
+        (params) => snapshot([bot("a")], params.botId === null ? undefined : { botId: params.botId, items: [] }),
+        () => null,
+        () => ({ resident: null, notes: null, lastDream: null, nextDream: null }),
+      ),
+    );
+    await app.press("id:conv-bot-a");
+    await app.waitFor("text:Memory: unavailable");
+    await app.press("id:conv-edit-profile");
+    await app.press("id:conv-profile-tab-memory");
+    await app.waitFor("id:conv-memory-resident");
+    expect(app.texts().filter((text) => text === "Unavailable").length).toBe(3);
+    expect(app.shows("text:No dream yet")).toBe(true);
   });
 });

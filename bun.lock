@@ -76,6 +76,7 @@
         "@byok-sdk/client": "workspace:*",
         "@byok-sdk/core": "workspace:*",
         "@byok-sdk/keys": "workspace:*",
+        "@byok-sdk/protocol": "workspace:*",
         "@byok-sdk/server": "workspace:*",
         "@byok-sdk/ui-runtime": "workspace:*",
         "electron-updater": "6.8.11",

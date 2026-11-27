@@ -1,12 +1,14 @@
+import path from 'node:path';
 import type { TurnCancelResult } from '@byok-sdk/bot-collaboration/host-kit';
 import type { ByokServer } from '@byok-sdk/server';
 import { BridgeError } from '../../bridge/protocol.ts';
 import type { Conversation } from '../k8/conversation.ts';
-import type { HostStore } from '../store/store.ts';
+import { StoreConflictError, type HostStore } from '../store/store.ts';
 import type { BotProfile } from '../store/types.ts';
 import type { ConversationBrand, ModelChoice, RolePreset } from './catalog.ts';
 import { DraftFollowers, type DraftTarget } from './drafts.ts';
-import type { ConversationSnapshot } from './types.ts';
+import { readMemoryFiles } from './memory.ts';
+import type { BotMemory, ConversationSnapshot } from './types.ts';
 import { botViews, conversationItems, openTurns, type BotView, type ConversationView } from './view.ts';
 
 export type { ConversationSnapshot };
@@ -34,13 +36,17 @@ export class ConversationService {
   readonly #drafts: DraftFollowers;
   readonly #taskReasons = new Map<string, string>();
   readonly #changed: () => void;
+  readonly #agentHomes: string;
 
   constructor(options: {
     conversation: Conversation; store: HostStore; server: Pick<ByokServer, 'tasks'>; brand: Pick<ConversationBrand, 'roles'>;
     /** The catalog's current choices: it changes when the keys profiles do. */
     models: () => readonly ModelChoice[]; changed: () => void;
+    /** The directory of the Agent homes, one per Bot id. */
+    agentHomes: string;
   }) {
     this.#changed = options.changed;
+    this.#agentHomes = options.agentHomes;
     this.#conversation = options.conversation;
     this.#store = options.store;
     this.#server = options.server;
@@ -139,6 +145,22 @@ export class ConversationService {
     await this.#conversation.bot.answer(text(value.questionId, 'questionId'), text(value.answer, 'answer'));
     this.changed();
     return null;
+  }
+
+  /** A Bot's memory files in its Agent home and its last dream. An archived Bot keeps its home, so it answers too. */
+  async memory(params: unknown): Promise<BotMemory> {
+    const botId = text(record(params, 'k8.memory').botId, 'botId');
+    if (!this.#store.bots().some(bot => bot.id === botId)) throw new StoreConflictError(`Unknown Bot ${botId}`);
+    const last = this.#conversation.bot.snapshot().dreams?.bots[botId]?.last;
+    return {
+      ...(await readMemoryFiles(path.join(this.#agentHomes, botId))),
+      lastDream: last === undefined ? null : {
+        outcome: last.outcome, at: new Date(last.at).toISOString(),
+        ...(last.reason === undefined ? {} : { reason: last.reason }),
+        ...(last.template === undefined ? {} : { template: last.template, fallback: last.fallback }),
+      },
+      nextDream: null,
+    };
   }
 
   /** The server's display reason of each ended Turn's task terminal, read once: a terminal never changes. */

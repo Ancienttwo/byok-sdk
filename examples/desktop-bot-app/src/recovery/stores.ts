@@ -24,7 +24,7 @@ export interface StoreLayout {
 const COMPLETE_MARKER = 'complete.json';
 
 export const hostStoresDir = (layout: StoreLayout): string => path.join(layout.hostStorageRoot, 'host');
-export const agentHomesDir = (layout: StoreLayout): string => path.join(layout.hostStorageRoot, 'agents');
+export const agentHomesDir = (layout: Pick<StoreLayout, 'hostStorageRoot'>): string => path.join(layout.hostStorageRoot, 'agents');
 export const snapshotsDir = (layout: StoreLayout): string => path.join(hostStoresDir(layout), 'snapshots');
 
 /** Marks the snapshot in `target` complete, after every store in it was copied. */
