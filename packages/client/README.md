@@ -62,9 +62,11 @@ the result gives the vendor command and reason. Pi ships with the SDK. See
 
 For model support advice, `checkSuggestedRuntimeVersion(runtimeId, installedVersion)`
 compares the observed version with OAR's bundled `suggestedRuntimeVersions`
-snapshot. Advice includes the suggested minimum and reason. The check returns
-`null` for an unknown runtime, an unreadable version, or a version at or above
-the suggestion.
+snapshot. Pass the ID from the SDK runtime observation. For Antigravity, the
+check reads the manifest's `antigravity` entry and returns advice under `agy`.
+The advice includes the suggested minimum and reason. The check returns `null`
+for an unknown runtime, a missing or unreadable version, or a version at or
+above the suggestion.
 
 The Host controls live refreshes from `SUGGESTED_RUNTIME_VERSIONS_URL`. Pass
 the decoded JSON to `parseSuggestedRuntimeVersions`, then pass a valid manifest

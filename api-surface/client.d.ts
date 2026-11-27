@@ -528,7 +528,7 @@
 //   buildRuntimeEnvironment -> dist/runtime/environment.d.ts
 //   bundledSdkHelperHost -> dist/sdk-reserved-helper-host.d.ts
 //   checkDaemonConfig -> dist/daemon/config-schema/check.d.ts
-//   checkSuggestedRuntimeVersion -> dist/runtime/oar-suggested-versions.d.ts
+//   checkSuggestedRuntimeVersion -> dist/runtime/runtime-releases.d.ts
 //   checkUpgradeFrom -> dist/lifecycle/upgrade-from.d.ts
 //   claimServiceLifecycleOwner -> dist/lifecycle/service-unit.d.ts
 //   classifyToolCall -> dist/tool-authorization.d.ts
@@ -5619,11 +5619,6 @@ export interface SuggestedRuntimeVersionAdvice {
 export declare const SUGGESTED_RUNTIME_VERSIONS_URL: string;
 export declare const suggestedRuntimeVersions: SuggestedRuntimeVersionsManifest;
 export declare function parseSuggestedRuntimeVersions(raw: unknown): SuggestedRuntimeVersionsManifest | null;
-export declare function checkSuggestedRuntimeVersion(
-  runtimeId: string,
-  installedVersion: string | undefined,
-  manifest?: SuggestedRuntimeVersionsManifest,
-): SuggestedRuntimeVersionAdvice | null;
 // ==== @byok-sdk/client dist/runtime/runtime-reader-types.d.ts ====
 export interface RuntimeReadOptions {
     readonly signal?: AbortSignal;
@@ -5726,9 +5721,11 @@ export type RuntimeAccountUsage = {
 // ==== @byok-sdk/client dist/runtime/runtime-releases.d.ts ====
 import { agyVersionToken } from '../adapters/antigravity/agy-version.js';
 import { grokVersionToken } from '../adapters/grok/grok-version.js';
+import { type SuggestedRuntimeVersionAdvice, type SuggestedRuntimeVersionsManifest } from './oar-suggested-versions.js';
 import { type RuntimeObservation } from '../runtime-detection.js';
 import type { RuntimeAdapterDescriptor, RuntimeDetectResult } from '../types.js';
-export { SUGGESTED_RUNTIME_VERSIONS_URL, suggestedRuntimeVersions, parseSuggestedRuntimeVersions, checkSuggestedRuntimeVersion, type SuggestedRuntimeVersionEntry, type SuggestedRuntimeVersionsManifest, type SuggestedRuntimeVersionAdvice, } from './oar-suggested-versions.js';
+export { SUGGESTED_RUNTIME_VERSIONS_URL, suggestedRuntimeVersions, parseSuggestedRuntimeVersions, type SuggestedRuntimeVersionEntry, type SuggestedRuntimeVersionsManifest, type SuggestedRuntimeVersionAdvice, } from './oar-suggested-versions.js';
+export declare function checkSuggestedRuntimeVersion(runtimeId: string, installedVersion: string | undefined, manifest?: SuggestedRuntimeVersionsManifest): SuggestedRuntimeVersionAdvice | null;
 // support
 interface RuntimeRelease {
     readonly qualifiedVersion: string;

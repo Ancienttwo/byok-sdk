@@ -38,7 +38,7 @@ SDK. Rebuild Node SEA launchers with a supported Node executable.
 
 ## Suggested runtime versions (#2524)
 
-- Import `checkSuggestedRuntimeVersion` from `@byok-sdk/client` to show an advisory for an installed runtime below OAR's suggested minimum for recent models. It uses the bundled `suggestedRuntimeVersions` snapshot by default.
+- Import `checkSuggestedRuntimeVersion` from `@byok-sdk/client` to show an advisory for an installed runtime below OAR's suggested minimum for recent models. Pass the SDK runtime ID from the observation, such as `agy` for Antigravity. The check returns advice under that ID and uses the bundled `suggestedRuntimeVersions` snapshot by default.
 - The Host may fetch `SUGGESTED_RUNTIME_VERSIONS_URL` on its own schedule, pass the decoded JSON through `parseSuggestedRuntimeVersions`, and supply a valid manifest to the check. The SDK performs the comparison offline. Compatibility floors, Host version policy, and the `required` and `available` upgrade states retain their existing meanings.
 
 ## OAR 0.136.0 (#2512, #2513)

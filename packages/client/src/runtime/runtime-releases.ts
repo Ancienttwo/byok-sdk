@@ -5,6 +5,8 @@ import { QUALIFIED_DSH_VERSION, dshVersionToken } from '../adapters/dsh/dsh-vers
 import { QUALIFIED_GROK_VERSION, grokVersionToken } from '../adapters/grok/grok-version.js';
 import { QUALIFIED_OPENCODE_VERSION, opencodeVersionToken } from '../adapters/opencode/opencode-version.js';
 import { compareRuntimeSemver } from './compare-runtime-semver.js';
+import { OAR_RUNTIME_IDS } from './oar-runtime-ids.js';
+import { checkSuggestedVersion, type SuggestedRuntimeVersionAdvice, type SuggestedRuntimeVersionsManifest } from './oar-suggested-versions.js';
 import { projectRuntimeObservation, type RuntimeObservation } from '../runtime-detection.js';
 import type { RuntimeAdapterDescriptor, RuntimeDetectResult } from '../types.js';
 
@@ -12,11 +14,22 @@ export {
   SUGGESTED_RUNTIME_VERSIONS_URL,
   suggestedRuntimeVersions,
   parseSuggestedRuntimeVersions,
-  checkSuggestedRuntimeVersion,
   type SuggestedRuntimeVersionEntry,
   type SuggestedRuntimeVersionsManifest,
   type SuggestedRuntimeVersionAdvice,
 } from './oar-suggested-versions.js';
+
+/** Check the installed version and report advice using the SDK adapter ID. */
+export function checkSuggestedRuntimeVersion(
+  runtimeId: string,
+  installedVersion: string | undefined,
+  manifest?: SuggestedRuntimeVersionsManifest,
+): SuggestedRuntimeVersionAdvice | null {
+  const ids = OAR_RUNTIME_IDS.get(runtimeId);
+  if (ids === undefined) return null;
+  const advice = checkSuggestedVersion(ids.runtime, installedVersion, manifest);
+  return advice === null ? null : { ...advice, runtime: runtimeId };
+}
 
 interface RuntimeRelease {
   readonly qualifiedVersion: string;

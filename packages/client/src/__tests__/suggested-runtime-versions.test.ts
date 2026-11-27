@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   SUGGESTED_RUNTIME_VERSIONS_URL,
   checkSuggestedRuntimeVersion,
-  parseSuggestedRuntimeVersions,
   suggestedRuntimeVersions,
+  type SuggestedRuntimeVersionsManifest,
 } from '../index.js';
 
 describe('suggested runtime versions', () => {
@@ -28,20 +28,24 @@ describe('suggested runtime versions', () => {
     expect(checkSuggestedRuntimeVersion('toString', '0.0.1')).toBeNull();
   });
 
-  it('rejects a malformed manifest and drops malformed rows from a valid document', () => {
-    const updatedAt = '2026-11-26';
-    expect(parseSuggestedRuntimeVersions({ schemaVersion: 1, updatedAt, runtimes: [] })).toBeNull();
+  it('returns no advice for a missing or unreadable installed version', () => {
+    expect(checkSuggestedRuntimeVersion('codex', undefined)).toBeNull();
+    expect(checkSuggestedRuntimeVersion('codex', 'version unavailable')).toBeNull();
+  });
 
-    const codex = { version: '1.0.0', reason: 'Model support' };
-    const manifest = parseSuggestedRuntimeVersions({
+  it('looks up Antigravity and returns advice under the SDK id agy', () => {
+    const antigravity = { version: '1.6.0', reason: 'Model support' };
+    const manifest: SuggestedRuntimeVersionsManifest = {
       schemaVersion: 1,
-      updatedAt,
-      runtimes: { codex, claude: { version: 'latest', reason: 'Model support' } },
+      updatedAt: '2026-11-26',
+      runtimes: { antigravity },
+    };
+    expect(checkSuggestedRuntimeVersion('agy', 'agy 1.5.18', manifest)).toEqual({
+      runtime: 'agy',
+      installedVersion: '1.5.18',
+      suggestedMinVersion: antigravity.version,
+      reason: antigravity.reason,
     });
-    expect(manifest).toEqual({ schemaVersion: 1, updatedAt, runtimes: { codex } });
-    expect(checkSuggestedRuntimeVersion('codex', '0.169.0', manifest!)).toMatchObject({
-      suggestedMinVersion: codex.version,
-      reason: codex.reason,
-    });
+    expect(checkSuggestedRuntimeVersion('antigravity', '1.5.18', manifest)).toBeNull();
   });
 });

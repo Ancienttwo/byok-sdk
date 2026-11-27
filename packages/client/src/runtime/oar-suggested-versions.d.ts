@@ -8,6 +8,7 @@ export interface SuggestedRuntimeVersionEntry {
 export interface SuggestedRuntimeVersionsManifest {
   readonly schemaVersion: 1;
   readonly updatedAt: string;
+  /** Runtime IDs from the OAR manifest. */
   readonly runtimes: Readonly<Record<string, SuggestedRuntimeVersionEntry>>;
 }
 
@@ -25,7 +26,7 @@ export declare const suggestedRuntimeVersions: SuggestedRuntimeVersionsManifest;
 /** Validate decoded JSON. Reject an invalid document and drop invalid runtime rows. */
 export declare function parseSuggestedRuntimeVersions(raw: unknown): SuggestedRuntimeVersionsManifest | null;
 /** Advise when the installed version is readable and strictly below the suggested minimum. */
-export declare function checkSuggestedRuntimeVersion(
+export declare function checkSuggestedVersion(
   runtimeId: string,
   installedVersion: string | undefined,
   manifest?: SuggestedRuntimeVersionsManifest,

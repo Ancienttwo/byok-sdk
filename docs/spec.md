@@ -1491,8 +1491,10 @@ upgrade when the installed version is usable and below the qualified release.
 At and above the qualified release, the Host version policy still applies.
 
 Hosts can check OAR's suggested minimums for recent model support with
-`checkSuggestedRuntimeVersion`. It uses the bundled `suggestedRuntimeVersions`
-snapshot by default. A Host can refresh on its own schedule from
+`checkSuggestedRuntimeVersion`. The check accepts and returns SDK runtime IDs,
+including `agy` for the OAR manifest's `antigravity` entry. It uses the bundled
+`suggestedRuntimeVersions` snapshot by default. A Host can refresh on its own
+schedule from
 `SUGGESTED_RUNTIME_VERSIONS_URL`, validate the decoded JSON with
 `parseSuggestedRuntimeVersions`, and pass the resulting manifest to the check.
 The SDK computes this advice offline. The suggestion is informational and

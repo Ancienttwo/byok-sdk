@@ -102,6 +102,12 @@ Not vendored: `shared/session-credentials.ts`, `shared/seal-session.ts`, `shared
 
 ## History
 
+### Suggested runtime versions (#2524)
+
+The selection now includes upstream `suggested-versions.ts` and
+`suggested-versions.generated.ts`, bringing it to 223 files. The upstream and fork
+pins stay at the 0.138.1 re-vendor commits.
+
 ### 0.138.1 re-vendor (#2521)
 
 All 69 BYOK commits from `byok/0.137.0` were replayed on `v0.138.1` (`223703d`). The 221-file selection is unchanged. Upstream updates the selected `contracts/install.ts` types and the shared ACP config confirmation and disposal code. In 0.138.1 the selected `contracts/account-usage.ts` change is a documentation clarification for limit resets. Dim, Claude limit-reset implementation, Cursor, the suggested-version files, and the installer implementation remain outside the selection. The ACP SDK remains pinned at `1.4.0`.
