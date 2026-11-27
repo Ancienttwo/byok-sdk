@@ -50,6 +50,7 @@ import { StoragePressure } from '../../packages/client/src/daemon/retention/pres
 import { createRetentionRegistry } from '../../packages/client/src/daemon/retention/producers.ts';
 import { ScratchRoot } from '../../packages/client/src/daemon/retention/scratch.ts';
 import { RetentionSweeper } from '../../packages/client/src/daemon/retention/sweeper.ts';
+import { testHarnesses } from '../../packages/client/src/__tests__/fixtures/activity-ingress.ts';
 import { TaskRunner } from '../../packages/client/src/daemon/task-runner.ts';
 import { buildRuntimeEnvironment } from '../../packages/client/src/runtime/environment.ts';
 import { freezeRuntimeAdapterDescriptor } from '../../packages/client/src/types.ts';
@@ -330,16 +331,19 @@ async function main() {
     onFailure: (trigger, classId, code) => failures.push({ trigger, classId, code }),
   });
   const adapter = new SoakRuntimeAdapter();
+  const adapters = [adapter];
+  const harnesses = testHarnesses(adapters);
   const sent = [];
   const runner = new TaskRunner({
     getIngressBudget: () => ({ activityMaxEvents: 50, activityMaxBytes: 65_536 }),
     // No cloud here: every claim is accepted, so the runtime starts (#2294).
     awaitClaimSettlement: async () => ({ outcome: 'accepted' }),
     advertisedCapabilities: () => ADVERTISED_CAPABILITIES,
+    advertisedHarnesses: () => harnesses,
     agentEgressPolicy: DEFAULT_AGENT_EGRESS_POLICY,
     agentEgress: new AgentEgressController({ policy: DEFAULT_AGENT_EGRESS_POLICY }),
     scratchRoot: scratch,
-    adapters: [adapter],
+    adapters,
     agentHome: home,
     agentSessionHandoffs: handoffs,
     deviceId: 'soak-device',
@@ -455,6 +459,9 @@ async function main() {
           const decline = terminalFor(taskId);
           throw new Error('result helper was not injected for ' + taskId + (decline === undefined ? '' : ': ' + JSON.stringify(decline.payload)));
         }
+        if (!sent.some(envelope => envelope.task_id === taskId && envelope.type === 'task.started')) {
+          throw new Error('expected task.started for ' + taskId);
+        }
         const staged = await runner.submitAgentResult({ contextToken, outcome: { ok: true } });
         if (staged.state !== 'staged') throw new Error('result staging failed for ' + taskId + ': ' + JSON.stringify(staged));
         const sessionRef = adapter.sessions.at(-1)?.sessionRef;
@@ -465,7 +472,11 @@ async function main() {
         await fs.utimes(file, new Date(batchStart), new Date(batchStart));
         seen.pi.add(path.basename(file));
         adapter.sessions.at(-1)?.emit({ type: 'turn_end' });
-        await waitFor(() => terminalFor(taskId)?.type === 'task.complete', 'completion terminal ' + taskId);
+        await waitFor(() => terminalFor(taskId) !== undefined, 'completion terminal ' + taskId);
+        const terminal = terminalFor(taskId);
+        if (terminal?.type !== 'task.complete' || terminal.payload.sessionRef !== sessionRef || terminal.payload.document?.ok !== true) {
+          throw new Error('expected task.complete with the staged result for ' + taskId + ', got ' + JSON.stringify(terminal));
+        }
         outcomes.complete++;
       }
       adapter.startError = undefined;
