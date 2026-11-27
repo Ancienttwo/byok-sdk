@@ -254,7 +254,7 @@ and the keys SQLite profile schema; then **0.17.0** with keys **0.4.3**
 
 The published 0.23.0 train, like 0.22.0, uses unmodified official
 `@earendil-works/pi-coding-agent@0.87.1` and its attested sibling closure;
-stable 0.46.0, 0.46.1 and 0.47.0 pin 1.6.0; stable 0.42.0 through 0.45.1 pin 1.5.2; stable 0.37.0, 0.38.0 and 0.39.0 pin 1.5.0; 1.4.0 ships in stable 0.30.1 through 0.36.0; 1.3.0 ships in stable 0.28.x, 0.29.0 and 0.30.0; 1.2.0 ships in stable 0.27.0 and its published RCs; 1.1.0 ships in stable 0.25.0, 0.26.x and their published RCs.
+stable 0.46.0, 0.46.1, 0.47.0 and 0.47.1 pin 1.6.0; stable 0.42.0 through 0.45.1 pin 1.5.2; stable 0.37.0, 0.38.0 and 0.39.0 pin 1.5.0; 1.4.0 ships in stable 0.30.1 through 0.36.0; 1.3.0 ships in stable 0.28.x, 0.29.0 and 0.30.0; 1.2.0 ships in stable 0.27.0 and its published RCs; 1.1.0 ships in stable 0.25.0, 0.26.x and their published RCs.
 The maintained fork is retired from this train; 0.21.0 remains the historical
 fork-based release. Release SemVer is observability only;
 protocol intersection and advertised capabilities remain the execution gates.

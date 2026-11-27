@@ -37,7 +37,7 @@ jobs:
           node-version-file: .node-version
       - name: Verify pinned Bun archive
         shell: node {0}
-        run: &verify-bun |
+        run: |
           const { createHash } = require('node:crypto');
           const { readFileSync, writeFileSync, mkdirSync, mkdtempSync, copyFileSync, chmodSync, rmSync } = require('node:fs');
           const { homedir } = require('node:os');
@@ -104,8 +104,13 @@ jobs:
         run: bun ci
       - name: Build workspace
         run: bun run build
+      - name: Smoke-test the first retention task
+        run: bun test scripts/soak/client-retention-soak.test.mjs
       - name: Run retention soak
-        run: bun scripts/soak/client-retention-soak.mjs --tasks "${{ inputs.tasks || '10000' }}" --out soak-report.json --summary soak-summary.md
+        run: >-
+          bun scripts/soak/client-retention-soak.mjs
+          --tasks "${{ inputs.tasks || '10000' }}"
+          --out soak-report.json --summary soak-summary.md
       - name: Append the human-readable summary
         if: always()
         run: cat soak-summary.md >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
