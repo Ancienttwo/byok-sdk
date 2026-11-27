@@ -9,15 +9,15 @@ export type ButtonSize = "sm" | "md" | "lg";
 
 const VARIANT_CLASSES: Readonly<Record<ButtonVariant, string>> = {
   primary:
-    "bg-primary hover:bg-primary/90 active:bg-primary/85 border border-primary",
+    "bg-primary hover:bg-primary/90 active:bg-primary/85",
   secondary:
-    "bg-secondary hover:bg-accent active:bg-accent/80 border border-border",
+    "bg-secondary hover:opacity-85 active:opacity-75",
   outline:
-    "bg-background hover:bg-accent active:bg-accent/80 border border-border",
+    "bg-card hover:bg-accent active:opacity-80 border border-border",
   ghost:
-    "bg-transparent hover:bg-accent active:bg-accent/80 border border-transparent",
+    "bg-transparent hover:bg-accent active:opacity-80",
   danger:
-    "bg-destructive hover:bg-destructive/90 active:bg-destructive/85 border border-destructive",
+    "bg-destructive hover:bg-destructive/90 active:bg-destructive/85",
 };
 
 const TEXT_CLASSES: Readonly<Record<ButtonVariant, string>> = {
@@ -28,16 +28,24 @@ const TEXT_CLASSES: Readonly<Record<ButtonVariant, string>> = {
   danger: "text-destructive-foreground",
 };
 
+const TEXT_WEIGHT_CLASSES: Readonly<Record<ButtonVariant, string>> = {
+  primary: "font-semibold",
+  secondary: "font-medium",
+  outline: "font-medium",
+  ghost: "font-medium",
+  danger: "font-semibold",
+};
+
 const SIZE_CLASSES: Readonly<Record<ButtonSize, string>> = {
-  sm: "h-6 px-2.5 gap-1",
-  md: "h-8 px-3 gap-2",
-  lg: "h-9 px-4 gap-2",
+  sm: "h-6 px-2.5 gap-1 rounded-md",
+  md: "h-8 px-3 gap-2 rounded-(--radius)",
+  lg: "h-9 px-4 gap-2 rounded-(--radius)",
 };
 
 const ICON_BTN_SIZES: Readonly<Record<ButtonSize, string>> = {
-  sm: "w-6 h-6",
-  md: "w-8 h-8",
-  lg: "w-9 h-9",
+  sm: "w-6 h-6 rounded-md",
+  md: "w-8 h-8 rounded-(--radius)",
+  lg: "w-9 h-9 rounded-(--radius)",
 };
 
 export interface UiButtonProps {
@@ -72,7 +80,7 @@ export function Button(props: UiButtonProps) {
       accessibilityHint={props.accessibilityHint}
       onPress={props.onPress}
       class={cx(
-        "flex-row items-center justify-center rounded-(--radius)",
+        "flex-row items-center justify-center",
         MOTION_CLASSES.buttonPress,
         FOCUS_RING_CLASS,
         SIZE_CLASSES[size()],
@@ -84,7 +92,13 @@ export function Button(props: UiButtonProps) {
         <Icon name="spinner" size={size() === "sm" ? "sm" : "md"} class={TEXT_CLASSES[variant()]} />
       </If>
       {typeof props.children === "string" ? (
-        <Text class={cx("text-sm font-medium", size() === "sm" ? "text-xs" : "text-sm", TEXT_CLASSES[variant()])}>
+        <Text
+          class={cx(
+            size() === "sm" ? "text-xs" : "text-sm",
+            TEXT_WEIGHT_CLASSES[variant()],
+            TEXT_CLASSES[variant()],
+          )}
+        >
           {props.children}
         </Text>
       ) : (
@@ -123,7 +137,7 @@ export function IconButton(props: IconButtonProps) {
       accessibilityHint={props.accessibilityHint}
       onPress={props.onPress}
       class={cx(
-        "flex-row items-center justify-center rounded-(--radius)",
+        "flex-row items-center justify-center",
         MOTION_CLASSES.iconButtonPress,
         FOCUS_RING_CLASS,
         ICON_BTN_SIZES[size()],

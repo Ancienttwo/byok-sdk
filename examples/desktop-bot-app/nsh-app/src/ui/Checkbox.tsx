@@ -31,7 +31,7 @@ export function Checkbox(props: UiCheckboxProps) {
         FOCUS_RING_CLASS,
       )}
       indicatorClass={cx(
-        "w-4 h-4 rounded-sm border items-center justify-center bg-background",
+        "w-4 h-4 rounded-sm border items-center justify-center bg-card",
         MOTION_CLASSES.interactiveColor,
         props.invalid ? "border-destructive" : "border-input",
         "checked:bg-primary checked:border-primary indeterminate:bg-primary indeterminate:border-primary",

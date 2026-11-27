@@ -55,7 +55,7 @@ export function MenuItem(props: UiMenuItemProps) {
       accessibilityLabel={props.label}
       onSelect={props.onSelect}
       class={cx(
-        "h-7 px-2 rounded-sm flex-row items-center justify-between gap-3 hover:bg-accent focus:bg-accent disabled:opacity-40",
+        "h-7 px-2 rounded-md flex-row items-center justify-between gap-3 hover:bg-accent focus:bg-accent disabled:opacity-40",
         MOTION_CLASSES.interactiveColor,
         FOCUS_RING_CLASS,
       )}

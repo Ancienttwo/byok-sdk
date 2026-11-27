@@ -3,16 +3,18 @@ import { cx } from "./tokens.ts";
 
 export interface SurfaceProps {
   tone?: "default" | "muted";
+  testID?: string;
   class?: string;
   children?: JSX.Element;
 }
 
-/** Flat contained surface using hairline borders rather than drop shadows. */
+/** iOS inset grouped surface: flat `bg-card` or `bg-muted` with 10 pt `--radius` and no outer stroke. */
 export function Surface(props: SurfaceProps) {
   return (
     <View
+      testID={props.testID}
       class={cx(
-        "rounded-(--radius) border border-border",
+        "rounded-(--radius)",
         props.tone === "muted" ? "bg-muted text-foreground" : "bg-card text-card-foreground",
         props.class,
       )}
@@ -22,8 +24,8 @@ export function Surface(props: SurfaceProps) {
   );
 }
 
-export function Card(props: { class?: string; children?: JSX.Element }) {
-  return <Surface class={cx("p-4 gap-3", props.class)}>{props.children}</Surface>;
+export function Card(props: { testID?: string; class?: string; children?: JSX.Element }) {
+  return <Surface testID={props.testID} class={cx("p-4 gap-3", props.class)}>{props.children}</Surface>;
 }
 
 export function CardHeader(props: { class?: string; children?: JSX.Element }) {

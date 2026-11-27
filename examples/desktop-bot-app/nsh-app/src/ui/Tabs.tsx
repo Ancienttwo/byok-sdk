@@ -11,17 +11,17 @@ export interface UiTabsProps {
   children?: JSX.Element;
 }
 
-/** Segmented / tabbed strip with native sliding selection indicator. */
+/** iOS segmented control with `systemFill` track and native sliding `segmented-thumb` indicator. */
 export function Tabs(props: UiTabsProps) {
   return (
     <BaseTabs
       testID={props.testID}
       orientation={props.orientation ?? "horizontal"}
       accessibilityLabel={props.accessibilityLabel}
-      indicatorClass="inset-y-1 rounded-sm bg-background border border-border"
+      indicatorClass="inset-y-0.5 rounded-md bg-segmented-thumb"
       class={cx(
         props.orientation === "vertical" ? "flex-col" : "flex-row items-center",
-        "gap-1 p-1 rounded-(--radius) bg-muted border border-border",
+        "gap-0.5 p-0.5 rounded-lg bg-muted",
         props.class,
       )}
     >
@@ -49,7 +49,7 @@ export function Tab(props: UiTabProps) {
       accessibilityLabel={props.accessibilityLabel}
       onPress={props.onPress}
       class={cx(
-        "h-7 px-2.5 rounded-sm items-center justify-center disabled:opacity-40",
+        "h-7 px-2.5 rounded-md items-center justify-center disabled:opacity-40",
         MOTION_CLASSES.interactiveColor,
         FOCUS_RING_CLASS,
       )}
@@ -57,8 +57,8 @@ export function Tab(props: UiTabProps) {
       {typeof props.children === "string" ? (
         <Text
           class={cx(
-            "text-xs font-medium",
-            props.selected ? "text-foreground" : "text-muted-foreground",
+            "text-xs",
+            props.selected ? "font-semibold text-foreground" : "font-medium text-muted-foreground",
           )}
         >
           {props.children}

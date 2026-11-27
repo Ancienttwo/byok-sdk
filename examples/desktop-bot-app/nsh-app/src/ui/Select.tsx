@@ -37,13 +37,13 @@ export function Select(props: UiSelectProps) {
       trigger={
         <View
           class={cx(
-            "h-8 px-3 flex-row items-center justify-between gap-2 rounded-(--radius) border border-input bg-background hover:bg-accent/50",
+            "h-8 px-3 flex-row items-center justify-between gap-2 rounded-(--radius) border border-input bg-card hover:bg-accent",
             MOTION_CLASSES.interactiveColor,
             FOCUS_RING_CLASS,
             props.disabled ? "opacity-50 bg-muted" : "",
           )}
         >
-          <Text class={cx("text-sm", selectedTitle() ? "text-foreground" : "text-muted-foreground")}>
+          <Text class={cx("text-sm", selectedTitle() ? "text-foreground" : "text-tertiary-foreground")}>
             {selectedTitle() ?? props.placeholder ?? "Select an option"}
           </Text>
           <Icon name="chevronDown" size="sm" class="text-muted-foreground" />
@@ -58,7 +58,7 @@ export function Select(props: UiSelectProps) {
       popupEndingClass={MOTION_CLASSES.popupEnding}
       listClass="gap-0.5"
       itemClass={cx(
-        "h-7 px-2.5 rounded-sm flex-row items-center text-sm text-popover-foreground focus:bg-accent focus:text-accent-foreground selected:font-semibold disabled:opacity-40",
+        "h-7 px-2.5 rounded-md flex-row items-center text-sm text-popover-foreground focus:bg-accent focus:text-accent-foreground selected:font-semibold disabled:opacity-40",
         MOTION_CLASSES.interactiveColor,
       )}
     />
